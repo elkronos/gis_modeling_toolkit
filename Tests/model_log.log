@@ -1,0 +1,292 @@
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to EPSG:32715 for point_on_surface
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to PROJCRS["WGS 84 / UTM zone 15S",
+    BASEGEOGCRS["WGS 84",
+        ENSEMBLE["World Geodetic System 1984 ensemble",
+            MEMBER["World Geodetic System 1984 (Transit)"],
+            MEMBER["World Geodetic System 1984 (G730)"],
+            MEMBER["World Geodetic System 1984 (G873)"],
+            MEMBER["World Geodetic System 1984 (G1150)"],
+            MEMBER["World Geodetic System 1984 (G1674)"],
+            MEMBER["World Geodetic System 1984 (G1762)"],
+            MEMBER["World Geodetic System 1984 (G2139)"],
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]],
+            ENSEMBLEACCURACY[2.0]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["UTM zone 15S",
+        METHOD["Transverse Mercator",
+            ID["EPSG",9807]],
+        PARAMETER["Latitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8801]],
+        PARAMETER["Longitude of natural origin",-93,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8802]],
+        PARAMETER["Scale factor at natural origin",0.9996,
+            SCALEUNIT["unity",1],
+            ID["EPSG",8805]],
+        PARAMETER["False easting",500000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8806]],
+        PARAMETER["False northing",10000000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8807]]],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1]],
+    USAGE[
+        SCOPE["Navigation and medium accuracy spatial referencing."],
+        AREA["Between 96°W and 90°W, southern hemisphere between 80°S and equator, onshore and offshore. Ecuador - Galapagos."],
+        BBOX[-80,-96,0,-90]],
+    ID["EPSG",32715]] for point_on_surface
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to EPSG:32715 for centroid
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to PROJCRS["WGS 84 / UTM zone 15S",
+    BASEGEOGCRS["WGS 84",
+        ENSEMBLE["World Geodetic System 1984 ensemble",
+            MEMBER["World Geodetic System 1984 (Transit)"],
+            MEMBER["World Geodetic System 1984 (G730)"],
+            MEMBER["World Geodetic System 1984 (G873)"],
+            MEMBER["World Geodetic System 1984 (G1150)"],
+            MEMBER["World Geodetic System 1984 (G1674)"],
+            MEMBER["World Geodetic System 1984 (G1762)"],
+            MEMBER["World Geodetic System 1984 (G2139)"],
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]],
+            ENSEMBLEACCURACY[2.0]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["UTM zone 15S",
+        METHOD["Transverse Mercator",
+            ID["EPSG",9807]],
+        PARAMETER["Latitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8801]],
+        PARAMETER["Longitude of natural origin",-93,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8802]],
+        PARAMETER["Scale factor at natural origin",0.9996,
+            SCALEUNIT["unity",1],
+            ID["EPSG",8805]],
+        PARAMETER["False easting",500000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8806]],
+        PARAMETER["False northing",10000000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8807]]],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1]],
+    USAGE[
+        SCOPE["Navigation and medium accuracy spatial referencing."],
+        AREA["Between 96°W and 90°W, southern hemisphere between 80°S and equator, onshore and offshore. Ecuador - Galapagos."],
+        BBOX[-80,-96,0,-90]],
+    ID["EPSG",32715]] for centroid
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to EPSG:32715 for point_on_surface
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to PROJCRS["WGS 84 / UTM zone 15S",
+    BASEGEOGCRS["WGS 84",
+        ENSEMBLE["World Geodetic System 1984 ensemble",
+            MEMBER["World Geodetic System 1984 (Transit)"],
+            MEMBER["World Geodetic System 1984 (G730)"],
+            MEMBER["World Geodetic System 1984 (G873)"],
+            MEMBER["World Geodetic System 1984 (G1150)"],
+            MEMBER["World Geodetic System 1984 (G1674)"],
+            MEMBER["World Geodetic System 1984 (G1762)"],
+            MEMBER["World Geodetic System 1984 (G2139)"],
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]],
+            ENSEMBLEACCURACY[2.0]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["UTM zone 15S",
+        METHOD["Transverse Mercator",
+            ID["EPSG",9807]],
+        PARAMETER["Latitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8801]],
+        PARAMETER["Longitude of natural origin",-93,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8802]],
+        PARAMETER["Scale factor at natural origin",0.9996,
+            SCALEUNIT["unity",1],
+            ID["EPSG",8805]],
+        PARAMETER["False easting",500000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8806]],
+        PARAMETER["False northing",10000000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8807]]],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1]],
+    USAGE[
+        SCOPE["Navigation and medium accuracy spatial referencing."],
+        AREA["Between 96°W and 90°W, southern hemisphere between 80°S and equator, onshore and offshore. Ecuador - Galapagos."],
+        BBOX[-80,-96,0,-90]],
+    ID["EPSG",32715]] for point_on_surface
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to EPSG:32615 for line_midpoint
+INFO [2025-11-01 15:01:27] coerce_to_points(): projecting long/lat to PROJCRS["WGS 84 / UTM zone 15N",
+    BASEGEOGCRS["WGS 84",
+        ENSEMBLE["World Geodetic System 1984 ensemble",
+            MEMBER["World Geodetic System 1984 (Transit)"],
+            MEMBER["World Geodetic System 1984 (G730)"],
+            MEMBER["World Geodetic System 1984 (G873)"],
+            MEMBER["World Geodetic System 1984 (G1150)"],
+            MEMBER["World Geodetic System 1984 (G1674)"],
+            MEMBER["World Geodetic System 1984 (G1762)"],
+            MEMBER["World Geodetic System 1984 (G2139)"],
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]],
+            ENSEMBLEACCURACY[2.0]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["UTM zone 15N",
+        METHOD["Transverse Mercator",
+            ID["EPSG",9807]],
+        PARAMETER["Latitude of natural origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8801]],
+        PARAMETER["Longitude of natural origin",-93,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8802]],
+        PARAMETER["Scale factor at natural origin",0.9996,
+            SCALEUNIT["unity",1],
+            ID["EPSG",8805]],
+        PARAMETER["False easting",500000,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8806]],
+        PARAMETER["False northing",0,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8807]]],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1]],
+    USAGE[
+        SCOPE["Navigation and medium accuracy spatial referencing."],
+        AREA["Between 96°W and 90°W, northern hemisphere between equator and 84°N, onshore and offshore. Canada - Manitoba; Nunavut; Ontario. Ecuador -Galapagos. Guatemala. Mexico. United States (USA)."],
+        BBOX[0,-96,84,-90]],
+    ID["EPSG",32615]] for line_midpoint
+INFO [2025-11-01 15:01:28] Creating Voronoi polygons
+INFO [2025-11-01 15:01:28] Fitting GWR model
+INFO [2025-11-01 15:01:28] Fitting Bayesian spatial model (exponential); n.samples=600
+INFO [2025-11-01 15:01:30] Fitting Bayesian spatial model (spherical); n.samples=600
+INFO [2025-11-01 15:01:31] Fitting Bayesian spatial model (matern); n.samples=600
+INFO [2025-11-01 15:01:42] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=1, seeds=kmeans
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] build_tessellation(): Voronoi with <2 seeds; using clip_target as single polygon
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=5, seeds=kmeans
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] Creating Voronoi polygons
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=12, seeds=kmeans
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] Creating Voronoi polygons
+INFO [2025-11-01 15:01:42] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=1, seeds=random
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] build_tessellation(): Voronoi with <2 seeds; using clip_target as single polygon
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=5, seeds=random
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] Creating Voronoi polygons
+INFO [2025-11-01 15:01:42] build_tessellation(): method=voronoi, level=12, seeds=random
+INFO [2025-11-01 15:01:42] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:42] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=voronoi, level=1, seeds=provided
+WARN [2025-11-01 15:01:43] Provided 7 seeds but level=1; proceeding with provided seed count.
+INFO [2025-11-01 15:01:43] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:43] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): method=voronoi, level=5, seeds=provided
+WARN [2025-11-01 15:01:43] Provided 7 seeds but level=5; proceeding with provided seed count.
+INFO [2025-11-01 15:01:43] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:43] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): method=voronoi, level=12, seeds=provided
+WARN [2025-11-01 15:01:43] Provided 7 seeds but level=12; proceeding with provided seed count.
+INFO [2025-11-01 15:01:43] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:43] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=hex, level=20, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=square, level=20, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=voronoi, level=5, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:43] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): method=voronoi, level=10, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:43] Creating Voronoi polygons
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=hex, level=5, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] build_tessellation(): method=hex, level=10, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:43] build_tessellation(): method=square, level=5, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] build_tessellation(): method=square, level=10, seeds=kmeans
+INFO [2025-11-01 15:01:43] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:01:43] Fitting GWR model
+INFO [2025-11-01 15:01:44] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:45] Fitting GWR model
+INFO [2025-11-01 15:01:45] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:46] Fitting GWR model
+INFO [2025-11-01 15:01:47] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:48] Fitting GWR model
+INFO [2025-11-01 15:01:48] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:50] Fitting GWR model
+INFO [2025-11-01 15:01:50] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:51] Fitting GWR model
+INFO [2025-11-01 15:01:52] Fitting Bayesian spatial model (exponential); n.samples=400
+INFO [2025-11-01 15:01:53] build_tessellation(): initial boundary class: sfc_POLYGON,sfc
+INFO [2025-11-01 15:01:53] build_tessellation(): method=voronoi, level=5, seeds=random
+INFO [2025-11-01 15:01:53] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:53] Creating Voronoi polygons
+INFO [2025-11-01 15:01:53] Fitting GWR model
+INFO [2025-11-01 15:01:53] Fitting Bayesian spatial model (spherical); n.samples=400
+INFO [2025-11-01 15:01:55] build_tessellation(): method=voronoi, level=10, seeds=kmeans
+INFO [2025-11-01 15:01:55] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:55] Creating Voronoi polygons
+INFO [2025-11-01 15:01:55] build_tessellation(): method=voronoi, level=9, seeds=kmeans
+INFO [2025-11-01 15:01:55] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:55] Creating Voronoi polygons
+INFO [2025-11-01 15:01:55] build_tessellation(): method=voronoi, level=8, seeds=kmeans
+INFO [2025-11-01 15:01:55] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:01:55] Creating Voronoi polygons
+INFO [2025-11-01 15:01:55] Fitting GWR model
+INFO [2025-11-01 15:01:55] Fitting Bayesian spatial model (matern); n.samples=400
+INFO [2025-11-01 15:02:05] Fitting GWR model
+INFO [2025-11-01 15:02:05] Fitting Bayesian spatial model (matern); n.samples=400
+INFO [2025-11-01 15:02:16] Fitting GWR model
+INFO [2025-11-01 15:02:16] Fitting Bayesian spatial model (matern); n.samples=400
+INFO [2025-11-01 15:03:11] build_tessellation(): initial boundary class: sfc_MULTIPOLYGON,sfc
+INFO [2025-11-01 15:03:11] build_tessellation(): method=voronoi, level=8, seeds=kmeans
+INFO [2025-11-01 15:03:11] build_tessellation(): clip_target class: sf,data.frame
+INFO [2025-11-01 15:03:11] Creating Voronoi polygons
+INFO [2025-11-01 15:03:11] build_tessellation(): initial boundary class: sfc_MULTIPOLYGON,sfc
+INFO [2025-11-01 15:03:11] build_tessellation(): method=hex, level=8, seeds=kmeans
+INFO [2025-11-01 15:03:11] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
+INFO [2025-11-01 15:03:11] build_tessellation(): initial boundary class: sfc_MULTIPOLYGON,sfc
+INFO [2025-11-01 15:03:11] build_tessellation(): method=square, level=8, seeds=kmeans
+INFO [2025-11-01 15:03:11] build_tessellation(): grid path, boundary class pre-grid: sf,data.frame
