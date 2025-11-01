@@ -161,3 +161,6 @@ Then run the UAT to verify CRS handling, tessellations, assignments, modeling, a
 - **OSM tiles**: set `use_osm_tiles=TRUE` (requires `ggspatial`); all layers are drawn in EPSG:3857.
 - **Non-point input**: `coerce_to_points()` handles lines/polygons (on-surface/centroids/line midpoints).
 
+---
+
+![NC tessellations](Examples/nc_tessellations_triptych.png)
