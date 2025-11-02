@@ -146,12 +146,9 @@ Install in R:
 ---
 
 ## UAT
-A full UAT script lives at `UAT/run_uat_spatial_modeling.R`.  
-If you rename the toolkit file, update:
+A full UAT script lives at `script_path <- file.path(script_dir, "gis_modeling_toolkit.R")`
 
-- `script_path <- file.path(script_dir, "gis_modeling_toolkit.R")`
-
-Then run the UAT to verify CRS handling, tessellations, assignments, modeling, and plotting.
+Run the UAT to verify CRS handling, tessellations, assignments, modeling, and plotting.
 
 ---
 
