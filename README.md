@@ -146,12 +146,9 @@ Install in R:
 ---
 
 ## UAT
-A full UAT script lives at `UAT/run_uat_spatial_modeling.R`.  
-If you rename the toolkit file, update:
+A full UAT script lives at `script_path <- file.path(script_dir, "gis_modeling_toolkit.R")`
 
-- `script_path <- file.path(script_dir, "gis_modeling_toolkit.R")`
-
-Then run the UAT to verify CRS handling, tessellations, assignments, modeling, and plotting.
+Run the UAT to verify CRS handling, tessellations, assignments, modeling, and plotting.
 
 ---
 
@@ -164,3 +161,45 @@ Then run the UAT to verify CRS handling, tessellations, assignments, modeling, a
 ---
 
 ![NC tessellations](Examples/nc_tessellations_triptych.png)
+
+
+## Current limitations & scaling roadmap
+
+**Where it works well today**
+- Interactive to moderate workloads (thousands to low tens of thousands of features), single-machine R.
+- Rapid prototyping of Voronoi/hex/square partitions, assignment, and model comparison (GWR AICc / Bayesian DIC proxy).
+
+**Known limitations**
+- **No built-in cross-validation yet.** Metrics are in-sample; boundary choices and bandwidths aren’t validated out-of-fold.
+- **Scaling pressure at large n (≈50k+).**  
+  - GWR (`spgwr`) uses dense distance operations and slows markedly with many repeats.  
+  - Bayesian GP (`spBayes::spLM`) has \(O(n^3)\) tendencies; memory/time grow quickly.
+- **Voronoi at high k** can be slow/heavy; numeric quirks at duplicate/near-duplicate seeds require jittering.
+- **Spatial joins** (`st_intersects/within`) become a bottleneck without careful projection/prepared geometries.
+- **CRS/geometry edge cases.** S2 vs planar behavior, invalid polygons, and mixed geometry collections can require extra handling.
+- **Reproducibility.** Seeding (k-means/random) is RNG-dependent; tessellation IDs and maps can shift without fixed seeds.
+- **Plotting/tiles.** OSM basemaps require `ggspatial` and EPSG:3857 reprojection; offline runs skip tiles.
+
+**Cross-validation at scale (in progress)**  
+I’m upgrading the toolkit to support **spatially aware CV** without leakage, but it’s more complex than expected. The work includes:
+- Fold generators: random K-fold and **spatial block/grid splits** with optional **buffer gaps** (to avoid train–test bleed).
+- **Fold-aware tessellations:** seeds derived **only from train data**, polygons built/clipped once per fold, and **stable `poly_id` mapping** for scoring/plots.
+- **Scaled model backends:**  
+  - GWR with k-NN neighborhoods (RANN/FNN) as a fast alternative to `spgwr` for big-n.  
+  - **NNGP** backends (`spNNGP`) as a scalable replacement for full GP when \(n\) is large.
+- **Faster seeding:** mini-batch k-means for Voronoi seeds and WSS estimation in elbow heuristics.
+- **Caching & reuse:** prepared/unioned boundaries, clipped grids, and compiled spatial indexes reused across folds.
+- **Metric aggregation:** out-of-fold AICc-like scores for GWR, WAIC/DIC-like proxies for Bayesian, plus RMSE/MAE.
+
+**Why it’s non-trivial**
+- Avoiding **information leakage** (train-only seeding + assignment) while keeping polygons comparable across folds.
+- Maintaining **deterministic, stable tessellation IDs** for fold-by-fold evaluation and visualization.
+- Balancing **projection/geometry validity** and performance (S2 vs planar) across repeated operations.
+- Managing **memory and runtime** for big-n under repeated model fits.
+
+**What you can do now**
+- Use hex/square grids for very large n; keep Voronoi k moderate.  
+- Fix seeds (`set.seed(...)`) for reproducible tessellations.  
+- Ensure inputs are **projected** (use `ensure_projected()`), and prefer **prepared/unioned boundaries**.  
+- For Bayesian runs, start with fewer MCMC samples and the **exponential** covariance for speed.  
+- Sample points to estimate the elbow (`determine_optimal_levels`) when n is very large.
