@@ -10,12 +10,17 @@ Real-world phenomena (weather, demand, risk) don’t stop at county or ZIP borde
 ---
 
 ## What it does
-- **CRS-safe preprocessing**: auto-detects lon/lat, picks a sensible projected CRS, and harmonizes layers.
-- **Pointization**: converts lines/polygons to representative points for clustering/assignment.
-- **Tessellations**: Voronoi (k-means/random/provided seeds), hex grids, and square grids—optionally clipped to a boundary.
+- **CRS-safe preprocessing**: auto-detects lon/lat, picks a sensible projected CRS, and harmonizes layers.  
+  - If input has **no CRS** and looks like lon/lat, it’s treated as WGS84 and then projected.  
+  - If input has **no CRS and does not** look like lon/lat, CRS is left **unset** (no forced projection).
+- **Pointization**: converts lines/polygons to representative points for clustering/assignment. Strategies:  
+  `auto`, `centroid`, `point_on_surface` (alias: `surface`), `line_midpoint`, `bbox_center`.  
+  Optional `tmp_project=TRUE/FALSE` for safe midpoint sampling on lon/lat lines.
+- **Tessellations**: Voronoi (seeds = `kmeans` / `random` / `provided`), hex grids, and square grids—optionally clipped to a boundary (holes respected).
 - **Assignment**: maps features to polygons and returns per-cell groupings.
 - **Level selection**: suggests good cluster counts via an elbow heuristic on within-cluster SSE.
-- **Modeling**: fits GWR (`spgwr`) and Bayesian spatial models (`spBayes`) and scores them (AICc/DIC).
+- **Modeling**: fits GWR (`spgwr`) and Bayesian spatial models (`spBayes`) and scores them (AICc/DIC).  
+  Bayesian covariance models: `exponential`, `spherical`, `matern`.
 - **Plotting**: clean maps with polygon ID labels (or counts) over optional basemaps/boundaries.
 
 ---
@@ -27,179 +32,202 @@ Real-world phenomena (weather, demand, risk) don’t stop at county or ZIP borde
 
 Install in R:
     
-    install.packages(c(
-      "logger","sf","sp","spgwr","spBayes","deldir",
-      "ggplot2","dplyr","tidyr","mvtnorm","ggspatial","patchwork"
-    ))
+```r
+install.packages(c(
+  "logger","sf","sp","spgwr","spBayes","deldir",
+  "ggplot2","dplyr","tidyr","mvtnorm","ggspatial","patchwork"
+))
+```
 
 ---
 
 ## Quick start
 
 1) **Source the toolkit**
-
-    source("R/gis_modeling_toolkit.R")
+```r
+source("R/gis_modeling_toolkit.R")
+```
 
 2) **Make or load points** (use your own data; here’s a simple demo)
-
-    library(sf); library(dplyr)
-    set.seed(42)
-    bb <- sf::st_as_sfc(sf::st_bbox(c(xmin=-80, ymin=35, xmax=-79, ymax=36), crs=4326))
-    pts <- sf::st_sample(bb, size = 300, type = "random", exact = TRUE) |> sf::st_sf()
-    pts <- ensure_projected(pts)  # choose a sensible projected CRS
+```r
+library(sf); library(dplyr)
+set.seed(42)
+bb  <- sf::st_as_sfc(sf::st_bbox(c(xmin=-80, ymin=35, xmax=-79, ymax=36), crs=4326))
+pts <- sf::st_sample(bb, size = 300, type = "random", exact = TRUE) |> sf::st_sf()
+pts <- ensure_projected(pts)  # choose a sensible projected CRS
+```
 
 3) **Build tessellations** (k = 8 shown; use any of: "voronoi","hex","square")
+```r
+bt_v <- build_tessellation(pts, levels = 8, method = "voronoi", seeds = "kmeans")
+bt_h <- build_tessellation(pts, levels = 8, method = "hex")
+bt_s <- build_tessellation(pts, levels = 8, method = "square")
+```
 
-    bt_v <- build_tessellation(pts, levels = 8, method = "voronoi", seeds = "kmeans")
-    bt_h <- build_tessellation(pts, levels = 8, method = "hex")
-    bt_s <- build_tessellation(pts, levels = 8, method = "square")
+4) **Plot** (labels display polygon IDs; or show per-cell counts)
+```r
+p_v <- plot_tessellation_map(bt_v[["8"]]$polygons, bt_v[["8"]]$data,
+                             title = "Voronoi (k=8)", label = "poly_id")
+p_h <- plot_tessellation_map(bt_h[["8"]]$polygons, bt_h[["8"]]$data,
+                             title = "Hex (≈8 cells)", label = "poly_id")
+p_s <- plot_tessellation_map(bt_s[["8"]]$polygons, bt_s[["8"]]$data,
+                             title = "Square (≈8 cells)", label = "poly_id")
 
-4) **Plot** (labels display polygon IDs)
-
-    p_v <- plot_tessellation_map(bt_v[["8"]]$polygons, bt_v[["8"]]$data,
-                                 title = "Voronoi (k=8)", label = "poly_id")
-    p_h <- plot_tessellation_map(bt_h[["8"]]$polygons, bt_h[["8"]]$data,
-                                 title = "Hex (≈8 cells)", label = "poly_id")
-    p_s <- plot_tessellation_map(bt_s[["8"]]$polygons, bt_s[["8"]]$data,
-                                 title = "Square (≈8 cells)", label = "poly_id")
-
-    ggplot2::ggsave("voronoi_k8.png", p_v, width=8, height=6, dpi=200)
+ggplot2::ggsave("voronoi_k8.png", p_v, width=8, height=6, dpi=200)
+```
 
 ---
 
 ## Overlay on a shapefile (North Carolina example)
+```r
+library(sf)
+nc <- sf::st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+nc_boundary <- sf::st_union(nc)
 
-    library(sf)
-    nc <- sf::st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
-    nc_boundary <- sf::st_union(nc)
+# Align CRSs
+pts <- ensure_projected(pts, nc_boundary)
+nc_boundary <- ensure_projected(nc_boundary)
+nc <- sf::st_transform(nc, sf::st_crs(nc_boundary))
 
-    # Align CRSs
-    pts <- ensure_projected(pts, nc_boundary)
-    nc_boundary <- ensure_projected(nc_boundary)
-    nc <- sf::st_transform(nc, sf::st_crs(nc_boundary))
+# Build tessellations clipped to the state
+k <- 8
+bt_v <- build_tessellation(pts, levels = k, method = "voronoi",
+                           boundary = nc_boundary, seeds = "kmeans")
 
-    # Build tessellations clipped to the state
-    k <- 8
-    bt_v <- build_tessellation(pts, levels = k, method = "voronoi",
-                               boundary = nc_boundary, seeds = "kmeans")
-    # Plot with counties as a basemap and boundary outline
-    p_v <- plot_tessellation_map(bt_v[[as.character(k)]]$polygons,
-                                 bt_v[[as.character(k)]]$data,
-                                 title = sprintf("North Carolina — Voronoi (k=%d)", k),
-                                 boundary = nc_boundary, basemap = nc, label = "poly_id")
+# Plot with counties as a basemap and boundary outline
+p_v <- plot_tessellation_map(bt_v[[as.character(k)]]$polygons,
+                             bt_v[[as.character(k)]]$data,
+                             title = sprintf("North Carolina — Voronoi (k=%d)", k),
+                             boundary = nc_boundary, basemap = nc, label = "poly_id")
+```
 
 ---
 
 ## Pick the number of groups & best model
+```r
+# Suggest cluster counts from data
+k_suggest <- determine_optimal_levels(pts, max_levels = 12, top_n = 3)
 
-    # Suggest cluster counts from data
-    k_suggest <- determine_optimal_levels(pts, max_levels = 12, top_n = 3)
+# Suppose you have a response + predictors on the same sf (add your columns to pts)
+# pts$resp <- ...
+# pts$x1 <- ...; pts$x2 <- ...
+res <- evaluate_models(
+  data_sf        = pts,                 # must contain columns resp & predictors
+  response_var   = "resp",
+  predictor_vars = c("x1","x2"),
+  levels         = k_suggest,           # or set explicitly, e.g., c(6,8,10)
+  tessellation   = c("voronoi","hex","square"),
+  boundary       = NULL,                # or a polygon sf to clip
+  seeds          = "kmeans",
+  models         = c("GWR","Bayesian"),
+  n.samples      = 2000,
+  cov_model      = "exponential"        # also: "spherical", "matern"
+)
 
-    # Suppose you have a response + predictors on the same sf (add your columns to pts)
-    # pts$resp <- ...
-    # pts$x1 <- ...; pts$x2 <- ...
-    res <- evaluate_models(
-      data_sf       = pts,                 # must contain columns resp & predictors
-      response_var  = "resp",
-      predictor_vars= c("x1","x2"),
-      levels        = k_suggest,           # or set explicitly, e.g., c(6,8,10)
-      tessellation  = c("voronoi","hex","square"),
-      boundary      = NULL,                # or a polygon sf to clip
-      seeds         = "kmeans",
-      models        = c("GWR","Bayesian"),
-      n.samples     = 2000,
-      cov_model     = "exponential"
-    )
-
-    # Results tibble: Tessellation, Level, Model, Metric (AICc for GWR, DIC proxy for Bayesian)
-    dplyr::arrange(res$results, Metric)
+# Results tibble: Tessellation, Level, Model, Metric (AICc for GWR, DIC for Bayesian)
+dplyr::arrange(res$results, Metric)
+```
 
 ---
 
 ## Make a single figure with all three maps (white background)
-
-    library(patchwork)
-    combo <- p_v + p_h + p_s + patchwork::plot_layout(ncol = 3) &
-             ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", color = NA))
-    ggplot2::ggsave("tessellations_side_by_side.png", combo, width = 18, height = 6, dpi = 200, bg = "white")
+```r
+library(patchwork)
+combo <- p_v + p_h + p_s + patchwork::plot_layout(ncol = 3) &
+         ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", color = NA))
+ggplot2::ggsave("tessellations_side_by_side.png", combo, width = 18, height = 6, dpi = 200, bg = "white")
+```
 
 ---
 
 ## Function index (brief)
 
-- **`ensure_projected(x, target_crs=NULL)`** — ensures a projected CRS; can force to match a target CRS.
+- **`ensure_projected(x, target_crs=NULL)`** — ensures a projected CRS; can force to match a target CRS.  
+  - No-CRS lon/lat ⇒ assume WGS84 then project.  
+  - No-CRS non–lon/lat ⇒ leave CRS unset.
 - **`harmonize_crs(a, b)`** — aligns CRS between two sf/sfc objects (returns list `a`, `b`).
-- **`coerce_to_points(x, strategy)`** — representative points from any geometry (auto/surface/centroid/line_midpoint).
-- **`create_voronoi_polygons(points, clip_with=NULL)`** — Voronoi polygons from seed points; optional clipping.
-- **`create_grid_polygons(boundary, target_cells, type)`** — hex/square grids clipped to a boundary.
-- **`voronoi_seeds_kmeans(points_sf, k)`** — k-means cluster centers as Voronoi seeds.
-- **`voronoi_seeds_random(boundary, k)`** — k random seeds inside a boundary.
+- **`coerce_to_points(x, strategy, tmp_project=TRUE)`** — representative points from any geometry.  
+  Strategies: `auto`, `centroid`, `point_on_surface` (alias: `surface`), `line_midpoint`, `bbox_center`.  
+  *Note:* `line_midpoint` expects LINESTRING (will error on MULTILINESTRING; cast or use `centroid`).  
+- **`create_voronoi_polygons(points, clip_with=NULL)`** — Voronoi polygons from seed points; optional clipping.  
+  Duplicate/overlapping seeds may share polygons; output preserves one tile per input seed.
+- **`create_grid_polygons(boundary, target_cells, type)`** — hex/square grids clipped to a boundary; **holes respected**.
+- **`voronoi_seeds_kmeans(points_sf, k)`** — k-means cluster centers as Voronoi seeds (deterministic with fixed seed).
+- **`voronoi_seeds_random(boundary, k)`** — k random seeds inside a boundary (set seed for reproducibility).
 - **`assign_features_to_polygons(features, polygons)`** — intersects features with tessellation; adds `polygon_id`.
-- **`determine_optimal_levels(points_sf, max_levels, top_n)`** — elbow heuristic over k-means WSS.
-- **`fit_gwr_model(data_sf, response, predictors)`** — fits GWR; returns model, bandwidth, AICc.
-- **`fit_bayesian_spatial_model(data_sf, response, predictors, n.samples, cov_model)`** — fits Bayesian spatial model; returns samples & DIC proxy.
-- **`build_tessellation(features_sf, levels, method, boundary, seeds, ...)`** — constructs tessellation(s) and assignments per level.
+- **`determine_optimal_levels(points_sf, max_levels, top_n)`** — elbow heuristic over k-means WSS (stable given RNG seed).
+- **`fit_gwr_model(data_sf, response, predictors)`** — fits GWR; returns model, bandwidth ∈ (0,1], AICc.
+- **`fit_bayesian_spatial_model(data_sf, response, predictors, n.samples, cov_model)`** — fits Bayesian spatial model; returns samples & DIC.  
+  `cov_model` ∈ `{ "exponential","spherical","matern" }` (invalid names error).
+- **`build_tessellation(features_sf, levels, method, boundary=NULL, seeds="kmeans", pointize="auto", provided_seed_points=NULL, ...)`** — constructs tessellation(s) and assignments per level.  
+  If `seeds="provided"`, you **must** pass `provided_seed_points`.
 - **`evaluate_models(...)`** — builds tessellations, fits models across levels/methods; returns a results tibble.
-- **`plot_tessellation_map(polygons, points, ..., label=c("poly_id","count","none"))`** — clean map with labels; optional basemap/boundary.
+- **`plot_tessellation_map(polygons, points, ..., label=c("poly_id","count","none"), show_counts=FALSE)`** — clean map with labels or count overlays; optional basemap/boundary.
 - **`summarize_by_cell(assigned_points_sf, response, predictors)`** — per-cell counts and means.
 
 ---
 
 ## UAT
-A full UAT script lives at `script_path <- file.path(script_dir, "gis_modeling_toolkit.R")`
 
-Run the UAT to verify CRS handling, tessellations, assignments, modeling, and plotting.
+A complete UAT script **`run_uat_spatial_modeling.R`** is included. It exercises CRS handling, mixed-geometry pointization, tessellations (including holes in boundaries), assignments, modeling (GWR + Bayesian with `exponential`/`spherical`/`matern`), plotting, and error paths.
+
+**Artifacts written to `UAT_outputs/`:**
+- `map_voronoi_kmeans_lvl12.png`, `map_square_lvl20.png`, `map_square_lvl20_nobnd.png`
+- `uat_evaluate_models_results.csv`
+- `sessionInfo.txt`
+
+Run it with your preferred method (e.g., `Rscript run_uat_spatial_modeling.R`) and adjust `script_path` inside if needed.
 
 ---
 
 ## Tips & troubleshooting
-- **Missing CRS**: set or infer CRS first; `ensure_projected()` assigns WGS84 if bbox looks like lon/lat, then projects.
-- **Label choice**: set `label = "poly_id"` (IDs) or `label = "count"` (point counts). Use `label="none"` to hide.
+- **Missing CRS**: set or infer CRS first; `ensure_projected()` assigns WGS84 if bbox looks like lon/lat, then projects; otherwise leaves CRS unset.
+- **Seeds**: if `seeds="provided"`, pass `provided_seed_points` (otherwise it will error).
+- **Line midpoints**: `line_midpoint` expects LINESTRING; for MULTILINESTRING either cast to LINESTRING or use `centroid`/`point_on_surface`.
+- **Label choice**: set `label = "poly_id"` (IDs) or `label = "count"` (point counts), or `show_counts=TRUE`.
 - **OSM tiles**: set `use_osm_tiles=TRUE` (requires `ggspatial`); all layers are drawn in EPSG:3857.
-- **Non-point input**: `coerce_to_points()` handles lines/polygons (on-surface/centroids/line midpoints).
+- **Boundaries with holes**: grids respect holes after clipping; ensure boundary and grid share the same CRS.
+- **Non-finite predictors**: model fits will warn/error or drop rows with `NA/Inf`—clean your inputs for best results.
+- **Reproducibility**: fix RNG seeds (`set.seed(...)`) to stabilize seeding and level suggestions.
 
 ---
 
 ![NC tessellations](Examples/nc_tessellations_triptych.png)
 
-
 ## Current limitations & scaling roadmap
 
+### Current capabilities & limits (updated)
+
 **Where it works well today**
-- Interactive to moderate workloads (thousands to low tens of thousands of features), single-machine R.
-- Rapid prototyping of Voronoi/hex/square partitions, assignment, and model comparison (GWR AICc / Bayesian DIC proxy).
+- Interactive → moderate workloads (thousands to low–tens of thousands of features) on a single R session.
+- Robust, CRS-safe workflows: automatic local UTM pick (with 3857 fallback), safe pointization for non-point geometries, and Voronoi that correctly handles duplicate/near-duplicate seeds.
+- Rapid prototyping of Voronoi/hex/square partitions, assignment, and model comparison (GWR AICc / Bayesian DIC).
+- Out-of-fold validation now supported via new CV helpers (see below), plus hex/square grid tuning that targets a requested cell count.
 
 **Known limitations**
-- **No built-in cross-validation yet.** Metrics are in-sample; boundary choices and bandwidths aren’t validated out-of-fold.
-- **Scaling pressure at large n (≈50k+).**  
-  - GWR (`spgwr`) uses dense distance operations and slows markedly with many repeats.  
-  - Bayesian GP (`spBayes::spLM`) has \(O(n^3)\) tendencies; memory/time grow quickly.
-- **Voronoi at high k** can be slow/heavy; numeric quirks at duplicate/near-duplicate seeds require jittering.
-- **Spatial joins** (`st_intersects/within`) become a bottleneck without careful projection/prepared geometries.
-- **CRS/geometry edge cases.** S2 vs planar behavior, invalid polygons, and mixed geometry collections can require extra handling.
-- **Reproducibility.** Seeding (k-means/random) is RNG-dependent; tessellation IDs and maps can shift without fixed seeds.
-- **Plotting/tiles.** OSM basemaps require `ggspatial` and EPSG:3857 reprojection; offline runs skip tiles.
+- **Tessellation selection is still in-sample in `evaluate_models()`.** AICc/DIC are computed on the assigned data; fold-aware tessellation building (train-only seeding with fold-stable IDs) is not yet integrated into that pipeline. Use the CV helpers for predictive scoring.
+- **Scaling pressure at large n (≈50k+).**
+  - GWR (`spgwr`) relies on dense distance ops and slows with repeated fits (including per-fold CV).
+  - Bayesian GP (`spBayes::spLM`) has \(O(n^3)\)-like behavior; memory/time grow quickly and CV multiplies cost. (`cv_bayes()` will fall back to regression-only predictions if `spBayes` is unavailable or a fold fit fails.)
+- **Voronoi at high k** remains heavy; tiny deterministic jitter reduces numerical quirks but does not remove the cost.
+- **Spatial joins** (`st_within`/`st_intersects`) can bottleneck without careful projection and valid/prepared geometries.
+- **Geometry edge cases & projections.** Multi-zone extents, antimeridian crossers, and polar regions may need a hand-picked CRS.  
+  For `coerce_to_points(mode = "line_midpoint")`, input must be **LINESTRING** (errors on MULTILINESTRING—cast or use `surface`/`centroid`).
 
-**Cross-validation at scale (in progress)**  
-I’m upgrading the toolkit to support **spatially aware CV** without leakage, but it’s more complex than expected. The work includes:
-- Fold generators: random K-fold and **spatial block/grid splits** with optional **buffer gaps** (to avoid train–test bleed).
-- **Fold-aware tessellations:** seeds derived **only from train data**, polygons built/clipped once per fold, and **stable `poly_id` mapping** for scoring/plots.
-- **Scaled model backends:**  
-  - GWR with k-NN neighborhoods (RANN/FNN) as a fast alternative to `spgwr` for big-n.  
-  - **NNGP** backends (`spNNGP`) as a scalable replacement for full GP when \(n\) is large.
-- **Faster seeding:** mini-batch k-means for Voronoi seeds and WSS estimation in elbow heuristics.
-- **Caching & reuse:** prepared/unioned boundaries, clipped grids, and compiled spatial indexes reused across folds.
-- **Metric aggregation:** out-of-fold AICc-like scores for GWR, WAIC/DIC-like proxies for Bayesian, plus RMSE/MAE.
-
-**Why it’s non-trivial**
-- Avoiding **information leakage** (train-only seeding + assignment) while keeping polygons comparable across folds.
-- Maintaining **deterministic, stable tessellation IDs** for fold-by-fold evaluation and visualization.
-- Balancing **projection/geometry validity** and performance (S2 vs planar) across repeated operations.
-- Managing **memory and runtime** for big-n under repeated model fits.
+**Cross-validation (now available)**
+- **Fold generation:** `make_folds()` supports:
+  - `random_kfold` (standard),
+  - `block_kfold` (regular-grid spatial blocks; balanced across folds),
+  - `buffered_loo` (leave-one-out with an exclusion buffer to reduce leakage).
+  All modes project lon/lat automatically for distance-based steps and preserve original row indices (`row_id`).
+- **GWR CV:** `cv_gwr()` fits per-fold with **adaptive bandwidth selection** (`gwr.sel`) and predicts at test coordinates; returns RMSE/MAE/R² overall and by fold, plus bandwidth diagnostics.
+- **Bayesian CV:** `cv_bayes()` fits per-fold with `spBayes::spLM` and predicts with `spPredict()`; returns RMSE/MAE/R² and optional fold DIC when samples are available. Safe fallbacks handle missing packages or unstable fits.
+- These CV tools measure **predictive** performance; use them to compare formulas, covariances, or tessellation designs (by reassigning features per design before CV).
 
 **What you can do now**
-- Use hex/square grids for very large n; keep Voronoi k moderate.  
-- Fix seeds (`set.seed(...)`) for reproducible tessellations.  
-- Ensure inputs are **projected** (use `ensure_projected()`), and prefer **prepared/unioned boundaries**.  
-- For Bayesian runs, start with fewer MCMC samples and the **exponential** covariance for speed.  
-- Sample points to estimate the elbow (`determine_optimal_levels`) when n is very large.
+- For **predictive model selection**, prefer `make_folds()` + `cv_gwr()` / `cv_bayes()` (use `block_kfold` or `buffered_loo` to reduce spatial leakage).
+- For **quick, in-sample** comparisons across designs, keep using `evaluate_models()`; you can now set `cov_model` ∈ {`"exponential"`, `"spherical"`, `"matern"`}.
+- For large n: start with **hex/square grids**, keep Voronoi k moderate, and use subsampling in `determine_optimal_levels()`.
+- Fix RNG seeds for reproducibility (`set.seed(...)` for k-means/random seeding and CV allocation).
+- Provide a projected **boundary** when possible (holes are respected); ensure geometries are valid before heavy intersects.
+- For lines, cast to LINESTRING before `line_midpoint`, or use `point_on_surface`/`centroid` as safer fallbacks.
