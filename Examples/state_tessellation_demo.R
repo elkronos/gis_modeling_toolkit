@@ -13,13 +13,11 @@ suppressWarnings(suppressMessages(source(script_path)))
 
 # -- Data: North Carolina as a demo basemap -----------------------------------
 nc <- sf::st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
-
-# Make a single-polygon boundary as sf (not sfc) to be safe for overlay ops
 nc_boundary <- sf::st_as_sf(sf::st_union(nc))
 
 # ✅ Project first (for proper distances/areas/label points)
-nc_boundary <- ensure_projected(nc_boundary)                  # projected sf
-nc          <- sf::st_transform(nc, sf::st_crs(nc_boundary))  # match CRS
+nc_boundary <- ensure_projected(nc_boundary)
+nc          <- sf::st_transform(nc, sf::st_crs(nc_boundary))
 
 # Sample points inside the projected boundary
 set.seed(42)
@@ -27,102 +25,132 @@ pts <- sf::st_sample(nc_boundary, size = 300, type = "random", exact = TRUE) |>
   sf::st_sf()
 
 # -- Synthesize a response and fit a simple model ------------------------------
-# Use projected coordinates as predictors
 xy <- sf::st_coordinates(pts)
 pts$xs <- as.numeric(scale(xy[,1]))
 pts$ys <- as.numeric(scale(xy[,2]))
-
 set.seed(42)
 pts$resp <- 2 + 0.7*pts$xs - 0.4*pts$ys + 0.2*(pts$xs*pts$ys) + rnorm(nrow(pts), sd = 0.5)
 
-# Fit a simple global model; predict at points
-glm_fit        <- lm(resp ~ xs + ys + I(xs*ys), data = sf::st_drop_geometry(pts))
-pts$pred_glm   <- as.numeric(predict(glm_fit, newdata = sf::st_drop_geometry(pts)))
+glm_fit      <- lm(resp ~ xs + ys + I(xs*ys), data = sf::st_drop_geometry(pts))
+pts$pred_glm <- as.numeric(predict(glm_fit, newdata = sf::st_drop_geometry(pts)))
 
-# -- Build tessellations -------------------------------------------------------
-levels <- 8
-lvl    <- as.character(levels)
+# -- Build tessellations (UPDATED API) ----------------------------------------
+levels <- 8L
 
-bt_v <- build_tessellation(pts, levels = levels, method = "voronoi",
-                           boundary = nc_boundary, seeds = "kmeans")
-bt_h <- build_tessellation(pts, levels = levels, method = "hex",
-                           boundary = nc_boundary, seeds = "kmeans")
-bt_s <- build_tessellation(pts, levels = levels, method = "square",
-                           boundary = nc_boundary, seeds = "kmeans")
+# Voronoi seeds via k-means, then build Voronoi cells
+seeds_v <- get_voronoi_seeds(boundary = nc_boundary, method = "kmeans", n = levels, set_seed = 42)
+bt_v <- build_tessellation(
+  points_sf = seeds_v,
+  method    = "voronoi",
+  boundary  = nc_boundary,
+  clip      = TRUE
+)
 
-# Helper: guarantee a polygon_id column on polygons (used for joins/labels)
-ensure_polygon_id <- function(polys) {
-  if (!"polygon_id" %in% names(polys)) polys$polygon_id <- seq_len(nrow(polys))
-  polys
+# Hex and Square grids (approximate number of cells)
+bt_h <- build_tessellation(points_sf = pts, method = "hex",
+                           boundary = nc_boundary, approx_n_cells = levels)
+bt_s <- build_tessellation(points_sf = pts, method = "square",
+                           boundary = nc_boundary, approx_n_cells = levels)
+
+cells_v <- bt_v$cells
+cells_h <- bt_h$cells
+cells_s <- bt_s$cells
+
+# -- Assign points to polygons (NEW helper uses polygon_id_col) ----------------
+to_poly <- function(polys, pts) {
+  # Normalize Voronoi 'cell_id' -> 'poly_id' for joins/labels
+  if (!"poly_id" %in% names(polys) && "cell_id" %in% names(polys)) {
+    polys$poly_id <- polys$cell_id
+  }
+  assign_features_to_polygons(
+    features_sf    = pts,
+    polygons_sf    = polys,
+    polygon_id_col = "poly_id",
+    predicate      = sf::st_within
+  )
 }
 
-# Helper: make a map colored by mean predicted outcome per polygon
+ap_v <- to_poly(cells_v, pts)
+ap_h <- to_poly(cells_h, pts)
+ap_s <- to_poly(cells_s, pts)
+
+# -- Mapping helper (UPDATED joins/labels) ------------------------------------
 make_outcome_map <- function(polys, assigned_pts, title, boundary, basemap) {
-  # Summarize per-cell using the toolkit helper
-  sum_tbl <- summarize_by_cell(assigned_pts,
-                               response_var   = "pred_glm",
-                               predictor_vars = NULL)  # just outcome
+  # Ensure polygons have poly_id (Voronoi may only have cell_id)
+  if (!"poly_id" %in% names(polys) && "cell_id" %in% names(polys)) {
+    polys$poly_id <- polys$cell_id
+  }
+  # Summarize per cell (mean of predicted outcome)
+  sum_tbl <- summarize_by_cell(
+    assigned_points_sf = assigned_pts,
+    response_var       = "pred_glm"
+  )
+  polys_f <- dplyr::left_join(polys, sum_tbl, by = "poly_id")
   
-  # Ensure polygons have polygon_id to join on
-  polys <- ensure_polygon_id(polys)
-  
-  # Join summary to polygons
-  polys_f <- polys %>%
-    left_join(sum_tbl, by = "polygon_id")
-  
-  # Label positions; avoid NAs for cleaner labeling
   labs <- suppressWarnings(sf::st_point_on_surface(polys_f))
   labs <- labs[!is.na(polys_f$mean_response), , drop = FALSE]
   
-  p <- ggplot() +
+  ggplot() +
     geom_sf(data = polys_f, aes(fill = mean_response), color = "white", linewidth = 0.2) +
-    geom_sf(data = boundary, fill = NA, color = "black", linewidth = 0.3) +
-    geom_sf(data = basemap, fill = NA, color = "grey80", linewidth = 0.2) +
-    geom_sf_text(data = labs, aes(label = polygon_id), size = 3, check_overlap = TRUE) +
+    geom_sf(data = boundary, fill = NA, color = "black",  linewidth = 0.3) +
+    geom_sf(data = basemap,  fill = NA, color = "grey80", linewidth = 0.2) +
+    geom_sf_text(data = labs, aes(label = poly_id), size = 3, check_overlap = TRUE) +
+    # keep a scale here; we'll override with one shared scale below
     scale_fill_viridis_c(name = "Mean predicted\noutcome", option = "C", direction = -1) +
     coord_sf(crs = sf::st_crs(boundary)) +
     labs(title = title) +
     theme_minimal(base_size = 12) +
     theme(
-      plot.title      = element_text(face = "bold"),
+      plot.title       = element_text(face = "bold"),
       panel.grid.major = element_blank(),
       panel.grid.minor = element_blank()
     )
-  p
 }
 
-# Build maps for each tessellation (color = mean predicted outcome)
+# Build maps for each tessellation
 p_v <- make_outcome_map(
-  polys       = bt_v[[lvl]]$polygons,
-  assigned_pts= bt_v[[lvl]]$data,
-  title       = sprintf("Voronoi (k = %d): mean predicted outcome", levels),
-  boundary    = nc_boundary,
-  basemap     = nc
+  polys        = cells_v,
+  assigned_pts = ap_v,
+  title        = sprintf("Voronoi (k = %d): mean predicted outcome", levels),
+  boundary     = nc_boundary,
+  basemap      = nc
 )
 
 p_h <- make_outcome_map(
-  polys       = bt_h[[lvl]]$polygons,
-  assigned_pts= bt_h[[lvl]]$data,
-  title       = sprintf("Hex Grid (≈%d cells): mean predicted outcome", levels),
-  boundary    = nc_boundary,
-  basemap     = nc
+  polys        = cells_h,
+  assigned_pts = ap_h,
+  title        = sprintf("Hex Grid (≈%d cells): mean predicted outcome", levels),
+  boundary     = nc_boundary,
+  basemap      = nc
 )
 
 p_s <- make_outcome_map(
-  polys       = bt_s[[lvl]]$polygons,
-  assigned_pts= bt_s[[lvl]]$data,
-  title       = sprintf("Square Grid (≈%d cells): mean predicted outcome", levels),
-  boundary    = nc_boundary,
-  basemap     = nc
+  polys        = cells_s,
+  assigned_pts = ap_s,
+  title        = sprintf("Square Grid (≈%d cells): mean predicted outcome", levels),
+  boundary     = nc_boundary,
+  basemap      = nc
 )
 
-# -- Combine and export --------------------------------------------------------
+# ---- One legend only: apply a SINGLE shared fill scale to all panels ---------
+# Use a global range so Patchwork can collect to exactly one legend.
+global_limits <- range(pts$pred_glm, na.rm = TRUE)
+
 common_theme <- theme(
   plot.background  = element_rect(fill = "white", color = NA),
   panel.background = element_rect(fill = "white", color = NA)
 )
 
-combined <- (p_v | p_h | p_s) + plot_layout(guides = "collect") & common_theme
+combined <- (p_v | p_h | p_s) +
+  plot_layout(guides = "collect") &
+  common_theme &
+  scale_fill_viridis_c(
+    name = "Mean predicted\noutcome",
+    option = "C",
+    direction = -1,
+    limits = global_limits
+  ) &
+  theme(legend.position = "bottom")
 
 ggplot2::ggsave("nc_tessellations_triptych.png", combined,
                 width = 18, height = 6, dpi = 240, bg = "white")
