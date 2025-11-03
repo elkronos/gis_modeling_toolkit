@@ -1,1 +1,3 @@
-WARN [2025-11-03 03:08:42] fit_gwr_model(): dropping %d rows with NA in modeling columns.1
+INFO [2025-11-03 13:43:27] make_folds(block_kfold): making grid 3 x 3 (≈ 9 blocks) over region.
+INFO [2025-11-03 13:43:27] make_folds(buffered_loo): building neighbor lists within buffer = 1000 (CRS units).
+WARN [2025-11-03 13:43:35] fit_gwr_model(): dropping %d rows with non-finite/NA in modeling columns.2
