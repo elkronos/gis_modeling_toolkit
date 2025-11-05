@@ -177,7 +177,7 @@ A complete UAT script **`run_uat_spatial_modeling.R`** is included. It exercises
 - `uat_cv_gwr_results.csv`, `uat_cv_bayes_results.csv`  <!-- predictive CV summaries (RMSE/MAE/R²; DIC when available) -->
 - `sessionInfo.txt`
 
-Run it with your preferred method (e.g., `Rscript run_uat_spatial_modeling.R`) and adjust `script_path` inside if needed. If `spBayes` is unavailable, the script will skip Bayesian fits gracefully and still write the other artifacts.
+Run it with your preferred method (e.g., `Rscript run_uat_gis_modeling_toolkit.R`) and adjust `script_path` inside if needed. If `spBayes` is unavailable, the script will skip Bayesian fits gracefully and still write the other artifacts.
 
 ---
 
