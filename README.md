@@ -167,6 +167,14 @@ ggplot2::ggsave("tessellations_side_by_side.png", combo, width = 18, height = 6,
 
 ---
 
+## Example
+
+This script illustrates how to display the mean outcome as a fill inside of a shape file where boundaries are set by the workflow. 
+
+![NC tessellations](Examples/nc_tessellations_triptych.png)
+
+---
+
 ## UAT
 
 A complete UAT script **`run_uat_spatial_modeling.R`** is included. It exercises CRS handling, mixed-geometry pointization, tessellations (including holes in boundaries), assignments, modeling (GWR + Bayesian with `exponential`/`spherical`/`matern`), **cross-validation** (`make_folds()`, `cv_gwr()`, `cv_bayes()`), plotting, and error paths.
@@ -198,10 +206,6 @@ Run it with your preferred method (e.g., `Rscript run_uat_gis_modeling_toolkit.R
   - For large `n`, prefer **hex/square** grids, keep Voronoi `k` moderate, and consider subsampling in `determine_optimal_levels()`.
 - **Cross-validation**: for **predictive** model selection, prefer `make_folds()` + `cv_gwr()` / `cv_bayes()` (use `block_kfold` or `buffered_loo` to reduce spatial leakage). If `spBayes` is unavailable, Bayesian CV is skipped/falls back gracefully.
 - **Reproducibility**: fix RNG seeds (`set.seed(...)`) to stabilize k-means/random seeding, CV allocation, and level suggestions.
-
----
-
-![NC tessellations](Examples/nc_tessellations_triptych.png)
 
 ---
 
