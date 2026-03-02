@@ -1,0 +1,47 @@
+Package: spatialkit
+Title: Spatial Tessellation, Modeling, and Cross-Validation Toolkit
+Version: 0.1.0
+Authors@R:
+    person("Author", "Name", email = "author@example.com", role = c("aut", "cre"))
+Description: A modular toolkit for spatial analysis workflows including CRS
+    management, Voronoi/Delaunay/grid tessellation, feature-to-polygon
+    assignment, geographically weighted regression (GWR via GWmodel),
+    Bayesian spatial GP regression (via brms), spatial cross-validation
+    with block/buffered strategies, and model comparison. Provides an S3
+    class system (spatial_fit) with consistent predict/fitted/residuals
+    methods across model backends.
+License: MIT + file LICENSE
+URL: https://github.com/your-org/spatialkit
+BugReports: https://github.com/your-org/spatialkit/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.1.0)
+Imports:
+    sf (>= 1.0),
+    dplyr (>= 1.0),
+    logger,
+    digest,
+    stats,
+    methods
+Suggests:
+    sp,
+    GWmodel,
+    brms,
+    cmdstanr,
+    loo,
+    tibble,
+    lwgeom,
+    geometry,
+    mvtnorm,
+    gstat,
+    ggplot2,
+    FNN,
+    Matrix,
+    matrixStats,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Config/testthat/edition: 3
+LazyData: true

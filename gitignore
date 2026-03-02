@@ -1,0 +1,29 @@
+# R session files
+.Rhistory
+.Rdata
+.RData
+.Ruserdata
+
+# RStudio project files
+.Rproj.user/
+*.Rproj
+
+# R package build artifacts
+src/*.o
+src/*.so
+src/*.dll
+*.tar.gz
+
+# Check/build directories
+*.Rcheck/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Byte-compiled / cached
+inst/doc
+
+# Credentials / secrets
+.Renviron
+.Rprofile
