@@ -1,0 +1,430 @@
+---
+title: "spatialkit Demo — Tessellations & Models on Synthetic North Carolina Data"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+    fig_width: 10
+    fig_height: 7
+vignette: >
+  %\VignetteIndexEntry{spatialkit Demo — Tessellations & Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  message    = FALSE,
+  warning    = FALSE,
+  fig.align  = "center",
+  out.width  = "100%"
+)
+```
+
+## Overview
+
+This vignette generates **synthetic spatial data** over the state of
+North Carolina and walks through the core `spatialkit` workflow:
+
+1. Build four tessellation types (Voronoi, hex, square, Delaunay)
+2. Assign observation points to cells and compute cell-level summaries
+3. Produce **choropleth maps** showing cell-level mean response
+4. Fit a GWR model and visualise residuals across tessellations
+5. Run 5-fold cross-validation
+
+Everything is self-contained — the boundary comes from the `nc.shp` demo
+shapefile bundled with the `sf` package, so no external files are needed.
+
+---
+
+## 1. Load Packages & Create Boundary
+
+```{r load-packages}
+library(spatialkit)
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+set.seed(42)
+```
+
+We load the North Carolina county boundaries shipped with `sf`, dissolve them
+into a single state outline, and project to **NAD83 / North Carolina (ftUS)**
+(EPSG:2264) for proper distance-based tessellations:
+
+```{r boundary}
+nc_counties <- st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+nc_boundary <- nc_counties |>
+  st_union() |>
+  st_transform(2264) |>
+  st_as_sf()
+```
+
+---
+
+## 2. Generate Synthetic Observation Data
+
+We scatter **300 points** inside the state boundary with two predictors and a
+spatially-varying response:
+
+- `elevation` — gradient increasing west → east, plus noise
+- `pop_density` — decays with distance from two fake "cities" (Charlotte, Raleigh)
+- `y` — response driven by predictors + a spatial sine/cosine trend
+
+```{r fake-data}
+n_points <- 300
+
+# Sample points inside the NC boundary
+pts_raw <- st_sample(nc_boundary, size = n_points, type = "random")
+pts_coords <- st_coordinates(pts_raw)
+x_coords <- pts_coords[, 1]
+y_coords <- pts_coords[, 2]
+
+# Predictors
+elevation <- scale(x_coords)[, 1] * 500 + rnorm(n_points, 3000, 400)
+
+# Approximate projected coords for Charlotte & Raleigh in EPSG:2264
+city1 <- c(1530000, 550000)   # Charlotte-ish
+city2 <- c(2150000, 750000)   # Raleigh-ish
+dist_to_city <- pmin(
+  sqrt((x_coords - city1[1])^2 + (y_coords - city1[2])^2),
+  sqrt((x_coords - city2[1])^2 + (y_coords - city2[2])^2)
+)
+pop_density <- exp(-dist_to_city / 400000) * 5000 + rnorm(n_points, 200, 100)
+pop_density <- pmax(pop_density, 10)
+
+# Response
+y_response <- 50 +
+  0.01  * elevation +
+  0.005 * pop_density +
+  2.0   * sin(x_coords / 300000) * cos(y_coords / 300000) +
+  rnorm(n_points, 0, 5)
+
+points_sf <- st_sf(
+  y           = y_response,
+  elevation   = elevation,
+  pop_density = pop_density,
+  geometry    = pts_raw
+)
+```
+
+Quick sanity check — points over boundary:
+
+```{r quick-peek, fig.height=5}
+ggplot() +
+  geom_sf(data = nc_boundary, fill = "grey95", color = "black") +
+  geom_sf(data = points_sf, aes(color = y), size = 1.2) +
+  scale_color_viridis_c(name = "Response (y)") +
+  theme_void() +
+  ggtitle("Raw observation points — North Carolina")
+```
+
+---
+
+## 3. Build Four Tessellation Types
+
+### 3a. Voronoi
+
+```{r tess-voronoi}
+seeds <- get_voronoi_seeds(
+  boundary      = nc_boundary,
+  sample_points = points_sf,
+  method        = "kmeans",
+  n             = 40
+)
+
+tess_voronoi <- build_tessellation(
+  points_sf, boundary = nc_boundary,
+  method = "voronoi", clip = TRUE, quiet = TRUE
+)
+```
+
+### 3b. Hexagonal Grid (~50 cells)
+
+```{r tess-hex}
+tess_hex <- build_tessellation(
+  points_sf, boundary = nc_boundary,
+  method = "hex", approx_n_cells = 50, clip = TRUE, quiet = TRUE
+)
+```
+
+### 3c. Square Grid (~50 cells)
+
+```{r tess-square}
+tess_square <- build_tessellation(
+  points_sf, boundary = nc_boundary,
+  method = "square", approx_n_cells = 50, clip = TRUE, quiet = TRUE
+)
+```
+
+### 3d. Delaunay Triangles
+
+```{r tess-tri}
+tess_tri <- tryCatch(
+  build_tessellation(
+    points_sf, boundary = nc_boundary,
+    method = "triangles", clip = TRUE, quiet = TRUE
+  ),
+  error = function(e) {
+    message("Delaunay skipped: ", conditionMessage(e))
+    NULL
+  }
+)
+```
+
+### Cell counts
+
+```{r cell-counts}
+cat(sprintf(
+  "Voronoi: %d | Hex: %d | Square: %d | Triangles: %s\n",
+  nrow(tess_voronoi$cells),
+  nrow(tess_hex$cells),
+  nrow(tess_square$cells),
+  if (!is.null(tess_tri)) nrow(tess_tri$cells) else "skipped"
+))
+```
+
+---
+
+## 4. Choropleth Maps — Cell-Level Mean Response
+
+For each tessellation we assign observation points to cells, compute the mean
+response `y` per cell, and render a **filled choropleth** with a clean look.
+
+```{r choropleth-helper}
+#' Assign points → cells, compute mean, and produce a clean choropleth
+make_choropleth <- function(tess, boundary, points, fill_var = "y",
+                            palette = "viridis", title = NULL,
+                            legend_title = "Mean Response (y)") {
+  cells <- tess$cells
+
+  # Identify the id column
+  id_col <- if ("cell_id" %in% names(cells)) "cell_id" else "poly_id"
+  if (!id_col %in% names(cells)) {
+    cells$cell_id <- seq_len(nrow(cells))
+    id_col <- "cell_id"
+  }
+
+  # Assign points to cells and compute cell-level mean
+  assigned <- assign_features_to_polygons(points, cells, polygon_id_col = id_col)
+
+  cell_summary <- assigned |>
+    st_drop_geometry() |>
+    group_by(.data[[id_col]]) |>
+    summarise(
+      fill_value = mean(.data[[fill_var]], na.rm = TRUE),
+      n_obs      = n(),
+      .groups    = "drop"
+    )
+
+  cells <- left_join(cells, cell_summary, by = id_col)
+
+  # Build the choropleth via plot_tessellation_map
+  plot_tessellation_map(
+    tessellation_sf = cells,
+    boundary        = boundary,
+    fill_col        = "fill_value",
+    palette         = palette,
+    tile_alpha      = 0.9,
+    outline_col     = "white",
+    outline_size    = 0.3,
+    boundary_col    = "grey20",
+    boundary_size   = 0.8,
+    legend_title    = legend_title,
+    title           = title,
+    subtitle        = sprintf("%d cells  |  %d observations", nrow(cells), nrow(points))
+  )
+}
+```
+
+### 4a. Voronoi Choropleth
+
+```{r choro-voronoi, fig.cap="Voronoi choropleth — mean response per cell"}
+make_choropleth(tess_voronoi, nc_boundary, points_sf,
+                title = "Voronoi Tessellation — Mean Response")
+```
+
+### 4b. Hexagonal Grid Choropleth
+
+```{r choro-hex, fig.cap="Hex grid choropleth — mean response per cell"}
+make_choropleth(tess_hex, nc_boundary, points_sf,
+                title = "Hexagonal Grid — Mean Response")
+```
+
+### 4c. Square Grid Choropleth
+
+```{r choro-square, fig.cap="Square grid choropleth — mean response per cell"}
+make_choropleth(tess_square, nc_boundary, points_sf,
+                title = "Square Grid — Mean Response")
+```
+
+### 4d. Delaunay Choropleth
+
+```{r choro-tri, fig.cap="Delaunay choropleth — mean response per cell", eval=!is.null(tess_tri)}
+make_choropleth(tess_tri, nc_boundary, points_sf,
+                title = "Delaunay Triangulation — Mean Response")
+```
+
+---
+
+## 5. Side-by-Side Comparison
+
+```{r comparison-panel, fig.width=14, fig.height=6, fig.cap="All tessellations at a glance"}
+if (requireNamespace("patchwork", quietly = TRUE)) {
+  library(patchwork)
+
+  p1 <- make_choropleth(tess_voronoi, nc_boundary, points_sf,
+                         title = "Voronoi")
+  p2 <- make_choropleth(tess_hex,     nc_boundary, points_sf,
+                         title = "Hex Grid")
+  p3 <- make_choropleth(tess_square,  nc_boundary, points_sf,
+                         title = "Square Grid")
+
+  (p1 | p2 | p3) +
+    plot_annotation(
+      title    = "Tessellation Comparison — Cell-Level Mean Response",
+      subtitle = sprintf("%d observations, North Carolina", n_points),
+      theme    = theme(
+        plot.title    = element_text(size = 16, face = "bold"),
+        plot.subtitle = element_text(size = 11, color = "grey40")
+      )
+    )
+} else {
+  cat("Install 'patchwork' for the side-by-side panel: install.packages('patchwork')")
+}
+```
+
+---
+
+## 6. GWR Model Fitting
+
+Fit a geographically weighted regression: `y ~ elevation + pop_density`.
+
+```{r gwr-fit}
+response_var   <- "y"
+predictor_vars <- c("elevation", "pop_density")
+
+gwr_fit <- tryCatch({
+  fit_gwr_model(
+    data_sf        = points_sf,
+    response_var   = response_var,
+    predictor_vars = predictor_vars,
+    adaptive       = TRUE,
+    kernel         = "bisquare"
+  )
+}, error = function(e) {
+  message("GWR skipped: ", conditionMessage(e))
+  NULL
+})
+```
+
+```{r gwr-summary, eval=!is.null(gwr_fit)}
+cat(sprintf("Bandwidth: %.1f  |  R²: %.3f  |  RMSE: %.3f\n",
+            gwr_fit$info$bandwidth,
+            gwr_fit$metrics$r_squared,
+            gwr_fit$metrics$rmse))
+```
+
+### GWR Residuals — Choropleth per Tessellation
+
+Map the **mean absolute residual** onto each tessellation type, producing
+clean filled maps so you can compare how tessellation geometry aggregates
+model error.
+
+```{r gwr-residual-maps, eval=!is.null(gwr_fit), results='asis'}
+pts_with_gwr <- points_sf
+pts_with_gwr$gwr_fitted   <- as.numeric(fitted(gwr_fit))
+pts_with_gwr$gwr_residual <- as.numeric(residuals(gwr_fit))
+pts_with_gwr$abs_error    <- abs(pts_with_gwr$gwr_residual)
+
+tess_list <- list(
+  list(tess = tess_voronoi, label = "Voronoi"),
+  list(tess = tess_hex,     label = "Hex Grid"),
+  list(tess = tess_square,  label = "Square Grid")
+)
+
+for (info in tess_list) {
+  cells <- info$tess$cells
+  id_col <- if ("cell_id" %in% names(cells)) "cell_id" else "poly_id"
+  if (!id_col %in% names(cells)) {
+    cells$cell_id <- seq_len(nrow(cells))
+    id_col <- "cell_id"
+  }
+
+  asgn <- assign_features_to_polygons(pts_with_gwr, cells, polygon_id_col = id_col)
+
+  cell_err <- asgn |>
+    st_drop_geometry() |>
+    group_by(.data[[id_col]]) |>
+    summarise(mean_abs_error = mean(abs_error, na.rm = TRUE), .groups = "drop")
+
+  cells <- left_join(cells, cell_err, by = id_col)
+
+  p <- plot_tessellation_map(
+    tessellation_sf = cells,
+    boundary        = nc_boundary,
+    fill_col        = "mean_abs_error",
+    palette         = "magma",
+    tile_alpha      = 0.9,
+    outline_col     = "white",
+    outline_size    = 0.3,
+    boundary_col    = "grey20",
+    boundary_size   = 0.8,
+    legend_title    = "Mean |Residual|",
+    title           = sprintf("GWR Residuals — %s", info$label),
+    subtitle        = sprintf("Abs. residual aggregated to %d cells", nrow(cells))
+  )
+  print(p)
+  cat("\n\n")
+}
+```
+
+---
+
+## 7. Cross-Validation (5-Fold GWR)
+
+```{r cv-gwr}
+cv_results <- tryCatch({
+  cv_gwr(
+    data_sf        = points_sf,
+    response_var   = response_var,
+    predictor_vars = predictor_vars,
+    k              = 5,
+    adaptive       = TRUE
+  )
+}, error = function(e) {
+  message("CV skipped: ", conditionMessage(e))
+  NULL
+})
+```
+
+```{r cv-results, eval=!is.null(cv_results)}
+cat(sprintf("CV RMSE: %.3f  |  CV R²: %.3f  |  CV MAE: %.3f\n",
+            cv_results$summary$rmse,
+            cv_results$summary$r_squared,
+            cv_results$summary$mae))
+```
+
+---
+
+## Summary
+
+| Tessellation | Cells | Notes |
+|:---|---:|:---|
+| Voronoi | `r nrow(tess_voronoi$cells)` | Adapts to point density via k-means seeds |
+| Hex grid | `r nrow(tess_hex$cells)` | Uniform hexagons, good for regular sampling |
+| Square grid | `r nrow(tess_square$cells)` | Simplest regular grid |
+| Delaunay | `r if(!is.null(tess_tri)) nrow(tess_tri$cells) else "—"` | One triangle per point triplet, finest resolution |
+
+The choropleth maps show how each tessellation aggregates the response
+variable spatially across North Carolina. The GWR residual maps let you
+compare how each tessellation captures model error — hexes and squares give a
+uniform view, while Voronoi cells highlight where the observation network is
+dense or sparse.
+
+```{r session-info, echo=FALSE}
+sessionInfo()
+```
