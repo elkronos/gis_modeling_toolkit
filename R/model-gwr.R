@@ -96,10 +96,10 @@
 .extract_gwr_values <- function(gwr_obj, data_sf, formula, n,
                                 response_var = all.vars(formula)[1]) {
   na_vec <- rep(NA_real_, n)
-
+  
   sdf <- tryCatch(gwr_obj$SDF, error = function(e) NULL)
   if (is.null(sdf)) return(na_vec)
-
+  
   sdf_data <- tryCatch({
     if (inherits(sdf, "sf")) {
       sf::st_drop_geometry(sdf)
@@ -110,7 +110,7 @@
     }
   }, error = function(e) NULL)
   if (is.null(sdf_data) || nrow(sdf_data) != n) return(na_vec)
-
+  
   # Strategy 1: direct prediction/fitted column.
   # GWmodel::gwr.basic stores fitted values in "yhat";
   # gwr.predict may use "prediction" or the response name.
@@ -120,7 +120,7 @@
     vals <- suppressWarnings(as.numeric(sdf_data[[hit[1]]]))
     if (length(vals) == n && any(is.finite(vals))) return(vals)
   }
-
+  
   # Strategy 2: reconstruct from local coefficients × design matrix
   mm <- tryCatch(
     stats::model.matrix(formula, data = sf::st_drop_geometry(data_sf)),
@@ -142,7 +142,7 @@
       }
     }
   }
-
+  
   # Strategy 3: y − residual (works for in-sample / gwr.basic)
   resid_cols <- c("residual", "gwr.e", "resid")
   resid_hit <- names(sdf_data)[tolower(names(sdf_data)) %in% resid_cols]
@@ -152,13 +152,13 @@
     resid <- suppressWarnings(as.numeric(sdf_data[[resid_hit[1]]]))
     if (length(resid) == n && length(y_obs) == n) return(y_obs - resid)
   }
-
+  
   # Strategy 4: response variable placed in the SDF directly
   if (response_var %in% names(sdf_data)) {
     vals <- suppressWarnings(as.numeric(sdf_data[[response_var]]))
     if (length(vals) == n && any(is.finite(vals))) return(vals)
   }
-
+  
   .log_warn(".extract_gwr_values(): all extraction strategies failed.")
   na_vec
 }
@@ -185,7 +185,6 @@
 #'   \code{GWmodel::bw.gwr()}.
 #' @param kernel Kernel function type. One of "bisquare" (default),
 #'   "gaussian", "tricube", "boxcar", "exponential".
-#' @param hatmatrix Logical; compute hat matrix (needed for AICc). Default TRUE.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
 #'   \code{prep_model_data()} call because the caller has already projected,
 #'   coerced, and filtered the data.  Used by the CV internals to avoid a
@@ -219,7 +218,6 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                           bandwidth = NULL,
                           kernel = c("bisquare", "gaussian", "tricube",
                                      "boxcar", "exponential"),
-                          hatmatrix = TRUE,
                           .already_prepped = FALSE) {
   if (!inherits(data_sf, "sf"))
     stop("fit_gwr_model(): `data_sf` must be an sf object.")
@@ -231,11 +229,11 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
          call. = FALSE)
   kernel <- match.arg(kernel)
   kernel <- .validate_kernel(kernel)
-
+  
   # prep_model_data() handles: point coercion, CRS projection, NA/non-finite
   # row removal — no need to duplicate that logic here.
   # When called from CV internals the data is already prepped; skip the
-
+  
   # redundant pass to avoid re-projecting, re-coercing geometry, and
   # re-scanning for NAs on every fold.
   if (isTRUE(.already_prepped)) {
@@ -246,7 +244,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       predictor_vars = predictor_vars, pointize = "auto"
     )
   }
-
+  
   # Warn or error if response looks non-continuous.
   # Gaussian GWR assumes a continuous response; binary data should error.
   resp_vals <- sf::st_drop_geometry(dat)[[response_var]]
@@ -272,10 +270,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       )
     }
   }
-
+  
   n_obs <- nrow(dat)
   n_params <- length(predictor_vars) + 1L  # +1 for intercept
-
+  
   pred_df <- sf::st_drop_geometry(dat)[, predictor_vars, drop = FALSE]
   for (pv in predictor_vars) {
     if (is.numeric(pred_df[[pv]]) && stats::sd(pred_df[[pv]], na.rm = TRUE) < .Machine$double.eps * 100) {
@@ -304,7 +302,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       n_local_extreme <- 0L
       for (si in spot_idx) {
         dists <- sqrt((coords[, 1] - coords[si, 1])^2 +
-                      (coords[, 2] - coords[si, 2])^2)
+                        (coords[, 2] - coords[si, 2])^2)
         # Use the same neighbour count that will be used for fitting;
         # for adaptive, take bw-nearest; for fixed, take points within bw.
         if (adaptive) {
@@ -333,34 +331,34 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       }
     }
   }
-
+  
   if (n_obs < n_params * 3L) {
     .log_warn("fit_gwr_model(): only %d observations for %d parameters; local regressions will be underdetermined.",
               n_obs, n_params)
   }
-
+  
   # NOTE: dat is already projected by prep_model_data(), so no
   # additional .is_longlat() / ensure_projected() call is needed.
-
+  
   fml <- stats::reformulate(termlabels = predictor_vars, response = response_var)
-
+  
   needed_cols <- unique(c(response_var, predictor_vars))
   sp_dat <- .to_sp(dat, needed_cols)
-
+  
   # --- Bandwidth selection ---
   bandwidth_is_fallback <- FALSE
   if (is.null(bandwidth)) {
     bw <- tryCatch(
       suppressWarnings(
         GWmodel::bw.gwr(fml, data = sp_dat, approach = "AICc",
-                         kernel = kernel, adaptive = adaptive)
+                        kernel = kernel, adaptive = adaptive)
       ),
       error = function(e) {
         .log_warn("fit_gwr_model(): bw.gwr() failed: %s", conditionMessage(e))
         NA_real_
       }
     )
-
+    
     if (!is.finite(bw) || is.na(bw) || bw <= 0) {
       bw <- .fallback_bandwidth(sp_dat, adaptive)
       bandwidth_is_fallback <- TRUE
@@ -375,7 +373,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   } else {
     bw <- as.numeric(bandwidth)
   }
-
+  
   # Clamp bandwidth to safe range
   if (adaptive) {
     bw <- as.integer(round(bw))
@@ -388,24 +386,23 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     }
     if (bw > max_bw) bw <- max_bw
   }
-
+  
   # --- Fit GWR ---
   fit <- tryCatch(
     GWmodel::gwr.basic(formula = fml, data = sp_dat, bw = bw,
-                        kernel = kernel, adaptive = adaptive,
-                        hatmatrix = hatmatrix),
+                       kernel = kernel, adaptive = adaptive),
     error = function(e) {
       stop(sprintf("fit_gwr_model(): GWR fit failed: %s", conditionMessage(e)),
            call. = FALSE)
     }
   )
-
+  
   # AICc extraction
   AICc_val <- NA_real_
   if (!is.null(fit$GW.diagnostic) && !is.null(fit$GW.diagnostic$AICc)) {
     AICc_val <- suppressWarnings(as.numeric(fit$GW.diagnostic$AICc))
   }
-
+  
   new_spatial_fit(
     subclass       = "gwr_fit",
     engine         = fit,
