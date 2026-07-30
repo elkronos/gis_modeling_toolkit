@@ -1,0 +1,50 @@
+Package: spatialkit
+Title: Spatial Tessellation, Modeling, and Cross-Validation Toolkit
+Version: 1.0.0
+Authors@R:
+    person("Justin", "Chase", email = "jchase.msu@gmail.com",
+           role = c("aut", "cre", "cph"))
+Description: A modular toolkit for spatial analysis workflows including
+    coordinate reference system management, Voronoi/Delaunay/grid
+    tessellation, feature-to-polygon assignment, geographically weighted
+    regression (GWR, via 'GWmodel'), Bayesian spatial Gaussian process
+    regression (via 'brms'), spatial cross-validation with block and
+    buffered strategies, and model comparison. Provides an S3 class system
+    ('spatial_fit') with consistent predict, fitted, and residuals methods
+    across model backends.
+License: MIT + file LICENSE
+URL: https://github.com/elkronos/gis_modeling_toolkit
+BugReports: https://github.com/elkronos/gis_modeling_toolkit/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.1.0)
+Imports:
+    sf (>= 1.0),
+    dplyr (>= 1.0),
+    logger,
+    digest,
+    stats,
+    methods,
+    utils,
+    parallel
+Suggests:
+    sp,
+    GWmodel,
+    brms,
+    cmdstanr,
+    loo,
+    tibble,
+    geometry,
+    gstat,
+    ggplot2,
+    patchwork,
+    FNN,
+    Matrix,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Additional_repositories: https://stan-dev.r-universe.dev
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0
