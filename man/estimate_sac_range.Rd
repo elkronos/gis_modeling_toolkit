@@ -10,6 +10,7 @@ estimate_sac_range(
   predictor_vars = NULL,
   n_max = 5000L,
   cutoff = 0.5,
+  range_frac = 1,
   seed = NULL
 )
 }
@@ -29,11 +30,29 @@ Variogram estimation is O(n²) so this keeps runtime bounded.}
 \item{cutoff}{Fraction of the maximum inter-point distance to use as
 the variogram lag cutoff.  Default 0.5.}
 
+\item{range_frac}{Positive numeric.  A fitted range exceeding
+\code{range_frac * cutoff * max_dist} -- that is, beyond the longest lag
+the empirical variogram was actually fitted over -- is treated as
+unidentified and \code{NA_real_} is returned.
+\code{gstat::fit.variogram()} yields a finite number even when the
+variogram never reaches a sill, and such a value is extrapolation past the
+observed lags rather than a long autocorrelation range.  Passing it to
+\code{make_folds(auto_range = TRUE)} would collapse the block grid to a
+single block.  Default 1.0; raise it to accept ranges extrapolated beyond
+the fitted lags.}
+
 \item{seed}{Optional RNG seed for subsampling reproducibility.}
 }
 \value{
 A single positive numeric value (the effective range in projected
-coordinate units), or \code{NA_real_} if estimation fails.
+coordinate units) of class \code{sac_range}, or \code{NA_real_} if
+estimation fails or the fitted range is unidentified.  The returned value
+behaves as an ordinary number; the fit it came from is attached as
+attributes \code{directional} (the 0° and 90° ranges),
+\code{anisotropy} (their ratio), \code{max_dist}, \code{cutoff_dist},
+\code{variogram} (the
+empirical variogram) and \code{variogram_model} (the fitted \code{gstat}
+model), so the fit can be inspected rather than trusted.
 }
 \description{
 Fits exponential (or spherical) variogram models and returns the
@@ -73,9 +92,13 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 }
 \seealso{
 Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=make_folds]{make_folds()}}
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

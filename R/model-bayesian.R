@@ -1,3 +1,91 @@
+#' Calibrate an inverse-gamma prior for a GP length-scale
+#'
+#' Returns shape and rate for an inverse-gamma placing \code{tail} probability
+#' below \code{lower} and \code{tail} above \code{upper}.
+#'
+#' A half-normal \code{normal(0, sd)} -- the previous choice -- puts its mode at
+#' zero, so most of its mass sits at length-scales shorter than the data can
+#' identify.  That is precisely where the Hilbert-space GP degenerates: as the
+#' length-scale shrinks below what the basis resolves, the marginal-variance /
+#' length-scale posterior develops a funnel and the sampler divergences.  An
+#' inverse-gamma with both tails pinned is the standard remedy (Betancourt,
+#' "Robust Gaussian Process Modeling"), and the bounds needed to calibrate it
+#' are already computed by \code{gp_lengthscale_bounds()}.
+#'
+#' Solved numerically: if \eqn{X \sim InvGamma(a, b)} then
+#' \eqn{1/X \sim Gamma(a, rate = b)}, so both tail conditions can be written
+#' against \code{pgamma()} and minimised on the log scale.
+#'
+#' @param lower,upper Positive numerics, \code{lower < upper}.
+#' @param tail Target probability in each tail. Default 0.01.
+#' @return A list with \code{shape}, \code{scale} and \code{ok}.  These map
+#'   directly onto Stan's \code{inv_gamma(shape, scale)}.  \code{ok} is
+#'   \code{FALSE} when the solve did not converge to the requested tails, in
+#'   which case the caller should fall back.
+#' @keywords internal
+#' @noRd
+.lscale_invgamma <- function(lower, upper, tail = 0.01) {
+  bad <- list(shape = NA_real_, scale = NA_real_, ok = FALSE)
+  if (!is.finite(lower) || !is.finite(upper) || lower <= 0 || upper <= lower)
+    return(bad)
+
+  # P(X < lower) = 1 - pgamma(1/lower, a, rate = b)
+  # P(X > upper) =     pgamma(1/upper, a, rate = b)
+  obj <- function(par) {
+    a <- exp(par[[1]]); b <- exp(par[[2]])
+    lo <- 1 - stats::pgamma(1 / lower, shape = a, rate = b)
+    hi <- stats::pgamma(1 / upper, shape = a, rate = b)
+    (lo - tail)^2 + (hi - tail)^2
+  }
+
+  # Start from an inverse-gamma whose mode is the geometric mean of the bounds:
+  # mode = b / (a + 1), so with a = 3, b = 4 * sqrt(lower * upper).
+  init <- c(log(3), log(4 * sqrt(lower * upper)))
+  fit  <- tryCatch(
+    stats::optim(init, obj, method = "Nelder-Mead",
+                 control = list(maxit = 2000, reltol = 1e-12)),
+    error = function(e) NULL
+  )
+  if (is.null(fit)) return(bad)
+
+  a <- exp(fit$par[[1]]); b <- exp(fit$par[[2]])
+  if (!is.finite(a) || !is.finite(b) || a <= 0 || b <= 0) return(bad)
+
+  lo <- 1 - stats::pgamma(1 / lower, shape = a, rate = b)
+  hi <- stats::pgamma(1 / upper, shape = a, rate = b)
+  # Accept only if both tails landed near target; a sloppy fit would be a
+  # worse prior than the half-normal it replaces.
+  ok <- is.finite(lo) && is.finite(hi) &&
+    abs(lo - tail) < 0.5 * tail && abs(hi - tail) < 0.5 * tail
+
+  list(shape = a, scale = b, ok = ok)
+}
+
+
+#' Build the brms gp() term for the spatial GP
+#'
+#' Kept separate from \code{fit_bayesian_spatial_model()} so the formula text
+#' can be tested without compiling a Stan model.
+#'
+#' \code{scale = FALSE} is deliberate and load-bearing: \code{brms::gp()}
+#' otherwise renormalises its covariates so the maximum pairwise distance is 1
+#' and reports \code{lscale} in that space, while this package standardises the
+#' coordinates itself and derives the length-scale prior, \code{c} and the
+#' basis-adequacy threshold in those units.  Two normalisations would put every
+#' length-scale quantity in the wrong space.
+#'
+#' @param gp_k Basis functions per dimension.
+#' @param gp_c Boundary factor.
+#' @param gp_iso Logical; single shared length-scale (TRUE) or one per axis.
+#' @return A length-one character string.
+#' @keywords internal
+#' @noRd
+.gp_formula_term <- function(gp_k, gp_c, gp_iso = FALSE) {
+  sprintf("gp(..x, ..y, k = %s, c = %s, scale = FALSE, iso = %s)",
+          gp_k, gp_c, if (isTRUE(gp_iso)) "TRUE" else "FALSE")
+}
+
+
 #' Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 #'
 #' @param data_sf An sf object with response, predictors, and geometries.
@@ -6,9 +94,22 @@
 #' @param family A model family accepted by \code{brms::brm()} (a stats
 #'   family function or a brms family object). Default NULL (resolved to
 #'   \code{stats::gaussian()}).
-#' @param gp_k Positive integer for GP rank, or NULL (default) for automatic
-#'   selection based on dataset size: min(n/3, max(15, sqrt(n))).
-#' @param gp_c Positive numeric for GP scale. Default 1.5.
+#' @param gp_k Positive integer giving the number of GP basis functions
+#'   \emph{per dimension}, or NULL (default) to derive it from the
+#'   length-scale/domain ratio.  Note that the fitted model carries
+#'   \code{gp_k^2} basis functions, not \code{gp_k} (see Details).
+#' @param gp_iso Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
+#'   (the default) fits a separate length-scale per coordinate axis, letting the
+#'   model learn any directional structure from the data.  \code{TRUE} fits a
+#'   single shared length-scale, which -- because the coordinates are
+#'   standardised per axis beforehand -- makes the kernel anisotropic in the
+#'   original CRS by whatever ratio \code{sd(X)/sd(Y)} happens to take.  See
+#'   Details.
+#' @param gp_c Positive numeric boundary factor for the approximate GP, or
+#'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
+#'   wide enough to contain the longest plausible correlation range; a value
+#'   that is too small truncates the domain and degrades the approximation for
+#'   smooth, long-range surfaces.
 #' @param prior Optional brms prior specification. When NULL and
 #'   \code{standardize_predictors = TRUE}, weakly informative
 #'   \code{normal(0, 5)} priors are set on regression coefficients.
@@ -37,32 +138,60 @@
 #'   avoid a redundant second pass on every fold.  End users should leave
 #'   this at the default \code{FALSE}.
 #' @details
+#' \strong{GP basis count and boundary factor.}
+#' \code{brms::gp()} builds a full tensor grid over its covariates, so a term
+#' \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions -- the
+#' \code{gp_k} argument is the count \emph{per dimension}, not the total rank.
+#' Both \code{gp_k} and \code{gp_c} are therefore chosen from the ratio of the
+#' estimated length-scale to the domain half-range, following
+#' Riutort-Mayol et al. (2023), rather than from the number of observations:
+#' \code{gp_c} is set large enough to contain the upper length-scale bound,
+#' and \code{gp_k} large enough to resolve the lower one.  The derived value is
+#' typically 21-25 per dimension and is largely independent of \code{n}.
+#'
+#' The GP term is built with \code{scale = FALSE}.  \code{brms::gp()} otherwise
+#' rescales its covariates so the maximum Euclidean distance between two points
+#' is 1, and reports \code{lscale} in that space; since this function already
+#' standardises the coordinates, and the length-scale prior, \code{gp_c} and the
+#' adequacy check below are all expressed in those standardised units, a second
+#' normalisation would leave every length-scale quantity in the wrong units.
+#'
+#' After fitting, the posterior length-scale is compared against the smallest
+#' scale the chosen basis can resolve
+#' (\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); a
+#' warning is issued when more than 10\% of the posterior mass falls below it,
+#' which is the signal that \code{gp_k} should be raised.
+#'
 #' \strong{Coordinate scaling and anisotropy.}
-#' Before fitting the GP, X and Y coordinates are each centered and divided by
-#' their own standard deviation (lines 110–111).
-#' Because the two axes are scaled independently, an isotropic
-#' squared-exponential kernel in the \emph{scaled} space corresponds to an
-#' \strong{anisotropic} kernel in the original CRS: the effective length-scale
-#' in the X direction (in CRS units) differs from the Y direction whenever
-#' \code{sd(X) != sd(Y)}.
+#' Before fitting the GP, X and Y coordinates are each centred and divided by
+#' their own standard deviation.  This is a conditioning step: easting and
+#' northing frequently span very different ranges in a projected CRS, and
+#' handing Stan raw metres samples poorly.
 #'
-#' This per-axis standardization is deliberate — it stabilises the GP
-#' numerically when the coordinate extents differ dramatically (common in
-#' projected CRSs where easting and northing span very different ranges) — but
-#' users who expect the GP to be isotropic in geographic distance should be
-#' aware of this behaviour.
+#' Because the axes are scaled independently, a \emph{single} shared
+#' length-scale in the scaled space corresponds to an anisotropic kernel in the
+#' original CRS, stretched by whatever ratio \code{sd(X)/sd(Y)} happens to
+#' take.  That ratio is a property of how the sampling locations are laid out,
+#' not of the process being modelled, so it is not a defensible source of
+#' anisotropy.
 #'
-#' If true isotropy in the original CRS is desired, one could use a single
-#' scaling factor such as \code{max(sd(X), sd(Y))} for both axes.
-#' The stored \code{$info$coord_scaling} list includes a
-#' \code{scaling_type} element (\code{"anisotropic"}) so downstream code can
-#' detect which strategy was used.
+#' \code{gp_iso = FALSE} (the default) therefore fits one length-scale per
+#' axis, letting the model estimate directional structure from the data instead
+#' of inheriting it from the standardisation.  Set \code{gp_iso = TRUE} to
+#' recover the previous single-length-scale behaviour.
+#'
+#' Note that \code{gp_iso} does not affect cost: \code{brms::gp()} builds a
+#' tensor grid either way, so the model carries \code{gp_k^2} basis functions
+#' regardless.  The stored \code{$info$coord_scaling} list records the scaling
+#' strategy, and \code{$info$gp_iso} records which kernel was used.
 #'
 #' @return A \code{bayesian_fit} object (inherits from \code{spatial_fit}).
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 #'   Model-specific metadata lives in \code{$info} (coord_scaling,
-#'   predictor_scaling, gp_k, loo, looic, convergence_ok,
+#'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
+#'   gp_lscale_prior, loo, looic,
+#'   convergence_ok,
 #'   convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 #' @family model fitting
 #' @examples
@@ -83,13 +212,20 @@
 #'   head(predict(fit, newdata = dat))
 #' }
 #' }
+#' @references
+#' Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. and
+#' Vehtari, A. (2023). Practical Hilbert space approximate Bayesian
+#' Gaussian processes for probabilistic programming.
+#' \emph{Statistics and Computing} \strong{33}, 1.
+#' \doi{10.1007/s11222-022-10167-2}
 #' @export
 fit_bayesian_spatial_model <- function(
     data_sf, response_var, predictor_vars,
     family      = NULL,
     
     gp_k        = NULL,
-    gp_c        = 1.5,
+    gp_c        = NULL,
+    gp_iso      = FALSE,
     prior       = NULL,
     chains      = 4,
     iter        = 2000,
@@ -148,14 +284,6 @@ fit_bayesian_spatial_model <- function(
   # NOTE: prep_model_data() already guarantees a projected CRS, so no
   # additional .is_longlat() / ensure_projected() call is needed here.
   
-  if (is.null(gp_k)) {
-    n_dat <- nrow(dat_sf)
-    gp_k <- as.integer(min(n_dat / 3, max(15L, floor(sqrt(n_dat)))))
-    gp_k <- max(5L, gp_k)  # absolute floor of 5
-    .log_info("fit_bayesian_spatial_model(): auto-selected gp_k = %d for n = %d.", gp_k, n_dat)
-  }
-  gp_k <- as.integer(gp_k)
-
   coords <- sf::st_coordinates(dat_sf)
   if (!all(c("X", "Y") %in% colnames(coords))) colnames(coords)[1:2] <- c("X", "Y")
   
@@ -193,6 +321,55 @@ fit_bayesian_spatial_model <- function(
     ls_bounds[["lower"]], ls_bounds[["upper"]], ls_prior_sd
   )
 
+  # ---- GP basis count and boundary factor ----
+  # Both are derived from the length-scale/domain ratio (Riutort-Mayol et al.
+  # 2023), NOT from n.  brms carries gp_k^2 basis functions here, so a rule
+  # that scaled gp_k with sqrt(n) made the approximation cost grow as n while
+  # adding no resolution the data supported.  NULL means "derive"; an explicit
+  # value passes through untouched, which is the contract the CV internals
+  # rely on when a user supplies gp_k per fold.
+  gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds)
+  gp_k_auto <- is.null(gp_k)
+  if (gp_k_auto)      gp_k <- gp_spec$k
+  if (is.null(gp_c))  gp_c <- gp_spec$c
+
+  # Validate before the arithmetic below divides by gp_k.  Previously an
+  # invalid user value only surfaced as a brms formula error; now it would also
+  # produce a nonsensical resolvable-length-scale and a spurious diagnostic.
+  if (!is.numeric(gp_k) || length(gp_k) != 1L || !is.finite(gp_k) || gp_k < 2)
+    stop("fit_bayesian_spatial_model(): `gp_k` must be a single finite number >= 2.",
+         call. = FALSE)
+  if (!is.numeric(gp_c) || length(gp_c) != 1L || !is.finite(gp_c) || gp_c <= 1)
+    stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
+         call. = FALSE)
+  gp_k <- as.integer(gp_k)
+  if (gp_c < 1.2)
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): gp_c = %.2f is below the minimum of ",
+             "1.2 recommended for the squared-exponential kernel; the GP ",
+             "boundary may truncate the domain."),
+      gp_c
+    )
+
+  # Smallest length-scale this (k, c) pair can resolve -- the inversion of
+  # m >= 1.75 * c / (ell/S).  Reported here and re-checked against the
+  # posterior after fitting.
+  gp_ell_min <- 1.75 * gp_c * gp_spec$S / gp_k
+  .log_info(
+    paste0("fit_bayesian_spatial_model(): GP basis k = %d per dimension, ",
+           "c = %.2f; TOTAL basis functions = %d (n = %d). ",
+           "Smallest resolvable length-scale = %.4f on scaled coords."),
+    gp_k, gp_c, gp_k^2, nrow(dat_sf), gp_ell_min
+  )
+  if (isTRUE(gp_spec$capped) && isTRUE(gp_k_auto))
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): derived GP basis count was capped ",
+             "at %d. The approximation may under-resolve short-range structure; ",
+             "pass a larger gp_k explicitly if short-range spatial variation ",
+             "matters."),
+      gp_k^2
+    )
+
   # Optional predictor standardization — store transform params so
   # predictions can be computed correctly on new data.
   predictor_scaling <- NULL
@@ -217,7 +394,18 @@ fit_bayesian_spatial_model <- function(
     base_fml  <- stats::reformulate(termlabels = predictor_vars)
     rhs_terms <- as.character(base_fml)[2L]
   }
-  gp_term <- sprintf("gp(..x, ..y, k = %s, c = %s)", gp_k, gp_c)
+  # scale = FALSE is essential, not cosmetic.  brms::gp() defaults to
+  # scale = TRUE, which rescales the covariates so the maximum Euclidean
+  # distance between any two points is 1 -- and the posterior `lscale` is then
+  # reported in THAT space.  This function has already standardised the
+  # coordinates itself (lines above), and gp_lengthscale_bounds(), gp_c and
+  # gp_ell_min are all derived in those standardised units.  Leaving brms to
+  # apply a second, different normalisation puts the length-scale prior and the
+  # basis-adequacy check in units the model does not use -- roughly a factor of
+  # the max pairwise distance (~4.9 for standardised 2D coordinates), which
+  # makes the prior far too diffuse and the adequacy check fire on every fit.
+  # With scale = FALSE there is exactly one coordinate scaling, ours.
+  gp_term <- .gp_formula_term(gp_k, gp_c, gp_iso)
   fml <- stats::as.formula(sprintf("%s ~ %s + %s", response_var, rhs_terms, gp_term))
 
   # Build priors in two independent steps:
@@ -244,15 +432,35 @@ fit_bayesian_spatial_model <- function(
     inherits(prior, "brmsprior") &&
     any(prior$class == "lscale")
 
+  lscale_prior_spec <- NULL
   if (!user_has_lscale) {
-    ls_prior <- brms::set_prior(
-      sprintf("normal(0, %s)", ls_prior_sd), class = "lscale"
-    )
+    # Prefer an inverse-gamma with both tails pinned to the estimated bounds.
+    # A half-normal puts its mode at zero, so most of its mass sits at
+    # length-scales shorter than the basis can resolve -- exactly where the
+    # Hilbert-space GP funnels and the sampler divergences.
+    ig <- .lscale_invgamma(ls_bounds[["lower"]], ls_bounds[["upper"]])
+
+    if (isTRUE(ig$ok)) {
+      lscale_prior_spec <- sprintf("inv_gamma(%.6f, %.6f)", ig$shape, ig$scale)
+      .log_info(
+        paste0("fit_bayesian_spatial_model(): GP length-scale prior ",
+               "%s (1%% tails at %.4f and %.4f on scaled coords)."),
+        lscale_prior_spec, ls_bounds[["lower"]], ls_bounds[["upper"]]
+      )
+    } else {
+      # Bounds too wide (or too degenerate) to pin both tails; a badly fitted
+      # inverse-gamma would be worse than the half-normal it replaces.
+      lscale_prior_spec <- sprintf("normal(0, %s)", ls_prior_sd)
+      .log_info(
+        paste0("fit_bayesian_spatial_model(): could not calibrate an ",
+               "inverse-gamma length-scale prior over [%.4f, %.4f]; falling ",
+               "back to %s."),
+        ls_bounds[["lower"]], ls_bounds[["upper"]], lscale_prior_spec
+      )
+    }
+
+    ls_prior <- brms::set_prior(lscale_prior_spec, class = "lscale")
     prior <- if (is.null(prior)) ls_prior else prior + ls_prior
-    .log_info(
-      "fit_bayesian_spatial_model(): appending data-informed GP length-scale prior normal(0, %.4f).",
-      ls_prior_sd
-    )
   } else {
     .log_info(
       "fit_bayesian_spatial_model(): user-supplied prior already includes lscale class; skipping automatic GP length-scale prior."
@@ -327,6 +535,34 @@ fit_bayesian_spatial_model <- function(
         )
       }
     }
+
+    # ---- GP basis adequacy ----
+    # gp_k is derived from a PRIOR length-scale bound computed from inter-point
+    # spacing.  If the posterior length-scale lands below what (gp_k, gp_c) can
+    # resolve, the Hilbert-space approximation is inadequate and nothing else
+    # here would say so.  This is the diagnostic Riutort-Mayol et al. (2023)
+    # recommend, and it is what makes a smaller default gp_k safe rather than
+    # merely cheaper.
+    #
+    # brms names GP parameters lscale(gp...) / sdgp(gp...), embedding the
+    # covariate names, so match on the prefix rather than a literal term name.
+    # The tryCatch keeps a future brms naming change from erroring the fit.
+    ls_draws <- tryCatch(
+      as.matrix(fit, variable = "^lscale", regex = TRUE),
+      error = function(e) NULL
+    )
+    if (!is.null(ls_draws) && length(ls_draws) > 0L) {
+      frac_below <- mean(as.numeric(ls_draws) < gp_ell_min, na.rm = TRUE)
+      convergence_diagnostics$gp_lscale_below_resolution <- frac_below
+      if (is.finite(frac_below) && frac_below > 0.10)
+        .log_warn(
+          paste0("fit_bayesian_spatial_model(): %.0f%% of posterior ",
+                 "length-scale draws fall below the smallest scale this basis ",
+                 "can resolve (%.4f). Consider raising gp_k (currently %d, ",
+                 "%d total basis functions)."),
+          100 * frac_below, gp_ell_min, gp_k, gp_k^2
+        )
+    }
   }
 
   loo_obj <- NULL; looic <- NA_real_
@@ -360,6 +596,11 @@ fit_bayesian_spatial_model <- function(
       coords                   = c("..x", "..y"),
       coord_scaling            = coord_scaling,
       gp_k                     = gp_k,
+      gp_c                     = gp_c,
+      gp_iso                   = gp_iso,
+      gp_lscale_prior          = lscale_prior_spec,
+      gp_n_basis               = gp_k^2,
+      gp_ell_min               = gp_ell_min,
       gp_lengthscale_bounds    = ls_bounds,
       convergence_ok           = convergence_ok,
       convergence_diagnostics  = convergence_diagnostics,

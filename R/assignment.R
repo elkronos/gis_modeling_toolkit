@@ -111,6 +111,112 @@ assign_features_to_polygons <- function(
 }
 
 
+#' Correlation implied by a fitted gstat variogram model
+#'
+#' Converts a fitted variogram to a correlation function of distance, giving
+#' the correlation between two \strong{distinct} observations a distance
+#' \code{h} apart: \code{partial_sill * f(h) / (nugget + partial_sill)}.
+#'
+#' There is deliberately no special case at \code{h = 0}.  The nugget captures
+#' measurement error and variation below the sampling resolution, so two
+#' distinct observations each carry independent nugget noise and are less than
+#' perfectly correlated even when they coincide.  Self-correlation of 1 belongs
+#' on the diagonal of the correlation matrix and is imposed by the caller.
+#'
+#' @param vgm_model A fitted \code{gstat} variogram model (a data frame with
+#'   \code{model}, \code{psill} and \code{range} columns).
+#' @return A function of distance returning correlation, or \code{NULL} if the
+#'   model cannot be interpreted.
+#' @keywords internal
+#' @noRd
+.vgm_correlation_fn <- function(vgm_model) {
+  if (is.null(vgm_model) || !is.data.frame(vgm_model)) return(NULL)
+  if (!all(c("model", "psill", "range") %in% names(vgm_model))) return(NULL)
+
+  is_nug <- as.character(vgm_model$model) == "Nug"
+  nugget <- sum(vgm_model$psill[is_nug], na.rm = TRUE)
+  struct <- vgm_model[!is_nug, , drop = FALSE]
+  if (nrow(struct) == 0L) return(NULL)
+
+  psill <- sum(struct$psill, na.rm = TRUE)
+  total <- nugget + psill
+  if (!is.finite(total) || total <= 0 || !is.finite(psill) || psill <= 0)
+    return(NULL)
+
+  rng  <- struct$range[which.max(struct$psill)]
+  type <- as.character(struct$model[which.max(struct$psill)])
+  if (!is.finite(rng) || rng <= 0) return(NULL)
+
+  ratio <- psill / total
+  function(h) {
+    f <- switch(
+      type,
+      Exp = exp(-h / rng),
+      Sph = ifelse(h >= rng, 0, 1 - 1.5 * (h / rng) + 0.5 * (h / rng)^3),
+      Gau = exp(-(h / rng)^2),
+      exp(-h / rng)                     # sensible default for other families
+    )
+    # No special case at h = 0: this is the correlation between two DISTINCT
+    # observations, which the nugget discounts even when they coincide.  An
+    # observation with itself correlates at 1, and the caller imposes that on
+    # the diagonal.
+    pmin(pmax(ratio * f, 0), 1)
+  }
+}
+
+
+#' Per-cell design effect from a fitted variogram
+#'
+#' For \code{n} observations in a cell with correlation matrix \code{R}, the
+#' effective sample size of the mean is \code{n^2 / sum(R)}, so the design
+#' effect is \code{sum(R) / n}.  This generalises Kish's
+#' \code{1 + (n - 1) * rho}, which is the special case of a constant
+#' off-diagonal correlation: substituting \code{R = I + rho(J - I)} gives
+#' \code{sum(R) / n = 1 + (n - 1) * rho} exactly.  Using the variogram instead
+#' lets correlation decay with distance, which is the whole point of having
+#' fitted one -- Kish assumes every pair in a cell is equally correlated
+#' regardless of how far apart they are, and that assumption degrades as cells
+#' get larger.
+#'
+#' @param coords Numeric matrix of coordinates.
+#' @param cell_id Vector of cell identifiers, same length as \code{nrow(coords)}.
+#' @param cor_fn Correlation function from \code{.vgm_correlation_fn()}.
+#' @param max_n Cells larger than this are subsampled before forming the
+#'   \code{n x n} correlation matrix.  Default 500.
+#' @param seed RNG seed for that subsampling.
+#' @return Named numeric vector of design effects, one per cell.
+#' @keywords internal
+#' @noRd
+.cell_deff_variogram <- function(coords, cell_id, cor_fn, max_n = 500L,
+                                 seed = 42L) {
+  ids <- unique(cell_id)
+  out <- stats::setNames(rep(NA_real_, length(ids)), as.character(ids))
+  if (is.null(cor_fn)) return(out)
+
+  cleanup <- .with_seed(seed)
+  on.exit(cleanup(), add = TRUE)
+
+  for (id in ids) {
+    idx <- which(cell_id == id)
+    n_i <- length(idx)
+    if (n_i <= 1L) { out[[as.character(id)]] <- 1; next }
+    if (n_i > max_n) idx <- sample(idx, max_n)
+
+    d <- as.matrix(stats::dist(coords[idx, , drop = FALSE]))
+    # Rebuild explicitly rather than relying on cor_fn() to preserve `dim`.
+    # A correlation function written as, say, rep(1, length(h)) returns a bare
+    # vector, and diag()<- would then fail.
+    R <- matrix(as.numeric(cor_fn(as.numeric(d))), nrow = nrow(d), ncol = ncol(d))
+    diag(R) <- 1
+    n_used <- nrow(R)
+    # deff = sum(R) / n; bounded below by 1 (independence) and above by n
+    # (complete redundancy).
+    out[[as.character(id)]] <- min(max(sum(R) / n_used, 1), n_used)
+  }
+  out
+}
+
+
 #' Summarize features by polygon/cell ID
 #'
 #' Aggregates an sf point dataset into one row per cell. By default computes
@@ -164,6 +270,15 @@ assign_features_to_polygons <- function(
 #'     \item{`1` (default)}{No adjustment; classic IID standard error.
 #'       Equivalent to previous behaviour but now emits a message (when
 #'       `quiet = FALSE`) reminding that SEs assume independence.}
+#'     \item{`"variogram"`}{Compute a per-cell design effect from a fitted
+#'       variogram: for `n` points in a cell with correlation matrix `R`, the
+#'       effective sample size of the mean is `n^2 / sum(R)`, so
+#'       `deff = sum(R) / n`. This generalises Kish -- substituting a constant
+#'       off-diagonal correlation recovers `1 + (n - 1) * rho` exactly -- but
+#'       lets correlation decay with distance, which matters increasingly as
+#'       cells get larger and Kish's single-`rho` assumption degrades. Supply
+#'       the fit via `sac`, or it is estimated when `response_var` is given and
+#'       'gstat' is available.}
 #'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
 #'       (ICCs) from the grouped data using a one-way random-effects ANOVA
 #'       decomposition — one ICC for the response variable and a separate
@@ -179,6 +294,12 @@ assign_features_to_polygons <- function(
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell. Use when you have an external estimate of the design effect.}
 #'   }
+#' @param sac Optional `sac_range` object from [estimate_sac_range()], used
+#'   when `deff = "variogram"`. Supplying one avoids re-fitting the variogram
+#'   and lets you inspect the fit the design effect is based on.
+#' @param deff_max_n Cells with more than this many points are subsampled
+#'   before forming the `n x n` correlation matrix used by
+#'   `deff = "variogram"`. Default 500.
 #' @param quiet Logical; suppress messages. Default TRUE.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell summaries
 #'   including `n`, `cell_weight`, and `..sd_*` / `..se_*` columns.
@@ -209,6 +330,8 @@ summarize_by_cell <- function(assigned_points_sf,
                               agg_funs       = list(mean = function(x) mean(x, na.rm = TRUE)),
                               cells_sf       = NULL,
                               deff           = 1,
+                              sac            = NULL,
+                              deff_max_n     = 500L,
                               quiet          = TRUE) {
   .msg <- function(...) if (!quiet) message(...)
   df <- sf::st_drop_geometry(assigned_points_sf)
@@ -234,9 +357,15 @@ summarize_by_cell <- function(assigned_points_sf,
 
   # --- validate / resolve design effect ---
   use_kish <- identical(deff, "kish")
-  if (!use_kish) {
+  use_vgm  <- identical(deff, "variogram")
+  if (use_vgm) {
+    # The SE closures below do arithmetic on `deff`; the per-cell variogram
+    # values are applied after summarising, so neutralise it here.
+    deff <- 1
+  }
+  if (!use_kish && !use_vgm) {
     if (!is.numeric(deff) || length(deff) != 1L || deff < 1) {
-      .log_warn("summarize_by_cell(): deff must be >= 1 or \"kish\"; falling back to 1.")
+      .log_warn("summarize_by_cell(): deff must be >= 1, \"kish\" or \"variogram\"; falling back to 1.")
       deff <- 1
     }
   }
@@ -389,6 +518,41 @@ summarize_by_cell <- function(assigned_points_sf,
     fns
   }
 
+  # --- per-cell design effect from the variogram ------------------------------
+  # Computed separately from the aggregation because the across() closures see
+  # only a column of values, never the geometry.  SE scales as sqrt(deff), so
+  # the SEs are formed with deff = 1 below and rescaled per cell afterwards.
+  vgm_deff <- NULL
+  if (use_vgm) {
+    vgm_model <- attr(sac, "variogram_model")
+    if (is.null(vgm_model)) {
+      if (!is.null(response_var) && requireNamespace("gstat", quietly = TRUE)) {
+        .msg("summarize_by_cell(): no fitted variogram supplied; estimating one.")
+        est <- try(estimate_sac_range(assigned_points_sf, response_var,
+                                      predictor_vars = predictor_vars),
+                   silent = TRUE)
+        if (!inherits(est, "try-error")) vgm_model <- attr(est, "variogram_model")
+      }
+    }
+    cor_fn <- .vgm_correlation_fn(vgm_model)
+    if (is.null(cor_fn)) {
+      .log_warn(paste0("summarize_by_cell(): deff = \"variogram\" requires a ",
+                       "fitted variogram model; none was available (pass one ",
+                       "via `sac = estimate_sac_range(...)`). Falling back to ",
+                       "deff = 1."))
+      use_vgm <- FALSE
+      deff <- 1
+    } else {
+      coords_mat <- sf::st_coordinates(assigned_points_sf)[, 1:2, drop = FALSE]
+      vgm_deff <- .cell_deff_variogram(coords_mat, df[[id_col]], cor_fn,
+                                       max_n = deff_max_n)
+      .msg(sprintf(
+        "summarize_by_cell(): variogram deff across cells: median %.3f, max %.3f",
+        stats::median(vgm_deff, na.rm = TRUE), max(vgm_deff, na.rm = TRUE)
+      ))
+    }
+  }
+
   # --- single grouped summarise for all columns ---
   grouped <- df |> dplyr::group_by(.data[[id_col]])
 
@@ -444,6 +608,22 @@ summarize_by_cell <- function(assigned_points_sf,
         deff     = deff_per_cell
       )
     }
+  } else if (use_vgm && !is.null(vgm_deff)) {
+    # Match each cell's deff by id, then rescale.  The ..se_ closures ran with
+    # deff = 1, and SE scales as sqrt(deff), so multiplying by sqrt(deff_i)
+    # yields exactly s / sqrt(n / deff_i).
+    d_i <- unname(vgm_deff[as.character(out[[id_col]])])
+    d_i[!is.finite(d_i) | d_i < 1] <- 1
+
+    se_cols <- grep("^\\.\\.se_", names(out), value = TRUE)
+    for (cn in se_cols) out[[cn]] <- out[[cn]] * sqrt(d_i)
+
+    out$cell_weight <- out$n / d_i
+    attr(out, "deff_applied") <- list(
+      method = "variogram",
+      deff   = d_i,
+      max_n  = deff_max_n
+    )
   } else if (!use_kish && is.numeric(deff) && deff > 1) {
     out$cell_weight <- out$n / deff
     attr(out, "deff_applied") <- list(method = "fixed", deff = deff)

@@ -3,7 +3,6 @@
 ^LICENSE\.md$
 ^README\.Rmd$
 ^\.github$
-^CODE_REVIEW\.md$
 ^dev$
 ^docs$
 ^man/figures$

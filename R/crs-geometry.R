@@ -9,6 +9,15 @@
 #' possible, and falling back to Web Mercator (EPSG:3857) when longitude/latitude
 #' information cannot be reliably determined.
 #'
+#' Extents reaching more than 5 degrees from the central meridian of the
+#' candidate UTM zone get an equal-area projection centred on the data instead:
+#' Albers for mid-latitudes, Lambert Azimuthal Equal Area for equatorial and
+#' high-latitude extents.  Forcing continental data into one UTM zone produces
+#' percent-scale distance errors that propagate silently into variogram ranges,
+#' block sizes, GWR bandwidth and GP length-scales.  Note that only longitude
+#' offset matters: transverse Mercator error scales with distance from the
+#' central meridian, so tall narrow north-south extents keep their UTM zone.
+#'
 #' @param x An sf or sfc object.
 #' @return An sf::crs object.
 #' @keywords internal
@@ -28,6 +37,112 @@
   ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(sf::st_geometry(x_ll))))
   if (!is.numeric(ctr) || length(ctr) < 2) return(sf::st_crs(3857))
   lon <- ctr[1]; lat <- ctr[2]
+
+  # st_centroid() on empty or degenerate geometry can return NA/NaN, which
+  # passes the is.numeric() check above.  A non-finite centroid cannot place
+  # either a UTM zone or an equal-area projection, so fall back explicitly
+  # rather than letting NA propagate into the comparisons below.
+  if (!is.finite(lon) || !is.finite(lat)) {
+    .log_warn(
+      ".pick_local_projected_crs(): could not compute a finite centroid (lon = %s, lat = %s); falling back to EPSG:3857.",
+      format(lon), format(lat)
+    )
+    return(sf::st_crs(3857))
+  }
+
+  # ---- Reject extents too wide for a single UTM zone ----
+  # Transverse Mercator scale error grows with distance from the *central
+  # meridian*: k = k0 * (1 + x^2 / (2 R^2)) where x ~ R * dlon * cos(lat).
+  # Two consequences drive the logic below:
+  #
+  #   * Only the LONGITUDE offset matters.  Latitude span does not inflate the
+  #     error -- cos(lat) shrinks x, so a tall narrow north-south extent is
+  #     precisely what UTM is designed for (a 4-deg-wide, 60-deg-tall strip
+  #     peaks at about +0.02%).  Switching such data to an equal-area
+  #     projection would make it worse, not better: LAEA distorts distance by
+  #     about -1.1% at 30 deg from its centre.
+  #   * What matters is the offset from the CENTRAL MERIDIAN OF THE SELECTED
+  #     ZONE, not the raw bbox span, because the centroid-derived zone is not
+  #     generally centred on the data.
+  #
+  # Beyond about 5 deg from the central meridian (~0.3% error) an equal-area
+  # projection centred on the data is the better choice.  Forcing CONUS into a
+  # single zone puts the extent edge 31 deg off the meridian: about +7.5%.
+  # That error is silent and it propagates -- estimate_sac_range() returns a
+  # range in CRS units, make_folds(block_kfold) sizes blocks in CRS units, and
+  # both the GWR bandwidth and the GP length-scale read projected coordinates.
+  bb       <- sf::st_bbox(x_ll)
+  lon_min  <- as.numeric(bb["xmin"]); lon_max <- as.numeric(bb["xmax"])
+  span_lon <- lon_max - lon_min
+  span_lat <- as.numeric(bb["ymax"] - bb["ymin"])
+
+  # A bbox wider than a hemisphere cannot be told apart from one that merely
+  # straddles the antimeridian, and in the latter case the centroid lands on
+  # the opposite side of the planet -- which would centre an equal-area
+  # projection 180 deg from the data.  Fall back to the documented
+  # can't-determine-reliably behaviour instead of guessing.
+  if (is.finite(span_lon) && span_lon > 180) {
+    .log_warn(
+      paste0(".pick_local_projected_crs(): longitude extent spans %.1f deg. ",
+             "This is either global coverage or data straddling the ",
+             "antimeridian, which a bounding box cannot distinguish; the ",
+             "centroid is unreliable either way. Falling back to EPSG:3857. ",
+             "Pass target_crs to ensure_projected() to choose a projection ",
+             "suited to your extent."),
+      span_lon
+    )
+    return(sf::st_crs(3857))
+  }
+
+  # as.integer() is belt-and-braces: floor() already yields an integral double,
+  # which sprintf("%d", ...) accepts, but making the type explicit removes the
+  # dependency on that coercion in the log messages below.
+  cand_zone <- as.integer(max(1, min(60, floor((lon + 180) / 6) + 1)))
+  cand_cm   <- 6 * cand_zone - 183           # central meridian of that zone
+  lon_off   <- max(abs(lon_min - cand_cm), abs(lon_max - cand_cm))
+
+  if (is.finite(lon_off) && lon_off > 5) {
+    # Albers suits mid-latitude extents; its standard parallels are
+    # conventionally placed at the 1/6 and 5/6 points of the latitude span.
+    # Lambert Azimuthal Equal Area covers equatorial and high-latitude cases,
+    # where Albers standard parallels degenerate.
+    if (abs(lat) > 20 && abs(lat) < 70) {
+      lat1 <- as.numeric(bb["ymin"]) + span_lat / 6
+      lat2 <- as.numeric(bb["ymax"]) - span_lat / 6
+      if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
+        lat1 <- lat - 5; lat2 <- lat + 5
+      }
+      .log_warn(
+        paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
+               "central meridian of UTM zone %d, well beyond the 3 deg the ",
+               "zone is designed for (%.1f deg longitude span in total). Using ",
+               "Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f) instead; ",
+               "a single UTM zone would distort distances by several percent, ",
+               "which propagates into variogram ranges, block sizes, GWR ",
+               "bandwidth and GP length-scales. Pass target_crs to ",
+               "ensure_projected() to override."),
+        lon_off, cand_zone, span_lon, lat1, lat2, lon
+      )
+      return(sf::st_crs(sprintf(
+        "+proj=aea +lat_1=%f +lat_2=%f +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs",
+        lat1, lat2, lat, lon)))
+    }
+
+    .log_warn(
+      paste0(".pick_local_projected_crs(): extent reaches %.1f deg from the ",
+             "central meridian of UTM zone %d, well beyond the 3 deg the zone ",
+             "is designed for (%.1f deg longitude span in total). Using Lambert ",
+             "Azimuthal Equal Area centred on (%.1f, %.1f) instead; a single ",
+             "UTM zone would distort distances by several percent, which ",
+             "propagates into variogram ranges, block sizes, GWR bandwidth and ",
+             "GP length-scales. Pass target_crs to ensure_projected() to ",
+             "override."),
+      lon_off, cand_zone, span_lon, lon, lat
+    )
+    return(sf::st_crs(sprintf(
+      "+proj=laea +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs",
+      lat, lon)))
+  }
 
   zone <- floor((lon + 180) / 6) + 1
   zone <- max(1, min(60, zone))

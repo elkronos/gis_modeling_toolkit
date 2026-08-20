@@ -28,6 +28,12 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 
+# `%||%` is used below (see the tessellation-plot helper).  It is internal to
+# spatialkit rather than exported, and it only entered base R in 4.4 while
+# DESCRIPTION permits R >= 4.1 -- so define it locally to keep this script
+# runnable on every supported R version.
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
 set.seed(42)
 dir.create("output", showWarnings = FALSE)
 
