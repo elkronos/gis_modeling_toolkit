@@ -1,0 +1,58 @@
+# Weekly check with the brms / Stan backend installed.
+#
+# brms pulls in a Stan toolchain and compiles models, which takes minutes per
+# run -- too slow for every push.  The main R-CMD-check workflow therefore
+# skips every brms-guarded code path.  This workflow closes that gap on a
+# schedule, and can be triggered by hand before a CRAN submission.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+name: check-brms
+
+permissions: read-all
+
+jobs:
+  check-brms:
+    runs-on: ubuntu-latest
+    name: ubuntu-latest (release, with brms)
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rcmdcheck
+            any::brms
+            any::loo
+            any::sp
+            any::GWmodel
+            any::gstat
+            any::FNN
+            any::Matrix
+          needs: check
+
+      - name: Confirm brms is installed
+        run: |
+          if (!requireNamespace("brms", quietly = TRUE))
+            stop("brms not installed; this workflow has no purpose without it.")
+          cat("brms ", as.character(utils::packageVersion("brms")), "\n")
+        shell: Rscript {0}
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
