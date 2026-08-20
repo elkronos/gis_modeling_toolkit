@@ -7,14 +7,17 @@
 make_folds(
   points_sf,
   k,
-  method = c("random_kfold", "block_kfold", "buffered_loo"),
+  method = c("random_kfold", "block_kfold", "buffered_loo", "leave_location_out", "nndm"),
   seed = NULL,
   block_nx = NULL,
   block_ny = NULL,
   block_multiplier = 3,
   block_size = NULL,
   auto_range = FALSE,
+  range_frac = 1,
   response_var = NULL,
+  group_var = NULL,
+  prediction_points = NULL,
   predictor_vars = NULL,
   boundary = NULL,
   buffer = NULL,
@@ -46,8 +49,26 @@ directional variograms to account for anisotropy — and used as the
 minimum \code{block_size}.  Requires \code{response_var}.  An explicit
 \code{block_size} takes precedence.  Default \code{FALSE}.}
 
+\item{range_frac}{Passed through to \code{estimate_sac_range()} when
+\code{auto_range = TRUE}.  A fitted range beyond the longest lag the
+empirical variogram was fitted over is rejected as unidentified, and block
+sizing falls back to geometry rather than collapsing to a single block.
+Default 1.0.}
+
 \item{response_var}{Character(1) response column name.  Required when
 \code{auto_range = TRUE}.}
+
+\item{group_var}{Character(1) naming a column of \code{points_sf} that
+identifies the location each observation belongs to.  Required for
+\code{method = "leave_location_out"}, which keeps every observation from a
+location together in the same fold.  Repeated measurements at the same
+site otherwise get split across folds, and the model is scored partly on
+sites it has already seen -- which random k-fold reports as excellent
+performance.}
+
+\item{prediction_points}{Optional \code{sf} layer of the locations you
+actually intend to predict onto.  Required for \code{method = "nndm"}.
+The grid from \code{predict_surface()} is the natural choice.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -76,6 +97,35 @@ leak across folds and CV metrics become optimistic.  Use
 \code{block_size} to set a minimum block edge length (in CRS units), or
 set \code{auto_range = TRUE} to estimate the range from an empirical
 variogram and enforce it automatically.
+
+\strong{Fold methods.}
+\code{"random_kfold"} ignores geography entirely and will overstate
+performance on autocorrelated data.  \code{"block_kfold"} separates folds
+geographically.  \code{"buffered_loo"} holds out one point at a time and
+excludes everything within a fixed \code{buffer}.
+
+\code{"leave_location_out"} groups by \code{group_var}, so all
+observations from a location share a fold.
+
+\code{"nndm"} implements the distance-matching principle of Milà et al.
+(2022): rather than choosing a buffer arbitrarily, it sizes the exclusion
+around each held-out point so that the resulting training-to-test distance
+distribution approaches the distribution of distances from your actual
+prediction locations to the training data.
+
+Each held-out point draws a target distance from the empirical
+prediction-distance CDF, then the nearest training points are excluded up to
+the one whose distance is closest to that target.  Matching is therefore
+\emph{as close as the training configuration permits}, not exact: the
+achievable distances are the order statistics of that point's neighbour
+distances, which are discrete and can leave gaps.  Clustered data is the
+hard case -- excluding everything inside a hard radius would remove a whole
+cluster and leave the nearest survivor in the next one, overshooting badly,
+which is why the nearest achievable distance is used instead.
+
+This differs from the paper's iterative exclusion procedure.  Compare
+\code{params$target_median} against \code{params$realised_median} to see
+how well the matching worked on your data.
 }
 \examples{
 library(sf)
@@ -91,11 +141,21 @@ lengths(folds$folds[[1]]) # train/test row-ID splits
 # Buffered leave-one-out: neighbours within 100 units excluded from training
 loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
 }
+\references{
+Mila, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
+distance matching Leave-One-Out Cross-Validation for map validation.
+\emph{Methods in Ecology and Evolution} \strong{13}, 1304-1316.
+\doi{10.1111/2041-210X.13851}
+}
 \seealso{
 Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}}
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

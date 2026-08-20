@@ -2,12 +2,9 @@
 % Please edit documentation in R/model-prep.R
 \name{gp_lengthscale_bounds}
 \alias{gp_lengthscale_bounds}
-\alias{phi_prior_bounds}
 \title{Heuristic length-scale bounds for a squared-exponential GP}
 \usage{
 gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
-
-phi_prior_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 }
 \arguments{
 \item{coords_xy}{Numeric matrix of (x, y) coordinates.}
@@ -32,13 +29,6 @@ The "effective range" where correlation drops to ~5\\% is
 }
 \details{
 Subsamples large datasets to avoid O(n^2) memory and time cost.
-
-\code{phi_prior_bounds} is a deprecated alias retained for
-backward compatibility.  Previous versions computed bounds calibrated
-for an exponential covariance (\code{3 / d}); the current
-implementation delegates to \code{gp_lengthscale_bounds} which is
-calibrated for the squared-exponential kernel used by
-\code{brms::gp()}.
 }
 \examples{
 set.seed(1)

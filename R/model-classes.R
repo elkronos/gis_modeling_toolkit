@@ -61,7 +61,9 @@ print.spatial_fit <- function(x, ...) {
       cat(sprintf("  AICc    : %.2f\n", x$info$AICc))
   }
   if (subclass == "bayesian_fit") {
-    cat(sprintf("  GP rank : %d\n", x$info$gp_k %||% NA_integer_))
+    cat(sprintf("  GP basis: %d per dim (%d total)\n",
+                x$info$gp_k %||% NA_integer_,
+                x$info$gp_n_basis %||% NA_integer_))
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
     if (!isTRUE(x$info$convergence_ok))
