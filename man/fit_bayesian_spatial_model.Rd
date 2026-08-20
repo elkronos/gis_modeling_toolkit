@@ -10,7 +10,8 @@ fit_bayesian_spatial_model(
   predictor_vars,
   family = NULL,
   gp_k = NULL,
-  gp_c = 1.5,
+  gp_c = NULL,
+  gp_iso = FALSE,
   prior = NULL,
   chains = 4,
   iter = 2000,
@@ -38,10 +39,24 @@ fit_bayesian_spatial_model(
 family function or a brms family object). Default NULL (resolved to
 \code{stats::gaussian()}).}
 
-\item{gp_k}{Positive integer for GP rank, or NULL (default) for automatic
-selection based on dataset size: min(n/3, max(15, sqrt(n))).}
+\item{gp_k}{Positive integer giving the number of GP basis functions
+\emph{per dimension}, or NULL (default) to derive it from the
+length-scale/domain ratio.  Note that the fitted model carries
+\code{gp_k^2} basis functions, not \code{gp_k} (see Details).}
 
-\item{gp_c}{Positive numeric for GP scale. Default 1.5.}
+\item{gp_c}{Positive numeric boundary factor for the approximate GP, or
+NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
+wide enough to contain the longest plausible correlation range; a value
+that is too small truncates the domain and degrades the approximation for
+smooth, long-range surfaces.}
+
+\item{gp_iso}{Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
+(the default) fits a separate length-scale per coordinate axis, letting the
+model learn any directional structure from the data.  \code{TRUE} fits a
+single shared length-scale, which -- because the coordinates are
+standardised per axis beforehand -- makes the kernel anisotropic in the
+original CRS by whatever ratio \code{sd(X)/sd(Y)} happens to take.  See
+Details.}
 
 \item{prior}{Optional brms prior specification. When NULL and
 \code{standardize_predictors = TRUE}, weakly informative
@@ -89,33 +104,61 @@ A \code{bayesian_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 Model-specific metadata lives in \code{$info} (coord_scaling,
-predictor_scaling, gp_k, loo, looic, convergence_ok,
+predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
+gp_lscale_prior, loo, looic,
+convergence_ok,
 convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 }
 \description{
 Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 }
 \details{
+\strong{GP basis count and boundary factor.}
+\code{brms::gp()} builds a full tensor grid over its covariates, so a term
+\code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions -- the
+\code{gp_k} argument is the count \emph{per dimension}, not the total rank.
+Both \code{gp_k} and \code{gp_c} are therefore chosen from the ratio of the
+estimated length-scale to the domain half-range, following
+Riutort-Mayol et al. (2023), rather than from the number of observations:
+\code{gp_c} is set large enough to contain the upper length-scale bound,
+and \code{gp_k} large enough to resolve the lower one.  The derived value is
+typically 21-25 per dimension and is largely independent of \code{n}.
+
+The GP term is built with \code{scale = FALSE}.  \code{brms::gp()} otherwise
+rescales its covariates so the maximum Euclidean distance between two points
+is 1, and reports \code{lscale} in that space; since this function already
+standardises the coordinates, and the length-scale prior, \code{gp_c} and the
+adequacy check below are all expressed in those standardised units, a second
+normalisation would leave every length-scale quantity in the wrong units.
+
+After fitting, the posterior length-scale is compared against the smallest
+scale the chosen basis can resolve
+(\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); a
+warning is issued when more than 10\\% of the posterior mass falls below it,
+which is the signal that \code{gp_k} should be raised.
+
 \strong{Coordinate scaling and anisotropy.}
-Before fitting the GP, X and Y coordinates are each centered and divided by
-their own standard deviation (lines 110–111).
-Because the two axes are scaled independently, an isotropic
-squared-exponential kernel in the \emph{scaled} space corresponds to an
-\strong{anisotropic} kernel in the original CRS: the effective length-scale
-in the X direction (in CRS units) differs from the Y direction whenever
-\code{sd(X) != sd(Y)}.
+Before fitting the GP, X and Y coordinates are each centred and divided by
+their own standard deviation.  This is a conditioning step: easting and
+northing frequently span very different ranges in a projected CRS, and
+handing Stan raw metres samples poorly.
 
-This per-axis standardization is deliberate — it stabilises the GP
-numerically when the coordinate extents differ dramatically (common in
-projected CRSs where easting and northing span very different ranges) — but
-users who expect the GP to be isotropic in geographic distance should be
-aware of this behaviour.
+Because the axes are scaled independently, a \emph{single} shared
+length-scale in the scaled space corresponds to an anisotropic kernel in the
+original CRS, stretched by whatever ratio \code{sd(X)/sd(Y)} happens to
+take.  That ratio is a property of how the sampling locations are laid out,
+not of the process being modelled, so it is not a defensible source of
+anisotropy.
 
-If true isotropy in the original CRS is desired, one could use a single
-scaling factor such as \code{max(sd(X), sd(Y))} for both axes.
-The stored \code{$info$coord_scaling} list includes a
-\code{scaling_type} element (\code{"anisotropic"}) so downstream code can
-detect which strategy was used.
+\code{gp_iso = FALSE} (the default) therefore fits one length-scale per
+axis, letting the model estimate directional structure from the data instead
+of inheriting it from the standardisation.  Set \code{gp_iso = TRUE} to
+recover the previous single-length-scale behaviour.
+
+Note that \code{gp_iso} does not affect cost: \code{brms::gp()} builds a
+tensor grid either way, so the model carries \code{gp_k^2} basis functions
+regardless.  The stored \code{$info$coord_scaling} list records the scaling
+strategy, and \code{$info$gp_iso} records which kernel was used.
 }
 \examples{
 \dontrun{
@@ -136,9 +179,17 @@ if (requireNamespace("brms", quietly = TRUE)) {
 }
 }
 }
+\references{
+Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. and
+Vehtari, A. (2023). Practical Hilbert space approximate Bayesian
+Gaussian processes for probabilistic programming.
+\emph{Statistics and Computing} \strong{33}, 1.
+\doi{10.1007/s11222-022-10167-2}
+}
 \seealso{
 Other model fitting:
 \code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
 \code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

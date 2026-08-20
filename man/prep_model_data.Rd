@@ -51,6 +51,7 @@ prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
 \seealso{
 Other model fitting:
 \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_gwr_model]{fit_gwr_model()}}
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}}
 }
 \concept{model fitting}
