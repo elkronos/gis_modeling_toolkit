@@ -289,16 +289,44 @@
 #'   cores; if \code{FALSE} (default), run sequentially.
 #' @param n_cores \emph{Deprecated.}
 #'   Explicit core count; overrides \code{parallel} when set.
+#' @param seed Integer RNG seed, or \code{NULL} to leave fold RNG unseeded.
+#'   When supplied, one seed per fold is drawn in the parent process and
+#'   applied inside the fold worker, so results depend on (seed, fold index)
+#'   alone and \code{parallel = TRUE} reproduces \code{parallel = FALSE}
+#'   exactly.
 #' @return List with pred_rows and fold_stats.
 #' @keywords internal
 #' @noRd
 .cv_run_folds <- function(dat_sf, response_var, predictor_vars,
                           remapped_folds, keep_idx, fit_one,
                           fold_info_fn = NULL, predict_args = list(),
-                          p = NULL, parallel = FALSE, n_cores = NULL) {
-  cores <- .resolve_n_cores(parallel, n_cores)
+                          p = NULL, parallel = FALSE, n_cores = NULL,
+                          seed = NULL) {
+  cores   <- .resolve_n_cores(parallel, n_cores)
+  n_folds <- length(remapped_folds)
+
+  # Draw one seed per fold in the parent so that each fold's RNG stream is a
+  # function of (seed, fold index) only -- never of the execution path.  This
+  # is what makes parallel and sequential runs bit-identical.  Forked workers
+  # cannot guarantee that on their own: mclapply() seeds each child from the
+  # current time and process ID unless the L'Ecuyer-CMRG generator is in use,
+  # so without this the parallel path is irreproducible for any fit_fn that
+  # consumes RNG (see cv_spatial(), which accepts an arbitrary learner).
+  fold_seeds <- if (is.null(seed)) {
+    rep(NA_integer_, n_folds)
+  } else {
+    cleanup_draw <- .with_seed(seed)
+    on.exit(cleanup_draw(), add = TRUE)
+    sample.int(.Machine$integer.max, n_folds)
+  }
 
   fold_worker <- function(i) {
+    # .with_seed() saves and restores .Random.seed, so seeding a fold never
+    # leaks into the caller's RNG state.
+    if (!is.na(fold_seeds[i])) {
+      cleanup_i <- .with_seed(fold_seeds[i])
+      on.exit(cleanup_i(), add = TRUE)
+    }
     .cv_fit_one_fold(
       i = i, dat_sf = dat_sf, response_var = response_var,
       remapped_fold = remapped_folds[[i]], keep_idx = keep_idx,
@@ -309,7 +337,7 @@
 
   if (cores > 1L) {
     message(sprintf("cv: running %d folds in parallel on %d cores.",
-                    length(remapped_folds), cores))
+                    n_folds, cores))
     results <- parallel::mclapply(
       seq_along(remapped_folds), fold_worker, mc.cores = cores
     )
@@ -317,7 +345,16 @@
     results <- lapply(seq_along(remapped_folds), fold_worker)
   }
 
-  # Filter NULLs (failed / skipped folds) and unpack
+  # mclapply() hands back a try-error OBJECT (not NULL) when a child errors or
+  # is killed, and Negate(is.null) keeps it -- the subsequent [[ "pred_row" ]]
+  # then fails with "subscript out of bounds", destroying the real diagnosis.
+  failed <- vapply(results, function(z) inherits(z, "try-error"), logical(1))
+  if (any(failed))
+    .log_warn("cv: %d fold(s) failed in a parallel worker: %s",
+              sum(failed),
+              paste(unique(vapply(results[failed], conditionMessage,
+                                  character(1))), collapse = "; "))
+  results <- results[!failed]
   results <- Filter(Negate(is.null), results)
   pred_rows  <- lapply(results, `[[`, "pred_row")
   fold_stats <- lapply(results, `[[`, "fold_stat")
@@ -329,6 +366,24 @@
 # -----------------------------------------------------------------------------
 # Spatial autocorrelation range estimation
 # -----------------------------------------------------------------------------
+
+#' Nearest-neighbour distance from each feature of \code{query} to \code{data}
+#'
+#' Uses \code{sf::st_nearest_feature()} so the search is indexed rather than a
+#' dense cross-distance matrix, which would be prohibitive at the sizes NNDM is
+#' guarded to.
+#'
+#' @param query,data sf layers in a common CRS.
+#' @return Numeric vector, one distance per row of \code{query}.
+#' @keywords internal
+#' @noRd
+.nn_dist_to <- function(query, data) {
+  idx <- sf::st_nearest_feature(query, data)
+  as.numeric(sf::st_distance(sf::st_geometry(query),
+                             sf::st_geometry(data)[idx],
+                             by_element = TRUE))
+}
+
 
 #' Estimate the spatial autocorrelation range from data
 #'
@@ -365,9 +420,26 @@
 #'   Variogram estimation is O(n²) so this keeps runtime bounded.
 #' @param cutoff Fraction of the maximum inter-point distance to use as
 #'   the variogram lag cutoff.  Default 0.5.
+#' @param range_frac Positive numeric.  A fitted range exceeding
+#'   \code{range_frac * cutoff * max_dist} -- that is, beyond the longest lag
+#'   the empirical variogram was actually fitted over -- is treated as
+#'   unidentified and \code{NA_real_} is returned.
+#'   \code{gstat::fit.variogram()} yields a finite number even when the
+#'   variogram never reaches a sill, and such a value is extrapolation past the
+#'   observed lags rather than a long autocorrelation range.  Passing it to
+#'   \code{make_folds(auto_range = TRUE)} would collapse the block grid to a
+#'   single block.  Default 1.0; raise it to accept ranges extrapolated beyond
+#'   the fitted lags.
 #' @param seed Optional RNG seed for subsampling reproducibility.
 #' @return A single positive numeric value (the effective range in projected
-#'   coordinate units), or \code{NA_real_} if estimation fails.
+#'   coordinate units) of class \code{sac_range}, or \code{NA_real_} if
+#'   estimation fails or the fitted range is unidentified.  The returned value
+#'   behaves as an ordinary number; the fit it came from is attached as
+#'   attributes \code{directional} (the 0° and 90° ranges),
+#'   \code{anisotropy} (their ratio), \code{max_dist}, \code{cutoff_dist},
+#'   \code{variogram} (the
+#'   empirical variogram) and \code{variogram_model} (the fitted \code{gstat}
+#'   model), so the fit can be inspected rather than trusted.
 #' @family cross-validation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
@@ -383,15 +455,18 @@
 estimate_sac_range <- function(points_sf, response_var,
                                predictor_vars = NULL,
                                n_max = 5000L, cutoff = 0.5,
-                               seed = NULL) {
+                               range_frac = 1.0, seed = NULL) {
   if (!requireNamespace("gstat", quietly = TRUE)) {
     .log_warn("estimate_sac_range(): package 'gstat' is required for variogram estimation; returning NA.")
     return(NA_real_)
   }
   if (!inherits(points_sf, "sf"))
     stop("estimate_sac_range(): `points_sf` must be an sf object.", call. = FALSE)
-  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) %in%
-           c("POINT", "MULTIPOINT")))
+  # MULTIPOINT must be coerced too, not merely admitted: st_coordinates()
+  # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
+  # different feature than row i, and every fold below misaligns silently.
+  # coerce_to_points() takes centroids, matching prep_model_data().
+  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
     points_sf <- coerce_to_points(points_sf, "auto")
 
   pts <- ensure_projected(points_sf)
@@ -471,31 +546,41 @@ estimate_sac_range <- function(points_sf, response_var,
     raw_range  <- max(spatial_rows$range, na.rm = TRUE)
     model_type <- spatial_rows$model[which.max(spatial_rows$range)]
     eff <- if (identical(as.character(model_type), "Exp")) 3 * raw_range else raw_range
-    if (!is.finite(eff) || eff <= 0) NA_real_ else eff
+    if (!is.finite(eff) || eff <= 0) return(NA_real_)
+    # Carry the fitted model out so callers can inspect the fit rather than
+    # trust a bare number.
+    structure(eff, vgm_model = vgm_model)
   }
 
   # --- Directional variograms (0° and 90°, tolerance 22.5°) ----------------
   # gstat uses azimuth in degrees clockwise from north.  0° = N-S, 90° = E-W.
-  dir_ranges <- vapply(c(0, 90), function(az) {
+  dir_fits <- lapply(c(0, 90), function(az) {
     vg_dir <- try(
       gstat::variogram(..sac_var ~ 1, data = pts,
                        cutoff = cutoff_dist,
                        alpha = az, tol.hor = 22.5),
       silent = TRUE
     )
-    .fit_vgm_range(vg_dir)
-  }, numeric(1))
+    list(vg = vg_dir, fit = .fit_vgm_range(vg_dir))
+  })
+  dir_ranges <- vapply(dir_fits, function(f) as.numeric(f$fit), numeric(1))
 
   dir_success <- sum(is.finite(dir_ranges)) == 2L
+  anisotropy  <- NA_real_
+  vg_used     <- NULL
+  vgm_used    <- NULL
 
   # --- Select the effective range ------------------------------------------
   if (dir_success) {
     effective_range <- max(dir_ranges)
-    ratio <- max(dir_ranges) / min(dir_ranges)
-    if (ratio > 1.5) {
+    anisotropy <- max(dir_ranges) / min(dir_ranges)
+    winner   <- which.max(dir_ranges)
+    vg_used  <- dir_fits[[winner]]$vg
+    vgm_used <- attr(dir_fits[[winner]]$fit, "vgm_model")
+    if (anisotropy > 1.5) {
       .log_warn(
         "estimate_sac_range(): notable anisotropy detected (range ratio %.1f). Directional ranges: 0\u00b0 = %.1f, 90\u00b0 = %.1f. Using the maximum.",
-        ratio, dir_ranges[1], dir_ranges[2]
+        anisotropy, dir_ranges[1], dir_ranges[2]
       )
     }
   } else {
@@ -506,7 +591,12 @@ estimate_sac_range <- function(points_sf, response_var,
     )
     iso_range <- .fit_vgm_range(vg_iso)
     if (is.finite(iso_range)) {
-      effective_range <- iso_range
+      # as.numeric() strips the vgm_model attribute .fit_vgm_range() attaches;
+      # it is re-attached under its documented name below, and leaving both
+      # would ship the same object under two attribute names.
+      effective_range <- as.numeric(iso_range)
+      vg_used  <- vg_iso
+      vgm_used <- attr(iso_range, "vgm_model")
     } else {
       # Neither directional nor isotropic succeeded
       .log_warn("estimate_sac_range(): variogram model fit failed; returning NA.")
@@ -519,7 +609,83 @@ estimate_sac_range <- function(points_sf, response_var,
     return(NA_real_)
   }
 
-  effective_range
+  # --- Reject ranges the data cannot actually support -----------------------
+  # gstat::fit.variogram() returns a finite number even when the empirical
+  # variogram never reaches a sill.  The range is then unidentified and the
+  # value is a fitting artefact, not an autocorrelation range.
+  #
+  # The test is against the CUTOFF distance, not the extent: the empirical
+  # variogram is only computed out to `cutoff * max_dist`, so a fitted range
+  # beyond that is extrapolation past the longest lag ever observed.  No amount
+  # of data at shorter lags identifies it.  (With the default cutoff = 0.5 this
+  # is half the extent, but the rationale is the fitted lag limit rather than an
+  # arbitrary fraction of the study area.)
+  #
+  # Returning such a value silently is worse than returning NA, because
+  # make_folds(auto_range = TRUE) sizes spatial blocks from it: a range
+  # spanning the data yields one block covering everything, which silently
+  # defeats blocked cross-validation.
+  max_supported <- range_frac * cutoff_dist
+  if (is.finite(max_supported) && effective_range > max_supported) {
+    .log_warn(
+      paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
+             "lag the variogram was fitted over (%.4g = %s x cutoff %.0f); the ",
+             "empirical variogram never reached a sill, so the range is ",
+             "unidentified rather than long. Returning NA. Raise `cutoff` to ",
+             "fit longer lags, supply `predictor_vars` to detrend, or set a ",
+             "block size explicitly."),
+      effective_range, max_supported, format(range_frac), cutoff_dist
+    )
+    # The VALUE is NA -- the range is genuinely unidentified and must not be
+    # used to size blocks -- but the variogram that justified the rejection has
+    # already been computed, and throwing it away leaves the user no way to see
+    # WHY.  It is exactly the case where plot(type = "variogram") is most worth
+    # looking at: a curve that never reaches a sill.  Attributes do not affect
+    # is.finite()/is.na(), so every downstream guard behaves as before.
+    return(structure(
+      NA_real_,
+      max_dist        = as.numeric(max_dist),
+      cutoff_dist     = as.numeric(cutoff_dist),
+      variogram       = vg_used,
+      variogram_model = vgm_used,
+      rejected_range  = as.numeric(effective_range),
+      rejected_reason = "fitted range exceeds the largest lag fitted"
+    ))
+  }
+
+  structure(
+    effective_range,
+    class           = c("sac_range", "numeric"),
+    directional     = stats::setNames(dir_ranges, c("0", "90")),
+    anisotropy      = anisotropy,
+    max_dist        = as.numeric(max_dist),
+    cutoff_dist     = as.numeric(cutoff_dist),
+    variogram       = vg_used,
+    variogram_model = vgm_used
+  )
+}
+
+
+#' Print a spatial autocorrelation range
+#'
+#' Prints the effective range as a plain number, with the directional fit
+#' summarised beneath it when one is available.
+#'
+#' @param x An object of class \code{sac_range}.
+#' @param ... Ignored.
+#' @return \code{x}, invisibly.
+#' @export
+print.sac_range <- function(x, ...) {
+  cat(format(as.numeric(x)), "\n")
+  d <- attr(x, "directional")
+  a <- attr(x, "anisotropy")
+  if (!is.null(d) && all(is.finite(d))) {
+    cat(sprintf("  directional: 0 deg = %s, 90 deg = %s",
+                format(d[[1]]), format(d[[2]])))
+    if (is.finite(a)) cat(sprintf("  (ratio %.2f)", a))
+    cat("\n")
+  }
+  invisible(x)
 }
 
 
@@ -576,12 +742,61 @@ estimate_sac_range <- function(points_sf, response_var,
 #'   directional variograms to account for anisotropy — and used as the
 #'   minimum \code{block_size}.  Requires \code{response_var}.  An explicit
 #'   \code{block_size} takes precedence.  Default \code{FALSE}.
+#' @param range_frac Passed through to \code{estimate_sac_range()} when
+#'   \code{auto_range = TRUE}.  A fitted range beyond the longest lag the
+#'   empirical variogram was fitted over is rejected as unidentified, and block
+#'   sizing falls back to geometry rather than collapsing to a single block.
+#'   Default 1.0.
 #' @param response_var Character(1) response column name.  Required when
 #'   \code{auto_range = TRUE}.
 #' @param predictor_vars Optional character vector of predictor column names.
 #'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
 #' @param boundary Optional polygonal sf/sfc for block_kfold.
 #' @param buffer Positive numeric distance for buffered_loo.
+#' @param group_var Character(1) naming a column of \code{points_sf} that
+#'   identifies the location each observation belongs to.  Required for
+#'   \code{method = "leave_location_out"}, which keeps every observation from a
+#'   location together in the same fold.  Repeated measurements at the same
+#'   site otherwise get split across folds, and the model is scored partly on
+#'   sites it has already seen -- which random k-fold reports as excellent
+#'   performance.
+#' @param prediction_points Optional \code{sf} layer of the locations you
+#'   actually intend to predict onto.  Required for \code{method = "nndm"}.
+#'   The grid from \code{predict_surface()} is the natural choice.
+#' @details
+#' \strong{Fold methods.}
+#' \code{"random_kfold"} ignores geography entirely and will overstate
+#' performance on autocorrelated data.  \code{"block_kfold"} separates folds
+#' geographically.  \code{"buffered_loo"} holds out one point at a time and
+#' excludes everything within a fixed \code{buffer}.
+#'
+#' \code{"leave_location_out"} groups by \code{group_var}, so all
+#' observations from a location share a fold.
+#'
+#' \code{"nndm"} implements the distance-matching principle of Milà et al.
+#' (2022): rather than choosing a buffer arbitrarily, it sizes the exclusion
+#' around each held-out point so that the resulting training-to-test distance
+#' distribution approaches the distribution of distances from your actual
+#' prediction locations to the training data.
+#'
+#' Each held-out point draws a target distance from the empirical
+#' prediction-distance CDF, then the nearest training points are excluded up to
+#' the one whose distance is closest to that target.  Matching is therefore
+#' \emph{as close as the training configuration permits}, not exact: the
+#' achievable distances are the order statistics of that point's neighbour
+#' distances, which are discrete and can leave gaps.  Clustered data is the
+#' hard case -- excluding everything inside a hard radius would remove a whole
+#' cluster and leave the nearest survivor in the next one, overshooting badly,
+#' which is why the nearest achievable distance is used instead.
+#'
+#' This differs from the paper's iterative exclusion procedure.  Compare
+#' \code{params$target_median} against \code{params$realised_median} to see
+#' how well the matching worked on your data.
+#' @references
+#' Mila, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
+#' distance matching Leave-One-Out Cross-Validation for map validation.
+#' \emph{Methods in Ecology and Evolution} \strong{13}, 1304-1316.
+#' \doi{10.1111/2041-210X.13851}
 #' @param drop_empty_blocks Logical. Default TRUE.
 #' @return A list with method, k, folds, assignment, params.  The
 #'   \code{train}/\code{test} elements of each fold contain \code{..row_id}
@@ -603,10 +818,12 @@ estimate_sac_range <- function(points_sf, response_var,
 #' loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
 #' @export
 make_folds <- function(points_sf, k,
-                       method = c("random_kfold", "block_kfold", "buffered_loo"),
+                       method = c("random_kfold", "block_kfold", "buffered_loo",
+                                  "leave_location_out", "nndm"),
                        seed = NULL, block_nx = NULL, block_ny = NULL,
                        block_multiplier = 3, block_size = NULL,
-                       auto_range = FALSE, response_var = NULL,
+                       auto_range = FALSE, range_frac = 1.0, response_var = NULL,
+                       group_var = NULL, prediction_points = NULL,
                        predictor_vars = NULL, boundary = NULL,
                        buffer = NULL,
                        drop_empty_blocks = TRUE) {
@@ -616,8 +833,11 @@ make_folds <- function(points_sf, k,
   on.exit(cleanup(), add = TRUE)
 
   if (!inherits(points_sf, "sf")) stop("make_folds(): `points_sf` must be an sf object.")
-  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) %in%
-           c("POINT", "MULTIPOINT")))
+  # MULTIPOINT must be coerced too, not merely admitted: st_coordinates()
+  # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
+  # different feature than row i, and every fold below misaligns silently.
+  # coerce_to_points() takes centroids, matching prep_model_data().
+  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
     points_sf <- coerce_to_points(points_sf, "auto")
   if (!("..row_id" %in% names(points_sf)))
     points_sf$..row_id <- seq_len(nrow(points_sf))
@@ -676,6 +896,7 @@ make_folds <- function(points_sf, k,
     if (isTRUE(auto_range) && !is.null(response_var)) {
       sac_range <- estimate_sac_range(pts, response_var = response_var,
                                       predictor_vars = predictor_vars,
+                                      range_frac = range_frac,
                                       seed = seed)
       if (is.finite(sac_range) && sac_range > 0) {
         message(sprintf(
@@ -796,6 +1017,26 @@ make_folds <- function(points_sf, k,
       pts$..block_id[na_idx] <- apply(as.matrix(dmat), 1, which.min)
     }
     B <- max(pts$..block_id, na.rm = TRUE)
+    # One block means one fold whose training set is empty -- blocked CV
+    # silently degenerating into nothing at all.  It happens whenever the block
+    # size exceeds half the extent, which an accepted autocorrelation range can
+    # do (estimate_sac_range() only rejects ranges above half the DIAGONAL, a
+    # factor of sqrt(2) looser than what .block_dims_from_size() needs).
+    if (B < 2L) {
+      # block_size is NULL when the caller set block_nx/block_ny directly, and
+      # sprintf() on a zero-length argument yields character(0) -- an empty
+      # error message.
+      how <- if (is.null(block_size))
+        "the requested block_nx/block_ny" else
+        sprintf("the block size (%s)", format(block_size))
+      stop(sprintf(paste0("make_folds(block_kfold): %s produces a single block ",
+                          "covering the whole extent, so there is no spatial ",
+                          "split to make and the one fold would have an empty ",
+                          "training set. Pass a smaller `block_size` (or more ",
+                          "blocks), or set auto_range = FALSE if the size came ",
+                          "from the estimated autocorrelation range."), how),
+           call. = FALSE)
+    }
     if (B < k) { .log_warn("make_folds(block_kfold): blocks < k; reducing k."); k <- B }
 
     blk_sizes <- as.integer(table(factor(pts$..block_id, levels = seq_len(B))))
@@ -862,6 +1103,151 @@ make_folds <- function(points_sf, k,
     return(.ret(method, n, splits,
                 .safe_tibble(row_id = pts$..row_id, fold = seq_len(n)),
                 list(buffer = buffer)))
+  }
+
+  # ---- LEAVE-LOCATION-OUT (grouped) ----
+  if (method == "leave_location_out") {
+    if (is.null(group_var) || !(group_var %in% names(points_sf)))
+      stop("make_folds(leave_location_out): `group_var` must name a column of ",
+           "`points_sf` identifying the location each observation belongs to.",
+           call. = FALSE)
+
+    grp <- as.character(sf::st_drop_geometry(points_sf)[[group_var]])
+    if (anyNA(grp))
+      stop("make_folds(leave_location_out): `group_var` contains NA; every ",
+           "observation must belong to a location.", call. = FALSE)
+
+    row_ids <- points_sf$..row_id
+    ug <- unique(grp)
+    n_g <- length(ug)
+    if (n_g < 2L)
+      stop("make_folds(leave_location_out): need at least 2 distinct groups.",
+           call. = FALSE)
+
+    # k groups per fold; k >= n_g degenerates to leave-one-group-out.
+    if (k > n_g) {
+      .log_warn("make_folds(leave_location_out): k = %d exceeds the %d distinct groups; using leave-one-group-out.", k, n_g)
+      k <- n_g
+    }
+    if (k < 2L) k <- 2L
+
+    grp_fold <- sample(rep(seq_len(k), length.out = n_g))
+    names(grp_fold) <- ug
+    fold_of_row <- grp_fold[grp]
+
+    splits <- vector("list", k)
+    for (j in seq_len(k)) {
+      test_rows <- row_ids[fold_of_row == j]
+      splits[[j]] <- list(train = row_ids[fold_of_row != j], test = test_rows)
+    }
+
+    return(.ret(method, k, splits,
+                .safe_tibble(row_id = row_ids, fold = unname(fold_of_row)),
+                list(seed = seed, group_var = group_var, n_groups = n_g)))
+  }
+
+  # ---- NNDM: nearest-neighbour distance matching ----
+  if (method == "nndm") {
+    pts <- ensure_projected(points_sf)
+    n <- nrow(pts)
+    if (n > 5000L)
+      stop(sprintf("make_folds(nndm): n = %d exceeds the safety threshold of 5000. Fold construction sorts distances from every point to every other (O(n^2) time), and NNDM then produces n leave-one-out folds, so the model is refitted n times. Use 'block_kfold' instead, or subset your data.", n),
+           call. = FALSE)
+    if (n < 3L)
+      stop("make_folds(nndm): need at least 3 points.", call. = FALSE)
+
+    if (is.null(prediction_points))
+      stop("make_folds(nndm): `prediction_points` is required -- NNDM matches ",
+           "the training-to-test distance distribution to the distance ",
+           "distribution from your actual prediction locations to the training ",
+           "data. Use the grid you intend to predict onto (see ",
+           "predict_surface()).", call. = FALSE)
+    pred <- ensure_projected(prediction_points, target_crs = sf::st_crs(pts))
+
+    # Target: distance from each prediction location to its nearest training
+    # point.  This is the distance regime the model will actually face, and the
+    # one an arbitrary fixed buffer has no reason to reproduce.
+    g_target <- .nn_dist_to(pred, pts)
+    g_target <- g_target[is.finite(g_target)]
+    if (!length(g_target))
+      stop("make_folds(nndm): could not compute prediction-to-training ",
+           "distances.", call. = FALSE)
+
+    # Give each held-out point a buffer drawn from the target distribution, so
+    # the realised test-to-train nearest-neighbour distances reproduce it by
+    # construction.  Exclusion uses st_is_within_distance (GEOS STRtree), not a
+    # dense n x n matrix -- at the 20000-point guard that would be over 3 GB.
+    # Re-seed, but do NOT register a second restore handler.  The .with_seed()
+    # at the top of make_folds() already owns save/restore for the whole
+    # function; a nested one is wrong twice over.  Reusing the name `cleanup`
+    # made both on.exit() expressions resolve to the inner closure, so the
+    # caller's state was never restored -- and merely renaming it is not enough
+    # either, because on.exit(add = TRUE) APPENDS: the outer handler would
+    # restore the caller's seed and the inner one would then immediately
+    # overwrite it with the intermediate post-set.seed(seed) state.
+    set.seed(seed)
+    radii <- stats::quantile(g_target,
+                             probs = stats::runif(n), names = FALSE, type = 7)
+
+    # For each held-out point, exclude the nearest training points up to the
+    # one whose distance is CLOSEST to that point's target radius -- rather
+    # than excluding everything inside a hard radius.
+    #
+    # The hard-radius version is what a naive reading of "match the
+    # distribution" suggests, but it systematically overshoots on clustered
+    # data: excluding everything within r of a point in a tight cluster removes
+    # the whole cluster, so the nearest survivor is in the NEXT cluster, far
+    # beyond r.  On a two-cluster test that produced a realised median of 596
+    # against a target of 193.  Choosing the order statistic nearest the target
+    # instead matches as closely as the training configuration allows, and
+    # degrades gracefully when no achievable distance is near the target.
+    xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
+    row_ids <- pts$..row_id
+    splits <- vector("list", n)
+    n_excluded <- integer(n)
+    realised  <- rep(NA_real_, n)
+
+    for (i in seq_len(n)) {
+      d <- sqrt((xy[, 1] - xy[i, 1])^2 + (xy[, 2] - xy[i, 2])^2)
+      d[i] <- Inf
+      o  <- order(d)
+      ds <- d[o]
+      keep_max <- n - 1L                      # all but the held-out point
+
+      # index of the achievable distance closest to this point's target
+      j <- which.min(abs(ds[seq_len(keep_max)] - radii[i]))
+      # never strip the training set below two points
+      if (j > keep_max - 1L) j <- max(1L, keep_max - 1L)
+
+      drop_idx <- if (j > 1L) o[seq_len(j - 1L)] else integer(0)
+      train_i  <- setdiff(seq_len(n), c(i, drop_idx))
+      n_excluded[i] <- length(drop_idx)
+      realised[i]   <- ds[j]
+      splits[[i]] <- list(train = row_ids[train_i], test = row_ids[i])
+    }
+
+    # Exclusion is not always needed.  When prediction locations sit no further
+    # from the training data than training points sit from each other, plain
+    # LOO already reproduces the target distribution and nothing is removed --
+    # that is the correct answer, not a failure.  Conversely NNDM cannot pull
+    # training points closer, so it cannot match a target that is shorter than
+    # the training nearest-neighbour distances.
+    .log_info(paste0("make_folds(nndm): %d folds. Target prediction-to-training ",
+                     "distance: median %.1f. Realised test-to-training distance: ",
+                     "median %.1f. Median buffer %.1f, excluding a median of %.1f ",
+                     "training point(s) per fold."),
+              n, stats::median(g_target), stats::median(realised),
+              stats::median(radii), stats::median(n_excluded))
+
+    return(.ret(method, n, splits,
+                .safe_tibble(row_id = row_ids, fold = seq_len(n)),
+                list(seed = seed, n_prediction_points = nrow(pred),
+                     median_buffer   = stats::median(radii),
+                     median_excluded = stats::median(n_excluded),
+                     target_median   = stats::median(g_target),
+                     realised_median = stats::median(realised),
+                     target_distances   = g_target,
+                     realised_distances = realised)))
   }
 
   stop("make_folds(): unsupported method.")
@@ -983,7 +1369,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
     predictor_vars = predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_one, fold_info_fn = fold_info_fn,
-    p = NULL, parallel = parallel
+    p = NULL, parallel = parallel, seed = seed
   )
 
   preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
@@ -1121,8 +1507,9 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   # Extra per-fold info: gp_k, CRPS, predictive coverage
   fold_info_fn <- function(fit_obj, test_sf, y_true, y_hat) {
     extras <- list(
-      gp_k    = as.integer(fit_obj$info$gp_k %||% NA_integer_),
-      n_draws = NA_integer_,
+      gp_k       = as.integer(fit_obj$info$gp_k %||% NA_integer_),
+      gp_n_basis = as.integer(fit_obj$info$gp_n_basis %||% NA_integer_),
+      n_draws    = NA_integer_,
       CRPS    = NA_real_
     )
     # Pre-initialise coverage columns so every fold emits the same schema
@@ -1166,7 +1553,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_one, fold_info_fn = fold_info_fn,
     predict_args = list(summary = summary),
-    p = NULL, parallel = parallel
+    p = NULL, parallel = parallel, seed = seed
   )
 
   # Assemble predictions — add yhat_sd column via a second pass
@@ -1186,7 +1573,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                n_pred = integer(),
                RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
                SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
-               CRPS = numeric(), gp_k = integer(), n_draws = integer())
+               CRPS = numeric(), gp_k = integer(),
+               gp_n_basis = integer(), n_draws = integer())
 
   n_attempted <- length(remapped_folds)
   n_succeeded <- length(res$fold_stats)
@@ -1278,7 +1666,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_fn, fold_info_fn = fold_info_fn,
     predict_args = predict_args, p = p,
-    parallel = parallel
+    parallel = parallel, seed = seed
   )
 
   preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
@@ -1287,7 +1675,24 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   folds_df <- if (length(res$fold_stats)) as.data.frame(dplyr::bind_rows(res$fold_stats)) else
     data.frame()
 
+  # cv_gwr() and cv_bayes() both raise a real condition here; cv_spatial() used
+  # to return an all-NA `overall` and an empty data.frame with nothing at R
+  # condition level, so a fit_fn that failed on every fold looked like a
+  # successful run that happened to score NA.
+  n_attempted <- length(remapped_folds)
+  n_succeeded <- length(res$fold_stats)
+  if (n_succeeded == 0L && n_attempted > 0L) {
+    .log_warn("cv_spatial(): all %d folds failed to produce predictions; results are empty.",
+              n_attempted)
+    warning("cv_spatial(): all folds failed; cross-validation results contain ",
+            "no predictions.", call. = FALSE)
+  } else if (n_succeeded < n_attempted) {
+    .log_warn("cv_spatial(): %d of %d folds produced predictions.",
+              n_succeeded, n_attempted)
+  }
+
   list(overall = .cv_overall_metrics(preds),
        fold_metrics = folds_df, predictions = preds,
-       folds = remapped_folds)
+       folds = remapped_folds,
+       n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded)
 }
