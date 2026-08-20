@@ -12,6 +12,8 @@ summarize_by_cell(
   agg_funs = list(mean = function(x) mean(x, na.rm = TRUE)),
   cells_sf = NULL,
   deff = 1,
+  sac = NULL,
+  deff_max_n = 500L,
   quiet = TRUE
 )
 }
@@ -38,6 +40,15 @@ data.frame/tibble is returned (previous behaviour).}
 \item{\code{1} (default)}{No adjustment; classic IID standard error.
 Equivalent to previous behaviour but now emits a message (when
 \code{quiet = FALSE}) reminding that SEs assume independence.}
+\item{\code{"variogram"}}{Compute a per-cell design effect from a fitted
+variogram: for \code{n} points in a cell with correlation matrix \code{R}, the
+effective sample size of the mean is \code{n^2 / sum(R)}, so
+\code{deff = sum(R) / n}. This generalises Kish -- substituting a constant
+off-diagonal correlation recovers \code{1 + (n - 1) * rho} exactly -- but
+lets correlation decay with distance, which matters increasingly as
+cells get larger and Kish's single-\code{rho} assumption degrades. Supply
+the fit via \code{sac}, or it is estimated when \code{response_var} is given and
+'gstat' is available.}
 \item{\code{"kish"}}{Estimate per-variable-type intra-class correlations
 (ICCs) from the grouped data using a one-way random-effects ANOVA
 decomposition — one ICC for the response variable and a separate
@@ -53,6 +64,14 @@ falls back to \code{deff = 1} otherwise.}
 \item{A positive number}{Applied as a uniform design effect to every
 cell. Use when you have an external estimate of the design effect.}
 }}
+
+\item{sac}{Optional \code{sac_range} object from \code{\link[=estimate_sac_range]{estimate_sac_range()}}, used
+when \code{deff = "variogram"}. Supplying one avoids re-fitting the variogram
+and lets you inspect the fit the design effect is based on.}
+
+\item{deff_max_n}{Cells with more than this many points are subsampled
+before forming the \verb{n x n} correlation matrix used by
+\code{deff = "variogram"}. Default 500.}
 
 \item{quiet}{Logical; suppress messages. Default TRUE.}
 }

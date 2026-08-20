@@ -2,16 +2,26 @@
 
 S3method(coef,bayesian_fit)
 S3method(coef,gwr_fit)
+S3method(coef,rf_fit)
 S3method(fitted,bayesian_fit)
 S3method(fitted,gwr_fit)
+S3method(fitted,rf_fit)
 S3method(model_metrics,spatial_fit)
+S3method(plot,spatial_fit)
 S3method(predict,bayesian_fit)
 S3method(predict,gwr_fit)
+S3method(predict,rf_fit)
+S3method(print,aoa)
+S3method(print,gwr_model_selection)
+S3method(print,rf_fit)
+S3method(print,sac_range)
 S3method(print,spatial_fit)
 S3method(print,summary.spatial_fit)
 S3method(residuals,bayesian_fit)
 S3method(residuals,gwr_fit)
+S3method(residuals,rf_fit)
 S3method(summary,spatial_fit)
+export(area_of_applicability)
 export(assign_features_to_polygons)
 export(build_tessellation)
 export(clear_fitted_cache)
@@ -25,44 +35,53 @@ export(create_grid_polygons_cached)
 export(create_voronoi_polygons)
 export(cv_bayes)
 export(cv_gwr)
+export(cv_rf)
 export(cv_spatial)
 export(determine_optimal_levels)
 export(ensure_projected)
 export(ensure_stable_poly_id)
 export(estimate_sac_range)
 export(evaluate_insample)
-export(evaluate_models)
-export(evaluate_models_cv)
 export(fit_bayesian_spatial_model)
 export(fit_gwr_model)
+export(fit_rf_model)
 export(get_voronoi_seeds)
 export(gp_lengthscale_bounds)
+export(gwr_model_selection)
 export(harmonize_crs)
 export(make_folds)
 export(model_metrics)
 export(new_spatial_fit)
-export(phi_prior_bounds)
+export(plot_folds)
 export(plot_tessellation_map)
+export(predict_surface)
 export(prep_model_data)
 export(residual_morans_i)
+export(select_features_forward)
 export(summarize_by_cell)
 export(voronoi_seeds_kmeans)
 export(voronoi_seeds_random)
 importFrom(dplyr,.data)
-importFrom(methods,as)
-importFrom(methods,is)
-importFrom(stats,complete.cases)
-importFrom(stats,dist)
-importFrom(stats,fitted)
-importFrom(stats,kmeans)
-importFrom(stats,lm.fit)
-importFrom(stats,median)
-importFrom(stats,pnorm)
-importFrom(stats,predict)
-importFrom(stats,quantile)
-importFrom(stats,reformulate)
-importFrom(stats,residuals)
-importFrom(stats,sd)
-importFrom(stats,setNames)
-importFrom(utils,head)
-importFrom(utils,modifyList)
+importFrom(methods,
+  as,
+  is
+)
+importFrom(stats,
+  complete.cases,
+  dist,
+  fitted,
+  kmeans,
+  lm.fit,
+  median,
+  pnorm,
+  predict,
+  quantile,
+  reformulate,
+  residuals,
+  sd,
+  setNames
+)
+importFrom(utils,
+  head,
+  modifyList
+)

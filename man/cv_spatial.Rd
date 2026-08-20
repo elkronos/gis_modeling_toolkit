@@ -72,9 +72,13 @@ a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
 }
 \seealso{
 Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
 \code{\link[=cv_bayes]{cv_bayes()}},
 \code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
 \code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=make_folds]{make_folds()}}
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

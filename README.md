@@ -162,7 +162,7 @@ cv <- cv_gwr(pts, "price", "elev", k = 5, parallel = 4L)      # explicit count
 
 **GWR bandwidth fallback.** If automatic bandwidth selection fails, a heuristic fallback is used, a `warning()` is raised, and `fit$info$bandwidth_is_fallback = TRUE` is set so downstream comparisons can flag the result. Supply an explicit `bandwidth` if you see this.
 
-**Bayesian GP anisotropy.** `fit_bayesian_spatial_model()` standardizes X and Y coordinates independently before the GP term. This stabilises fitting but makes the kernel anisotropic in the original CRS whenever `sd(X) ≠ sd(Y)`; the strategy is recorded in `fit$info$coord_scaling$scaling_type`. A data-informed GP length-scale prior is derived automatically from the inter-point distance distribution (see `gp_lengthscale_bounds()`).
+**Bayesian GP anisotropy.** `fit_bayesian_spatial_model()` standardizes X and Y coordinates independently before the GP term, as a conditioning step — easting and northing often span very different ranges in a projected CRS. Because the axes are scaled separately, a single shared length-scale would make the kernel anisotropic in the original CRS by the arbitrary ratio `sd(X)/sd(Y)`, which reflects the sampling layout rather than the process. The GP therefore fits one length-scale per axis by default (`gp_iso = FALSE`), estimating directional structure from the data; pass `gp_iso = TRUE` for a single shared length-scale. The scaling strategy is recorded in `fit$info$coord_scaling$scaling_type`, and a data-informed length-scale prior is derived from the inter-point distance distribution (see `gp_lengthscale_bounds()`).
 
 ## Logging
 

@@ -89,6 +89,7 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 \seealso{
 Other model fitting:
 \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
 \code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}
