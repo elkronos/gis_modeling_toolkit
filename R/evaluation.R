@@ -52,13 +52,18 @@
 #'   \pkg{Matrix} is available, otherwise a dense base matrix.
 #' @keywords internal
 #' @noRd
-.build_knn_weights <- function(coords, k = 8L) {
+.build_knn_weights <- function(coords, k = 8L,
+                              use_fnn    = requireNamespace("FNN",    quietly = TRUE),
+                              use_matrix = requireNamespace("Matrix", quietly = TRUE)) {
   n <- nrow(coords)
   k <- min(as.integer(k), n - 1L)
   if (k < 1L) k <- 1L
 
-  has_fnn    <- requireNamespace("FNN",    quietly = TRUE)
-  has_matrix <- requireNamespace("Matrix", quietly = TRUE)
+  # Backend availability is a parameter rather than a direct requireNamespace()
+  # call so the dense fallback -- and its size guard -- can be exercised on a
+  # machine that has FNN installed.  Defaults preserve the previous behaviour.
+  has_fnn    <- isTRUE(use_fnn)
+  has_matrix <- isTRUE(use_matrix)
 
   if (has_fnn && has_matrix) {
     # --- Fast path: O(n*k) kd-tree lookup + sparse matrix ----
@@ -527,183 +532,4 @@ compare_models_cv <- function(
   c(list(overall = dplyr::bind_rows(comparison_rows),
          by_fold = dplyr::bind_rows(by_fold_rows)),
     cv_results)
-}
-
-
-# ===========================================================================
-# Legacy wrappers  (backward compatibility)
-# ===========================================================================
-
-#' Evaluate spatial models (legacy interface)
-#'
-#' Thin wrapper that preserves the original \code{evaluate_models()} call
-#' signature.  New code should use \code{compare_models()} (for already-fit
-#' objects) or \code{compare_models_cv()} (for CV) instead.
-#'
-#' @inheritParams compare_models_cv
-#' @param do_cv Logical; use cross-validation. Default TRUE.
-#' @param gwr_args,bayes_args Extra arguments for model fitting.
-#' @return A list with CV or in-sample results.
-#' @export
-evaluate_models <- function(
-    data_sf, response_var, predictor_vars,
-    do_cv = TRUE, folds = NULL, k = 5, seed = 123,
-    boundary = NULL, pointize = "auto", gwr_args = list(), bayes_args = list(),
-    summary = c("mean", "median"), models = c("GWR", "Bayesian"), quiet = FALSE
-) {
-  summary <- match.arg(summary)
-  .msg <- function(...) if (!quiet) message(...)
-
-  if (!inherits(data_sf, "sf"))
-    stop("evaluate_models(): `data_sf` must be an sf object.")
-  models <- unique(intersect(models, c("GWR", "Bayesian")))
-  if (length(models) == 0L) models <- "GWR"
-
-  for (m in models) {
-    if (!.model_available(m)) {
-      .msg(sprintf("evaluate_models(): dropping %s (package/function unavailable).", m))
-      models <- setdiff(models, m)
-    }
-  }
-  if (length(models) == 0L) stop("evaluate_models(): no viable models.")
-
-  if (!("..row_id" %in% names(data_sf)))
-    data_sf$`..row_id` <- seq_len(nrow(data_sf))
-
-  # ==== CV path — delegate to compare_models_cv ====
-  if (isTRUE(do_cv)) {
-    result <- compare_models_cv(
-      data_sf = data_sf, response_var = response_var,
-      predictor_vars = predictor_vars, models = models,
-      k = k, seed = seed, folds = folds, boundary = boundary,
-      pointize = pointize, gwr_args = gwr_args, bayes_args = bayes_args,
-      summary = summary, quiet = quiet
-    )
-    # Reshape to match legacy return structure
-    out <- list()
-    if (!is.null(result$gwr_cv))   out$gwr_cv   <- result$gwr_cv
-    if (!is.null(result$bayes_cv)) out$bayes_cv <- result$bayes_cv
-    out$comparison <- result$overall
-    return(out)
-  }
-
-  # ==== In-sample path — fit then evaluate ====
-  dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
-
-  fit_list <- list()
-
-  if ("GWR" %in% models) {
-    .msg("evaluate_models(): fitting GWR ...")
-    fit_list$GWR <- do.call(fit_gwr_model,
-      c(list(data_sf = dat_sf, response_var = response_var,
-             predictor_vars = predictor_vars), gwr_args))
-  }
-
-  if ("Bayesian" %in% models) {
-    .msg("evaluate_models(): fitting Bayesian ...")
-    fit_list$Bayesian <- do.call(fit_bayesian_spatial_model,
-      c(list(data_sf = dat_sf, response_var = response_var,
-             predictor_vars = predictor_vars), bayes_args))
-  }
-
-  # Build legacy-shaped return
-  ret <- list(
-    formula = deparse(stats::reformulate(predictor_vars, response_var)),
-    data    = dat_sf
-  )
-
-  if (!is.null(fit_list$GWR)) {
-    gwr_obj <- fit_list$GWR
-    ret$gwr <- list(
-      fit       = gwr_obj,           # the spatial_fit object (new)
-      model     = gwr_obj$engine,    # raw GWmodel result (legacy compat)
-      bandwidth = gwr_obj$info$bandwidth,
-      adaptive  = gwr_obj$info$adaptive,
-      kernel    = gwr_obj$info$kernel,
-      AICc      = gwr_obj$info$AICc %||% NA_real_
-    )
-  }
-
-  if (!is.null(fit_list$Bayesian)) {
-    bay_obj <- fit_list$Bayesian
-    ret$bayes <- list(
-      fit            = bay_obj,           # the spatial_fit object (new)
-      model          = bay_obj$engine,    # raw brmsfit (legacy compat)
-      coord_scaling  = bay_obj$info$coord_scaling,
-      loo            = bay_obj$info$loo,
-      looic          = bay_obj$info$looic %||% NA_real_
-    )
-  }
-
-  ret$metrics <- compare_models(fit_list)
-
-  # Attach per-model residual Moran's I diagnostics for programmatic access
-  ret$residual_morans <- lapply(fit_list, residual_morans_i)
-
-  ret
-}
-
-
-#' Cross-validated comparison with optional tessellation (legacy interface)
-#'
-#' Thin wrapper preserving the original \code{evaluate_models_cv()} call
-#' signature.  New code should use \code{compare_models_cv()} directly.
-#'
-#' @inheritParams compare_models_cv
-#' @param tess_method Tessellation type for diagnostics.
-#' @param tess_args Extra arguments for tessellation builders.
-#' @return A list with overall, by_fold, tessellation.
-#' @export
-evaluate_models_cv <- function(
-    data_sf, response_var, predictor_vars,
-    k = 5, seed = 123, folds = NULL, boundary = NULL, pointize = "auto",
-    tess_method = c("grid", "hex", "square", "voronoi", "triangles"),
-    tess_args = list(), summary = c("mean", "median"),
-    models = c("GWR", "Bayesian"),
-    gwr_args = list(), bayes_args = list(),
-    quiet = FALSE
-) {
-  summary     <- match.arg(summary)
-  tess_method <- match.arg(tess_method)
-
-  # --- Build tessellation for diagnostics ---
-  proj_pts <- try(ensure_projected(coerce_to_points(data_sf, pointize)), silent = TRUE)
-  if (inherits(proj_pts, "try-error")) proj_pts <- ensure_projected(data_sf)
-
-  boundary_proj <- if (!is.null(boundary)) {
-    ensure_projected(boundary, proj_pts)
-  } else {
-    g    <- sf::st_geometry(proj_pts)
-    hull <- sf::st_convex_hull(sf::st_union(g))
-    bb   <- sf::st_bbox(hull)
-    diag <- sqrt((bb$xmax - bb$xmin)^2 + (bb$ymax - bb$ymin)^2)
-    sf::st_buffer(hull, dist = 0.01 * diag)
-  }
-
-  cells <- NULL
-  if (tess_method %in% c("grid", "hex", "square")) {
-    grid_type <- if (tess_method %in% c("hex", "square")) tess_method else "square"
-    args <- modifyList(list(boundary = boundary_proj, target_cells = 30,
-                            type = grid_type), tess_args)
-    cells <- do.call(create_grid_polygons, args)
-  } else if (tess_method %in% c("voronoi", "triangles")) {
-    args <- modifyList(list(points_sf = coerce_to_points(proj_pts, "auto"),
-                            boundary = boundary_proj, method = tess_method),
-                       tess_args)
-    cells <- do.call(build_tessellation, args)$cells
-  }
-  tessellation <- list(method = tess_method, args = tess_args, cells = cells)
-
-  # --- Run CV models via the new compare_models_cv ---
-  result <- compare_models_cv(
-    data_sf = data_sf, response_var = response_var,
-    predictor_vars = predictor_vars, models = models,
-    k = k, seed = seed, folds = folds, boundary = boundary,
-    pointize = pointize, gwr_args = gwr_args, bayes_args = bayes_args,
-    summary = summary, quiet = quiet
-  )
-
-  c(list(overall = result$overall, by_fold = result$by_fold,
-         tessellation = tessellation),
-    result[grep("_cv$", names(result))])
 }
