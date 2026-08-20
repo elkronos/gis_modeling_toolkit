@@ -125,22 +125,62 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   c(lower = as.numeric(lower), upper = as.numeric(upper))
 }
 
-#' @rdname gp_lengthscale_bounds
-#' @usage phi_prior_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
-#' @details \code{phi_prior_bounds} is a deprecated alias retained for
-#'   backward compatibility.  Previous versions computed bounds calibrated
-#'   for an exponential covariance (\code{3 / d}); the current
-#'   implementation delegates to \code{gp_lengthscale_bounds} which is
-#'   calibrated for the squared-exponential kernel used by
-#'   \code{brms::gp()}.
-#' @export
-phi_prior_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
-  .Deprecated("gp_lengthscale_bounds")
-  gp_lengthscale_bounds(coords_xy, q_small = q_small, max_n = max_n)
-}
 
-# Internal alias for backward compatibility
-.phi_prior_bounds <- phi_prior_bounds
+#' Choose GP basis count and boundary factor from the length-scale/domain ratio
+#'
+#' Implements the practical recommendations of Riutort-Mayol et al. (2023,
+#' Statistics and Computing 33:1) for the squared-exponential kernel used by
+#' \code{brms::gp()}:
+#' \preformatted{
+#'   c >= 3.2 * (ell/S),  c >= 1.2
+#'   m >= 1.75 * c / (ell/S)
+#' }
+#' where \code{S} is the half-range of the (scaled) coordinate domain.
+#'
+#' \code{m} is the count PER DIMENSION.  brms expands a full tensor grid over
+#' the GP covariates, so the fitted model carries \code{m^D} basis functions
+#' (\code{D = 2} for \code{gp(..x, ..y)}) -- see brms/R/data-predictor.R,
+#' \code{data_gp()}:  \code{out[[paste0("NBgp", pi)]] <- k ^ D}.  Because
+#' \code{brms::gp()} accepts a single \code{k} shared across dimensions, the
+#' per-dimension recommendations are collapsed into one value.
+#'
+#' The boundary factor is set from the UPPER length-scale bound -- it must
+#' contain the longest plausible correlation range -- while the basis count is
+#' set from the LOWER bound, because it must resolve the shortest.  Deriving
+#' both from the same length-scale estimate is the point: the previous rule
+#' scaled the basis count with the number of observations, which made the
+#' approximation cost grow as n while adding no resolution the data supported.
+#'
+#' @param coords_xy Numeric matrix of (already scaled) coordinates.
+#' @param ls_bounds Named numeric \code{c(lower, upper)}, as returned by
+#'   \code{gp_lengthscale_bounds()}.
+#' @param k_min Integer floor on the per-dimension basis count.
+#' @param max_basis Integer cap on the TOTAL basis count (\code{k^2}).  The
+#'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
+#'   so there is a single cap rather than two that can contradict each other.
+#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
+#'   \code{S} (numeric half-range) and \code{capped} (logical).
+#' @keywords internal
+#' @noRd
+.gp_basis_spec <- function(coords_xy, ls_bounds,
+                           k_min = 10L, max_basis = 2500L) {
+  S <- max(apply(coords_xy, 2, function(z) diff(range(z)) / 2))
+  if (!is.finite(S) || S <= 0) S <- 1
+
+  # Ratios of length-scale to domain half-range.
+  r_lo <- max(ls_bounds[["lower"]] / S, .Machine$double.eps)  # must resolve
+  r_hi <- max(ls_bounds[["upper"]] / S, r_lo)                 # must contain
+
+  c_val <- max(3.2 * r_hi, 1.2)
+  k_raw <- ceiling(1.75 * c_val / r_lo)
+
+  k_max  <- as.integer(floor(sqrt(max_basis)))
+  k_val  <- min(max(k_raw, k_min), k_max)
+  capped <- k_raw > k_max
+
+  list(k = as.integer(k_val), c = as.numeric(c_val),
+       S = as.numeric(S), capped = capped)
+}
 
 
 # NOTE: the previously defined .matern_rho() and .safe_ll() helpers were
