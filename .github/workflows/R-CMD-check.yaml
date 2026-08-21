@@ -51,9 +51,13 @@ jobs:
       # Stan dropped that typedef after 2.32.  The optional backends are the
       # job of the `backends` job below and of check-brms.yaml.
       #
-      # knitr and rmarkdown build the vignette during R CMD build, and the
-      # vignette calls library(ggplot2) unguarded, so these three are
-      # required here rather than optional.
+      # Four Suggests are not optional in practice.  knitr and rmarkdown
+      # build the vignette during R CMD build; the vignette calls
+      # library(ggplot2) unguarded; and tests/testthat.R opens with
+      # library(testthat), so without it the test stage errors rather than
+      # skipping.  _R_CHECK_FORCE_SUGGESTS_ = false does not cover this -- it
+      # only downgrades the complaint about absent Suggests, it does not stop
+      # check from running the test file.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'
@@ -62,6 +66,7 @@ jobs:
             any::knitr
             any::rmarkdown
             any::ggplot2
+            any::testthat
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2
@@ -109,6 +114,7 @@ jobs:
             any::knitr
             any::rmarkdown
             any::ggplot2
+            any::testthat
             any::sp
             any::GWmodel
             any::gstat
