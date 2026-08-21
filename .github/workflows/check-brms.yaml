@@ -44,10 +44,16 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
+          # StanHeaders and loo are pinned to CRAN on purpose.  The
+          # stan-dev repository above (needed for cmdstanr) also serves
+          # development builds of both, and pak prefers the higher version --
+          # which leaves CRAN's rstan compiling against headers that no longer
+          # define boost::ecuyer1988.
           extra-packages: |
             any::rcmdcheck
             any::brms
-            any::loo
+            cran::StanHeaders
+            cran::loo
             any::sp
             any::GWmodel
             any::gstat
