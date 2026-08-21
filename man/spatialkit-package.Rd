@@ -6,7 +6,7 @@
 \alias{spatialkit-package}
 \title{spatialkit: Spatial Tessellation, Modeling, and Cross-Validation Toolkit}
 \description{
-A modular toolkit for spatial analysis workflows including coordinate reference system management, Voronoi/Delaunay/grid tessellation, feature-to-polygon assignment, geographically weighted regression (GWR, via 'GWmodel'), Bayesian spatial Gaussian process regression (via 'brms'), spatial cross-validation with block and buffered strategies, and model comparison. Provides an S3 class system ('spatial_fit') with consistent predict, fitted, and residuals methods across model backends.
+A modular toolkit for spatial analysis workflows including coordinate reference system management, Voronoi/Delaunay/grid tessellation, feature-to-polygon assignment and cell-level aggregation. Model backends cover geographically weighted regression (GWR, via 'GWmodel'), Bayesian spatial Gaussian process regression (via 'brms') and random forests (via 'ranger'), each behind a common S3 class ('spatial_fit') with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds, forward variable selection, model comparison, prediction onto a regular surface, and area-of-applicability estimation to flag where a fitted model extrapolates beyond its training data.
 }
 \seealso{
 Useful links:

@@ -98,7 +98,10 @@ cat(sprintf("✓ Generated %d fake observation points\n", n_points))
 
 cat("\n--- Building tessellations ---\n")
 
-# 3a. Voronoi (k-means seeds)
+# 3a. Voronoi (~40 k-means seeds)
+# Cells are built around the SEEDS, not the observations: one cell per
+# observation would be a nearest-neighbour interpolation, not an aggregation,
+# and would not be comparable with the ~50-cell grids below.
 seeds <- get_voronoi_seeds(
   boundary      = nc_boundary,
   sample_points = points_sf,
@@ -106,7 +109,7 @@ seeds <- get_voronoi_seeds(
   n             = 40
 )
 tess_voronoi <- build_tessellation(
-  points_sf, boundary = nc_boundary,
+  seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 cat(sprintf("  Voronoi: %d cells\n", nrow(tess_voronoi$cells)))
@@ -229,8 +232,10 @@ gwr_fit <- tryCatch({
     kernel         = "bisquare"
   )
   cat("  ✓ GWR model fitted successfully\n")
-  cat(sprintf("    Bandwidth: %.1f | R²: %.3f\n",
-              fit$info$bandwidth, fit$metrics$r_squared))
+  # A spatial_fit stores the engine and its settings, not precomputed metrics.
+  met <- model_metrics(fit)
+  cat(sprintf("    Bandwidth: %.1f | R²: %.3f | RMSE: %.3f\n",
+              fit$info$bandwidth, met$R2, met$RMSE))
   fit
 }, error = function(e) {
   cat("  ✗ GWR skipped:", conditionMessage(e), "\n")
@@ -330,8 +335,9 @@ tryCatch({
     k              = 5,
     adaptive       = TRUE
   )
-  cat(sprintf("  CV RMSE: %.3f  |  CV R²: %.3f\n",
-              cv_results$summary$rmse, cv_results$summary$r_squared))
+  cat(sprintf("  CV RMSE: %.3f  |  CV R²: %.3f  |  CV MAE: %.3f\n",
+              cv_results$overall$RMSE, cv_results$overall$R2,
+              cv_results$overall$MAE))
 }, error = function(e) {
   cat("  CV skipped:", conditionMessage(e), "\n")
 })
