@@ -21,9 +21,13 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # Every Suggests use in this package is requireNamespace()-guarded,
+      # so an optional backend that will not install on one platform should
+      # skip its tests, not fail the run.
+      _R_CHECK_FORCE_SUGGESTS_: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: r-lib/actions/setup-pandoc@v2
 
@@ -31,6 +35,12 @@ jobs:
         with:
           r-version: 'release'
           use-public-rspm: true
+          # Load-bearing: cmdstanr is in Suggests and is NOT on CRAN. R CMD
+          # check honours DESCRIPTION's Additional_repositories, but pak --
+          # which setup-r-dependencies uses to resolve Suggests -- does not,
+          # so without this the dependency graph fails to solve with
+          # "Can't find package called cmdstanr" before any R code runs.
+          extra-repositories: 'https://stan-dev.r-universe.dev'
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
