@@ -7,3 +7,5 @@
 ^docs$
 ^man/figures$
 ^cran-comments\.md$
+^\.Rhistory$
+\.DS_Store$
