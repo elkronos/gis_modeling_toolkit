@@ -126,7 +126,14 @@ ggplot() +
 
 ## 3. Build Four Tessellation Types
 
-### 3a. Voronoi
+### 3a. Voronoi (~40 k-means seeds)
+
+Voronoi cells are built around *seed* points, not the observations
+themselves. Seeding one cell per observation would give 300 cells each
+containing a single point, which is a nearest-neighbour interpolation rather
+than an aggregation — and it would not be comparable with the ~50-cell grids
+below. `get_voronoi_seeds()` clusters the observations first, so cell size
+follows sampling density.
 
 ```{r tess-voronoi}
 seeds <- get_voronoi_seeds(
@@ -137,7 +144,7 @@ seeds <- get_voronoi_seeds(
 )
 
 tess_voronoi <- build_tessellation(
-  points_sf, boundary = nc_boundary,
+  seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 ```
@@ -321,11 +328,15 @@ gwr_fit <- tryCatch({
 })
 ```
 
+In-sample fit quality comes from `model_metrics()`; a `spatial_fit` stores the
+fitted engine and its settings (`$info`), not precomputed metrics.
+
 ```{r gwr-summary, eval=exists("gwr_fit") && !is.null(gwr_fit)}
+gwr_met <- model_metrics(gwr_fit)
 cat(sprintf("Bandwidth: %.1f  |  R²: %.3f  |  RMSE: %.3f\n",
             gwr_fit$info$bandwidth,
-            gwr_fit$metrics$r_squared,
-            gwr_fit$metrics$rmse))
+            gwr_met$R2,
+            gwr_met$RMSE))
 ```
 
 ### GWR Residuals — Choropleth per Tessellation
@@ -403,9 +414,9 @@ cv_results <- tryCatch({
 
 ```{r cv-results, eval=exists("cv_results") && !is.null(cv_results)}
 cat(sprintf("CV RMSE: %.3f  |  CV R²: %.3f  |  CV MAE: %.3f\n",
-            cv_results$summary$rmse,
-            cv_results$summary$r_squared,
-            cv_results$summary$mae))
+            cv_results$overall$RMSE,
+            cv_results$overall$R2,
+            cv_results$overall$MAE))
 ```
 
 ---
