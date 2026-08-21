@@ -194,6 +194,29 @@ every Bayesian fit change. Both are documented under "Breaking changes".
   fallback is logged. The prior actually applied is recorded in
   `$info$gp_lscale_prior`.
 
+* **Documentation.** The vignette and `inst/scripts/example_nc_demo.R` read
+  fit quality from `fit$metrics$r_squared` and CV results from
+  `cv$summary$rmse`. Neither field has ever existed: a `spatial_fit` carries
+  `$info` and computes metrics on demand via `model_metrics()`, and the CV
+  functions return `$overall` with columns `RMSE`/`MAE`/`R2`. Because
+  `sprintf()` returns `character(0)` when any argument has length zero, the
+  reporting lines printed *nothing* rather than erroring, so the shipped
+  vignette silently omitted every number it claimed to show. Both now use the
+  real accessors.
+
+* **Documentation.** The demo's Voronoi tessellation was built from all 300
+  observations rather than from the 40 k-means seeds it computed one line
+  earlier — the `seeds` object was discarded. That produced one cell per
+  observation (a nearest-neighbour interpolation, not an aggregation) and made
+  the side-by-side comparison 300 cells against two ~50-cell grids, while the
+  summary table described it as adapting to point density via k-means seeds.
+  The seeds are now used.
+
+* `dev/render_vignette.R` rendered the vignette against the *installed*
+  package, so it could not detect breakage in the working tree. It now loads
+  the source tree with `pkgload::load_all()` and prints the namespace path,
+  matching the other `dev/` scripts.
+
 ## New features
 
 * New `select_features_forward()`: greedy forward feature selection with

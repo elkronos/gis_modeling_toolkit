@@ -120,10 +120,12 @@ comparison$overall
 | Tessellation | `build_tessellation()`, `create_voronoi_polygons()`, `create_grid_polygons()`, `create_grid_polygons_cached()`, `clip_target_for()`, `ensure_stable_poly_id()` |
 | Seeding & resolution | `get_voronoi_seeds()`, `voronoi_seeds_kmeans()`, `voronoi_seeds_random()`, `determine_optimal_levels()` |
 | Assignment & aggregation | `assign_features_to_polygons()`, `summarize_by_cell()` |
-| Modeling | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `gp_lengthscale_bounds()`; S3: `predict()`, `fitted()`, `residuals()`, `coef()`, `summary()`, `model_metrics()` |
-| Cross-validation | `make_folds()`, `estimate_sac_range()`, `cv_gwr()`, `cv_bayes()`, `cv_spatial()` |
-| Comparison & diagnostics | `compare_models()`, `compare_models_cv()`, `evaluate_insample()`, `residual_morans_i()` |
-| Plotting | `plot_tessellation_map()` |
+| Modeling | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`, `gp_lengthscale_bounds()`; S3: `predict()`, `fitted()`, `residuals()`, `coef()`, `summary()`, `model_metrics()` |
+| Cross-validation | `make_folds()` (`block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`), `estimate_sac_range()`, `cv_gwr()`, `cv_bayes()`, `cv_rf()`, `cv_spatial()` |
+| Variable selection | `select_features_forward()`, `gwr_model_selection()` |
+| Prediction | `predict_surface()` |
+| Comparison & diagnostics | `compare_models()`, `compare_models_cv()`, `evaluate_insample()`, `residual_morans_i()`, `area_of_applicability()` |
+| Plotting | `plot_tessellation_map()`, `plot()` for `spatial_fit`, `plot_folds()` |
 
 `cv_spatial()` is the extensibility point: pass any `fit_fn(train_sf)` that returns a `spatial_fit` object and it plugs into the same fold infrastructure, metrics, and comparison tooling.
 
@@ -143,9 +145,20 @@ preds <- predict(fit, newdata = new_sites)
 
 `model_metrics()` *does* require the response in `newdata`, since it computes error metrics against observed values.
 
+### Prediction surfaces
+
+Building `newdata` by hand is the fiddly part of producing the thing most people actually want from a fitted spatial model — a map. `predict_surface()` builds a regular grid over the training extent, joins covariates from the nearest feature, clips to a boundary, predicts in chunks and returns `sf`:
+
+```r
+surf <- predict_surface(fit, n_cells = 5000, covariates = pts, boundary = county)
+plot(surf[".pred"])
+```
+
+Chunking matters for `bayesian_fit`, where the posterior draw matrix is `n_draws x n_newdata` and a fine grid would exhaust memory long before the fit itself would. Pass `se = TRUE` for a posterior-SD surface where the backend exposes draws.
+
 ## Parallel cross-validation
 
-All three CV functions accept a `parallel` argument for fold-level parallelism via `parallel::mclapply()` (macOS/Linux; falls back to sequential on Windows with a message). This matters most for `cv_bayes()`, where every fold is a full MCMC run:
+Every CV function — `cv_gwr()`, `cv_bayes()`, `cv_rf()` and `cv_spatial()` — accepts a `parallel` argument for fold-level parallelism via `parallel::mclapply()` (macOS/Linux; falls back to sequential on Windows with a message). This matters most for `cv_bayes()`, where every fold is a full MCMC run:
 
 ```r
 cv <- cv_bayes(pts, "price", "elev", k = 5, parallel = TRUE)  # auto-detect cores
@@ -156,7 +169,21 @@ cv <- cv_gwr(pts, "price", "elev", k = 5, parallel = 4L)      # explicit count
 
 **Residual Moran's I.** `residual_morans_i()` computes Moran's I on model residuals with the Cliff & Ord randomisation variance, using row-standardised k-NN weights by default (sparse via `FNN` + `Matrix` when available) or a user-supplied weight matrix (base or sparse `Matrix`). `compare_models()` runs it automatically and warns when residual spatial structure remains.
 
-**Aggregation standard errors.** The `..se_*` columns from `summarize_by_cell()` are IID standard errors by default, which are anticonservative under within-cell spatial correlation. Pass `deff = "kish"` to apply Kish's design-effect correction from estimated intra-class correlations (separate ICCs for response and predictors), or a fixed numeric design effect. Inspect what was applied via `attr(result, "deff_applied")`.
+**Aggregation standard errors.** The `..se_*` columns from `summarize_by_cell()` are IID standard errors by default, which are anticonservative under within-cell spatial correlation. Pass `deff = "kish"` to apply Kish's design-effect correction from estimated intra-class correlations (separate ICCs for response and predictors), a fixed numeric design effect, or `deff = "variogram"` to compute it from a fitted variogram instead of one pooled correlation. Kish assumes every pair in a cell is equally correlated regardless of separation, an assumption that degrades as cells grow; the variogram option lets correlation decay with distance, which is what having fitted a variogram is for. Substituting a constant off-diagonal correlation recovers Kish exactly. Inspect what was applied via `attr(result, "deff_applied")`.
+
+**Area of applicability.** A fitted model returns a number for any location you hand it, including locations whose predictor values look nothing like anything it was trained on. Those predictions are extrapolations dressed as interpolations, and a cross-validation score says nothing about them — the held-out folds were drawn from the same predictor distribution as the training data. `area_of_applicability()` implements the dissimilarity index of Meyer & Pebesma (2021) and marks where the score applies:
+
+```r
+surf <- predict_surface(fit, n_cells = 5000, covariates = pts)
+aoa  <- area_of_applicability(surf, model = fit, folds = folds)
+surf$.pred[!aoa$aoa$AOA] <- NA          # blank out the extrapolations
+```
+
+Pass the `make_folds()` result you actually validated with. Without it the reference distance is each training point's nearest neighbour anywhere in the data, which for clustered data is very close, giving a conservative area; with it the reference distances are larger and the area is correspondingly wider. That is not a loophole — the area of applicability is defined relative to a performance estimate, and a spatially blocked estimate is a claim about predicting further away.
+
+**Random forests and location.** `fit_rf_model()` defaults to `include_coords = FALSE`. Handing a forest the x and y coordinates lets it reproduce the training surface almost exactly by memorising location, then fail badly anywhere it has not seen; random cross-validation does not catch this, because nearby points leak between folds (Meyer et al. 2019). Relatedly, `fitted()` on an `rf_fit` returns **out-of-bag** predictions rather than in-sample ones — in-sample predictions from a forest are close to memorisation and would make `summary()` report a fictitious R-squared. The out-of-bag error is itself a *random* hold-out, so it is optimistic under spatial autocorrelation for the same reason random k-fold is; use `cv_rf()` for a blocked estimate.
+
+**Variable selection.** `select_features_forward()` scores candidates against spatially blocked inner folds, which is the entire point of having it: random inner folds inside blocked outer folds select variables that look predictive only because nearby points leak between train and test, and the outer loop then reports honest-looking numbers for a dishonestly chosen feature set. `gwr_model_selection()` is the fast in-sample counterpart — the same forward search scored by AICc — and is worth cross-checking against the blocked estimate when the answer matters.
 
 **GWR collinearity.** `fit_gwr_model()` checks the global condition number of the predictor matrix *and* spot-checks local condition numbers within bandwidth windows at sampled locations, since spatially clustered subsets can be collinear even when the global matrix is not.
 
