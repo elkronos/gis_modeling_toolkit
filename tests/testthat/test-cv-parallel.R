@@ -23,11 +23,24 @@ test_that(".resolve_n_cores auto-detects when TRUE", {
 
 test_that(".resolve_n_cores falls back to 1L on Windows", {
   skip_on_os(c("mac", "linux", "solaris"))
+
+  # Ask for an EXPLICIT count rather than parallel = TRUE.  Auto-detection
+  # yields detectCores(logical = FALSE) - 1, and a CI runner reporting one or
+  # two PHYSICAL cores makes that 1 already -- so the fallback has nothing to
+  # reduce and correctly stays silent.  This test asserted the message through
+  # that path and therefore depended on the machine having >= 3 physical cores;
+  # it had never run anywhere until CI, because it is skipped on every other OS.
   expect_message(
-    cores <- spatialkit:::.resolve_n_cores(TRUE),
+    cores <- spatialkit:::.resolve_n_cores(parallel = 4L),
     "not available on Windows"
   )
   expect_equal(cores, 1L)
+
+  # Auto-detection must also come back sequential, whatever the core count.
+  expect_equal(suppressMessages(spatialkit:::.resolve_n_cores(TRUE)), 1L)
+
+  # ...and nothing should be said when no parallelism was asked for.
+  expect_no_message(spatialkit:::.resolve_n_cores(FALSE))
 })
 
 
