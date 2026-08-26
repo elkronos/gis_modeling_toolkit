@@ -49,7 +49,11 @@ meaning any improvement is accepted.}
 \item{max_fits}{Abort if the sweep would exceed this many model fits.
 Default 5000.}
 
-\item{seed}{RNG seed for inner fold construction.}
+\item{seed}{RNG seed.  It governs both the inner fold construction and the
+cross-validation itself: it is forwarded to \code{cv_spatial(seed = )},
+which draws one RNG stream per fold from it, so it also seeds the
+\emph{learner} inside every fold.  A stochastic \code{fit_fn} is therefore
+reproducible from this one value.}
 
 \item{quiet}{Suppress progress messages. Default FALSE.}
 }
@@ -82,21 +86,35 @@ that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 \code{max_fits} guards against that.
 }
 \examples{
-\dontrun{
-  fit_fn <- function(tr, vars) fit_gwr_model(tr, "y", vars)
-  sel <- select_features_forward(pts, "y", c("a", "b", "c"), fit_fn)
+\donttest{
+if (requireNamespace("GWmodel", quietly = TRUE) &&
+    requireNamespace("sp", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 120
+  pts <- st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+               a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$resp <- 3 * pts$a + 2 * pts$b + rnorm(n, 0, 0.3)
+
+  fit_fn <- function(tr, vars) fit_gwr_model(tr, "resp", vars, bandwidth = 30)
+  sel <- select_features_forward(pts, "resp", c("a", "b", "noise"), fit_fn,
+                                 k = 3, quiet = TRUE)
   sel$selected
 }
 }
+}
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()}
 }
 \concept{cross-validation}

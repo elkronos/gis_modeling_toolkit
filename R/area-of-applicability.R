@@ -104,21 +104,52 @@
 #' values before passing them.  They are rescaled to mean 1 here purely so the
 #' recorded values are readable.
 #'
+#' @param fill_vars Character vector of predictors that this package appended
+#'   to \code{vars} itself (the \code{"..x"}/\code{"..y"} coordinate columns of
+#'   a coordinate-using model).  The caller has never seen them, so a missing
+#'   weight for one is filled in rather than raising an error, and unnamed
+#'   weights may be one-per-\emph{user-visible}-predictor.
 #' @keywords internal
 #' @noRd
-.aoa_weight_vector <- function(weights, vars) {
+.aoa_weight_vector <- function(weights, vars, fill_vars = character(0)) {
   if (is.null(weights)) return(stats::setNames(rep(1, length(vars)), vars))
   if (!is.numeric(weights))
     stop("area_of_applicability(): `weights` must be numeric.", call. = FALSE)
+  fill_vars    <- intersect(fill_vars, vars)
+  user_vars    <- setdiff(vars, fill_vars)
   if (is.null(names(weights))) {
-    if (length(weights) != length(vars))
+    # An unnamed vector may be one value per predictor the CALLER knows about;
+    # the coordinate columns appended for an include_coords model are filled in
+    # below rather than demanded from someone who never heard of them.
+    if (length(weights) == length(vars)) {
+      names(weights) <- vars
+    } else if (length(fill_vars) > 0L && length(weights) == length(user_vars)) {
+      names(weights) <- user_vars
+    } else {
       stop(sprintf(paste0("area_of_applicability(): unnamed `weights` must ",
-                          "have one value per predictor (%d), got %d. Name ",
+                          "have one value per predictor (%d%s), got %d. Name ",
                           "them to be unambiguous."),
-                   length(vars), length(weights)), call. = FALSE)
-    names(weights) <- vars
+                   length(vars),
+                   if (length(fill_vars) > 0L)
+                     sprintf(" including the coordinate columns, or %d without them",
+                             length(user_vars)) else "",
+                   length(weights)), call. = FALSE)
+    }
   }
   missing_w <- setdiff(vars, names(weights))
+  # A model fitted with include_coords = TRUE has "..x"/"..y" appended to
+  # predictor_vars BEFORE this point, so a user who supplied importances for
+  # the model's real predictors used to get a hard error naming two columns
+  # they never heard of.  Default them instead to the mean of the weights that
+  # WERE supplied (1 when none were), i.e. location counts as much as a typical
+  # predictor -- which is the honest default for a model that splits on it.
+  fill_missing <- intersect(missing_w, fill_vars)
+  if (length(fill_missing) > 0L) {
+    known <- weights[intersect(user_vars, names(weights))]
+    known <- known[is.finite(known) & known >= 0]
+    weights[fill_missing] <- if (length(known)) mean(known) else 1
+    missing_w <- setdiff(missing_w, fill_missing)
+  }
   if (length(missing_w) > 0L)
     stop("area_of_applicability(): `weights` has no entry for: ",
          paste(sQuote(missing_w), collapse = ", "), call. = FALSE)
@@ -213,9 +244,15 @@
 #' folds contribute the training set that was actually available -- which is
 #' the point of having built them.
 #'
+#' @param row_ids Optional vector of \code{..row_id} values, one per training
+#'   row, in training-row order.  When supplied, the \code{train}/\code{test}
+#'   entries of a list-shaped \code{folds} are treated as \code{..row_id}
+#'   VALUES and resolved to row positions with \code{match()}; when
+#'   \code{NULL} they are treated as positions, as before.  Fold labels are
+#'   always positional -- they are one label per row by definition.
 #' @keywords internal
 #' @noRd
-.aoa_fold_splits <- function(folds, n) {
+.aoa_fold_splits <- function(folds, n, row_ids = NULL) {
   if (is.null(folds)) return(NULL)
 
   if (is.atomic(folds) && !is.list(folds)) {
@@ -240,6 +277,8 @@
       te <- which(f == lv)
       list(test = te, train = setdiff(seq_len(n), te))
     })
+    # which() already returns positions, so there is nothing to resolve.
+    row_ids <- NULL
   } else {
     sp <- if (is.list(folds) && !is.null(folds$folds)) folds$folds else folds
   }
@@ -254,11 +293,32 @@
          "list of train/test splits, or a vector of fold labels.",
          call. = FALSE)
 
+  # Every make_folds() branch emits ..row_id VALUES in its train/test slots, as
+  # its @return documents, and those coincide with row POSITIONS only when the
+  # training data had no pre-existing ..row_id column.  cv_gwr(), cv_bayes()
+  # and cv_spatial() all stamp one before prep_model_data(), so the documented
+  # workflow -- "pass the same make_folds() result you passed to cv_spatial()"
+  # -- hands us IDs.  Indexing X with them computed the training reference
+  # distances for the WRONG rows whenever the IDs happened to land inside 1:n,
+  # silently shifting the threshold.  Resolve, do not index.
+  .resolve <- function(v, j, slot) {
+    if (is.null(row_ids)) return(as.integer(v))
+    pos <- match(v, row_ids)
+    if (anyNA(pos))
+      stop(sprintf(paste0("area_of_applicability(): fold %d's %s set names %d ",
+                          "..row_id value(s) that are not in the training data ",
+                          "(first: %s). `folds` was built on a different data ",
+                          "set, or on rows that have since been removed."),
+                   j, slot, sum(is.na(pos)),
+                   format(v[is.na(pos)][1L])), call. = FALSE)
+    as.integer(pos)
+  }
+
   seen <- integer(n)
   out  <- vector("list", length(sp))
   for (j in seq_along(sp)) {
-    te <- as.integer(sp[[j]]$test)
-    tr <- as.integer(sp[[j]]$train)
+    te <- .resolve(sp[[j]]$test,  j, "test")
+    tr <- .resolve(sp[[j]]$train, j, "train")
     if (anyNA(te) || anyNA(tr) || any(te < 1L | te > n) || any(tr < 1L | tr > n))
       stop(sprintf(paste0("area_of_applicability(): fold %d refers to rows ",
                           "outside 1:%d. `folds` was probably built on a ",
@@ -410,7 +470,14 @@
 #' @param train_sf Training data, if not taken from \code{model}.
 #' @param predictor_vars Predictor names, if not taken from \code{model}.
 #' @param weights Optional named numeric vector of predictor importances. Any
-#'   positive scale works.
+#'   positive scale works. When \code{model} was fitted with
+#'   \code{include_coords = TRUE}, the coordinates \code{"..x"} and
+#'   \code{"..y"} are measured as predictors too (see below), and you are not
+#'   expected to supply importances for them: any you leave out default to the
+#'   mean of the weights you did supply, so location counts about as much as a
+#'   typical predictor. Naming them explicitly overrides that. An unnamed
+#'   vector may have one value per predictor either with or without the two
+#'   coordinate columns.
 #' @param folds Cross-validation folds: a \code{\link{make_folds}} result, a
 #'   list of \code{train}/\code{test} splits, or a vector of fold labels with
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
@@ -489,6 +556,15 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   if (length(predictor_vars) == 0L)
     stop("area_of_applicability(): no predictors.", call. = FALSE)
 
+  # An explicit use_fnn = TRUE on a machine without FNN reached FNN::get.knnx()
+  # and produced R's bare "there is no package called 'FNN'", with no hint that
+  # use_fnn = FALSE is a working alternative.  The default is guarded by
+  # requireNamespace(); an explicit request needs the same courtesy.
+  if (isTRUE(use_fnn) && !requireNamespace("FNN", quietly = TRUE))
+    stop("area_of_applicability(): `use_fnn = TRUE` but package 'FNN' is not ",
+         "installed. Install it with install.packages(\"FNN\"), or pass ",
+         "use_fnn = FALSE to use the dense fallback.", call. = FALSE)
+
   # A model fitted with the coordinates as predictors splits on location, so
   # the dissimilarity index has to measure location too.  Without this, a
   # prediction point far outside the training extent but with ordinary
@@ -496,6 +572,7 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # extrapolation the index exists to catch, and exactly the failure mode that
   # makes coordinate predictors dangerous in the first place.
   coord_model <- !is.null(model) && isTRUE(model$info$include_coords)
+  coord_vars  <- if (coord_model) c("..x", "..y") else character(0)
   if (coord_model) {
     if (!inherits(train_sf, "sf") || !inherits(newdata, "sf"))
       stop("area_of_applicability(): this model uses the coordinates as ",
@@ -511,6 +588,12 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
 
   X_tr_full <- .aoa_matrix(train_sf, predictor_vars, "the training data")
   X_nw_full <- .aoa_matrix(newdata,  predictor_vars, "`newdata`")
+
+  # Fold train/test slots from make_folds() are ..row_id VALUES, not row
+  # positions; keep the IDs alongside so .aoa_fold_splits() can resolve them.
+  tr_meta <- if (inherits(train_sf, "sf")) sf::st_drop_geometry(train_sf) else
+    as.data.frame(train_sf)
+  tr_row_ids <- if ("..row_id" %in% names(tr_meta)) tr_meta[["..row_id"]] else NULL
 
   # Training rows carrying NA or Inf cannot define a reference distance.
   # complete.cases() alone would let an Inf through, and it would then poison
@@ -529,6 +612,9 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
            "values, so `folds` row positions can no longer be matched. Remove ",
            "the incomplete rows before building folds.", call. = FALSE)
     X_tr_full <- X_tr_full[tr_ok, , drop = FALSE]
+    # Unreachable when folds were supplied (the branch above stops), but keeps
+    # the IDs aligned with X_tr_full for anything added later.
+    if (!is.null(tr_row_ids)) tr_row_ids <- tr_row_ids[tr_ok]
   }
 
   sc <- .aoa_scaling(X_tr_full)
@@ -551,11 +637,12 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # numbers.  Multiplying by sqrt(w) instead (contributing w to the squared
   # distance) is the other defensible reading of "weighted Euclidean" and is
   # NOT what is used here.
-  w_vec <- unname(w <- .aoa_weight_vector(weights, predictor_vars)[used_vars])
+  w_vec <- unname(w <- .aoa_weight_vector(weights, predictor_vars,
+                                          fill_vars = coord_vars)[used_vars])
   Z_tr  <- sweep(Z_tr, 2L, w_vec, "*")
   Z_nw  <- sweep(Z_nw, 2L, w_vec, "*")
 
-  splits <- .aoa_fold_splits(folds, nrow(Z_tr))
+  splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids)
 
   norm     <- .aoa_normalizer(Z_tr, max_n = normalizer_max_n, seed = seed)
   train_d  <- .aoa_train_dist(Z_tr, splits = splits, use_fnn = use_fnn,
@@ -570,8 +657,13 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     as.numeric(threshold)
   }
 
-  # NA predictors in newdata give NA DI rather than a misleading number.
-  nw_ok <- stats::complete.cases(Z_nw)
+  # NA or Inf predictors in newdata give NA DI rather than a misleading number.
+  # Same test as the training side above, deliberately: complete.cases() alone
+  # lets an Inf through, and an Inf predictor then produces Inf - Inf = NaN in
+  # the dense |a|^2 + |b|^2 - 2a.b path.  NaN counts as NA downstream so the
+  # outcome was tolerable, but the asymmetry between the two checks was not
+  # intentional and made the two paths disagree on what "usable" means.
+  nw_ok <- apply(Z_nw, 1L, function(r) all(is.finite(r)))
   DI <- rep(NA_real_, nrow(Z_nw))
   if (any(nw_ok))
     DI[nw_ok] <- .aoa_min_dist(Z_nw[nw_ok, , drop = FALSE], Z_tr,

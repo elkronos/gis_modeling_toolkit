@@ -27,9 +27,18 @@ make_folds(
 \arguments{
 \item{points_sf}{An sf object.}
 
-\item{k}{Integer; number of folds.}
+\item{k}{Integer; number of folds.  Required for every method, but not every
+method honours it: \code{"buffered_loo"} and \code{"nndm"} are
+leave-one-out schemes and always return \code{k = n} regardless of what
+was asked for, while \code{"block_kfold"} lowers it when the grid yields
+fewer than \code{k} non-empty blocks and \code{"leave_location_out"}
+lowers it when there are fewer than \code{k} distinct groups.  Read the
+\code{k} element of the returned list rather than assuming the requested
+value; a reduction is logged.}
 
-\item{method}{One of "random_kfold", "block_kfold", "buffered_loo".}
+\item{method}{One of \code{"random_kfold"}, \code{"block_kfold"},
+\code{"buffered_loo"}, \code{"leave_location_out"} or \code{"nndm"}.  See
+\strong{Details} for what each one does and when it is appropriate.}
 
 \item{seed}{Optional integer RNG seed.}
 
@@ -84,6 +93,9 @@ A list with method, k, folds, assignment, params.  The
 \code{train}/\code{test} elements of each fold contain \code{..row_id}
 values (equal to row positions when the input has no pre-existing
 \code{..row_id} column), consistent with the \code{assignment} tibble.
+The returned \code{k} is the number of folds actually built, which is not
+always the \code{k} that was requested (see the \code{k} argument above),
+and \code{length(folds)} always matches it.
 }
 \description{
 Builds train/test splits using random K-fold, spatial block K-fold, or
@@ -148,14 +160,14 @@ distance matching Leave-One-Out Cross-Validation for map validation.
 \doi{10.1111/2041-210X.13851}
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

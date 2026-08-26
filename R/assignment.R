@@ -14,7 +14,10 @@
 #'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area, \code{"first"} keeps the first match (original order-dependent
 #'   behavior).
-#' @return An sf object with polygon_id_col attached.
+#' @return An sf object with polygon_id_col attached. Any column of
+#'   `features_sf` whose name would collide with the polygon ID column is
+#'   dropped before the spatial join (with a warning), so re-assigning an
+#'   already-assigned layer replaces the old IDs rather than failing.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -57,7 +60,21 @@ assign_features_to_polygons <- function(
   }
 
   p_sel <- p[, id_col, drop = FALSE]
-  
+
+  # st_join() suffixes columns present on both sides (`poly_id.x` /
+  # `poly_id.y`), which would defeat the rename below and leave
+  # `polygon_id_col` absent -- silently returning zero rows.  This is reachable
+  # simply by re-assigning already-assigned points, or points that came out of
+  # summarize_by_cell().  Drop the colliding column(s) up front instead.
+  collide <- intersect(unique(c(id_col, polygon_id_col)), names(f))
+  if (length(collide)) {
+    .log_warn(
+      "assign_features_to_polygons(): `features_sf` already carries column(s) %s, which would collide with the polygon ID column; dropping them before the spatial join. Rename them first if you need to keep them.",
+      paste(sprintf("'%s'", collide), collapse = ", ")
+    )
+    f <- f[, setdiff(names(f), collide), drop = FALSE]
+  }
+
   f$`..pre_join_row_id` <- seq_len(nrow(f))
   
   f_gtypes <- unique(as.character(sf::st_geometry_type(f, by_geometry = TRUE)))
@@ -78,7 +95,17 @@ assign_features_to_polygons <- function(
   if (!identical(id_col, polygon_id_col)) {
     names(joined)[names(joined) == id_col] <- polygon_id_col
   }
-  
+  if (!polygon_id_col %in% names(joined)) {
+    stop(sprintf(
+      paste0("assign_features_to_polygons(): the spatial join did not produce ",
+             "the expected '%s' column (join result has: %s). This usually ",
+             "means a column-name collision between `features_sf` and ",
+             "`polygons_sf`; rename the offending column in `features_sf`."),
+      polygon_id_col, paste(names(joined), collapse = ", ")
+    ), call. = FALSE)
+  }
+
+
   # Deterministic tie-break for features matching multiple polygons.
   # The previous approach (keep first duplicate) was order-dependent.
   dup_mask <- duplicated(joined[["..pre_join_row_id"]])
@@ -304,7 +331,16 @@ assign_features_to_polygons <- function(
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell summaries
 #'   including `n`, `cell_weight`, and `..sd_*` / `..se_*` columns.
 #'   When `deff != 1`, an attribute `"deff_applied"` is attached to the result
-#'   recording the design effect(s) used.
+#'   recording the design effect(s) used — including when `cells_sf` is
+#'   supplied, in which case its per-cell `deff` vector is realigned to the
+#'   joined row order and cells with no observations carry `NA`. The one
+#'   exception is `deff = "kish"` with an estimated ICC of 0: no correction is
+#'   applied, so no attribute is attached.
+#'
+#'   The ID column keeps its input type when `cells_sf`'s ID column and the
+#'   summarised IDs already have the same class. When the classes differ, both
+#'   are coerced to character in order to join (logged as a warning), and the
+#'   returned ID column is therefore character.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -421,8 +457,8 @@ summarize_by_cell <- function(assigned_points_sf,
     if (length(keep) == 0L) return(character(0))
     is_num <- vapply(keep, function(nm) is.numeric(df[[nm]]), logical(1))
     if (!all(is_num)) {
-      .msg(sprintf("summarize_by_cell(): non-numeric columns skipped: %s",
-                   paste(keep[!is_num], collapse = ", ")))
+      .msg(sprintf("summarize_by_cell(): non-numeric %s columns skipped: %s",
+                   label, paste(keep[!is_num], collapse = ", ")))
     }
     keep[is_num]
   }
@@ -543,7 +579,15 @@ summarize_by_cell <- function(assigned_points_sf,
       use_vgm <- FALSE
       deff <- 1
     } else {
-      coords_mat <- sf::st_coordinates(assigned_points_sf)[, 1:2, drop = FALSE]
+      # st_coordinates() returns one row per VERTEX, so any non-POINT geometry
+      # (this function accepts POLYGON and MULTIPOINT features) would misalign
+      # coords_mat with `df` and feed the wrong points into every cell.
+      # coerce_to_points() takes representative points, matching the guard in
+      # estimate_sac_range().
+      pts_for_deff <- assigned_points_sf
+      if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
+        pts_for_deff <- coerce_to_points(pts_for_deff, "auto")
+      coords_mat <- sf::st_coordinates(pts_for_deff)[, 1:2, drop = FALSE]
       vgm_deff <- .cell_deff_variogram(coords_mat, df[[id_col]], cor_fn,
                                        max_n = deff_max_n)
       .msg(sprintf(
@@ -643,9 +687,35 @@ summarize_by_cell <- function(assigned_points_sf,
         if (cells_id != id_col) {
           names(cells_slim)[names(cells_slim) == cells_id] <- id_col
         }
-        out[[id_col]] <- as.character(out[[id_col]])
-        cells_slim[[id_col]] <- as.character(cells_slim[[id_col]])
+        # Join on the native type when both sides already agree.  Coercing
+        # unconditionally made the returned ID type depend on an unrelated
+        # argument and turned integer IDs into "1", "10", "2", ...
+        if (!identical(class(out[[id_col]]), class(cells_slim[[id_col]]))) {
+          .log_warn(
+            "summarize_by_cell(): cells_sf$%s is <%s> but the summarised IDs are <%s>; coercing both to character to join, so the returned '%s' column is character.",
+            id_col, paste(class(cells_slim[[id_col]]), collapse = "/"),
+            paste(class(out[[id_col]]), collapse = "/"), id_col
+          )
+          out[[id_col]] <- as.character(out[[id_col]])
+          cells_slim[[id_col]] <- as.character(cells_slim[[id_col]])
+        }
+
+        # dplyr::left_join() rebuilds attributes from the `x` template, which
+        # silently drops "deff_applied".  Save it, then re-attach it, mapping
+        # the per-cell vector onto the joined row order (cells with no
+        # observations get NA).
+        deff_attr   <- attr(out, "deff_applied")
+        pre_join_id <- as.character(out[[id_col]])
+
         out <- dplyr::left_join(cells_slim, out, by = id_col)
+
+        if (!is.null(deff_attr)) {
+          if (length(deff_attr$deff) == length(pre_join_id)) {
+            lookup <- stats::setNames(deff_attr$deff, pre_join_id)
+            deff_attr$deff <- unname(lookup[as.character(out[[id_col]])])
+          }
+          attr(out, "deff_applied") <- deff_attr
+        }
       } else {
         .log_warn("summarize_by_cell(): cells_sf has no matching ID column; returning plain data.frame.")
       }

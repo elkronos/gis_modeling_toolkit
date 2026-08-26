@@ -23,8 +23,11 @@
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
-#'   Set to NULL to disable.
+#'   Default 4326. Set to NULL to disable.
 #' @return An sf polygon layer re-ordered with sequential IDs in id_col.
+#'   Non-polygonal rows are **dropped** (with a warning), so the result can
+#'   have fewer rows than the input; if no polygonal rows remain, an error is
+#'   raised.
 #' @export
 ensure_stable_poly_id <- function(polygons_sf,
                                   id_col = "poly_id",
@@ -40,6 +43,14 @@ ensure_stable_poly_id <- function(polygons_sf,
   # Keep only polygon rows
   gtypes <- as.character(sf::st_geometry_type(polygons_sf, by_geometry = TRUE))
   keep   <- gtypes %in% c("POLYGON", "MULTIPOLYGON")
+  if (any(!keep)) {
+    dropped <- table(gtypes[!keep])
+    .log_warn(
+      "ensure_stable_poly_id(): dropping %d non-polygon row(s) (%s); only POLYGON/MULTIPOLYGON features are given IDs.",
+      sum(!keep),
+      paste(sprintf("%s: %d", names(dropped), as.integer(dropped)), collapse = ", ")
+    )
+  }
   polygons_sf <- polygons_sf[keep, , drop = FALSE]
   if (nrow(polygons_sf) == 0L)
     stop("ensure_stable_poly_id(): no polygon rows found.")
@@ -132,8 +143,13 @@ ensure_stable_poly_id <- function(polygons_sf,
     }
   }
 
-  paste0(type, "::", as.integer(target_cells), "::",
-         digest::digest(list(geom_hash = geom_hash, crs = crs_token, args = dots)))
+  # `target_cells` goes into the hashed payload rather than into the key text:
+  # as.integer() truncated it, so 25.2 and 25.7 collided on one key (the second
+  # call silently got the first one's grid), and a NULL target_cells collapsed
+  # paste0() to character(0), which crashes the exists() lookup downstream.
+  paste0(type, "::",
+         digest::digest(list(geom_hash = geom_hash, crs = crs_token,
+                             target_cells = target_cells, args = dots)))
 }
 
 # -----------------------------------------------------------------------------
@@ -147,14 +163,15 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'
 #' @param boundary An sf or sfc polygonal object.
 #' @param target_cells Approximate desired number of cells.
-#' @param type Grid type: "hex" or "square".
+#' @param type Grid type: `"square"` (the default) or `"hex"`, matching
+#'   [create_grid_polygons()].
 #' @param ... Additional arguments forwarded to create_grid_polygons().
 #' @param cache_env Environment for memoized grids. Default .gmt_cache.
 #' @return An sf data frame with a stable poly_id column.
 #' @export
 create_grid_polygons_cached <- function(boundary,
                                         target_cells,
-                                        type = c("hex", "square"),
+                                        type = c("square", "hex"),
                                         ...,
                                         cache_env = .gmt_cache) {
   type <- match.arg(type)

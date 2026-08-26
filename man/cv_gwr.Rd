@@ -59,7 +59,12 @@ on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).}
 }
 \value{
-A list with overall, fold_metrics, predictions, folds, formula, adaptive.
+A list with \code{overall}, \code{fold_metrics},
+\code{predictions}, \code{folds}, \code{n_folds_attempted},
+\code{n_folds_succeeded}, \code{formula} and \code{adaptive}.  The two
+fold counts make a run where every fold failed visible in the return
+value rather than only in a warning, since \code{overall} is a
+well-formed all-\code{NA} row either way.
 }
 \description{
 K-fold cross-validation for GWR
@@ -83,14 +88,14 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

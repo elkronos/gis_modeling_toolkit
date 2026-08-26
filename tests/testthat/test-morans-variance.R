@@ -3,11 +3,13 @@
 #
 # Guards against the denominator bug where an extra factor of n made Var(I)
 # ~n x too small, inflating z-scores by ~sqrt(n).
+#
+# The fit stub and its residuals method live in helper-moranstub.R, on a
+# test-only subclass -- see the note there on why registering against
+# "spatial_fit" itself was wrong.
 # ---------------------------------------------------------------------------
 
 test_that("residual_morans_i variance matches the Cliff & Ord randomisation formula", {
-  skip_if_not_installed("sf")
-
   set.seed(7)
   n <- 25
   coords_mat <- cbind(runif(n), runif(n))
@@ -17,19 +19,10 @@ test_that("residual_morans_i variance matches the Cliff & Ord randomisation form
   )
   resid_vec <- rnorm(n)
 
-  fake_fit <- structure(
-    list(data_sf = pts, residuals = resid_vec, engine = list()),
-    class = "spatial_fit"
-  )
-  registerS3method("residuals", "spatial_fit",
-                   function(object, ...) object$residuals)
+  fake_fit <- moran_stub_fit(pts, resid_vec)
 
   # Row-standardised weight matrix (4 neighbours each, weight 1/4)
-  W <- matrix(0, n, n)
-  for (i in seq_len(n)) {
-    nbrs <- sample(setdiff(seq_len(n), i), 4)
-    W[i, nbrs] <- 1 / 4
-  }
+  W <- moran_stub_weights(n, k = 4, seed = 7)
 
   res <- residual_morans_i(fake_fit, weights = W)
   expect_true(is.list(res))
@@ -59,8 +52,10 @@ test_that("residual_morans_i variance matches the Cliff & Ord randomisation form
 })
 
 test_that("residual_morans_i does not flag white-noise residuals as significant", {
-  skip_if_not_installed("sf")
-  skip_if_not_installed("FNN")
+  # No skip_if_not_installed("FNN"): .build_knn_weights() has a dense
+  # order()-based fallback that is refused only above n = 5000, and n = 100
+  # here.  Guarding this on FNN skipped the very test the file exists for
+  # wherever FNN was absent -- which is every CI job but one.
 
   # With the extra-n bug, z was inflated ~sqrt(n) and pure noise came out
   # "significant" almost always. With the correct variance, white noise
@@ -71,15 +66,32 @@ test_that("residual_morans_i does not flag white-noise residuals as significant"
     data.frame(x = runif(n), y = runif(n), resp = rnorm(n)),
     coords = c("x", "y"), crs = 32631
   )
-  fake_fit <- structure(
-    list(data_sf = pts, residuals = rnorm(n), engine = list()),
-    class = "spatial_fit"
-  )
-  registerS3method("residuals", "spatial_fit",
-                   function(object, ...) object$residuals)
+  fake_fit <- moran_stub_fit(pts, rnorm(n))
 
   res <- residual_morans_i(fake_fit)
   expect_true(is.finite(res$z))
   # |z| for iid noise should be modest; the buggy version produced |z| ~ 10+
   expect_lt(abs(res$z), 4)
+})
+
+test_that("the default kNN weights agree whether or not FNN is available", {
+  # The dense fallback must build the same row-standardised k-NN matrix as
+  # the kd-tree path; otherwise the statistic silently depends on which
+  # optional packages happen to be installed.
+  set.seed(5)
+  n <- 40
+  coords <- cbind(runif(n), runif(n))
+
+  W_dense <- spatialkit:::.build_knn_weights(coords, k = 6L,
+                                             use_fnn = FALSE, use_matrix = FALSE)
+  expect_equal(dim(W_dense), c(n, n))
+  expect_equal(unname(rowSums(W_dense)), rep(1, n), tolerance = 1e-12)
+  expect_equal(sum(diag(W_dense)), 0)               # no self-neighbours
+
+  skip_if_not_installed("FNN")
+  skip_if_not_installed("Matrix")
+  W_fast <- spatialkit:::.build_knn_weights(coords, k = 6L,
+                                            use_fnn = TRUE, use_matrix = TRUE)
+  expect_equal(as.matrix(W_fast), W_dense, tolerance = 1e-12,
+               ignore_attr = TRUE)
 })

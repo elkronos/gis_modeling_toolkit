@@ -64,6 +64,12 @@
     # below 10 and n never entered the lower bound.)
     return(as.integer(max(10L, min(50L, floor(0.9 * n)))))
   }
+  # Guard locally rather than relying on the caller, matching .to_sp().  Both
+  # current callers check first, so this only changes the message a future
+  # caller would see.
+  if (!requireNamespace("sp", quietly = TRUE))
+    stop(".fallback_bandwidth(): package 'sp' is required for the fixed-",
+         "bandwidth extent calculation.", call. = FALSE)
   bb <- sp::bbox(sp_dat)
   dx <- bb[1, 2] - bb[1, 1]
   dy <- bb[2, 2] - bb[2, 1]
@@ -74,10 +80,10 @@
 
 #' Extract fitted or predicted values from a GWmodel GWR result
 #'
-#' **Unified extraction function** used by both in-sample evaluation
-#' (10_evaluation.R) and cross-validation prediction (09_cross_validation.R).
-#' Replaces the previously duplicated .extract_gwr_fitted() and
-#' .extract_gwr_predictions() functions.
+#' **Unified extraction function** used by \code{fitted.gwr_fit()} (in-sample
+#' evaluation) and \code{predict.gwr_fit()} (prediction at new locations), both
+#' in R/model-classes.R.  Replaces the previously duplicated
+#' .extract_gwr_fitted() and .extract_gwr_predictions() functions.
 #'
 #' Implements four strategies in order:
 #'   1. Look for a direct prediction/fitted column in the SDF.
@@ -136,13 +142,39 @@
     cn_mm  <- .norm_names(colnames(mm))
     cn_sdf <- .norm_names(names(sdf_data))
     shared <- intersect(cn_mm, cn_sdf)
-    if (length(shared) >= 1L) {
+    # EVERY model-matrix column must be matched.  With a partial match this
+    # reconstructs a linear predictor missing one or more terms and returns it
+    # as the fitted value: plausible-looking numbers that are simply wrong,
+    # feeding fitted(), residuals(), summary() and every metric with no
+    # warning.  A GWmodel column rename or a differently-spelled factor
+    # contrast is enough to trigger it, so fall through to strategies 3 and 4
+    # instead of guessing.
+    if (length(shared) == ncol(mm)) {
       mm_sub <- mm[, match(shared, cn_mm), drop = FALSE]
-      cf_sub <- as.matrix(sdf_data[, match(shared, cn_sdf), drop = FALSE])
-      if (nrow(cf_sub) == n) {
-        y_hat <- rowSums(mm_sub * cf_sub)
-        if (any(is.finite(y_hat))) return(y_hat)
+      cf_df  <- sdf_data[, match(shared, cn_sdf), drop = FALSE]
+      # A non-numeric coefficient column cannot be used either way: as.matrix()
+      # would coerce the WHOLE selection to character and make `mm_sub *
+      # cf_sub` throw an uncaught "non-numeric argument to binary operator",
+      # while data.matrix() would quietly substitute factor codes for it.
+      # Refuse and fall through instead.
+      if (!all(vapply(cf_df, is.numeric, logical(1)))) {
+        .log_warn(paste0(".extract_gwr_values(): GWmodel's SDF carries a ",
+                         "non-numeric column for a model term, so the local ",
+                         "coefficients cannot be multiplied through; trying ",
+                         "the remaining strategies."))
+      } else {
+        cf_sub <- data.matrix(cf_df)
+        if (nrow(cf_sub) == n) {
+          y_hat <- rowSums(mm_sub * cf_sub)
+          if (any(is.finite(y_hat))) return(y_hat)
+        }
       }
+    } else if (length(shared) >= 1L) {
+      .log_warn(paste0(".extract_gwr_values(): only %d of %d model-matrix ",
+                       "term(s) matched a column in GWmodel's SDF, so the ",
+                       "local coefficients cannot reconstruct the full linear ",
+                       "predictor; trying the remaining strategies."),
+                length(shared), ncol(mm))
     }
   }
   
@@ -248,9 +280,39 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   if (!requireNamespace("sp", quietly = TRUE))
     stop("fit_gwr_model(): package 'sp' is required (for GWmodel interop).",
          call. = FALSE)
+  # match.arg() has already rejected every invalid value, so .validate_kernel()
+  # would be a no-op here; it earns its keep in cv_gwr(), where `kernel`
+  # arrives unvalidated.
   kernel <- match.arg(kernel)
-  kernel <- .validate_kernel(kernel)
-  
+
+  # prep_model_data() accepts character(0) so an intercept-only spatial GP can
+  # be fitted; a GWR needs at least one predictor to vary locally, and
+  # reformulate() would otherwise fail with a bare message naming neither
+  # this function nor the argument.
+  if (!is.character(predictor_vars) || length(predictor_vars) < 1L)
+    stop("fit_gwr_model(): `predictor_vars` must name at least one predictor; ",
+         "there are no local coefficients to estimate otherwise.",
+         call. = FALSE)
+
+  # `bandwidth` is used unchecked below (twice: in the local-collinearity
+  # spot-check and as the fitted bandwidth), and the clamping block further
+  # down runs only in the adaptive branch.  Unvalidated, NA gives "missing
+  # value where TRUE/FALSE needed", a length-2 vector gives "the condition has
+  # length > 1", and with adaptive = FALSE a zero or negative distance reaches
+  # GWmodel::gwr.basic() untouched.
+  if (!is.null(bandwidth) &&
+      (!is.numeric(bandwidth) || length(bandwidth) != 1L ||
+       !is.finite(bandwidth) || bandwidth <= 0))
+    stop(sprintf(paste0("fit_gwr_model(): `bandwidth` must be a single ",
+                        "positive finite number (or NULL to select one ",
+                        "automatically). With adaptive = %s it is %s."),
+                 if (isTRUE(adaptive)) "TRUE" else "FALSE",
+                 if (isTRUE(adaptive))
+                   "the number of nearest neighbours in each local window"
+                 else
+                   "a distance in the CRS units of `data_sf`"),
+         call. = FALSE)
+
   # prep_model_data() handles: point coercion, CRS projection, NA/non-finite
   # row removal — no need to duplicate that logic here.
   # When called from CV internals the data is already prepped; skip the
@@ -268,17 +330,44 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   
   # Warn or error if response looks non-continuous.
   # Gaussian GWR assumes a continuous response; binary data should error.
+  #
+  # The three degenerate cases are separated because folding them together
+  # misdiagnoses two of them: all(numeric(0) == round(numeric(0)), na.rm =
+  # TRUE) is TRUE, so an all-dropped dataset used to be reported as "binary
+  # (0 unique values)" and a constant response as "binary (1 unique value)",
+  # while a genuinely binary non-integer response (1.5 / 2.5) failed the
+  # integer-like gate and passed unremarked.
   resp_vals <- sf::st_drop_geometry(dat)[[response_var]]
   if (is.numeric(resp_vals)) {
-    is_integer_like <- all(resp_vals == round(resp_vals), na.rm = TRUE)
-    n_unique <- length(unique(resp_vals[is.finite(resp_vals)]))
-    if (is_integer_like && n_unique <= 2L) {
+    usable   <- resp_vals[is.finite(resp_vals)]
+    n_usable <- length(usable)
+    uniq     <- unique(usable)
+    n_unique <- length(uniq)
+
+    if (n_usable < 2L) {
       stop(
-        sprintf("fit_gwr_model(): response '%s' is binary (%d unique values). Gaussian GWR is invalid for binary outcomes. Consider GWmodel::ggwr.basic() with family = 'binomial'.",
-                response_var, n_unique),
+        sprintf("fit_gwr_model(): response '%s' has %d usable (finite, non-missing) value(s) after cleaning; a GWR needs at least two. Check for NA/Inf in the response and predictors.",
+                response_var, n_usable),
         call. = FALSE
       )
-    } else if (is_integer_like && n_unique <= 10L) {
+    }
+    if (n_unique < 2L) {
+      stop(
+        sprintf("fit_gwr_model(): response '%s' is constant (a single distinct finite value, %s). There is nothing to regress.",
+                response_var, format(uniq[[1L]])),
+        call. = FALSE
+      )
+    }
+    if (n_unique == 2L) {
+      stop(
+        sprintf("fit_gwr_model(): response '%s' is binary (2 distinct values: %s). Gaussian GWR is invalid for binary outcomes. Consider GWmodel::ggwr.basic() with family = 'binomial'.",
+                response_var, paste(format(sort(uniq)), collapse = ", ")),
+        call. = FALSE
+      )
+    }
+
+    is_integer_like <- all(usable == round(usable))
+    if (is_integer_like && n_unique <= 10L) {
       warning(
         sprintf("fit_gwr_model(): response '%s' is integer-valued with only %d unique values. Gaussian GWR assumes a continuous response; results may be unreliable for counts or ordinal outcomes.",
                 response_var, n_unique),
@@ -317,9 +406,23 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       # (nearest-neighbour) design sub-matrix.  This catches cases where the
       # global condition number looks benign but spatially clustered subsets
       # have near-zero predictor variance.
+      #
+      # The sample is drawn under .with_seed() and the previous RNG state is
+      # restored on exit, as .safe_dist() and make_folds() already do.  Drawing
+      # from the global stream would make a diagnostic silently shift every
+      # downstream random draw -- and it fires only when n_obs > 30 AND there
+      # are >= 2 numeric predictors, so the same script would give different
+      # fold assignments depending on how many predictors a model happens to
+      # carry.  cv_gwr() calls this once per fold.
       coords <- sf::st_coordinates(dat)
       n_spot <- min(30L, n_obs)
-      spot_idx <- if (n_obs <= 30L) seq_len(n_obs) else sample.int(n_obs, n_spot)
+      spot_idx <- if (n_obs <= 30L) {
+        seq_len(n_obs)
+      } else {
+        cleanup_spot <- .with_seed(42L)
+        on.exit(cleanup_spot(), add = TRUE)
+        sample.int(n_obs, n_spot)
+      }
       n_local_extreme <- 0L
       for (si in spot_idx) {
         dists <- sqrt((coords[, 1] - coords[si, 1])^2 +

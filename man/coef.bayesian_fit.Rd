@@ -12,7 +12,10 @@
 \item{...}{Ignored.}
 }
 \value{
-A data.frame of fixed-effect posterior summaries.
+A matrix of fixed-effect posterior summaries, as returned by
+\code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
+\code{fixef()} call errors, following the \code{coef()} contract described
+in \code{\link{new_spatial_fit}}.
 }
 \description{
 Extract Bayesian model fixed-effect summaries

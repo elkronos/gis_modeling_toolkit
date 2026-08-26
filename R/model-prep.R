@@ -8,13 +8,25 @@
 #'
 #' @param data_sf An sf object.
 #' @param response_var Response variable column name.
-#' @param predictor_vars Predictor column names.
+#' @param predictor_vars Predictor column names.  May be \code{character(0)}
+#'   for an intercept-only model (\code{fit_bayesian_spatial_model()} supports
+#'   one; the GWR and random-forest backends do not and reject it themselves).
 #' @param boundary Optional sf/sfc for CRS alignment.
-#' @param pointize Strategy for non-point geometry coercion.
+#' @param pointize Strategy for non-point geometry coercion, passed to
+#'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
+#'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
+#'   for \code{"point_on_surface"}), \code{"line_midpoint"} or
+#'   \code{"bbox_center"}.
 #' @param require_response Logical; if FALSE the response column is not
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
-#' @return An sf object (points) in a projected CRS, cleaned.
+#' @return An sf object with POINT geometry, cleaned of rows carrying missing
+#'   or non-finite values in the modelling columns.  The CRS is projected
+#'   whenever one can be established: \code{\link{ensure_projected}} returns
+#'   the input unchanged when its CRS is missing \emph{and} the coordinates do
+#'   not look like lon/lat, so a CRS-less local survey grid is passed through
+#'   as-is rather than silently re-projected.  Set the CRS on \code{data_sf}
+#'   if a projected result matters.
 #' @family model fitting
 #' @examples
 #' library(sf)
@@ -28,16 +40,20 @@
 #' @export
 prep_model_data <- function(data_sf, response_var, predictor_vars,
                             boundary = NULL,
-                            pointize = c("auto", "surface", "centroid",
-                                         "line_midpoint", "bbox_center"),
+                            pointize = c("auto", "surface", "point_on_surface",
+                                         "centroid", "line_midpoint",
+                                         "bbox_center"),
                             require_response = TRUE) {
   if (!inherits(data_sf, "sf"))
     stop("prep_model_data(): 'data_sf' must be an sf object.")
   pointize <- match.arg(pointize)
   if (!is.character(response_var) || length(response_var) != 1L)
     stop("prep_model_data(): 'response_var' must be a single column name.")
-  if (!is.character(predictor_vars) || length(predictor_vars) < 1L)
-    stop("prep_model_data(): 'predictor_vars' must be a non-empty character vector.")
+  # character(0) is allowed: an intercept-only spatial GP is a legitimate
+  # model (see fit_bayesian_spatial_model()).  Backends that genuinely need a
+  # predictor reject an empty set themselves, where the message can say why.
+  if (!is.character(predictor_vars))
+    stop("prep_model_data(): 'predictor_vars' must be a character vector.")
 
   req_cols <- if (require_response) c(response_var, predictor_vars) else predictor_vars
   miss <- setdiff(req_cols, names(data_sf))
@@ -59,7 +75,7 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     if (!inherits(bnd, "sf"))
       stop("prep_model_data(): 'boundary' must be sf/sfc when supplied.")
     bnd <- ensure_projected(bnd)
-    data_sf <- ensure_projected(data_sf, bnd)
+    data_sf <- ensure_projected(data_sf, .crs_or_null(bnd))
   } else {
     data_sf <- ensure_projected(data_sf)
   }
@@ -98,8 +114,10 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'
 #' Subsamples large datasets to avoid O(n^2) memory and time cost.
 #'
-#' @param coords_xy Numeric matrix of (x, y) coordinates.
-#' @param q_small Numeric quantile for the lower bound. Default 0.25.
+#' @param coords_xy Numeric matrix or data.frame of coordinates with at least
+#'   two columns; the first two are used.
+#' @param q_small Numeric quantile for the lower bound, a single number in
+#'   \code{[0, 1]}. Default 0.25.
 #'   Previous versions used 0.1, but the 10th percentile can be
 #'   dominated by within-cluster spacing in clustered data, producing
 #'   a misleadingly small lower bound.
@@ -112,13 +130,27 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #' gp_lengthscale_bounds(xy)
 #' @export
 gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
+  # Without these, a vector `coords_xy` fails inside .safe_dist() with
+  # "argument is of length zero" (nrow(NULL)) and an out-of-range `q_small`
+  # fails inside quantile() -- neither message naming the argument at fault.
+  if (!(is.matrix(coords_xy) || is.data.frame(coords_xy)))
+    stop("gp_lengthscale_bounds(): 'coords_xy' must be a matrix or data.frame ",
+         "of coordinates, not a ", class(coords_xy)[1L], ".", call. = FALSE)
+  if (ncol(coords_xy) < 2L)
+    stop("gp_lengthscale_bounds(): 'coords_xy' must have at least two columns ",
+         "(x and y); it has ", ncol(coords_xy), ".", call. = FALSE)
+  if (!is.numeric(q_small) || length(q_small) != 1L || !is.finite(q_small) ||
+      q_small < 0 || q_small > 1)
+    stop("gp_lengthscale_bounds(): 'q_small' must be a single number in [0, 1].",
+         call. = FALSE)
+
   d <- .safe_dist(coords_xy, max_n = max_n)
   d <- d[d > 0]
   if (!length(d)) return(c(lower = 0.001, upper = 1))
   dmax  <- max(d)
   dq    <- stats::quantile(d, probs = q_small, names = FALSE, type = 7)
   # For SE kernel: 5% correlation at distance d  =>  l = d / sqrt(2 ln 20)
-  se_range_factor <- sqrt(2 * log(20))          # ≈ 2.448
+  se_range_factor <- sqrt(2 * log(20))          # approx. 2.448
   lower <- dq   / se_range_factor
   upper <- dmax / se_range_factor
   upper <- max(upper, lower * 1.2)               # ensure separation

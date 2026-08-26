@@ -11,9 +11,16 @@
 
 \item{newdata}{Optional sf object carrying the same predictors. It is
 transformed to the CRS used at fitting time first, so a forest that
-includes the coordinates is not fed a different coordinate system.}
+includes the coordinates is not fed a different coordinate system.
+Categorical predictors must not carry levels absent from the training
+data; an unseen level is an error, not a guess.}
 
-\item{...}{Passed to \code{ranger}'s predict method.}
+\item{...}{Passed to \code{ranger}'s predict method. Arguments that make
+\code{ranger} return a matrix rather than one value per row --
+\code{predict.all = TRUE}, \code{type = "quantiles"}, \code{type = "se"}
+with \code{predict.all} -- are rejected, because this method's contract is
+one number per row of \code{newdata}. Call
+\code{predict(fit$engine, data = ...)} directly for those.}
 }
 \value{
 Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for

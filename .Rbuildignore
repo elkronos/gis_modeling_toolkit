@@ -8,4 +8,8 @@
 ^man/figures$
 ^cran-comments\.md$
 ^\.Rhistory$
+^\.gitignore$
+# Stray graphics-device output. Base plot() called with no open device writes
+# Rplots.pdf into the working directory, and R CMD build will happily ship it.
+^Rplots\.pdf$
 \.DS_Store$

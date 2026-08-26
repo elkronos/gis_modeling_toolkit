@@ -66,11 +66,13 @@
 #' @param object A \code{spatial_fit} (e.g. from \code{fit_gwr_model()} or
 #'   \code{fit_bayesian_spatial_model()}).
 #' @param grid Optional \code{sf} POINT layer to predict onto.  When
-#'   \code{NULL}, a regular grid is built over the training extent.
+#'   \code{NULL}, a regular grid is built over the training extent.  Must have
+#'   at least one row.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.
 #' @param n_cells Approximate cell count used to derive \code{cell_size}.
-#'   Default 10000.
+#'   Default 10000.  Also ignored when \code{grid} is supplied -- the grid you
+#'   pass is used verbatim.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc}; grid points outside
 #'   it are dropped.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
@@ -81,14 +83,31 @@
 #'   backend supports it.  Default FALSE.
 #' @param ... Passed to \code{predict()}.
 #' @return An \code{sf} POINT layer with a \code{.pred} column (and
-#'   \code{.pred_se} when \code{se = TRUE} and available).  The grid resolution
-#'   is attached as attribute \code{"cell_size"}.
+#'   \code{.pred_se} when \code{se = TRUE} and available).  For an
+#'   auto-generated grid the resolution is attached as attribute
+#'   \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
+#'   \code{"cell_size"} attribute that object already carried -- usually
+#'   \code{NULL}, and \code{NULL} for certain if the grid had to be
+#'   re-projected, since \code{st_transform()} does not preserve custom
+#'   attributes.  The resolution of a grid you built is not this function's to
+#'   infer.
 #' @family prediction
 #' @examples
-#' \dontrun{
-#'   fit  <- fit_gwr_model(pts, "y", "x")
-#'   surf <- predict_surface(fit, n_cells = 2000)
+#' \donttest{
+#' if (requireNamespace("GWmodel", quietly = TRUE) &&
+#'     requireNamespace("sp", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 60
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
+#'   fit  <- fit_gwr_model(pts, "price", "elev", bandwidth = 30)
+#'   surf <- predict_surface(fit, n_cells = 500, covariates = pts)
 #'   plot(surf[".pred"])
+#' }
 #' }
 #' @export
 predict_surface <- function(object, grid = NULL, cell_size = NULL,
@@ -110,13 +129,19 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   } else {
     if (!inherits(grid, "sf"))
       stop("predict_surface(): `grid` must be an sf object.", call. = FALSE)
-    grid <- ensure_projected(grid, target_crs = target_crs)
+    # The boundary-clip path below guards its own empty result; without this
+    # an empty `grid` reaches seq(1L, 0L, by = chunk_size) and aborts with
+    # "wrong sign in 'by' argument", which names nothing the caller passed.
+    if (nrow(grid) == 0L)
+      stop("predict_surface(): `grid` has no rows; there is nothing to ",
+           "predict onto.", call. = FALSE)
+    grid <- ensure_projected(grid, target_crs = .crs_or_null(target_crs))
   }
   res <- attr(grid, "cell_size")
 
   # ---- clip ----------------------------------------------------------------
   if (!is.null(boundary)) {
-    bnd <- ensure_projected(sf::st_geometry(boundary), target_crs = target_crs)
+    bnd <- ensure_projected(sf::st_geometry(boundary), target_crs = .crs_or_null(target_crs))
     keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)
@@ -135,13 +160,18 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
            "that already carries them.", call. = FALSE)
     if (!inherits(covariates, "sf"))
       stop("predict_surface(): `covariates` must be an sf object.", call. = FALSE)
+    # st_nearest_feature() against an empty layer fails inside sf with a
+    # message that names neither argument.
+    if (nrow(covariates) == 0L)
+      stop("predict_surface(): `covariates` has no rows, so there is no ",
+           "nearest feature to take predictor values from.", call. = FALSE)
 
     cov_missing <- setdiff(missing_preds, names(covariates))
     if (length(cov_missing) > 0L)
       stop("predict_surface(): `covariates` lacks column(s) ",
            paste(sQuote(cov_missing), collapse = ", "), ".", call. = FALSE)
 
-    covariates <- ensure_projected(covariates, target_crs = target_crs)
+    covariates <- ensure_projected(covariates, target_crs = .crs_or_null(target_crs))
     nn  <- sf::st_nearest_feature(grid, covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
@@ -162,8 +192,19 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   # colMeans(draws) for summary = "mean" and the column medians otherwise.
   # Deriving unconditionally would silently change .pred for anyone passing
   # summary = "median".
+  #
+  # Test a PREFIX match, not `.dots$summary`.  `$` on a list partial-matches
+  # only in the other direction, so list(summ = "median")$summary is NULL --
+  # but R's argument matching does partial-match a supplied name onto a
+  # formal, so predict_surface(fit, se = TRUE, summ = "median") is legal and
+  # arrives at predict() as summary = "median".  The old test missed it and
+  # .pred silently became colMeans(d): exactly what the paragraph above says
+  # must not happen.
   .dots <- list(...)
-  derive_pred <- se_ok && is.null(.dots$summary)
+  dot_names <- names(.dots)
+  supplied_summary <- !is.null(dot_names) &&
+    any(nzchar(dot_names) & startsWith("summary", dot_names))
+  derive_pred <- se_ok && !supplied_summary
 
   for (s in starts) {
     e   <- min(s + chunk_size - 1L, n)
