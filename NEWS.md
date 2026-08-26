@@ -1,7 +1,8 @@
 # spatialkit 1.0.0.9000
 
-This is the **development version**; nothing below has been released.
-Everything is relative to **1.0.0** (git tag `v1.0.0`).
+This is the **development version**; nothing below is on CRAN yet.
+Everything is relative to **1.0.0**, the version currently on CRAN
+(published 2026-08-07).
 
 Release will need a **major** version bump: three exported functions have been
 removed, and several defaults change the result of a fit or a comparison. Both
@@ -640,7 +641,7 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
 
 # spatialkit 1.0.0
 
-First public release (git tag `v1.0.0`); never submitted to CRAN.
+First CRAN release, published 2026-08-07.
 
 * CRS management: `ensure_projected()`, `harmonize_crs()`,
   `coerce_to_points()`, `prep_model_data()`.

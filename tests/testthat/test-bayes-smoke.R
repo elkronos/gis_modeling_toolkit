@@ -6,8 +6,11 @@
 # it never samples a posterior.  This fits one deliberately tiny model so the
 # Bayesian path is exercised end to end.
 #
-# Kept out of CRAN checks and the main matrix: it needs a working Stan
-# toolchain and takes ~1 minute even at this size.
+# Opt-in only, via SPATIALKIT_TEST_BRMS.  skip_on_cran() is NOT enough: the
+# r-lib GitHub actions set NOT_CRAN=true, so these five Stan fits would run in
+# every matrix job that happens to have brms available -- slow, and dependent
+# on whether Stan sampled cleanly on that runner rather than on anything this
+# package controls.  check-brms.yaml sets the variable; nothing else does.
 #
 # NOTE on argument names: fit_bayesian_spatial_model() has no `...`, so only
 # its actual formals may be passed -- there is no `refresh`.  cv_bayes()
@@ -48,6 +51,8 @@ fit_smoke_model <- function(pts, ...) {
 
 test_that("fit_bayesian_spatial_model returns a usable bayesian_fit", {
   skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan smoke tests")
   skip_if_not_installed("brms")
 
   pts <- bayes_smoke_points()
@@ -77,6 +82,8 @@ test_that("fit_bayesian_spatial_model returns a usable bayesian_fit", {
 
 test_that("predict() and fitted() on a bayesian_fit are length-aligned and finite", {
   skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan smoke tests")
   skip_if_not_installed("brms")
 
   pts <- bayes_smoke_points()
@@ -99,6 +106,8 @@ test_that("predict() and fitted() on a bayesian_fit are length-aligned and finit
 
 test_that("predict() honours summary and type when newdata is NULL", {
   skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan smoke tests")
   skip_if_not_installed("brms")
 
   # Regression: predict.bayesian_fit() used to short-circuit to the cached
@@ -126,6 +135,8 @@ test_that("predict() honours summary and type when newdata is NULL", {
 
 test_that("a supplied control list keeps the package's adapt_delta default", {
   skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan smoke tests")
   skip_if_not_installed("brms")
 
   # Regression: control = list(...) used to replace the defaults wholesale,
@@ -148,6 +159,8 @@ test_that("a supplied control list keeps the package's adapt_delta default", {
 
 test_that("cv_bayes runs a small spatial cross-validation", {
   skip_on_cran()
+  skip_if(!nzchar(Sys.getenv("SPATIALKIT_TEST_BRMS")),
+          "set SPATIALKIT_TEST_BRMS=true to run the Stan smoke tests")
   skip_if_not_installed("brms")
 
   pts <- bayes_smoke_points(n = 60)

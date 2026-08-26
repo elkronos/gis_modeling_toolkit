@@ -73,12 +73,20 @@ coordinates out. It just stops being visible unless you measure it.
 `make_folds()`'s default is `random_kfold`, deliberately: it is the baseline
 you compare against, not the one to report.
 
-## Not on CRAN
+## Installation
 
-`spatialkit` is not on CRAN. `install.packages("spatialkit")` will not find it.
+`spatialkit` is on CRAN:
 
 ```r
-# From GitHub
+install.packages("spatialkit")
+```
+
+That gets you **1.0.0** (published 2026-08-07). The development version below
+is ahead of it and changes several defaults — see `NEWS.md` before upgrading a
+running analysis.
+
+```r
+# Development version from GitHub
 # install.packages("remotes")
 remotes::install_github("elkronos/gis_modeling_toolkit")
 

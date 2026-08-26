@@ -48,6 +48,7 @@ jobs:
       # so an optional backend that will not install on one platform should
       # skip its tests, not fail the run.
       _R_CHECK_FORCE_SUGGESTS_: false
+      SPATIALKIT_TEST_BRMS: true
 
     steps:
       - uses: actions/checkout@v5
