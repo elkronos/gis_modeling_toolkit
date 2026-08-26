@@ -5,24 +5,22 @@ tree so it does not drift out of date while development continues. Every
 "<fill in>" below must be replaced with a real result before this is used for an
 actual submission.
 
-## Assumption this file is written under
+## What this submission is
 
-**This is treated as a FIRST submission of spatialkit to CRAN.** Nothing in the
-repository corroborates a CRAN release history: `v1.0.0` is a git tag,
-`DESCRIPTION` carries no CRAN URL, there is no CRAN badge, `NEWS.md` records
-1.0.0 as a GitHub release, and the README documents installation only via
-`remotes::install_github()`. An earlier draft of this file described the
-submission as "an update to spatialkit 1.0.0"; that claim had no supporting
-evidence and has been removed.
+**This is an update to `spatialkit` 1.0.0, published on CRAN 2026-08-07.**
 
-If 1.0.0 *was* in fact published on CRAN, this file needs rewriting as an update
-— the version number, the reverse-dependency section and the framing of the
-breaking changes all differ.
+The version to submit is **not** `1.0.0.9000` — that is the development string.
+Pick a release number before submitting and set `Version:` in `DESCRIPTION`
+accordingly. A **major** bump to `2.0.0` is the honest choice: three exported
+functions are removed, and several defaults change the result of a fit or a
+comparison (see "Breaking changes" in `NEWS.md`). Update this file's version
+references at the same time.
 
-Because it is a first submission, the version to submit is **not**
-`1.0.0.9000`. Pick a release number before submitting (the removal of three
-exported functions and the changed default results of every Bayesian fit argue
-for `2.0.0`; see `NEWS.md`), and set `Version:` in `DESCRIPTION` accordingly.
+### Reverse dependencies
+
+The CRAN page for 1.0.0 lists no reverse depends, imports or suggests, so there
+is nothing to break. Confirm with `revdepcheck::revdep_check()` before
+submitting rather than relying on this note.
 
 ## Summary
 
@@ -171,7 +169,8 @@ In descending order of user impact:
 
 ## Reverse dependencies
 
-None. This is a first submission, so there can be none.
+None listed on the CRAN page for 1.0.0. Re-confirm with
+`revdepcheck::revdep_check()` before submitting.
 
 ## Comments for reviewers
 
