@@ -7,9 +7,11 @@
 gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 }
 \arguments{
-\item{coords_xy}{Numeric matrix of (x, y) coordinates.}
+\item{coords_xy}{Numeric matrix or data.frame of coordinates with at least
+two columns; the first two are used.}
 
-\item{q_small}{Numeric quantile for the lower bound. Default 0.25.
+\item{q_small}{Numeric quantile for the lower bound, a single number in
+\code{[0, 1]}. Default 0.25.
 Previous versions used 0.1, but the 10th percentile can be
 dominated by within-cluster spacing in clustered data, producing
 a misleadingly small lower bound.}

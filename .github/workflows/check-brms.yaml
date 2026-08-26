@@ -1,9 +1,32 @@
 # Weekly check with the brms / Stan backend installed.
 #
-# brms pulls in a Stan toolchain and compiles models, which takes minutes per
-# run -- too slow for every push.  The main R-CMD-check workflow therefore
-# skips every brms-guarded code path.  This workflow closes that gap on a
-# schedule, and can be triggered by hand before a CRAN submission.
+# brms pulls in a Stan toolchain, which takes many minutes to install -- too
+# slow for every push.  This job runs it on a schedule, and can be triggered by
+# hand before a CRAN submission.
+#
+# WHAT THIS ACTUALLY VALIDATES.  Be precise about it, because the obvious
+# reading ("the brms code paths are exercised") is not true today:
+#
+#   * that brms and its Stan toolchain install and load at all, which is the
+#     single most common way this optional backend breaks for users;
+#   * that R CMD check passes with brms PRESENT, which is a different code path
+#     from the matrix jobs: every requireNamespace("brms") guard flips, so
+#     .model_available("Bayesian") becomes TRUE and compare_models_cv() takes
+#     its Bayesian branch rather than dropping it;
+#   * exactly ONE test that guards on brms
+#     (tests/testthat/test-multipoint-geometry.R, the .already_prepped
+#     MULTIPOINT rejection).
+#
+# It does NOT sample a single posterior.  test-gp-basis.R exercises the basis
+# and prior internals, which need no brms at all, and both brms examples
+# (fit_bayesian_spatial_model, cv_bayes) are in \dontrun{} precisely because
+# they compile Stan models -- so R CMD check never runs them.
+#
+# TO CLOSE THE REMAINING GAP, the test suite needs a small end-to-end smoke
+# test: skip_if_not_installed("brms") + skip_on_cran(), a ~40-row dataset,
+# chains = 1, iter = 200, compute_loo = FALSE, asserting that the fit is a
+# bayesian_fit and that predict()/fitted() return nrow(data) finite values.
+# That belongs in tests/, not here.
 on:
   schedule:
     - cron: '0 6 * * 1'   # Mondays 06:00 UTC

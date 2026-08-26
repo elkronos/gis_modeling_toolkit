@@ -112,6 +112,7 @@ test_that("the projection choice changes downstream distance estimates", {
   skip_if_not_installed("gstat")
 
   pts <- ll_points(c(-124, -67), c(25, 49), n = 400, seed = 3)
+  set.seed(11)
   pts$z <- stats::rnorm(nrow(pts))
 
   auto <- ensure_projected(pts)                  # equal-area
@@ -121,14 +122,40 @@ test_that("the projection choice changes downstream distance estimates", {
   bb_utm  <- sf::st_bbox(utm)
   w_auto  <- as.numeric(bb_auto[["xmax"]] - bb_auto[["xmin"]])
   w_utm   <- as.numeric(bb_utm[["xmax"]]  - bb_utm[["xmin"]])
+  h_auto  <- as.numeric(bb_auto[["ymax"]] - bb_auto[["ymin"]])
+  h_utm   <- as.numeric(bb_utm[["ymax"]]  - bb_utm[["ymin"]])
 
   # Forcing one zone stretches east-west distances by several percent.
   expect_gt(abs(w_utm - w_auto) / w_auto, 0.02)
+  expect_gt(abs(h_utm - h_auto) / h_auto, 0.02)
 
   # And that difference reaches block sizing, which works in CRS units.
-  f_auto <- make_folds(auto, k = 4, method = "block_kfold", seed = 1)
-  f_utm  <- make_folds(utm,  k = 4, method = "block_kfold", seed = 1)
-  expect_true(is.list(f_auto$params) && is.list(f_utm$params))
+  # `block_size` is a minimum block EDGE LENGTH, so make_folds() derives
+  # nx = floor(w / block_size).  Sizing one block at exactly 1/50th of the
+  # equal-area width therefore gives nx = 50 there by construction, and
+  # floor(50 * w_utm / w_auto) in the forced zone -- which the >2% assertion
+  # above guarantees is not 50.  Same argument for ny.
+  #
+  # The DEFAULT sizing would not show this: it is purely geometric (nx/ny come
+  # from the aspect ratio and k), so it lands on the same grid in both CRSs
+  # while each block covers a different distance on the ground.
+  block_size <- w_auto / 50
+  f_auto <- make_folds(auto, k = 4, method = "block_kfold", seed = 1,
+                       block_size = block_size)
+  f_utm  <- make_folds(utm,  k = 4, method = "block_kfold", seed = 1,
+                       block_size = block_size)
+
+  expect_equal(f_auto$params$grid_nx, 50L)
+  expect_equal(f_utm$params$grid_nx, as.integer(floor(50 * w_utm / w_auto)))
+  expect_false(f_utm$params$grid_nx == f_auto$params$grid_nx)
+  expect_false(f_utm$params$grid_ny == f_auto$params$grid_ny)
+
+  # The geometric default, by contrast, does NOT depend on the CRS -- worth
+  # pinning so the assertions above are read as being about `block_size`.
+  g_auto <- make_folds(auto, k = 4, method = "block_kfold", seed = 1)
+  g_utm  <- make_folds(utm,  k = 4, method = "block_kfold", seed = 1)
+  expect_equal(g_auto$params$grid_nx, g_utm$params$grid_nx)
+  expect_equal(g_auto$params$grid_ny, g_utm$params$grid_ny)
 })
 
 

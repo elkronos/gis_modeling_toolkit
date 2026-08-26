@@ -33,14 +33,28 @@ checks most likely to reveal a problem -- is there structure left in the
 residuals, and where is it -- had to be written by hand each time.
 }
 \examples{
-\dontrun{
-  fit <- fit_gwr_model(pts, "y", "x")
+\donttest{
+if (requireNamespace("GWmodel", quietly = TRUE) &&
+    requireNamespace("sp", quietly = TRUE) &&
+    requireNamespace("ggplot2", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 60
+  pts <- st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
+  fit <- fit_gwr_model(pts, "price", "elev", bandwidth = 30)
   plot(fit, type = "residuals")
-  plot(fit, type = "variogram")
+  plot(fit, type = "observed_predicted")
+  if (requireNamespace("gstat", quietly = TRUE))
+    plot(fit, type = "variogram")
+}
 }
 }
 \seealso{
-Other plotting:
-\code{\link[=plot_folds]{plot_folds()}}
+Other plotting: 
+\code{\link{plot_folds}()}
 }
 \concept{plotting}

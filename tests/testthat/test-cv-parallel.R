@@ -3,23 +3,11 @@
 # Tests for parallel fold-fitting support in CV functions
 # -------------------------------------------------------------------
 
-test_that(".resolve_n_cores returns 1L for FALSE / NULL", {
-  expect_equal(spatialkit:::.resolve_n_cores(FALSE), 1L)
-  expect_equal(spatialkit:::.resolve_n_cores(FALSE, NULL), 1L)
-})
-
-test_that(".resolve_n_cores respects explicit integer", {
-  skip_on_os("windows")
-  expect_equal(spatialkit:::.resolve_n_cores(parallel = 2L), 2L)
-  expect_equal(spatialkit:::.resolve_n_cores(parallel = FALSE, n_cores = 3L), 3L)
-})
-
-test_that(".resolve_n_cores auto-detects when TRUE", {
-  skip_on_os("windows")
-  cores <- spatialkit:::.resolve_n_cores(TRUE)
-  expect_true(is.integer(cores))
-  expect_true(cores >= 1L)
-})
+# The non-Windows .resolve_n_cores() cases live in test-core-count.R, which
+# owns that helper and pins the same values with expect_identical().  They were
+# duplicated here at lower strength (expect_equal, which ignores the integer
+# type the callers depend on); the Windows branch below stays because it is the
+# only place that can exercise it.
 
 test_that(".resolve_n_cores falls back to 1L on Windows", {
   skip_on_os(c("mac", "linux", "solaris"))

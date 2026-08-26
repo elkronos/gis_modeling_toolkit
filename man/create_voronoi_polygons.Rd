@@ -47,10 +47,10 @@ res$cells   # one polygon per unique point, with stable cell_id
 res$index   # cell_id assignment for each input point
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

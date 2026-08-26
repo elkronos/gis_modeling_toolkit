@@ -62,6 +62,28 @@
 }
 
 
+#' Read the family name out of whatever brm() would accept
+#'
+#' \code{brms::brm()} takes a \code{stats} family function, an evaluated family
+#' object, a \code{brmsfamily}, or a bare string.  All that is needed here is
+#' the name, to decide whether a numeric response is required.
+#'
+#' @param family Any of the above, or NULL.
+#' @return A length-one character, or \code{NA_character_} if the name cannot
+#'   be determined (in which case no response-type check is made).
+#' @keywords internal
+#' @noRd
+.brms_family_name <- function(family) {
+  tryCatch({
+    f <- family
+    if (is.function(f)) f <- f()
+    if (is.character(f)) return(as.character(f)[[1L]])
+    if (is.list(f) && !is.null(f$family)) return(as.character(f$family)[[1L]])
+    NA_character_
+  }, error = function(e) NA_character_)
+}
+
+
 #' Build the brms gp() term for the spatial GP
 #'
 #' Kept separate from \code{fit_bayesian_spatial_model()} so the formula text
@@ -90,7 +112,12 @@
 #'
 #' @param data_sf An sf object with response, predictors, and geometries.
 #' @param response_var Response column name.
-#' @param predictor_vars Predictor column names.
+#' @param predictor_vars Predictor column names.  May be \code{character(0)}
+#'   for an intercept-only model: the response is then explained by the
+#'   intercept and the spatial Gaussian process alone, which is the right
+#'   baseline for asking how much of the surface is spatial structure rather
+#'   than covariate effect (and the natural null model for comparing against a
+#'   covariate model with \code{\link{compare_models}}).
 #' @param family A model family accepted by \code{brms::brm()} (a stats
 #'   family function or a brms family object). Default NULL (resolved to
 #'   \code{stats::gaussian()}).
@@ -122,7 +149,11 @@
 #' @param cores Number of parallel cores.
 #' @param seed Integer seed. Default 123.
 #' @param backend "auto", "cmdstanr", or "rstan".
-#' @param control Named list of sampler controls.
+#' @param control Named list of sampler controls, \emph{merged} over the
+#'   package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)} rather
+#'   than replacing them.  Passing \code{list(max_treedepth = 15)} therefore
+#'   keeps \code{adapt_delta = 0.9} -- which matters, because that is exactly
+#'   the setting the divergence warning tells you to raise.
 #' @param compute_loo Logical; compute PSIS-LOO. Default TRUE.
 #' @param standardize_predictors Logical; center and scale numeric predictors
 #'   before fitting. Default FALSE. When TRUE, the scaling parameters are
@@ -188,9 +219,11 @@
 #' @return A \code{bayesian_fit} object (inherits from \code{spatial_fit}).
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
-#'   Model-specific metadata lives in \code{$info} (coord_scaling,
+#'   Model-specific metadata lives in \code{$info} (coords -- the names of the
+#'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
-#'   gp_lscale_prior, loo, looic,
+#'   gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
+#'   was calibrated over; gp_lscale_prior, loo, looic,
 #'   convergence_ok,
 #'   convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 #' @family model fitting
@@ -233,7 +266,7 @@ fit_bayesian_spatial_model <- function(
     cores       = max(1L, parallel::detectCores() - 1L),
     seed        = 123,
     backend     = c("auto", "cmdstanr", "rstan"),
-    control     = list(adapt_delta = 0.9, max_treedepth = 12),
+    control     = list(),
     compute_loo = TRUE,
     standardize_predictors = FALSE,
     check_convergence = TRUE,
@@ -245,6 +278,22 @@ fit_bayesian_spatial_model <- function(
     stop("fit_bayesian_spatial_model(): `data_sf` must be an sf object.")
   if (!requireNamespace("brms", quietly = TRUE))
     stop("fit_bayesian_spatial_model(): package 'brms' is required.")
+  if (!is.character(response_var) || length(response_var) != 1L)
+    stop("fit_bayesian_spatial_model(): `response_var` must be a single ",
+         "column name.", call. = FALSE)
+  if (!is.character(predictor_vars))
+    stop("fit_bayesian_spatial_model(): `predictor_vars` must be a character ",
+         "vector (character(0) for an intercept-only spatial GP).",
+         call. = FALSE)
+
+  # Merge rather than replace.  A user passing control = list(max_treedepth =
+  # 15) would otherwise silently lose adapt_delta = 0.9 -- the very setting
+  # the divergence warning further down tells them to raise.
+  if (!is.list(control))
+    stop("fit_bayesian_spatial_model(): `control` must be a named list of ",
+         "sampler control arguments.", call. = FALSE)
+  control <- utils::modifyList(list(adapt_delta = 0.9, max_treedepth = 12),
+                               control)
 
   # Resolve family lazily.  NOTE: gaussian() comes from stats — brms does
   # NOT export a `gaussian` object (brms::gaussian errors); brm() accepts
@@ -281,9 +330,33 @@ fit_bayesian_spatial_model <- function(
     stop("fit_bayesian_spatial_model(): geometry must be POINT after prep. ",
          "Run prep_model_data() (or coerce_to_points()) first.")
 
-  # NOTE: prep_model_data() already guarantees a projected CRS, so no
-  # additional .is_longlat() / ensure_projected() call is needed here.
-  
+  # ---- Response validation ----
+  # Both sibling backends validate the response (GWR rejects binary outcomes,
+  # fit_rf_model() rejects non-numeric ones and fewer than two rows); without
+  # this a character response reached brms::brm() and failed inside Stan's
+  # data block, where nothing points back at the column.
+  dat_cols <- sf::st_drop_geometry(dat_sf)
+  if (!(response_var %in% names(dat_cols)))
+    stop(sprintf("fit_bayesian_spatial_model(): response '%s' is absent from the data.",
+                 response_var), call. = FALSE)
+  if (nrow(dat_sf) < 2L)
+    stop(sprintf("fit_bayesian_spatial_model(): %d usable row(s) after cleaning; at least two are needed to fit a spatial GP.",
+                 nrow(dat_sf)), call. = FALSE)
+  if (identical(.brms_family_name(family), "gaussian") &&
+      !is.numeric(dat_cols[[response_var]]))
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' is %s, ",
+                        "not numeric, but the family is gaussian. Convert it ",
+                        "to numeric, or pass a `family` that matches it (e.g. ",
+                        "brms::bernoulli() for a 0/1 outcome)."),
+                 response_var, class(dat_cols[[response_var]])[1L]),
+         call. = FALSE)
+
+  # NOTE: prep_model_data() coerces geometry to points and drops incomplete
+  # rows, and projects the CRS *whenever one can be established* --
+  # ensure_projected() passes a CRS-less dataset through unchanged when its
+  # coordinates do not look like lon/lat, so this is not an unconditional
+  # guarantee.  Set the CRS on `data_sf` if a projected fit matters.
+
   coords <- sf::st_coordinates(dat_sf)
   if (!all(c("X", "Y") %in% colnames(coords))) colnames(coords)[1:2] <- c("X", "Y")
   
@@ -306,19 +379,22 @@ fit_bayesian_spatial_model <- function(
     `..y` = (y_raw - y_center) / y_scale
   )
 
-  # ---- Data-informed GP length-scale prior ----
-  # gp_lengthscale_bounds() is calibrated for the squared-exponential
-  # kernel that brms::gp() uses.  We derive a weakly informative
-
-  # normal(0, ·) prior on lscale from the distance structure of the
-  # (scaled) coordinates.
+  # ---- Data-informed GP length-scale bounds ----
+  # gp_lengthscale_bounds() is calibrated for the squared-exponential kernel
+  # that brms::gp() uses.  These bounds drive three separate decisions further
+  # down: the basis count and boundary factor (.gp_basis_spec()), and the
+  # length-scale prior itself -- which is an inv_gamma() with both tails pinned
+  # to these bounds whenever .lscale_invgamma() can calibrate one, and a
+  # half-normal normal(0, ls_prior_sd) only as the fallback when it cannot.
+  # The prior is CHOSEN ~120 lines below and logs its own message there;
+  # naming one here would contradict it on a normal run.
   ls_bounds <- gp_lengthscale_bounds(
     cbind(dat_df[["..x"]], dat_df[["..y"]])
   )
   ls_prior_sd <- max(ls_bounds[["upper"]], ls_bounds[["lower"]] * 1.5)
   .log_info(
-    "fit_bayesian_spatial_model(): GP length-scale bounds [%.4f, %.4f] on scaled coords; using normal(0, %.4f) lscale prior.",
-    ls_bounds[["lower"]], ls_bounds[["upper"]], ls_prior_sd
+    "fit_bayesian_spatial_model(): GP length-scale bounds [%.4f, %.4f] on scaled coords.",
+    ls_bounds[["lower"]], ls_bounds[["upper"]]
   )
 
   # ---- GP basis count and boundary factor ----
@@ -388,8 +464,15 @@ fit_bayesian_spatial_model <- function(
                 length(predictor_scaling))
   }
 
+  # An intercept-only spatial GP: the response is explained by the intercept
+  # and the Gaussian process alone.  prep_model_data() accepts character(0)
+  # precisely so this is reachable from the public entry point, not only via
+  # .already_prepped = TRUE.
   if (length(predictor_vars) == 0L) {
     rhs_terms <- "1"
+    .log_info(paste0("fit_bayesian_spatial_model(): no predictors supplied; ",
+                     "fitting an intercept-only model with the spatial GP as ",
+                     "the only structure."))
   } else {
     base_fml  <- stats::reformulate(termlabels = predictor_vars)
     rhs_terms <- as.character(base_fml)[2L]
@@ -440,8 +523,16 @@ fit_bayesian_spatial_model <- function(
     # Hilbert-space GP funnels and the sampler divergences.
     ig <- .lscale_invgamma(ls_bounds[["lower"]], ls_bounds[["upper"]])
 
-    if (isTRUE(ig$ok)) {
-      lscale_prior_spec <- sprintf("inv_gamma(%.6f, %.6f)", ig$shape, ig$scale)
+    # %.10g, not %.6f.  %.6f is fixed-point, so a small scale rounds to the
+    # literal "0.000000" (3e-7 does) and Stan rejects inv_gamma(a, 0) with an
+    # opaque error from deep inside the model block.  Tightly clustered
+    # coordinates get there, and .lscale_invgamma()'s `ok` test only checks
+    # tail probabilities, never parameter magnitudes -- so guard those here.
+    ig_usable <- isTRUE(ig$ok) &&
+      is.finite(ig$shape) && is.finite(ig$scale) &&
+      ig$shape > 0 && ig$scale > 0
+    if (ig_usable) {
+      lscale_prior_spec <- sprintf("inv_gamma(%.10g, %.10g)", ig$shape, ig$scale)
       .log_info(
         paste0("fit_bayesian_spatial_model(): GP length-scale prior ",
                "%s (1%% tails at %.4f and %.4f on scaled coords)."),
@@ -450,7 +541,11 @@ fit_bayesian_spatial_model <- function(
     } else {
       # Bounds too wide (or too degenerate) to pin both tails; a badly fitted
       # inverse-gamma would be worse than the half-normal it replaces.
-      lscale_prior_spec <- sprintf("normal(0, %s)", ls_prior_sd)
+      # Guard the fallback's own scale for the same reason: normal(0, 0) is
+      # not a prior Stan will accept either.
+      sd_spec <- if (is.finite(ls_prior_sd) && ls_prior_sd > 0)
+        ls_prior_sd else 1
+      lscale_prior_spec <- sprintf("normal(0, %.10g)", sd_spec)
       .log_info(
         paste0("fit_bayesian_spatial_model(): could not calibrate an ",
                "inverse-gamma length-scale prior over [%.4f, %.4f]; falling ",

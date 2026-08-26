@@ -32,10 +32,24 @@
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' \dontrun{
-#'   fit <- fit_gwr_model(pts, "y", "x")
+#' \donttest{
+#' if (requireNamespace("GWmodel", quietly = TRUE) &&
+#'     requireNamespace("sp", quietly = TRUE) &&
+#'     requireNamespace("ggplot2", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 60
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
+#'   fit <- fit_gwr_model(pts, "price", "elev", bandwidth = 30)
 #'   plot(fit, type = "residuals")
-#'   plot(fit, type = "variogram")
+#'   plot(fit, type = "observed_predicted")
+#'   if (requireNamespace("gstat", quietly = TRUE))
+#'     plot(fit, type = "variogram")
+#' }
 #' }
 #' @export
 plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
@@ -67,6 +81,10 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   if (type == "residuals") {
     dat$.resid <- as.numeric(res)
     lim <- max(abs(dat$.resid), na.rm = TRUE)
+    # A perfectly-fitting model gives lim = 0, so limits = c(0, 0): a
+    # degenerate diverging scale whose breaks collapse onto a single value.
+    # The all-NA case a few lines above is handled; this one fell through.
+    if (!is.finite(lim) || lim <= 0) lim <- 1
     return(
       ggplot2::ggplot(dat) +
         ggplot2::geom_sf(ggplot2::aes(colour = .data$.resid)) +
@@ -157,16 +175,27 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' \dontrun{
-#'   f <- make_folds(pts, k = 5, method = "block_kfold")
+#' if (requireNamespace("ggplot2", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 80
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
 #'   plot_folds(f, pts)
 #' }
 #' @export
 plot_folds <- function(folds, points_sf, boundary = NULL) {
   .need_ggplot("plot_folds()")
-  if (!is.list(folds) || is.null(folds$assignment))
-    stop("plot_folds(): `folds` must be the list returned by make_folds().",
-         call. = FALSE)
+  # `method` and `k` are read straight into the title; a folds list missing
+  # either collapses sprintf() to character(0), which ggplot2 accepts and
+  # renders as a plot with no title at all rather than erroring.
+  if (!is.list(folds) || is.null(folds$assignment) ||
+      is.null(folds$method) || is.null(folds$k))
+    stop("plot_folds(): `folds` must be the list returned by make_folds() ",
+         "(with `assignment`, `method` and `k`).", call. = FALSE)
   if (!inherits(points_sf, "sf"))
     stop("plot_folds(): `points_sf` must be an sf object.", call. = FALSE)
 

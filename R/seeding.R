@@ -6,7 +6,10 @@
 #'
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #' @param method One of "kmeans", "random", "provided".
-#' @param n Integer; number of seeds to return.
+#' @param n Integer; number of seeds to return. Required for
+#'   `method = "kmeans"` and `method = "random"`. **Ignored** for
+#'   `method = "provided"`, where every row of `seeds` is returned; a mismatch
+#'   between `n` and `nrow(seeds)` is reported as a warning.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
 #' @param sample_points Optional sf POINT cloud for k-means clustering.
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
@@ -34,10 +37,19 @@ get_voronoi_seeds <- function(boundary = NULL,
   # --- validation ---
   if (!is.null(boundary)) .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
   if (method %in% c("random", "kmeans") && is.null(n))
-    stop("Argument 'n' is required for method = '", method, "'.", call. = FALSE)
+    stop("get_voronoi_seeds(): argument 'n' is required for method = '", method,
+         "'.", call. = FALSE)
   if (method == "provided") {
-    if (is.null(seeds)) stop("Provide 'seeds' (sf POINT) for method = 'provided'.", call. = FALSE)
+    if (is.null(seeds))
+      stop("get_voronoi_seeds(): provide 'seeds' (sf POINT) for method = 'provided'.",
+           call. = FALSE)
     .assert_sf(seeds, "POINT", "seeds")
+    if (!is.null(n) && !identical(as.integer(n), nrow(seeds))) {
+      .log_warn(
+        "get_voronoi_seeds(): method = 'provided' ignores 'n'; returning all %d row(s) of 'seeds' rather than the %d requested.",
+        nrow(seeds), as.integer(n)
+      )
+    }
   }
   if (!is.null(sample_points)) .assert_sf(sample_points, "POINT", "sample_points")
 
@@ -52,14 +64,14 @@ get_voronoi_seeds <- function(boundary = NULL,
 
     "provided" = {
       s <- seeds
-      if (!is.null(boundary)) s <- .align_crs(s, boundary)
       s$seed_id <- seq_len(nrow(s))
       s$method  <- "provided"
       s
     },
 
     "random" = {
-      if (is.null(boundary)) stop("Random seeds require 'boundary'.", call. = FALSE)
+      if (is.null(boundary))
+        stop("get_voronoi_seeds(): random seeds require 'boundary'.", call. = FALSE)
       b <- boundary_union(boundary)
       pts <- .robust_st_sample(b, n)
       pts_sfc <- sf::st_sfc(pts, crs = sf::st_crs(boundary))
@@ -72,7 +84,8 @@ get_voronoi_seeds <- function(boundary = NULL,
         cloud <- if (!is.null(boundary)) .align_crs(sample_points, boundary) else sample_points
       } else {
         if (is.null(boundary))
-          stop("K-means seeds require 'boundary' (or provide 'sample_points').", call. = FALSE)
+          stop("get_voronoi_seeds(): k-means seeds require 'boundary' (or provide 'sample_points').",
+               call. = FALSE)
         b <- boundary_union(boundary)
         cloud_n <- max(2000L, 50L * as.integer(n))
         cloud_geom <- .robust_st_sample(b, cloud_n)
@@ -80,8 +93,6 @@ get_voronoi_seeds <- function(boundary = NULL,
         cloud <- sf::st_sf(geometry = cloud_sfc)
       }
 
-      xy <- sf::st_coordinates(cloud)
-      
       # If cloud is in lon/lat, project to a local CRS before k-means so
       # that clustering is distance-faithful (k-means in degrees is
       # distorted except in very small areas).
@@ -112,18 +123,14 @@ get_voronoi_seeds <- function(boundary = NULL,
       if (cloud_is_ll && !identical(sf::st_crs(s), sf::st_crs(cloud))) {
         s <- sf::st_transform(s, sf::st_crs(cloud))
       }
-      if (!is.null(boundary)) s <- .align_crs(s, boundary)
       s
     }
   )
 
-  if (!is.null(boundary) &&
-      !is.na(sf::st_crs(boundary)) &&
-      !is.na(sf::st_crs(out)) &&
-      !(sf::st_crs(out) == sf::st_crs(boundary))) {
-    out <- sf::st_transform(out, sf::st_crs(boundary))
-  }
-  out
+  # Single alignment point for every branch: the seeds are returned in the
+  # boundary's CRS whenever one is available.  (The branches above no longer
+  # align individually, which made this block unreachable.)
+  .align_crs(out, boundary)
 }
 
 
@@ -162,11 +169,16 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' K-means seed generation from point coordinates
 #'
 #' @param points_sf An sf object with POINT geometries.
-#' @param k Integer; requested number of clusters.
+#' @param k Integer; requested number of clusters. Clamped to the number of
+#'   distinct point positions, with a warning, when it exceeds it.
 #' @param set_seed Optional integer RNG seed. Default 456.
-#' @return An sf object of k cluster center POINTs.
+#' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
+#'   `k` exceeds the number of distinct positions), with `seed_id` and
+#'   `method = "kmeans"` columns matching [get_voronoi_seeds()].
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
+  .assert_sf(points_sf, "POINT", "points_sf")
+
   # Project to metric CRS if lon/lat to make k-means distance-faithful
   pts_for_km <- points_sf
   pts_is_ll <- .is_longlat(points_sf)
@@ -174,20 +186,43 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
     pts_for_km <- ensure_projected(points_sf)
   }
   coords <- sf::st_coordinates(pts_for_km)
+  if (ncol(coords) >= 2L) coords <- coords[, 1:2, drop = FALSE]
+  # st_coordinates() yields one all-NA row per EMPTY POINT rather than zero
+  # rows, so a row-count check alone would let empty geometries through to
+  # kmeans(), which fails with "NA/NaN/Inf in foreign function call".
+  finite_rows <- stats::complete.cases(coords) &
+    apply(coords, 1L, function(r) all(is.finite(r)))
+  n_drop <- sum(!finite_rows)
+  if (n_drop > 0L) {
+    .log_warn("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
+              n_drop)
+    coords <- coords[finite_rows, , drop = FALSE]
+  }
   n <- nrow(coords)
-  
+  if (n == 0L)
+    stop("voronoi_seeds_kmeans(): `points_sf` has no usable coordinates; ",
+         "nothing to cluster.", call. = FALSE)
+
   n_uniq <- nrow(unique(round(coords, 10)))
-  k <- max(1L, min(k, n_uniq))
+  k_use <- max(1L, min(as.integer(k), n_uniq))
+  if (k_use < k) {
+    .log_warn("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping.",
+              as.integer(k), n_uniq, n)
+  }
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
-  km <- stats::kmeans(coords, centers = k, iter.max = 50, nstart = 10)
+  km <- stats::kmeans(coords, centers = k_use, iter.max = 50, nstart = 10)
   cent <- as.data.frame(km$centers); names(cent) <- c("x", "y")
   result <- sf::st_as_sf(cent, coords = c("x", "y"), crs = sf::st_crs(pts_for_km))
   # Transform back to original CRS if we projected
   if (pts_is_ll) {
     result <- sf::st_transform(result, sf::st_crs(points_sf))
   }
+  # Same output contract as get_voronoi_seeds(), so the three seeding
+  # functions are drop-in interchangeable.
+  result$seed_id <- seq_len(nrow(result))
+  result$method  <- "kmeans"
   result
 }
 
@@ -197,12 +232,24 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #' @param boundary An sf or sfc polygonal object.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Integer RNG seed. Default 456.
-#' @return An sf object of k random POINTs.
+#' @return An sf object of **at most** `k` random POINTs (rejection sampling
+#'   inside an awkward geometry can fall short of `k`, which is warned about),
+#'   with `seed_id` and `method = "random"` columns matching
+#'   [get_voronoi_seeds()].
 #' @export
 voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
+  # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.
+  if (inherits(boundary, "sfc")) boundary <- sf::st_as_sf(boundary)
+  .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
+
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
   geom <- sf::st_union(boundary)
   pts <- .robust_st_sample(geom, k)
-  sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
+  out <- sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
+  # Same output contract as get_voronoi_seeds(), so the three seeding
+  # functions are drop-in interchangeable.
+  out$seed_id <- seq_len(nrow(out))
+  out$method  <- "random"
+  out
 }

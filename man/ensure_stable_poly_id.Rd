@@ -22,10 +22,13 @@ ensure_stable_poly_id(
 \item{make_valid}{Logical; apply st_make_valid() first. Default TRUE.}
 
 \item{transform_for_sort}{CRS used only for computing sort-key coordinates.
-Set to NULL to disable.}
+Default 4326. Set to NULL to disable.}
 }
 \value{
 An sf polygon layer re-ordered with sequential IDs in id_col.
+Non-polygonal rows are \strong{dropped} (with a warning), so the result can
+have fewer rows than the input; if no polygonal rows remain, an error is
+raised.
 }
 \description{
 Ensures that a polygon layer has a reproducible, deterministic identifier

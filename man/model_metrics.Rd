@@ -15,7 +15,8 @@ model_metrics(object, ...)
 \item{...}{Additional arguments passed to predict().}
 
 \item{newdata}{Optional sf object for out-of-sample evaluation. If NULL,
-in-sample (fitted) values are used.}
+fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
+see above).}
 }
 \value{
 A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
@@ -23,3 +24,15 @@ A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
 \description{
 Compute goodness-of-fit metrics for a spatial model
 }
+\section{What the metrics are computed on}{
+
+With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
+That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
+but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
+returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
+returned data.frame carries no label distinguishing the two, so check
+\code{object$info$fitted_are_oob} before comparing numbers across backends
+-- or use \code{\link{compare_models_cv}}, which scores every backend the
+same way.
+}
+

@@ -6,9 +6,16 @@
 #'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
 #' @param boundary Optional polygonal sf object.
-#' @param expand Numeric expansion distance or fraction (0–1 = fraction of extent).
+#' @param expand Numeric expansion distance or fraction (0–1 = fraction of
+#'   extent). Absolute values are expressed in the units of the CRS the clip
+#'   target is built in. Because [sf::st_buffer()] interprets `dist` as
+#'   **metres** for lon/lat data while the fraction-of-extent form is derived
+#'   from a bounding box measured in **degrees**, lon/lat input is projected to
+#'   a local projected CRS first (see `@return`), so both forms agree.
 #' @param quiet Logical; suppress messages.
-#' @return An sf polygon layer representing the clip target.
+#' @return An sf polygon layer representing the clip target. For lon/lat input
+#'   the layer is returned in the automatically selected local projected CRS,
+#'   not the input CRS; a message reports this unless `quiet = TRUE`.
 #' @export
 clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALSE) {
   .msg <- function(...) if (!quiet) message(...)
@@ -21,6 +28,19 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     dy <- as.numeric(bb$ymax - bb$ymin)
     if (expand > 0 && expand < 1) return(max(dx, dy) * expand)
     expand
+  }
+
+  # The fraction-of-extent form of `expand` is derived from the bounding box,
+  # which for lon/lat data is measured in DEGREES -- but with s2 enabled
+  # st_buffer() reads `dist` as METRES, so the two disagree by five orders of
+  # magnitude.  Project to a local projected CRS first so the distance that is
+  # computed and the distance that is buffered share the same units.  The
+  # boundary is aligned to the projected points immediately below.
+  if (.is_longlat(points_sf)) {
+    .msg("clip_target_for(): input is lon/lat; projecting to a local projected ",
+         "CRS so `expand` is measured in projected units. The returned clip ",
+         "target uses that CRS, not the input CRS.")
+    points_sf <- ensure_projected(points_sf)
   }
 
   crs_pts <- sf::st_crs(points_sf)
@@ -136,8 +156,9 @@ create_voronoi_polygons <- function(
 
   pts <- points_sf
   if (!is.null(crs)) {
-    pts <- sf::st_transform(pts, crs)
-    if (!is.null(boundary)) boundary <- sf::st_transform(boundary, crs)
+    pts <- .transform_or_stamp(pts, crs, "points_sf", "create_voronoi_polygons")
+    if (!is.null(boundary))
+      boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_voronoi_polygons")
   } else {
     if (.is_longlat(pts)) pts <- ensure_projected(pts)
     if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
@@ -175,6 +196,12 @@ create_voronoi_polygons <- function(
 
   if (clip) {
     clip_to <- if (isTRUE(is.numeric(expand)) && expand > 0) boundary_expanded else boundary
+    # Union the boundary first (as the Voronoi envelope above already does).
+    # Intersecting against a multi-feature boundary splits every straddling
+    # cell into one row per boundary feature and grafts the boundary's
+    # attribute columns onto the result, breaking the documented
+    # "one polygon per unique point" contract.
+    clip_to <- sf::st_union(sf::st_geometry(clip_to))
     cells <- suppressWarnings(sf::st_intersection(cells, clip_to))
     # st_intersection can produce non-polygon slivers (LINESTRING, POINT,
     # GEOMETRYCOLLECTION); keep only POLYGON/MULTIPOLYGON and non-empty rows
@@ -212,11 +239,15 @@ create_voronoi_polygons <- function(
 #'   grids the count is adjusted for hexagonal packing density, but the final
 #'   cell count after clipping to an irregular boundary may deviate
 #'   substantially from the requested value.
-#' @param type Grid type: "square" or "hex".
+#' @param type Grid type: `"square"` (the default) or `"hex"`.
 #' @param cellsize Optional numeric cell size (length 1 or 2).
-#' @param n Optional grid resolution (integer, length 1 or 2).
+#' @param n Optional grid resolution (integer, length 1 or 2). Applies to
+#'   square grids only; [sf::st_make_grid()] derives hexagon placement from
+#'   `cellsize` alone.
 #' @param clip Logical; clip grid to boundary.
-#' @param crs Optional target CRS.
+#' @param crs Optional target CRS. When `NULL` (default) the boundary is
+#'   projected with [ensure_projected()], which changes the CRS of the returned
+#'   grid; a message reports this unless `quiet = TRUE`.
 #' @param quiet Logical; suppress messages.
 #' @return An sf polygon layer with poly_id column.
 #' @family tessellation
@@ -225,16 +256,20 @@ create_voronoi_polygons <- function(
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
-#' grid_sq  <- create_grid_polygons(bnd, target_cells = 25, type = "square")
-#' grid_hex <- create_grid_polygons(bnd, target_cells = 25, type = "hex")
+#' grid_sq  <- create_grid_polygons(bnd, target_cells = 100, type = "square")
+#' grid_hex <- create_grid_polygons(bnd, target_cells = 100, type = "hex")
 #' nrow(grid_sq)
-#' nrow(grid_hex)  # near-target thanks to hex packing correction
+#' # Hex counts run above target because clipping keeps every hexagon that
+#' # merely overhangs the boundary; the inflation is proportionally larger
+#' # at small target_cells.
+#' nrow(grid_hex)
 #' @export
 create_grid_polygons <- function(
     boundary, target_cells = NULL, type = c("square", "hex"),
     cellsize = NULL, n = NULL, clip = TRUE, crs = NULL, quiet = FALSE
 ) {
   type <- match.arg(type)
+  .msg <- function(...) if (!quiet) message(...)
 
   .as_sf <- function(x) {
     if (inherits(x, "sf")) return(x)
@@ -248,9 +283,13 @@ create_grid_polygons <- function(
     stop("create_grid_polygons(): 'boundary' must be polygonal (POLYGON/MULTIPOLYGON).")
 
   if (!is.null(crs)) {
-    boundary <- sf::st_transform(boundary, crs)
+    boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
   } else {
+    crs_before <- sf::st_crs(boundary)
     boundary <- ensure_projected(boundary)
+    if (!identical(crs_before, sf::st_crs(boundary)))
+      .msg("create_grid_polygons(): projecting `boundary` to a local projected ",
+           "CRS; the returned grid uses that CRS. Pass `crs` to control it.")
   }
   boundary <- .safe_make_valid(boundary)
 
@@ -261,21 +300,22 @@ create_grid_polygons <- function(
     stop("create_grid_polygons(): boundary bbox has non-positive extent.")
   env <- sf::st_as_sfc(bb, crs = sf::st_crs(boundary))
 
+  # Parse and validate `n` once, up front, so an invalid value is rejected the
+  # same way whether or not `cellsize` was also supplied (it used to be
+  # silently coerced to NULL in the cellsize branch and to error otherwise).
+  if (!is.null(n)) {
+    if (length(n) == 1L) n <- rep(n, 2L)
+    n <- suppressWarnings(as.integer(n[1:2]))
+    if (any(is.na(n)) || any(n < 1))
+      stop("create_grid_polygons(): 'n' must be integer >= 1.", call. = FALSE)
+  }
+
   # Derive n and/or cellsize
   if (!is.null(cellsize)) {
     if (length(cellsize) == 1L) cellsize <- rep(cellsize, 2L)
     if (length(cellsize) != 2L || any(!is.finite(cellsize)) || any(cellsize <= 0))
       stop("create_grid_polygons(): 'cellsize' must be positive numeric (length 1 or 2).")
-    if (!is.null(n)) {
-      if (length(n) == 1L) n <- rep(as.integer(n), 2L)
-      n <- as.integer(n[1:2])
-      if (any(is.na(n)) || any(n < 1)) n <- NULL
-    }
   } else if (!is.null(n)) {
-    if (length(n) == 1L) n <- rep(as.integer(n), 2L)
-    n <- as.integer(n[1:2])
-    if (any(is.na(n)) || any(n < 1))
-      stop("create_grid_polygons(): 'n' must be integer >= 1.")
     cellsize <- c(w / n[1], h / n[2])
   } else {
     if (is.null(target_cells) || !is.finite(target_cells) || target_cells < 1)
@@ -301,13 +341,16 @@ create_grid_polygons <- function(
 
   grid_args <- list(x = env, what = "polygons",
                     square = identical(type, "square"))
-  # st_make_grid ignores n when cellsize is given; pass only one to avoid
-  # silent parameter masking.
-  if (!is.null(cellsize)) {
-    grid_args$cellsize <- cellsize
-  } else {
-    grid_args$n <- n
-  }
+  # st_make_grid() does NOT ignore `n` when `cellsize` is given: for square
+  # grids it uses `cellsize` for the cell dimensions AND `nx = n[1]`,
+  # `ny = n[2]` for the counts.  Omitting `n` makes it recompute
+  # nx = ceiling(w / cellsize[1]), which floating-point division pushes one
+  # past the intended count (e.g. w = 100, n = 9 gives 100/(100/9) = 9.0000...4
+  # -> 10 columns).  Pass both whenever both are known.  For hex grids sf
+  # short-circuits to make_hex_grid() and reads `cellsize` only, so the extra
+  # argument is inert there.
+  if (!is.null(cellsize)) grid_args$cellsize <- cellsize
+  if (!is.null(n))        grid_args$n        <- n
   grid_sfc <- do.call(sf::st_make_grid, grid_args)
   if (length(grid_sfc) == 0L)
     stop("create_grid_polygons(): st_make_grid() produced zero cells.")
@@ -316,7 +359,11 @@ create_grid_polygons <- function(
   grid_sf <- sf::st_sf(poly_id = seq_along(grid_sfc), geometry = grid_sfc)
 
   if (isTRUE(clip)) {
-    grid_sf <- suppressWarnings(sf::st_intersection(.safe_make_valid(grid_sf), boundary))
+    # Union first: a multi-feature boundary would otherwise split straddling
+    # cells into one row per boundary feature and graft the boundary's
+    # attribute columns onto the grid.
+    clip_to <- sf::st_union(sf::st_geometry(boundary))
+    grid_sf <- suppressWarnings(sf::st_intersection(.safe_make_valid(grid_sf), clip_to))
     # st_intersection can produce non-polygon slivers; keep only valid polygons
     gtypes <- as.character(sf::st_geometry_type(grid_sf, by_geometry = TRUE))
     keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(grid_sf)
@@ -339,12 +386,25 @@ create_grid_polygons <- function(
 #'   grids the target is adjusted for packing density; the actual count after
 #'   clipping to an irregular boundary may differ noticeably.
 #' @param cellsize Numeric cell size (grid methods).
-#' @param expand Buffer distance for Voronoi envelope.
+#' @param expand Buffer distance for the Voronoi envelope. Applied by
+#'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
+#'   methods ignore it (the value you passed is still echoed back in
+#'   `params$expand`).
 #' @param clip Logical; clip to boundary.
 #' @param keep_duplicates Logical; keep duplicate points.
 #' @param crs Optional target CRS.
 #' @param quiet Logical; suppress messages.
-#' @return A list with cells, index, boundary, method, params.
+#' @return A list with components:
+#'   \describe{
+#'     \item{`cells`}{An sf polygon layer, one row per cell. It always carries
+#'       a `cell_id` column; the `"hex"` and `"square"` methods additionally
+#'       carry `poly_id`, which holds the same values.}
+#'     \item{`index`}{Integer vector of `cell_id` values, one per row of
+#'       `points_sf`.}
+#'     \item{`boundary`}{The boundary used (possibly derived and/or reprojected).}
+#'     \item{`method`}{The method actually used.}
+#'     \item{`params`}{The parameters the tessellation was built with.}
+#'   }
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -368,8 +428,9 @@ build_tessellation <- function(
 
   # --- CRS handling ---
   if (!is.null(crs)) {
-    points_sf <- sf::st_transform(points_sf, crs)
-    if (!is.null(boundary)) boundary <- sf::st_transform(boundary, crs)
+    points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
+    if (!is.null(boundary))
+      boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
   } else {
     if (.is_longlat(points_sf)) {
       .msg("build_tessellation(): projecting points to a local UTM CRS.")
@@ -383,12 +444,18 @@ build_tessellation <- function(
     boundary <- .safe_make_valid(boundary)
   }
 
+  # A CRS-less `points_sf` yields NA_crs_, which is a list rather than NULL and
+  # so is not treated as "no CRS supplied" downstream -- create_voronoi_polygons()
+  # would call st_transform() on a CRS-less object and fail.  Normalise to NULL.
+  pts_crs <- sf::st_crs(points_sf)
+  crs_arg <- if (is.na(pts_crs)) NULL else pts_crs
+
   # ---- Voronoi ----
   if (identical(method, "voronoi")) {
     return(create_voronoi_polygons(
       points_sf = points_sf, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
-      crs = sf::st_crs(points_sf), quiet = quiet
+      crs = crs_arg, quiet = quiet
     ))
   }
 
@@ -396,9 +463,13 @@ build_tessellation <- function(
   if (method %in% c("hex", "square")) {
     if (is.null(boundary))
       stop("build_tessellation(): `boundary` is required for hex/square grids.")
+    # Pass the points' CRS through: without it create_grid_polygons() would
+    # re-project the boundary on its own, leaving grid and points in different
+    # CRSs and breaking the st_intersects() below.
     grid <- create_grid_polygons(
       boundary = boundary, target_cells = approx_n_cells,
-      type = method, cellsize = cellsize, clip = clip, quiet = quiet
+      type = method, cellsize = cellsize, clip = clip, crs = crs_arg,
+      quiet = quiet
     )
     # Build point-to-cell index for grid tessellations
     id_col <- if ("poly_id" %in% names(grid)) "poly_id" else "cell_id"
@@ -406,17 +477,20 @@ build_tessellation <- function(
       grid$cell_id <- seq_len(nrow(grid))
       id_col <- "cell_id"
     }
-    # Temporarily rename to cell_id for the index builder
+    # `cell_id` is the id column every other method returns, so keep it on the
+    # grid too rather than dropping it after indexing: downstream helpers (and
+    # plot_tessellation_map(fill_col = "cell_id")) can then treat all four
+    # methods alike.  `poly_id` is retained for backward compatibility.
     if (id_col != "cell_id") {
       grid$cell_id <- grid[[id_col]]
     }
     index <- .build_point_cell_index(points_sf, grid)
-    if (id_col != "cell_id") grid$cell_id <- NULL
 
     return(list(
       cells = grid, index = index, boundary = boundary, method = method,
       params = list(approx_n_cells = approx_n_cells, cellsize = cellsize,
-                    clip = clip, keep_duplicates = keep_duplicates, expand = 0)
+                    clip = clip, keep_duplicates = keep_duplicates,
+                    expand = expand)
     ))
   }
 
@@ -449,17 +523,23 @@ build_tessellation <- function(
 
     if (is.null(tri_sfc)) {
       .log_warn(
-        "build_tessellation(triangles): package 'geometry' unavailable or delaunayn() failed. Falling back to st_triangulate() on the convex hull, which triangulates the hull polygon \u2014 NOT the input point set. The resulting triangles will NOT reflect point density/distribution. Install 'geometry' for true Delaunay triangulation."
+        "build_tessellation(triangles): package 'geometry' unavailable or delaunayn() failed. Falling back to GEOS via sf::st_triangulate() instead of qhull; the result is still the Delaunay triangulation of the input points, but degenerate (e.g. co-circular) configurations may be resolved differently."
       )
-      hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(pts)))
-      tri_sfc <- sf::st_triangulate(hull)
+      # st_triangulate() accepts a MULTIPOINT and returns the true Delaunay
+      # triangulation of it.  Triangulating the convex-hull POLYGON instead
+      # (as this used to) discards every interior point.
+      tri_sfc <- sf::st_triangulate(sf::st_union(sf::st_geometry(pts)))
       tri_sfc <- sf::st_collection_extract(tri_sfc, "POLYGON", warn = FALSE)
       tri_sfc <- sf::st_sfc(tri_sfc, crs = sf::st_crs(pts))
     }
 
     tri_sf <- sf::st_sf(geometry = .safe_make_valid(tri_sfc))
     if (!is.null(boundary) && isTRUE(clip)) {
-      tri_sf <- suppressWarnings(sf::st_intersection(tri_sf, boundary))
+      # Union first: a multi-feature boundary would otherwise split straddling
+      # triangles into one row per boundary feature and graft the boundary's
+      # attribute columns onto the result.
+      clip_to <- sf::st_union(sf::st_geometry(boundary))
+      tri_sf <- suppressWarnings(sf::st_intersection(tri_sf, clip_to))
       # Keep only POLYGON/MULTIPOLYGON (drop slivers) and non-empty
       gtypes <- as.character(sf::st_geometry_type(tri_sf, by_geometry = TRUE))
       keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(tri_sf)
@@ -473,7 +553,7 @@ build_tessellation <- function(
     return(list(
       cells = tri_sf, index = index, boundary = boundary, method = "triangles",
       params = list(clip = clip, approx_n_cells = approx_n_cells,
-                    keep_duplicates = keep_duplicates, expand = 0)
+                    keep_duplicates = keep_duplicates, expand = expand)
     ))
   }
 

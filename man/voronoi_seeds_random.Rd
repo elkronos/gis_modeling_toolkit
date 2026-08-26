@@ -14,7 +14,10 @@ voronoi_seeds_random(boundary, k, set_seed = 456)
 \item{set_seed}{Integer RNG seed. Default 456.}
 }
 \value{
-An sf object of k random POINTs.
+An sf object of \strong{at most} \code{k} random POINTs (rejection sampling
+inside an awkward geometry can fall short of \code{k}, which is warned about),
+with \code{seed_id} and \code{method = "random"} columns matching
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
 }
 \description{
 Random seed generation within a polygonal boundary

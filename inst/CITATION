@@ -1,0 +1,45 @@
+## The version is read from the installed DESCRIPTION, so it cannot go stale.
+## DESCRIPTION carries no Date field; fall back to the current year.
+year <- if (!is.null(meta$Date) && nzchar(meta$Date))
+  sub("-.*", "", meta$Date) else format(Sys.Date(), "%Y")
+
+bibentry(
+  bibtype  = "Manual",
+  title    = "spatialkit: Spatial Tessellation, Modeling, and Cross-Validation Toolkit",
+  author   = person("Justin", "Chase", email = "jchase.msu@gmail.com"),
+  year     = year,
+  note     = paste("R package version", meta$Version),
+  url      = "https://github.com/elkronos/gis_modeling_toolkit"
+)
+
+citFooter(
+  "spatialkit implements published methods. If you use one of them, please ",
+  "cite the method as well as the package:\n\n",
+  "  area_of_applicability(): Meyer, H. and Pebesma, E. (2021). Predicting ",
+  "into unknown space? Estimating the area of applicability of spatial ",
+  "prediction models. Methods in Ecology and Evolution 12(9), 1620-1633. ",
+  "doi:10.1111/2041-210X.13650\n\n",
+  "  make_folds(method = \"nndm\"): Mila, C., Mateu, J., Pebesma, E. and ",
+  "Meyer, H. (2022). Nearest neighbour distance matching leave-one-out ",
+  "cross-validation for map validation. Methods in Ecology and Evolution ",
+  "13(6), 1304-1316. doi:10.1111/2041-210X.13851\n\n",
+  "  fit_bayesian_spatial_model() GP basis: Riutort-Mayol, G., Burkner, ",
+  "P.-C., Andersen, M. R., Solin, A. and Vehtari, A. (2023). Practical ",
+  "Hilbert space approximate Bayesian Gaussian processes for probabilistic ",
+  "programming. Statistics and Computing 33, 1. ",
+  "doi:10.1007/s11222-022-10167-2\n\n",
+  "  fit_rf_model() permutation importance: Strobl, C., Boulesteix, A.-L., ",
+  "Zeileis, A. and Hothorn, T. (2007). Bias in random forest variable ",
+  "importance measures: illustrations, sources and a solution. BMC ",
+  "Bioinformatics 8, 25. doi:10.1186/1471-2105-8-25\n\n",
+  "  fit_rf_model(include_coords =) and cv_rf(): Meyer, H., Reudenbach, C., ",
+  "Wollauer, S. and Nauss, T. (2019). Importance of spatial predictor ",
+  "variable selection in machine learning applications - moving from data ",
+  "reproduction to spatial prediction. Ecological Modelling 411, 108815. ",
+  "doi:10.1016/j.ecolmodel.2019.108815\n\n",
+  "  fit_gwr_model() and gwr_model_selection(): Lu, B., Harris, P., Charlton, ",
+  "M. and Brunsdon, C. (2014). The GWmodel R package: further topics for ",
+  "exploring spatial heterogeneity using geographically weighted models. ",
+  "Geo-spatial Information Science 17(2), 85-101. ",
+  "doi:10.1080/10095020.2014.917453"
+)

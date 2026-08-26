@@ -26,6 +26,12 @@ An sf object with geometry coerced to POINTs.
 Converts the geometry column of an sf object to POINTs using one of several
 strategies.
 }
+\details{
+LINESTRING midpoints are sampled with \code{\link[sf:st_line_sample]{sf::st_line_sample()}}, which yields
+no point for an EMPTY LINESTRING.  Rather than silently misaligning the
+result (or letting sf crash), such input raises an error; drop empty
+geometries first with \code{x <- x[!sf::st_is_empty(x), ]}.
+}
 \examples{
 library(sf)
 poly <- st_sf(

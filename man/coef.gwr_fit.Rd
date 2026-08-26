@@ -13,6 +13,9 @@
 }
 \value{
 A data.frame of local coefficient estimates (one row per obs).
+Never \code{NULL}: when the engine carries no \code{SDF} component this
+errors, following the \code{coef()} contract described in
+\code{\link{new_spatial_fit}}.
 }
 \description{
 Extract GWR local coefficients

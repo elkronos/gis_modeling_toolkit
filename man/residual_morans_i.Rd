@@ -80,9 +80,9 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=compare_models_cv]{compare_models_cv()}},
-\code{\link[=evaluate_insample]{evaluate_insample()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{compare_models_cv}()},
+\code{\link{evaluate_insample}()}
 }
 \concept{model evaluation}

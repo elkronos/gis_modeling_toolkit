@@ -9,7 +9,8 @@ prep_model_data(
   response_var,
   predictor_vars,
   boundary = NULL,
-  pointize = c("auto", "surface", "centroid", "line_midpoint", "bbox_center"),
+  pointize = c("auto", "surface", "point_on_surface", "centroid", "line_midpoint",
+    "bbox_center"),
   require_response = TRUE
 )
 }
@@ -18,18 +19,30 @@ prep_model_data(
 
 \item{response_var}{Response variable column name.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Predictor column names.  May be \code{character(0)}
+for an intercept-only model (\code{fit_bayesian_spatial_model()} supports
+one; the GWR and random-forest backends do not and reject it themselves).}
 
 \item{boundary}{Optional sf/sfc for CRS alignment.}
 
-\item{pointize}{Strategy for non-point geometry coercion.}
+\item{pointize}{Strategy for non-point geometry coercion, passed to
+\code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
+\code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
+for \code{"point_on_surface"}), \code{"line_midpoint"} or
+\code{"bbox_center"}.}
 
 \item{require_response}{Logical; if FALSE the response column is not
 required to be present (useful for out-of-sample prediction where the
 response is unknown).  Default TRUE.}
 }
 \value{
-An sf object (points) in a projected CRS, cleaned.
+An sf object with POINT geometry, cleaned of rows carrying missing
+or non-finite values in the modelling columns.  The CRS is projected
+whenever one can be established: \code{\link{ensure_projected}} returns
+the input unchanged when its CRS is missing \emph{and} the coordinates do
+not look like lon/lat, so a CRS-less local survey grid is passed through
+as-is rather than silently re-projected.  Set the CRS on \code{data_sf}
+if a projected result matters.
 }
 \description{
 Ensures point geometry, projected CRS, and removes rows with missing or
@@ -49,9 +62,9 @@ dat <- st_as_sf(
 prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
 }
 \seealso{
-Other model fitting:
-\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=fit_rf_model]{fit_rf_model()}}
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_gwr_model}()},
+\code{\link{fit_rf_model}()}
 }
 \concept{model fitting}

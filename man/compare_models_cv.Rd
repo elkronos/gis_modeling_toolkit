@@ -16,6 +16,7 @@ compare_models_cv(
   pointize = "auto",
   gwr_args = list(),
   bayes_args = list(),
+  rf_args = list(),
   summary = c("mean", "median"),
   quiet = FALSE
 )
@@ -27,7 +28,12 @@ compare_models_cv(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{models}{Character vector: subset of c("GWR", "Bayesian").}
+\item{models}{Character vector: any subset of \code{c("GWR", "Bayesian",
+  "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
+Names outside that set raise a warning and are dropped; if nothing
+recognised remains, this is an error rather than a silent fallback.
+A recognised model whose backend package is not installed is dropped with
+a message.}
 
 \item{k}{Number of folds. Default 5.}
 
@@ -39,16 +45,29 @@ compare_models_cv(
 
 \item{pointize}{Geometry coercion strategy.}
 
-\item{gwr_args}{Extra arguments for fit_gwr_model() / cv_gwr().}
+\item{gwr_args}{Extra arguments for \code{\link{cv_gwr}}.  Only names that
+are formal arguments of \code{cv_gwr()} are forwarded --- it has no
+\code{...} --- so entries meant for \code{fit_gwr_model()} alone (e.g.
+\code{longlat}) cannot be passed this way.  Anything dropped is named in a
+warning; call \code{cv_gwr()} directly if you need it.}
 
-\item{bayes_args}{Extra arguments for fit_bayesian_spatial_model().}
+\item{bayes_args}{Extra arguments for \code{fit_bayesian_spatial_model()}.
+Forwarded whole as \code{cv_bayes(fit_args = )}, so an unrecognised name
+is an error from \code{fit_bayesian_spatial_model()} rather than a silent
+drop.  \code{compute_loo}, \code{boundary} and \code{pointize} are
+overridden by the CV internals.}
+
+\item{rf_args}{Extra arguments for \code{\link{cv_rf}}, which passes
+anything it does not recognise on to \code{\link{fit_rf_model}} and thence
+to \code{ranger::ranger()}.}
 
 \item{summary}{"mean" or "median" for Bayesian predictions.}
 
 \item{quiet}{Logical; suppress messages.}
 }
 \value{
-A list with overall, by_fold, and per-model cv_results.
+A list with overall, by_fold, and per-model cv_results
+(\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
 }
 \description{
 Fits and cross-validates one or more model types, returning a unified
@@ -56,10 +75,27 @@ comparison table.  Unlike \code{compare_models()}, this function does
 perform fitting (inside CV folds), because CV inherently requires
 repeated fitting.
 }
+\examples{
+\donttest{
+if (requireNamespace("ranger", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 120
+  dat <- st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    coords = c("x", "y"), crs = 32632
+  )
+  dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+  cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
+                           rf_args = list(num_trees = 100))
+  cmp$overall
+}
+}
+}
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=evaluate_insample]{evaluate_insample()}},
-\code{\link[=residual_morans_i]{residual_morans_i()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{evaluate_insample}()},
+\code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

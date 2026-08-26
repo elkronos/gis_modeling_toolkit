@@ -7,7 +7,7 @@
 create_grid_polygons_cached(
   boundary,
   target_cells,
-  type = c("hex", "square"),
+  type = c("square", "hex"),
   ...,
   cache_env = .gmt_cache
 )
@@ -17,7 +17,8 @@ create_grid_polygons_cached(
 
 \item{target_cells}{Approximate desired number of cells.}
 
-\item{type}{Grid type: "hex" or "square".}
+\item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}, matching
+\code{\link[=create_grid_polygons]{create_grid_polygons()}}.}
 
 \item{...}{Additional arguments forwarded to create_grid_polygons().}
 

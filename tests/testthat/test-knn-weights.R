@@ -15,6 +15,7 @@ knn_fn <- function() get(".build_knn_weights", envir = asNamespace("spatialkit")
 test_that("the dense fallback refuses to allocate an n x n matrix", {
   # Previously unreachable: skipped whenever FNN was present.
   build <- knn_fn()
+  set.seed(3)
   big <- matrix(runif(5001 * 2), ncol = 2)
   expect_error(build(big, k = 8L, use_fnn = FALSE),
                "requires FNN for k-NN weights")

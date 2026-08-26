@@ -13,6 +13,45 @@
 }
 
 
+#' Merge caller-supplied extras onto compare_models_cv()'s base arguments
+#'
+#' `c(base, extra)` would produce two entries of the same name whenever an
+#' extra collides with a base argument, and `do.call()` then fails with
+#' "formal argument ... matched by multiple actual arguments".  A user passing
+#' `rf_args = list(seed = 3)` hits this immediately, so extras replace base
+#' entries by name instead of being appended alongside them.
+#'
+#' The four arguments that define *what is being compared* are protected: a
+#' per-model override of the data, the response, the predictors or the folds
+#' would silently make the models incomparable, which is the whole point of the
+#' function.
+#'
+#' @param base Named list of arguments built by `compare_models_cv()`.
+#' @param extra Named list supplied by the caller (`gwr_args` etc.).
+#' @param arg_label Name of the caller-facing argument, for messages.
+#' @return A named list with no duplicate names.
+#' @keywords internal
+#' @noRd
+.merge_args <- function(base, extra, arg_label) {
+  if (is.null(extra) || length(extra) == 0L) return(base)
+  if (is.null(names(extra)) || any(!nzchar(names(extra))))
+    stop(sprintf("compare_models_cv(): every element of `%s` must be named.",
+                 arg_label), call. = FALSE)
+
+  protected <- c("data_sf", "response_var", "predictor_vars", "folds")
+  clash <- intersect(names(extra), protected)
+  if (length(clash) > 0L) {
+    warning(sprintf(
+      paste0("compare_models_cv(): ignoring %s in `%s` -- these are set by ",
+             "compare_models_cv() itself so that every model is scored on the ",
+             "same data and the same folds."),
+      paste(sQuote(clash), collapse = ", "), arg_label), call. = FALSE)
+    extra <- extra[setdiff(names(extra), protected)]
+  }
+  utils::modifyList(base, extra)
+}
+
+
 #' Check whether a model backend is available
 #' @keywords internal
 #' @noRd
@@ -21,8 +60,40 @@
     "GWR" = requireNamespace("GWmodel", quietly = TRUE) &&
       requireNamespace("sp", quietly = TRUE),
     "Bayesian" = requireNamespace("brms", quietly = TRUE),
+    "RF" = requireNamespace("ranger", quietly = TRUE),
     FALSE
   )
+}
+
+
+#' Warn about argument-list entries a CV wrapper will silently discard
+#'
+#' \code{.filter_args()} drops anything the target function has no formal for
+#' (and no \code{...} to absorb it), which is correct but silent: a mistyped or
+#' misplaced entry then simply has no effect.  This names the casualties.
+#'
+#' @param fun The function the arguments are destined for.
+#' @param args_list The user-supplied argument list.
+#' @param arg_name Name of the parameter it arrived as, for the message.
+#' @param fun_name Name of \code{fun}, for the message.
+#' @return \code{NULL}, invisibly.  Called for the warning.
+#' @keywords internal
+#' @noRd
+.warn_dropped_args <- function(fun, args_list, arg_name, fun_name) {
+  if (!length(args_list)) return(invisible(NULL))
+  fml <- try(formals(fun), silent = TRUE)
+  if (inherits(fml, "try-error") || "..." %in% names(fml))
+    return(invisible(NULL))
+  dropped <- setdiff(names(args_list), names(fml))
+  if (length(dropped) == 0L) return(invisible(NULL))
+  warning(sprintf(
+    paste0("compare_models_cv(): ignoring %s entr%s %s -- %s() has no such ",
+           "argument. Only arguments of %s() are forwarded from `%s`; pass ",
+           "anything else by calling %s() yourself."),
+    arg_name, if (length(dropped) == 1L) "y" else "ies",
+    paste(sQuote(dropped), collapse = ", "), fun_name, fun_name,
+    arg_name, fun_name), call. = FALSE)
+  invisible(NULL)
 }
 
 
@@ -48,6 +119,13 @@
 #'
 #' @param coords Numeric matrix (n x 2) of projected coordinates.
 #' @param k Integer number of nearest neighbours (default 8).
+#' @param use_fnn Logical; use \pkg{FNN}'s kd-tree for the neighbour lookup.
+#'   Defaults to whether \pkg{FNN} is installed.  Exposed so the dense
+#'   brute-force fallback is reachable on a machine that has FNN.
+#' @param use_matrix Logical; return a \pkg{Matrix} sparse matrix rather than a
+#'   dense base matrix.  Defaults to whether \pkg{Matrix} is installed.
+#'   Exposed for the same reason as \code{use_fnn}.  The fast sparse path
+#'   requires both backends; with either disabled the dense path runs.
 #' @return A row-standardised weight matrix W — sparse (dgCMatrix) when
 #'   \pkg{Matrix} is available, otherwise a dense base matrix.
 #' @keywords internal
@@ -76,8 +154,12 @@
     )
   } else {
     # --- Fallback: dense O(n²) path when packages are missing ----
-    if (!has_fnn && n > 5000L)
-      stop("n = ", n, " requires FNN for k-NN weights (dense fallback would allocate an n*n matrix). Install FNN with install.packages(\"FNN\").", call. = FALSE)
+    # The guard has to test BOTH backends, not just FNN: this branch is entered
+    # whenever either is missing and always allocates W <- matrix(0, n, n), so
+    # keying it on FNN alone let an unbounded n x n allocation through whenever
+    # FNN was present but Matrix was not (or use_matrix = FALSE).
+    if (!(has_fnn && has_matrix) && n > 5000L)
+      stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
     if (has_fnn) {
       nn_idx <- FNN::get.knn(coords, k = k)$nn.index
     } else {
@@ -231,14 +313,24 @@ residual_morans_i <- function(fit,
     W <- .build_knn_weights(coords, k = k)
   }
   S0 <- sum(W)
-  if (S0 < .Machine$double.eps || sum(resid^2) < .Machine$double.eps) {
+
+  # Moran's I is a function of the CENTRED residuals, so the degeneracy guard
+  # has to test their sum of squares rather than the raw one.  Constant
+  # non-zero residuals pass sum(resid^2) but give resid_c == 0, and the
+  # variance block below then computes m2 = 0 -> b2 = NaN -> VI = NaN, so
+  # `if (VI > 0)` raises "missing value where TRUE/FALSE needed" instead of
+  # this function returning NULL.
+  resid_c <- resid - mean(resid)
+  ss_c    <- sum(resid_c^2)
+  if (S0 < .Machine$double.eps || ss_c < .Machine$double.eps) {
     .log_warn("residual_morans_i(): degenerate weights or zero residual variance.")
     return(NULL)
   }
 
   # --- Moran's I ---
-  resid_c <- resid - mean(resid)
-  I <- (n / S0) * as.numeric(crossprod(resid_c, W %*% resid_c)) / sum(resid_c^2)
+  # sum(resid_c * (W %*% resid_c)) rather than crossprod(): see the dispatch
+  # note in the variance block below.  The two are numerically identical.
+  I <- (n / S0) * sum(resid_c * (W %*% resid_c)) / ss_c
 
   # --- Analytical expectation & variance (randomisation assumption) ---
   EI <- -1 / (n - 1)
@@ -248,17 +340,20 @@ residual_morans_i <- function(fit,
   #    = sum(W^2) + sum(W * t(W))
   # so that sparse W never materialises the denser (W + t(W)) intermediate.
   #
-  # NOTE: t(), rowSums(), and colSums() are plain S3/base functions that do
-  # NOT dispatch to Matrix's S4 methods when called from package code with
-  # Matrix loaded-but-not-attached, so sparse W needs the Matrix:: generics
-  # explicitly.  (Primitives like *, %*%, and sum() do dispatch.)
+  # NOTE: t(), rowSums(), colSums() and crossprod() are plain base functions
+  # that do NOT dispatch to Matrix's S4 methods when called from package code
+  # with Matrix loaded-but-not-attached, so sparse W needs the Matrix::
+  # generics explicitly (or, for crossprod, the primitive-only rewrite used
+  # for I above).  Only primitives -- *, %*%, and sum() -- dispatch on their
+  # own; crossprod is neither a primitive nor an internal generic, which is
+  # why it belongs on this list and not with them.
   is_sparse <- inherits(W, "Matrix")
   Wt <- if (is_sparse) Matrix::t(W) else t(W)
   S1 <- sum(W * W) + sum(W * Wt)
   rs <- if (is_sparse) Matrix::rowSums(W) else rowSums(W)
   cs <- if (is_sparse) Matrix::colSums(W) else colSums(W)
   S2 <- sum((rs + cs)^2)
-  m2 <- sum(resid_c^2) / n
+  m2 <- ss_c / n
   m4 <- sum(resid_c^4) / n
   b2 <- m4 / (m2^2)                          # kurtosis
 
@@ -267,7 +362,9 @@ residual_morans_i <- function(fit,
   C  <- (n^2 - n) * S1 - 2 * n * S2 + 6 * S0^2
   VI <- (A - b2 * C) / D - EI^2
 
-  sd_I <- if (VI > 0) sqrt(VI) else NA_real_
+  # is.finite() as well as > 0: a degenerate kurtosis (b2) can make VI NaN,
+  # and `if (NaN > 0)` is an error rather than FALSE.
+  sd_I <- if (is.finite(VI) && VI > 0) sqrt(VI) else NA_real_
   z    <- if (is.finite(sd_I) && sd_I > 0) (I - EI) / sd_I else NA_real_
 
   p <- if (is.finite(z)) {
@@ -324,7 +421,9 @@ residual_morans_i <- function(fit,
 #' \code{predict()} for new data.
 #'
 #' @param fits A \code{spatial_fit} object, or a named list of them
-#'   (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).
+#'   (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
+#'   used as the model labels and every element must have one; an unnamed
+#'   list is an error.
 #' @param newdata Optional sf object for out-of-sample evaluation.
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
@@ -342,7 +441,18 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
   if (!is.list(fits) || length(fits) == 0L)
     stop("evaluate_insample(): `fits` must be a spatial_fit or a named list of them.")
 
-  rows <- lapply(names(fits), function(nm) {
+  # The loop below is over names(fits), which is NULL for an unnamed list --
+  # so lapply() would iterate zero times and this function would return NULL,
+  # silently, having passed the check above.  compare_models() then turns that
+  # NULL into a plain list and dies in seq_len(nrow(met_df)) with "argument
+  # must be coercible to non-negative integer", nowhere near the real cause.
+  nms <- names(fits)
+  if (is.null(nms) || anyNA(nms) || !all(nzchar(nms)))
+    stop("evaluate_insample(): `fits` must be a NAMED list of spatial_fit ",
+         "objects -- the names label the models in the output. Supply them, ",
+         "e.g. list(GWR = gwr_fit, Bayesian = bayes_fit).", call. = FALSE)
+
+  rows <- lapply(nms, function(nm) {
     obj <- fits[[nm]]
     if (!inherits(obj, "spatial_fit")) {
       .log_warn("evaluate_insample(): '%s' is not a spatial_fit; skipping.", nm)
@@ -373,8 +483,15 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #' @family model evaluation
 #' @export
 compare_models <- function(fits, newdata = NULL, ...) {
+  # Wrap a bare fit exactly as evaluate_insample() does.  Without this, a
+  # single spatial_fit passes the is.list() check below (a fit *is* a list),
+  # and every downstream loop then iterates the fit's own components instead
+  # of a set of models -- yielding all-NA Moran's I columns and one
+  # "'fit' is not a spatial_fit object" log line per component.
+  if (inherits(fits, "spatial_fit"))
+    fits <- stats::setNames(list(fits), class(fits)[1L])
   if (!is.list(fits) || length(fits) == 0L)
-    stop("compare_models(): `fits` must be a non-empty named list of spatial_fit objects.")
+    stop("compare_models(): `fits` must be a spatial_fit or a non-empty named list of them.")
 
   met_df <- evaluate_insample(fits, newdata = newdata, ...)
 
@@ -441,24 +558,57 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
-#' @param models Character vector: subset of c("GWR", "Bayesian").
+#' @param models Character vector: any subset of \code{c("GWR", "Bayesian",
+#'   "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
+#'   Names outside that set raise a warning and are dropped; if nothing
+#'   recognised remains, this is an error rather than a silent fallback.
+#'   A recognised model whose backend package is not installed is dropped with
+#'   a message.
 #' @param k Number of folds. Default 5.
 #' @param seed RNG seed. Default 123.
 #' @param folds Optional precomputed fold splits.
 #' @param boundary Optional polygon sf/sfc.
 #' @param pointize Geometry coercion strategy.
-#' @param gwr_args Extra arguments for fit_gwr_model() / cv_gwr().
-#' @param bayes_args Extra arguments for fit_bayesian_spatial_model().
+#' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
+#'   are formal arguments of \code{cv_gwr()} are forwarded --- it has no
+#'   \code{...} --- so entries meant for \code{fit_gwr_model()} alone (e.g.
+#'   \code{longlat}) cannot be passed this way.  Anything dropped is named in a
+#'   warning; call \code{cv_gwr()} directly if you need it.
+#' @param bayes_args Extra arguments for \code{fit_bayesian_spatial_model()}.
+#'   Forwarded whole as \code{cv_bayes(fit_args = )}, so an unrecognised name
+#'   is an error from \code{fit_bayesian_spatial_model()} rather than a silent
+#'   drop.  \code{compute_loo}, \code{boundary} and \code{pointize} are
+#'   overridden by the CV internals.
+#' @param rf_args Extra arguments for \code{\link{cv_rf}}, which passes
+#'   anything it does not recognise on to \code{\link{fit_rf_model}} and thence
+#'   to \code{ranger::ranger()}.
 #' @param summary "mean" or "median" for Bayesian predictions.
 #' @param quiet Logical; suppress messages.
-#' @return A list with overall, by_fold, and per-model cv_results.
+#' @return A list with overall, by_fold, and per-model cv_results
+#'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
 #' @family model evaluation
+#' @examples
+#' \donttest{
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 120
+#'   dat <- st_as_sf(
+#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+#'   cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
+#'                            rf_args = list(num_trees = 100))
+#'   cmp$overall
+#' }
+#' }
 #' @export
 compare_models_cv <- function(
     data_sf, response_var, predictor_vars,
     models = c("GWR", "Bayesian"),
     k = 5, seed = 123, folds = NULL, boundary = NULL, pointize = "auto",
-    gwr_args = list(), bayes_args = list(),
+    gwr_args = list(), bayes_args = list(), rf_args = list(),
     summary = c("mean", "median"),
     quiet = FALSE
 ) {
@@ -467,8 +617,22 @@ compare_models_cv <- function(
 
   if (!inherits(data_sf, "sf"))
     stop("compare_models_cv(): `data_sf` must be an sf object.")
-  models <- unique(intersect(models, c("GWR", "Bayesian")))
-  if (length(models) == 0L) models <- "GWR"
+
+  # Unrecognised model names used to be dropped by a bare intersect(), so
+  # models = "RF" silently ran GWR instead of what was asked for -- a wrong
+  # answer presented as the right one.
+  known    <- c("GWR", "Bayesian", "RF")
+  models   <- unique(as.character(models))
+  unknown  <- setdiff(models, known)
+  models   <- intersect(models, known)
+  if (length(unknown) > 0L)
+    warning(sprintf(
+      "compare_models_cv(): ignoring unknown model(s) %s. Supported: %s.",
+      paste(sQuote(unknown), collapse = ", "),
+      paste(sQuote(known), collapse = ", ")), call. = FALSE)
+  if (length(models) == 0L)
+    stop(sprintf("compare_models_cv(): no recognised model requested. Supported: %s.",
+                 paste(sQuote(known), collapse = ", ")), call. = FALSE)
 
   for (m in models) {
     if (!.model_available(m)) {
@@ -488,11 +652,12 @@ compare_models_cv <- function(
 
   if ("GWR" %in% models) {
     .msg("compare_models_cv(): running CV for GWR ...")
-    base <- c(
+    .warn_dropped_args(cv_gwr, gwr_args, "gwr_args", "cv_gwr")
+    base <- .merge_args(
       list(data_sf = data_sf, response_var = response_var,
            predictor_vars = predictor_vars, folds = folds,
            k = k, seed = seed, boundary = boundary, pointize = pointize),
-      gwr_args
+      gwr_args, "gwr_args"
     )
     gwr_cv <- do.call(cv_gwr, .filter_args(cv_gwr, base))
     cv_results$gwr_cv <- gwr_cv
@@ -526,6 +691,31 @@ compare_models_cv <- function(
     bf <- try(as.data.frame(bayes_cv$fold_metrics), silent = TRUE)
     if (!inherits(bf, "try-error") && nrow(bf)) {
       bf$model <- "Bayesian"; by_fold_rows[["Bayesian"]] <- bf
+    }
+  }
+
+  if ("RF" %in% models) {
+    .msg("compare_models_cv(): running CV for RF ...")
+    # cv_rf() has `...` (forwarded to fit_rf_model() and on to ranger), so
+    # nothing in rf_args is filtered out; `pointize` is deliberately not
+    # passed, because cv_rf() has no such formal and it would land in ranger.
+    base <- .merge_args(
+      list(data_sf = data_sf, response_var = response_var,
+           predictor_vars = predictor_vars, folds = folds,
+           k = k, seed = seed, boundary = boundary),
+      rf_args, "rf_args"
+    )
+    rf_cv <- do.call(cv_rf, base)
+    cv_results$rf_cv <- rf_cv
+    ov <- try(as.data.frame(rf_cv$overall), silent = TRUE)
+    if (inherits(ov, "try-error") || nrow(ov) == 0L)
+      ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
+                       R2 = NA_real_, Adj_R2 = NA_real_)
+    ov$model <- "RF"
+    comparison_rows[["RF"]] <- ov
+    bf <- try(as.data.frame(rf_cv$fold_metrics), silent = TRUE)
+    if (!inherits(bf, "try-error") && nrow(bf)) {
+      bf$model <- "RF"; by_fold_rows[["RF"]] <- bf
     }
   }
 

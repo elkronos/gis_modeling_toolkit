@@ -1,126 +1,220 @@
 # cran-comments
 
 **Status: draft. Nothing is being submitted.** This file describes the working
-tree relative to the released 1.0.0 (2026-08-07) so it does not drift out of
-date while development continues. Every "<fill in>" below must be replaced with
-a real result before this is used for an actual submission.
+tree so it does not drift out of date while development continues. Every
+"<fill in>" below must be replaced with a real result before this is used for an
+actual submission.
 
-## Submission
+## Assumption this file is written under
 
-This is an update to spatialkit 1.0.0.
+**This is treated as a FIRST submission of spatialkit to CRAN.** Nothing in the
+repository corroborates a CRAN release history: `v1.0.0` is a git tag,
+`DESCRIPTION` carries no CRAN URL, there is no CRAN badge, `NEWS.md` records
+1.0.0 as a GitHub release, and the README documents installation only via
+`remotes::install_github()`. An earlier draft of this file described the
+submission as "an update to spatialkit 1.0.0"; that claim had no supporting
+evidence and has been removed.
 
-It is a substantial release. The published 1.0.0 carried three defects in the
-Bayesian model path, one of which affected every fit; correcting them changes
-default results, and correcting them properly required work that grew into a
-broader set of changes. `NEWS.md` is the full record; the summary below is what
-a reviewer needs.
+If 1.0.0 *was* in fact published on CRAN, this file needs rewriting as an update
+— the version number, the reverse-dependency section and the framing of the
+breaking changes all differ.
+
+Because it is a first submission, the version to submit is **not**
+`1.0.0.9000`. Pick a release number before submitting (the removal of three
+exported functions and the changed default results of every Bayesian fit argue
+for `2.0.0`; see `NEWS.md`), and set `Version:` in `DESCRIPTION` accordingly.
+
+## Summary
+
+`spatialkit` builds tessellations over point data, aggregates observations to
+cells, and cross-validates spatial models with folds that respect the data's
+autocorrelation structure. Three model backends (GWR via `GWmodel`, a Bayesian
+Gaussian process via `brms`, random forests via `ranger`) sit behind one S3
+class so they can be scored on identical folds.
 
 ## Test environments
 
-* local: macOS (aarch64-apple-darwin), R 4.6.x — <fill in: R CMD check result>
+Ubuntu 24.04.4 LTS, R 4.3.3, x86_64-pc-linux-gnu — the environment the results
+below were produced on. Installed: sf 1.0.15, dplyr 1.1.4, logger 0.2.2, digest
+0.6.34, testthat 3.2.1, sp 2.1.2, ranger 0.16.0, tibble 3.2.1, geometry 0.4.7,
+gstat 2.1.1, ggplot2 3.4.4, patchwork 1.2.0, FNN 1.1.4, Matrix 1.6.5,
+roxygen2 7.3.1, knitr 1.45, rmarkdown 2.25. **Not installed: `GWmodel`, `brms`,
+`cmdstanr`, `loo`.**
+
+Still to run before any submission:
+
+* local: macOS (aarch64-apple-darwin), R release — <fill in>
 * win-builder: R-devel — <fill in>
 * win-builder: R-release — <fill in>
-* GitHub Actions: macOS / Windows / Ubuntu, R release, devel and oldrel-1 —
-  <fill in>
+* GitHub Actions `R-CMD-check.yaml`, five jobs (not a cross-product):
+  macOS-latest R release; windows-latest R release; ubuntu-latest R devel;
+  ubuntu-latest R release; ubuntu-latest R oldrel-1. R-devel and oldrel-1 are
+  tested on Linux only. — <fill in>
+* GitHub Actions `backends` job (ubuntu-latest, R release) with `sp`, `GWmodel`,
+  `gstat`, `FNN`, `Matrix`, `geometry`, `ranger` and `tibble` installed, so the
+  optional code paths actually execute rather than skip. — <fill in>
+* GitHub Actions `check-brms.yaml` (weekly, ubuntu-latest, R release) with
+  `brms` and the Stan toolchain. — <fill in>
 
 ## R CMD check results
 
-<fill in. `devtools::test()` currently reports 856 passing, 0 failures, 1 skip
-(a Windows-only fallback path that cannot run on macOS). A full R CMD check has
-not been run against the current tree.>
+<fill in: `R CMD check --as-cran` has not been run against the current tree on a
+release-R machine, and neither has the manual (no LaTeX here).>
 
-## Breaking changes
+On the environment above, `R CMD check --no-manual --no-build-vignettes` on the
+built tarball reports **2 WARNINGs, 1 NOTE**. All three are accounted for:
+
+* **NOTE — "Packages suggested but not available for checking: 'GWmodel',
+  'brms', 'cmdstanr', 'loo'".** Environmental. These are the optional backends
+  this machine does not have; the `backends` and `check-brms` CI jobs exist to
+  cover them.
+
+* **WARNING — "checking R files for non-ASCII characters": `crs-geometry.R`.**
+  Real, and must be fixed before submission. `R/crs-geometry.R` line 188 carries
+  a literal U+2014 EM DASH inside a string literal in the `ensure_projected()`
+  error message:
+
+  ```
+  "object that carries a CRS — or omit `target_crs` to let a ",
+  ```
+
+  Replace it with `--` or the escape `—`. Em dashes elsewhere in `R/` sit
+  in comments and roxygen blocks, which the check tolerates; this is the only
+  one in code.
+
+* **WARNING — "checking R files for syntax errors":** the only content is
+  `Warning in Sys.setlocale("LC_CTYPE", "en_US.UTF-8") : OS reports request to
+  set locale to "en_US.UTF-8" cannot be honored`. Environmental: this container
+  ships only the C locale, so the check's own locale switch fails. No syntax
+  error was reported. Expect this WARNING to disappear on any machine with a
+  UTF-8 locale.
+
+`R CMD build` produces a 994 KB tarball, of which the built vignette is 857 KB.
+Both `checking tests` and `checking running R code from vignettes` pass.
+
+`testthat` reports **1752 passing, 0 failures, 0 errors, 7 skips** on that
+environment (`NOT_CRAN=true`). The seven skips are:
+
+* 5 skipped for `GWmodel` (`skip_if_not_installed`), which is not installed here
+* 1 skipped for `brms`, likewise
+* 1 Windows-only fallback path that cannot run on Linux
+
+With `GWmodel` and `brms` installed there would be none. Without `NOT_CRAN` set,
+four further tests skip on purpose: they exercise `parallel::mclapply()` fork
+behaviour, which is not appropriate to run on CRAN.
+
+This figure and the one in `README.md` describe the same run; the README does
+not restate the count, precisely so the two cannot drift apart.
+
+## Breaking changes since the 1.0.0 tag
 
 Three exported functions have been removed: `evaluate_models()`,
 `evaluate_models_cv()` and `phi_prior_bounds()`. All three were thin wrappers
-that the package's own documentation described as legacy, and each has a
-documented replacement (`compare_models()`, `compare_models_cv()` and
-`gp_lengthscale_bounds()` respectively).
+the package's own documentation described as legacy, and each has a documented
+replacement (`compare_models()`, `compare_models_cv()` and
+`gp_lengthscale_bounds()`).
 
 Default results from `fit_bayesian_spatial_model()` also change, as a
-consequence of the corrections below. This is recorded in `NEWS.md`, and the
-previous behaviour remains available by passing `gp_k` and `gp_c` explicitly.
-
-Because of both, the version bump is major rather than minor.
+consequence of three corrections to the Gaussian process path (the basis count,
+the coordinate scaling, and the length-scale prior). The previous behaviour
+remains reachable by passing `gp_k`, `gp_c` and `gp_iso` explicitly. `NEWS.md`
+is the full record.
 
 ## What was wrong in 1.0.0
 
-Three corrections, in descending order of user impact:
+In descending order of user impact:
 
-1. The automatic length-scale prior for the Gaussian process was expressed in
+1. `residual_morans_i()` failed on its own documented fast path. With `FNN` and
+   `Matrix` installed the weights are a sparse `Matrix`, and `base::crossprod()`
+   does not S4-dispatch on the `dgeMatrix` that `W %*% resid` produces, so the
+   call errored — taking `compare_models()`, which invokes it automatically,
+   down with it. This is a live failure on the recommended configuration, not a
+   corner case.
+
+2. The automatic length-scale prior for the Gaussian process was expressed in
    the wrong units. `brms::gp()` defaults to `scale = TRUE`, which rescales its
-   covariates so the maximum Euclidean distance between two points is 1 and
-   reports the `lscale` parameter in that space. This package standardises the
-   coordinates itself and derived the prior in *those* units, so the two
-   normalisations differed by roughly the maximum pairwise distance and the
-   prior was about five times too diffuse. In practice this produced rejected
-   initial values ("Gradient evaluated at the initial value is not finite") on
-   most chains. The GP term now sets `scale = FALSE` so there is exactly one
-   coordinate scaling.
+   covariates so the maximum pairwise distance is 1 and reports `lscale` in that
+   space. This package standardises the coordinates itself and derived the prior
+   in *those* units, so the two normalisations differed by roughly the maximum
+   pairwise distance and the prior was about five times too diffuse. In practice
+   that produced rejected initial values ("Gradient evaluated at the initial
+   value is not finite") on most chains. The GP term now sets `scale = FALSE`.
 
-2. The number of Gaussian process basis functions was chosen from the number of
-   observations rather than from the spatial structure of the data. Because
-   `brms::gp()` builds a tensor grid, a term `gp(x, y, k = k)` carries `k^2`
-   basis functions, and the previous rule reduced to `max(15, floor(sqrt(n)))`
-   for any n above 45 — making the basis count identically n. A model at
-   n = 10,000 therefore carried 10,000 basis functions, at which point the
-   approximation is no longer an approximation. The count is now derived from
-   the length-scale-to-domain ratio following Riutort-Mayol et al. (2023,
-   Statistics and Computing 33:1).
+3. The number of GP basis functions was chosen from the number of observations
+   rather than from the spatial structure of the data. `brms::gp()` builds a
+   tensor grid, so `gp(x, y, k = k)` carries `k^2` basis functions, and the
+   previous rule reduced to `max(15, floor(sqrt(n)))` for any n above 45 —
+   making the basis count identically n. A model at n = 10,000 carried 10,000
+   basis functions. The count is now derived from the length-scale-to-domain
+   ratio following Riutort-Mayol et al. (2023, Statistics and Computing 33:1).
+   Measured on the recorded baselines: at n = 2,000, `gp_k` 44 to 24 and the
+   basis count 1,936 to 576; at n = 10,000, 100 to 23 and 10,000 to 529; at
+   n = 200 the basis is *larger* than before (225 to 529), which is the expected
+   consequence of a correction rather than an optimisation.
 
-   Measured on the same simulated field and seeds, 1.0.0 versus the current
-   tree: at n = 2,000, `gp_k` 44 to 24 and the basis count 1,936 to 576, with
-   cross-validated R-squared 0.9269 to 0.9272 — unchanged within noise — and
-   elapsed time 10,908 s to 1,186 s. At n = 300 the derived basis is *larger*
-   than before (289 to 529) and the fit correspondingly slower, which is the
-   expected consequence of a correction rather than an optimisation.
-
-3. `ensure_projected()` forced data of any extent into a single UTM zone.
+4. `ensure_projected()` forced data of any extent into a single UTM zone.
    Transverse Mercator scale error grows quadratically with distance from the
    central meridian, so continental-extent data carried distance errors of
-   several percent, which propagated silently into variogram ranges, spatial
-   block sizes, GWR bandwidth selection and GP length-scales. Wide extents now
-   receive an equal-area projection centred on the data.
+   several percent, propagating silently into variogram ranges, spatial block
+   sizes, GWR bandwidth selection and GP length-scales. Wide extents now receive
+   an equal-area projection centred on the data.
 
-A fourth fix makes cross-validation reproducible under `parallel = TRUE`;
-forked workers previously seeded themselves from the current time and process
-ID.
+5. `make_folds(method = "nndm")` called `set.seed(seed)` unconditionally, and
+   `seed` defaults to `NULL`. `set.seed(NULL)` re-initialises the RNG from the
+   clock and process ID, so an ordinary call destroyed the caller's random
+   number stream.
 
-## Scope of the release
+6. Cross-validation under `parallel = TRUE` was not reproducible; forked workers
+   seeded themselves from the current time and process ID.
 
-Beyond the four items above, `NEWS.md` records roughly 20 further bug fixes and
-14 new features. The new user-facing functions are
-`area_of_applicability()`, `fit_rf_model()`, `cv_rf()`,
-`gwr_model_selection()`, `select_features_forward()`, `predict_surface()`,
-`plot_folds()`, and a `plot()` method for `spatial_fit`; `make_folds()` gains
-`leave_location_out` and `nndm` methods, and `summarize_by_cell()` gains a
-variogram-based design effect.
+`NEWS.md` records roughly 100 further user-facing fixes and 14 new features.
 
 ## Reverse dependencies
 
-<fill in: run revdepcheck::revdep_check(). At 1.0.0 there were none.>
+None. This is a first submission, so there can be none.
 
 ## Comments for reviewers
 
-* Words flagged by the spell checker in DESCRIPTION (Voronoi, Delaunay,
-  GWR, backends) are correctly spelled domain terms / standard
-  abbreviations.
-* 'cmdstanr' (Suggests) is not on CRAN; it is available from the
-  repository declared in Additional_repositories
-  (https://stan-dev.r-universe.dev). It is an optional backend for 'brms',
-  used only conditionally via requireNamespace(); the 'rstan' backend that
-  ships with 'brms' is used otherwise.
-* Optional model backends ('GWmodel', 'brms', 'ranger') and other heavy
-  dependencies live in Suggests and are used strictly conditionally: all
-  package code, examples, tests, and the vignette guard their use with
-  requireNamespace() and skip or degrade gracefully when the packages are
-  unavailable.
-* Examples that run full MCMC via 'brms' are wrapped in \dontrun{} because
-  they require Stan compilation and long sampling times; fast conditional
-  examples for the 'GWmodel' and 'ranger' backends use \donttest{}.
-* Logging writes INFO+ to a session tempdir() file and WARN+ to the console
-  (see .onLoad in R/zzz.R), all within a package-specific 'logger' namespace so
-  the user's global logger configuration is never modified. Nothing is written
-  outside tempdir(). RNG state is saved and restored around all seeded
-  operations, including the per-fold streams used by the parallel
-  cross-validation path and every method of `make_folds()`.
+* Words flagged by the spell checker in DESCRIPTION (Voronoi, Delaunay, GWR,
+  backends) are correctly spelled domain terms or standard abbreviations.
+
+* `cmdstanr` (Suggests) is not on CRAN; it is available from the repository
+  declared in `Additional_repositories` (https://stan-dev.r-universe.dev). It is
+  an optional backend for `brms`, used only conditionally via
+  `requireNamespace()`; the `rstan` backend that ships with `brms` is used
+  otherwise.
+
+* Optional model backends (`GWmodel`, `brms`, `ranger`) and other heavy
+  dependencies live in Suggests and are used strictly conditionally. All package
+  code, examples, tests **and the vignette** guard their use with
+  `requireNamespace()` and skip or degrade gracefully when the package is
+  absent. The vignette resolves every optional backend in its setup chunk and
+  gates the relevant chunks on the result; the `ggplot2` gate is global, since
+  every chunk in it either draws something or feeds something that does, so on a
+  machine without `ggplot2` the vignette builds as code without output rather
+  than failing `R CMD build`.
+
+* Exactly two examples are wrapped in `\dontrun{}`: `fit_bayesian_spatial_model()`
+  and `cv_bayes()`, both of which run full MCMC via `brms` and require Stan
+  compilation. Every other example runs, using `\donttest{}` plus a
+  `requireNamespace()` guard where it needs an optional backend.
+
+* Logging writes INFO+ to a session `tempdir()` file and WARN+ to the console
+  (see `.onLoad` in `R/zzz.R`), all within a package-specific `logger` namespace
+  so the user's global `logger` configuration is never modified. Nothing is
+  written outside `tempdir()`. The demo script in `inst/scripts/` also writes
+  its PNGs to `tempdir()` unless the user sets an environment variable naming
+  somewhere else.
+
+* RNG state is saved and restored around seeded operations via an internal
+  `.with_seed()` helper — the per-fold streams used by the parallel
+  cross-validation path, the k-means seeding functions, and `fit_gwr_model()`'s
+  local-collinearity spot-check. Where `seed` is `NULL`, nothing is seeded and
+  nothing is restored: unseeded functions advance the caller's stream the way
+  any other unseeded R function does, rather than re-initialising it. That
+  distinction is the subject of fix 5 above.
+
+* `NEWS.md` is long. The package changed substantially since the 1.0.0 tag, and
+  several of the changes alter results that users may have already reported, so
+  each is recorded with enough detail to tell whether it affects a given
+  analysis.

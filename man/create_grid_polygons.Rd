@@ -23,15 +23,19 @@ grids the count is adjusted for hexagonal packing density, but the final
 cell count after clipping to an irregular boundary may deviate
 substantially from the requested value.}
 
-\item{type}{Grid type: "square" or "hex".}
+\item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}.}
 
 \item{cellsize}{Optional numeric cell size (length 1 or 2).}
 
-\item{n}{Optional grid resolution (integer, length 1 or 2).}
+\item{n}{Optional grid resolution (integer, length 1 or 2). Applies to
+square grids only; \code{\link[sf:st_make_grid]{sf::st_make_grid()}} derives hexagon placement from
+\code{cellsize} alone.}
 
 \item{clip}{Logical; clip grid to boundary.}
 
-\item{crs}{Optional target CRS.}
+\item{crs}{Optional target CRS. When \code{NULL} (default) the boundary is
+projected with \code{\link[=ensure_projected]{ensure_projected()}}, which changes the CRS of the returned
+grid; a message reports this unless \code{quiet = TRUE}.}
 
 \item{quiet}{Logical; suppress messages.}
 }
@@ -46,16 +50,19 @@ library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
-grid_sq  <- create_grid_polygons(bnd, target_cells = 25, type = "square")
-grid_hex <- create_grid_polygons(bnd, target_cells = 25, type = "hex")
+grid_sq  <- create_grid_polygons(bnd, target_cells = 100, type = "square")
+grid_hex <- create_grid_polygons(bnd, target_cells = 100, type = "hex")
 nrow(grid_sq)
-nrow(grid_hex)  # near-target thanks to hex packing correction
+# Hex counts run above target because clipping keeps every hexagon that
+# merely overhangs the boundary; the inflation is proportionally larger
+# at small target_cells.
+nrow(grid_hex)
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

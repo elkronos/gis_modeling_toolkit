@@ -113,6 +113,7 @@ test_that("singleton and empty cells are handled", {
 })
 
 test_that("a NULL correlation function yields all-NA rather than erroring", {
+  set.seed(12)
   coords <- matrix(runif(10 * 2), ncol = 2)
   d <- cell_de(coords, rep("a", 10), NULL)
   expect_true(all(is.na(d)))

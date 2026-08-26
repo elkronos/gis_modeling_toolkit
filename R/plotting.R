@@ -20,7 +20,10 @@
 #' @param label_size Label text size. Default 2.7.
 #' @param legend Logical; show fill legend. Default TRUE.
 #' @param legend_title Optional legend title.
-#' @param theme A ggplot2 theme. Default theme_void().
+#' @param theme A ggplot2 theme, or NULL (the default) to use
+#'   \code{ggplot2::theme_void()}.  The default is resolved inside the function
+#'   rather than in the formals, so that a Suggests package is never evaluated
+#'   before the \code{requireNamespace()} check has run.
 #' @param target_crs Optional CRS for plotting.
 #' @param title,subtitle,caption Plot annotations.
 #' @param xlim,ylim Optional numeric vectors of length 2 for coordinate limits
@@ -64,7 +67,7 @@ plot_tessellation_map <- function(tessellation_sf,
                                   label_size = 2.7,
                                   legend = TRUE,
                                   legend_title = NULL,
-                                  theme = ggplot2::theme_void(),
+                                  theme = NULL,
                                   target_crs = NULL,
                                   title = NULL,
                                   subtitle = NULL,
@@ -76,9 +79,25 @@ plot_tessellation_map <- function(tessellation_sf,
   # --- validation ---
   if (!requireNamespace("ggplot2", quietly = TRUE))
     stop("plot_tessellation_map() requires package 'ggplot2'. Install it with install.packages('ggplot2').", call. = FALSE)
+  # Resolved here, not in the formals: a Suggests package must not appear in an
+  # exported function's default arguments.  Lazy evaluation happens to make
+  # that safe today only because the guard above fires first -- a property that
+  # breaks the moment anyone reorders this block.
+  if (is.null(theme)) theme <- ggplot2::theme_void()
   if (missing(tessellation_sf) || is.null(tessellation_sf))
     stop("plot_tessellation_map(): 'tessellation_sf' is required.")
   .assert_sf(tessellation_sf, c("POLYGON", "MULTIPOLYGON"), "tessellation_sf")
+
+  .check_lim <- function(v, nm) {
+    if (is.null(v)) return(invisible(NULL))
+    if (!is.numeric(v) || length(v) != 2L || any(!is.finite(v)))
+      stop(sprintf(paste0("plot_tessellation_map(): '%s' must be a numeric ",
+                          "vector of length 2 with finite values."), nm),
+           call. = FALSE)
+    invisible(NULL)
+  }
+  .check_lim(xlim, "xlim")
+  .check_lim(ylim, "ylim")
 
   # --- pick plot CRS ---
   plot_crs <- if (!is.null(target_crs)) sf::st_crs(target_crs) else sf::st_crs(tessellation_sf)
@@ -108,6 +127,11 @@ plot_tessellation_map <- function(tessellation_sf,
 
   # Fill mapping
   has_fill <- !is.null(fill_col) && fill_col %in% names(tess)
+  # A mistyped fill_col used to yield an unfilled outline map with nothing to
+  # say anything had gone wrong, while a mistyped label_col warned.  Match it.
+  if (!is.null(fill_col) && !has_fill)
+    .log_warn("plot_tessellation_map(): fill_col '%s' not found; drawing an unfilled outline map.",
+              paste(as.character(fill_col), collapse = ", "))
   if (has_fill) {
     tess$`..__fill__` <- tess[[fill_col]]
     p <- p + ggplot2::geom_sf(

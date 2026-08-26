@@ -31,7 +31,14 @@ point summary.  Default FALSE.}
 \item{...}{Ignored.}
 }
 \value{
-Numeric vector (or matrix when draws=TRUE).
+Numeric vector of length \code{nrow(newdata)}, or a
+\code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE} (a 1-row
+all-\code{NA} matrix if the posterior draw fails).  With
+\code{newdata = NULL} the cached \code{fitted()} values are returned only
+for the default \code{summary = "mean"}, \code{type = "epred"},
+\code{draws = FALSE} combination; any other combination is recomputed
+against the training data, because the cache holds epred column means and
+nothing else.
 }
 \description{
 Applies the same newdata preparation pipeline as \code{predict.gwr_fit()}:

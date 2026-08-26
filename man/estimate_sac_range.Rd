@@ -44,15 +44,33 @@ the fitted lags.}
 \item{seed}{Optional RNG seed for subsampling reproducibility.}
 }
 \value{
-A single positive numeric value (the effective range in projected
-coordinate units) of class \code{sac_range}, or \code{NA_real_} if
-estimation fails or the fitted range is unidentified.  The returned value
-behaves as an ordinary number; the fit it came from is attached as
-attributes \code{directional} (the 0° and 90° ranges),
-\code{anisotropy} (their ratio), \code{max_dist}, \code{cutoff_dist},
-\code{variogram} (the
-empirical variogram) and \code{variogram_model} (the fitted \code{gstat}
-model), so the fit can be inspected rather than trusted.
+A single value of class \code{sac_range}, which behaves as an
+ordinary number.  There are three shapes, and they carry different
+attributes:
+\describe{
+\item{Success}{A positive effective range in projected coordinate units,
+with the fit attached as attributes \code{directional} (the 0° and 90°
+ranges), \code{anisotropy} (their ratio), \code{max_dist},
+\code{cutoff_dist}, \code{variogram} (the empirical variogram) and
+\code{variogram_model} (the fitted \code{gstat} model), so the fit can
+be inspected rather than trusted.}
+\item{Rejected range}{\code{NA_real_} when a range was fitted but exceeds
+\code{range_frac * cutoff * max_dist} and is therefore unidentified
+(see \code{range_frac}).  It is classed \code{sac_range} as well, so it
+prints as a bare \code{NA} rather than dumping its attributes, and it
+carries \code{max_dist}, \code{cutoff_dist}, \code{variogram} and
+\code{variogram_model} --- the evidence for the rejection --- plus
+\code{rejected_range} (the value that was refused) and
+\code{rejected_reason}.  It does \strong{not} carry \code{directional}
+or \code{anisotropy}.}
+\item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
+could not be attempted or produced nothing at all (\pkg{gstat}
+missing, fewer than 30 finite values, a degenerate extent, or a
+singular variogram fit).}
+}
+Attributes and the class do not affect \code{is.na()} or
+\code{is.finite()}, so every downstream guard treats all three the same
+way it always did.
 }
 \description{
 Fits exponential (or spherical) variogram models and returns the
@@ -91,14 +109,14 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

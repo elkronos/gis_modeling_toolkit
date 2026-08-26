@@ -11,12 +11,19 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 
 \item{boundary}{Optional polygonal sf object.}
 
-\item{expand}{Numeric expansion distance or fraction (0–1 = fraction of extent).}
+\item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
+extent). Absolute values are expressed in the units of the CRS the clip
+target is built in. Because \code{\link[sf:geos_unary]{sf::st_buffer()}} interprets \code{dist} as
+\strong{metres} for lon/lat data while the fraction-of-extent form is derived
+from a bounding box measured in \strong{degrees}, lon/lat input is projected to
+a local projected CRS first (see \verb{@return}), so both forms agree.}
 
 \item{quiet}{Logical; suppress messages.}
 }
 \value{
-An sf polygon layer representing the clip target.
+An sf polygon layer representing the clip target. For lon/lat input
+the layer is returned in the automatically selected local projected CRS,
+not the input CRS; a message reports this unless \code{quiet = TRUE}.
 }
 \description{
 Build a polygonal clip target from points and/or a boundary

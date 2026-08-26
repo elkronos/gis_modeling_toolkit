@@ -26,7 +26,7 @@ plot_tessellation_map(
   label_size = 2.7,
   legend = TRUE,
   legend_title = NULL,
-  theme = ggplot2::theme_void(),
+  theme = NULL,
   target_crs = NULL,
   title = NULL,
   subtitle = NULL,
@@ -71,7 +71,10 @@ plot_tessellation_map(
 
 \item{legend_title}{Optional legend title.}
 
-\item{theme}{A ggplot2 theme. Default theme_void().}
+\item{theme}{A ggplot2 theme, or NULL (the default) to use
+\code{ggplot2::theme_void()}.  The default is resolved inside the function
+rather than in the formals, so that a Suggests package is never evaluated
+before the \code{requireNamespace()} check has run.}
 
 \item{target_crs}{Optional CRS for plotting.}
 
@@ -105,10 +108,10 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()}
 }
 \concept{tessellation}

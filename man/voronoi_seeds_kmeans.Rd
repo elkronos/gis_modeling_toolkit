@@ -9,12 +9,15 @@ voronoi_seeds_kmeans(points_sf, k, set_seed = 456)
 \arguments{
 \item{points_sf}{An sf object with POINT geometries.}
 
-\item{k}{Integer; requested number of clusters.}
+\item{k}{Integer; requested number of clusters. Clamped to the number of
+distinct point positions, with a warning, when it exceeds it.}
 
 \item{set_seed}{Optional integer RNG seed. Default 456.}
 }
 \value{
-An sf object of k cluster center POINTs.
+An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
+\code{k} exceeds the number of distinct positions), with \code{seed_id} and
+\code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
 }
 \description{
 K-means seed generation from point coordinates

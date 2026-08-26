@@ -14,6 +14,52 @@
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+#' Resolve an object's CRS, or NULL when it has none
+#'
+#' `ensure_projected(target_crs = )` deliberately errors on an unusable
+#' `target_crs`, so that a typo cannot silently turn it into a no-op.  Internal
+#' callers, though, routinely derive the target from another object
+#' (`sf::st_crs(training_data)`), and that object is legitimately allowed to
+#' carry no CRS.  Passing `NA_crs_` straight through would turn a supported
+#' CRS-less workflow into a hard error, so those call sites funnel the value
+#' through here and get `NULL` — "no target, pick one automatically" — instead.
+#'
+#' @param x An sf/sfc object or anything `sf::st_crs()` accepts.
+#' @return An `sf::crs` object, or NULL when the CRS is missing.
+#' @keywords internal
+#' @noRd
+.crs_or_null <- function(x) {
+  cr <- tryCatch(sf::st_crs(x), error = function(e) NA)
+  if (length(cr) == 0L || all(is.na(cr))) NULL else cr
+}
+
+#' Reproject to a target CRS, or stamp it when the source has none
+#'
+#' `sf::st_transform()` refuses a CRS-less object ("cannot transform sfc object
+#' with missing crs"), so any `if (!is.null(crs)) st_transform(x, crs)` turns a
+#' `crs =` argument into a hard error for exactly the users most likely to pass
+#' it — those whose data carries no CRS. Reprojection is impossible there, but
+#' assumption is not: stamp the target and say so loudly, matching what
+#' `ensure_projected()` already documents for the same situation.
+#'
+#' @param x An sf or sfc object.
+#' @param crs Target CRS (anything `sf::st_crs()` accepts).
+#' @param what Label naming `x` in the warning.
+#' @param caller Calling function name, for the warning.
+#' @return `x` reprojected to, or stamped with, `crs`.
+#' @keywords internal
+#' @noRd
+.transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit") {
+  if (is.null(crs)) return(x)
+  if (is.na(sf::st_crs(x))) {
+    .log_warn(
+      "%s(): `%s` has no CRS, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
+      caller, what)
+    return(sf::st_set_crs(x, crs))
+  }
+  sf::st_transform(x, crs)
+}
+
 #' Check whether an sf/sfc object has a geographic (lon/lat) CRS
 #'
 #' @param x An sf or sfc object.
@@ -127,7 +173,12 @@
   if (!inherits(x, "sf"))
     stop(sprintf("Expected an sf object for `%s`.", label), call. = FALSE)
   gcls <- unique(as.character(sf::st_geometry_type(x, by_geometry = TRUE)))
-  if (!any(gcls %in% what))
+  # `all`, not `any`: a mixed-geometry layer with one acceptable type used to
+  # pass, contradicting the error text below and letting e.g. a POINT/POLYGON
+  # mix through a POINT-only check.  The explicit length check keeps a zero-row
+  # layer failing as it did under `any()` -- all() is vacuously TRUE on the
+  # empty set.
+  if (length(gcls) == 0L || !all(gcls %in% what))
     stop(sprintf("`%s` geometry must be one of: %s (found: %s).",
                  label, paste(what, collapse = ", "), paste(gcls, collapse = ", ")),
          call. = FALSE)
@@ -169,18 +220,24 @@
 #'   the mean of `y` is used. A scalar value (e.g., per-fold training mean) is
 #'   used directly as the baseline. A per-observation vector (length matching `y`)
 #'   is filtered in parallel with `y` and `yhat` to remove non-finite cases.
-#' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, and optionally Adj_R2.
+#'   Any other length is an error — recycling it would silently produce a wrong
+#'   R-squared.
+#' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2 and Adj_R2. `Adj_R2`
+#'   is always present, and is `NA` when `p` is NULL or `n <= p + 1`.
 #' @keywords internal
 #' @noRd
 .compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL) {
   ok <- is.finite(y) & is.finite(yhat)
 
-  # Distinguish scalar baseline (per-fold) from per-observation vector (pooled).
-  if (!is.null(y_train_mean) && length(y_train_mean) == 1L) {
-    # Scalar training mean — use directly as baseline (no subsetting needed).
-    y_train_mean <- y_train_mean
-  } else if (!is.null(y_train_mean) && length(y_train_mean) == length(ok)) {
-    # Per-observation vector — filter to match the finite-obs mask.
+  # A scalar baseline (per-fold training mean) is used as-is; a per-observation
+  # vector (pooled) is filtered in parallel with `y`/`yhat`.  Anything else
+  # would recycle against the filtered `y` and silently distort R-squared.
+  if (!is.null(y_train_mean) && length(y_train_mean) != 1L) {
+    if (length(y_train_mean) != length(ok))
+      stop(sprintf(
+        ".compute_reg_metrics(): `y_train_mean` must be length 1 (a scalar baseline) or length %d (one per observation); got %d.",
+        length(ok), length(y_train_mean)
+      ), call. = FALSE)
     y_train_mean <- y_train_mean[ok]
   }
 

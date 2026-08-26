@@ -4,10 +4,22 @@
 
 #' Build a spatial_fit S3 object
 #'
-#' Low-level constructor used by \code{fit_gwr_model()} and
-#' \code{fit_bayesian_spatial_model()}.  Users should not call this directly.
+#' Low-level constructor used by \code{fit_gwr_model()},
+#' \code{fit_bayesian_spatial_model()} and \code{fit_rf_model()}.  Users should
+#' not call this directly.
 #'
-#' @param subclass Character scalar: "gwr_fit" or "bayesian_fit".
+#' @section The coef() contract:
+#' \code{coef()} on a \code{spatial_fit} either returns the coefficients or
+#' signals an error -- it never returns \code{NULL}.  \code{coef.rf_fit()}
+#' always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
+#' and \code{coef.bayesian_fit()} error when the backend cannot supply them
+#' (a missing package, an engine without the expected component).  A
+#' \code{NULL} return would be indistinguishable from "this model genuinely
+#' has no fixed effects", so \code{lapply(fits, coef)} would quietly produce a
+#' shorter answer than the caller expected.  Wrap in \code{try()} or
+#' \code{tryCatch()} when sweeping over a heterogeneous list of fits.
+#'
+#' @param subclass Character scalar: "gwr_fit", "bayesian_fit" or "rf_fit".
 #' @param engine   The raw model object.
 #' @param formula  A formula.
 #' @param response_var  Character(1).
@@ -40,6 +52,11 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 # print / summary
 # ---------------------------------------------------------------------------
 
+#' Print a fitted spatial model
+#'
+#' @param x A \code{spatial_fit} object.
+#' @param ... Ignored.
+#' @return \code{x}, invisibly (called for its side effect).
 #' @export
 print.spatial_fit <- function(x, ...) {
   subclass <- class(x)[1L]
@@ -73,6 +90,30 @@ print.spatial_fit <- function(x, ...) {
 }
 
 
+#' Summarise a fitted spatial model
+#'
+#' Computes goodness-of-fit metrics from \code{fitted(object)} against the
+#' observed response.
+#'
+#' @section What the metrics are computed on:
+#' For a \code{gwr_fit} or a \code{bayesian_fit} these are \strong{in-sample}
+#' metrics: \code{fitted()} returns values computed at the training locations
+#' from the model that saw them.  For an \code{rf_fit} they are
+#' \strong{out-of-bag}, because \code{fitted.rf_fit()} returns out-of-bag
+#' predictions rather than in-sample ones (see \code{\link{fit_rf_model}}).
+#' The two are not comparable, and \code{print()} on the result labels which
+#' one it is holding, driven by \code{$info$fitted_are_oob}.  Use
+#' \code{\link{compare_models_cv}} to compare backends.
+#'
+#' Adjusted R-squared is suppressed: GWR's effective parameter count far
+#' exceeds the global predictor count, and a GP model has no simple \code{p}.
+#'
+#' @param object A \code{spatial_fit} object.
+#' @param ... Ignored.
+#' @return An object of class \code{summary.spatial_fit}: a list with
+#'   \code{class}, \code{formula}, \code{n}, \code{response_var},
+#'   \code{predictor_vars}, \code{info} and \code{in_sample} (the metric
+#'   data.frame, out-of-bag for an \code{rf_fit}).
 #' @export
 summary.spatial_fit <- function(object, ...) {
   fit_vals <- fitted(object)
@@ -101,7 +142,13 @@ summary.spatial_fit <- function(object, ...) {
 print.summary.spatial_fit <- function(x, ...) {
   cat(sprintf("Summary of <%s> fit (n = %d)\n\n", x$class, x$n))
   cat(sprintf("  Formula: %s\n", deparse(x$formula)))
-  cat("\n  In-sample metrics:\n")
+  # An rf_fit's fitted() values are out-of-bag, not in-sample.  Labelling them
+  # "In-sample" understates a random hold-out as a memorised fit, which is the
+  # opposite of the truth and the opposite of the caveat ?fit_rf_model carries.
+  if (isTRUE(x$info$fitted_are_oob))
+    cat("\n  Out-of-bag metrics (NOT in-sample; see ?fit_rf_model):\n")
+  else
+    cat("\n  In-sample metrics:\n")
   m <- x$in_sample
   cat(sprintf("    RMSE  = %.4f\n", m$RMSE))
   cat(sprintf("    MAE   = %.4f\n", m$MAE))
@@ -119,9 +166,20 @@ print.summary.spatial_fit <- function(x, ...) {
 
 #' Compute goodness-of-fit metrics for a spatial model
 #'
+#' @section What the metrics are computed on:
+#' With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
+#' That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
+#' but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
+#' returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
+#' returned data.frame carries no label distinguishing the two, so check
+#' \code{object$info$fitted_are_oob} before comparing numbers across backends
+#' -- or use \code{\link{compare_models_cv}}, which scores every backend the
+#' same way.
+#'
 #' @param object A \code{spatial_fit} object.
 #' @param newdata Optional sf object for out-of-sample evaluation. If NULL,
-#'   in-sample (fitted) values are used.
+#'   fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
+#'   see above).
 #' @param ... Additional arguments passed to predict().
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
 #' @export
@@ -153,51 +211,34 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 # NA-safe prediction helpers
 # ---------------------------------------------------------------------------
 
-#' Identify rows that would survive prep_model_data() cleaning
-#'
-#' Mirrors the complete-cases + finite-check logic in prep_model_data() so
-#' that predict methods can track which rows are dropped and later expand
-#' the result back to the original length with NA fill.
-#'
-#' @param data_sf An sf object.
-#' @param response_var Character(1) response column name.
-#' @param predictor_vars Character vector of predictor column names.
-#' @param require_response Logical; when FALSE (prediction mode) the response
-#'   column is excluded from the completeness check so that NAs in a reused
-#'   dataset do not silently drop valid rows.  Default TRUE.
-#' @return Logical vector of length \code{nrow(data_sf)}; TRUE = row is clean.
-#' @keywords internal
-#' @noRd
-.clean_row_mask <- function(data_sf, response_var, predictor_vars,
-                            require_response = TRUE) {
-  check_vars <- if (require_response) c(response_var, predictor_vars) else predictor_vars
-  req_cols <- intersect(check_vars, names(data_sf))
-  df <- sf::st_drop_geometry(data_sf)[, req_cols, drop = FALSE]
-  ok_cc <- stats::complete.cases(df)
-  num_mask <- vapply(df, is.numeric, logical(1))
-  ok_fin <- if (any(num_mask)) {
-    apply(as.matrix(df[, num_mask, drop = FALSE]), 1L,
-          function(r) all(is.finite(r)))
-  } else {
-    rep(TRUE, nrow(df))
-  }
-  ok_cc & ok_fin
-}
-
-
 #' Expand a prediction vector back to the original newdata length
 #'
 #' Places predictions into the positions indicated by \code{clean_idx},
 #' filling remaining positions with NA.
 #'
-#' @param preds Numeric vector of predictions on the clean subset.
-#' @param clean_idx Logical vector from \code{.clean_row_mask()}.
+#' \code{clean_idx} is derived from the \code{..orig_row_id..} sentinel column
+#' every predict method attaches before calling \code{prep_model_data()}, so
+#' there is exactly one implementation of "which rows survived cleaning".
+#'
+#' @param preds Numeric vector of predictions on the clean subset.  Its length
+#'   must equal \code{sum(clean_idx)}; a mismatch is an error, never a recycle.
+#' @param clean_idx Logical vector marking the rows that survived cleaning.
 #' @param n_orig Integer original number of rows.
 #' @return Numeric vector of length \code{n_orig}.
 #' @keywords internal
 #' @noRd
 .expand_predictions <- function(preds, clean_idx, n_orig) {
-  if (sum(clean_idx) == n_orig) return(preds)
+  n_clean <- sum(clean_idx)
+  # Without this check `out[which(clean_idx)] <- preds` RECYCLES silently: 4
+  # clean slots and a length-2 `preds` fills 1 2 . 1 . 2 and returns it as a
+  # prediction.  The equal-length fast path below would likewise hand back a
+  # vector of the wrong length unchecked.
+  if (length(preds) != n_clean)
+    stop(sprintf(paste0(".expand_predictions(): %d prediction value(s) for %d ",
+                        "row(s) that survived cleaning; the two cannot be ",
+                        "aligned."),
+                 length(preds), n_clean), call. = FALSE)
+  if (n_clean == n_orig) return(preds)
   out <- rep(NA_real_, n_orig)
   out[which(clean_idx)] <- preds
   out
@@ -240,7 +281,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   # lon/lat input independent of training), after which gwr.predict()
   # would silently mix coordinates from two different systems.  This
   # mirrors predict.bayesian_fit().
-  newdata <- ensure_projected(newdata, target_crs = sf::st_crs(object$data_sf))
+  newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
 
   # Use a sentinel row ID column so that after prep_model_data()'s single-pass
 
@@ -256,6 +297,16 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 
   clean_idx <- seq_len(n_orig) %in% newdata$..orig_row_id..
   newdata$..orig_row_id.. <- NULL
+
+  # Degrade to an all-NA vector when nothing survived cleaning, matching
+  # predict.rf_fit() and predict.bayesian_fit().  Without this the .to_sp()
+  # call below -- which sits outside the tryCatch -- would surface a raw
+  # sf-to-Spatial coercion error instead.
+  if (n_new == 0L) {
+    .log_warn(paste0("predict.gwr_fit(): every row of newdata was dropped as ",
+                     "missing or non-finite; returning %d NA(s)."), n_orig)
+    return(rep(NA_real_, n_orig))
+  }
 
   # .to_sp() uses intersect() internally, so it gracefully handles newdata
   # that lacks the response column (true out-of-sample prediction).
@@ -317,9 +368,22 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   ps <- object$info$predictor_scaling
   if (!is.null(ps) && length(ps) > 0L) {
     for (pv in names(ps)) {
-      if (pv %in% names(pred_df) && is.numeric(pred_df[[pv]])) {
-        pred_df[[pv]] <- (pred_df[[pv]] - ps[[pv]]$center) / ps[[pv]]$scale
-      }
+      # Silently skipping a predictor here would hand brms an un-centred,
+      # un-scaled column while the model was fitted on a standardised one --
+      # wrong predictions with no diagnostic.  A numeric column that came back
+      # as character from a CSV round-trip is the common way to get here.
+      if (!(pv %in% names(pred_df)))
+        stop(sprintf(paste0("predict.bayesian_fit(): predictor '%s' was ",
+                            "standardised at fit time but is absent from ",
+                            "newdata; the same standardisation cannot be ",
+                            "applied."), pv), call. = FALSE)
+      if (!is.numeric(pred_df[[pv]]))
+        stop(sprintf(paste0("predict.bayesian_fit(): predictor '%s' was ",
+                            "standardised at fit time but is %s in newdata, ",
+                            "not numeric. Convert it back to numeric (a CSV ",
+                            "round-trip is the usual cause)."),
+                     pv, class(pred_df[[pv]])[1L]), call. = FALSE)
+      pred_df[[pv]] <- (pred_df[[pv]] - ps[[pv]]$center) / ps[[pv]]$scale
     }
   }
 
@@ -346,7 +410,14 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #' @param draws If TRUE, return the full posterior draw matrix instead of a
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
-#' @return Numeric vector (or matrix when draws=TRUE).
+#' @return Numeric vector of length \code{nrow(newdata)}, or a
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE} (a 1-row
+#'   all-\code{NA} matrix if the posterior draw fails).  With
+#'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
+#'   for the default \code{summary = "mean"}, \code{type = "epred"},
+#'   \code{draws = FALSE} combination; any other combination is recomputed
+#'   against the training data, because the cache holds epred column means and
+#'   nothing else.
 #' @export
 predict.bayesian_fit <- function(object, newdata = NULL,
                                  summary = c("mean", "median"),
@@ -356,12 +427,12 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   type    <- match.arg(type)
 
   if (is.null(newdata)) {
-    if (draws) {
-      # Return fitted draw matrix from training data
-      newdata <- object$data_sf
-    } else {
-      return(fitted(object))
-    }
+    # fitted() caches colMeans(posterior_epred(...)) and nothing else, so it
+    # answers exactly one argument combination.  Short-circuiting for any
+    # other one returned means where medians were asked for, and expected
+    # values where observation noise was asked for -- silently.
+    if (!draws && summary == "mean" && type == "epred") return(fitted(object))
+    newdata <- object$data_sf
   }
 
   # ---- Early validation: ensure all predictor columns are present ----
@@ -382,28 +453,31 @@ predict.bayesian_fit <- function(object, newdata = NULL,
     stop("predict.bayesian_fit(): engine is not a brmsfit object.", call. = FALSE)
 
   # ---- Preprocessing: match the pipeline used during fitting ----
-  # Coerce non-POINT geometry to points (same as prep_model_data()).
-  # MULTIPOINT included: multi-vertex MULTIPOINTs would misalign the
-  # st_coordinates() rows built in .prepare_brms_pred_df().
-  if (!all(sf::st_geometry_type(newdata, by_geometry = TRUE) == "POINT")) {
-    newdata <- coerce_to_points(newdata, "auto")
-  }
-
-  # Ensure newdata is in the same projected CRS that was used for training.
-  # The training data stored in `object$data_sf` is already projected by
-  # prep_model_data(), so we use its CRS as the target.
+  # Ensure newdata is in the same projected CRS that was used for training,
+  # BEFORE prep_model_data(): prep's own ensure_projected() has no target and
+  # would leave already-projected newdata in *its* CRS.  This mirrors
+  # predict.gwr_fit() and predict.rf_fit().
+  n_orig       <- nrow(newdata)
   training_crs <- sf::st_crs(object$data_sf)
-  newdata <- ensure_projected(newdata, target_crs = training_crs)
+  newdata      <- ensure_projected(newdata, target_crs = .crs_or_null(training_crs))
 
-  # Track which rows are clean so we can return an aligned result.
-  n_orig    <- nrow(newdata)
-  clean_idx <- .clean_row_mask(newdata, object$response_var,
-                               object$predictor_vars,
-                               require_response = FALSE)
-  if (sum(clean_idx) < n_orig) {
-    .log_warn("predict.bayesian_fit(): dropping %d row(s) with non-finite or missing values.",
-              n_orig - sum(clean_idx))
-    newdata <- newdata[clean_idx, , drop = FALSE]
+  # Sentinel row ID: after prep_model_data()'s single-pass cleaning (which also
+  # coerces non-POINT geometry, MULTIPOINT included, so st_coordinates() in
+  # .prepare_brms_pred_df() stays one row per observation) we can derive
+  # exactly which original rows survived -- no duplicated filtering logic.
+  newdata$..orig_row_id.. <- seq_len(n_orig)
+  newdata <- prep_model_data(
+    newdata, object$response_var, object$predictor_vars,
+    pointize = "auto", require_response = FALSE
+  )
+  clean_idx <- seq_len(n_orig) %in% newdata$..orig_row_id..
+  newdata$..orig_row_id.. <- NULL
+
+  if (nrow(newdata) == 0L) {
+    .log_warn(paste0("predict.bayesian_fit(): every row of newdata was dropped ",
+                     "as missing or non-finite; returning %d NA(s)."), n_orig)
+    return(if (draws) matrix(NA_real_, nrow = 1L, ncol = n_orig)
+           else rep(NA_real_, n_orig))
   }
 
   # Build prediction data.frame with scaled coordinates & standardised predictors
@@ -415,7 +489,10 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
     .log_warn("predict.bayesian_fit(): posterior draw failed.")
-    return(rep(NA_real_, n_orig))
+    # Honour the documented return shape: a matrix when draws = TRUE, so a
+    # caller that indexes columns is not handed a vector on the failure path.
+    return(if (draws) matrix(NA_real_, nrow = 1L, ncol = n_orig)
+           else rep(NA_real_, n_orig))
   }
 
   if (draws) {
@@ -439,6 +516,20 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 # fitted
 # ---------------------------------------------------------------------------
 
+#' In-sample fitted values from a GWR fit
+#'
+#' Reads the fitted values out of the GWmodel result, which stores them under
+#' one of several names depending on version and entry point; the extraction
+#' falls back through the local coefficients and the residuals when no direct
+#' column is present.  These are \strong{in-sample} values -- each observation
+#' was inside its own bandwidth window -- so \code{summary()} on a
+#' \code{gwr_fit} reports an optimistic fit.  Use \code{\link{cv_gwr}} for a
+#' spatially blocked estimate.
+#'
+#' @param object A \code{gwr_fit}.
+#' @param ... Ignored.
+#' @return Numeric vector of length \code{object$n} (\code{NA} where extraction
+#'   failed).
 #' @export
 fitted.gwr_fit <- function(object, ...) {
   .extract_gwr_values(
@@ -448,6 +539,26 @@ fitted.gwr_fit <- function(object, ...) {
 }
 
 
+#' In-sample fitted values from a Bayesian spatial GP fit
+#'
+#' Posterior expectation at the training locations: the column means of
+#' \code{brms::posterior_epred()}.  These are \strong{in-sample} values.
+#'
+#' @section The result is cached:
+#' \code{posterior_epred()} is O(draws x n), and \code{summary()},
+#' \code{residuals()}, \code{model_metrics()} and \code{compare_models()} each
+#' call \code{fitted()} independently, so the value is memoised in an
+#' environment carried in \code{object$info$.cache} (reference semantics, so it
+#' survives R's copy-on-modify).  The cache holds epred column means only,
+#' which is why \code{predict(object, summary = "median")} and
+#' \code{predict(object, type = "predict")} recompute rather than reuse it.
+#' Call \code{\link{clear_fitted_cache}} if the engine or the training data has
+#' been mutated by hand after fitting.
+#'
+#' @param object A \code{bayesian_fit}.
+#' @param ... Ignored.
+#' @return Numeric vector of length \code{object$n} (all \code{NA} if the
+#'   posterior draw failed).
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
   # --- Lazy cache: posterior_epred() is O(draws × n) and expensive.
@@ -505,6 +616,14 @@ clear_fitted_cache <- function(object) {
 # residuals
 # ---------------------------------------------------------------------------
 
+#' In-sample residuals from a GWR fit
+#'
+#' Observed response minus \code{\link{fitted.gwr_fit}}, so these are
+#' \strong{in-sample} residuals.
+#'
+#' @param object A \code{gwr_fit}.
+#' @param ... Ignored.
+#' @return Numeric vector of length \code{object$n}.
 #' @export
 residuals.gwr_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -512,6 +631,14 @@ residuals.gwr_fit <- function(object, ...) {
 }
 
 
+#' In-sample residuals from a Bayesian spatial GP fit
+#'
+#' Observed response minus \code{\link{fitted.bayesian_fit}} (the cached
+#' posterior expectation), so these are \strong{in-sample} residuals.
+#'
+#' @param object A \code{bayesian_fit}.
+#' @param ... Ignored.
+#' @return Numeric vector of length \code{object$n}.
 #' @export
 residuals.bayesian_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -528,10 +655,17 @@ residuals.bayesian_fit <- function(object, ...) {
 #' @param object A \code{gwr_fit} object.
 #' @param ... Ignored.
 #' @return A data.frame of local coefficient estimates (one row per obs).
+#'   Never \code{NULL}: when the engine carries no \code{SDF} component this
+#'   errors, following the \code{coef()} contract described in
+#'   \code{\link{new_spatial_fit}}.
 #' @export
 coef.gwr_fit <- function(object, ...) {
   sdf <- tryCatch(object$engine$SDF, error = function(e) NULL)
-  if (is.null(sdf)) return(NULL)
+  # Returning NULL here would be indistinguishable from "this GWR has no
+  # coefficients", which is never true.  See ?new_spatial_fit for the contract.
+  if (is.null(sdf))
+    stop("coef.gwr_fit(): the fit carries no GWmodel `SDF` component, so the ",
+         "local coefficients cannot be extracted.", call. = FALSE)
   if (inherits(sdf, "Spatial")) sdf@data else sf::st_drop_geometry(sdf)
 }
 
@@ -540,9 +674,20 @@ coef.gwr_fit <- function(object, ...) {
 #'
 #' @param object A \code{bayesian_fit} object.
 #' @param ... Ignored.
-#' @return A data.frame of fixed-effect posterior summaries.
+#' @return A matrix of fixed-effect posterior summaries, as returned by
+#'   \code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
+#'   \code{fixef()} call errors, following the \code{coef()} contract described
+#'   in \code{\link{new_spatial_fit}}.
 #' @export
 coef.bayesian_fit <- function(object, ...) {
-  if (!requireNamespace("brms", quietly = TRUE)) return(NULL)
-  tryCatch(brms::fixef(object$engine), error = function(e) NULL)
+  # A NULL return would be indistinguishable from "this model has no fixed
+  # effects", while predict()/fitted() on the same object stop() informatively.
+  # See ?new_spatial_fit for the contract.
+  if (!requireNamespace("brms", quietly = TRUE))
+    stop("coef.bayesian_fit(): package 'brms' is required.", call. = FALSE)
+  fx <- tryCatch(brms::fixef(object$engine), error = function(e) e)
+  if (inherits(fx, "error"))
+    stop(sprintf("coef.bayesian_fit(): brms::fixef() failed: %s",
+                 conditionMessage(fx)), call. = FALSE)
+  fx
 }

@@ -66,8 +66,17 @@ on Windows).  If an integer > 1, use that many cores.  Default
 are the primary beneficiary of this option.}
 }
 \value{
-A list with overall, fold_metrics, predictions, folds, formula,
-and predictive_coverage.
+A list with \code{overall}, \code{fold_metrics},
+\code{predictions}, \code{folds}, \code{n_folds_attempted},
+\code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
+The two fold counts make a run where every fold failed visible in the
+return value rather than only in a warning.
+The \code{predictive_coverage} entries (one per
+\code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
+folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
+values in \code{fold_metrics} are themselves means over that fold's test
+rows; an unweighted average would not be the pooled quantity when fold
+sizes differ, which for spatially blocked folds they routinely do.
 }
 \description{
 K-fold cross-validation for the Bayesian spatial model
@@ -91,14 +100,14 @@ if (requireNamespace("brms", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

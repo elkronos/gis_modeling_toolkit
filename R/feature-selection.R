@@ -43,16 +43,34 @@
 #' @param max_vars Optional cap on how many predictors to select.
 #' @param max_fits Abort if the sweep would exceed this many model fits.
 #'   Default 5000.
-#' @param seed RNG seed for inner fold construction.
+#' @param seed RNG seed.  It governs both the inner fold construction and the
+#'   cross-validation itself: it is forwarded to \code{cv_spatial(seed = )},
+#'   which draws one RNG stream per fold from it, so it also seeds the
+#'   \emph{learner} inside every fold.  A stochastic \code{fit_fn} is therefore
+#'   reproducible from this one value.
 #' @param quiet Suppress progress messages. Default FALSE.
 #' @return A list with \code{selected}, \code{score}, \code{history} (a
 #'   data.frame of every candidate evaluated at every step) and \code{params}.
 #' @family cross-validation
 #' @examples
-#' \dontrun{
-#'   fit_fn <- function(tr, vars) fit_gwr_model(tr, "y", vars)
-#'   sel <- select_features_forward(pts, "y", c("a", "b", "c"), fit_fn)
+#' \donttest{
+#' if (requireNamespace("GWmodel", quietly = TRUE) &&
+#'     requireNamespace("sp", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 120
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+#'                a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$resp <- 3 * pts$a + 2 * pts$b + rnorm(n, 0, 0.3)
+#'
+#'   fit_fn <- function(tr, vars) fit_gwr_model(tr, "resp", vars, bandwidth = 30)
+#'   sel <- select_features_forward(pts, "resp", c("a", "b", "noise"), fit_fn,
+#'                                  k = 3, quiet = TRUE)
 #'   sel$selected
+#' }
 #' }
 #' @export
 select_features_forward <- function(train_sf, response_var, candidate_vars,
@@ -85,15 +103,27 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   # THAT candidate's columns -- so without this, a step compares an RMSE over
   # 150 rows against one over 120, and can prefer a variable for having an
   # easier surviving subset rather than for predicting better.
-  keep <- stats::complete.cases(
-    sf::st_drop_geometry(train_sf)[, c(response_var, candidate_vars), drop = FALSE])
+  #
+  # The test must match prep_model_data()'s exactly.  complete.cases() alone
+  # lets Inf through, while prep_model_data() also drops on all(is.finite(r))
+  # over the numeric columns -- so a candidate carrying a single Inf would
+  # still reach cv_spatial() with a smaller row set than its rivals, which is
+  # precisely the comparison this filter exists to prevent.
+  fs_df <- sf::st_drop_geometry(train_sf)[, c(response_var, candidate_vars),
+                                          drop = FALSE]
+  keep <- stats::complete.cases(fs_df)
+  num_mask <- vapply(fs_df, is.numeric, logical(1))
+  if (any(num_mask))
+    keep <- keep & apply(as.matrix(fs_df[, num_mask, drop = FALSE]), 1L,
+                         function(r) all(is.finite(r)))
   if (!all(keep)) {
     if (sum(keep) < 2L)
-      stop("select_features_forward(): fewer than two rows are complete across ",
-           "the response and every candidate.", call. = FALSE)
+      stop("select_features_forward(): fewer than two rows are complete and ",
+           "finite across the response and every candidate.", call. = FALSE)
     .log_warn(paste0("select_features_forward(): dropping %d row(s) incomplete ",
-                     "across the response and candidates, so every candidate ",
-                     "set is scored on the same %d observations."),
+                     "or non-finite across the response and candidates, so ",
+                     "every candidate set is scored on the same %d ",
+                     "observations."),
               sum(!keep), sum(keep))
     train_sf <- train_sf[keep, , drop = FALSE]
   }
@@ -122,11 +152,29 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   better <- if (metric == "R2") function(a, b) a > b else function(a, b) a < b
   worst  <- if (metric == "R2") -Inf else Inf
 
+  # Build the inner folds ONCE, before the sweep.
+  #
+  # Fold construction does not depend on the candidate set: make_folds() reads
+  # `predictor_vars` only when auto_range = TRUE, which this function never
+  # enables, and every other argument is fixed across the sweep.  Rebuilding
+  # them inside score_set() therefore produced the same splits p^2/2 times --
+  # repeating every block-size warning as many times -- and, worse, put
+  # make_folds() OUTSIDE the try() below, so a single fold-construction failure
+  # (block_kfold raising when the geometry collapses to one block, say) killed
+  # the whole sweep instead of the candidate being scored NA.  It cannot be a
+  # per-candidate NA in any case: if the folds cannot be built, no candidate is
+  # scorable, so this is one informative error instead of p^2/2 silent ones.
+  folds <- try(make_folds(train_sf, k = k, method = method, seed = seed,
+                          block_size = block_size, response_var = response_var,
+                          predictor_vars = candidate_vars), silent = TRUE)
+  if (inherits(folds, "try-error"))
+    stop("select_features_forward(): could not build the inner CV folds, so no ",
+         "candidate can be scored: ",
+         trimws(conditionMessage(attr(folds, "condition"))),
+         " Adjust `method`, `k` or `block_size`.", call. = FALSE)
+
   score_set <- function(vars) {
     inner_fit <- function(tr) fit_fn(tr, vars)
-    folds <- make_folds(train_sf, k = k, method = method, seed = seed,
-                        block_size = block_size, response_var = response_var,
-                        predictor_vars = vars)
     res <- try(suppressMessages(
       cv_spatial(train_sf, response_var, vars, fit_fn = inner_fit,
                  folds = folds, seed = seed)), silent = TRUE)
