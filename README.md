@@ -8,29 +8,52 @@
 
 ## The problem this solves
 
-You have point observations — sites, sensors, parcels, plots — and you want a
-model that predicts well at locations you have not sampled. You fit something
-flexible, cross-validate it, and get an R² of 0.8. Then you predict onto a grid
-and the map is wrong in ways the score never hinted at.
+You have point observations — sites, sensors, parcels, plots — and you need to
+summarise or model them over areas. The path of least resistance is to borrow
+boundaries that already exist: ZIP codes, census tracts, counties, sales
+territories. Every one of those was drawn for mail routing, enumeration or
+politics, and none of them knows anything about the process you are studying.
+Aggregate to them and part of your answer is an artefact of the partition —
+the modifiable areal unit problem, and it is not a rounding error: the same
+observations can support materially different conclusions under different
+boundaries.
 
-The score was wrong because the folds were wrong. Random k-fold puts a test
-point's nearest neighbours in the training set, and under spatial
-autocorrelation those neighbours carry most of its signal. The model is scored
-on interpolation between known points while the actual task is extrapolation
-away from them. The same thing happens one level up, in variable selection: a
-predictor chosen by random inner folds can be chosen for leaking rather than
-for predicting.
+`spatialkit` lets the data draw the boundaries instead:
 
-`spatialkit` is built around fixing that. It provides folds that hold out whole
-regions sized to the data's own autocorrelation range; three model backends —
-geographically weighted regression (`GWmodel`), a Bayesian spatial Gaussian
-process (`brms`), and random forests (`ranger`) — behind one `spatial_fit` S3
-class so they can be scored on identical folds; and an area-of-applicability
-estimate that marks where the resulting score actually applies. Around all of
-that sits a tessellation and aggregation pipeline built on
-[`sf`](https://r-spatial.github.io/sf/): CRS management, Voronoi, hex, square
-and Delaunay cells with stable reproducible IDs, and cell-level summaries with
-optional design-effect-corrected standard errors.
+- **Seed cells where the observations actually are** — `get_voronoi_seeds()`
+  places seeds by k-means on the point cloud, so cell density follows sampling
+  density rather than an inherited grid.
+- **Let the spatial structure choose how many** — `determine_optimal_levels()`
+  ranks candidate cell counts by the elbow of within-cluster variance, and,
+  once you hand it a response, also by how much spatial autocorrelation each
+  partition leaves in the residuals. Better than picking a round number.
+- **Build them, reproducibly** — `build_tessellation()` produces Voronoi, hex,
+  square or Delaunay cells, clipped to your study area, with stable IDs that do
+  not shift when the input row order does.
+- **Aggregate honestly** — `summarize_by_cell(deff = "kish")` corrects
+  cell-level standard errors for within-cell autocorrelation, rather than
+  treating clustered observations as independent and reporting intervals that
+  are too narrow.
+
+Redrawing boundaries is easy; knowing whether the result means anything is not.
+So the second half of the package exists to keep you honest: three model
+backends — geographically weighted regression (`GWmodel`), a Bayesian spatial
+Gaussian process (`brms`), and random forests (`ranger`) — behind one
+`spatial_fit` S3 class so they can be scored on identical folds; cross-validation
+that holds out whole regions sized to the data's own autocorrelation range; and
+an area-of-applicability estimate that marks where the resulting score actually
+applies. All of it is built on [`sf`](https://r-spatial.github.io/sf/), with CRS
+management that will not silently hand metres to a function expecting degrees.
+
+That validation half matters more than it sounds. Fit something flexible,
+cross-validate it, get an R² of 0.8, predict onto a grid — and the map is wrong
+in ways the score never hinted at. The score was wrong because the folds were
+wrong. Random k-fold puts a test point's nearest neighbours in the training set,
+and under spatial autocorrelation those neighbours carry most of its signal. The
+model is scored on interpolation between known points while the actual task is
+extrapolation away from them. The same thing happens one level up, in variable
+selection: a predictor chosen by random inner folds can be chosen for leaking
+rather than for predicting.
 
 Here is the gap, on 600 synthetic points with a smooth spatial field the
 predictor does not explain. Same data, same model, same settings — only the
