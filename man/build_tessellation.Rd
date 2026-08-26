@@ -30,7 +30,10 @@ clipping to an irregular boundary may differ noticeably.}
 
 \item{cellsize}{Numeric cell size (grid methods).}
 
-\item{expand}{Buffer distance for Voronoi envelope.}
+\item{expand}{Buffer distance for the Voronoi envelope. Applied by
+\code{method = "voronoi"} only; the \code{"hex"}, \code{"square"} and \code{"triangles"}
+methods ignore it (the value you passed is still echoed back in
+\code{params$expand}).}
 
 \item{clip}{Logical; clip to boundary.}
 
@@ -41,7 +44,17 @@ clipping to an irregular boundary may differ noticeably.}
 \item{quiet}{Logical; suppress messages.}
 }
 \value{
-A list with cells, index, boundary, method, params.
+A list with components:
+\describe{
+\item{\code{cells}}{An sf polygon layer, one row per cell. It always carries
+a \code{cell_id} column; the \code{"hex"} and \code{"square"} methods additionally
+carry \code{poly_id}, which holds the same values.}
+\item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
+\code{points_sf}.}
+\item{\code{boundary}}{The boundary used (possibly derived and/or reprojected).}
+\item{\code{method}}{The method actually used.}
+\item{\code{params}}{The parameters the tessellation was built with.}
+}
 }
 \description{
 Build a tessellation (Voronoi, Delaunay triangles, hex grid, or square grid)
@@ -57,10 +70,10 @@ tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
 tess$cells
 }
 \seealso{
-Other tessellation:
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{create_grid_polygons}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

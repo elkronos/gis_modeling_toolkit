@@ -27,42 +27,59 @@ test_that(".fallback_bandwidth adaptive clamp respects [10, 0.9n]", {
 })
 
 
-test_that("fallback_bandwidth sets bandwidth_is_fallback in info", {
-  fb_adaptive <- spatialkit:::.fallback_bandwidth
-  # Construct a minimal mock Spatial object
+test_that(".fallback_bandwidth fixed branch is one third of the bbox diagonal", {
   skip_if_not_installed("sp")
-  coords <- matrix(c(0, 0, 1, 1, 2, 2), ncol = 2, byrow = TRUE)
+  fb <- spatialkit:::.fallback_bandwidth
+
+  # A 300 x 400 bounding box: diagonal 500 by construction, so the documented
+  # rule gives exactly 500/3.  Asserting the value rather than `> 0` is what
+  # separates this from any positive number a broken implementation returns.
   sp_dat <- sp::SpatialPointsDataFrame(
-    coords,
+    cbind(c(100, 400, 250), c(50, 450, 200)),
     data = data.frame(x = 1:3)
   )
+  expect_equal(fb(sp_dat, adaptive = FALSE), 500 / 3)
 
-  bw_a <- fb_adaptive(sp_dat, adaptive = TRUE)
-  expect_true(is.integer(bw_a) || is.numeric(bw_a))
-  expect_true(bw_a >= 1)
+  # Degenerate extent: all points coincident gives a zero diagonal, which must
+  # come back as the positive epsilon floor rather than 0 (a zero bandwidth
+  # makes every GWmodel kernel weight undefined).
+  coincident <- sp::SpatialPointsDataFrame(
+    cbind(rep(7, 3), rep(9, 3)), data = data.frame(x = 1:3)
+  )
+  expect_equal(fb(coincident, adaptive = FALSE), .Machine$double.eps)
 
-  bw_f <- fb_adaptive(sp_dat, adaptive = FALSE)
-  expect_true(is.numeric(bw_f))
-  expect_true(bw_f > 0)
+  # The two branches are genuinely different code paths, not one rounded:
+  # the adaptive branch counts neighbours, the fixed branch measures distance.
+  expect_false(isTRUE(all.equal(fb(sp_dat, adaptive = TRUE),
+                                fb(sp_dat, adaptive = FALSE))))
 })
 
 
-test_that("gwr_fit info contains bandwidth_is_fallback field", {
-  # We cannot run a full GWR fit without GWmodel + real data, but we can
+test_that("a successful bandwidth selection is not labelled a fallback", {
+  # The contract that matters downstream: compare_models() warns, and
+  # $info$bandwidth_is_fallback drives that warning.  Assert it on a real fit
+  # -- a mock `info` list literal can only re-assert its own contents.
+  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
 
-  # verify the info list contract by constructing a mock gwr_fit.
-  skip_if_not_installed("sf")
-  pts <- sf::st_as_sf(
-    data.frame(x = runif(10), y = runif(10), resp = rnorm(10)),
-    coords = c("x", "y"), crs = 32632
+  set.seed(4)
+  n <- 80
+  px <- runif(n, 0, 5000); py <- runif(n, 0, 5000)
+  dat <- sf::st_as_sf(
+    data.frame(x1 = rnorm(n), px = px, py = py,
+               y = 2 + 0.001 * px + 0.5 * rnorm(n)),
+    coords = c("px", "py"), crs = 32632
   )
-  mock_info <- list(
-    bandwidth = 50,
-    adaptive = TRUE,
-    kernel = "bisquare",
-    AICc = NA_real_,
-    bandwidth_is_fallback = TRUE
-  )
-  expect_true("bandwidth_is_fallback" %in% names(mock_info))
-  expect_true(mock_info$bandwidth_is_fallback)
+
+  # An explicit bandwidth is never a fallback, and is carried through verbatim.
+  explicit <- fit_gwr_model(dat, "y", "x1", bandwidth = 30, adaptive = TRUE)
+  expect_false(explicit$info$bandwidth_is_fallback)
+  expect_equal(explicit$info$bandwidth, 30)
+
+  # Automatic selection on well-behaved data succeeds, so the flag stays FALSE
+  # and the chosen bandwidth is a real selection rather than the arbitrary
+  # fallback constant.
+  auto <- fit_gwr_model(dat, "y", "x1", adaptive = TRUE)
+  expect_false(auto$info$bandwidth_is_fallback)
+  expect_true(is.finite(auto$info$bandwidth) && auto$info$bandwidth > 0)
 })

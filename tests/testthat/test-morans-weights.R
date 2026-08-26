@@ -5,10 +5,13 @@
 # the kNN fallback (giving a different statistic than the one asked for),
 # and non-row-standardised weights being treated as though they were.
 # See test-morans-variance.R for the variance formula itself.
+#
+# The fit stub and its residuals method live in helper-moranstub.R, on a
+# test-only subclass -- see the note there on why registering against
+# "spatial_fit" itself was wrong.
 # ===========================================================================
 
 test_that("residual_morans_i accepts sparse Matrix weights (no kNN fallback)", {
-  skip_if_not_installed("sf")
   skip_if_not_installed("Matrix")
 
   set.seed(21)
@@ -17,20 +20,10 @@ test_that("residual_morans_i accepts sparse Matrix weights (no kNN fallback)", {
     data.frame(x = runif(n), y = runif(n), resp = rnorm(n)),
     coords = c("x", "y"), crs = 32631
   )
-  resid_vec <- rnorm(n)
-  fake_fit <- structure(
-    list(data_sf = pts, residuals = resid_vec, engine = list()),
-    class = "spatial_fit"
-  )
-  registerS3method("residuals", "spatial_fit",
-                   function(object, ...) object$residuals)
+  fake_fit <- moran_stub_fit(pts, rnorm(n))
 
   # Row-standardised weight matrix (3 neighbours each, weight 1/3)
-  W <- matrix(0, n, n)
-  for (i in seq_len(n)) {
-    nbrs <- sample(setdiff(seq_len(n), i), 3)
-    W[i, nbrs] <- 1 / 3
-  }
+  W <- moran_stub_weights(n, k = 3, seed = 21)
   W_sparse <- Matrix::Matrix(W, sparse = TRUE)
 
   res_dense  <- residual_morans_i(fake_fit, weights = W)
@@ -42,67 +35,51 @@ test_that("residual_morans_i accepts sparse Matrix weights (no kNN fallback)", {
   expect_equal(res_sparse$sd,       res_dense$sd,       tolerance = 1e-12)
   expect_equal(res_sparse$z,        res_dense$z,        tolerance = 1e-12)
   expect_equal(res_sparse$p_value,  res_dense$p_value,  tolerance = 1e-12)
+
+  # ... and the kNN fallback really would give something else, so the four
+  # equalities above are not satisfiable by "both paths fell back".
+  res_knn <- residual_morans_i(fake_fit)
+  expect_false(isTRUE(all.equal(res_knn$observed, res_dense$observed)))
 })
 
 
 test_that("residual_morans_i warns on non-row-standardised user weights", {
-  skip_if_not_installed("sf")
-  skip_if_not_installed("FNN")
+  # No skip_if_not_installed("FNN"): this test always passes explicit
+  # `weights =`, so the kNN builder is never reached at all.
 
-  # Build a minimal spatial_fit stub with residuals and coordinates
   n <- 20
   set.seed(42)
-  coords_mat <- cbind(runif(n), runif(n))
   pts <- sf::st_as_sf(
-    data.frame(x = coords_mat[, 1], y = coords_mat[, 2], resp = rnorm(n)),
+    data.frame(x = runif(n), y = runif(n), resp = rnorm(n)),
     coords = c("x", "y"), crs = 32631
   )
+  fake_fit <- moran_stub_fit(pts, rnorm(n))
 
-  fake_fit <- structure(
-    list(
-      data_sf  = pts,
-      residuals = rnorm(n),
-      engine   = list()
-    ),
-    class = c("spatial_fit")
+  # A row-standardised matrix should NOT trigger the row-standardisation
+  # warning.  .log_warn() raises no R condition, so this has to be asserted on
+  # captured log lines -- expect_no_warning() would pass vacuously either way
+  # (see helper-logging.R).
+  W_good <- moran_stub_weights(n, k = 4, seed = 1, value = 1 / 4)
+  good_lines <- capture_spatialkit_log(
+    result <- residual_morans_i(fake_fit, weights = W_good)
   )
-  residuals.spatial_fit <- function(object, ...) object$residuals
-  registerS3method("residuals", "spatial_fit", residuals.spatial_fit)
-
-  # A row-standardised matrix should NOT trigger the row-standardisation warning
-  W_good <- matrix(0, n, n)
-  for (i in seq_len(n)) {
-    nbrs <- sample(setdiff(seq_len(n), i), 4)
-    W_good[i, nbrs] <- 1 / 4
-  }
-  result <- residual_morans_i(fake_fit, weights = W_good)
+  expect_false(log_has(good_lines, "not row-standardised"))
   expect_true(is.list(result))
   expect_true(is.finite(result$observed))
 
-  # A non-row-standardised (binary) matrix SHOULD trigger a logger warning.
-  # The spatialkit logger appends to a temp file (configured in .onLoad),
-  # so we read new log entries from that file after the call.
-  W_bad <- matrix(0, n, n)
-  for (i in seq_len(n)) {
-    nbrs <- sample(setdiff(seq_len(n), i), 4)
-    W_bad[i, nbrs] <- 1
-  }
+  # A non-row-standardised (binary) matrix SHOULD emit the logger warning.
+  W_bad <- moran_stub_weights(n, k = 4, seed = 1, value = 1)
+  bad_lines <- capture_spatialkit_log(
+    res_bad <- residual_morans_i(fake_fit, weights = W_bad)
+  )
+  expect_true(log_has(bad_lines, "not row-standardised"))
+  # The message reports the observed row-sum range, which is exactly 4 here.
+  expect_true(log_has(bad_lines, "row sums range from 4 to 4"))
 
-  log_file <- file.path(tempdir(), "spatialkit_model_log.log")
-  # Record the file size before so we can isolate new entries
-  before_size <- if (file.exists(log_file)) file.info(log_file)$size else 0L
-
-  residual_morans_i(fake_fit, weights = W_bad)
-
-  # Read any new content appended to the log file after the call
-  if (file.exists(log_file) && file.info(log_file)$size > before_size) {
-    con <- file(log_file, open = "rb")
-    on.exit(close(con), add = TRUE)
-    if (before_size > 0) seek(con, where = before_size)
-    new_log <- readLines(con, warn = FALSE)
-  } else {
-    new_log <- character(0)
-  }
-
-  expect_true(any(grepl("not row-standardised", new_log)))
+  # The warning is advisory: the general Cliff & Ord formula is still applied,
+  # so a usable statistic comes back.  W_bad is 4x W_good, and both I and the
+  # variance are invariant to a positive rescaling of W, so the two agree.
+  expect_true(is.finite(res_bad$observed))
+  expect_equal(res_bad$observed, result$observed, tolerance = 1e-10)
+  expect_equal(res_bad$z,        result$z,        tolerance = 1e-10)
 })

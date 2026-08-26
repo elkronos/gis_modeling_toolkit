@@ -144,9 +144,9 @@
       lat, lon)))
   }
 
-  zone <- floor((lon + 180) / 6) + 1
-  zone <- max(1, min(60, zone))
-  epsg <- if (!is.na(lat) && lat < 0) 32700 + zone else 32600 + zone
+  # Reuse the candidate zone computed above so the zone named in the messages
+  # and the EPSG code returned here can never diverge.
+  epsg <- if (!is.na(lat) && lat < 0) 32700 + cand_zone else 32600 + cand_zone
   sf::st_crs(epsg)
 }
 
@@ -161,6 +161,9 @@
 #'
 #' @param x An sf or sfc object (other objects returned unchanged).
 #' @param target_crs Optional target CRS (sf object, integer EPSG, or crs).
+#'   Must resolve to a usable CRS via [sf::st_crs()]; an unusable value (one
+#'   that resolves to `NA_crs_`) raises an error rather than silently leaving
+#'   `x` unprojected.
 #' @return x, potentially with a new projected CRS.
 #' @examples
 #' library(sf)
@@ -175,7 +178,18 @@ ensure_projected <- function(x, target_crs = NULL) {
 
   if (!is.null(target_crs)) {
     tcrs <- sf::st_crs(target_crs)
-    if (is.na(tcrs)) return(x)
+    if (is.na(tcrs)) {
+      # Silently returning `x` here would make ensure_projected() a no-op and
+      # let unprojected coordinates flow into distance/area computations.
+      stop(sprintf(
+        paste0("ensure_projected(): `target_crs` does not resolve to a usable ",
+               "CRS (sf::st_crs() returned NA for an object of class %s). Pass ",
+               "an EPSG code, a proj string, an sf::crs object, or an sf/sfc ",
+               "object that carries a CRS -- or omit `target_crs` to let a ",
+               "local projected CRS be chosen automatically."),
+        paste(class(target_crs), collapse = "/")
+      ), call. = FALSE)
+    }
     xcrs <- sf::st_crs(x)
     if (is.na(xcrs)) {
       # No source CRS: we cannot reproject, only assume.  Make the
@@ -254,6 +268,11 @@ ensure_projected <- function(x, target_crs = NULL) {
 #'
 #' Aligns two sf objects to a common CRS.
 #'
+#' When one input carries no CRS, the other object's CRS (or `target_crs`) is
+#' *stamped* onto it with [sf::st_set_crs()]: the coordinates are **not**
+#' reprojected, only relabelled.  That assumption is announced with a warning,
+#' matching what [ensure_projected()] does in the same situation.
+#'
 #' @param a,b Objects of class sf or sfc.
 #' @param prefer Which object's CRS to keep ("a" or "b").
 #' @param target_crs Optional target CRS to apply to both.
@@ -295,19 +314,46 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
     )
   }
 
+  # st_set_crs() only stamps a label: the coordinates are NOT moved.  Whenever
+  # that happens on CRS-less input, say so, matching the loud assumption
+  # ensure_projected() makes in the same situation.
+  .warn_stamped <- function(which_obj, to) {
+    lbl <- tryCatch({
+      inp <- sf::st_crs(to)$input
+      if (is.null(inp) || length(inp) != 1L || is.na(inp) ||
+          !nzchar(as.character(inp))) "unknown" else as.character(inp)
+    }, error = function(e) "unknown")
+    .log_warn(
+      "harmonize_crs(): `%s` has no CRS; stamping '%s' onto it WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set it explicitly with sf::st_crs().",
+      which_obj, lbl
+    )
+  }
+
   if (!is.null(target_crs)) {
-    a <- if (!is.na(crs_a)) .safe_transform(a, target_crs) else sf::st_set_crs(a, target_crs)
-    b <- if (!is.na(crs_b)) .safe_transform(b, target_crs) else sf::st_set_crs(b, target_crs)
+    if (is.na(crs_a)) {
+      .warn_stamped("a", target_crs)
+      a <- sf::st_set_crs(a, target_crs)
+    } else {
+      a <- .safe_transform(a, target_crs)
+    }
+    if (is.na(crs_b)) {
+      .warn_stamped("b", target_crs)
+      b <- sf::st_set_crs(b, target_crs)
+    } else {
+      b <- .safe_transform(b, target_crs)
+    }
     return(list(a = a, b = b))
   }
 
   if (is.na(crs_a) && is.na(crs_b)) return(list(a = a, b = b))
 
   if (is.na(crs_a) && !is.na(crs_b)) {
+    .warn_stamped("a", crs_b)
     a <- sf::st_set_crs(a, crs_b)
     return(list(a = a, b = b))
   }
   if (!is.na(crs_a) && is.na(crs_b)) {
+    .warn_stamped("b", crs_a)
     b <- sf::st_set_crs(b, crs_a)
     return(list(a = a, b = b))
   }
@@ -331,6 +377,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' @param x An sf object.
 #' @return An sfc (POINT) vector.
 #' @keywords internal
+#' @noRd
 .bbox_center_sfc <- function(x) {
   stopifnot(inherits(x, "sf"))
   pts <- lapply(sf::st_geometry(x), function(g) {
@@ -348,6 +395,11 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #'
 #' Converts the geometry column of an sf object to POINTs using one of several
 #' strategies.
+#'
+#' LINESTRING midpoints are sampled with [sf::st_line_sample()], which yields
+#' no point for an EMPTY LINESTRING.  Rather than silently misaligning the
+#' result (or letting sf crash), such input raises an error; drop empty
+#' geometries first with `x <- x[!sf::st_is_empty(x), ]`.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
@@ -393,26 +445,34 @@ coerce_to_points <- function(
 
   is_ll <- .is_longlat(x)
 
-  .as_sf_single <- function(geom, crs) {
-    sfc1 <- if (inherits(geom, "sfc")) {
-      if (is.na(sf::st_crs(geom)) && !is.na(crs)) sf::st_crs(geom) <- crs
-      geom
-    } else {
-      sf::st_sfc(geom, crs = crs)
-    }
-    sf::st_sf(geometry = sfc1)
+  # An EMPTY LINESTRING has no midpoint: st_line_sample() yields an empty
+  # MULTIPOINT that st_cast(, "POINT") silently drops (and in sf 1.0.x the
+  # call segfaults outright), so the sampled midpoints would no longer align
+  # 1:1 with the rows they are scattered back into.  Reject before sampling.
+  .guard_empty_lines <- function(geom, idx_ls) {
+    empty <- which(sf::st_is_empty(geom))
+    if (!length(empty)) return(invisible(NULL))
+    shown <- idx_ls[empty][seq_len(min(5L, length(empty)))]
+    stop(sprintf(
+      paste0("coerce_to_points(): %d of %d LINESTRING feature(s) are EMPTY ",
+             "(row(s) %s%s); st_line_sample() yields no midpoint for them, ",
+             "which would misalign the result. Drop them first, e.g. ",
+             "x <- x[!sf::st_is_empty(x), ]."),
+      length(empty), length(idx_ls),
+      paste(shown, collapse = ", "),
+      if (length(empty) > 5L) ", ..." else ""
+    ), call. = FALSE)
   }
 
-  midpoint_linestring <- function(geom) {
-    if (is_ll && !tmp_project) {
-      return(suppressWarnings(sf::st_centroid(geom)))
-    }
-    x1     <- .as_sf_single(geom, crs)
-    x_proj <- if (tmp_project) ensure_projected(x1) else x1
-    midp   <- sf::st_line_sample(sf::st_geometry(x_proj), sample = 0.5)
-    midp   <- sf::st_cast(midp, "POINT")
-    if (!identical(sf::st_crs(x_proj), crs)) midp <- sf::st_transform(midp, crs)
-    sf::st_geometry(midp)
+  # Backstop for any other way the sampled count could diverge from the number
+  # of LINESTRING rows being filled.
+  .check_midpoint_alignment <- function(midps, idx_ls) {
+    if (length(midps) == length(idx_ls)) return(invisible(NULL))
+    stop(sprintf(
+      paste0("coerce_to_points(): st_line_sample() returned %d midpoint(s) for ",
+             "%d LINESTRING feature(s); the result would be misaligned."),
+      length(midps), length(idx_ls)
+    ), call. = FALSE)
   }
 
   if (mode == "line_midpoint") {
@@ -431,12 +491,14 @@ coerce_to_points <- function(
         out[idx_ls] <- as.list(ctr)
       } else {
         g_ls      <- g[idx_ls]
+        .guard_empty_lines(g_ls, idx_ls)
         g_ls_sf   <- sf::st_sf(geometry = g_ls)
         g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
         midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
         midps     <- sf::st_cast(midps, "POINT")
         if (!identical(sf::st_crs(g_ls_proj), crs))
           midps <- sf::st_transform(midps, crs)
+        .check_midpoint_alignment(midps, idx_ls)
         out[idx_ls] <- as.list(midps)
       }
     }
@@ -462,7 +524,7 @@ coerce_to_points <- function(
   idx_mpt <- which(gtypes == "MULTIPOINT")
   if (length(idx_mpt)) {
     for (i in idx_mpt) {
-      out[[i]] <- sf::st_centroid(g[i])[[1L]]
+      out[[i]] <- suppressWarnings(sf::st_centroid(g[i]))[[1L]]
     }
   }
 
@@ -481,12 +543,14 @@ coerce_to_points <- function(
       out[idx_ls] <- as.list(ctr)
     } else {
       g_ls     <- g[idx_ls]
+      .guard_empty_lines(g_ls, idx_ls)
       g_ls_sf  <- sf::st_sf(geometry = g_ls)
       g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
       midps    <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
       midps    <- sf::st_cast(midps, "POINT")
       if (!identical(sf::st_crs(g_ls_proj), crs))
         midps <- sf::st_transform(midps, crs)
+      .check_midpoint_alignment(midps, idx_ls)
       out[idx_ls] <- as.list(midps)
     }
   }

@@ -8,7 +8,9 @@ evaluate_insample(fits, newdata = NULL, ...)
 }
 \arguments{
 \item{fits}{A \code{spatial_fit} object, or a named list of them
-(e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).}
+(e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
+used as the model labels and every element must have one; an unnamed
+list is an error.}
 
 \item{newdata}{Optional sf object for out-of-sample evaluation.
 Must contain the response variable and all predictors.
@@ -26,9 +28,9 @@ Does NOT refit — uses \code{fitted()} for in-sample and
 \code{predict()} for new data.
 }
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=compare_models_cv]{compare_models_cv()}},
-\code{\link[=residual_morans_i]{residual_morans_i()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{compare_models_cv}()},
+\code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

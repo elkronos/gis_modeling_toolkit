@@ -22,13 +22,20 @@ see whether spatial blocks are actually separating the data, or whether the
 blocks are smaller than the autocorrelation range and therefore leaking.
 }
 \examples{
-\dontrun{
-  f <- make_folds(pts, k = 5, method = "block_kfold")
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 80
+  pts <- st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+    coords = c("x", "y"), crs = 32632
+  )
+  f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)
   plot_folds(f, pts)
 }
 }
 \seealso{
-Other plotting:
-\code{\link[=plot.spatial_fit]{plot.spatial_fit()}}
+Other plotting: 
+\code{\link{plot.spatial_fit}()}
 }
 \concept{plotting}

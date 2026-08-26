@@ -20,7 +20,10 @@ determine_optimal_levels(
 
 \item{max_levels}{Integer upper bound on levels. Default 12.}
 
-\item{top_n}{Integer; how many candidates to return. Default 3.}
+\item{top_n}{Integer; how many candidates to return. Default 3. Under
+\code{criterion = "geometric"} the candidate set is the elbow and its two
+immediate neighbours, so at most 3 values are ever returned no matter how
+large \code{top_n} is; only the model-aware criteria can return more.}
 
 \item{sample_n}{Integer; subsample size for speed. Default 1500.}
 
@@ -30,7 +33,8 @@ determine_optimal_levels(
 \code{predictor_vars}, enables model-aware level selection via Moran's I
 on OLS residuals.}
 
-\item{predictor_vars}{Optional predictor column names.}
+\item{predictor_vars}{Optional predictor column names. Must be numeric;
+factor/character columns raise an error.}
 
 \item{criterion}{One of \code{"geometric"} (default when no response given),
 \code{"morans_i"} (select k that minimizes |Moran's I|), or
@@ -40,7 +44,11 @@ Falls back to \code{"geometric"} if response/predictors are unavailable.}
 \value{
 An integer vector of candidate level counts. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
-attached with per-k Moran's I values.
+attached with per-k Moran's I values — except when the model-aware path
+itself falls back to the geometric result (no viable k in the elbow
+neighbourhood, or Moran's I could not be computed for any candidate), in
+which case no diagnostics are available and the attribute is absent. Both
+fallbacks are logged as warnings.
 }
 \description{
 Computes a WSS curve over k=1..K_max using k-means on projected feature

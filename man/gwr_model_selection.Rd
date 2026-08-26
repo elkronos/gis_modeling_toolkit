@@ -63,6 +63,8 @@ An object of class \code{gwr_model_selection}, a list with:
 \code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
 \code{criterion} (label for the criterion actually read, noting when it
 had to be located positionally);
+\code{response_var} and \code{candidate_vars} (the response and the full
+candidate set the sweep ran over, both echoed by \code{print()});
 \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
 \code{kernel} (the smoothing held fixed across the sweep, and where it
 came from);
@@ -141,14 +143,14 @@ geographically weighted models. \emph{Geo-spatial Information Science}
 cross-validated counterpart, \code{\link{fit_gwr_model}} to fit the
 selected model.
 
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

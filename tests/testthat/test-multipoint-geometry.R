@@ -52,17 +52,43 @@ test_that("create_voronoi_polygons accepts MULTIPOINT input", {
     sf::st_point(c(5, 5)),
     crs = 32632
   )
-  pts <- sf::st_sf(geometry = g)
+  pts <- sf::st_sf(id = 1:3, geometry = g)
   res <- suppressMessages(create_voronoi_polygons(pts, quiet = TRUE))
   expect_true(is.list(res))
   expect_s3_class(res$cells, "sf")
-  expect_gt(nrow(res$cells), 0L)
+
+  # 3 FEATURES, 5 VERTICES.  `nrow(res$cells) > 0` could not tell those apart,
+  # which is exactly the confusion this file exists to police:
+  #
+  #   * cells are one per unique VERTEX (st_voronoi() tessellates the union of
+  #     all sub-points), so 5;
+  #   * `index` is one per input FEATURE, so 3 -- it is the vector callers use
+  #     to attach cell IDs back onto their attribute rows, and a length of 5
+  #     there would silently misalign every one of them.
+  expect_equal(nrow(res$cells), 5L)
+  expect_equal(length(res$index), nrow(pts))
+  expect_equal(length(res$index), 3L)
+
+  # Every feature is placed, and in a cell that exists.
+  expect_false(anyNA(res$index))
+  expect_true(all(res$index %in% res$cells$cell_id))
+  expect_equal(sort(res$cells$cell_id), seq_len(5L))
+
+  # A MULTIPOINT spans two cells; the documented tie-break keeps the smallest
+  # cell_id rather than duplicating the feature.
+  expect_equal(length(unique(res$index)), 3L)
+
+  # Baseline: with three plain POINTs, cells and features agree at 3.
+  plain <- sf::st_sf(id = 1:3, geometry = sf::st_sfc(
+    sf::st_point(c(0, 0)), sf::st_point(c(10, 0)), sf::st_point(c(5, 5)),
+    crs = 32632))
+  res_plain <- suppressMessages(create_voronoi_polygons(plain, quiet = TRUE))
+  expect_equal(nrow(res_plain$cells), 3L)
+  expect_equal(length(res_plain$index), 3L)
 })
 
 
 test_that("prep_model_data coerces multi-vertex MULTIPOINT to POINT", {
-  skip_if_not_installed("sf")
-
   g <- sf::st_sfc(
     sf::st_multipoint(rbind(c(0, 0), c(10, 0), c(10, 10), c(0, 10))),
     sf::st_multipoint(rbind(c(100, 100), c(120, 100))),
@@ -90,7 +116,6 @@ test_that("prep_model_data coerces multi-vertex MULTIPOINT to POINT", {
 
 
 test_that("fit_bayesian_spatial_model rejects MULTIPOINT when .already_prepped", {
-  skip_if_not_installed("sf")
   skip_if_not_installed("brms")
 
   g <- sf::st_sfc(
@@ -109,8 +134,6 @@ test_that("fit_bayesian_spatial_model rejects MULTIPOINT when .already_prepped",
 
 
 test_that("coerce_to_points() uses centroid for MULTIPOINT, not first sub-point", {
-  skip_if_not_installed("sf")
-
   # Build a MULTIPOINT whose centroid differs from its first sub-point
   mp <- sf::st_multipoint(matrix(c(0, 0,
                                     10, 0,
@@ -132,8 +155,6 @@ test_that("coerce_to_points() uses centroid for MULTIPOINT, not first sub-point"
 
 
 test_that("coerce_to_points() returns POINT geometry for MULTIPOINT input", {
-  skip_if_not_installed("sf")
-
   mp <- sf::st_multipoint(matrix(c(1, 2, 3, 4), ncol = 2, byrow = TRUE))
   sf_obj <- sf::st_sf(geometry = sf::st_sfc(mp, crs = 4326))
 

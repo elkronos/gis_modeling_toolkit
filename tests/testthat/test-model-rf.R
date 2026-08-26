@@ -183,6 +183,22 @@ test_that("predict.rf_fit reprojects newdata to the fitting CRS", {
   # would collapse every point into one corner of predictor space.
   expect_equal(predict(fit, newdata = nd_ll), predict(fit, newdata = nd_proj),
                tolerance = 1e-3)
+
+  # The tolerance above is wide enough that it depends on the installed PROJ
+  # version, which varies across the CI matrix.  This is the discriminating
+  # half: mislabel the lon/lat coordinates as metres -- exactly what skipping
+  # the reprojection does -- and the predictions must NOT come back equal.
+  # Without it, a `tolerance` that quietly grew too large would go unnoticed.
+  nd_mislabelled <- sf::st_set_crs(
+    sf::st_set_crs(nd_ll, NA_character_), sf::st_crs(nd_proj))
+  p_wrong <- suppressWarnings(predict(fit, newdata = nd_mislabelled))
+  p_right <- predict(fit, newdata = nd_proj)
+  expect_length(p_wrong, length(p_right))
+  expect_false(isTRUE(all.equal(unname(p_wrong), unname(p_right),
+                                tolerance = 1e-3)))
+  # ... and wrong by a lot, not by rounding: degrees put every point within
+  # ~50 units of the origin, far outside the training extent.
+  expect_gt(max(abs(p_wrong - p_right)), 1e-2 * stats::sd(p_right))
 })
 
 test_that("coef() on an rf_fit refuses rather than inventing something", {

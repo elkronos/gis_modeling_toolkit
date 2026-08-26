@@ -15,5 +15,8 @@
 Never returns; always signals an error.
 }
 \description{
-Coefficients are undefined for a random forest
+Consistent with \code{coef.gwr_fit()} and \code{coef.bayesian_fit()}, which
+also error rather than returning \code{NULL} when they cannot supply
+coefficients -- see the \code{coef()} contract in
+\code{\link{new_spatial_fit}}.
 }
