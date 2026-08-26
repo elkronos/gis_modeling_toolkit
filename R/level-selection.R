@@ -75,14 +75,14 @@
 #' @param xy Numeric matrix of coordinates.
 #' @param response Numeric vector of response values.
 #' @param predictors Numeric matrix of predictor values.
-#' @param cluster_ids Integer vector of cluster assignments.
-#' @param k Number of clusters.
+#' @param cluster_ids Integer vector of cluster assignments. The cluster count
+#'   is derived from this vector, so it is not passed separately.
 #' @return Numeric scalar: Moran's I statistic (values near 0 indicate the
 #'   tessellation resolution captures the spatial pattern; positive values
 #'   indicate residual spatial autocorrelation remains).
 #' @keywords internal
 #' @noRd
-.morans_i_for_k <- function(xy, response, predictors, cluster_ids, k) {
+.morans_i_for_k <- function(xy, response, predictors, cluster_ids) {
   # Aggregate to cell-level means
   cell_ids <- sort(unique(cluster_ids))
   n_cells <- length(cell_ids)
@@ -121,8 +121,13 @@
   if (S0 < .Machine$double.eps || sum(resid^2) < .Machine$double.eps)
     return(NA_real_)
   resid_c <- resid - mean(resid)
-  I <- (n / S0) * as.numeric(crossprod(resid_c, W %*% resid_c)) / sum(resid_c^2)
-  I
+  # sum(resid_c * (W %*% resid_c)) rather than crossprod(): .build_knn_weights()
+  # returns a sparse Matrix when FNN and Matrix are installed, and
+  # base::crossprod() does not dispatch on the dgeMatrix that W %*% resid_c
+  # produces ("requires numeric/complex matrix/vector arguments").  The two
+  # forms are numerically identical.  Matches residual_morans_i().
+  I <- (n / S0) * sum(resid_c * (W %*% resid_c)) / sum(resid_c^2)
+  as.numeric(I)
 }
 
 
@@ -150,20 +155,28 @@
 #'
 #' @param data_sf An sf object.
 #' @param max_levels Integer upper bound on levels. Default 12.
-#' @param top_n Integer; how many candidates to return. Default 3.
+#' @param top_n Integer; how many candidates to return. Default 3. Under
+#'   \code{criterion = "geometric"} the candidate set is the elbow and its two
+#'   immediate neighbours, so at most 3 values are ever returned no matter how
+#'   large \code{top_n} is; only the model-aware criteria can return more.
 #' @param sample_n Integer; subsample size for speed. Default 1500.
 #' @param set_seed Integer RNG seed. Default 123.
 #' @param response_var Optional response column name. When provided alongside
 #'   \code{predictor_vars}, enables model-aware level selection via Moran's I
 #'   on OLS residuals.
-#' @param predictor_vars Optional predictor column names.
+#' @param predictor_vars Optional predictor column names. Must be numeric;
+#'   factor/character columns raise an error.
 #' @param criterion One of \code{"geometric"} (default when no response given),
 #'   \code{"morans_i"} (select k that minimizes |Moran's I|), or
 #'   \code{"combined"} (rank-average of WSS elbow distance and |Moran's I|).
 #'   Falls back to \code{"geometric"} if response/predictors are unavailable.
 #' @return An integer vector of candidate level counts. When
 #'   \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
-#'   attached with per-k Moran's I values.
+#'   attached with per-k Moran's I values — except when the model-aware path
+#'   itself falls back to the geometric result (no viable k in the elbow
+#'   neighbourhood, or Moran's I could not be computed for any candidate), in
+#'   which case no diagnostics are available and the attribute is absent. Both
+#'   fallbacks are logged as warnings.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -200,8 +213,11 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     criterion <- "geometric"
   }
 
-  if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) %in%
-           c("POINT", "MULTIPOINT"))) {
+  # MULTIPOINT must be coerced too, not merely admitted: st_coordinates()
+  # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
+  # different feature than row i of resp_vec/pred_mat, and every index below
+  # reads the wrong rows silently.  Matches the guard in estimate_sac_range().
+  if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
     data_sf <- coerce_to_points(data_sf, "auto")
   }
   data_sf <- ensure_projected(data_sf)
@@ -217,6 +233,21 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   resp_vec <- pred_mat <- NULL
   if (has_model_vars) {
     df <- sf::st_drop_geometry(data_sf)
+    # A factor or character predictor makes as.matrix() return a CHARACTER
+    # matrix, which dies deep inside colMeans() with "'x' must be numeric".
+    # Name the offending columns here instead.
+    non_num <- predictor_vars[!vapply(predictor_vars,
+                                      function(v) is.numeric(df[[v]]),
+                                      logical(1))]
+    if (length(non_num)) {
+      stop(sprintf(
+        paste0("determine_optimal_levels(): `predictor_vars` must be numeric; ",
+               "%s %s not. Encode factor/character predictors numerically ",
+               "(e.g. with model.matrix()) before calling."),
+        paste(sprintf("'%s'", non_num), collapse = ", "),
+        if (length(non_num) == 1L) "is" else "are"
+      ), call. = FALSE)
+    }
     resp_vec <- as.numeric(df[[response_var]])
     pred_mat <- as.matrix(df[, predictor_vars, drop = FALSE])
   }
@@ -309,8 +340,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
               silent = TRUE)
     if (inherits(km, "try-error")) next
     wss_eval[k]   <- km$tot.withinss
-    moran_vals[k] <- .morans_i_for_k(xy, resp_vec, pred_mat,
-                                       km$cluster, k)
+    moran_vals[k] <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
   }
 
   valid_moran <- is.finite(moran_vals[eval_ks])

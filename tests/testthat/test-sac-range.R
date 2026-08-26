@@ -60,7 +60,13 @@ test_that("a rejected range is NA but keeps the variogram that rejected it", {
   expect_true(is.na(r))
   expect_false(is.finite(r))
   expect_identical(as.numeric(r), NA_real_)
-  expect_null(attr(r, "class"))            # still a bare numeric, not classed
+  # Classed exactly as the success return, so print.sac_range() fires for a
+  # rejected range too.  Before this, printing one dumped the empirical
+  # variogram data.frame and the fitted gstat model as raw attributes.
+  expect_s3_class(r, "sac_range")
+  expect_output(print(r), "^NA")
+  printed <- paste(utils::capture.output(print(r)), collapse = "\n")
+  expect_false(grepl("np|dist|gamma|psill", printed))   # no variogram dump
 
   # the diagnostics that justify the rejection
   expect_false(is.null(attr(r, "variogram")))

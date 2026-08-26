@@ -51,9 +51,14 @@ caller has already projected and cleaned the data.}
 }
 \value{
 An \code{rf_fit} object (inherits from \code{spatial_fit}).
-\code{$info} carries \code{importance} (a named numeric),
-\code{oob_rmse}, \code{oob_r_squared}, \code{num_trees}, \code{mtry} and
-\code{include_coords}. The raw forest is in \code{$engine}.
+\code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
+\code{importance_type}, \code{importance} (a named numeric, or
+\code{NULL} when \code{importance = "none"}), \code{include_coords},
+\code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
+ranger did not compute it -- forwarding \code{oob.error = FALSE} through
+\code{...} is one way to get there), \code{fitted_are_oob} (always
+\code{TRUE}; \code{summary()} reads it to label its metrics) and
+\code{seed}. The raw forest is in \code{$engine}.
 }
 \description{
 Fits a regression random forest on an \code{sf} dataset and returns it as a
@@ -129,9 +134,9 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 \code{\link{area_of_applicability}}, which can take
 \code{weights = pmax(fit$info$importance, 0)}.
 
-Other model fitting:
-\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_gwr_model}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

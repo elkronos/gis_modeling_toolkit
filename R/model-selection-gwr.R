@@ -180,7 +180,10 @@
 #' without it.
 #'
 #' @return A list with \code{model_list}, \code{gwr_df}, \code{bandwidth},
-#'   \code{bandwidth_source} and \code{used_dmat}.
+#'   \code{bandwidth_source}, \code{used_dmat} and \code{raw} (GWmodel's
+#'   unmodified return, which the caller passes straight through to the public
+#'   result).  \code{.engine} is a documented injection point, so this list is
+#'   the contract an injected engine has to satisfy -- \code{raw} included.
 #' @keywords internal
 #' @noRd
 .gwr_ms_engine <- function(dat, response_var, candidate_vars, bandwidth,
@@ -370,6 +373,8 @@
 #'   \code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
 #'   \code{criterion} (label for the criterion actually read, noting when it
 #'   had to be located positionally);
+#'   \code{response_var} and \code{candidate_vars} (the response and the full
+#'   candidate set the sweep ran over, both echoed by \code{print()});
 #'   \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
 #'   \code{kernel} (the smoothing held fixed across the sweep, and where it
 #'   came from);
@@ -420,8 +425,31 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
   if (!is.character(response_var) || length(response_var) != 1L)
     stop("gwr_model_selection(): `response_var` must be a single column name.",
          call. = FALSE)
-  kernel      <- .validate_kernel(match.arg(kernel))
+  # match.arg() has already rejected every invalid value, so .validate_kernel()
+  # would be a no-op here; it earns its keep in cv_gwr(), where `kernel`
+  # arrives unvalidated.
+  kernel      <- match.arg(kernel)
   bw_approach <- match.arg(bw_approach)
+
+  # Validate `bandwidth` here, not inside .gwr_ms_engine(): the engine is an
+  # injectable test seam and requires GWmodel, so a check placed there would
+  # be skipped for injected engines and unreachable without GWmodel.
+  # Unvalidated, NA reaches the engine's clamp as "missing value where
+  # TRUE/FALSE needed", a length-2 vector as "the condition has length > 1",
+  # and with adaptive = FALSE (no clamp at all) a zero or negative distance
+  # goes straight into GWmodel.
+  if (!is.null(bandwidth) &&
+      (!is.numeric(bandwidth) || length(bandwidth) != 1L ||
+       !is.finite(bandwidth) || bandwidth <= 0))
+    stop(sprintf(paste0("gwr_model_selection(): `bandwidth` must be a single ",
+                        "positive finite number (or NULL to select one ",
+                        "automatically). With adaptive = %s it is %s."),
+                 if (isTRUE(adaptive)) "TRUE" else "FALSE",
+                 if (isTRUE(adaptive))
+                   "the number of nearest neighbours in each local window"
+                 else
+                   "a distance in the CRS units of `data_sf`"),
+         call. = FALSE)
 
   candidate_vars <- unique(as.character(candidate_vars))
   missing_v <- setdiff(c(response_var, candidate_vars), names(data_sf))

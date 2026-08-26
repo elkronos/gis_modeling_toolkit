@@ -15,7 +15,7 @@ new_spatial_fit(
 )
 }
 \arguments{
-\item{subclass}{Character scalar: "gwr_fit" or "bayesian_fit".}
+\item{subclass}{Character scalar: "gwr_fit", "bayesian_fit" or "rf_fit".}
 
 \item{engine}{The raw model object.}
 
@@ -33,6 +33,20 @@ new_spatial_fit(
 An object of class \code{c(subclass, "spatial_fit")}.
 }
 \description{
-Low-level constructor used by \code{fit_gwr_model()} and
-\code{fit_bayesian_spatial_model()}.  Users should not call this directly.
+Low-level constructor used by \code{fit_gwr_model()},
+\code{fit_bayesian_spatial_model()} and \code{fit_rf_model()}.  Users should
+not call this directly.
 }
+\section{The coef() contract}{
+
+\code{coef()} on a \code{spatial_fit} either returns the coefficients or
+signals an error -- it never returns \code{NULL}.  \code{coef.rf_fit()}
+always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
+and \code{coef.bayesian_fit()} error when the backend cannot supply them
+(a missing package, an engine without the expected component).  A
+\code{NULL} return would be indistinguishable from "this model genuinely
+has no fixed effects", so \code{lapply(fits, coef)} would quietly produce a
+shorter answer than the caller expected.  Wrap in \code{try()} or
+\code{tryCatch()} when sweeping over a heterogeneous list of fits.
+}
+

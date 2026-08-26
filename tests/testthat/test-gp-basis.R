@@ -38,7 +38,14 @@ test_that(".gp_basis_spec does not scale with n", {
   expect_lt(ks[3]^2, ns[3] / 4)
 })
 
-test_that(".gp_basis_spec is stable across point-pattern geometry", {
+test_that(".gp_basis_spec follows the Riutort-Mayol inequalities exactly", {
+  # The documented specification, not an observed band:
+  #     c >= 3.2 * (ell/S),  c >= 1.2
+  #     m >= 1.75 * c / (ell/S)
+  # with the boundary factor set from the UPPER bound (it must contain the
+  # longest plausible range) and the basis count from the LOWER one (it must
+  # resolve the shortest).  m is an integer, so the second inequality is met by
+  # ceiling(): the slack is in [0, 1), never more.
   set.seed(2)
   unif <- scale(matrix(runif(2 * 2000), ncol = 2))
   elon <- scale(cbind(runif(2000, 0, 10), runif(2000, 0, 0.5)))
@@ -46,13 +53,63 @@ test_that(".gp_basis_spec is stable across point-pattern geometry", {
   lab  <- sample(20, 2000, replace = TRUE)
   clus <- scale(ctr[lab, ] + matrix(rnorm(2 * 2000, 0, 0.02), ncol = 2))
 
-  ks <- vapply(list(unif, elon, clus), function(xy)
-    spatialkit:::.gp_basis_spec(xy, gp_lengthscale_bounds(xy))$k, integer(1))
+  for (xy in list(unif, elon, clus)) {
+    b <- gp_lengthscale_bounds(xy)
+    s <- spatialkit:::.gp_basis_spec(xy, b)
 
-  # Derived k sits around 21-25 for realistic patterns; the band is loose
-  # enough to survive RNG jitter but tight enough to catch a regression to an
-  # n-dependent rule.
-  expect_true(all(ks >= 15L & ks <= 35L))
+    r_lo <- b[["lower"]] / s$S          # ell/S that must be RESOLVED
+    r_hi <- b[["upper"]] / s$S          # ell/S that must be CONTAINED
+
+    expect_gte(s$c, 3.2 * r_hi - 1e-9)
+    expect_gte(s$c, 1.2)
+    # Neither clamp binds for these patterns, so k is exactly the ceiling of
+    # the second inequality -- a stronger statement than ">=".
+    expect_false(s$capped)
+    expect_identical(s$k, as.integer(ceiling(1.75 * s$c / r_lo)))
+  }
+})
+
+test_that(".gp_basis_spec tracks the length-scale ratio, not the coordinate scale", {
+  # Composing the two inequalities (in the regime where c = 3.2 * r_hi, i.e.
+  # whenever 3.2 * upper > 1.2 * S) gives
+  #     k = ceiling(1.75 * 3.2 * upper / lower) = ceiling(5.6 * upper / lower)
+  # -- S cancels.  k therefore depends ONLY on the shape of the pairwise
+  # distance distribution, and is invariant to multiplying every coordinate by
+  # a constant.  An implementation that reached for n, for S, or for an
+  # absolute distance anywhere would break this.
+  set.seed(2)
+  xy <- scale(matrix(runif(2 * 2000), ncol = 2))
+  b  <- gp_lengthscale_bounds(xy)
+  k0 <- spatialkit:::.gp_basis_spec(xy, b)$k
+
+  expect_identical(k0, as.integer(ceiling(5.6 * b[["upper"]] / b[["lower"]])))
+
+  for (mult in c(1e-3, 1e3)) {
+    xy_s <- xy * mult
+    s_s  <- spatialkit:::.gp_basis_spec(xy_s, gp_lengthscale_bounds(xy_s))
+    expect_identical(s_s$k, k0)                    # k unchanged ...
+    expect_equal(s_s$S, mult * max(apply(xy, 2, function(z) diff(range(z)) / 2)))
+  }                                                # ... while S scaled by 1e6
+})
+
+test_that(".gp_basis_spec demands more basis functions for finer structure", {
+  # Three tight clusters far apart: a third of all pairs are within-cluster, so
+  # the 25th-percentile distance is a within-cluster one and upper/lower jumps
+  # from ~4 to ~90.  The required k rises with it and hits the cap -- which is
+  # the behaviour a length-scale-driven rule must have and an n-driven one
+  # cannot, since n is the same order as the uniform case above.
+  set.seed(9)
+  centres <- matrix(c(0, 0, 10, 0, 5, 9), ncol = 2, byrow = TRUE)
+  tight   <- centres[sample(3, 1500, replace = TRUE), ] +
+    matrix(rnorm(2 * 1500, 0, 0.05), ncol = 2)
+
+  b <- gp_lengthscale_bounds(tight)
+  s <- spatialkit:::.gp_basis_spec(tight, b)
+
+  expect_gt(b[["upper"]] / b[["lower"]], 20)       # genuinely finer structure
+  expect_gt(1.75 * s$c / (b[["lower"]] / s$S), 50) # more than the cap allows
+  expect_true(s$capped)
+  expect_identical(s$k, as.integer(floor(sqrt(2500L))))
 })
 
 test_that(".gp_basis_spec keeps the total basis count modest", {

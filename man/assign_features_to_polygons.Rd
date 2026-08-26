@@ -35,7 +35,10 @@ smallest area, \code{"first"} keeps the first match (original order-dependent
 behavior).}
 }
 \value{
-An sf object with polygon_id_col attached.
+An sf object with polygon_id_col attached. Any column of
+\code{features_sf} whose name would collide with the polygon ID column is
+dropped before the spatial join (with a warning), so re-assigning an
+already-assigned layer replaces the old IDs rather than failing.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.

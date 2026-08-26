@@ -19,7 +19,7 @@ fit_bayesian_spatial_model(
   cores = max(1L, parallel::detectCores() - 1L),
   seed = 123,
   backend = c("auto", "cmdstanr", "rstan"),
-  control = list(adapt_delta = 0.9, max_treedepth = 12),
+  control = list(),
   compute_loo = TRUE,
   standardize_predictors = FALSE,
   check_convergence = TRUE,
@@ -33,7 +33,12 @@ fit_bayesian_spatial_model(
 
 \item{response_var}{Response column name.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Predictor column names.  May be \code{character(0)}
+for an intercept-only model: the response is then explained by the
+intercept and the spatial Gaussian process alone, which is the right
+baseline for asking how much of the surface is spatial structure rather
+than covariate effect (and the natural null model for comparing against a
+covariate model with \code{\link{compare_models}}).}
 
 \item{family}{A model family accepted by \code{brms::brm()} (a stats
 family function or a brms family object). Default NULL (resolved to
@@ -77,7 +82,11 @@ automatically unless \code{prior} already contains an entry with
 
 \item{backend}{"auto", "cmdstanr", or "rstan".}
 
-\item{control}{Named list of sampler controls.}
+\item{control}{Named list of sampler controls, \emph{merged} over the
+package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)} rather
+than replacing them.  Passing \code{list(max_treedepth = 15)} therefore
+keeps \code{adapt_delta = 0.9} -- which matters, because that is exactly
+the setting the divergence warning tells you to raise.}
 
 \item{compute_loo}{Logical; compute PSIS-LOO. Default TRUE.}
 
@@ -103,9 +112,11 @@ this at the default \code{FALSE}.}
 A \code{bayesian_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
-Model-specific metadata lives in \code{$info} (coord_scaling,
+Model-specific metadata lives in \code{$info} (coords -- the names of the
+scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
-gp_lscale_prior, loo, looic,
+gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
+was calibrated over; gp_lscale_prior, loo, looic,
 convergence_ok,
 convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 }
@@ -187,9 +198,9 @@ Gaussian processes for probabilistic programming.
 \doi{10.1007/s11222-022-10167-2}
 }
 \seealso{
-Other model fitting:
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=fit_rf_model]{fit_rf_model()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_gwr_model}()},
+\code{\link{fit_rf_model}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

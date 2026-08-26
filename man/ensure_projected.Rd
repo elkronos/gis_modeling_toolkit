@@ -9,7 +9,10 @@ ensure_projected(x, target_crs = NULL)
 \arguments{
 \item{x}{An sf or sfc object (other objects returned unchanged).}
 
-\item{target_crs}{Optional target CRS (sf object, integer EPSG, or crs).}
+\item{target_crs}{Optional target CRS (sf object, integer EPSG, or crs).
+Must resolve to a usable CRS via \code{\link[sf:st_crs]{sf::st_crs()}}; an unusable value (one
+that resolves to \code{NA_crs_}) raises an error rather than silently leaving
+\code{x} unprojected.}
 }
 \value{
 x, potentially with a new projected CRS.

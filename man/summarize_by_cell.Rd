@@ -79,7 +79,16 @@ before forming the \verb{n x n} correlation matrix used by
 A tibble/data.frame (or sf if cells_sf given) with per-cell summaries
 including \code{n}, \code{cell_weight}, and \verb{..sd_*} / \verb{..se_*} columns.
 When \code{deff != 1}, an attribute \code{"deff_applied"} is attached to the result
-recording the design effect(s) used.
+recording the design effect(s) used — including when \code{cells_sf} is
+supplied, in which case its per-cell \code{deff} vector is realigned to the
+joined row order and cells with no observations carry \code{NA}. The one
+exception is \code{deff = "kish"} with an estimated ICC of 0: no correction is
+applied, so no attribute is attached.
+
+The ID column keeps its input type when \code{cells_sf}'s ID column and the
+summarised IDs already have the same class. When the classes differ, both
+are coerced to character in order to join (logged as a warning), and the
+returned ID column is therefore character.
 }
 \description{
 Aggregates an sf point dataset into one row per cell. By default computes

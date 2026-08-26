@@ -51,13 +51,18 @@ jobs:
       # Stan dropped that typedef after 2.32.  The optional backends are the
       # job of the `backends` job below and of check-brms.yaml.
       #
-      # Four Suggests are not optional in practice.  knitr and rmarkdown
-      # build the vignette during R CMD build; the vignette calls
-      # library(ggplot2) unguarded; and tests/testthat.R opens with
+      # Three Suggests are not optional in practice.  knitr and rmarkdown build
+      # the vignette during R CMD build, and tests/testthat.R opens with
       # library(testthat), so without it the test stage errors rather than
       # skipping.  _R_CHECK_FORCE_SUGGESTS_ = false does not cover this -- it
       # only downgrades the complaint about absent Suggests, it does not stop
       # check from running the test file.
+      #
+      # ggplot2 is installed by choice rather than necessity.  The vignette
+      # gates every chunk on requireNamespace("ggplot2") in its setup chunk, so
+      # R CMD build succeeds without it -- but then the vignette renders as code
+      # with no output and none of the plotting code runs anywhere in this
+      # matrix.  It is a cheap pure-R install; keep it.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'
@@ -77,7 +82,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Optional backends live in Suggests and are guarded by requireNamespace().
   # Without this job the matrix above skips most model tests, so a green
-  # matrix would prove very little.  GWmodel / gstat / FNN / Matrix are cheap
+  # matrix would prove very little.  GWmodel / gstat / FNN / Matrix / ranger are cheap
   # enough to install on every push; brms + Stan is not (see nightly workflow).
   # ---------------------------------------------------------------------------
   backends:
@@ -106,6 +111,15 @@ jobs:
       # to exercise.  Suggests are deliberately NOT installed wholesale: that
       # dragged in brms and the Stan toolchain, which the comment above says
       # belongs in the nightly workflow instead.
+      #
+      # ranger is here because without it the entire random-forest backend --
+      # fit_rf_model(), cv_rf(), predict/fitted/residuals/coef/print.rf_fit,
+      # summary.spatial_fit()'s out-of-bag branch and the AOA coordinate-space
+      # branch -- never ran in CI at all.  It is a small binary with no system
+      # dependencies.  tibble is here because .safe_tibble()'s tibble branch is
+      # otherwise dead code in every job, so the tibble-vs-data.frame drop
+      # semantics that folds$assignment and cv$predictions inherit went
+      # untested.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'
@@ -121,11 +135,14 @@ jobs:
             any::FNN
             any::Matrix
             any::geometry
+            any::ranger
+            any::tibble
           needs: check
 
       - name: Confirm optional backends are installed
         run: |
-          for (p in c("sp", "GWmodel", "gstat", "FNN", "Matrix", "geometry")) {
+          for (p in c("sp", "GWmodel", "gstat", "FNN", "Matrix", "geometry",
+                      "ranger", "tibble")) {
             if (!requireNamespace(p, quietly = TRUE))
               stop("Backend package not installed: ", p)
           }

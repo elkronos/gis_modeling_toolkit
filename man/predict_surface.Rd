@@ -21,13 +21,15 @@ predict_surface(
 \code{fit_bayesian_spatial_model()}).}
 
 \item{grid}{Optional \code{sf} POINT layer to predict onto.  When
-\code{NULL}, a regular grid is built over the training extent.}
+\code{NULL}, a regular grid is built over the training extent.  Must have
+at least one row.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.}
 
 \item{n_cells}{Approximate cell count used to derive \code{cell_size}.
-Default 10000.}
+Default 10000.  Also ignored when \code{grid} is supplied -- the grid you
+pass is used verbatim.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc}; grid points outside
 it are dropped.}
@@ -45,8 +47,14 @@ backend supports it.  Default FALSE.}
 }
 \value{
 An \code{sf} POINT layer with a \code{.pred} column (and
-\code{.pred_se} when \code{se = TRUE} and available).  The grid resolution
-is attached as attribute \code{"cell_size"}.
+\code{.pred_se} when \code{se = TRUE} and available).  For an
+auto-generated grid the resolution is attached as attribute
+\code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
+\code{"cell_size"} attribute that object already carried -- usually
+\code{NULL}, and \code{NULL} for certain if the grid had to be
+re-projected, since \code{st_transform()} does not preserve custom
+attributes.  The resolution of a grid you built is not this function's to
+infer.
 }
 \description{
 Builds a prediction surface over the extent of the training data (or over a
@@ -64,10 +72,21 @@ matrix is \code{n_draws x n_newdata}, which will exhaust memory on a fine
 grid long before the fit itself would.
 }
 \examples{
-\dontrun{
-  fit  <- fit_gwr_model(pts, "y", "x")
-  surf <- predict_surface(fit, n_cells = 2000)
+\donttest{
+if (requireNamespace("GWmodel", quietly = TRUE) &&
+    requireNamespace("sp", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 60
+  pts <- st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
+  fit  <- fit_gwr_model(pts, "price", "elev", bandwidth = 30)
+  surf <- predict_surface(fit, n_cells = 500, covariates = pts)
   plot(surf[".pred"])
+}
 }
 }
 \concept{prediction}

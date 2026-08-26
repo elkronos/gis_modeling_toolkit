@@ -8,13 +8,17 @@
 #' Fitting and prediction must produce identical column names in identical
 #' order, so both go through this.
 #'
+#' @param .caller Name used in the error message; the same helper is reached
+#'   from \code{fit_rf_model()} and from \code{predict.rf_fit()}, and naming
+#'   the wrong one sends the reader to the wrong argument.
 #' @keywords internal
 #' @noRd
-.rf_frame <- function(data_sf, predictor_vars, include_coords = FALSE) {
+.rf_frame <- function(data_sf, predictor_vars, include_coords = FALSE,
+                      .caller = "fit_rf_model") {
   df <- sf::st_drop_geometry(data_sf)
   missing_v <- setdiff(predictor_vars, names(df))
   if (length(missing_v) > 0L)
-    stop("fit_rf_model(): predictor(s) absent from the data: ",
+    stop(.caller, "(): predictor(s) absent from the data: ",
          paste(sQuote(missing_v), collapse = ", "), call. = FALSE)
   out <- df[, predictor_vars, drop = FALSE]
   if (isTRUE(include_coords)) {
@@ -23,6 +27,62 @@
     out[["..y"]] <- crd[, 2L]
   }
   out
+}
+
+
+#' Coerce a ranger scalar diagnostic to a single finite number or NA
+#'
+#' \code{ranger} can leave \code{prediction.error} / \code{r.squared} unset
+#' (for instance when \code{oob.error = FALSE} is forwarded through
+#' \code{...}).  \code{as.numeric(NULL)} is \code{numeric(0)}, which
+#' \code{\%||\%} does not catch because it is not \code{NULL}: the downstream
+#' \code{if (is.finite(x))} then raises "argument is of length zero", and
+#' \code{sprintf()} handed a length-zero argument prints nothing at all.
+#'
+#' @param x Any value.
+#' @return A length-one numeric: the value if it is a single finite number,
+#'   \code{NA_real_} otherwise.
+#' @keywords internal
+#' @noRd
+.num1 <- function(x) {
+  v <- suppressWarnings(as.numeric(x))
+  if (length(v) != 1L || !is.finite(v)) return(NA_real_)
+  v
+}
+
+
+#' Check that categorical predictor levels in newdata were seen at fit time
+#'
+#' \code{ranger} matches factor predictors by level, so a level that was not
+#' present when the forest was grown has no split to follow.  Depending on the
+#' ranger version this either errors -- which \code{predict.rf_fit()}'s
+#' \code{tryCatch} would turn into an all-\code{NA} vector plus one log line --
+#' or, as in ranger 0.16, silently returns a plausible-looking number.  Both
+#' are worse than an error naming the level.
+#'
+#' @param X Prediction frame from \code{.rf_frame()}.
+#' @param train_X Training frame from \code{.rf_frame()}.
+#' @return \code{X}, with categorical columns coerced to the training levels.
+#' @keywords internal
+#' @noRd
+.rf_align_levels <- function(X, train_X) {
+  for (cn in intersect(names(X), names(train_X))) {
+    tr <- train_X[[cn]]
+    if (!(is.factor(tr) || is.character(tr))) next
+    lv  <- if (is.factor(tr)) levels(tr) else sort(unique(as.character(tr)))
+    val <- as.character(X[[cn]])
+    unseen <- setdiff(unique(val[!is.na(val)]), lv)
+    if (length(unseen) > 0L)
+      stop(sprintf(paste0("predict.rf_fit(): predictor '%s' in newdata has ",
+                          "level(s) the forest was never grown with: %s. ",
+                          "Trained levels: %s."),
+                   cn, paste(sQuote(unseen), collapse = ", "),
+                   paste(sQuote(lv), collapse = ", ")), call. = FALSE)
+    # Coerce with the TRAINING levels so the codes ranger sees are the codes
+    # it was built with, whatever order newdata happens to carry.
+    X[[cn]] <- if (is.factor(tr)) factor(val, levels = lv) else val
+  }
+  X
 }
 
 
@@ -85,9 +145,14 @@
 #' @param ... Passed to \code{ranger::ranger()}.
 #'
 #' @return An \code{rf_fit} object (inherits from \code{spatial_fit}).
-#'   \code{$info} carries \code{importance} (a named numeric),
-#'   \code{oob_rmse}, \code{oob_r_squared}, \code{num_trees}, \code{mtry} and
-#'   \code{include_coords}. The raw forest is in \code{$engine}.
+#'   \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
+#'   \code{importance_type}, \code{importance} (a named numeric, or
+#'   \code{NULL} when \code{importance = "none"}), \code{include_coords},
+#'   \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
+#'   ranger did not compute it -- forwarding \code{oob.error = FALSE} through
+#'   \code{...} is one way to get there), \code{fitted_are_oob} (always
+#'   \code{TRUE}; \code{summary()} reads it to label its metrics) and
+#'   \code{seed}. The raw forest is in \code{$engine}.
 #'
 #' @references
 #' Meyer, H., Reudenbach, C., Wöllauer, S. and Nauss, T. (2019). Importance of
@@ -132,6 +197,12 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
     stop("fit_rf_model(): package 'ranger' is required. Install with ",
          "install.packages('ranger').", call. = FALSE)
   importance <- match.arg(importance)
+  # prep_model_data() accepts character(0) so an intercept-only spatial GP can
+  # be fitted; a forest with nothing to split on is not a model, so reject it
+  # here where the message can say why.
+  if (!is.character(predictor_vars) || length(predictor_vars) < 1L)
+    stop("fit_rf_model(): `predictor_vars` must name at least one predictor; ",
+         "a forest has nothing to split on otherwise.", call. = FALSE)
 
   # Check the response type BEFORE prep_model_data(), which would otherwise
   # trip over a character column first and report something less useful.
@@ -183,7 +254,9 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   )
 
   imp <- if (identical(importance, "none")) NULL else fit$variable.importance
-  oob_mse <- suppressWarnings(as.numeric(fit$prediction.error))
+  # .num1() collapses an unset ranger field to NA_real_ rather than the
+  # numeric(0) that as.numeric(NULL) produces -- see ?.num1.
+  oob_mse <- .num1(fit$prediction.error)
 
   new_spatial_fit(
     subclass       = "rf_fit",
@@ -206,7 +279,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       importance       = imp,
       include_coords   = isTRUE(include_coords),
       oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
-      oob_r_squared    = suppressWarnings(as.numeric(fit$r.squared)),
+      oob_r_squared    = .num1(fit$r.squared),
       fitted_are_oob   = TRUE,
       seed             = seed
     )
@@ -275,7 +348,14 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #' @param newdata Optional sf object carrying the same predictors. It is
 #'   transformed to the CRS used at fitting time first, so a forest that
 #'   includes the coordinates is not fed a different coordinate system.
-#' @param ... Passed to \code{ranger}'s predict method.
+#'   Categorical predictors must not carry levels absent from the training
+#'   data; an unseen level is an error, not a guess.
+#' @param ... Passed to \code{ranger}'s predict method. Arguments that make
+#'   \code{ranger} return a matrix rather than one value per row --
+#'   \code{predict.all = TRUE}, \code{type = "quantiles"}, \code{type = "se"}
+#'   with \code{predict.all} -- are rejected, because this method's contract is
+#'   one number per row of \code{newdata}. Call
+#'   \code{predict(fit$engine, data = ...)} directly for those.
 #' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
 #'   rows dropped as incomplete.
 #' @export
@@ -285,7 +365,7 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
     stop("predict.rf_fit(): package 'ranger' is required.", call. = FALSE)
 
   n_orig  <- nrow(newdata)
-  newdata <- ensure_projected(newdata, target_crs = sf::st_crs(object$data_sf))
+  newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)
   newdata <- prep_model_data(newdata, object$response_var,
                              object$predictor_vars, pointize = "auto",
@@ -294,8 +374,15 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   newdata$..orig_row_id.. <- NULL
   n_new <- nrow(newdata)
 
-  X <- .rf_frame(newdata, object$predictor_vars,
-                 isTRUE(object$info$include_coords))
+  include_coords <- isTRUE(object$info$include_coords)
+  X <- .rf_frame(newdata, object$predictor_vars, include_coords,
+                 .caller = "predict.rf_fit")
+  # A factor level the forest was never grown with has no split to follow;
+  # ranger 0.16 returns a plausible-looking number for it rather than erroring.
+  # The helper intersects on name, so the whole training frame can be handed
+  # over -- the added coordinate columns are numeric and simply skipped.
+  X <- .rf_align_levels(X, sf::st_drop_geometry(object$data_sf))
+
   p <- tryCatch(
     stats::predict(object$engine, data = X, ...)$predictions,
     error = function(e) {
@@ -304,6 +391,18 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
       NULL
     }
   )
+  # predict.all = TRUE and type = "quantiles" make ranger return a matrix.
+  # as.numeric() would flatten it column-major into a vector of the wrong
+  # length, which .expand_predictions() would then either reject or (at the
+  # equal-length fast path) hand back as if it were a prediction per row.
+  if (!is.null(dim(p)))
+    stop(sprintf(paste0("predict.rf_fit(): ranger returned a %s matrix rather ",
+                        "than one value per row. Arguments such as ",
+                        "`predict.all = TRUE` or `type = \"quantiles\"` are ",
+                        "not supported here, because this method must return ",
+                        "one prediction per row of newdata. Call ",
+                        "predict(<fit>$engine, data = ...) directly instead."),
+                 paste(dim(p), collapse = " x ")), call. = FALSE)
   preds <- if (is.null(p)) rep(NA_real_, n_new) else as.numeric(p)
   .expand_predictions(preds, clean_idx, n_orig)
 }
@@ -343,6 +442,11 @@ residuals.rf_fit <- function(object, ...) {
 
 #' Coefficients are undefined for a random forest
 #'
+#' Consistent with \code{coef.gwr_fit()} and \code{coef.bayesian_fit()}, which
+#' also error rather than returning \code{NULL} when they cannot supply
+#' coefficients -- see the \code{coef()} contract in
+#' \code{\link{new_spatial_fit}}.
+#'
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return Never returns; always signals an error.
@@ -369,9 +473,13 @@ print.rf_fit <- function(x, ...) {
               format(x$info$mtry %||% NA), format(x$info$min_node_size %||% NA)))
   cat(sprintf("  Coords as predictors: %s\n",
               if (isTRUE(x$info$include_coords)) "YES - see ?fit_rf_model" else "no"))
-  if (is.finite(x$info$oob_rmse %||% NA_real_))
+  # .num1() rather than %||%: an unset ranger field arrives as numeric(0),
+  # which is not NULL, so is.finite() would error and sprintf() would print
+  # nothing at all.
+  oob_rmse <- .num1(x$info$oob_rmse)
+  if (is.finite(oob_rmse))
     cat(sprintf("  OOB RMSE: %.4f   OOB R\u00b2: %.4f\n",
-                x$info$oob_rmse, x$info$oob_r_squared %||% NA_real_))
+                oob_rmse, .num1(x$info$oob_r_squared)))
   imp <- x$info$importance
   if (!is.null(imp) && length(imp) > 0L) {
     top <- utils::head(sort(imp, decreasing = TRUE), 5L)

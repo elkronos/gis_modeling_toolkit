@@ -32,3 +32,9 @@ A named list with components a and b.
 \description{
 Aligns two sf objects to a common CRS.
 }
+\details{
+When one input carries no CRS, the other object's CRS (or \code{target_crs}) is
+\emph{stamped} onto it with \code{\link[sf:st_crs]{sf::st_set_crs()}}: the coordinates are \strong{not}
+reprojected, only relabelled.  That assumption is announced with a warning,
+matching what \code{\link[=ensure_projected]{ensure_projected()}} does in the same situation.
+}
