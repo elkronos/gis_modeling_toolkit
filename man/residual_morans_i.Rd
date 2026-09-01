@@ -8,12 +8,13 @@ residual_morans_i(
   fit,
   alternative = c("two.sided", "greater", "less"),
   weights = NULL,
-  k = 8L
+  k = 8L,
+  null = c("auto", "randomisation", "residual")
 )
 }
 \arguments{
-\item{fit}{A \code{spatial_fit} object (from \code{fit_gwr_model} or
-\code{fit_bayesian_spatial_model}).}
+\item{fit}{A \code{spatial_fit} object (from \code{fit_gwr_model},
+\code{fit_bayesian_spatial_model} or \code{fit_rf_model}).}
 
 \item{alternative}{Character: \code{"two.sided"} (default),
 \code{"greater"} (positive autocorrelation), or \code{"less"}.}
@@ -31,53 +32,145 @@ row-standardised weights.}
 \item{k}{Integer number of nearest neighbours used when building the
 default weight matrix (ignored when \code{weights} is supplied).
 Default 8.}
+
+\item{null}{Which null distribution the expectation, variance and p-value
+are computed against.  One of:
+\describe{
+\item{\code{"auto"} (default)}{\code{"residual"} when the design matrix
+can be rebuilt \emph{and} the fit's residuals are the OLS residuals on
+it, \code{"randomisation"} otherwise.}
+\item{\code{"randomisation"}}{Always the exchangeable moments.}
+\item{\code{"residual"}}{Always the Cliff & Ord residual moments.  Falls
+back to \code{"randomisation"} with a logged warning if the design
+cannot be rebuilt, and warns (but proceeds) if the residuals are not
+the OLS residuals on it, in which case the moments are approximate.}
+}
+See \strong{Which null, and when it is approximate} above.}
 }
 \value{
 A list with components:
 \describe{
 \item{observed}{Numeric scalar, Moran's I statistic.}
-\item{expected}{Expected I under the null of no spatial
-autocorrelation, \eqn{-1/(n-1)}.}
-\item{sd}{Standard deviation of I under the randomisation
-assumption.}
+\item{expected}{Expected I under the null named by \code{null}:
+\eqn{-1/(n-1)} for \code{"randomisation"},
+\eqn{(n/S_0)\mathrm{tr}(MW)/(n-p)} for \code{"residual"}.}
+\item{sd}{Standard deviation of I under that same null.}
 \item{z}{Standardised z-score, \eqn{(I - E[I]) / sd(I)}.}
 \item{p_value}{Two-sided (or one-sided) p-value from the
 normal approximation.}
 \item{n}{Number of observations used.}
+\item{null}{The null actually used, \code{"randomisation"} or
+\code{"residual"} — check this rather than assuming, since
+\code{"auto"} chooses per fit and \code{"residual"} can fall back.}
+\item{df}{Residual degrees of freedom behind the moments:
+\eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
+design matrix), \eqn{n - 1} for \code{"randomisation"}.}
 }
 Returns \code{NULL} with a warning if computation fails (e.g. fewer
 than 4 valid residuals).
 }
 \description{
-Given a \code{spatial_fit} object (GWR or Bayesian), extracts the
-residuals and the observation coordinates, builds a spatial weight
-matrix, and computes the Moran's I statistic together with
-its analytical expectation and variance under the randomisation
-assumption (Cliff & Ord).  A z-score and two-sided p-value are
-provided so the caller can assess whether statistically significant
-spatial autocorrelation remains after fitting.
+Given a \code{spatial_fit} object, extracts the residuals and the
+observation coordinates, builds a spatial weight matrix, and computes
+Moran's I together with its analytical expectation and variance under a
+stated null.  A z-score and two-sided p-value are provided so the caller can
+assess whether statistically significant spatial autocorrelation remains
+after fitting.
 }
 \details{
 By default, weights are constructed as a k-nearest-neighbour (k = 8)
 binary matrix, row-standardised.  Users may supply their own weight
 matrix via the \code{weights} argument.
 }
+\section{Which null, and when it is approximate}{
+
+Two nulls are available, and the one actually used is reported back in the
+\code{null} element of the return value.
+
+\code{"randomisation"} is the classical exchangeable null:
+\eqn{E[I] = -1/(n-1)} with the Cliff & Ord randomisation variance,
+conditioning on the observed kurtosis.  These are the moments of I for a
+vector whose elements are equally likely in any order.
+
+\strong{Model residuals are not exchangeable.}  They are orthogonal to the
+design matrix, which pushes \eqn{E[I]} materially below \eqn{-1/(n-1)}
+whenever the covariates are spatially smooth — and pushes it further the
+more covariates there are.  In a simulation with \eqn{n = 120}, six smooth
+covariates and \emph{independent} errors (so the truth is "no residual
+autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
+exchangeable \eqn{E[I] = -0.008}; the z-score averaged \eqn{-0.54} with
+\eqn{sd = 0.90} instead of 0 and 1.  The cost is power, which is the point
+of the test: at a moderate residual autocorrelation the exchangeable null
+rejected 13\\% of the time where the correct one rejected 31\\%.
+
+\code{"residual"} therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
+regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
+\code{predictor_vars} and \code{data_sf}:
+\deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
+\deqn{Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
+  (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
+These assume normal errors rather than conditioning on the observed
+kurtosis.  On the simulation above they restored the z-score to mean
+\eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\\% against a
+nominal 5\\%.  They agree with \code{spdep::lm.morantest()} to machine
+precision.
+
+\strong{These moments are exact for \eqn{e = My} and for nothing else}, so
+\code{null = "auto"} does not guess from the fit's class: it rebuilds
+\code{X}, regresses the response on it, and uses the residual moments only
+when the supplied residuals \emph{are} those OLS residuals to numerical
+tolerance.  A GWR wide enough to have collapsed to global OLS passes that
+test; the same GWR at a working bandwidth does not.
+
+\strong{For the flexible backends neither null is exact}, and \code{"auto"}
+leaves them on \code{"randomisation"} because forcing the OLS moments on
+them measurably makes matters worse, not better.  Measured on null data
+(\eqn{n = 120}, three smooth covariates, independent errors; nominal 5\\%,
+one-sided):
+\tabular{lrr}{
+\strong{backend} \tab \strong{randomisation} \tab \strong{residual} \cr
+OLS              \tab 0.035 \tab 0.060 \cr
+random forest    \tab 0.128 \tab 0.200 \cr
+GWR              \tab 0.000 \tab 0.000
+}
+An in-sample random forest is anticonservative under both — its residuals
+are shrunk and spatially heteroscedastic, so the variance is understated
+whichever moments are used (\eqn{sd(z) \approx 1.3}) — and GWR is
+conservative under both, because it removes far more structure than a rank-p
+projection does.  Treat the p-value from those backends as a rough
+indicator, and prefer cross-validated residuals or an explicit spatial
+covariance model when the answer has to carry weight.
+
+A permutation null was considered and rejected: permuting the residual
+vector destroys exactly the orthogonality that causes the bias, so its mean
+is the exchangeable \eqn{-1/(n-1)} by construction (measured:
+\eqn{-0.00840} against \eqn{-1/(n-1) = -0.00840}) and it reproduces the
+randomisation null rather than correcting it.
+}
+
 \examples{
 \donttest{
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE)) {
+# Works on any spatial_fit; a forest keeps the example free of the optional
+# GWR/Stan backends.
+if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
-  n <- 60
+  n <- 120
   dat <- st_as_sf(
     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
-  dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
-  fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
+  # A strong east-west trend the predictor cannot explain: the residuals
+  # should still carry spatial structure, and this is what detects it.
+  dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+  fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
   residual_morans_i(fit)  # z near 0 / p large = no residual structure
 }
 }
+}
+\references{
+Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
+Models and Applications}. Pion, London. Section 8.3.
 }
 \seealso{
 Other model evaluation: 

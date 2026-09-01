@@ -79,7 +79,22 @@ rows; an unweighted average would not be the pooled quantity when fold
 sizes differ, which for spatially blocked folds they routinely do.
 }
 \description{
-K-fold cross-validation for the Bayesian spatial model
+Refits the Gaussian-process model of
+\code{\link{fit_bayesian_spatial_model}()} on each training fold and scores
+it on the held-out fold.  Beyond the point-prediction metrics the other CV
+wrappers report, this one scores the whole predictive \emph{distribution}:
+\code{predictive_coverage} says what fraction of held-out observations fell
+inside the 50/80/95\\% intervals, and \code{mean_CRPS} rates sharpness and
+calibration together.  That is the reason to reach for it -- a Bayesian model
+is usually chosen for its uncertainty, and only held-out coverage shows
+whether those intervals are honest at locations the model has not seen.
+}
+\details{
+It is the most expensive wrapper in the package by a wide margin: every fold
+is a full MCMC run.  Use few folds, and \code{parallel = TRUE} if you have
+the cores.  For a cheap first pass on the same question, cross-validate a
+forest with \code{\link{cv_rf}()} and come back here once the predictor set
+has settled.
 }
 \examples{
 \dontrun{

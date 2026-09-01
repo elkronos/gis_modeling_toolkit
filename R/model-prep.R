@@ -44,21 +44,29 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
                                          "centroid", "line_midpoint",
                                          "bbox_center"),
                             require_response = TRUE) {
+  # call. = FALSE on every one of these, as elsewhere in the package: these are
+  # argument-validation messages, and the call frame R would otherwise append
+  # is an internal one the user did not write (prep_model_data() is reached
+  # through fit_gwr_model(), the CV internals and every predict() method), so
+  # printing it buries the message that names the actual problem.
   if (!inherits(data_sf, "sf"))
-    stop("prep_model_data(): 'data_sf' must be an sf object.")
+    stop("prep_model_data(): 'data_sf' must be an sf object.", call. = FALSE)
   pointize <- match.arg(pointize)
   if (!is.character(response_var) || length(response_var) != 1L)
-    stop("prep_model_data(): 'response_var' must be a single column name.")
+    stop("prep_model_data(): 'response_var' must be a single column name.",
+         call. = FALSE)
   # character(0) is allowed: an intercept-only spatial GP is a legitimate
   # model (see fit_bayesian_spatial_model()).  Backends that genuinely need a
   # predictor reject an empty set themselves, where the message can say why.
   if (!is.character(predictor_vars))
-    stop("prep_model_data(): 'predictor_vars' must be a character vector.")
+    stop("prep_model_data(): 'predictor_vars' must be a character vector.",
+         call. = FALSE)
 
   req_cols <- if (require_response) c(response_var, predictor_vars) else predictor_vars
   miss <- setdiff(req_cols, names(data_sf))
   if (length(miss))
-    stop("prep_model_data(): missing required column(s): ", paste(miss, collapse = ", "))
+    stop("prep_model_data(): missing required column(s): ",
+         paste(miss, collapse = ", "), call. = FALSE)
 
   # Coerce unless every geometry is already a plain POINT.  MULTIPOINT must
   # be coerced too: a multi-vertex MULTIPOINT survives st_coordinates() with
@@ -164,10 +172,33 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' Statistics and Computing 33:1) for the squared-exponential kernel used by
 #' \code{brms::gp()}:
 #' \preformatted{
-#'   c >= 3.2 * (ell/S),  c >= 1.2
+#'   c >= 3.2 * (ell/S),  c >= 1.25
 #'   m >= 1.75 * c / (ell/S)
 #' }
-#' where \code{S} is the half-range of the (scaled) coordinate domain.
+#' where \code{S} is \strong{the same domain measure \code{brms::gp(c = )}
+#' multiplies}, namely the full pooled range of the column-centred coordinates.
+#'
+#' \strong{Why the range and not the half-range.}  Riutort-Mayol et al. state
+#' their inequalities against the domain half-range, but both are really
+#' constraints on the \emph{boundary} \eqn{L}: contain the longest plausible
+#' range (\eqn{L \ge 3.2\,\ell_{upper}}) and resolve the shortest
+#' (\eqn{m \ge 1.75\,L/\ell_{lower}}).  brms builds that boundary as
+#' \preformatted{
+#'   choose_L <- function(x, c) c * max(1, max(x) - min(x))
+#' }
+#' over the column-centred covariate matrix, pooled across dimensions
+#' (\code{brms:::.data_gp()}) -- the FULL range, about twice the per-axis
+#' half-range.  Deriving \code{c} against the half-range and handing the result
+#' to \code{brms::gp()} therefore built a boundary twice as wide as intended:
+#' \code{k} was sized for a boundary half the real one, so the GP was
+#' systematically under-resolved, and the smallest resolvable length-scale
+#' (\code{gp_ell_min}) was understated by the same factor -- making the post-fit
+#' adequacy diagnostic, whose whole job is to catch under-resolution, twice too
+#' lenient to fire.  Working in brms's own units removes both.
+#'
+#' The floor is \code{1.25} rather than Riutort-Mayol's \code{1.2} because the
+#' floor is convention-dependent too: it is brms's own default (\code{c = 5/4}),
+#' and on the range convention it is the more generous of the two.
 #'
 #' \code{m} is the count PER DIMENSION.  brms expands a full tensor grid over
 #' the GP covariates, so the fitted model carries \code{m^D} basis functions
@@ -191,19 +222,28 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
 #'   so there is a single cap rather than two that can contradict each other.
 #' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
-#'   \code{S} (numeric half-range) and \code{capped} (logical).
+#'   \code{S} (numeric; the pooled full range of the column-centred coordinates,
+#'   i.e. exactly what \code{brms::gp(c = )} multiplies) and \code{capped}
+#'   (logical).
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
                            k_min = 10L, max_basis = 2500L) {
-  S <- max(apply(coords_xy, 2, function(z) diff(range(z)) / 2))
+  # Reproduce brms::choose_L()'s domain measure exactly: centre each column,
+  # then take the range over the POOLED matrix.  na.rm mirrors brms.
+  xy <- as.matrix(coords_xy)
+  Xc <- sweep(xy, 2L, colMeans(xy, na.rm = TRUE))
+  S  <- suppressWarnings(
+    max(1, max(Xc, na.rm = TRUE) - min(Xc, na.rm = TRUE)))
   if (!is.finite(S) || S <= 0) S <- 1
 
-  # Ratios of length-scale to domain half-range.
+  # Ratios of length-scale to the domain measure brms will use.
   r_lo <- max(ls_bounds[["lower"]] / S, .Machine$double.eps)  # must resolve
   r_hi <- max(ls_bounds[["upper"]] / S, r_lo)                 # must contain
 
-  c_val <- max(3.2 * r_hi, 1.2)
+  # 1.25, not 1.2: the floor is stated on the half-range convention by
+  # Riutort-Mayol et al., and 5/4 is brms's own default on this one.
+  c_val <- max(3.2 * r_hi, 1.25)
   k_raw <- ceiling(1.75 * c_val / r_lo)
 
   k_max  <- as.integer(floor(sqrt(max_basis)))

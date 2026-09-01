@@ -35,12 +35,24 @@ test_that("summarize_by_cell default deff=1 gives classic SE", {
 })
 
 
-test_that("summarize_by_cell deff=2 inflates SE by sqrt(2)", {
+test_that("summarize_by_cell deff=2 inflates SE by more than sqrt(2)", {
+  # sqrt(deff) is only HALF the correction.  deff inflates Var(xbar) to
+  # sigma^2 * deff / n, but under the same clustering the ordinary sample
+  # variance is biased low by exactly the amount that inflation assumes:
+  #     E[s^2] = sigma^2 (n - deff) / (n - 1).
+  # Applying sqrt(deff) alone therefore leaves the second error in place and
+  # the two compound.  Measured 95% CI coverage of the sqrt(deff)-only form at
+  # n = 20: 0.905 at rho = 0.3, 0.796 at rho = 0.6, 0.632 at rho = 0.8; with
+  # the sqrt((n-1)/(n-deff)) rescale, 0.952 / 0.952 / 0.953 against a nominal
+  # 0.95.
   pts <- .make_test_points(rho = 0)
   out_1 <- summarize_by_cell(pts, response_var = "y", deff = 1)
   out_2 <- summarize_by_cell(pts, response_var = "y", deff = 2)
   ratio <- out_2[["..se_resp_y"]] / out_1[["..se_resp_y"]]
-  expect_equal(ratio, rep(sqrt(2), nrow(out_1)), tolerance = 1e-12)
+  expect_equal(ratio, sqrt(2) * sqrt((out_1$n - 1) / (out_1$n - 2)),
+               tolerance = 1e-12)
+  # Strictly above the sqrt(deff)-only factor, which is the regression guard.
+  expect_true(all(ratio > sqrt(2)))
   # cell_weight halved
   expect_equal(out_2$cell_weight, out_2$n / 2)
   # attribute recorded
@@ -65,6 +77,129 @@ test_that("summarize_by_cell deff='kish' inflates SE under correlation", {
   expect_true(is.na(da$icc_pred))
 })
 
+
+test_that("summarize_by_cell deff='kish' applies Kish's exact 1 + (n-1) rho", {
+  # "Kish SE >= IID SE" holds for ANY design effect that grows with rho, so it
+  # does not pin the formula: 1 + n*rho, 1 + (n+1)*rho and (1 + rho)^n all pass
+  # it.  Kish's deff is specifically
+  #
+  #     deff_i = 1 + (n_i - 1) * rho,     se_i = sd_i / sqrt(n_i / deff_i),
+  #
+  # floored at 1.  Cells of DIFFERENT sizes, so an off-by-one in the (n - 1)
+  # cannot be absorbed into a rescaled rho: the ratio between the true and a
+  # mis-specified deff varies from cell to cell.
+  set.seed(4242)
+  n_per <- c(2L, 3L, 5L, 9L, 14L, 20L)
+  ids   <- rep(seq_along(n_per), times = n_per)
+  n     <- length(ids)
+  y     <- rep(rnorm(length(n_per), 0, 3), times = n_per) + rnorm(n)
+  pts   <- sf::st_sf(
+    poly_id  = ids,
+    y        = y,
+    geometry = sf::st_sfc(lapply(seq_len(n),
+                                 function(i) sf::st_point(c(i, ids[i]))),
+                          crs = 32632)
+  )
+
+  out <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+  rho <- attr(out, "deff_applied")$icc_resp
+  expect_gt(rho, 0)          # otherwise deff is floored at 1 and pins nothing
+  expect_equal(out$n, n_per)
+
+  deff  <- pmax(1, 1 + (out$n - 1) * rho)
+  # TWO corrections: sqrt(deff/n) for the mean's inflated variance, and
+  # sqrt((n-1)/(n-deff)) because s^2 itself is biased low by the same
+  # clustering (E[s^2] = sigma^2 (n - deff)/(n - 1)).  See .se_with_deff().
+  se_ok <- out[["..sd_resp_y"]] * sqrt(deff / out$n) *
+    sqrt((out$n - 1) / (out$n - deff))
+  expect_equal(out[["..se_resp_y"]], se_ok, tolerance = 1e-12)
+
+  # cell_weight is the effective sample size n / deff, from the same formula.
+  expect_equal(out$cell_weight, out$n / deff, tolerance = 1e-12)
+
+  # And the (n - 1) inside deff is load-bearing: the nearest plausible
+  # alternative gives visibly different standard errors on this design, so the
+  # assertion above is not satisfiable by an off-by-one.
+  d_off <- pmax(1, 1 + out$n * rho)
+  se_off_by_one <- out[["..sd_resp_y"]] * sqrt(d_off / out$n) *
+    sqrt((out$n - 1) / pmax(out$n - d_off, .Machine$double.eps))
+  expect_false(isTRUE(all.equal(se_ok, se_off_by_one, tolerance = 1e-6)))
+
+  # Regression guard: the sqrt(deff)-only form is strictly smaller wherever
+  # deff > 1, which is every cell with more than one observation here.
+  se_old <- out[["..sd_resp_y"]] / sqrt(out$n / deff)
+  bigger <- deff > 1
+  expect_true(any(bigger))
+  expect_true(all(se_ok[bigger] > se_old[bigger]))
+})
+
+test_that("the Kish standard error covers at the nominal rate", {
+  # The property the formula exists for.  The design-effect SE targets
+  # Var(cell mean) UNCONDITIONALLY -- the cluster effect is part of the
+  # sampling variability -- so the estimand is the grand mean, not the realised
+  # cluster mean.  Without the s^2 correction this ran at 0.80 for rho = 0.6.
+  skip_on_cran()
+  n_cells <- 20L; n_per <- 20L; rho <- 0.6
+  hit <- logical(0)
+  for (r in 1:150) {
+    set.seed(9000 + r)
+    cid <- rep(seq_len(n_cells), each = n_per)
+    u   <- rnorm(n_cells)
+    v   <- sqrt(rho) * u[cid] + sqrt(1 - rho) * rnorm(n_cells * n_per)
+    pts <- sf::st_sf(
+      poly_id  = cid, y = v,
+      geometry = sf::st_sfc(lapply(seq_along(cid),
+                                   function(i) sf::st_point(c(i, cid[i]))),
+                            crs = 32632))
+    out <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+    hit <- c(hit, abs(out$resp_mean_y) <=
+               stats::qt(0.975, n_per - 1) * out[["..se_resp_y"]])
+  }
+  expect_gt(mean(hit, na.rm = TRUE), 0.90)
+  expect_lt(mean(hit, na.rm = TRUE), 0.99)
+})
+
+test_that("summarize_by_cell reports NA spread for a one-observation cell", {
+  # A cell holding a single point has no within-cell variation, so its sd and
+  # se are undefined rather than zero -- the contract the README leans on when
+  # it explains why one-seed-per-point Voronoi cells are an interpolation and
+  # not an aggregation.  Zero would read as "measured with perfect precision"
+  # and would sail straight into any weighting that reads these columns.
+  set.seed(808)
+  n_per <- c(1L, 1L, 4L, 6L)
+  ids   <- rep(seq_along(n_per), times = n_per)
+  n     <- length(ids)
+  pts   <- sf::st_sf(
+    poly_id  = ids,
+    y        = rnorm(n),
+    e        = rnorm(n),
+    geometry = sf::st_sfc(lapply(seq_len(n),
+                                 function(i) sf::st_point(c(i, ids[i]))),
+                          crs = 32632)
+  )
+
+  for (dv in list(1, "kish")) {
+    out  <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
+                              deff = dv)
+    lone <- out$n == 1L
+    multi <- !lone
+    expect_equal(sum(lone), 2L)
+    expect_gt(sum(multi), 0L)
+
+    for (col in c("..sd_resp_y", "..se_resp_y", "..sd_pred_e", "..se_pred_e")) {
+      expect_true(all(is.na(out[[col]][lone])),
+                  info = paste(col, "deff =", dv))
+      # Not NA everywhere -- the columns do carry numbers where there is
+      # something to measure, so the assertion above is about the lone cells.
+      expect_true(all(is.finite(out[[col]][multi])),
+                  info = paste(col, "deff =", dv))
+      expect_type(out[[col]], "double")
+    }
+    # The mean is still reported: it is the SPREAD that is undefined, not the
+    # summary itself.
+    expect_true(all(is.finite(out$resp_mean_y)))
+  }
+})
 
 test_that("summarize_by_cell deff='kish' estimates separate ICC for response and predictors", {
   set.seed(99)
@@ -281,11 +416,17 @@ test_that("summarize_by_cell(deff = 'variogram') applies sum(R)/n per cell", {
   expect_equal(unname(da$deff), unname(.hand_deff(pts, sac)), tolerance = 1e-8)
   expect_true(all(da$deff > 1))
 
-  # SE scales as sqrt(deff): the ..se_ closures run with deff = 1 and the
-  # result is rescaled afterwards, so this equality is the whole mechanism.
-  iid <- summarize_by_cell(pts, response_var = "z", deff = 1)
-  expect_equal(out[["..se_resp_z"]], iid[["..se_resp_z"]] * sqrt(da$deff),
+  # The ..se_ closures run with deff = 1 and the result is rescaled afterwards,
+  # so this equality is the whole mechanism.  The factor is the same one
+  # .se_with_deff() applies on the Kish path -- sqrt(deff) for the mean's
+  # inflated variance AND sqrt((n-1)/(n-deff)) for the downward bias in s^2 --
+  # so the two paths cannot drift apart.
+  iid  <- summarize_by_cell(pts, response_var = "z", deff = 1)
+  infl <- sqrt(da$deff) * sqrt((out$n - 1) / (out$n - da$deff))
+  expect_equal(out[["..se_resp_z"]], iid[["..se_resp_z"]] * infl,
                tolerance = 1e-10)
+  # Regression guard: strictly above the sqrt(deff)-only rescale.
+  expect_true(all(infl > sqrt(da$deff)))
   # ... and the effective sample size is n / deff.
   expect_equal(out$cell_weight, out$n / da$deff, tolerance = 1e-10)
   expect_true(all(out$cell_weight < out$n))
@@ -308,11 +449,18 @@ test_that("summarize_by_cell passes deff_max_n through to the subsampler", {
   da_cap  <- attr(capped, "deff_applied")
 
   expect_equal(da_cap$max_n, 10L)
-  # A design effect cannot exceed the number of points it was computed on, so
-  # capping the correlation matrix at 10 caps every cell's deff at 10.
-  expect_true(all(da_cap$deff <= 10))
-  expect_true(all(attr(full, "deff_applied")$deff > 10))
-  # A cap larger than every cell changes nothing.
+  # `deff_max_n` caps the SUBSAMPLE the correlation matrix is built on, not the
+  # answer.  The design effect reported is still the CELL's -- estimated as
+  # 1 + (n_i - 1) * Rbar with Rbar taken from the subsample -- so it is bounded
+  # by the cell size, not by max_n, and stays close to the un-subsampled value.
+  # The old code returned sum(R)/n_used, i.e. the design effect of a cell of
+  # max_n points, understating a large cell by roughly n_i/max_n.
+  n_cell <- capped$n
+  expect_true(all(da_cap$deff <= n_cell))
+  expect_true(any(da_cap$deff > 10))           # the old form could not exceed 10
+  expect_equal(unname(da_cap$deff), unname(attr(full, "deff_applied")$deff),
+               tolerance = 0.35)
+  # A cap larger than every cell changes nothing at all.
   wide <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
                             sac = sac, deff_max_n = 5000L)
   expect_equal(attr(wide, "deff_applied")$deff,

@@ -297,6 +297,42 @@ test_that(".aoa_threshold is the outlier-removed maximum", {
   expect_equal(.aoa_threshold(c(1, 2, 3, 4, 5)), 5)
 })
 
+test_that(".aoa_threshold's fence is 1.5 x IQR and not some other multiple", {
+  # Neither vector above can see the multiplier: c(rep(1, 9), 10) has IQR = 0,
+  # so the fence is Q3 for ANY multiple, and c(1, 2, 3, 4, 5) has max <= fence
+  # for every multiple >= 0.5.  Both pass unchanged if the 1.5 of Meyer &
+  # Pebesma (2021) is quietly replaced by 1 or by 3.
+  #
+  # This one can.  Take 1:9 and append one larger value.  Because the appended
+  # value sorts above x[8], the type-7 quartiles of the ten-element sample stay
+  # at Q1 = 3.25 and Q3 = 7.75 wherever it lands, so IQR = 4.5 and the fence is
+  # exactly 7.75 + m * 4.5.  Whether the appended value survives the fence then
+  # depends on m alone.
+  probe   <- c(1:9, 99)
+  q3      <- stats::quantile(probe, 0.75, names = FALSE)
+  iqr_val <- stats::IQR(probe)
+  expect_equal(c(q3, iqr_val), c(7.75, 4.5))
+  fence_at <- function(m) q3 + m * iqr_val
+  expect_equal(fence_at(1.5), 14.5)
+
+  # Half a unit ABOVE the 1.5 fence: an outlier, discarded, so the threshold
+  # falls back to the largest ordinary value.  Any multiplier >= 1.612 -- 2, or
+  # the 3 of the classic "far out" fence -- would keep it and return 15.
+  hi <- c(1:9, fence_at(1.5) + 0.5)
+  expect_equal(.aoa_threshold(hi), 9)
+
+  # Half a unit BELOW it: inside the fence, so it IS the outlier-removed
+  # maximum.  Any multiplier < 1.389 -- a plain 1 x IQR fence, say -- would
+  # discard it and return 9 instead.
+  lo <- c(1:9, fence_at(1.5) - 0.5)
+  expect_equal(.aoa_threshold(lo), 14)
+
+  # Together the two pin the multiplier to [1.389, 1.612), which contains 1.5
+  # and nothing else anyone would plausibly have written.
+  for (d in list(hi, lo))
+    expect_equal(.aoa_threshold(d), max(d[d <= fence_at(1.5)]))
+})
+
 test_that(".aoa_threshold ignores non-finite values", {
   expect_equal(.aoa_threshold(c(1, 2, 3, 4, 5, NA, Inf)), 5)
   expect_error(.aoa_threshold(c(NA_real_, NaN)), "no finite training DI")
@@ -624,4 +660,66 @@ test_that("a coordinate-using model reprojects newdata before measuring it", {
   expect_equal(area_of_applicability(nd_ll, model = fit)$aoa$DI,
                area_of_applicability(nd_proj, model = fit)$aoa$DI,
                tolerance = 1e-6)
+})
+
+
+test_that("area_of_applicability reads a logical predictor as 0/1", {
+  # The dissimilarity index is a Euclidean distance in scaled predictor space,
+  # so it needs a defensible numeric coding.  A logical column HAS one --
+  # TRUE/FALSE is 1/0 and its standard deviation is meaningful -- and every
+  # other part of the package fits, cross-validates and predicts with logical
+  # predictors, so refusing them only here was self-inconsistent.  The contract
+  # is equality with the explicit 0/1 coding, not just the absence of an error.
+  set.seed(31)
+  n  <- 120
+  lg <- stats::runif(n) > 0.5
+  tr_lgl <- sf::st_as_sf(
+    data.frame(x = stats::runif(n, 0, 1000), y = stats::runif(n, 0, 1000),
+               a = stats::rnorm(n), flag = lg),
+    coords = c("x", "y"), crs = 32632)
+  # Separate prediction points, spread from the middle of the training cloud
+  # out well past its edge, so the DI values actually vary.
+  nd_lgl <- sf::st_as_sf(
+    data.frame(x = seq(10, by = 10, length.out = 20),
+               y = seq(10, by = 10, length.out = 20),
+               a = seq(0, 8, length.out = 20),
+               flag = rep(c(TRUE, FALSE), 10)),
+    coords = c("x", "y"), crs = 32632)
+
+  tr_num <- tr_lgl; tr_num$flag <- as.numeric(lg)
+  nd_num <- nd_lgl; nd_num$flag <- as.numeric(nd_lgl$flag)
+  expect_type(tr_lgl$flag, "logical")
+  expect_type(tr_num$flag, "double")
+
+  res_lgl <- area_of_applicability(nd_lgl, train_sf = tr_lgl,
+                                   predictor_vars = c("a", "flag"))
+  res_num <- area_of_applicability(nd_num, train_sf = tr_num,
+                                   predictor_vars = c("a", "flag"))
+
+  expect_s3_class(res_lgl, "aoa")
+  expect_equal(res_lgl$aoa$DI,     res_num$aoa$DI,     tolerance = 1e-12)
+  expect_equal(res_lgl$aoa$AOA,    res_num$aoa$AOA)
+  expect_equal(res_lgl$threshold,  res_num$threshold,  tolerance = 1e-12)
+  expect_equal(res_lgl$train_DI,   res_num$train_DI,   tolerance = 1e-12)
+  expect_equal(res_lgl$normalizer, res_num$normalizer, tolerance = 1e-12)
+  # The numbers being compared are real ones, so equality is not vacuous.
+  expect_true(all(is.finite(res_lgl$aoa$DI)))
+  expect_gt(stats::sd(res_lgl$aoa$DI), 0)
+  expect_identical(res_lgl$predictor_vars, c("a", "flag"))
+
+  # A logical predictor on its own is enough.
+  solo <- area_of_applicability(nd_lgl, train_sf = tr_lgl,
+                                predictor_vars = "flag")
+  expect_equal(solo$aoa$DI,
+               area_of_applicability(nd_num, train_sf = tr_num,
+                                     predictor_vars = "flag")$aoa$DI,
+               tolerance = 1e-12)
+
+  # Factors and characters are still refused, and the message says so.
+  tr_fac <- tr_lgl; tr_fac$flag <- factor(ifelse(lg, "yes", "no"))
+  nd_fac <- tr_fac[1:20, ]
+  expect_error(
+    area_of_applicability(nd_fac, train_sf = tr_fac,
+                          predictor_vars = c("a", "flag")),
+    "are not numeric or logical")
 })

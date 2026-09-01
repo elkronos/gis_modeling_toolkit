@@ -67,7 +67,24 @@ value rather than only in a warning, since \code{overall} is a
 well-formed all-\code{NA} row either way.
 }
 \description{
-K-fold cross-validation for GWR
+Refits a geographically weighted regression from scratch on each training
+fold and scores it on the held-out fold, so the reported error is what the
+model achieves at locations it did not see.  Reach for it whenever you need
+a defensible accuracy figure for a GWR: the in-sample \eqn{R^2} that
+\code{\link{model_metrics}()} reports on a \code{gwr_fit} is close to
+meaningless, because a local regression with a small bandwidth can track the
+training points almost exactly.  Bandwidth is re-selected per fold unless you
+fix it with \code{bandwidth}, which keeps the selection itself inside the
+cross-validation rather than tuning on the full data first.
+}
+\details{
+Folds default to spatial blocks (\code{\link{make_folds}(method =
+"block_kfold")}), not random ones -- with autocorrelated data a random
+split leaves a held-out point's neighbours in the training set and the score
+comes back flattering.  Use \code{\link{cv_bayes}()} for the same treatment
+of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
+\code{\link{compare_models_cv}()} to score several backends on one set of
+folds.
 }
 \examples{
 \donttest{

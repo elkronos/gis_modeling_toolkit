@@ -77,7 +77,10 @@ cat("  (set SPATIALKIT_DEMO_OUTPUT before sourcing to change it)\n\n")
 # 1. NORTH CAROLINA BOUNDARY
 # =============================================================================
 # sf ships nc.shp (100 county polygons). Dissolve to a state outline and
-# project to NAD83 / NC State Plane (ftUS) so distances are metric.
+# project to NAD83 / NC State Plane (ftUS), EPSG:2264, so distances are planar
+# rather than angular.  Projected does not mean metric: 2264's unit is the US
+# SURVEY FOOT, so every distance, bandwidth and block size below - and the
+# autocorrelation range printed in section 6 - is in feet, not metres.
 
 nc_counties <- st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
 nc_boundary <- nc_counties |>

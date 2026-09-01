@@ -20,5 +20,17 @@ with \code{seed_id} and \code{method = "random"} columns matching
 \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
 }
 \description{
-Random seed generation within a polygonal boundary
+Draws \code{k} seed points uniformly at random inside \code{boundary}, ignoring where
+the observations are. Reach for this when the cells should cover the study
+area evenly — so that sparsely sampled ground still gets its own cells and
+is visibly under-sampled in the results — rather than concentrating
+resolution where the data already are, which is what
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} does. It is also the honest choice for a null or
+sensitivity comparison: re-running an analysis over several random seedings
+shows how much of a result depends on one particular tessellation.
+}
+\details{
+Sampling is by rejection inside the polygon, so an awkward geometry can
+return fewer than \code{k} seeds; that shortfall is warned about rather than
+silently padded.
 }

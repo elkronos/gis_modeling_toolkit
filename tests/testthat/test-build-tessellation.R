@@ -302,3 +302,73 @@ test_that("clip = FALSE leaves cells extending past the boundary", {
   expect_equal(clipped$params$clip, TRUE)
   expect_equal(whole$params$clip, FALSE)
 })
+
+
+# ---------------------------------------------------------------------------
+# create_grid_polygons(): a caller-supplied `cellsize` wins over `n`
+# ---------------------------------------------------------------------------
+
+test_that("create_grid_polygons ignores `n` when the caller fixes `cellsize`", {
+  # sf::st_make_grid() does NOT ignore `n` when `cellsize` is given: it uses
+  # cellsize for the cell dimensions and nx/ny for the COUNTS, anchored at the
+  # bounding-box corner.  create_grid_polygons(cellsize = 25, n = 2) on a
+  # 100x100 boundary therefore returned 4 cells covering the bbox 0,0,50,50 --
+  # a quarter of the study area -- and because clip = TRUE discards nothing
+  # there, it looked like a perfectly ordinary grid.
+  bnd  <- .bt_boundary()
+  side <- 100
+  expect_equal(as.numeric(sf::st_area(bnd)), side^2)
+
+  lines <- capture_spatialkit_log(g <- create_grid_polygons(bnd, cellsize = 25,
+                                                            n = 2))
+  # `n` is dropped, and loudly: silently ignoring it would be its own trap.
+  expect_true(log_has(lines, "both `cellsize` and `n` were supplied"))
+  expect_true(log_has(lines, "`cellsize` wins and `n` \\(2 x 2\\) is ignored"))
+
+  # 100 / 25 = 4 columns and 4 rows ...
+  expect_equal(nrow(g), 16L)
+  # ... covering the boundary completely, not a corner of it.
+  expect_equal(sum(as.numeric(sf::st_area(g))), side^2, tolerance = 1e-8)
+  expect_equal(unname(sf::st_bbox(g)[c("xmin", "ymin", "xmax", "ymax")]),
+               c(0, 0, side, side), tolerance = 1e-8)
+  # Every cell is the size that was asked for.
+  expect_equal(unique(round(as.numeric(sf::st_area(g)), 8)), 25^2)
+
+  # Identical to passing `cellsize` alone -- which is the point: the extra `n`
+  # changed nothing.
+  alone <- create_grid_polygons(bnd, cellsize = 25)
+  expect_equal(nrow(alone), nrow(g))
+  expect_equal(sf::st_bbox(alone), sf::st_bbox(g))
+
+  # And no warning when only one of them is given.
+  quiet <- capture_spatialkit_log(create_grid_polygons(bnd, cellsize = 25))
+  expect_false(log_has(quiet, "both `cellsize` and `n`"))
+  quiet_n <- capture_spatialkit_log(create_grid_polygons(bnd, n = 4))
+  expect_false(log_has(quiet_n, "both `cellsize` and `n`"))
+})
+
+test_that("create_grid_polygons still honours a package-derived cell size", {
+  # The `n` argument is forwarded to st_make_grid() when the PACKAGE derived
+  # cellsize from it, because ceiling(w / (w / n)) floating-point-rounds one
+  # cell too far (100 / (100/9) = 9.0000...4 -> 10 columns).  Dropping `n`
+  # unconditionally would have reintroduced that off-by-one.
+  bnd  <- .bt_boundary()
+  side <- 100
+
+  for (k in c(3L, 4L, 7L, 9L)) {
+    g <- create_grid_polygons(bnd, n = k)
+    expect_equal(nrow(g), k^2, info = paste("n =", k))
+    expect_equal(sum(as.numeric(sf::st_area(g))), side^2, tolerance = 1e-8,
+                 info = paste("n =", k))
+    expect_equal(unique(round(as.numeric(sf::st_area(g)), 6)), (side / k)^2,
+                 info = paste("n =", k))
+  }
+
+  # target_cells derives both, and covers the boundary in full.
+  for (tc in c(16L, 25L, 100L)) {
+    g <- create_grid_polygons(bnd, target_cells = tc)
+    expect_equal(nrow(g), tc, info = paste("target_cells =", tc))
+    expect_equal(sum(as.numeric(sf::st_area(g))), side^2, tolerance = 1e-8,
+                 info = paste("target_cells =", tc))
+  }
+})

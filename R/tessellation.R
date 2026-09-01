@@ -4,6 +4,16 @@
 
 #' Build a polygonal clip target from points and/or a boundary
 #'
+#' Resolves the single polygon that every tessellation method clips against.
+#' With a `boundary` it is that boundary (optionally buffered by `expand`);
+#' without one it is the convex hull of `points_sf`, again optionally buffered.
+#' Reach for it when you want to see or reuse the exact clip target
+#' [build_tessellation()] will apply — for instance to check that a study-area
+#' polygon actually contains the observations before tessellating, or to pass
+#' the same envelope to [create_voronoi_polygons()] and
+#' [create_grid_polygons()] so that two tessellations of one dataset cover
+#' identical ground.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
 #' @param boundary Optional polygonal sf object.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
@@ -126,6 +136,21 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 
 #' Create Voronoi polygons from points with robust CRS and optional clipping
 #'
+#' Assigns every location in the study area to its nearest input point, giving
+#' one cell per point. This is the tessellation to reach for when the
+#' observations themselves define the regions of interest — sampling sites,
+#' monitoring stations, service points — because cell size then adapts to
+#' sampling density instead of being imposed by a fixed grid: dense areas get
+#' small cells and sparse areas large ones. Prefer [create_grid_polygons()]
+#' instead when you need equal-area cells or a resolution independent of where
+#' the data happen to be.
+#'
+#' The heavy lifting is [sf::st_voronoi()]; what this adds is the surrounding
+#' bookkeeping — projecting lon/lat input, building and buffering an envelope
+#' so edge cells are bounded, clipping to `boundary`, restoring the
+#' point-to-cell correspondence that `st_voronoi()` scrambles, and stamping
+#' stable `cell_id` values.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries.
 #' @param boundary Optional polygonal sf object.
 #' @param expand Numeric; absolute buffer distance for the envelope.
@@ -234,16 +259,37 @@ create_voronoi_polygons <- function(
 
 #' Create square or hexagonal grid polygons over a boundary
 #'
+#' Lays a regular grid of equal-area cells over `boundary` and clips it to that
+#' boundary. Reach for this rather than [create_voronoi_polygons()] when cell
+#' size should be a decision you make — because you need per-cell rates
+#' comparable across the map, or a resolution that stays fixed as the sample
+#' grows — instead of one dictated by where the observations happen to be.
+#' Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of squares and
+#' give every cell the same distance to all six neighbours, which matters for
+#' anything that reads neighbourhoods.
+#'
+#' Size the grid with exactly one of `target_cells` (roughly how many cells you
+#' want, the package derives the rest), `cellsize` (a fixed edge length in CRS
+#' units) or `n` (a fixed number of columns and rows). See `@param cellsize`
+#' for what happens when more than one is given.
+#'
 #' @param boundary Polygonal sf or sfc object.
 #' @param target_cells Optional approximate desired number of cells. For hex
 #'   grids the count is adjusted for hexagonal packing density, but the final
 #'   cell count after clipping to an irregular boundary may deviate
 #'   substantially from the requested value.
 #' @param type Grid type: `"square"` (the default) or `"hex"`.
-#' @param cellsize Optional numeric cell size (length 1 or 2).
-#' @param n Optional grid resolution (integer, length 1 or 2). Applies to
-#'   square grids only; [sf::st_make_grid()] derives hexagon placement from
-#'   `cellsize` alone.
+#' @param cellsize Optional numeric cell size (length 1 or 2), in the units of
+#'   the working CRS. Takes precedence over `n`: if both are supplied,
+#'   `cellsize` is used, `n` is ignored and a warning is logged. Supply exactly
+#'   one of `target_cells`, `cellsize` and `n`.
+#' @param n Optional grid resolution (integer, length 1 or 2) giving the number
+#'   of columns and rows to divide the boundary's bounding box into; the cell
+#'   size is derived from it. Applies to square grids only; [sf::st_make_grid()]
+#'   derives hexagon placement from `cellsize` alone. Ignored (with a logged
+#'   warning) when `cellsize` is also supplied — passing both would otherwise
+#'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
+#'   corner, covering only part of the boundary.
 #' @param clip Logical; clip grid to boundary.
 #' @param crs Optional target CRS. When `NULL` (default) the boundary is
 #'   projected with [ensure_projected()], which changes the CRS of the returned
@@ -311,10 +357,24 @@ create_grid_polygons <- function(
   }
 
   # Derive n and/or cellsize
+  #
+  # `cellsize_supplied` records whether the CALLER fixed the cell size, as
+  # opposed to the package deriving it from `n` or `target_cells`.  It decides
+  # whether `n` is forwarded to st_make_grid() below; see the note there.
+  cellsize_supplied <- !is.null(cellsize)
   if (!is.null(cellsize)) {
     if (length(cellsize) == 1L) cellsize <- rep(cellsize, 2L)
     if (length(cellsize) != 2L || any(!is.finite(cellsize)) || any(cellsize <= 0))
       stop("create_grid_polygons(): 'cellsize' must be positive numeric (length 1 or 2).")
+    if (!is.null(n)) {
+      .log_warn(paste0("create_grid_polygons(): both `cellsize` and `n` were ",
+                       "supplied; `cellsize` wins and `n` (%s) is ignored. ",
+                       "Pass one or the other -- `n` would cap the grid at ",
+                       "%d x %d cells anchored at the bbox corner, leaving ",
+                       "most of the boundary uncovered."),
+                paste(n, collapse = " x "), n[1L], n[2L])
+      n <- NULL
+    }
   } else if (!is.null(n)) {
     cellsize <- c(w / n[1], h / n[2])
   } else {
@@ -341,16 +401,29 @@ create_grid_polygons <- function(
 
   grid_args <- list(x = env, what = "polygons",
                     square = identical(type, "square"))
+  # REGRESSION NOTE -- do not "simplify" this back to passing both whenever
+  # both are non-NULL.
+  #
   # st_make_grid() does NOT ignore `n` when `cellsize` is given: for square
   # grids it uses `cellsize` for the cell dimensions AND `nx = n[1]`,
-  # `ny = n[2]` for the counts.  Omitting `n` makes it recompute
+  # `ny = n[2]` for the counts, anchored at the bbox corner.  That is exactly
+  # what we want when the PACKAGE derived `cellsize` from `n` (the `n` and
+  # `target_cells` branches above): omitting `n` there makes sf recompute
   # nx = ceiling(w / cellsize[1]), which floating-point division pushes one
   # past the intended count (e.g. w = 100, n = 9 gives 100/(100/9) = 9.0000...4
-  # -> 10 columns).  Pass both whenever both are known.  For hex grids sf
-  # short-circuits to make_hex_grid() and reads `cellsize` only, so the extra
-  # argument is inert there.
+  # -> 10 columns).
+  #
+  # It is exactly what we do NOT want when the CALLER supplied `cellsize`: an
+  # unrelated `n` then truncates the grid to n[1] x n[2] cells in one corner
+  # of the bbox and silently leaves the rest of the boundary uncovered
+  # (cellsize = 25 with n = 2 on a 100x100 boundary covered 2500 of 10000 --
+  # and clip = TRUE discards nothing, so it looks like an ordinary grid).
+  # `n` is dropped with a warning in that branch above, so it is NULL here.
+  #
+  # For hex grids sf short-circuits to make_hex_grid() and reads `cellsize`
+  # only, so the extra argument is inert there.
   if (!is.null(cellsize)) grid_args$cellsize <- cellsize
-  if (!is.null(n))        grid_args$n        <- n
+  if (!is.null(n) && !cellsize_supplied) grid_args$n <- n
   grid_sfc <- do.call(sf::st_make_grid, grid_args)
   if (length(grid_sfc) == 0L)
     stop("create_grid_polygons(): st_make_grid() produced zero cells.")
@@ -379,8 +452,34 @@ create_grid_polygons <- function(
 
 #' Build a tessellation (Voronoi, Delaunay triangles, hex grid, or square grid)
 #'
+#' The single entry point for turning a point pattern into analysis regions, and
+#' the first step of the package's pipeline.  It wraps the four tessellation
+#' methods behind one interface that handles CRS projection, clipping and stable
+#' cell identifiers consistently, and returns the cell layer together with the
+#' point-to-cell index that \code{\link{assign_features_to_polygons}()} and
+#' \code{\link{summarize_by_cell}()} consume.  Use it rather than the
+#' individual constructors whenever you might want to compare methods: the
+#' return shape does not change with \code{method}, so swapping
+#' \code{"voronoi"} for \code{"hex"} costs one argument.
+#'
+#' Which method to reach for.  \code{"voronoi"} gives one cell per point, so
+#' resolution follows sampling density -- the choice when the observations
+#' themselves define the regions.  \code{"hex"} and \code{"square"} give
+#' equal-area cells on a fixed grid, so cell size is a decision you make rather
+#' than one the data makes for you; hexagons avoid the axis-aligned artefacts of
+#' squares and have uniform neighbour distances.  \code{"triangles"} returns
+#' the Delaunay triangulation, useful for interpolation and adjacency work
+#' rather than as an aggregation unit.  \code{\link{determine_optimal_levels}()}
+#' will suggest a cell count from the spatial structure of the data.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
-#' @param boundary Optional polygonal sf/sfc.
+#' @param boundary Polygonal sf/sfc study area. **Required** for
+#'   `method = "hex"` and `method = "square"`, which have no extent of their
+#'   own to lay a grid over and error without it; supply the study-area polygon,
+#'   or build one from the points with [clip_target_for()]. **Optional** for
+#'   `method = "voronoi"` and `method = "triangles"`, which derive their extent
+#'   from the points themselves and use `boundary` only to clip the result when
+#'   `clip = TRUE`.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells (grid methods). For hex
 #'   grids the target is adjusted for packing density; the actual count after

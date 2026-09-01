@@ -20,7 +20,13 @@ data; an unseen level is an error, not a guess.}
 \code{predict.all = TRUE}, \code{type = "quantiles"}, \code{type = "se"}
 with \code{predict.all} -- are rejected, because this method's contract is
 one number per row of \code{newdata}. Call
-\code{predict(fit$engine, data = ...)} directly for those.}
+\code{predict(fit$engine, data = ...)} directly for those.
+\code{seed} defaults to a constant rather than being left unset: an unset
+\code{seed} makes \code{ranger} draw one uniform from the global RNG
+stream per call, so the number of \code{predict()} calls a script happens
+to make (via \code{\link{predict_surface}}'s \code{chunk_size}, say) would
+otherwise shift every later random draw. It does not affect a regression
+forest's predictions; pass your own if you need one.}
 }
 \value{
 Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for

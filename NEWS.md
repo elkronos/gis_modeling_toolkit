@@ -15,6 +15,228 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
 
 ## Breaking changes
 
+### Statistical corrections that change results (third audit pass)
+
+Each item below was measured, and the measurement is quoted so you can judge
+whether it affects an analysis you have already run.
+
+* **`residual_morans_i()` no longer puts weight on a point's own residual.**
+  `FNN::get.knn()` reports a point's OWN index among its neighbours whenever
+  exact duplicate coordinates are present, which put `1/k` on the diagonal of a
+  matrix Moran's I is only defined for with a zero diagonal. On 40 sites x 4
+  repeats with a response carrying **no** spatial structure, 120 of 160 rows
+  gained a self-weight, mean I came out at +0.086 against E[I] = -0.0063, and
+  **77% of samples were "significant" at p < 0.05** against a nominal 5%.
+  Repeat observations at one site are exactly what
+  `make_folds(method = "leave_location_out")` is for, so this was a mainstream
+  input. The dense fallback never had the fault, so the statistic also depended
+  silently on whether **FNN** happened to be installed; the two paths now share
+  one neighbour lookup and agree exactly.
+
+  Requesting `k + 1` neighbours and dropping self is **not** sufficient on its
+  own — the slot self occupied displaced a genuine co-located neighbour and left
+  a farther point standing in for it (75 of 400 retained pairs sat at distance
+  121 where a neighbour at distance 0 existed). Duplicate coordinates are now
+  grouped and answered exactly.
+
+* **`residual_morans_i()` gains a `null` argument, defaulting to `"auto"`.**
+  Model residuals are not exchangeable — they are orthogonal to the design
+  matrix — so the classical randomisation moments are wrong for them. At
+  n = 120 with six smooth covariates and independent errors, OLS residuals had
+  mean I = -0.031 against the exchangeable E[I] = -0.008, and the z-score
+  averaged -0.54 with sd 0.90 instead of 0 and 1. The Cliff & Ord (1981,
+  sec. 8.3) regression-residual moments restore mean z = -0.09, sd 1.03 and a
+  4.3% rejection rate against a nominal 5%, and **agree with
+  `spdep::lm.morantest()` to machine precision** (verified at 1e-16 through the
+  public function). `"auto"` applies them only when the fit's residuals really
+  are the OLS residuals on the rebuilt design, which a forest's and a working
+  GWR's are not; the null actually used is reported in the return value.
+
+* **`summarize_by_cell()` standard errors under a design effect were too
+  small.** `s / sqrt(n / deff)` corrects the mean's variance for clustering but
+  leaves `s^2` biased low by the same clustering: for exchangeable correlation
+  rho, `E[s^2] = sigma^2 (n - deff)/(n - 1)`. The two errors compound. Measured
+  95% CI coverage at n = 20: **0.905 at rho = 0.3, 0.796 at rho = 0.6, 0.632 at
+  rho = 0.8**; after rescaling by `sqrt((n-1)/(n-deff))`, 0.952 / 0.952 / 0.953.
+  Applies to `deff = "kish"`, `deff = "variogram"` and a fixed numeric `deff`.
+  **The default `deff = 1` path is bit-identical to before.**
+
+* **`summarize_by_cell(deff = "variogram")` reported the design effect of the
+  subsample, not of the cell.** A cell larger than `deff_max_n` was subsampled
+  and then answered with `sum(R)/n_used` — the design effect of a cell of
+  `deff_max_n` points. Measured on 4000 points with an exponential correlation
+  of range 60: true deff **1821.8**, reported **228.6**. The mean off-diagonal
+  correlation is now estimated from the subsample and scaled to the cell's own
+  size, giving 1825.2. Un-subsampled cells are algebraically unchanged.
+
+* **`determine_optimal_levels()` ranks model-aware candidates on the
+  standardised deviate, not on |Moran's I|.** E[I] and Var(I) both depend on the
+  cell count, so |I| shrinks as k grows whether or not the finer tessellation
+  captures anything. Over 300 replicates of a response with **no** spatial
+  structure, mean |I| fell monotonically from 0.114 at k = 10 to 0.050 at
+  k = 60 — an |I| ranking prefers the largest candidate for arithmetic reasons
+  alone. Candidates are now ordered by |z| using the Cliff & Ord residual
+  moments (exact here, since the cell-level residuals are OLS residuals by
+  construction); over the same runs z had mean ~0, sd ~1 and a 5% rejection rate
+  of 0.040-0.057 at every k. The `"diagnostics"` attribute now carries
+  `moran_z` alongside `moran_i`.
+
+* **`estimate_sac_range()` sweeps four azimuths, not two.** A +/-22.5 degree
+  window around 0 and 90 covers exactly **90 of the 180 distinct azimuths** —
+  every direction between 23 and 67 degrees, and between 113 and 157, fell into
+  neither. On simulated fields with 3:1 anisotropy and a true major-axis range
+  of 300, the estimate came back at 255 and 249 for major axes at 0 and 90
+  degrees but **151 and 147 at 45 and 135**. Since
+  `make_folds(auto_range = TRUE)` sizes blocks from this number, a diagonally
+  oriented field silently got blocks half as wide as the correlation they were
+  meant to separate. `c(0, 45, 90, 135)` tiles all 180 azimuths; the same fields
+  now return 255 / 245 / 249 / 228. A direction whose variogram never reaches a
+  sill is excluded rather than taken as a long range, and the `directional`
+  attribute now has four named entries.
+
+* **`gwr_model_selection()` ranked on AIC while labelling the result AICc.**
+  GWmodel's `GWR.df` is documented and built as `c(bandwidth, AIC, AICc, RSS)`
+  and is `rbind()`ed over unnamed vectors, so it never carries column names —
+  making the positional read the path every real call takes, not a rare
+  fallback. Column 2 is the uncorrected AIC. Executed against a faithful
+  GWmodel stub on 200 points with two real predictors and one pure-noise
+  variable: **column 2 selects the model containing the noise variable; column 3
+  selects `a + b`.** The result now also reports whether the table had the
+  documented four columns.
+
+* **`fit_bayesian_spatial_model()`'s calibrated length-scale prior never
+  reached Stan.** `brms::set_prior(spec, class = "lscale")` with no `coef` is a
+  *global* prior, and brms applies a global prior only to coefficients with no
+  individual prior of their own — every `lscale` coefficient always has one.
+  brms dropped it with a note and Stan received brms's defaults, which made
+  `gp_lengthscale_bounds()`, the tail calibration and `$info$gp_lscale_prior`
+  dead weight. Confirmed with `brms::make_stancode()`: the requested prior is
+  absent under the global form and present under the coefficient-level form,
+  which is now used. `$info$gp_lscale_prior` is read back from
+  `brms::validate_prior()`, so it records what brms will actually use.
+
+* **The GP basis was sized against the wrong domain measure.** brms builds the
+  boundary as `choose_L(x, c) = c * max(1, max(x) - min(x))` over the pooled,
+  column-centred covariates — the **full range**, not the per-axis half-range in
+  which Riutort-Mayol et al. state their inequalities. Recovering the boundary
+  from `make_standata()`'s eigenvalues confirms `L = c * full range` exactly at
+  every `c`, so the old convention built a boundary **twice as wide** as `gp_k`
+  was sized for: the GP was under-resolved, and `$info$gp_ell_min` — the
+  diagnostic meant to catch exactly that — was twice too lenient to fire. The
+  `c` floor is now brms's own default 1.25 rather than 1.2.
+
+* **`fitted()` on a `gwr_fit` could return a coefficient surface.** The search
+  for GWmodel's fitted-value column matched the whole candidate name vector with
+  `%in%` and took the first hit in the *SDF's* column order — and the local
+  coefficients come first. A predictor named `fit`, `pred`, `prediction`,
+  `fitted` or `yhat` therefore returned its own coefficient column, silently:
+  executed in-sample R^2 was **-1.18** against a true 0.981, and `residuals()`,
+  `summary()`, `model_metrics()`, `compare_models()` and every `cv_gwr()` fold
+  consumed it without a warning. The search now runs in preference order and
+  excludes any candidate that is also a model term; all five colliding names now
+  give R^2 = 0.981, identical to the renamed control.
+
+* **`coef.gwr_fit()` returned GWmodel's whole SDF data slot** — 15 columns for a
+  two-predictor fit, of which 3 are coefficients and the rest are standard
+  errors, t-values, the response, the fitted values, residuals and `Local_R2`.
+  It now returns the model terms only; reach for `object$engine$SDF` for the
+  rest.
+
+* **`estimate_sac_range()` is reproducible, and no longer disturbs the caller's
+  RNG.** `seed` now defaults to `123L` rather than `NULL`. The `n_max`
+  subsample is an internal approximation, not part of the answer, and leaving it
+  unseeded made the returned range differ between runs on identical input
+  (19531 / 19589 / 19605 on three calls) while silently advancing the caller's
+  stream — and `make_folds(auto_range = TRUE)` sizes its blocks from that
+  number. Pass `seed = NULL` for the old behaviour.
+
+* **`estimate_sac_range()` rejects a non-numeric response.** `as.numeric()` on a
+  factor returns its level codes, so a factor response produced a variogram of
+  an arbitrary integer relabelling of the categories and the estimated range
+  changed when the levels were reordered (3700 against 2497 on the same data).
+  Factors and character columns are now an error naming the column; logicals are
+  read as 0/1.
+
+* **Fold sets built from a different dataset are refused.** Fold splits are
+  lists of `..row_id` values, and row IDs are `seq_len(nrow())` unless supplied,
+  so passing `cv_gwr()` a `folds` object built from another dataset of the same
+  size applied cleanly — every ID matched, every fold was populated, and the
+  model was scored on splits describing other observations. `make_folds()` now
+  records a small projection-invariant row fingerprint in
+  `params$row_probe`, and `cv_gwr()`, `cv_bayes()`, `cv_spatial()` and `cv_rf()`
+  error rather than proceed. Fold objects from earlier versions carry no
+  fingerprint and are passed through unchecked.
+
+* **`evaluate_insample()` rejects duplicated names in `fits`.** `model` is the
+  key `compare_models()` joins its metric and Moran's I tables on, so two fits
+  called `"GWR"` produced a 2x2 cross-join: four rows, every one carrying the
+  first fit's numbers, with the second fit never scored at all.
+
+* **`predict.rf_fit()` no longer consumes the global RNG.** `ranger`'s predict
+  draws a seed from the global stream when none is supplied, so the number of
+  `predict()` calls a script happened to make — via `predict_surface()`'s
+  `chunk_size`, a pure performance knob — shifted every later random draw,
+  including fold assignments. A constant seed is now supplied unless the caller
+  passes one; it does not affect a regression forest's predictions.
+
+* **`fit_gwr_model()` rejects a non-numeric predictor.** `gwr.basic()` expands
+  contrasts via `model.matrix()` and fits, but `gwr.predict()` does not and
+  fails, so the model appeared to fit and then silently predicted all `NA`.
+
+* **`fit_gwr_model()` no longer rejects a two-valued continuous response.** The
+  "binary" error is now gated on the response being integer-like. A
+  left-censored or saturated measurement (every observation at a detection limit
+  or a ceiling) has two distinct values and is perfectly continuous; it now
+  warns instead. The guard also runs once per fold inside `cv_gwr()`, where a
+  small training fold can legitimately hold only two distinct values.
+
+* **`gwr_model_selection()` works above `dmat_max_n`.** `bw.gwr()` branches on
+  `missing(dMat)`, not `is.null(dMat)`, so passing `dMat = NULL` explicitly took
+  the *supplied* branch and died — meaning **every dataset above 2000 points
+  silently fell back to the arbitrary fallback bandwidth**, with the message
+  blaming GWmodel. The argument is now omitted rather than passed as `NULL`. A
+  fixed bandwidth with no distance matrix, which GWmodel cannot start, is now
+  refused with a message naming both remedies.
+
+* `fitted()` returning the wrong length, or nothing, is now an error in
+  `summary()` and `model_metrics()` rather than a plausible row count over an
+  all-`NA` comparison. `new_spatial_fit()` is the documented extension point, so
+  a subclass with a missing or mis-sized `fitted()` method is user-reachable.
+
+* The cached `fitted()` on a `bayesian_fit` is stamped with the `n` and a digest
+  of the data it was computed from. The cache environment has reference
+  semantics — which is what makes it survive copy-on-modify — so `fit2 <- fit`
+  gave both objects the *same* cache, and assigning different data to the copy
+  returned the original's values at the original's length.
+
+* `make_folds()` drops rows with empty or non-finite coordinates, with a logged
+  warning naming the count, rather than letting an `EMPTY` POINT reach
+  `block_kfold`'s nearest-block rescue and die with "replacement has length
+  zero".
+
+* When every fold fails, the warning now names the first underlying error.
+  Previously "all 5 folds failed" was the whole diagnosis even when the cause
+  was simply that **brms** or **GWmodel** was not installed.
+
+* `make_folds()` records the CRS the folds were built in as `params$crs`.
+  Geographic input is projected by `ensure_projected()` to a CRS the caller
+  never chose, and `block_size`, `sac_range` and `buffer` are lengths in *that*
+  CRS.
+
+* `n_models` in `gwr_model_selection()` is computed in double precision; the
+  integer form overflowed to `NA` above 46341 candidates, so the guard meant to
+  refuse an impossible sweep errored on exactly the inputs it existed to catch.
+
+* `.morans_i_for_k()` returns `NA` at or below nine cells, where every cell
+  neighbours every other and Moran's I collapses to exactly `-1/(k-1)` for any
+  residual vector — a function of the cell count alone.
+
+* `residual_morans_i(fit, k = 1)` works on machines without **FNN**. `apply()`
+  simplified the length-1 result to a vector, making the neighbour index a
+  1 x n matrix and every row after the first out of bounds.
+
+### API and default changes
+
 * Removed the legacy wrappers `evaluate_models()`, `evaluate_models_cv()` and
   `phi_prior_bounds()`. Use `compare_models()`, `compare_models_cv()` and
   `gp_lengthscale_bounds()`.
@@ -490,6 +712,93 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
 * `gwr_model_selection()` reports which column it read when the diagnostic table
   is labelled but not with `AICc`, rather than calling it unlabelled.
 
+* **`create_grid_polygons()` no longer truncates the grid when `cellsize` and
+  `n` are both supplied. This changes results.** `sf::st_make_grid()` does not
+  ignore `n` when `cellsize` is given: for square grids it takes the cell
+  dimensions from `cellsize` *and* the counts from `nx = n[1]`, `ny = n[2]`,
+  anchored at the bounding-box corner. `cellsize = 25` with `n = 2` on a
+  100 × 100 boundary therefore produced 4 cells covering 2,500 of 10,000 square
+  units and silently left three quarters of the study area with no cells at
+  all — and because `clip = TRUE` had nothing outside the boundary to discard,
+  the result looked like an ordinary, complete grid. `cellsize` now wins, `n`
+  is dropped with a logged warning naming what it would have done, and the same
+  call returns 16 cells covering the whole boundary. `n` is still forwarded
+  when the *package* derived `cellsize` from it or from `target_cells`, which
+  is what the original code was written for: omitting it there lets sf
+  recompute `ceiling(w / cellsize)` and floating-point division pushes the
+  count one past the intended value.
+
+* **`fit_gwr_model()` no longer refuses a continuous response that happens to
+  take two values. This changes results: fits that used to error now run.** The
+  guard rejected any response with exactly two distinct finite values as
+  "binary" and pointed at `GWmodel::ggwr.basic(family = "binomial")`. Two
+  distinct values is not the same thing as binary: a measurement censored at a
+  detection limit or saturated at a ceiling (0.0031 / 12.7401) is perfectly
+  continuous, Gaussian GWR on it is a well-defined least-squares problem, and
+  the advice to switch to a binomial family is nonsense for such values. The
+  hard stop is now gated on the response also being integer-like, which is what
+  the surrounding code already used to separate coded categories from
+  measurements. A two-valued non-integer response raises a `warning()` naming
+  the two values and asking you to confirm it is genuinely continuous, then
+  fits. This also mattered inside `cv_gwr()`, where the guard runs once per
+  fold and a small training fold can legitimately hold only two distinct
+  values.
+
+* **`determine_optimal_levels()` no longer reports a Moran's I that is
+  arithmetically fixed. This changes which cell counts it returns.**
+  `.morans_i_for_k()` builds a `min(8, n_cells - 1)`-nearest-neighbour weight
+  matrix, so at nine cells or fewer every cell neighbours every other one. The
+  row-standardised matrix is then complete, `W %*% e = -e/(n - 1)` for *any*
+  mean-zero residual vector, and Moran's I collapses to exactly
+  `-1/(n_cells - 1)` whatever the data are. That is not merely uninformative:
+  `|I| = 1/(n_cells - 1)` falls monotonically in the number of cells, so
+  `criterion = "morans_i"` ranked the largest evaluated candidate first every
+  time, and `"combined"` carried the same tilt at half weight. Candidates below
+  the floor now return `NA_real_` and are excluded from the model-aware
+  ranking; when none clears it — the usual outcome at the default
+  `max_levels = 12`, since the search evaluates a window around the elbow — the
+  call falls back to the geometric ranking and logs a warning. Raise
+  `max_levels` above roughly 10 for the model-aware criteria to contribute at
+  all. `predictor_vars` also accepts logical columns now, read as 0/1, matching
+  `fit_rf_model()`/`cv_rf()`/`predict()`; factor and character predictors are
+  still refused by name.
+
+* `area_of_applicability()` accepts logical predictors, read as 0/1, instead of
+  refusing them alongside factors and characters. `fit_rf_model()` fits a
+  logical predictor, `cv_rf()` cross-validates it and `predict()` predicts with
+  it, so refusing to compute the dissimilarity index for the same model was
+  self-inconsistent. A logical's 0/1 standard deviation is meaningful, which is
+  the property the scaling needs; factor and character predictors, which would
+  need an arbitrary one-hot scaling, are still refused.
+
+* `residual_morans_i(fit, k = 1)` no longer errors with "subscript out of
+  bounds" on a machine without `FNN`. In the dense fallback the inner function
+  returns a scalar at `k = 1`, so `apply()` simplified the neighbour table to a
+  length-n vector and `t()` made it a 1 × n matrix; indexing `nn_idx[i, ]`
+  then failed for every `i > 1`. The result is now forced to `n × k`.
+
+* `make_folds()` no longer dies on an empty or non-finite geometry.
+  `st_coordinates()` yields one all-`NA` row per EMPTY POINT rather than zero
+  rows, so a row-count check let them through: `block_kfold`'s
+  `st_intersects()` returned `integer(0)`, `..block_id` went `NA`, and the
+  nearest-block rescue aborted with "replacement has length zero". Unusable
+  rows are now dropped with a warning naming the count, after `..row_id` is
+  stamped so the survivors keep their original row identities, and for every
+  method rather than just `block_kfold` — `random_kfold` would otherwise put an
+  unplottable point in a fold, and `nndm` and `buffered_loo` both feed the
+  coordinates to distance code. The rescue itself uses `vapply()` rather than
+  `apply()`, so a point whose distances are all `NA` keeps its `NA` instead of
+  collapsing the assignment. `points_sf` with no usable coordinates at all is
+  an error naming that, not a downstream one.
+
+* Every cross-validation wrapper names the cause when folds fail.
+  `.cv_run_folds()` returns each fold's error text rather than a bare `NULL`,
+  and `cv_gwr()`, `cv_bayes()` and `cv_spatial()` append `First error: ...` to
+  both the logged and the R-level "all N folds failed" message. Running
+  `cv_bayes()` without `brms` installed previously produced five `fold N fit
+  failed` warnings and an all-`NA` `$overall` with `n_pred = 0` in which the
+  word "brms" never appeared.
+
 ## New features
 
 * New `fit_rf_model()` and `cv_rf()`: a `ranger` random forest as a first-class
@@ -596,6 +905,13 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
   result records `n_folds_attempted` and `n_folds_succeeded` — compare them
   before trusting `overall`.
 
+* `make_folds()` records the CRS the folds were built in as `params$crs`
+  (`"EPSG:32632"`, an input string, or a WKT). `block_size` and `sac_range` are
+  lengths in *that* CRS, which is not necessarily the one the caller passed:
+  geographic input is projected by `ensure_projected()` to a CRS chosen for the
+  extent. Without the label the units of a recorded block size were not
+  recoverable from the result.
+
 ## Documentation
 
 * Every runnable example is now runnable. Four exported functions
@@ -638,6 +954,84 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
   `summarize_by_cell()` instead of reimplementing it with
   `group_by()`/`summarise()`, and adds a spatial cross-validation section
   contrasting `block_kfold` against `random_kfold` on the same data.
+
+* The package-level help page (`?spatialkit`) gains "The pipeline, in order"
+  and "Where to start" sections, so `help(package = "spatialkit")` leads
+  somewhere rather than presenting 40 exports in alphabetical order.
+
+* Every exported function's description now says *when to reach for it* rather
+  than only what it does, and `@family` / `@seealso` links connect each step of
+  the pipeline to the one before and after it — `assign_features_to_polygons()`
+  to `summarize_by_cell()`, `determine_optimal_levels()` to
+  `build_tessellation()`, `new_spatial_fit()` to `cv_spatial()`, and the two
+  seeding functions to each other. `create_voronoi_polygons()` versus
+  `create_grid_polygons()`, and `voronoi_seeds_kmeans()` versus
+  `voronoi_seeds_random()`, each say which to pick and why.
+
+* `build_tessellation()` documents that `boundary` is **required** for
+  `method = "hex"` and `method = "square"` — the grid methods have no extent of
+  their own — and optional for `"voronoi"` and `"triangles"`, which derive one
+  from the points. The error existed; the requirement was not written down
+  anywhere.
+
+* `create_grid_polygons()` documents that `target_cells`, `cellsize` and `n`
+  are three ways of sizing one grid and that exactly one should be supplied,
+  that `cellsize` is in the units of the working CRS, and that `cellsize` takes
+  precedence over `n`.
+
+* `determine_optimal_levels()` documents the nine-cell resolution floor on the
+  model-aware criteria, why it exists, and that the whole call falls back to
+  the geometric ranking when no candidate clears it.
+
+* `compare_models_cv()` documents that dropping every requested backend is an
+  error (`"no viable models."`) rather than an empty comparison, and that the
+  returned frame carries only the models that actually ran, so callers should
+  check which names are present rather than assuming one row per request.
+
+* `new_spatial_fit()` documents the two obligations on a custom backend:
+  return an object built by the constructor, and define a
+  `predict.<subclass>()` method — `cv_spatial()` scores folds through the
+  `predict()` generic, so without one every fold fails.
+
+* **README.** A new "Your own data" section shows both entry points —
+  `st_read()` for a spatial file and `read.csv()` + `st_as_sf()` for a table of
+  coordinates — using the `nc.shp` demo shapefile shipped with `sf` so it runs
+  anywhere. The README previously manufactured every example inline with a
+  hard-coded `crs = 32632` and never showed data entering the package at all.
+  A companion "CRS: what the numbers are in" subsection states that block
+  sizes, buffers, bandwidths, variogram ranges and `expand` distances are in
+  the units of the working CRS; that geographic input is projected
+  automatically to a CRS chosen for the extent; and how to pin one.
+
+* **README.** New guidance where none existed: how to choose among the four
+  tessellation methods, how `k` and `block_size` trade off against the
+  autocorrelation range, what to do when `estimate_sac_range()` returns `NA`,
+  how to read a design effect, which model backend to reach for (with the
+  recorded cost of each), and a "Troubleshooting" section covering the errors a
+  new user actually hits first. A worked hex-grid example replaces the previous
+  picture-only coverage of the grid methods.
+
+* **README.** Three corrections. The `estimate_sac_range()` example showed a
+  rejected range printing its attributes, which `print.sac_range()` has not
+  done since the attribute dump was removed; it now shows the bare `NA` and
+  reads the attributes explicitly. The `determine_optimal_levels()` passage
+  claimed the residual-autocorrelation criterion was doing work at cell counts
+  where it is arithmetically degenerate. The test-suite paragraph said "exactly
+  one" test guards on `brms`; six do, five of them additionally gated behind
+  `SPATIALKIT_TEST_BRMS` so they never run in the matrix.
+
+* **`inst/scripts/example_nc_demo.R`** said EPSG:2264 was projected "so
+  distances are metric". Its unit is the US survey foot, which is what the
+  script's own "Autocorrelation range: %.0f ft" line reports. The comment now
+  says planar, and names the unit every distance, bandwidth and block size in
+  the script is in.
+
+* **Vignette.** `print(rf_fit)` and `summary(rf_fit)` report the same OOB RMSE
+  but different R² (0.4733 against 0.4715). The vignette now explains why:
+  `print.rf_fit()` echoes `ranger`'s `r.squared` (`1 - MSE/var(y)`, unbiased
+  n − 1 variance) while `summary()` recomputes `1 - SS_res/SS_tot` from the
+  same out-of-bag predictions with an n denominator, so the unexplained
+  fractions differ by exactly n/(n − 1).
 
 # spatialkit 1.0.0
 

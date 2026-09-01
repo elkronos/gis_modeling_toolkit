@@ -295,3 +295,80 @@ test_that("predict_surface refuses to build a grid over no extent", {
   expect_true(".pred" %in% names(ok))
   expect_false(anyNA(ok$.pred))
 })
+
+
+# ---------------------------------------------------------------------------
+# An EMPTY geometry INSIDE a populated layer
+#
+# The blocks above cover zero-row layers, which every guard already handled.
+# An EMPTY POINT sitting among ordinary ones is a different animal: nrow() is
+# positive, st_geometry_type() says POINT, and st_coordinates() returns one
+# ALL-NA row for it rather than none -- so it slips past every row-count and
+# type check and reaches the distance code.  In block_kfold that meant
+# st_intersects() -> integer(0) -> ..block_id NA -> an all-NA distance row ->
+# which.min() returning integer(0) -> "replacement has length zero".
+# ---------------------------------------------------------------------------
+
+.dg_with_empty <- function(n = 60, seed = 9) {
+  set.seed(seed)
+  geom <- sf::st_sfc(
+    c(lapply(seq_len(n),
+             function(i) sf::st_point(c(runif(1, 0, 1000), runif(1, 0, 1000)))),
+      list(sf::st_point())),
+    crs = 32632)
+  sf::st_sf(z = c(rnorm(n), 0), w = c(rnorm(n), 0), geometry = geom)
+}
+
+test_that("make_folds drops an EMPTY geometry from a populated layer", {
+  pts <- .dg_with_empty()
+  n   <- nrow(pts) - 1L
+  expect_equal(sum(sf::st_is_empty(pts)), 1L)
+  expect_true(all(as.character(sf::st_geometry_type(pts)) == "POINT"))
+  # st_coordinates() returns a FULL-HEIGHT matrix with one all-NA row, not a
+  # shorter one -- which is exactly why a row-count check cannot spot the
+  # empty geometry and a complete.cases() check has to.
+  xy <- suppressWarnings(sf::st_coordinates(pts))
+  expect_equal(nrow(xy), n + 1L)
+  expect_equal(sum(!stats::complete.cases(xy[, 1:2, drop = FALSE])), 1L)
+
+  grid <- sf::st_as_sf(
+    data.frame(x = stats::runif(15, 0, 1000), y = stats::runif(15, 0, 1000)),
+    coords = c("x", "y"), crs = 32632)
+
+  args <- list(
+    random_kfold = list(k = 3, method = "random_kfold", seed = 1),
+    block_kfold  = list(k = 3, method = "block_kfold",  seed = 1),
+    buffered_loo = list(k = 3, method = "buffered_loo", buffer = 100, seed = 1),
+    nndm         = list(method = "nndm", prediction_points = grid, seed = 1)
+  )
+
+  for (m in names(args)) {
+    lines <- capture_spatialkit_log(
+      f <- do.call(make_folds, c(list(points_sf = pts), args[[m]])))
+    # Dropped, and the count is named rather than silently absorbed.
+    expect_true(log_has(lines, "dropping 1 point\\(s\\) with empty or non-finite"),
+                info = m)
+    # The empty row appears in no fold and in no assignment row ...
+    expect_equal(nrow(f$assignment), n, info = m)
+    expect_false((n + 1L) %in% f$assignment$row_id, info = m)
+    expect_setequal(f$assignment$row_id, seq_len(n))
+    # ... and the survivors keep their ORIGINAL row identities, so the folds
+    # still index the layer the caller passed in.
+    all_rows <- sort(unique(unlist(lapply(f$folds, `[[`, "test"))))
+    expect_true(all(all_rows <= n), info = m)
+    expect_gt(length(f$folds), 0L)
+    expect_true(all(vapply(f$folds, function(s) length(s$train) > 0L,
+                           logical(1))), info = m)
+  }
+})
+
+test_that("make_folds refuses a layer whose geometries are ALL empty", {
+  allempty <- sf::st_sf(
+    z = c(1, 2, 3), w = c(4, 5, 6),
+    geometry = sf::st_sfc(sf::st_point(), sf::st_point(), sf::st_point(),
+                          crs = 32632))
+  expect_equal(nrow(allempty), 3L)
+  expect_error(suppressWarnings(make_folds(allempty, k = 2,
+                                           method = "random_kfold", seed = 1)),
+               "no usable coordinates; there is nothing to split into folds")
+})

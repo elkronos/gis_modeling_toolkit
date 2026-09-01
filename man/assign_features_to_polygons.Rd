@@ -43,6 +43,15 @@ already-assigned layer replaces the old IDs rather than failing.
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
 }
+\details{
+This is the second step of the package's pipeline: it labels every
+observation with the cell it falls in, which is what
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} then aggregates over. Reach for it directly (rather
+than for \code{\link[sf:st_join]{sf::st_join()}}) when the join has to be \emph{unambiguous} --- it
+resolves features matching several polygons by an explicit \code{tie_break} rule
+instead of silently duplicating rows, so the assigned layer keeps one row
+per input feature and cell-level counts mean what they say.
+}
 \examples{
 library(sf)
 set.seed(1)
@@ -57,3 +66,12 @@ grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)
 table(assigned$poly_id)
 }
+\seealso{
+\code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
+
+Other aggregation: 
+\code{\link{determine_optimal_levels}()},
+\code{\link{summarize_by_cell}()}
+}
+\concept{aggregation}

@@ -11,7 +11,7 @@ estimate_sac_range(
   n_max = 5000L,
   cutoff = 0.5,
   range_frac = 1,
-  seed = NULL
+  seed = 123L
 )
 }
 \arguments{
@@ -41,7 +41,14 @@ observed lags rather than a long autocorrelation range.  Passing it to
 single block.  Default 1.0; raise it to accept ranges extrapolated beyond
 the fitted lags.}
 
-\item{seed}{Optional RNG seed for subsampling reproducibility.}
+\item{seed}{RNG seed for the \code{n_max} subsample, restored afterwards so
+the caller's random stream is untouched.  Default \code{123L}: the
+subsample is an internal approximation rather than part of the answer, and
+leaving it unseeded made the returned range differ between runs on
+identical input (19531, 19589, 19605 on three calls) and silently advanced
+the caller's RNG.  Pass \code{NULL} for the old unseeded behaviour, or a
+different number to check how sensitive the estimate is to the subsample.
+Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.}
 }
 \value{
 A single value of class \code{sac_range}, which behaves as an
@@ -49,8 +56,9 @@ ordinary number.  There are three shapes, and they carry different
 attributes:
 \describe{
 \item{Success}{A positive effective range in projected coordinate units,
-with the fit attached as attributes \code{directional} (the 0° and 90°
-ranges), \code{anisotropy} (their ratio), \code{max_dist},
+with the fit attached as attributes \code{directional} (the 0°, 45°,
+90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
+over smallest), \code{max_dist},
 \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
 \code{variogram_model} (the fitted \code{gstat} model), so the fit can
 be inspected rather than trusted.}
@@ -79,19 +87,29 @@ Fits exponential (or spherical) variogram models and returns the
 }
 \details{
 To guard against anisotropy, the function first estimates directional
-variograms at 0° (N–S) and 90° (E–W) azimuths (tolerance 22.5°,
-which avoids double-counting point pairs near the 45° diagonal but
-requires denser point clouds for stable estimates).
-When both fits succeed the \strong{maximum} of the two directional ranges
-is returned, which is the conservative choice for spatial block CV —
-blocks must be at least as large as the longest autocorrelation range to
-avoid information leakage.
+variograms at 0° (N–S), 45°, 90° (E–W) and 135° azimuths, each with a
+±22.5° tolerance.  Those four windows tile all 180 distinct azimuths
+exactly once, with no gap and no double-counted pair.  When all four fits
+succeed the \strong{maximum} of the four directional ranges is returned,
+which is the conservative choice for spatial block CV — blocks must be at
+least as large as the longest autocorrelation range to avoid information
+leakage.
 
-If either directional fit fails (e.g., too few point pairs in a direction),
-the function falls back to an omnidirectional (isotropic) variogram.
+Sweeping only 0° and 90° would leave the azimuths between 23° and 67°, and
+between 113° and 157°, covered by neither window: on simulated fields with a
+3:1 anisotropy and a true major-axis range of 300, a two-direction sweep
+recovered 255 and 249 for major axes at 0° and 90° but only 151 and 147 at
+45° and 135°.  Since \code{make_folds(auto_range = TRUE)} sizes its blocks
+from this number, that halved the blocks for a diagonally oriented field.
 
-A log warning is emitted when notable anisotropy is detected (ratio of
-directional ranges > 1.5).
+If any directional fit fails (e.g., too few point pairs in a direction),
+the function falls back to an omnidirectional (isotropic) variogram rather
+than taking the maximum over the directions that did fit — which would bias
+the answer downward precisely when the widest direction is the one that
+failed.
+
+A log warning is emitted when notable anisotropy is detected (ratio of the
+largest to the smallest directional range > 1.5).
 
 The returned range is in the coordinate units of the (projected) data and
 can be passed directly to \code{make_folds(block_size = ...)} to ensure

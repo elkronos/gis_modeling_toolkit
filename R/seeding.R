@@ -10,6 +10,14 @@
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
 #'   `method = "provided"`, where every row of `seeds` is returned; a mismatch
 #'   between `n` and `nrow(seeds)` is reported as a warning.
+#'
+#'   For `method = "kmeans"` it is an upper bound rather than a guarantee:
+#'   k-means cannot produce more centres than there are distinct positions in
+#'   the sampling cloud, nor as many centres as there are rows. When `n`
+#'   exceeds either ceiling it is clamped, with a warning naming the count
+#'   actually used — `n = nrow(sample_points)` is the common case, and yields
+#'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result rather than
+#'   assuming `n`.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
 #' @param sample_points Optional sf POINT cloud for k-means clustering.
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
@@ -104,11 +112,17 @@ get_voronoi_seeds <- function(boundary = NULL,
       }
       xy <- sf::st_coordinates(cloud_for_km)
       
+      # Two separate ceilings, both of which stats::kmeans() enforces with a
+      # raw message the caller cannot act on.  `n_uniq` is "more cluster
+      # centers than distinct data points"; nrow(xy) - 1L is "number of cluster
+      # centres must lie between 1 and nrow(x)", which fires at k == nrow(x)
+      # exactly -- so n = nrow(sample_points) used to die on a raw kmeans error.
       n_uniq <- nrow(unique(round(xy, 10)))
-      k_use <- max(1L, min(as.integer(n), n_uniq))
+      k_max  <- min(n_uniq, nrow(xy) - 1L)
+      k_use  <- max(1L, min(as.integer(n), k_max))
       if (k_use < n) {
-        .log_warn("get_voronoi_seeds(kmeans): requested %d seeds but only %d unique positions; clamping.",
-                  n, n_uniq)
+        .log_warn("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
+                  as.integer(n), k_use, n_uniq, nrow(xy))
       }
 
       km <- stats::kmeans(x = xy, centers = k_use, iter.max = kmeans_iter,
@@ -168,9 +182,25 @@ get_voronoi_seeds <- function(boundary = NULL,
 
 #' K-means seed generation from point coordinates
 #'
+#' Places `k` seed points at k-means cluster centres of the observed
+#' coordinates, so seeds — and the Voronoi cells built from them — follow the
+#' sampling density: clusters of observations attract seeds, empty ground gets
+#' none. Reach for this when you want cells that each carry a comparable number
+#' of observations, which is what makes per-cell aggregates in
+#' [summarize_by_cell()] similarly precise. Use [voronoi_seeds_random()]
+#' instead when you want coverage of the study area rather than of the data,
+#' and [get_voronoi_seeds()] to pick between them by name.
+#'
+#' Lon/lat input is projected first so the k-means distances are metric rather
+#' than degrees. Rows with empty or non-finite coordinates are dropped with a
+#' warning, and `k` is clamped to the number of distinct positions.
+#'
 #' @param points_sf An sf object with POINT geometries.
-#' @param k Integer; requested number of clusters. Clamped to the number of
-#'   distinct point positions, with a warning, when it exceeds it.
+#' @param k Integer; requested number of clusters, and an upper bound rather
+#'   than a guarantee. It is clamped, with a warning, to whichever is smaller
+#'   of the number of distinct point positions and `nrow(points_sf) - 1` —
+#'   k-means can produce neither more centres than there are distinct points
+#'   nor as many centres as there are rows. Check `nrow()` on the result.
 #' @param set_seed Optional integer RNG seed. Default 456.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
@@ -203,11 +233,16 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
     stop("voronoi_seeds_kmeans(): `points_sf` has no usable coordinates; ",
          "nothing to cluster.", call. = FALSE)
 
+  # As in get_voronoi_seeds(): stats::kmeans() refuses k > distinct rows AND
+  # k >= nrow(x), the latter with "number of cluster centres must lie between 1
+  # and nrow(x)".  k = nrow(points_sf) therefore used to error rather than
+  # clamp, despite `@return` promising "at most k".
   n_uniq <- nrow(unique(round(coords, 10)))
-  k_use <- max(1L, min(as.integer(k), n_uniq))
+  k_max  <- min(n_uniq, n - 1L)
+  k_use  <- max(1L, min(as.integer(k), k_max))
   if (k_use < k) {
-    .log_warn("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping.",
-              as.integer(k), n_uniq, n)
+    .log_warn("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
+              as.integer(k), n_uniq, n, k_use)
   }
 
   cleanup <- .with_seed(set_seed)
@@ -228,6 +263,19 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 
 
 #' Random seed generation within a polygonal boundary
+#'
+#' Draws `k` seed points uniformly at random inside `boundary`, ignoring where
+#' the observations are. Reach for this when the cells should cover the study
+#' area evenly — so that sparsely sampled ground still gets its own cells and
+#' is visibly under-sampled in the results — rather than concentrating
+#' resolution where the data already are, which is what
+#' [voronoi_seeds_kmeans()] does. It is also the honest choice for a null or
+#' sensitivity comparison: re-running an analysis over several random seedings
+#' shows how much of a result depends on one particular tessellation.
+#'
+#' Sampling is by rejection inside the polygon, so an awkward geometry can
+#' return fewer than `k` seeds; that shortfall is warned about rather than
+#' silently padded.
 #'
 #' @param boundary An sf or sfc polygonal object.
 #' @param k Integer; number of random seeds.

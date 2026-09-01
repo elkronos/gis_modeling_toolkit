@@ -4,9 +4,23 @@
 
 #' Build a spatial_fit S3 object
 #'
-#' Low-level constructor used by \code{fit_gwr_model()},
-#' \code{fit_bayesian_spatial_model()} and \code{fit_rf_model()}.  Users should
-#' not call this directly.
+#' The constructor for the \code{spatial_fit} class, and the public entry point
+#' for plugging your own model backend into this package.  The three built-in
+#' fitters -- \code{\link{fit_gwr_model}()},
+#' \code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()}
+#' -- all end by calling it, and so should a custom \code{fit_fn} written for
+#' \code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
+#' what lets it use the package's folds, metrics, comparison and
+#' area-of-applicability machinery unchanged.
+#'
+#' There are two obligations.  Return an object built here from your
+#' \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
+#' you chose -- \code{\link{cv_spatial}()} scores folds by calling the
+#' \code{predict()} generic on the fit, so without a matching
+#' \code{predict.<subclass>()} every fold fails.  Methods for
+#' \code{\link{fitted}()}, \code{\link{residuals}()} and \code{\link{coef}()}
+#' are optional; supply them if you want the corresponding helpers to work on
+#' your fits too.
 #'
 #' @section The coef() contract:
 #' \code{coef()} on a \code{spatial_fit} either returns the coefficients or
@@ -19,14 +33,62 @@
 #' shorter answer than the caller expected.  Wrap in \code{try()} or
 #' \code{tryCatch()} when sweeping over a heterogeneous list of fits.
 #'
-#' @param subclass Character scalar: "gwr_fit", "bayesian_fit" or "rf_fit".
-#' @param engine   The raw model object.
+#' @param subclass Character scalar naming the class to stamp on the object:
+#'   one of the built-ins \code{"gwr_fit"}, \code{"bayesian_fit"} or
+#'   \code{"rf_fit"}, or any name of your own for a custom backend (say
+#'   \code{"lm_fit"}).  It is the S3 dispatch key: \code{predict()},
+#'   \code{fitted()}, \code{residuals()} and \code{coef()} on the result all
+#'   dispatch on it, so a custom \code{subclass} \strong{requires} a matching
+#'   \code{predict.<subclass>()} method to be usable with
+#'   \code{\link{cv_spatial}()}.
+#' @param engine   The raw model object your backend produced (an \code{lm},
+#'   a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
+#'   except your own methods.
 #' @param formula  A formula.
 #' @param response_var  Character(1).
 #' @param predictor_vars Character vector.
 #' @param data_sf  An sf object used for fitting.
-#' @param info     Named list of model-specific extras.
+#' @param info     Named list of model-specific extras.  Set
+#'   \code{fitted_are_oob = TRUE} if your \code{fitted()} values are held out
+#'   rather than in-sample, so \code{summary()} labels them honestly.
 #' @return An object of class \code{c(subclass, "spatial_fit")}.
+#' @seealso \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
+#'   \code{\link{fit_rf_model}()} for a worked built-in fitter.
+#' @family model fitting
+#' @examples
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' site <- st_as_sf(
+#'   data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+#'
+#' # A custom backend: an ordinary linear model behind the spatial_fit interface.
+#' lm_fit <- function(train_sf) {
+#'   new_spatial_fit(
+#'     subclass       = "lm_fit",
+#'     engine         = lm(price ~ elev, st_drop_geometry(train_sf)),
+#'     formula        = price ~ elev,
+#'     response_var   = "price",
+#'     predictor_vars = "elev",
+#'     data_sf        = train_sf
+#'   )
+#' }
+#'
+#' # Required: cv_spatial() scores each fold through the predict() generic,
+#' # which dispatches on the subclass named above.
+#' predict.lm_fit <- function(object, newdata = NULL, ...) {
+#'   if (is.null(newdata)) newdata <- object$data_sf
+#'   as.numeric(stats::predict(object$engine, st_drop_geometry(newdata)))
+#' }
+#' registerS3method("predict", "lm_fit", predict.lm_fit)
+#'
+#' cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
+#' cv$overall
+#' # Always check these two agree before trusting the metrics above.
+#' c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 #' @export
 new_spatial_fit <- function(subclass, engine, formula, response_var,
                             predictor_vars, data_sf, info = list()) {
@@ -48,11 +110,54 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
   obj
 }
 
+#' Fetch fitted() from a spatial_fit and check it against the fit's own n
+#'
+#' \code{new_spatial_fit()} is the documented extension point, so a subclass
+#' whose \code{fitted()} method is missing or returns the wrong length is
+#' user-reachable -- and nothing downstream notices.  With no method at all,
+#' \code{stats::fitted()} finds \code{object$fitted} (absent) and returns
+#' \code{NULL}, so \code{.compute_reg_metrics()} reports \code{n = 0} and
+#' all-\code{NA}; with a method returning 60 values for 120 rows, the metric
+#' code drops the pairs it cannot align and reports the fit's \code{n = 120}
+#' against all-\code{NA} numbers -- a plausible row count over a silently
+#' mis-indexed comparison.  \code{.cv_run_folds()} guards exactly this on the
+#' prediction side; these two paths did not.
+#'
+#' @param object A \code{spatial_fit}.
+#' @param .caller Name used in the error message.
+#' @return \code{fitted(object)}, guaranteed to be length \code{object$n}.
+#' @keywords internal
+#' @noRd
+.fitted_checked <- function(object, .caller = "model_metrics") {
+  fit_vals <- fitted(object)
+  n_exp    <- object$n
+  if (is.null(fit_vals) || length(fit_vals) != n_exp)
+    stop(sprintf(paste0("%s(): fitted() returned %s for a fit of %d ",
+                        "observation(s). Define a fitted.%s() method that ",
+                        "returns one value per row of the fit's `data_sf`, in ",
+                        "the same order (see ?new_spatial_fit)."),
+                 .caller,
+                 if (is.null(fit_vals)) "NULL"
+                 else sprintf("%d value(s)", length(fit_vals)),
+                 n_exp, class(object)[1L]),
+         call. = FALSE)
+  fit_vals
+}
+
+
 # ---------------------------------------------------------------------------
 # print / summary
 # ---------------------------------------------------------------------------
 
 #' Print a fitted spatial model
+#'
+#' Shows the one-screen summary of any \code{spatial_fit}: backend, formula,
+#' number of observations, CRS, and the few backend-specific numbers worth
+#' seeing immediately (GWR bandwidth, GP basis size, forest settings).  It is
+#' what you get by typing the object's name, and the quickest way to confirm a
+#' fit used the data, predictors and CRS you meant.  For fit quality use
+#' \code{\link{model_metrics}()} or \code{\link{summary}()} instead --
+#' nothing printed here is an out-of-sample score.
 #'
 #' @param x A \code{spatial_fit} object.
 #' @param ... Ignored.
@@ -116,7 +221,7 @@ print.spatial_fit <- function(x, ...) {
 #'   data.frame, out-of-bag for an \code{rf_fit}).
 #' @export
 summary.spatial_fit <- function(object, ...) {
-  fit_vals <- fitted(object)
+  fit_vals <- .fitted_checked(object, .caller = "summary")
   y_obs    <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
   # GWR fits locally varying coefficients at every observation, so the
   # global predictor count is not a valid effective-parameter count for
@@ -166,6 +271,19 @@ print.summary.spatial_fit <- function(x, ...) {
 
 #' Compute goodness-of-fit metrics for a spatial model
 #'
+#' Reports RMSE, MAE, MAPE, SMAPE, \eqn{R^2} and adjusted \eqn{R^2} for any
+#' \code{spatial_fit}, in one row and on one scale, so that fits from different
+#' backends can be read side by side.  Reach for it to score a model on data you
+#' hold out yourself (pass it as \code{newdata}), or to get a quick in-sample
+#' reading of how closely a fit tracks its training data.
+#'
+#' It is not a substitute for cross-validation.  With \code{newdata = NULL} the
+#' numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit} -- and a
+#' GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
+#' without predicting anything.  For a figure you can report, use
+#' \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
+#' or \code{\link{compare_models_cv}()}.
+#'
 #' @section What the metrics are computed on:
 #' With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
 #' That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
@@ -190,7 +308,7 @@ model_metrics <- function(object, ...) UseMethod("model_metrics")
 #' @export
 model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
   if (is.null(newdata)) {
-    y_hat <- fitted(object)
+    y_hat <- .fitted_checked(object, .caller = "model_metrics")
     y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
   } else {
     if (!(object$response_var %in% names(newdata)))
@@ -326,7 +444,18 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
       )
     ),
     error = function(e) {
+      # A real warning(), not only a logger line.  A logger line is invisible
+      # to tryCatch(warning = ), to withCallingHandlers(), to
+      # testthat::expect_warning() and to R CMD check, so a predict() that
+      # returns nothing but NA left no trace a caller could act on.  The
+      # commonest cause is a factor or character predictor: gwr.basic() expands
+      # contrasts via model.matrix() and fits, gwr.predict() does not and fails
+      # here.  fit_gwr_model() now rejects those at fit time, so reaching this
+      # generally means the fit was built by other means.
       .log_warn("predict.gwr_fit(): gwr.predict() failed: %s", conditionMessage(e))
+      warning(sprintf(paste0("predict.gwr_fit(): GWmodel::gwr.predict() ",
+                             "failed, so every prediction is NA. Cause: %s"),
+                      conditionMessage(e)), call. = FALSE)
       NULL
     }
   )
@@ -552,8 +681,26 @@ fitted.gwr_fit <- function(object, ...) {
 #' survives R's copy-on-modify).  The cache holds epred column means only,
 #' which is why \code{predict(object, summary = "median")} and
 #' \code{predict(object, type = "predict")} recompute rather than reuse it.
-#' Call \code{\link{clear_fitted_cache}} if the engine or the training data has
-#' been mutated by hand after fitting.
+#' Call \code{\link{clear_fitted_cache}} if the engine has been mutated by hand
+#' after fitting.
+#'
+#' @section The cache is shared by copies, and validated:
+#' An environment has reference semantics, which is what makes the memo survive
+#' R's copy-on-modify -- but it also means \code{fit2 <- fit} gives the two
+#' objects \emph{the same} cache.  Assigning a different \code{data_sf} to the
+#' copy would then have returned the original's cached values, at the original's
+#' length, which \code{residuals()} silently recycled against the copy's shorter
+#' response.  The entry therefore carries the \code{n} and a digest of the
+#' training data it was computed from, and is recomputed whenever either fails
+#' to match, so a copy with different data recomputes instead of reading the
+#' original's answer.
+#'
+#' Two consequences of the shared environment remain and cannot be removed from
+#' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
+#' share (harmless -- the other simply recomputes), and \code{identical()}
+#' cannot distinguish two fits by their caches.  The digest covers
+#' \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
+#' what \code{\link{clear_fitted_cache}} is for.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
@@ -565,11 +712,21 @@ fitted.bayesian_fit <- function(object, ...) {
   #     summary(), residuals(), model_metrics(), and compare_models() all
   #     call fitted() independently.  Caching avoids redundant passes.
   #     The cache lives in an environment (reference semantics) so it
-
-  #     persists even though R lists are copy-on-modify.
+  #     persists even though R lists are copy-on-modify -- and, for the same
+  #     reason, is SHARED by every copy of the fit.  See the @section above:
+  #     the entry is stamped with the n and a digest of the data it was
+  #     computed from, and anything that does not match is recomputed.
   cache <- object$info$.cache
+  key   <- .fitted_cache_key(object)
   if (!is.null(cache) && exists(".fitted_values", envir = cache, inherits = FALSE)) {
-    return(get(".fitted_values", envir = cache, inherits = FALSE))
+    hit <- get(".fitted_values", envir = cache, inherits = FALSE)
+    if (is.list(hit) && identical(hit$n, object$n) &&
+        identical(hit$key, key) &&
+        is.numeric(hit$values) && length(hit$values) == object$n)
+      return(hit$values)
+    # Stale (a copy carrying different data, or an entry written by an older
+    # version of this package).  Drop it rather than returning it.
+    rm(list = ".fitted_values", envir = cache)
   }
 
   if (!requireNamespace("brms", quietly = TRUE))
@@ -584,12 +741,42 @@ fitted.bayesian_fit <- function(object, ...) {
 
   fitted_vals <- colMeans(draws)
 
-  # Store in cache for subsequent calls
-  if (!is.null(cache)) {
-    assign(".fitted_values", fitted_vals, envir = cache)
+  # Store in cache for subsequent calls, stamped so a copy carrying different
+  # data cannot read it back.  A wrong-length result is never cached.
+  if (!is.null(cache) && length(fitted_vals) == object$n) {
+    assign(".fitted_values",
+           list(n = object$n, key = key, values = fitted_vals),
+           envir = cache)
   }
 
   fitted_vals
+}
+
+
+#' Cheap fingerprint of the training data a cached fitted() was computed from
+#'
+#' Covers exactly what \code{.prepare_brms_pred_df()} reads: the attribute
+#' columns and the coordinates.  \code{$engine} is deliberately excluded --
+#' digesting a \code{brmsfit} with all its draws would cost more than the
+#' posterior pass the cache exists to avoid, and a hand-mutated engine is what
+#' \code{\link{clear_fitted_cache}} is for.  Returns \code{NA_character_} if a
+#' digest cannot be taken, which still fingerprints consistently (a stored
+#' \code{NA} matches a computed \code{NA}), leaving the \code{n} and length
+#' checks as the guard.
+#'
+#' @param object A \code{spatial_fit}.
+#' @return A length-one character.
+#' @keywords internal
+#' @noRd
+.fitted_cache_key <- function(object) {
+  tryCatch(
+    digest::digest(list(
+      n      = object$n,
+      data   = sf::st_drop_geometry(object$data_sf),
+      coords = unname(sf::st_coordinates(object$data_sf))
+    )),
+    error = function(e) NA_character_
+  )
 }
 
 
@@ -597,8 +784,14 @@ fitted.bayesian_fit <- function(object, ...) {
 #'
 #' Removes the lazily-cached \code{fitted()} result so that the next call
 #' recomputes from the posterior.  This is only necessary if the underlying
-#' \code{brmsfit} engine or training data has been manually mutated after
-#' fitting — normal usage never requires it.
+#' \code{brmsfit} engine has been manually mutated after fitting -- a change to
+#' \code{data_sf} invalidates the entry on its own, because the cached value
+#' carries a digest of the data it was computed from (see
+#' \code{\link{fitted.bayesian_fit}}).  Normal usage never requires it.
+#'
+#' The cache environment is shared by every copy of a fit, so clearing it
+#' through one copy clears it for all of them.  That is harmless: the others
+#' recompute.
 #'
 #' @param object A \code{bayesian_fit} object.
 #' @return \code{object}, invisibly (called for side effect).
@@ -652,9 +845,33 @@ residuals.bayesian_fit <- function(object, ...) {
 
 #' Extract GWR local coefficients
 #'
+#' Returns the whole surface of coefficients -- one row per observation, one
+#' column per term -- rather than the single global vector \code{coef()}
+#' returns for an \code{lm}.  That table is the point of fitting a GWR at all:
+#' inspect the spread of a predictor's column to see where, and by how much,
+#' its relationship with the response changes across the study area, and join
+#' it back to \code{object$data_sf} to map it.  Use
+#' \code{\link{plot.spatial_fit}()} for a quick look at that map.
+#'
+#' @section What is and is not returned:
+#' Only the model terms -- the intercept and one column per predictor.
+#' GWmodel's \code{SDF} data slot carries a good deal more alongside them
+#' (standard errors, t-values, the observed response, the fitted values, the
+#' residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
+#' are coefficients.  Returning the whole slot would have made
+#' \code{coef(fit)$Local_R2} and \code{coef(fit)$a_SE} read like coefficients
+#' and \code{ncol(coef(fit))} a meaningless number.  Reach for
+#' \code{object$engine$SDF} when you want the rest; it is the unmodified
+#' GWmodel object.
+#'
+#' If the model terms cannot be located in the \code{SDF} -- a GWmodel that
+#' names its coefficient columns differently -- the whole slot is returned with
+#' a warning saying so, rather than an error or a silently short table.
+#'
 #' @param object A \code{gwr_fit} object.
 #' @param ... Ignored.
-#' @return A data.frame of local coefficient estimates (one row per obs).
+#' @return A data.frame of local coefficient estimates: one row per
+#'   observation, one column per model term.
 #'   Never \code{NULL}: when the engine carries no \code{SDF} component this
 #'   errors, following the \code{coef()} contract described in
 #'   \code{\link{new_spatial_fit}}.
@@ -666,11 +883,51 @@ coef.gwr_fit <- function(object, ...) {
   if (is.null(sdf))
     stop("coef.gwr_fit(): the fit carries no GWmodel `SDF` component, so the ",
          "local coefficients cannot be extracted.", call. = FALSE)
-  if (inherits(sdf, "Spatial")) sdf@data else sf::st_drop_geometry(sdf)
+  dat <- if (inherits(sdf, "Spatial")) sdf@data else sf::st_drop_geometry(sdf)
+
+  # Keep only the model terms.  gwr.basic()'s SDF is
+  #   c(colnames(betas), "y", "yhat", "residual", "CV_Score", "Stud_residual",
+  #     paste0(colnames(betas), "_SE"), paste0(colnames(betas), "_TV"),
+  #     "Local_R2")
+  # so the coefficients are the leading block and everything after it is a
+  # diagnostic.  Match on the model-matrix column names (normalised, so
+  # "(Intercept)" and GWmodel's "Intercept" agree) and take the FIRST unclaimed
+  # SDF column for each -- coefficients come first, so first-match is the
+  # coefficient even when a predictor shares a name with a diagnostic column.
+  want <- tryCatch(
+    colnames(stats::model.matrix(object$formula,
+                                 data = sf::st_drop_geometry(object$data_sf))),
+    error = function(e) NULL
+  )
+  .norm  <- function(x) tolower(gsub("[^[:alnum:]_.]", "", x))
+  if (!is.null(want) && length(want) > 0L) {
+    sdf_n  <- .norm(names(dat))
+    pos    <- integer(0)
+    for (w in .norm(want)) {
+      cand <- setdiff(which(sdf_n == w), pos)
+      if (length(cand) > 0L) pos <- c(pos, cand[[1L]])
+    }
+    if (length(pos) == length(want)) return(dat[, pos, drop = FALSE])
+    .log_warn(paste0("coef.gwr_fit(): matched only %d of %d model term(s) to a ",
+                     "column of GWmodel's SDF, so the full SDF data slot is ",
+                     "returned instead of the coefficients alone. Columns such ",
+                     "as *_SE, *_TV, residual and Local_R2 are diagnostics, ",
+                     "not coefficients."),
+              length(pos), length(want))
+  }
+  dat
 }
 
 
 #' Extract Bayesian model fixed-effect summaries
+#'
+#' Returns the posterior summary of the global (non-spatial) regression terms:
+#' estimate, error and credible interval per predictor, as
+#' \code{brms::fixef()} reports them.  Reach for it to read the average effect
+#' of a predictor with its uncertainty attached -- the Bayesian counterpart to
+#' a coefficient table -- remembering that the Gaussian-process term has
+#' already absorbed the spatially structured part of the signal, so these are
+#' effects net of location.
 #'
 #' @param object A \code{bayesian_fit} object.
 #' @param ... Ignored.

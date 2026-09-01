@@ -10,7 +10,9 @@ evaluate_insample(fits, newdata = NULL, ...)
 \item{fits}{A \code{spatial_fit} object, or a named list of them
 (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
 used as the model labels and every element must have one; an unnamed
-list is an error.}
+list is an error, and so are duplicated names --- \code{model} is the key
+the comparison table is assembled on, so two fits sharing a name cannot be
+told apart in the output.}
 
 \item{newdata}{Optional sf object for out-of-sample evaluation.
 Must contain the response variable and all predictors.
