@@ -110,6 +110,25 @@
 
 #' Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 #'
+#' Fits a regression whose residual spatial structure is modelled explicitly, as
+#' a Gaussian process over the coordinates, rather than left in the errors.  Two
+#' things follow, and they are the reasons to reach for this backend.  First,
+#' every quantity comes with a posterior, so predictions carry calibrated
+#' intervals instead of point estimates -- score them with
+#' \code{\link{cv_bayes}()}, which reports held-out interval coverage and CRPS.
+#' Second, the fitted length-scale is itself an estimate of how far the spatial
+#' dependence reaches, a number you can read and report.
+#'
+#' Choose it over \code{\link{fit_gwr_model}()} when you want one global
+#' relationship plus an explicit spatial random field, and uncertainty you can
+#' defend; choose GWR instead when the question is how a coefficient
+#' \emph{varies} across the map.  Choose \code{\link{fit_rf_model}()} when
+#' predictive accuracy matters more than an interpretable model and the
+#' response is non-linear in the predictors.  The cost here is time: this is
+#' full MCMC via 'brms' and Stan, so it is minutes rather than seconds, and the
+#' GP is fitted through a reduced-rank basis approximation whose size
+#' (\code{gp_k}) trades fidelity against runtime.
+#'
 #' @param data_sf An sf object with response, predictors, and geometries.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.  May be \code{character(0)}
@@ -174,11 +193,22 @@
 #' \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions -- the
 #' \code{gp_k} argument is the count \emph{per dimension}, not the total rank.
 #' Both \code{gp_k} and \code{gp_c} are therefore chosen from the ratio of the
-#' estimated length-scale to the domain half-range, following
+#' estimated length-scale to the domain extent, following
 #' Riutort-Mayol et al. (2023), rather than from the number of observations:
 #' \code{gp_c} is set large enough to contain the upper length-scale bound,
 #' and \code{gp_k} large enough to resolve the lower one.  The derived value is
 #' typically 21-25 per dimension and is largely independent of \code{n}.
+#'
+#' The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
+#' the full pooled range of the column-centred coordinates
+#' (\code{brms:::choose_L()}), not the per-axis half-range in which
+#' Riutort-Mayol et al. state their inequalities.  Both constraints are really
+#' constraints on the boundary \eqn{L = c \times S}, so expressing them in
+#' brms's units is what keeps \code{gp_c}, \code{gp_k} and
+#' \code{$info$gp_ell_min} describing the basis brms actually builds.  A
+#' \code{gp_c} derived on the half-range convention and handed to
+#' \code{brms::gp()} produces a boundary twice as wide as intended, against
+#' which \code{gp_k} under-resolves by a factor of two.
 #'
 #' The GP term is built with \code{scale = FALSE}.  \code{brms::gp()} otherwise
 #' rescales its covariates so the maximum Euclidean distance between two points
@@ -223,7 +253,10 @@
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 #'   gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
-#'   was calibrated over; gp_lscale_prior, loo, looic,
+#'   was calibrated over; gp_lscale_prior -- the length-scale prior
+#'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
+#'   which is not necessarily the one this function requested (several entries,
+#'   semicolon-separated, if brms resolved the axes differently); loo, looic,
 #'   convergence_ok,
 #'   convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 #' @family model fitting
@@ -357,9 +390,29 @@ fit_bayesian_spatial_model <- function(
   # coordinates do not look like lon/lat, so this is not an unconditional
   # guarantee.  Set the CRS on `data_sf` if a projected fit matters.
 
+  # `..x` and `..y` are this function's own reserved names: they are the
+  # columns handed to brms::gp() and the ones predict()/fitted() rebuild from
+  # $info$coord_scaling.  A data column already using either name survives the
+  # cbind() below as a DUPLICATE, and both dat_df[["..x"]] and brms's
+  # gp(..x, ..y) then resolve to the user's column -- so the GP is fitted over
+  # arbitrary data while $info$coord_scaling records the transform that was
+  # never applied, and predict time writes a different `..x` than was fitted.
+  # Nothing downstream can detect this, so refuse it here.
+  reserved <- intersect(c("..x", "..y"), names(sf::st_drop_geometry(dat_sf)))
+  if (length(reserved) > 0L)
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): column(s) %s in ",
+                        "`data_sf` collide with the reserved names this ",
+                        "function gives the scaled coordinates it hands to ",
+                        "brms::gp(). Rename them (they would otherwise be ",
+                        "silently used as the GP's coordinates in place of the ",
+                        "geometry)."),
+                 paste(sQuote(reserved), collapse = ", ")),
+         call. = FALSE)
+
   coords <- sf::st_coordinates(dat_sf)
   if (!all(c("X", "Y") %in% colnames(coords))) colnames(coords)[1:2] <- c("X", "Y")
-  
+
+
   # Per-axis (anisotropic) standardization: each coordinate is centered and
   # divided by its own SD.  This means the GP kernel is isotropic in the
   # *scaled* space but anisotropic in the original CRS whenever sd(X) != sd(Y).
@@ -419,17 +472,21 @@ fit_bayesian_spatial_model <- function(
     stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
          call. = FALSE)
   gp_k <- as.integer(gp_k)
-  if (gp_c < 1.2)
+  if (gp_c < 1.25)
     .log_warn(
-      paste0("fit_bayesian_spatial_model(): gp_c = %.2f is below the minimum of ",
-             "1.2 recommended for the squared-exponential kernel; the GP ",
-             "boundary may truncate the domain."),
+      paste0("fit_bayesian_spatial_model(): gp_c = %.2f is below 1.25, the ",
+             "boundary factor brms itself defaults to (c = 5/4) and the floor ",
+             "this package derives; the GP boundary may truncate the domain. ",
+             "Note brms multiplies c by the full range of the centred ",
+             "coordinates, not the half-range."),
       gp_c
     )
 
   # Smallest length-scale this (k, c) pair can resolve -- the inversion of
-  # m >= 1.75 * c / (ell/S).  Reported here and re-checked against the
-  # posterior after fitting.
+  # m >= 1.75 * L / ell with L = c * S.  gp_spec$S is brms's own domain
+  # measure (the pooled range of the centred coordinates), so this is the
+  # resolution of the basis brms will actually build, not of a notional one.
+  # Reported here and re-checked against the posterior after fitting.
   gp_ell_min <- 1.75 * gp_c * gp_spec$S / gp_k
   .log_info(
     paste0("fit_bayesian_spatial_model(): GP basis k = %d per dimension, ",
@@ -554,12 +611,71 @@ fit_bayesian_spatial_model <- function(
       )
     }
 
-    ls_prior <- brms::set_prior(lscale_prior_spec, class = "lscale")
+    # Attach the prior at COEFFICIENT level, not globally.
+    #
+    # brms::set_prior(spec, class = "lscale") with no `coef` is a *global*
+    # prior, and brms only applies a global prior to coefficients that have no
+    # individual prior of their own.  Every lscale coefficient always does --
+    # brms assigns each one a default inv_gamma() -- so the calibrated prior
+    # was silently dropped with the note "The global prior ... of class
+    # 'lscale' will not be used in the model as all related coefficients have
+    # individual priors already", and Stan received brms's defaults.  That made
+    # gp_lengthscale_bounds(), .lscale_invgamma(), the tail calibration and the
+    # %.10g guard all dead weight, and $info$gp_lscale_prior asserted a prior
+    # the model did not have.  (A global class = "b" prior does stick, because
+    # brms's `b` defaults are flat; the asymmetry is specific to lscale.)
+    #
+    # The coefficient names are read back from brms rather than hard-coded:
+    # they embed the covariate names ("gp..x..y..x", "gp..x..y..y") and the
+    # count depends on `iso`, so deriving them is the only version-safe way.
+    ls_coefs <- tryCatch({
+      gp_def <- brms::get_prior(fml, data = dat_df, family = family)
+      gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
+    }, error = function(e) character(0))
+
+    ls_prior <- if (length(ls_coefs) > 0L) {
+      Reduce(`+`, lapply(ls_coefs, function(k)
+        brms::set_prior(lscale_prior_spec, class = "lscale", coef = k)))
+    } else {
+      # No lscale coefficient to attach to (a brms that names them
+      # differently, or a formula with no GP term).  Fall back to the global
+      # form: it may be ignored, but it is the only thing left to say.
+      .log_warn(paste0("fit_bayesian_spatial_model(): brms reported no ",
+                       "coefficient-level 'lscale' priors for this formula, so ",
+                       "the calibrated length-scale prior is attached globally ",
+                       "and brms may not use it. Check $info$gp_lscale_prior ",
+                       "against brms::make_stancode()."))
+      brms::set_prior(lscale_prior_spec, class = "lscale")
+    }
     prior <- if (is.null(prior)) ls_prior else prior + ls_prior
   } else {
     .log_info(
       "fit_bayesian_spatial_model(): user-supplied prior already includes lscale class; skipping automatic GP length-scale prior."
     )
+  }
+
+  # Record the prior brms will actually use, not the one that was requested.
+  # validate_prior() resolves globals against coefficient-level defaults and
+  # returns the full table brms hands to Stan, so reading the lscale rows back
+  # out of it is the only way $info$gp_lscale_prior can be trusted.  On any
+  # failure the requested spec is kept and said to be unverified.
+  gp_lscale_prior_used <- lscale_prior_spec
+  vp <- tryCatch(
+    suppressWarnings(brms::validate_prior(prior, formula = fml, data = dat_df,
+                                          family = family)),
+    error = function(e) NULL
+  )
+  if (!is.null(vp) && is.data.frame(vp) && all(c("class", "coef", "prior") %in% names(vp))) {
+    used <- unique(vp$prior[vp$class == "lscale" & nzchar(vp$coef) &
+                              nzchar(vp$prior)])
+    if (length(used) > 0L) {
+      gp_lscale_prior_used <- paste(used, collapse = "; ")
+      if (!is.null(lscale_prior_spec) && !all(used == lscale_prior_spec))
+        .log_warn(paste0("fit_bayesian_spatial_model(): brms resolved the GP ",
+                         "length-scale prior to %s, not the requested %s. ",
+                         "$info$gp_lscale_prior records what brms will use."),
+                  gp_lscale_prior_used, lscale_prior_spec)
+    }
   }
 
   brm_args <- list(
@@ -598,15 +714,22 @@ fit_bayesian_spatial_model <- function(
     }, error = function(e) NULL)
     
     if (!is.null(rhat_vals)) {
-      max_rhat <- max(rhat_vals, na.rm = TRUE)
+      # brms::rhat() returns NaN for a parameter that is constant across
+      # draws, which `lprior` frequently is.  Two consequences had to be
+      # guarded.  `names(rhat_vals)[rhat_vals > 1.05]` keeps one NA element per
+      # NaN entry -- so convergence_ok was set FALSE and the warning named
+      # "NA" -- while which() drops them.  And max(..., na.rm = TRUE) over an
+      # all-NA vector is -Inf with a warning, not a diagnostic.
+      max_rhat <- if (any(is.finite(rhat_vals)))
+        max(rhat_vals[is.finite(rhat_vals)]) else NA_real_
       convergence_diagnostics$max_rhat <- max_rhat
-      bad_rhat <- names(rhat_vals)[rhat_vals > 1.05]
+      bad_rhat <- names(rhat_vals)[which(rhat_vals > 1.05)]
       if (length(bad_rhat) > 0L) {
         convergence_ok <- FALSE
         .log_warn(
           "fit_bayesian_spatial_model(): %d parameter(s) have R-hat > 1.05 (max = %.3f): %s. The model may not have converged.",
           length(bad_rhat), max_rhat,
-          paste(head(bad_rhat, 5), collapse = ", ")
+          paste(utils::head(bad_rhat, 5), collapse = ", ")
         )
       }
     }
@@ -618,15 +741,20 @@ fit_bayesian_spatial_model <- function(
     }, error = function(e) NULL)
     
     if (!is.null(neff_vals)) {
-      min_neff <- min(neff_vals, na.rm = TRUE)
+      # Same NaN hazard as R-hat above: a constant parameter has no effective
+      # sample size.  which() drops the NAs a logical subscript would keep as
+      # NA names, and min() is guarded so an all-NaN vector reports NA rather
+      # than +Inf.
+      min_neff <- if (any(is.finite(neff_vals)))
+        min(neff_vals[is.finite(neff_vals)]) else NA_real_
       convergence_diagnostics$min_neff_ratio <- min_neff
-      low_neff <- names(neff_vals)[neff_vals < 0.1]
+      low_neff <- names(neff_vals)[which(neff_vals < 0.1)]
       if (length(low_neff) > 0L) {
         convergence_ok <- FALSE
         .log_warn(
           "fit_bayesian_spatial_model(): %d parameter(s) have effective sample size ratio < 0.1 (min = %.3f): %s. Consider running longer chains.",
           length(low_neff), min_neff,
-          paste(head(low_neff, 5), collapse = ", ")
+          paste(utils::head(low_neff, 5), collapse = ", ")
         )
       }
     }
@@ -693,7 +821,7 @@ fit_bayesian_spatial_model <- function(
       gp_k                     = gp_k,
       gp_c                     = gp_c,
       gp_iso                   = gp_iso,
-      gp_lscale_prior          = lscale_prior_spec,
+      gp_lscale_prior          = gp_lscale_prior_used,
       gp_n_basis               = gp_k^2,
       gp_ell_min               = gp_ell_min,
       gp_lengthscale_bounds    = ls_bounds,

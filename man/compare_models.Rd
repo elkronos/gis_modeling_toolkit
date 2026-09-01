@@ -7,14 +7,22 @@
 compare_models(fits, newdata = NULL, ...)
 }
 \arguments{
-\item{fits}{A named list of \code{spatial_fit} objects.}
+\item{fits}{A named list of \code{spatial_fit} objects.  Names must be
+unique; see \code{\link{evaluate_insample}}.}
 
 \item{newdata}{Optional sf for out-of-sample evaluation.}
 
 \item{...}{Extra arguments passed to predict().}
 }
 \value{
-A data.frame comparing all models.
+A data.frame comparing all models.  Alongside the metrics it carries
+\code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
+\code{resid_morans_null} --- the last naming which null
+\code{\link{residual_morans_i}} scored each model against, since that
+choice is per-fit and governs how much the p-value is worth.  The
+significant-autocorrelation warning below is driven by that p-value, so
+read its caveats in \code{?residual_morans_i} before treating silence as
+evidence of no residual structure.
 }
 \description{
 Takes a named list of already-fit \code{spatial_fit} objects and produces

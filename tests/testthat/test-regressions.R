@@ -99,6 +99,105 @@ test_that(".remap_folds keeps the original fold labels when one is dropped", {
 })
 
 
+test_that(".remap_folds drops folds left with fewer than two training rows", {
+  # An empty (or one-row) TRAINING set is as fatal as an empty test set: there
+  # is nothing to fit on.  Such folds used to reach .cv_fit_one_fold(), fail
+  # there one at a time, and surface only as a generic "all folds failed".
+  remap <- spatialkit:::.remap_folds
+
+  # keep_idx admits only rows 1:6, so fold 2's training set shrinks to a single
+  # surviving row and fold 3's to none, while fold 1 keeps four.
+  folds <- list(
+    list(train = 3:10, test = 1:2),     # -> train 3:6  (kept)
+    list(train = c(1L, 20L), test = 5L),# -> train 1    (dropped: < 2)
+    list(train = 30:40,  test = 6L),    # -> train none (dropped)
+    list(train = 1:5,    test = 6L)     # -> train 1:5  (kept)
+  )
+  keep <- 1:6
+
+  lines <- capture_spatialkit_log(out <- remap(folds, keep))
+  expect_true(log_has(lines, "fewer than 2 training rows"))
+  expect_true(log_has(lines, "2 fold\\(s\\)"))
+
+  expect_length(out, 2L)
+  # The survivors keep their ORIGINAL labels, so the drop is not a renumbering.
+  expect_equal(vapply(out, function(z) z$fold_id, integer(1)), c(1L, 4L))
+  expect_equal(out[[1]]$train, 3:6)
+  expect_equal(out[[2]]$train, 1:5)
+  # Every fold that came back really is fittable.
+  expect_true(all(vapply(out, function(z) length(z$train) >= 2L, logical(1))))
+
+  # A fold with exactly two training rows is on the right side of the line.
+  edge <- remap(list(list(train = c(1L, 2L, 90L), test = 3L)), keep)
+  expect_length(edge, 1L)
+  expect_equal(edge[[1]]$train, 1:2)
+})
+
+
+# ---------------------------------------------------------------------------
+# Pooled CV R-squared must use each observation's TRAINING-fold mean
+# ---------------------------------------------------------------------------
+
+test_that("cv R-squared is scored against the training-fold mean, not the pooled one", {
+  # Out-of-sample R^2 measured against the test data's OWN mean is the classic
+  # flattering number: it credits the model for knowing where the held-out
+  # block sits, which at prediction time it does not.  cv_spatial() therefore
+  # carries a per-observation y_train_mean through to .compute_reg_metrics().
+  #
+  # Three explicit west-to-east strips over a steep x-gradient, so the two
+  # baselines are genuinely different: each strip's training mean is the mean
+  # of the OTHER two strips, which sits far from both the strip's own values
+  # and the pooled mean of everything held out.  The only predictor is noise,
+  # so the fitted model predicts close to its training mean and the choice of
+  # baseline is the whole story.
+  set.seed(11)
+  n   <- 90
+  x   <- runif(n, 0, 900); y <- runif(n, 0, 900)
+  pts <- sf::st_as_sf(
+    data.frame(x = x, y = y, w = rnorm(n), z = 0.1 * x + rnorm(n, 0, 2)),
+    coords = c("x", "y"), crs = 3857)
+
+  strip <- cut(x, breaks = c(-Inf, 300, 600, Inf), labels = FALSE)
+  folds <- lapply(1:3, function(j) list(train = which(strip != j),
+                                        test  = which(strip == j)))
+  expect_true(all(vapply(folds, function(f) length(f$test) >= 10L, logical(1))))
+
+  cv <- cv_spatial(pts, "z", "w",
+                   fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
+                   folds = folds, seed = 1)
+
+  p <- cv$predictions
+  expect_true("y_train_mean" %in% names(p))
+  expect_equal(cv$n_folds_succeeded, 3L)
+
+  # Every prediction carries the mean of ITS OWN fold's training rows.
+  for (j in seq_along(folds)) {
+    in_fold <- p$fold == j
+    expect_equal(sum(in_fold), length(folds[[j]]$test), info = paste("fold", j))
+    expect_equal(unique(p$y_train_mean[in_fold]),
+                 mean(pts$z[folds[[j]]$train]), tolerance = 1e-10,
+                 info = paste("fold", j))
+  }
+  # The three baselines really are three different numbers.
+  expect_equal(length(unique(p$y_train_mean)), 3L)
+
+  ok  <- is.finite(p$y) & is.finite(p$yhat)
+  rss <- sum((p$y[ok] - p$yhat[ok])^2)
+  r2_train  <- 1 - rss / sum((p$y[ok] - p$y_train_mean[ok])^2)
+  r2_pooled <- 1 - rss / sum((p$y[ok] - mean(p$y[ok]))^2)
+
+  # The two baselines are a full R^2 unit apart, so the assertion below picks
+  # one of them rather than tolerating either.
+  expect_gt(abs(r2_train - r2_pooled), 0.5)
+  expect_equal(cv$overall$R2, r2_train, tolerance = 1e-10)
+  expect_false(isTRUE(all.equal(cv$overall$R2, r2_pooled, tolerance = 1e-3)))
+
+  # RMSE has no baseline, so it must be unaffected either way -- a check that
+  # the fixture is not simply broken.
+  expect_equal(cv$overall$RMSE, sqrt(rss / sum(ok)), tolerance = 1e-10)
+})
+
+
 test_that("cv_spatial reports fold labels that match make_folds()", {
   # The user-visible form of the same fix.
   pts   <- .rg_points(40)

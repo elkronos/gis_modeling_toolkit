@@ -101,15 +101,189 @@
 # Post-fit residual spatial autocorrelation check (Moran's I)
 # ---------------------------------------------------------------------------
 
+#' Index pairs of the k nearest *other* observations
+#'
+#' Returns the \code{(i, j)} pairs of a k-nearest-neighbour graph with every
+#' self-match removed, so the weight matrix built from them has a zero
+#' diagonal.  That is not cosmetic: Moran's I is defined only for
+#' \eqn{w_{ii} = 0}, and both \eqn{E[I] = -1/(n-1)} and the Cliff & Ord
+#' variance assume it.
+#'
+#' \code{FNN::get.knn()} reports a point's OWN index among its neighbours
+#' whenever exact duplicate coordinates are present, which put \eqn{1/k} on the
+#' diagonal and added a strictly positive \eqn{w_{ii} e_i^2} term to the
+#' numerator.  Repeat observations at one site are exactly what
+#' \code{make_folds(method = "leave_location_out")} is for, and
+#' \code{residual_morans_i()} reads \code{fit$data_sf} without de-duplicating,
+#' so this was a mainstream input rather than a corner case: with 40 sites x 4
+#' repeats and a response carrying no spatial structure at all, 120 of 160 rows
+#' gained a self-weight, mean I came out at +0.086 against
+#' \eqn{E[I] = -0.0063}, and 77\% of samples were "significant" at
+#' \eqn{p < 0.05} (nominal 5\%).  \code{spdep::knearneigh()} never returns a
+#' self-match, and neither did the dense fallback, so the statistic also
+#' depended silently on whether \pkg{FNN} happened to be installed.
+#'
+#' The kd-tree path therefore asks for \code{k + 1} neighbours, drops any
+#' \code{j == i}, and keeps the \code{k} nearest of what remains.
+#'
+#' @param coords Numeric matrix (n x 2) of projected coordinates.
+#' @param k Integer neighbour count, already clamped to \code{n - 1}.
+#' @param use_fnn Logical; use \pkg{FNN}'s kd-tree rather than a dense
+#'   \code{dist()} scan.
+#' @return A list with integer vectors \code{i} and \code{j} of equal length.
+#' @keywords internal
+#' @noRd
+.knn_pairs <- function(coords, k, use_fnn) {
+  n <- nrow(coords)
+
+  # At k >= n - 1 every point neighbours every other, so no lookup can add
+  # anything -- and asking FNN for n - 1 neighbours of duplicated points can
+  # spend one of them on a self-match, silently losing a genuine neighbour.
+  if (k >= n - 1L) {
+    return(list(
+      i = rep(seq_len(n), each = n - 1L),
+      j = as.integer(unlist(lapply(seq_len(n), function(i) seq_len(n)[-i]),
+                            use.names = FALSE))
+    ))
+  }
+
+  if (isTRUE(use_fnn)) {
+    kq     <- k + 1L                                # k + 1 <= n - 1 here
+    nn_idx <- FNN::get.knn(coords, k = kq)$nn.index  # n x kq, nearest first
+    # Entries within a row are distinct point indices, so at most one of them
+    # can be i itself.
+    self <- nn_idx == seq_len(n)     # recycles down columns: [i, j] against i
+
+    if (!any(self)) {
+      # No slot was spent on a self-match, so all k + 1 returned neighbours are
+      # genuine and the k nearest of them are a correct k-NN set.
+      idx <- nn_idx[, seq_len(k), drop = FALSE]
+      return(list(i = rep(seq_len(n), each = k), j = as.integer(t(idx))))
+    }
+
+    # A self-match means exact duplicate coordinates, and dropping it is NOT
+    # enough: the slot it occupied displaced a genuine tied neighbour, so the
+    # k that remain are not the k nearest.  Measured on 25 sites x 4 repeats,
+    # k = 3: 75 of 400 retained pairs were a point at distance 121 standing in
+    # for a co-located one at distance 0.  Group the duplicates and answer
+    # exactly instead.
+    return(.knn_pairs_dup(coords, k))
+  }
+
+  dmat <- as.matrix(stats::dist(coords))
+  diag(dmat) <- Inf                                 # self is never a neighbour
+  # matrix(..., nrow = n, ncol = k) forces the shape apply() will not.
+  # At k = 1 the inner function returns a scalar, so apply() simplifies to a
+  # length-n VECTOR and t() turns it into a 1 x n matrix -- making nn_idx[i, ]
+  # fail with "subscript out of bounds" for every i > 1.
+  # residual_morans_i(fit, k = 1) reached this on any machine without FNN.
+  nn_idx <- matrix(t(apply(dmat, 1, function(row) order(row)[seq_len(k)])),
+                   nrow = n, ncol = k)
+  list(i = rep(seq_len(n), each = k), j = as.integer(t(nn_idx)))
+}
+
+
+#' Exact k-nearest-neighbour pairs when the coordinates contain exact duplicates
+#'
+#' \code{FNN::get.knn()} answers a tied query by returning \emph{some} of the
+#' tied points, and the point's own index is eligible to be one of them --- so
+#' with duplicates a \code{k + 1} query can come back holding self \emph{and}
+#' having dropped a genuine co-located neighbour, leaving a farther point in
+#' its place.  Requesting one extra neighbour therefore removes the self-weight
+#' but does not restore the neighbour it displaced.
+#'
+#' Duplicates are not exotic here: repeat observations at one site are exactly
+#' what \code{make_folds(method = "leave_location_out")} exists for, and
+#' \code{residual_morans_i()} reads \code{fit$data_sf} without de-duplicating.
+#'
+#' The structure of the problem makes an exact answer cheap.  Points sharing a
+#' coordinate are at distance 0 from each other and at an identical distance
+#' from everything else, so the neighbour set is determined group-wise: take
+#' the other members of the point's own group first, then fill from the nearest
+#' \emph{other} groups in order.  The k-d tree runs on the group
+#' representatives, which are distinct by construction and so cannot tie
+#' against themselves.
+#'
+#' @param coords Numeric matrix (n x 2) of projected coordinates.
+#' @param k Integer neighbour count, already known to be \code{< n - 1}.
+#' @return A list with integer vectors \code{i} and \code{j}, \code{k} entries
+#'   per row of \code{coords}.
+#' @keywords internal
+#' @noRd
+.knn_pairs_dup <- function(coords, k) {
+  n <- nrow(coords)
+
+  # "%.17g" round-trips a double exactly, so two rows share a key iff they are
+  # bit-identical.  (as.character() would stop at 15 significant digits and
+  # could merge two points a few ulps apart -- harmless, but only by accident.)
+  key <- paste(sprintf("%.17g", coords[, 1L]),
+               sprintf("%.17g", coords[, 2L]), sep = "\r")
+  gid     <- match(key, key)              # representative row index per point
+  reps    <- which(!duplicated(gid))      # one row index per distinct location
+  gid     <- match(gid, gid[reps])        # 1..G
+  members <- split(seq_len(n), gid)
+  G       <- length(reps)
+
+  # Every point at one location: k < n - 1 already, so the first k of the other
+  # members is a correct answer (they are all at distance 0).
+  if (G == 1L) {
+    j <- unlist(lapply(seq_len(n), function(i) seq_len(n)[-i][seq_len(k)]),
+                use.names = FALSE)
+    return(list(i = rep(seq_len(n), each = k), j = as.integer(j)))
+  }
+
+  # Nearest other GROUPS, in distance order.  k groups always suffice: each
+  # supplies at least one member and at most k are ever needed.  Ask for one
+  # extra and filter, so a self-match here could only cost an unused slot.
+  kg  <- min(k + 1L, G - 1L)
+  nn  <- FNN::get.knn(coords[reps, , drop = FALSE], k = kg)$nn.index
+  nn  <- matrix(nn, nrow = G, ncol = kg)
+
+  out_i <- vector("list", G)
+  out_j <- vector("list", G)
+  for (g in seq_len(G)) {
+    mem <- members[[g]]
+    m   <- length(mem)
+
+    # Members of the nearest other groups, in order, enough to top up any point
+    # of this group.  Identical for every point in the group, since they share
+    # a coordinate.
+    ext <- integer(0)
+    if (k > m - 1L) {
+      for (h in nn[g, ]) {
+        if (h == g) next                  # defensive; representatives are distinct
+        ext <- c(ext, members[[h]])
+        if (length(ext) >= k - (m - 1L)) break
+      }
+      ext <- ext[seq_len(k - (m - 1L))]
+    }
+
+    js <- lapply(mem, function(i) {
+      own <- mem[mem != i]
+      if (length(own) >= k) own[seq_len(k)] else c(own, ext)
+    })
+    out_i[[g]] <- rep(mem, each = k)
+    out_j[[g]] <- unlist(js, use.names = FALSE)
+  }
+
+  list(i = as.integer(unlist(out_i, use.names = FALSE)),
+       j = as.integer(unlist(out_j, use.names = FALSE)))
+}
+
+
 #' Build a row-standardised k-nearest-neighbour sparse weight matrix
 #'
-#' For each observation the \code{k} closest neighbours receive weight 1;
-#' all other pairs receive weight 0.
+#' For each observation the \code{k} closest \emph{other} observations receive
+#' weight 1; all other pairs, and the diagonal, receive weight 0.
 #' The resulting matrix is then row-standardised so that each row sums to 1.
 #' This is the standard default in spatial statistics (Anselin, 1988) and is
 #' far more robust to irregularly-spaced or clustered data than an
 #' inverse-distance scheme, which gives enormous weight to very close pairs
 #' and can inflate Moran's I significance.
+#'
+#' The neighbour lookup itself is \code{.knn_pairs()}, which is where the
+#' zero-diagonal guarantee lives — see the note there on duplicate
+#' coordinates.
 #'
 #' Uses \pkg{FNN} for O(n·k) kd-tree nearest-neighbour lookup when available,
 #' avoiding the O(n²) full distance matrix.  Returns a
@@ -143,57 +317,238 @@
   has_fnn    <- isTRUE(use_fnn)
   has_matrix <- isTRUE(use_matrix)
 
+  # --- Fallback: dense O(n²) path when packages are missing ----
+  # The guard has to test BOTH backends, not just FNN: the dense branch is
+  # entered whenever either is missing and always allocates W <- matrix(0,n,n),
+  # so keying it on FNN alone let an unbounded n x n allocation through whenever
+  # FNN was present but Matrix was not (or use_matrix = FALSE).
+  if (!(has_fnn && has_matrix) && n > 5000L)
+    stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
+
+  # Both backends share one neighbour lookup, so the zero diagonal (and the
+  # k + 1 request that FNN needs to guarantee it) cannot drift apart between
+  # them.  The two paths differ only in how W is stored.
+  pr    <- .knn_pairs(coords, k = k, use_fnn = has_fnn)
+  row_i <- pr$i
+  col_j <- pr$j
+  deg   <- tabulate(row_i, nbins = n)   # neighbours actually kept per row
+  deg[deg == 0L] <- 1L                  # isolate: leave a zero row, not NaN
+
   if (has_fnn && has_matrix) {
     # --- Fast path: O(n*k) kd-tree lookup + sparse matrix ----
-    nn_idx <- FNN::get.knn(coords, k = k)$nn.index          # n x k matrix
-    row_i  <- rep(seq_len(n), each = k)
-    col_j  <- as.integer(t(nn_idx))
     W <- Matrix::sparseMatrix(
-      i = row_i, j = col_j, x = 1 / k,                      # row-standardised
+      i = row_i, j = col_j, x = 1 / deg[row_i],             # row-standardised
       dims = c(n, n), repr = "C"
     )
   } else {
-    # --- Fallback: dense O(n²) path when packages are missing ----
-    # The guard has to test BOTH backends, not just FNN: this branch is entered
-    # whenever either is missing and always allocates W <- matrix(0, n, n), so
-    # keying it on FNN alone let an unbounded n x n allocation through whenever
-    # FNN was present but Matrix was not (or use_matrix = FALSE).
-    if (!(has_fnn && has_matrix) && n > 5000L)
-      stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
-    if (has_fnn) {
-      nn_idx <- FNN::get.knn(coords, k = k)$nn.index
-    } else {
-      dmat <- as.matrix(stats::dist(coords))
-      diag(dmat) <- Inf
-      nn_idx <- t(apply(dmat, 1, function(row) order(row)[seq_len(k)]))
-    }
     W <- matrix(0, n, n)
-    for (i in seq_len(n)) W[i, nn_idx[i, ]] <- 1
-    rs <- rowSums(W)
-    rs[rs == 0] <- 1
-    W <- W / rs
+    W[cbind(row_i, col_j)] <- 1 / deg[row_i]
   }
 
   W
 }
 
 
+#' Rebuild a fitted model's design matrix and test whether its residuals are
+#' the OLS residuals on it
+#'
+#' The Cliff & Ord residual moments are exact for \eqn{e = My} with
+#' \eqn{M = I - X(X'X)^{-1}X'} and nothing else, so rather than guessing from
+#' the fit's class whether that holds, this checks it directly: rebuild
+#' \code{X} from \code{predictor_vars} and \code{data_sf}, regress the response
+#' on it, and compare the result with the residuals actually supplied.  The
+#' answer is exactly the condition the formula needs, and it degrades
+#' gracefully — a GWR whose bandwidth is wide enough to be global OLS passes,
+#' the same GWR at a small bandwidth does not.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @param resid The residual vector already extracted and subset by \code{keep}.
+#' @param keep Logical vector over the rows of \code{fit$data_sf} marking the
+#'   observations that survived the finite-residual filter.
+#' @return \code{NULL} when the design cannot be rebuilt, otherwise a list with
+#'   \code{X} (the model matrix, rows subset by \code{keep}) and \code{is_ols}.
+#' @keywords internal
+#' @noRd
+.morans_ols_design <- function(fit, resid, keep) {
+  d  <- fit$data_sf
+  rv <- fit$response_var
+  pv <- fit$predictor_vars
+  if (!inherits(d, "sf")) return(NULL)
+  if (!is.character(rv) || length(rv) != 1L || is.na(rv)) return(NULL)
+  if (is.null(pv)) pv <- character(0)
+  if (!is.character(pv)) return(NULL)
+
+  df <- tryCatch(sf::st_drop_geometry(d), error = function(e) NULL)
+  if (is.null(df) || nrow(df) != length(keep)) return(NULL)
+  if (!all(c(rv, pv) %in% names(df))) return(NULL)
+
+  df <- df[keep, c(rv, pv), drop = FALSE]
+  if (nrow(df) != length(resid) || anyNA(df)) return(NULL)
+
+  y <- df[[rv]]
+  if (!is.numeric(y) || !all(is.finite(y))) return(NULL)
+
+  X <- if (length(pv) == 0L) {
+    # An intercept-only model.  tr(MW) = -S0/n for any W with a zero diagonal,
+    # so the residual moments reduce to E[I] = -1/(n - 1) exactly -- the
+    # classical value -- which is a useful sanity check on the general path.
+    matrix(1, nrow(df), 1L, dimnames = list(NULL, "(Intercept)"))
+  } else {
+    tryCatch(
+      stats::model.matrix(~ ., data = df[, pv, drop = FALSE]),
+      error = function(e) NULL
+    )
+  }
+  if (!is.matrix(X) || nrow(X) != nrow(df) || !all(is.finite(X))) return(NULL)
+
+  e_ols <- tryCatch(qr.resid(qr(X), y), error = function(e) NULL)
+  if (is.null(e_ols) || length(e_ols) != length(resid)) return(NULL)
+
+  scale <- max(stats::sd(y), .Machine$double.eps)
+  list(X = X, is_ols = max(abs(resid - e_ols)) <= 1e-7 * scale)
+}
+
+
+#' Cliff & Ord (1981) sec. 8.3 moments of Moran's I for regression residuals
+#'
+#' For \eqn{e = M\varepsilon} with \eqn{M = I - X(X'X)^{-1}X'} and
+#' \eqn{\varepsilon \sim N(0, \sigma^2 I)}:
+#' \deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
+#' \deqn{Var[I] = (n/S_0)^2 [\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
+#'   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
+#'
+#' \eqn{M} is never formed.  With \eqn{Q} an orthonormal basis of
+#' \eqn{col(X)} (so \eqn{P = QQ'}), every trace reduces to a \eqn{q \times q}
+#' one plus Frobenius norms of the \eqn{n \times q} products \eqn{WQ} and
+#' \eqn{W'Q}, which keeps the sparse weight matrix sparse:
+#' \deqn{\mathrm{tr}(MW) = \mathrm{tr}(W) - \mathrm{tr}(Q'WQ)}
+#' \deqn{\mathrm{tr}((MW)^2) = \mathrm{tr}(W^2) - 2\,\mathrm{tr}(PW^2) +
+#'   \mathrm{tr}((Q'WQ)^2)}
+#' \deqn{\mathrm{tr}(MWMW') = \mathrm{tr}(WW') - \mathrm{tr}(PW'W) -
+#'   \mathrm{tr}(PWW') + \mathrm{tr}((Q'WQ)(Q'WQ)')}
+#'
+#' Verified to agree with \code{spdep::lm.morantest()} and with an explicit
+#' dense \eqn{M} to machine precision.
+#'
+#' @param W The weight matrix (base or \pkg{Matrix}).
+#' @param X The design matrix.
+#' @param S0 \code{sum(W)}, already computed by the caller.
+#' @param is_sparse Whether \code{W} is a \pkg{Matrix} object.
+#' @return \code{NULL} when the residual degrees of freedom are too small to
+#'   support the formula, otherwise a list with \code{EI}, \code{VI},
+#'   \code{df} and \code{p}.
+#' @keywords internal
+#' @noRd
+.morans_residual_moments <- function(W, X, S0, is_sparse) {
+  n   <- nrow(X)
+  qrX <- tryCatch(qr(X), error = function(e) NULL)
+  if (is.null(qrX)) return(NULL)
+  q  <- qrX$rank
+  df <- n - q
+  # (n - p + 2) sits in the denominator and the normal approximation is
+  # meaningless with a handful of residual degrees of freedom either way.
+  if (!is.finite(q) || q < 1L || df < 4L) return(NULL)
+
+  Q  <- qr.Q(qrX)[, seq_len(q), drop = FALSE]
+  Wt <- if (is_sparse) Matrix::t(W) else t(W)
+  WQ <- as.matrix(W  %*% Q)                     # n x q
+  HQ <- as.matrix(Wt %*% Q)                     # n x q  (= W' Q)
+  G  <- crossprod(Q, WQ)                        # q x q  (= Q' W Q)
+
+  trW   <- sum(if (is_sparse) Matrix::diag(W) else diag(W))
+  trMW  <- trW - sum(diag(G))
+  trWWt <- sum(W * W)                           # tr(W W')
+  trW2  <- sum(W * Wt)                          # tr(W^2)
+
+  trMWMWt <- trWWt - sum(WQ * WQ) - sum(HQ * HQ) + sum(G * G)
+  trMWMW  <- trW2  - 2 * sum(HQ * WQ)           + sum(G * t(G))
+
+  EI <- (n / S0) * trMW / df
+  VI <- (n / S0)^2 * (trMWMWt + trMWMW + trMW^2) / (df * (df + 2)) - EI^2
+  if (!is.finite(EI) || !is.finite(VI)) return(NULL)
+  list(EI = EI, VI = VI, df = df, p = q)
+}
+
+
 #' Compute Moran's I on the residuals of a fitted spatial model
 #'
-#' Given a \code{spatial_fit} object (GWR or Bayesian), extracts the
-#' residuals and the observation coordinates, builds a spatial weight
-#' matrix, and computes the Moran's I statistic together with
-#' its analytical expectation and variance under the randomisation
-#' assumption (Cliff & Ord).  A z-score and two-sided p-value are
-#' provided so the caller can assess whether statistically significant
-#' spatial autocorrelation remains after fitting.
+#' Given a \code{spatial_fit} object, extracts the residuals and the
+#' observation coordinates, builds a spatial weight matrix, and computes
+#' Moran's I together with its analytical expectation and variance under a
+#' stated null.  A z-score and two-sided p-value are provided so the caller can
+#' assess whether statistically significant spatial autocorrelation remains
+#' after fitting.
 #'
 #' By default, weights are constructed as a k-nearest-neighbour (k = 8)
 #' binary matrix, row-standardised.  Users may supply their own weight
 #' matrix via the \code{weights} argument.
 #'
-#' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model} or
-#'   \code{fit_bayesian_spatial_model}).
+#' @section Which null, and when it is approximate:
+#' Two nulls are available, and the one actually used is reported back in the
+#' \code{null} element of the return value.
+#'
+#' \code{"randomisation"} is the classical exchangeable null:
+#' \eqn{E[I] = -1/(n-1)} with the Cliff & Ord randomisation variance,
+#' conditioning on the observed kurtosis.  These are the moments of I for a
+#' vector whose elements are equally likely in any order.
+#'
+#' \strong{Model residuals are not exchangeable.}  They are orthogonal to the
+#' design matrix, which pushes \eqn{E[I]} materially below \eqn{-1/(n-1)}
+#' whenever the covariates are spatially smooth — and pushes it further the
+#' more covariates there are.  In a simulation with \eqn{n = 120}, six smooth
+#' covariates and \emph{independent} errors (so the truth is "no residual
+#' autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
+#' exchangeable \eqn{E[I] = -0.008}; the z-score averaged \eqn{-0.54} with
+#' \eqn{sd = 0.90} instead of 0 and 1.  The cost is power, which is the point
+#' of the test: at a moderate residual autocorrelation the exchangeable null
+#' rejected 13\% of the time where the correct one rejected 31\%.
+#'
+#' \code{"residual"} therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
+#' regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
+#' \code{predictor_vars} and \code{data_sf}:
+#' \deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
+#' \deqn{Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
+#'   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
+#' These assume normal errors rather than conditioning on the observed
+#' kurtosis.  On the simulation above they restored the z-score to mean
+#' \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\% against a
+#' nominal 5\%.  They agree with \code{spdep::lm.morantest()} to machine
+#' precision.
+#'
+#' \strong{These moments are exact for \eqn{e = My} and for nothing else}, so
+#' \code{null = "auto"} does not guess from the fit's class: it rebuilds
+#' \code{X}, regresses the response on it, and uses the residual moments only
+#' when the supplied residuals \emph{are} those OLS residuals to numerical
+#' tolerance.  A GWR wide enough to have collapsed to global OLS passes that
+#' test; the same GWR at a working bandwidth does not.
+#'
+#' \strong{For the flexible backends neither null is exact}, and \code{"auto"}
+#' leaves them on \code{"randomisation"} because forcing the OLS moments on
+#' them measurably makes matters worse, not better.  Measured on null data
+#' (\eqn{n = 120}, three smooth covariates, independent errors; nominal 5\%,
+#' one-sided):
+#' \tabular{lrr}{
+#'   \strong{backend} \tab \strong{randomisation} \tab \strong{residual} \cr
+#'   OLS              \tab 0.035 \tab 0.060 \cr
+#'   random forest    \tab 0.128 \tab 0.200 \cr
+#'   GWR              \tab 0.000 \tab 0.000
+#' }
+#' An in-sample random forest is anticonservative under both — its residuals
+#' are shrunk and spatially heteroscedastic, so the variance is understated
+#' whichever moments are used (\eqn{sd(z) \approx 1.3}) — and GWR is
+#' conservative under both, because it removes far more structure than a rank-p
+#' projection does.  Treat the p-value from those backends as a rough
+#' indicator, and prefer cross-validated residuals or an explicit spatial
+#' covariance model when the answer has to carry weight.
+#'
+#' A permutation null was considered and rejected: permuting the residual
+#' vector destroys exactly the orthogonality that causes the bias, so its mean
+#' is the exchangeable \eqn{-1/(n-1)} by construction (measured:
+#' \eqn{-0.00840} against \eqn{-1/(n-1) = -0.00840}) and it reproduces the
+#' randomisation null rather than correcting it.
+#'
+#' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model},
+#'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).
 #' @param alternative Character: \code{"two.sided"} (default),
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
 #' @param weights Optional user-supplied n x n weight matrix — a base
@@ -208,34 +563,58 @@
 #' @param k Integer number of nearest neighbours used when building the
 #'   default weight matrix (ignored when \code{weights} is supplied).
 #'   Default 8.
+#' @param null Which null distribution the expectation, variance and p-value
+#'   are computed against.  One of:
+#'   \describe{
+#'     \item{\code{"auto"} (default)}{\code{"residual"} when the design matrix
+#'       can be rebuilt \emph{and} the fit's residuals are the OLS residuals on
+#'       it, \code{"randomisation"} otherwise.}
+#'     \item{\code{"randomisation"}}{Always the exchangeable moments.}
+#'     \item{\code{"residual"}}{Always the Cliff & Ord residual moments.  Falls
+#'       back to \code{"randomisation"} with a logged warning if the design
+#'       cannot be rebuilt, and warns (but proceeds) if the residuals are not
+#'       the OLS residuals on it, in which case the moments are approximate.}
+#'   }
+#'   See \strong{Which null, and when it is approximate} above.
 #' @return A list with components:
 #'   \describe{
 #'     \item{observed}{Numeric scalar, Moran's I statistic.}
-#'     \item{expected}{Expected I under the null of no spatial
-#'       autocorrelation, \eqn{-1/(n-1)}.}
-#'     \item{sd}{Standard deviation of I under the randomisation
-#'       assumption.}
+#'     \item{expected}{Expected I under the null named by \code{null}:
+#'       \eqn{-1/(n-1)} for \code{"randomisation"},
+#'       \eqn{(n/S_0)\mathrm{tr}(MW)/(n-p)} for \code{"residual"}.}
+#'     \item{sd}{Standard deviation of I under that same null.}
 #'     \item{z}{Standardised z-score, \eqn{(I - E[I]) / sd(I)}.}
 #'     \item{p_value}{Two-sided (or one-sided) p-value from the
 #'       normal approximation.}
 #'     \item{n}{Number of observations used.}
+#'     \item{null}{The null actually used, \code{"randomisation"} or
+#'       \code{"residual"} — check this rather than assuming, since
+#'       \code{"auto"} chooses per fit and \code{"residual"} can fall back.}
+#'     \item{df}{Residual degrees of freedom behind the moments:
+#'       \eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
+#'       design matrix), \eqn{n - 1} for \code{"randomisation"}.}
 #'   }
 #'   Returns \code{NULL} with a warning if computation fails (e.g. fewer
 #'   than 4 valid residuals).
+#' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
+#'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
 #' @examples
 #' \donttest{
-#' if (requireNamespace("GWmodel", quietly = TRUE) &&
-#'     requireNamespace("sp", quietly = TRUE)) {
+#' # Works on any spatial_fit; a forest keeps the example free of the optional
+#' # GWR/Stan backends.
+#' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
-#'   n <- 60
+#'   n <- 120
 #'   dat <- st_as_sf(
 #'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
-#'   dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
-#'   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
+#'   # A strong east-west trend the predictor cannot explain: the residuals
+#'   # should still carry spatial structure, and this is what detects it.
+#'   dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+#'   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
 #'   residual_morans_i(fit)  # z near 0 / p large = no residual structure
 #' }
 #' }
@@ -243,8 +622,10 @@
 residual_morans_i <- function(fit,
                               alternative = c("two.sided", "greater", "less"),
                               weights = NULL,
-                              k = 8L) {
+                              k = 8L,
+                              null = c("auto", "randomisation", "residual")) {
   alternative <- match.arg(alternative)
+  null        <- match.arg(null)
 
   if (!inherits(fit, "spatial_fit")) {
     .log_warn("residual_morans_i(): `fit` is not a spatial_fit object.")
@@ -332,35 +713,85 @@ residual_morans_i <- function(fit,
   # note in the variance block below.  The two are numerically identical.
   I <- (n / S0) * sum(resid_c * (W %*% resid_c)) / ss_c
 
-  # --- Analytical expectation & variance (randomisation assumption) ---
-  EI <- -1 / (n - 1)
-
-  # Cliff & Ord variance under randomisation
-  # S1 = 0.5 * sum((W + t(W))^2) rewritten via the identity
-  #    = sum(W^2) + sum(W * t(W))
-  # so that sparse W never materialises the denser (W + t(W)) intermediate.
-  #
-  # NOTE: t(), rowSums(), colSums() and crossprod() are plain base functions
-  # that do NOT dispatch to Matrix's S4 methods when called from package code
-  # with Matrix loaded-but-not-attached, so sparse W needs the Matrix::
-  # generics explicitly (or, for crossprod, the primitive-only rewrite used
-  # for I above).  Only primitives -- *, %*%, and sum() -- dispatch on their
-  # own; crossprod is neither a primitive nor an internal generic, which is
-  # why it belongs on this list and not with them.
+  # NOTE for everything below: t(), rowSums(), colSums() and crossprod() are
+  # plain base functions that do NOT dispatch to Matrix's S4 methods when
+  # called from package code with Matrix loaded-but-not-attached, so sparse W
+  # needs the Matrix:: generics explicitly (or, for crossprod, the
+  # primitive-only rewrite used for I above).  Only primitives -- *, %*%, and
+  # sum() -- dispatch on their own; crossprod is neither a primitive nor an
+  # internal generic, which is why it belongs on this list and not with them.
   is_sparse <- inherits(W, "Matrix")
-  Wt <- if (is_sparse) Matrix::t(W) else t(W)
-  S1 <- sum(W * W) + sum(W * Wt)
-  rs <- if (is_sparse) Matrix::rowSums(W) else rowSums(W)
-  cs <- if (is_sparse) Matrix::colSums(W) else colSums(W)
-  S2 <- sum((rs + cs)^2)
-  m2 <- ss_c / n
-  m4 <- sum(resid_c^4) / n
-  b2 <- m4 / (m2^2)                          # kurtosis
 
-  A  <- n * ((n^2 - 3 * n + 3) * S1 - n * S2 + 3 * S0^2)
-  D  <- (n - 1) * (n - 2) * (n - 3) * S0^2
-  C  <- (n^2 - n) * S1 - 2 * n * S2 + 6 * S0^2
-  VI <- (A - b2 * C) / D - EI^2
+  # --- Choose the null -------------------------------------------------------
+  # The exchangeable moments below are the moments of I for a vector whose
+  # elements are equally likely in any order.  Model residuals are not such a
+  # vector: they are orthogonal to the design matrix, which drags the true
+  # E[I] well below -1/(n - 1) once the covariates are spatially smooth.  See
+  # ?residual_morans_i, section "Which null, and when it is approximate", for
+  # the measured size and power cost and for why "auto" refuses to apply the
+  # OLS residual moments to a backend whose residuals are not OLS residuals.
+  des <- if (identical(null, "randomisation")) NULL else
+    .morans_ols_design(fit, resid, ok)
+
+  use_residual <- switch(null,
+    randomisation = FALSE,
+    auto          = !is.null(des) && isTRUE(des$is_ols),
+    residual      = !is.null(des)
+  )
+  if (identical(null, "residual")) {
+    if (is.null(des)) {
+      .log_warn(paste0("residual_morans_i(): null = \"residual\" needs the design ",
+                       "matrix, which cannot be rebuilt from this fit's ",
+                       "`predictor_vars` and `data_sf`; using the randomisation ",
+                       "null instead. The returned `null` element says which was used."))
+    } else if (!isTRUE(des$is_ols)) {
+      .log_warn(paste0("residual_morans_i(): null = \"residual\" was requested, but ",
+                       "these residuals are not the OLS residuals of the response on ",
+                       "the rebuilt design matrix, so the Cliff & Ord residual ",
+                       "moments are an approximation here rather than exact."))
+    }
+  }
+
+  mom <- NULL
+  if (use_residual) {
+    mom <- .morans_residual_moments(W = W, X = des$X, S0 = S0,
+                                    is_sparse = is_sparse)
+    if (is.null(mom) && !identical(null, "auto"))
+      .log_warn(paste0("residual_morans_i(): the residual moments are not usable ",
+                       "here (too few residual degrees of freedom); using the ",
+                       "randomisation null instead."))
+  }
+
+  if (!is.null(mom)) {
+    # --- Cliff & Ord (1981) sec. 8.3 residual moments ---
+    null_used <- "residual"
+    EI   <- mom$EI
+    VI   <- mom$VI
+    df_I <- mom$df
+  } else {
+    # --- Analytical expectation & variance (randomisation assumption) ---
+    null_used <- "randomisation"
+    EI   <- -1 / (n - 1)
+    df_I <- n - 1
+
+    # Cliff & Ord variance under randomisation
+    # S1 = 0.5 * sum((W + t(W))^2) rewritten via the identity
+    #    = sum(W^2) + sum(W * t(W))
+    # so that sparse W never materialises the denser (W + t(W)) intermediate.
+    Wt <- if (is_sparse) Matrix::t(W) else t(W)
+    S1 <- sum(W * W) + sum(W * Wt)
+    rs <- if (is_sparse) Matrix::rowSums(W) else rowSums(W)
+    cs <- if (is_sparse) Matrix::colSums(W) else colSums(W)
+    S2 <- sum((rs + cs)^2)
+    m2 <- ss_c / n
+    m4 <- sum(resid_c^4) / n
+    b2 <- m4 / (m2^2)                          # kurtosis
+
+    A  <- n * ((n^2 - 3 * n + 3) * S1 - n * S2 + 3 * S0^2)
+    D  <- (n - 1) * (n - 2) * (n - 3) * S0^2
+    C  <- (n^2 - n) * S1 - 2 * n * S2 + 6 * S0^2
+    VI <- (A - b2 * C) / D - EI^2
+  }
 
   # is.finite() as well as > 0: a degenerate kurtosis (b2) can make VI NaN,
   # and `if (NaN > 0)` is an error rather than FALSE.
@@ -378,7 +809,7 @@ residual_morans_i <- function(fit,
   }
 
   list(observed = I, expected = EI, sd = sd_I, z = z,
-       p_value = p, n = n)
+       p_value = p, n = n, null = null_used, df = df_I)
 }
 
 
@@ -390,19 +821,27 @@ residual_morans_i <- function(fit,
 #'
 #' @param fits Named list of \code{spatial_fit} objects.
 #' @return A data.frame with columns \code{model}, \code{resid_morans_I},
-#'   \code{resid_morans_z}, and \code{resid_morans_p}.
+#'   \code{resid_morans_z}, \code{resid_morans_p} and \code{resid_morans_null}
+#'   (which null the p-value was computed against, per model).
 #' @keywords internal
 #' @noRd
 .residual_morans_table <- function(fits) {
-  rows <- lapply(names(fits), function(nm) {
-    mi <- residual_morans_i(fits[[nm]])
+  # seq_along() rather than names(): fits[[nm]] returns the FIRST element of
+  # that name, so duplicated names scored one fit repeatedly.  evaluate_insample()
+  # now rejects duplicates outright, but positional indexing means this cannot
+  # silently mis-report even if it is called directly.
+  nms  <- names(fits)
+  rows <- lapply(seq_along(fits), function(i) {
+    mi <- residual_morans_i(fits[[i]])
     if (is.null(mi)) {
-      data.frame(model = nm, resid_morans_I = NA_real_,
+      data.frame(model = nms[i], resid_morans_I = NA_real_,
                  resid_morans_z = NA_real_, resid_morans_p = NA_real_,
+                 resid_morans_null = NA_character_,
                  stringsAsFactors = FALSE)
     } else {
-      data.frame(model = nm, resid_morans_I = mi$observed,
+      data.frame(model = nms[i], resid_morans_I = mi$observed,
                  resid_morans_z = mi$z, resid_morans_p = mi$p_value,
+                 resid_morans_null = mi$null,
                  stringsAsFactors = FALSE)
     }
   })
@@ -423,7 +862,9 @@ residual_morans_i <- function(fit,
 #' @param fits A \code{spatial_fit} object, or a named list of them
 #'   (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
 #'   used as the model labels and every element must have one; an unnamed
-#'   list is an error.
+#'   list is an error, and so are duplicated names --- \code{model} is the key
+#'   the comparison table is assembled on, so two fits sharing a name cannot be
+#'   told apart in the output.
 #' @param newdata Optional sf object for out-of-sample evaluation.
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
@@ -452,8 +893,25 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
          "objects -- the names label the models in the output. Supply them, ",
          "e.g. list(GWR = gwr_fit, Bayesian = bayes_fit).", call. = FALSE)
 
-  rows <- lapply(nms, function(nm) {
-    obj <- fits[[nm]]
+  # Duplicated names are silently WRONG rather than merely ambiguous.  `model`
+  # is the join key compare_models() merges the metric and Moran's I tables on,
+  # so two fits called "GWR" produced a 2 x 2 cross-join: four rows, every one
+  # of them carrying the first fit's numbers (fits[[nm]] returns the first
+  # match, so the second fit was never scored at all).
+  dup <- unique(nms[duplicated(nms)])
+  if (length(dup) > 0L)
+    stop(sprintf(
+      paste0("evaluate_insample(): `fits` has duplicated name(s) %s. The names ",
+             "label the models and are the key the comparison table is built ",
+             "on, so they must be unique -- give the fits distinct names, e.g. ",
+             "list(GWR_bw50 = ..., GWR_bw80 = ...)."),
+      paste(sQuote(dup), collapse = ", ")), call. = FALSE)
+
+  # seq_along() rather than the names themselves: fits[[nm]] returns the first
+  # element of that name, which is the other half of the duplicate-name bug.
+  rows <- lapply(seq_along(fits), function(i) {
+    obj <- fits[[i]]
+    nm  <- nms[i]
     if (!inherits(obj, "spatial_fit")) {
       .log_warn("evaluate_insample(): '%s' is not a spatial_fit; skipping.", nm)
       return(NULL)
@@ -476,10 +934,18 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #' a tidy comparison table including in-sample metrics and model-specific
 #' information criteria (AICc, LOOIC).
 #'
-#' @param fits A named list of \code{spatial_fit} objects.
+#' @param fits A named list of \code{spatial_fit} objects.  Names must be
+#'   unique; see \code{\link{evaluate_insample}}.
 #' @param newdata Optional sf for out-of-sample evaluation.
 #' @param ... Extra arguments passed to predict().
-#' @return A data.frame comparing all models.
+#' @return A data.frame comparing all models.  Alongside the metrics it carries
+#'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
+#'   \code{resid_morans_null} --- the last naming which null
+#'   \code{\link{residual_morans_i}} scored each model against, since that
+#'   choice is per-fit and governs how much the p-value is worth.  The
+#'   significant-autocorrelation warning below is driven by that p-value, so
+#'   read its caveats in \code{?residual_morans_i} before treating silence as
+#'   evidence of no residual structure.
 #' @family model evaluation
 #' @export
 compare_models <- function(fits, newdata = NULL, ...) {
@@ -500,8 +966,13 @@ compare_models <- function(fits, newdata = NULL, ...) {
   met_df$LOOIC <- NA_real_
   met_df$bandwidth_is_fallback <- NA
   for (i in seq_len(nrow(met_df))) {
-    nm  <- met_df$model[i]
-    obj <- fits[[nm]]
+    nm <- met_df$model[i]
+    # By index, not fits[[nm]]: name lookup returns the FIRST match, so with two
+    # fits of one name every row read the same object.  evaluate_insample() now
+    # rejects duplicate names outright, and match() keeps this loop correct
+    # rather than merely lucky.  met_df can be shorter than `fits` when a
+    # non-spatial_fit element was skipped, so the mapping is by name, not order.
+    obj <- fits[[match(nm, names(fits))]]
     if (inherits(obj, "gwr_fit")) {
       met_df$AICc[i] <- obj$info$AICc %||% NA_real_
       is_fb <- isTRUE(obj$info$bandwidth_is_fallback)
@@ -563,7 +1034,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   Names outside that set raise a warning and are dropped; if nothing
 #'   recognised remains, this is an error rather than a silent fallback.
 #'   A recognised model whose backend package is not installed is dropped with
-#'   a message.
+#'   a message so the call still returns the models that could run --- but if
+#'   \emph{none} of the requested backends is installed, nothing is left to
+#'   compare and the call errors with \code{"no viable models."}.  Guard with
+#'   \code{requireNamespace()} when the model set is not known in advance.
 #' @param k Number of folds. Default 5.
 #' @param seed RNG seed. Default 123.
 #' @param folds Optional precomputed fold splits.
@@ -586,6 +1060,11 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param quiet Logical; suppress messages.
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
+#'   Only the models that actually ran appear, so check which names are present
+#'   rather than assuming one entry per requested model: a backend whose package
+#'   is missing is dropped with a message.  When \strong{no} requested backend
+#'   is available there is nothing to return and the function errors with
+#'   \code{"no viable models."} instead of returning an empty comparison.
 #' @family model evaluation
 #' @examples
 #' \donttest{

@@ -33,7 +33,21 @@ create_voronoi_polygons(
 A list with cells, index, boundary, method, params.
 }
 \description{
-Create Voronoi polygons from points with robust CRS and optional clipping
+Assigns every location in the study area to its nearest input point, giving
+one cell per point. This is the tessellation to reach for when the
+observations themselves define the regions of interest — sampling sites,
+monitoring stations, service points — because cell size then adapts to
+sampling density instead of being imposed by a fixed grid: dense areas get
+small cells and sparse areas large ones. Prefer \code{\link[=create_grid_polygons]{create_grid_polygons()}}
+instead when you need equal-area cells or a resolution independent of where
+the data happen to be.
+}
+\details{
+The heavy lifting is \code{\link[sf:geos_unary]{sf::st_voronoi()}}; what this adds is the surrounding
+bookkeeping — projecting lon/lat input, building and buffering an envelope
+so edge cells are bounded, clipping to \code{boundary}, restoring the
+point-to-cell correspondence that \code{st_voronoi()} scrambles, and stamping
+stable \code{cell_id} values.
 }
 \examples{
 library(sf)

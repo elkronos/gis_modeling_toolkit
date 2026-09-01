@@ -15,5 +15,11 @@
 \code{x}, invisibly (called for its side effect).
 }
 \description{
-Print a fitted spatial model
+Shows the one-screen summary of any \code{spatial_fit}: backend, formula,
+number of observations, CRS, and the few backend-specific numbers worth
+seeing immediately (GWR bandwidth, GP basis size, forest settings).  It is
+what you get by typing the object's name, and the quickest way to confirm a
+fit used the data, predictors and CRS you meant.  For fit quality use
+\code{\link{model_metrics}()} or \code{\link{summary}()} instead --
+nothing printed here is an out-of-sample score.
 }

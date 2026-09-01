@@ -186,8 +186,53 @@ test_that("voronoi_seeds_kmeans reproduces its centres and validates input", {
                "`points_sf` geometry must be one of: POINT")
   expect_error(voronoi_seeds_kmeans(sf::st_drop_geometry(pts), k = 3),
                "Expected an sf object")
-  # Nothing to cluster.
-  expect_error(voronoi_seeds_kmeans(pts[0, , drop = FALSE], k = 3))
+  # A zero-row layer never reaches the clustering code: .assert_sf() rejects it
+  # first, because an empty geometry set has no type to check.  Without the
+  # regexp this expectation passed on that message and looked like coverage of
+  # the "nothing to cluster" branch, which it is not -- see the next test.
+  expect_error(voronoi_seeds_kmeans(pts[0, , drop = FALSE], k = 3),
+               "`points_sf` geometry must be one of: POINT")
+})
+
+test_that("voronoi_seeds_kmeans drops unusable points and reports having none", {
+  # st_coordinates() yields one ALL-NA row per EMPTY POINT rather than zero
+  # rows, so a layer of empty points has nrow() > 0, passes .assert_sf() (its
+  # geometry type is POINT), and used to reach stats::kmeans() as a matrix of
+  # NAs -- which fails with "NA/NaN/Inf in foreign function call (arg 1)".
+  ll <- sf::st_crs(32632)
+
+  # (a) An empty point INSIDE a populated layer is dropped, and the rest
+  #     clusters exactly as if it had never been there.
+  set.seed(3)
+  n  <- 20
+  xy <- data.frame(x = runif(n, 0, 100), y = runif(n, 0, 100))
+  good <- sf::st_as_sf(xy, coords = c("x", "y"), crs = ll)
+  mixed <- rbind(
+    good,
+    sf::st_sf(geometry = sf::st_sfc(sf::st_point(), crs = ll))
+  )
+  expect_equal(nrow(mixed), n + 1L)
+  expect_true(any(sf::st_is_empty(mixed)))
+
+  lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(mixed, k = 3,
+                                                              set_seed = 11))
+  expect_true(log_has(lines, "dropping 1 point\\(s\\) with empty or non-finite"))
+  expect_equal(nrow(out), 3L)
+  expect_true(all(is.finite(sf::st_coordinates(out))))
+  # Identical to clustering the clean layer: the empty row contributed nothing.
+  expect_equal(sf::st_coordinates(out),
+               sf::st_coordinates(voronoi_seeds_kmeans(good, k = 3,
+                                                       set_seed = 11)))
+
+  # (b) A layer of NOTHING BUT empty points is the only way to reach the
+  #     "nothing to cluster" branch -- a zero-row layer is stopped earlier.
+  allempty <- sf::st_sf(
+    id = 1:3,
+    geometry = sf::st_sfc(sf::st_point(), sf::st_point(), sf::st_point(),
+                          crs = ll))
+  expect_equal(nrow(allempty), 3L)
+  expect_error(voronoi_seeds_kmeans(allempty, k = 2),
+               "has no usable coordinates; nothing to cluster")
 })
 
 
@@ -302,4 +347,92 @@ test_that(".robust_st_sample returns exactly the requested number of points", {
   awkward <- sf::st_geometry(sf::st_buffer(
     sf::st_sfc(sf::st_point(c(0, 0)), crs = 32632), 1))
   expect_length(spatialkit:::.robust_st_sample(awkward, 25L), 25L)
+})
+
+
+# ---------------------------------------------------------------------------
+# Every method returns seeds in the BOUNDARY's CRS
+# ---------------------------------------------------------------------------
+
+test_that("get_voronoi_seeds returns seeds in the boundary CRS for every method", {
+  # NEWS states this for all three methods, and it is what makes the seeds
+  # droppable straight into build_tessellation() alongside the boundary.  Two
+  # of the branches happen to produce boundary-CRS seeds already (they sample
+  # or align against the boundary), so only "provided" -- where the caller
+  # hands over seeds carrying whatever CRS they were stored in -- shows the
+  # difference.  All three are asserted because all three are promised.
+  bnd <- .seed_sq()                                   # EPSG:32632
+  expect_equal(sf::st_crs(bnd), sf::st_crs(32632))
+
+  pts32 <- .seed_points(12, seed = 4)                 # same CRS ...
+  pts_ll <- sf::st_transform(pts32, 4326)             # ... and a lon/lat copy
+  expect_equal(sf::st_crs(pts_ll)$epsg, 4326L)
+
+  cases <- list(
+    provided = get_voronoi_seeds(bnd, method = "provided", seeds = pts_ll),
+    random   = get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1),
+    kmeans   = get_voronoi_seeds(bnd, method = "kmeans", n = 4,
+                                 sample_points = pts_ll, set_seed = 1),
+    kmeans_internal = get_voronoi_seeds(bnd, method = "kmeans", n = 4,
+                                        set_seed = 1)
+  )
+  for (nm in names(cases))
+    expect_equal(sf::st_crs(cases[[nm]]), sf::st_crs(bnd), info = nm)
+
+  # Aligning means REPROJECTING, not restamping: the provided seeds come back
+  # at the metric coordinates the degrees denote, not at the degrees relabelled.
+  got <- sf::st_coordinates(cases$provided)
+  expect_equal(unname(got), unname(sf::st_coordinates(pts32)), tolerance = 1e-6)
+  # ... and they are NOT the degrees they arrived as, merely relabelled.
+  expect_false(isTRUE(all.equal(unname(got),
+                                unname(sf::st_coordinates(pts_ll)),
+                                tolerance = 1e-3)))
+
+  # And with no boundary at all there is nothing to align to, so the seeds keep
+  # their own CRS rather than silently losing it.
+  expect_equal(sf::st_crs(get_voronoi_seeds(method = "provided",
+                                            seeds = pts_ll)),
+               sf::st_crs(4326))
+})
+
+
+# ---------------------------------------------------------------------------
+# k-means seed counts are clamped, not fatal
+# ---------------------------------------------------------------------------
+
+test_that("k-means seeding clamps n to what k-means can actually produce", {
+  # stats::kmeans() refuses BOTH k > distinct rows and k >= nrow(x), the latter
+  # with "number of cluster centres must lie between 1 and nrow(x)".  So
+  # n = nrow(sample_points) -- the obvious "one seed per point" request -- used
+  # to die on a raw kmeans error rather than clamp, despite `@return`
+  # promising "at most n".
+  bnd   <- .seed_sq()
+  cloud <- .seed_points(12, seed = 4)
+  N     <- nrow(cloud)
+  expect_equal(N, 12L)
+
+  # Below the ceiling: exactly what was asked for, and no clamp message.
+  quiet <- capture_spatialkit_log(
+    under <- get_voronoi_seeds(bnd, method = "kmeans", n = N - 1L,
+                               sample_points = cloud, set_seed = 1))
+  expect_equal(nrow(under), N - 1L)
+  expect_false(log_has(quiet, "clamping"))
+  expect_equal(nrow(voronoi_seeds_kmeans(cloud, k = N - 1L, set_seed = 1)),
+               N - 1L)
+
+  # AT the ceiling and ABOVE it: clamped to nrow - 1, with a message naming the
+  # count actually used.  No error either way.
+  for (k in c(N, N + 3L)) {
+    lines <- capture_spatialkit_log(
+      at <- get_voronoi_seeds(bnd, method = "kmeans", n = k,
+                              sample_points = cloud, set_seed = 1))
+    expect_equal(nrow(at), N - 1L, info = paste("get_voronoi_seeds n =", k))
+    expect_equal(at$seed_id, seq_len(N - 1L))
+    expect_true(log_has(lines, "clamping"), info = paste("n =", k))
+
+    lines2 <- capture_spatialkit_log(
+      at2 <- voronoi_seeds_kmeans(cloud, k = k, set_seed = 1))
+    expect_equal(nrow(at2), N - 1L, info = paste("voronoi_seeds_kmeans k =", k))
+    expect_true(log_has(lines2, "clamping to 11"), info = paste("k =", k))
+  }
 })

@@ -60,11 +60,27 @@ ensure_stable_poly_id <- function(polygons_sf,
 
   method <- match.arg(method)
 
-  # Work on a transformed copy for the sort key
+  # Work on a transformed copy for the sort key.
+  #
+  # The transform is the whole mechanism by which the IDs are stable: sorting
+  # on a common CRS is what makes the same layer get the same IDs whichever
+  # projection it arrives in.  Falling back to the untransformed geometry
+  # silently therefore does not degrade the result, it defeats the function's
+  # purpose -- the IDs stop being comparable with any other run -- so say so.
   sort_sf <- polygons_sf
   if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
-    sort_sf <- tryCatch(sf::st_transform(sort_sf, transform_for_sort),
-                        error = function(e) sort_sf)
+    sort_sf <- tryCatch(
+      sf::st_transform(sort_sf, transform_for_sort),
+      error = function(e) {
+        .log_warn(paste0("ensure_stable_poly_id(): could not transform to the ",
+                         "sort CRS (%s) -- %s. Sorting in the layer's own CRS ",
+                         "instead, so the IDs assigned here are NOT comparable ",
+                         "with IDs assigned to the same features in another ",
+                         "projection."),
+                  paste(format(transform_for_sort), collapse = " "),
+                  conditionMessage(e))
+        sort_sf
+      })
 
   # Representative points — all paths produce an sfc_POINT vector
   rep_sfc <- switch(method,

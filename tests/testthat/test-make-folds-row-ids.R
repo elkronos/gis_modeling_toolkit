@@ -111,3 +111,77 @@ test_that("auto-generated block folds stay aligned when prep_model_data drops ro
     expect_setequal(dat_sf$..row_id[te_pos], remapped[[j]]$test)
   }
 })
+
+
+# ---------------------------------------------------------------------------
+# Fold provenance
+#
+# Fold splits are lists of ..row_id values, and row IDs are just
+# seq_len(nrow()) unless the caller supplied them.  A `folds` object built from
+# a DIFFERENT dataset of the same size therefore applied cleanly: every ID
+# matched, every fold was populated, and the model was scored on splits that
+# describe other observations.  Nothing in the result said so.
+# ---------------------------------------------------------------------------
+
+.probe_pts <- function(seed, n = 60) {
+  set.seed(seed)
+  d <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), a = rnorm(n)),
+    coords = c("x", "y"), crs = 32632)
+  d$z <- 0.01 * sf::st_coordinates(d)[, 1] + 2 * d$a + rnorm(n)
+  d
+}
+
+test_that("make_folds records a row probe in params", {
+  f <- make_folds(.probe_pts(1), k = 3, method = "random_kfold", seed = 1)
+  p <- f$params$row_probe
+  expect_false(is.null(p))
+  expect_type(p$row_id, "integer")
+  expect_type(p$key, "character")
+  expect_equal(length(p$row_id), length(p$key))
+  expect_true(all(p$row_id %in% seq_len(60)))
+})
+
+test_that("folds built on another dataset of the same size are refused", {
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(1)
+  b <- .probe_pts(2)                      # same n, same columns, other points
+  expect_equal(nrow(a), nrow(b))
+
+  folds_a <- make_folds(a, k = 3, method = "random_kfold", seed = 1)
+  # Same data: runs.
+  expect_no_error(cv_rf(a, "z", "a", folds = folds_a, num_trees = 30, seed = 1))
+  # Other data: refused, and the message says why rather than reporting
+  # plausible-looking metrics computed on the wrong splits.
+  expect_error(
+    cv_rf(b, "z", "a", folds = folds_a, num_trees = 30, seed = 1),
+    "built from different data"
+  )
+})
+
+test_that("the probe survives dropping rows and reprojection", {
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(3)
+  folds_a <- make_folds(a, k = 3, method = "random_kfold", seed = 1)
+
+  # prep_model_data() drops incomplete cases, so the probe must tolerate
+  # missing probe rows rather than treating them as a mismatch.
+  a2 <- a; a2$a[c(2, 5, 11)] <- NA
+  expect_no_error(cv_rf(a2, "z", "a", folds = folds_a, num_trees = 30, seed = 1))
+
+  # The probe is taken in EPSG:4326, so folds built on geographic input still
+  # match after make_folds()/prep_model_data() project to their own CRS.
+  geo <- sf::st_transform(a, 4326)
+  folds_geo <- make_folds(geo, k = 3, method = "random_kfold", seed = 1)
+  expect_no_error(cv_rf(geo, "z", "a", folds = folds_geo, num_trees = 30, seed = 1))
+  expect_no_error(cv_rf(a,   "z", "a", folds = folds_geo, num_trees = 30, seed = 1))
+})
+
+test_that("a folds object with no probe is passed through unchecked", {
+  # Backwards compatibility: an object built by an earlier version.
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(4)
+  f <- make_folds(a, k = 3, method = "random_kfold", seed = 1)
+  f$params$row_probe <- NULL
+  expect_no_error(cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1))
+})

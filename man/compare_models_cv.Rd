@@ -33,7 +33,10 @@ compare_models_cv(
 Names outside that set raise a warning and are dropped; if nothing
 recognised remains, this is an error rather than a silent fallback.
 A recognised model whose backend package is not installed is dropped with
-a message.}
+a message so the call still returns the models that could run --- but if
+\emph{none} of the requested backends is installed, nothing is left to
+compare and the call errors with \code{"no viable models."}.  Guard with
+\code{requireNamespace()} when the model set is not known in advance.}
 
 \item{k}{Number of folds. Default 5.}
 
@@ -68,6 +71,11 @@ to \code{ranger::ranger()}.}
 \value{
 A list with overall, by_fold, and per-model cv_results
 (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
+Only the models that actually ran appear, so check which names are present
+rather than assuming one entry per requested model: a backend whose package
+is missing is dropped with a message.  When \strong{no} requested backend
+is available there is nothing to return and the function errors with
+\code{"no viable models."} instead of returning an empty comparison.
 }
 \description{
 Fits and cross-validates one or more model types, returning a unified

@@ -64,29 +64,51 @@
 }
 
 
+#' The "not computable" return of .morans_i_for_k()
+#'
+#' Kept as a named constant so every early exit has the same shape as the
+#' success path; a bare \code{NA_real_} from one of them would silently make
+#' \code{moran_z[k]} the \emph{I} of the next candidate.
+#'
+#' @return \code{c(I = NA_real_, z = NA_real_)}.
+#' @keywords internal
+#' @noRd
+.morans_na <- function() c(I = NA_real_, z = NA_real_)
+
+
 #' Compute Moran's I for residuals at a given tessellation resolution
 #'
 #' For a given k-means cluster assignment, fits OLS on cell-level means and
 #' computes Moran's I on the residuals using a k-nearest-neighbour (k = 8)
-#' binary weight matrix, row-standardised.
-#' Lower absolute Moran's I suggests the tessellation resolution adequately
-#' captures the spatial structure in the data.
+#' binary weight matrix, row-standardised, together with its standardised
+#' deviate under the Cliff & Ord regression-residual moments.
+#'
+#' \strong{Rank on \code{z}, not on \code{I}.}  \eqn{E[I]} and \eqn{Var[I]}
+#' both depend on the number of cells, so \eqn{|I|} shrinks as \code{k} grows
+#' whether or not the tessellation is capturing anything.  Over 300 replicates
+#' of a response with no spatial structure, mean \eqn{|I|} fell monotonically
+#' from 0.114 at \code{k = 10} to 0.050 at \code{k = 60}; mean \eqn{|z|} over
+#' the same runs was 0.77, 0.78, 0.76, 0.80 against the theoretical
+#' \eqn{E|N(0,1)| = 0.798}.  Ranking on \eqn{|I|} therefore prefers the finest
+#' tessellation for arithmetic reasons rather than statistical ones.
 #'
 #' @param xy Numeric matrix of coordinates.
 #' @param response Numeric vector of response values.
 #' @param predictors Numeric matrix of predictor values.
 #' @param cluster_ids Integer vector of cluster assignments. The cluster count
 #'   is derived from this vector, so it is not passed separately.
-#' @return Numeric scalar: Moran's I statistic (values near 0 indicate the
-#'   tessellation resolution captures the spatial pattern; positive values
-#'   indicate residual spatial autocorrelation remains).
+#' @return A named numeric vector \code{c(I = , z = )}: Moran's I on the
+#'   cell-level OLS residuals, and its standardised deviate.  Values of
+#'   \code{z} near 0 indicate the resolution captures the spatial pattern;
+#'   positive values indicate residual spatial autocorrelation remains.  Both
+#'   are \code{NA_real_} when the statistic is not computable at this \code{k}.
 #' @keywords internal
 #' @noRd
 .morans_i_for_k <- function(xy, response, predictors, cluster_ids) {
   # Aggregate to cell-level means
   cell_ids <- sort(unique(cluster_ids))
   n_cells <- length(cell_ids)
-  if (n_cells < 4L) return(NA_real_)
+  if (n_cells < 4L) return(.morans_na())
 
   cell_resp <- numeric(n_cells)
   cell_xy   <- matrix(0, n_cells, 2)
@@ -101,33 +123,64 @@
 
   # Fit OLS on cell means
   ok <- is.finite(cell_resp) & apply(is.finite(cell_pred), 1, all)
-  if (sum(ok) < 4L) return(NA_real_)
+  if (sum(ok) < 4L) return(.morans_na())
 
   fit <- try(stats::lm.fit(x = cbind(1, cell_pred[ok, , drop = FALSE]),
                             y = cell_resp[ok]),
              silent = TRUE)
-  if (inherits(fit, "try-error")) return(NA_real_)
+  if (inherits(fit, "try-error")) return(.morans_na())
   resid <- fit$residuals
   n <- length(resid)
 
   # k-nearest-neighbour weight matrix via shared helper (sparse when possible)
   n_neighbors <- min(8L, n - 1L)
-  if (n_neighbors < 1L) return(NA_real_)
+  if (n_neighbors < 1L) return(.morans_na())
+
+  # Refuse to report a number that carries no information.  When every cell is
+  # a neighbour of every other (n <= n_neighbors + 1, i.e. n <= 9 at the
+  # default of 8), W is the complete row-standardised matrix W_ij = 1/(n-1),
+  # so W %*% e = -e/(n-1) for ANY mean-zero residual vector, S0 = n, and
+  # Moran's I collapses to exactly -1/(n - 1) whatever the data are.  It is not
+  # merely uninformative but biased for level selection: |I| = 1/(n-1) falls
+  # monotonically in the number of cells for arithmetic reasons alone, so
+  # criterion = "morans_i" would rank the largest candidate k first every time.
+  # NA excludes these candidates instead; determine_optimal_levels() falls back
+  # to the geometric ranking when none of them clears the floor.
+  if (n <= n_neighbors + 1L) return(.morans_na())
 
   W <- .build_knn_weights(cell_xy[ok, , drop = FALSE], k = n_neighbors)
 
   # Moran's I = (n / S0) * (e' W e) / (e' e)
   S0 <- sum(W)
   if (S0 < .Machine$double.eps || sum(resid^2) < .Machine$double.eps)
-    return(NA_real_)
+    return(.morans_na())
   resid_c <- resid - mean(resid)
   # sum(resid_c * (W %*% resid_c)) rather than crossprod(): .build_knn_weights()
   # returns a sparse Matrix when FNN and Matrix are installed, and
   # base::crossprod() does not dispatch on the dgeMatrix that W %*% resid_c
   # produces ("requires numeric/complex matrix/vector arguments").  The two
   # forms are numerically identical.  Matches residual_morans_i().
-  I <- (n / S0) * sum(resid_c * (W %*% resid_c)) / sum(resid_c^2)
-  as.numeric(I)
+  I <- as.numeric((n / S0) * sum(resid_c * (W %*% resid_c)) / sum(resid_c^2))
+
+  # The ranking needs a STANDARDISED deviate, not |I|.  E[I] and Var(I) both
+  # depend on k, so |I| shrinks with the number of cells for arithmetic reasons
+  # that have nothing to do with the data.  Measured over 300 replicates of a
+  # response with NO spatial structure (n = 1200, two noise predictors), mean
+  # |I| fell monotonically from 0.1136 at k = 10 to 0.0502 at k = 60 -- -55.9%
+  # -- so ranking on |I| prefers the finest candidate whatever the data say.
+  # Over the same runs mean |z| was 0.769, 0.778, 0.755, 0.801 against the
+  # theoretical E|N(0,1)| = 0.798, with sd(z) 0.96-1.02 and a two-sided 5%
+  # rejection rate of 0.040-0.057.  It is calibrated, and flat in k.
+  #
+  # These are Cliff & Ord's regression-residual moments, and they are EXACT
+  # here: `resid` is by construction the OLS residual of the cell means on
+  # cbind(1, cell_pred), which is the one case the formula is derived for.
+  mom <- .morans_residual_moments(W = W, X = cbind(1, cell_pred[ok, , drop = FALSE]),
+                                  S0 = S0, is_sparse = inherits(W, "Matrix"))
+  z <- if (is.null(mom) || !is.finite(mom$VI) || mom$VI <= 0) NA_real_
+       else (I - mom$EI) / sqrt(mom$VI)
+
+  c(I = I, z = z)
 }
 
 
@@ -153,6 +206,38 @@
 #' promising candidate k values incur the cost of the full Moran's I
 #' computation.
 #'
+#' \strong{The model-aware criteria rank on the standardised deviate, not on
+#' |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
+#' cells, so \eqn{|I|} falls as \code{k} grows whether or not the finer
+#' tessellation is capturing anything.  Measured over 300 replicates of a
+#' response with \emph{no} spatial structure, mean \eqn{|I|} fell monotonically
+#' from 0.114 at \code{k = 10} to 0.050 at \code{k = 60} (\eqn{-56\%}), which
+#' made an \eqn{|I|} ranking prefer the largest candidate for arithmetic
+#' reasons alone.  Candidates are therefore ordered by
+#' \eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
+#' residual moments --- exact here, because the cell-level residuals are OLS
+#' residuals by construction.  Over the same runs \eqn{z} had mean \eqn{\approx
+#' 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection rate of
+#' 0.040--0.057 at every \code{k}.  Both quantities are reported in the
+#' \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
+#'
+#' \strong{Resolution floor on the model-aware criteria.}  Moran's I is
+#' computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
+#' so it only carries information once there are more than nine cells.  At nine
+#' or fewer, every cell is a neighbour of every other, the row-standardised
+#' weight matrix is complete, and Moran's I collapses to exactly
+#' \eqn{-1/(k - 1)} for \emph{any} residual vector — a function of \code{k}
+#' alone, and one whose magnitude shrinks monotonically with \code{k}, which
+#' would make \code{criterion = "morans_i"} prefer the largest candidate every
+#' time.  Those candidates therefore return \code{NA} and are excluded from the
+#' model-aware ranking.  When no candidate in the elbow neighbourhood clears
+#' the floor — which is the usual outcome for small \code{max_levels} — the
+#' whole call falls back to the geometric ranking and logs a warning; raise
+#' \code{max_levels} above roughly 10 if you want the model-aware criteria to
+#' contribute.  Under \code{criterion = "combined"}, a candidate below the
+#' floor that sits alongside candidates above it is ranked last on the Moran's
+#' I axis while still competing on the geometric axis.
+#'
 #' @param data_sf An sf object.
 #' @param max_levels Integer upper bound on levels. Default 12.
 #' @param top_n Integer; how many candidates to return. Default 3. Under
@@ -164,15 +249,19 @@
 #' @param response_var Optional response column name. When provided alongside
 #'   \code{predictor_vars}, enables model-aware level selection via Moran's I
 #'   on OLS residuals.
-#' @param predictor_vars Optional predictor column names. Must be numeric;
-#'   factor/character columns raise an error.
+#' @param predictor_vars Optional predictor column names. Must be numeric or
+#'   logical (logicals are read as 0/1); factor/character columns raise an
+#'   error.
 #' @param criterion One of \code{"geometric"} (default when no response given),
-#'   \code{"morans_i"} (select k that minimizes |Moran's I|), or
-#'   \code{"combined"} (rank-average of WSS elbow distance and |Moran's I|).
-#'   Falls back to \code{"geometric"} if response/predictors are unavailable.
+#'   \code{"morans_i"} (select the k whose residual Moran's I is least
+#'   \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
+#'   distance and that same quantity).  Falls back to \code{"geometric"} if
+#'   response/predictors are unavailable, and also when no candidate clears the
+#'   nine-cell resolution floor described in \strong{Details}.
 #' @return An integer vector of candidate level counts. When
 #'   \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
-#'   attached with per-k Moran's I values — except when the model-aware path
+#'   attached with per-k Moran's I values (\code{moran_i}) and their
+#'   standardised deviates (\code{moran_z}) — except when the model-aware path
 #'   itself falls back to the geometric result (no viable k in the elbow
 #'   neighbourhood, or Moran's I could not be computed for any candidate), in
 #'   which case no diagnostics are available and the attribute is absent. Both
@@ -187,6 +276,10 @@
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' determine_optimal_levels(pts, max_levels = 6)
+#' @family aggregation
+#' @seealso [build_tessellation()], which takes the chosen level count as
+#'   `approx_n_cells`; [assign_features_to_polygons()] and
+#'   [summarize_by_cell()] for the steps that follow.
 #' @export
 determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                      sample_n = 1500L, set_seed = 123L,
@@ -236,20 +329,27 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     # A factor or character predictor makes as.matrix() return a CHARACTER
     # matrix, which dies deep inside colMeans() with "'x' must be numeric".
     # Name the offending columns here instead.
+    #
+    # Logicals are NOT offending: as.matrix() on a logical column gives a
+    # logical matrix, which colMeans() handles, and storage.mode() below makes
+    # the 0/1 coding explicit.  fit_rf_model()/cv_rf()/predict() all accept
+    # logical predictors, so rejecting them here would be inconsistent.
     non_num <- predictor_vars[!vapply(predictor_vars,
-                                      function(v) is.numeric(df[[v]]),
+                                      function(v) is.numeric(df[[v]]) ||
+                                        is.logical(df[[v]]),
                                       logical(1))]
     if (length(non_num)) {
       stop(sprintf(
-        paste0("determine_optimal_levels(): `predictor_vars` must be numeric; ",
-               "%s %s not. Encode factor/character predictors numerically ",
-               "(e.g. with model.matrix()) before calling."),
+        paste0("determine_optimal_levels(): `predictor_vars` must be numeric ",
+               "or logical; %s %s not. Encode factor/character predictors ",
+               "numerically (e.g. with model.matrix()) before calling."),
         paste(sprintf("'%s'", non_num), collapse = ", "),
         if (length(non_num) == 1L) "is" else "are"
       ), call. = FALSE)
     }
     resp_vec <- as.numeric(df[[response_var]])
     pred_mat <- as.matrix(df[, predictor_vars, drop = FALSE])
+    storage.mode(pred_mat) <- "double"
   }
 
   if (n > sample_n) {
@@ -333,17 +433,21 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # combined ranking below compares elbow distance and Moran's I computed
   # on the *same* clustering — the sweep's RNG state differs, so its WSS
   # can come from a different local optimum than the Moran evaluation.
-  moran_vals <- rep(NA_real_, k_max)
+  moran_vals <- rep(NA_real_, k_max)   # raw I, reported in $diagnostics
+  moran_z    <- rep(NA_real_, k_max)   # standardised deviate, used for ranking
   wss_eval   <- wss
   for (k in eval_ks) {
     km <- try(stats::kmeans(xy, centers = k, iter.max = 50, nstart = 5),
               silent = TRUE)
     if (inherits(km, "try-error")) next
     wss_eval[k]   <- km$tot.withinss
-    moran_vals[k] <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
+    mi            <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
+    moran_vals[k] <- mi[["I"]]
+    moran_z[k]    <- mi[["z"]]
   }
 
-  valid_moran <- is.finite(moran_vals[eval_ks])
+  # Ranking is on |z|.  |I| is not comparable across k -- see .morans_i_for_k().
+  valid_moran <- is.finite(moran_z[eval_ks])
 
   if (!any(valid_moran)) {
     .log_warn("determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.")
@@ -354,15 +458,28 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
 
   if (criterion == "morans_i") {
     # Select k that minimizes |Moran's I| among evaluated candidates.
-    abs_moran <- rep(Inf, k_max)
-    abs_moran[eval_ks] <- abs(moran_vals[eval_ks])
-    abs_moran[!is.finite(abs_moran)] <- Inf
-    ranked <- order(abs_moran)
+    #
+    # Rank ONLY the candidates that actually produced a finite Moran's I.
+    # Ranking all of 1:k_max and truncating to top_n padded the answer with k
+    # values that were never evaluated: the unevaluated entries all sit at Inf,
+    # order() breaks those ties by index, and head() then appended 1, 2, 3, ...
+    # whenever top_n exceeded the number of finite candidates -- including k
+    # below the resolution floor, and k = 1, which is not a tessellation.
+    finite_ks <- eval_ks[is.finite(moran_z[eval_ks])]
+    if (length(finite_ks) == 0L) {
+      .log_warn(paste0("determine_optimal_levels(): no candidate produced a ",
+                       "finite Moran's I (every candidate is at or below the ",
+                       "resolution floor); falling back to geometric."))
+      out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
+      out[out < 1L] <- 1L; out[out > k_max] <- k_max
+      return(unique(out))
+    }
+    ranked <- finite_ks[order(abs(moran_z[finite_ks]))]
     out <- as.integer(head(ranked, max(1L, as.integer(top_n))))
     out[out < 1L] <- 1L; out[out > k_max] <- k_max
     out <- unique(out)
-    attr(out, "diagnostics") <- list(moran_i = moran_vals, wss = wss[1:k_max],
-                                      eval_ks = eval_ks)
+    attr(out, "diagnostics") <- list(moran_i = moran_vals, moran_z = moran_z,
+                                      wss = wss[1:k_max], eval_ks = eval_ks)
     return(out)
   }
 
@@ -384,9 +501,11 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
 
   # Rank both criteria (lower rank = better)
   rank_elbow <- rank(-perp_dist, ties.method = "average")  # higher distance = better
-  abs_moran_sub <- abs(moran_vals[eval_ks])
+  # |z|, not |I|: the two rank candidates differently and only |z| is
+  # comparable across k.  See .morans_i_for_k().
+  abs_moran_sub <- abs(moran_z[eval_ks])
   abs_moran_sub[!is.finite(abs_moran_sub)] <- max(abs_moran_sub[is.finite(abs_moran_sub)], 1) + 1
-  rank_moran <- rank(abs_moran_sub, ties.method = "average")  # lower |I| = better
+  rank_moran <- rank(abs_moran_sub, ties.method = "average")  # lower |z| = better
 
   combined_rank <- (rank_elbow + rank_moran) / 2
   best_idx <- order(combined_rank)
@@ -394,7 +513,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   out[out < 1L] <- 1L; out[out > k_max] <- k_max
   out <- unique(out)
   attr(out, "diagnostics") <- list(
-    moran_i = moran_vals, wss = wss[1:k_max],
+    moran_i = moran_vals, moran_z = moran_z, wss = wss[1:k_max],
     wss_eval = wss_eval[1:k_max],
     combined_rank = stats::setNames(combined_rank, eval_ks),
     eval_ks = eval_ks,

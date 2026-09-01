@@ -28,7 +28,27 @@ environment carried in \code{object$info$.cache} (reference semantics, so it
 survives R's copy-on-modify).  The cache holds epred column means only,
 which is why \code{predict(object, summary = "median")} and
 \code{predict(object, type = "predict")} recompute rather than reuse it.
-Call \code{\link{clear_fitted_cache}} if the engine or the training data has
-been mutated by hand after fitting.
+Call \code{\link{clear_fitted_cache}} if the engine has been mutated by hand
+after fitting.
+}
+
+\section{The cache is shared by copies, and validated}{
+
+An environment has reference semantics, which is what makes the memo survive
+R's copy-on-modify -- but it also means \code{fit2 <- fit} gives the two
+objects \emph{the same} cache.  Assigning a different \code{data_sf} to the
+copy would then have returned the original's cached values, at the original's
+length, which \code{residuals()} silently recycled against the copy's shorter
+response.  The entry therefore carries the \code{n} and a digest of the
+training data it was computed from, and is recomputed whenever either fails
+to match, so a copy with different data recomputes instead of reading the
+original's answer.
+
+Two consequences of the shared environment remain and cannot be removed from
+here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
+share (harmless -- the other simply recomputes), and \code{identical()}
+cannot distinguish two fits by their caches.  The digest covers
+\code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
+what \code{\link{clear_fitted_cache}} is for.
 }
 
