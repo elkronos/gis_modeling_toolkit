@@ -73,19 +73,22 @@ grid long before the fit itself would.
 }
 \examples{
 \donttest{
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE)) {
+# Any spatial_fit works here; a forest keeps the example free of the
+# optional GWR/Stan backends.
+if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
-  n <- 60
+  n <- 120
   pts <- st_as_sf(
     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
   pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
-  fit  <- fit_gwr_model(pts, "price", "elev", bandwidth = 30)
+  fit  <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
   surf <- predict_surface(fit, n_cells = 500, covariates = pts)
-  plot(surf[".pred"])
+  surf[".pred"]
+  # Check where that surface is extrapolating before mapping it.
+  area_of_applicability(surf, model = fit)
 }
 }
 }

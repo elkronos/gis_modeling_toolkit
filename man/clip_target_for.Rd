@@ -26,5 +26,13 @@ the layer is returned in the automatically selected local projected CRS,
 not the input CRS; a message reports this unless \code{quiet = TRUE}.
 }
 \description{
-Build a polygonal clip target from points and/or a boundary
+Resolves the single polygon that every tessellation method clips against.
+With a \code{boundary} it is that boundary (optionally buffered by \code{expand});
+without one it is the convex hull of \code{points_sf}, again optionally buffered.
+Reach for it when you want to see or reuse the exact clip target
+\code{\link[=build_tessellation]{build_tessellation()}} will apply — for instance to check that a study-area
+polygon actually contains the observations before tessellating, or to pass
+the same envelope to \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and
+\code{\link[=create_grid_polygons]{create_grid_polygons()}} so that two tessellations of one dataset cover
+identical ground.
 }

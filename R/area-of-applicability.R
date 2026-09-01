@@ -29,12 +29,19 @@
                  what, paste(sQuote(missing_v), collapse = ", ")),
          call. = FALSE)
   sub <- df[, vars, drop = FALSE]
-  bad <- vars[!vapply(sub, is.numeric, logical(1))]
+  # Logicals are admitted: storage.mode() below gives them the natural 0/1
+  # coding, whose standard deviation IS meaningful.  fit_rf_model() fits a
+  # logical predictor, cv_rf() cross-validates it and predict() predicts with
+  # it, so refusing the same model here would be self-inconsistent.  Only
+  # factor/character predictors -- which would need an arbitrary one-hot
+  # scaling -- are refused.
+  bad <- vars[!vapply(sub, function(v) is.numeric(v) || is.logical(v),
+                      logical(1))]
   if (length(bad) > 0L)
     stop(sprintf(paste0("area_of_applicability(): predictor(s) in %s are not ",
-                        "numeric: %s. The dissimilarity index is a Euclidean ",
-                        "distance in scaled predictor space and has no ",
-                        "definition for categorical predictors; recode them ",
+                        "numeric or logical: %s. The dissimilarity index is a ",
+                        "Euclidean distance in scaled predictor space and has ",
+                        "no definition for categorical predictors; recode them ",
                         "yourself if you have a scaling you can defend."),
                  what, paste(sQuote(bad), collapse = ", ")), call. = FALSE)
   m <- as.matrix(sub)
@@ -706,6 +713,14 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
 
 
 #' Print an area-of-applicability result
+#'
+#' Summarises where the model may be trusted: how many prediction locations
+#' fall inside the area of applicability and how many outside, the
+#' dissimilarity threshold that separated them, and the predictors the index
+#' was computed over (naming any dropped for having no usable variance).  The
+#' proportion outside is the headline number -- a map that extrapolates over
+#' much of its extent is reporting predictions its training data cannot
+#' support, whatever the cross-validation score said.
 #'
 #' @param x An \code{aoa} object.
 #' @param ... Ignored.

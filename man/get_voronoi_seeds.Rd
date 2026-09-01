@@ -23,7 +23,15 @@ get_voronoi_seeds(
 \item{n}{Integer; number of seeds to return. Required for
 \code{method = "kmeans"} and \code{method = "random"}. \strong{Ignored} for
 \code{method = "provided"}, where every row of \code{seeds} is returned; a mismatch
-between \code{n} and \code{nrow(seeds)} is reported as a warning.}
+between \code{n} and \code{nrow(seeds)} is reported as a warning.
+
+For \code{method = "kmeans"} it is an upper bound rather than a guarantee:
+k-means cannot produce more centres than there are distinct positions in
+the sampling cloud, nor as many centres as there are rows. When \code{n}
+exceeds either ceiling it is clamped, with a warning naming the count
+actually used — \code{n = nrow(sample_points)} is the common case, and yields
+\code{nrow(sample_points) - 1} seeds. Check \code{nrow()} on the result rather than
+assuming \code{n}.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
 

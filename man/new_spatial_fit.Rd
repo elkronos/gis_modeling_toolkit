@@ -15,9 +15,18 @@ new_spatial_fit(
 )
 }
 \arguments{
-\item{subclass}{Character scalar: "gwr_fit", "bayesian_fit" or "rf_fit".}
+\item{subclass}{Character scalar naming the class to stamp on the object:
+one of the built-ins \code{"gwr_fit"}, \code{"bayesian_fit"} or
+\code{"rf_fit"}, or any name of your own for a custom backend (say
+\code{"lm_fit"}).  It is the S3 dispatch key: \code{predict()},
+\code{fitted()}, \code{residuals()} and \code{coef()} on the result all
+dispatch on it, so a custom \code{subclass} \strong{requires} a matching
+\code{predict.<subclass>()} method to be usable with
+\code{\link{cv_spatial}()}.}
 
-\item{engine}{The raw model object.}
+\item{engine}{The raw model object your backend produced (an \code{lm},
+a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
+except your own methods.}
 
 \item{formula}{A formula.}
 
@@ -27,15 +36,32 @@ new_spatial_fit(
 
 \item{data_sf}{An sf object used for fitting.}
 
-\item{info}{Named list of model-specific extras.}
+\item{info}{Named list of model-specific extras.  Set
+\code{fitted_are_oob = TRUE} if your \code{fitted()} values are held out
+rather than in-sample, so \code{summary()} labels them honestly.}
 }
 \value{
 An object of class \code{c(subclass, "spatial_fit")}.
 }
 \description{
-Low-level constructor used by \code{fit_gwr_model()},
-\code{fit_bayesian_spatial_model()} and \code{fit_rf_model()}.  Users should
-not call this directly.
+The constructor for the \code{spatial_fit} class, and the public entry point
+for plugging your own model backend into this package.  The three built-in
+fitters -- \code{\link{fit_gwr_model}()},
+\code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()}
+-- all end by calling it, and so should a custom \code{fit_fn} written for
+\code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
+what lets it use the package's folds, metrics, comparison and
+area-of-applicability machinery unchanged.
+}
+\details{
+There are two obligations.  Return an object built here from your
+\code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
+you chose -- \code{\link{cv_spatial}()} scores folds by calling the
+\code{predict()} generic on the fit, so without a matching
+\code{predict.<subclass>()} every fold fails.  Methods for
+\code{\link{fitted}()}, \code{\link{residuals}()} and \code{\link{coef}()}
+are optional; supply them if you want the corresponding helpers to work on
+your fits too.
 }
 \section{The coef() contract}{
 
@@ -50,3 +76,49 @@ shorter answer than the caller expected.  Wrap in \code{try()} or
 \code{tryCatch()} when sweeping over a heterogeneous list of fits.
 }
 
+\examples{
+library(sf)
+set.seed(1)
+n <- 80
+site <- st_as_sf(
+  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+
+# A custom backend: an ordinary linear model behind the spatial_fit interface.
+lm_fit <- function(train_sf) {
+  new_spatial_fit(
+    subclass       = "lm_fit",
+    engine         = lm(price ~ elev, st_drop_geometry(train_sf)),
+    formula        = price ~ elev,
+    response_var   = "price",
+    predictor_vars = "elev",
+    data_sf        = train_sf
+  )
+}
+
+# Required: cv_spatial() scores each fold through the predict() generic,
+# which dispatches on the subclass named above.
+predict.lm_fit <- function(object, newdata = NULL, ...) {
+  if (is.null(newdata)) newdata <- object$data_sf
+  as.numeric(stats::predict(object$engine, st_drop_geometry(newdata)))
+}
+registerS3method("predict", "lm_fit", predict.lm_fit)
+
+cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
+cv$overall
+# Always check these two agree before trusting the metrics above.
+c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+}
+\seealso{
+\code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
+\code{\link{fit_rf_model}()} for a worked built-in fitter.
+
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_gwr_model}()},
+\code{\link{fit_rf_model}()},
+\code{\link{prep_model_data}()}
+}
+\concept{model fitting}

@@ -20,7 +20,13 @@ build_tessellation(
 \arguments{
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometry.}
 
-\item{boundary}{Optional polygonal sf/sfc.}
+\item{boundary}{Polygonal sf/sfc study area. \strong{Required} for
+\code{method = "hex"} and \code{method = "square"}, which have no extent of their
+own to lay a grid over and error without it; supply the study-area polygon,
+or build one from the points with \code{\link[=clip_target_for]{clip_target_for()}}. \strong{Optional} for
+\code{method = "voronoi"} and \code{method = "triangles"}, which derive their extent
+from the points themselves and use \code{boundary} only to clip the result when
+\code{clip = TRUE}.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
@@ -57,7 +63,26 @@ carry \code{poly_id}, which holds the same values.}
 }
 }
 \description{
-Build a tessellation (Voronoi, Delaunay triangles, hex grid, or square grid)
+The single entry point for turning a point pattern into analysis regions, and
+the first step of the package's pipeline.  It wraps the four tessellation
+methods behind one interface that handles CRS projection, clipping and stable
+cell identifiers consistently, and returns the cell layer together with the
+point-to-cell index that \code{\link{assign_features_to_polygons}()} and
+\code{\link{summarize_by_cell}()} consume.  Use it rather than the
+individual constructors whenever you might want to compare methods: the
+return shape does not change with \code{method}, so swapping
+\code{"voronoi"} for \code{"hex"} costs one argument.
+}
+\details{
+Which method to reach for.  \code{"voronoi"} gives one cell per point, so
+resolution follows sampling density -- the choice when the observations
+themselves define the regions.  \code{"hex"} and \code{"square"} give
+equal-area cells on a fixed grid, so cell size is a decision you make rather
+than one the data makes for you; hexagons avoid the axis-aligned artefacts of
+squares and have uniform neighbour distances.  \code{"triangles"} returns
+the Delaunay triangulation, useful for interpolation and adjacency work
+rather than as an aggregation unit.  \code{\link{determine_optimal_levels}()}
+will suggest a cell count from the spatial structure of the data.
 }
 \examples{
 library(sf)

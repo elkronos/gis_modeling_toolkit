@@ -95,6 +95,17 @@ Aggregates an sf point dataset into one row per cell. By default computes
 counts and means, but the aggregation function is configurable.
 }
 \details{
+This is the third step of the package's pipeline, taking the labelled layer
+from \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} down to cell level. What distinguishes
+it from a plain \code{dplyr::group_by()} + \code{summarise()} is that it carries the
+\emph{uncertainty} of each aggregate with it: alongside every mean it returns a
+within-cell standard deviation, a standard error and an observation count,
+and it can correct that standard error for within-cell spatial
+autocorrelation via \code{deff}. Reach for it whenever the cell-level values will
+be modelled or mapped, because a cell mean over 2 observations and one over
+200 are not the same measurement and nothing downstream can tell them apart
+otherwise.
+
 In addition to user-specified aggregation functions, this function always
 computes within-cell standard deviation (\verb{..sd_<var>}) and standard error
 (\verb{..se_<var>}) for every numeric response/predictor column, plus a
@@ -147,3 +158,12 @@ cells <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
 cells
 attr(cells, "deff_applied")
 }
+\seealso{
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, which produces the input layer;
+\code{\link[=build_tessellation]{build_tessellation()}} for the cells themselves.
+
+Other aggregation: 
+\code{\link{assign_features_to_polygons}()},
+\code{\link{determine_optimal_levels}()}
+}
+\concept{aggregation}

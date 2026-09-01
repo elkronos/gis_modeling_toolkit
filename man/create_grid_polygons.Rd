@@ -25,11 +25,18 @@ substantially from the requested value.}
 
 \item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}.}
 
-\item{cellsize}{Optional numeric cell size (length 1 or 2).}
+\item{cellsize}{Optional numeric cell size (length 1 or 2), in the units of
+the working CRS. Takes precedence over \code{n}: if both are supplied,
+\code{cellsize} is used, \code{n} is ignored and a warning is logged. Supply exactly
+one of \code{target_cells}, \code{cellsize} and \code{n}.}
 
-\item{n}{Optional grid resolution (integer, length 1 or 2). Applies to
-square grids only; \code{\link[sf:st_make_grid]{sf::st_make_grid()}} derives hexagon placement from
-\code{cellsize} alone.}
+\item{n}{Optional grid resolution (integer, length 1 or 2) giving the number
+of columns and rows to divide the boundary's bounding box into; the cell
+size is derived from it. Applies to square grids only; \code{\link[sf:st_make_grid]{sf::st_make_grid()}}
+derives hexagon placement from \code{cellsize} alone. Ignored (with a logged
+warning) when \code{cellsize} is also supplied — passing both would otherwise
+truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
+corner, covering only part of the boundary.}
 
 \item{clip}{Logical; clip grid to boundary.}
 
@@ -43,7 +50,20 @@ grid; a message reports this unless \code{quiet = TRUE}.}
 An sf polygon layer with poly_id column.
 }
 \description{
-Create square or hexagonal grid polygons over a boundary
+Lays a regular grid of equal-area cells over \code{boundary} and clips it to that
+boundary. Reach for this rather than \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} when cell
+size should be a decision you make — because you need per-cell rates
+comparable across the map, or a resolution that stays fixed as the sample
+grows — instead of one dictated by where the observations happen to be.
+Hexagons (\code{type = "hex"}) avoid the axis-aligned artefacts of squares and
+give every cell the same distance to all six neighbours, which matters for
+anything that reads neighbourhoods.
+}
+\details{
+Size the grid with exactly one of \code{target_cells} (roughly how many cells you
+want, the package derives the rest), \code{cellsize} (a fixed edge length in CRS
+units) or \code{n} (a fixed number of columns and rows). See \verb{@param cellsize}
+for what happens when more than one is given.
 }
 \examples{
 library(sf)

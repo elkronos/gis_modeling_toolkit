@@ -12,11 +12,35 @@
 \item{...}{Ignored.}
 }
 \value{
-A data.frame of local coefficient estimates (one row per obs).
+A data.frame of local coefficient estimates: one row per
+observation, one column per model term.
 Never \code{NULL}: when the engine carries no \code{SDF} component this
 errors, following the \code{coef()} contract described in
 \code{\link{new_spatial_fit}}.
 }
 \description{
-Extract GWR local coefficients
+Returns the whole surface of coefficients -- one row per observation, one
+column per term -- rather than the single global vector \code{coef()}
+returns for an \code{lm}.  That table is the point of fitting a GWR at all:
+inspect the spread of a predictor's column to see where, and by how much,
+its relationship with the response changes across the study area, and join
+it back to \code{object$data_sf} to map it.  Use
+\code{\link{plot.spatial_fit}()} for a quick look at that map.
 }
+\section{What is and is not returned}{
+
+Only the model terms -- the intercept and one column per predictor.
+GWmodel's \code{SDF} data slot carries a good deal more alongside them
+(standard errors, t-values, the observed response, the fitted values, the
+residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
+are coefficients.  Returning the whole slot would have made
+\code{coef(fit)$Local_R2} and \code{coef(fit)$a_SE} read like coefficients
+and \code{ncol(coef(fit))} a meaningless number.  Reach for
+\code{object$engine$SDF} when you want the rest; it is the unmodified
+GWmodel object.
+
+If the model terms cannot be located in the \code{SDF} -- a GWmodel that
+names its coefficient columns differently -- the whole slot is returned with
+a warning saying so, rather than an error or a silently short table.
+}
+

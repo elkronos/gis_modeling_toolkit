@@ -199,3 +199,52 @@ test_that("harmonize_crs rejects non-spatial input", {
   expect_error(harmonize_crs(data.frame(x = 1), a), "`a` must be sf or sfc")
   expect_error(harmonize_crs(a, data.frame(x = 1)), "`b` must be sf or sfc")
 })
+
+
+test_that("ensure_projected refuses to assume lon/lat for a small integer-grid survey", {
+  # With no CRS at all, the only evidence available is the numbers themselves.
+  # Falling inside the lon/lat envelope is necessary but nowhere near
+  # sufficient: a local site survey in metres sits inside it too, and stamping
+  # EPSG:4326 on one silently teleports it to the Gulf of Guinea and then
+  # "projects" it.  So a second test is required -- the data must look
+  # POSITIVELY geographic, either by spanning more than a degree or by
+  # carrying fractional-degree precision.
+  nocrs <- function(x, y)
+    sf::st_as_sf(data.frame(x = x, y = y), coords = c("x", "y"))
+
+  # A 1 m quadrat frame on a whole-metre grid: extent 1 in both axes, no
+  # fractional part anywhere.  Neither test is met, so nothing is assumed.
+  quad <- nocrs(c(0, 0, 1, 1), c(0, 1, 0, 1))
+  lines <- capture_spatialkit_log(out <- ensure_projected(quad))
+  expect_true(log_has(lines, "Not assuming EPSG:4326"))
+  expect_true(log_has(lines, "lack the decimal precision or extent"))
+  expect_true(is.na(sf::st_crs(out)))
+  expect_equal(sf::st_coordinates(out), sf::st_coordinates(quad))
+
+  # (a) More than a degree in ONE axis is enough to tip it the other way, so
+  #     the extent test is doing real work and is not simply always false.
+  wide_x <- nocrs(c(0, 0, 2, 2), c(0, 1, 0, 1))
+  lx <- capture_spatialkit_log(ox <- ensure_projected(wide_x))
+  expect_true(log_has(lx, "assuming EPSG:4326"))
+  expect_false(is.na(sf::st_crs(ox)))
+  expect_false(sf::st_is_longlat(ox))
+
+  wide_y <- nocrs(c(0, 0, 1, 1), c(0, 2, 0, 2))
+  expect_false(is.na(sf::st_crs(
+    suppressWarnings(ensure_projected(wide_y)))))
+
+  # (b) So is fractional-degree precision within the same 1-degree box.
+  fine <- nocrs(c(9.10, 9.20, 9.30, 9.15), c(48.70, 48.75, 48.80, 48.72))
+  lf <- capture_spatialkit_log(of <- ensure_projected(fine))
+  expect_true(log_has(lf, "assuming EPSG:4326"))
+  expect_equal(sf::st_crs(of)$epsg, 32632L)     # the containing UTM zone
+
+  # An explicit CRS short-circuits the whole heuristic: the quadrat is left
+  # exactly where it is, with no guessing and no warning about it.
+  stamped <- quad
+  sf::st_crs(stamped) <- sf::st_crs(32632)
+  quiet <- capture_spatialkit_log(os <- ensure_projected(stamped))
+  expect_false(log_has(quiet, "assuming EPSG:4326"))
+  expect_equal(sf::st_crs(os), sf::st_crs(32632))
+  expect_equal(sf::st_coordinates(os), sf::st_coordinates(quad))
+})

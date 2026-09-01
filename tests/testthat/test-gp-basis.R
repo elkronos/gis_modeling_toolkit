@@ -84,12 +84,45 @@ test_that(".gp_basis_spec tracks the length-scale ratio, not the coordinate scal
 
   expect_identical(k0, as.integer(ceiling(5.6 * b[["upper"]] / b[["lower"]])))
 
-  for (mult in c(1e-3, 1e3)) {
+  # S is brms's own domain measure: the pooled range of the COLUMN-CENTRED
+  # coordinates, which is exactly what brms:::choose_L() multiplies by c.
+  # Verified against brms itself -- the boundary recovered from
+  # make_standata()'s slambda equals c * this quantity to the last digit at
+  # every c, and equals TWICE the per-axis half-range the earlier
+  # implementation used.
+  brms_S <- function(m) {
+    Xc <- sweep(as.matrix(m), 2L, colMeans(as.matrix(m)))
+    max(1, max(Xc) - min(Xc))                      # the max(1, .) is brms's
+  }
+  # Scale invariance of k holds wherever brms's own max(1, .) floor does not
+  # bite -- which is every realistic input, since this package hands gp() the
+  # per-axis standardised coordinates (pooled centred range ~3.5 here).
+  for (mult in c(1, 1e3, 1e6)) {
     xy_s <- xy * mult
     s_s  <- spatialkit:::.gp_basis_spec(xy_s, gp_lengthscale_bounds(xy_s))
+    expect_gt(brms_S(xy_s), 1)                     # floor not engaged
     expect_identical(s_s$k, k0)                    # k unchanged ...
-    expect_equal(s_s$S, mult * max(apply(xy, 2, function(z) diff(range(z)) / 2)))
-  }                                                # ... while S scaled by 1e6
+    expect_equal(s_s$S, brms_S(xy_s))              # ... while S scales with it
+  }
+  # Regression guard: the half-range convention is exactly half of this, and
+  # using it built a GP boundary twice as wide as gp_k was sized for.
+  expect_equal(spatialkit:::.gp_basis_spec(xy, b)$S, brms_S(xy))
+  expect_gt(brms_S(xy), 1.5 * max(apply(xy, 2, function(z) diff(range(z)) / 2)))
+})
+
+test_that(".gp_basis_spec reproduces brms's max(1, range) boundary floor", {
+  # choose_L() floors the domain range at 1, so below that extent brms builds
+  # the boundary from 1 rather than from the data.  This function must do the
+  # same, or gp_k and gp_ell_min would describe a basis brms does not build.
+  # It is why k is NOT scale-invariant all the way down.
+  set.seed(2)
+  xy    <- scale(matrix(runif(2 * 2000), ncol = 2))
+  tiny  <- xy * 1e-3                                # pooled centred range ~0.0035
+  s_t   <- spatialkit:::.gp_basis_spec(tiny, gp_lengthscale_bounds(tiny))
+  expect_equal(s_t$S, 1)                            # floored, not 0.0035
+  expect_equal(s_t$c, 1.25)                         # so c falls to its floor
+  # and k rises, because the basis must now resolve a much smaller ell/S.
+  expect_gt(s_t$k, spatialkit:::.gp_basis_spec(xy, gp_lengthscale_bounds(xy))$k)
 })
 
 test_that(".gp_basis_spec demands more basis functions for finer structure", {
@@ -145,14 +178,23 @@ test_that(".gp_basis_spec sets c from the UPPER length-scale bound", {
   # not (3.2*upper)/S -- and allow a rounding tolerance: when this constraint
   # binds, c_val IS this product, so a strict >= is a floating-point coin flip.
   expect_gte(s$c, 3.2 * (b[["upper"]] / s$S) - 1e-9)
-  expect_gte(s$c, 1.2)
+  expect_gte(s$c, 1.25)        # brms's own default boundary factor, c = 5/4
   expect_gt(s$c, 1.5)          # would have failed under the old default
 })
 
-test_that(".gp_basis_spec returns the domain half-range it used", {
+test_that(".gp_basis_spec returns brms's own domain measure, not the half-range", {
+  # brms builds the GP boundary as choose_L(x, c) = c * max(1, max(x) - min(x))
+  # over the column-centred, POOLED covariate matrix.  Deriving c against the
+  # per-axis half-range and handing it to brms::gp() therefore produced a
+  # boundary twice as wide as intended, under-resolving the GP by a factor of
+  # two and making $info$gp_ell_min twice too lenient to catch it.
   xy <- scaled_uniform(500, seed = 5)
   s  <- spatialkit:::.gp_basis_spec(xy, gp_lengthscale_bounds(xy))
-  expect_equal(s$S, max(apply(xy, 2, function(z) diff(range(z)) / 2)))
+  Xc <- sweep(xy, 2L, colMeans(xy))
+  expect_equal(s$S, max(1, max(Xc) - min(Xc)))
+  # ... and that is twice the old half-range, which is the size of the bug.
+  expect_equal(s$S / max(apply(xy, 2, function(z) diff(range(z)) / 2)), 2,
+               tolerance = 0.05)
 })
 
 test_that(".gp_basis_spec survives degenerate coordinates", {
@@ -171,6 +213,50 @@ test_that("gp_lengthscale_bounds returns a sane, separated interval", {
   expect_true(all(is.finite(b)))
   expect_gt(b[["lower"]], 0)
   expect_gte(b[["upper"]], b[["lower"]] * 1.2)   # the separation guard
+})
+
+test_that("gp_lengthscale_bounds calibrates to 5 % SE correlation at the bound", {
+  # Finiteness, positivity and a 1.2x gap are satisfied by an interval that is
+  # 2.45x too wide at both ends, so none of them pins the calibration.  The
+  # documented rule does: the squared-exponential kernel has
+  #
+  #     corr(d) = exp(-d^2 / (2 l^2)),
+  #
+  # so requiring corr = 0.05 at distance d gives d^2 / (2 l^2) = log 20, i.e.
+  # l = d / sqrt(2 log 20).  The lower bound applies that to the q_small
+  # quantile of the pairwise distances and the upper bound to the maximum, so
+  # BOTH bounds must reproduce a correlation of exactly 0.05 at their own
+  # distance.  Nothing here re-uses the implementation's constant.
+  xy <- scaled_uniform(500, seed = 6)
+  b  <- gp_lengthscale_bounds(xy)
+
+  d    <- as.numeric(stats::dist(xy))          # n = 500 <= max_n, so no sample
+  d    <- d[d > 0]
+  dq   <- stats::quantile(d, 0.25, names = FALSE, type = 7)   # q_small default
+  dmax <- max(d)
+  # The separation guard must not be the thing setting `upper`, or the upper
+  # assertion below would be testing max() rather than the calibration.
+  expect_gt(dmax, 1.2 * dq)
+
+  se_corr <- function(dist, l) exp(-dist^2 / (2 * l^2))
+  expect_equal(se_corr(dq,   b[["lower"]]), 0.05, tolerance = 1e-12)
+  expect_equal(se_corr(dmax, b[["upper"]]), 0.05, tolerance = 1e-12)
+
+  # Equivalently, and more directly: the bounds ARE those distances divided by
+  # sqrt(2 log 20) ~ 2.448.  A factor of 1 -- no conversion at all -- would put
+  # both bounds 2.45x too high and make the correlation above exp(-1/2) = 0.61.
+  expect_equal(unname(b[["lower"]]), dq   / sqrt(2 * log(20)), tolerance = 1e-12)
+  expect_equal(unname(b[["upper"]]), dmax / sqrt(2 * log(20)), tolerance = 1e-12)
+
+  # The separation guard still binds when the distance distribution is narrow
+  # enough that dmax < 1.2 * dq -- points on one tight ring, say.
+  ang  <- seq(0, 2 * pi, length.out = 60)[-60]
+  ring <- cbind(cos(ang), sin(ang))
+  br   <- gp_lengthscale_bounds(ring, q_small = 0.9)
+  dr   <- as.numeric(stats::dist(ring)); dr <- dr[dr > 0]
+  expect_lt(max(dr), 1.2 * stats::quantile(dr, 0.9, names = FALSE))
+  expect_equal(unname(br[["upper"]]), unname(br[["lower"]]) * 1.2,
+               tolerance = 1e-12)
 })
 
 

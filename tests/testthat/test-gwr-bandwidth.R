@@ -83,3 +83,62 @@ test_that("a successful bandwidth selection is not labelled a fallback", {
   expect_false(auto$info$bandwidth_is_fallback)
   expect_true(is.finite(auto$info$bandwidth) && auto$info$bandwidth > 0)
 })
+
+
+# ---------------------------------------------------------------------------
+# "Exactly two distinct values" is not the same thing as "binary"
+# ---------------------------------------------------------------------------
+
+.gwr2v_points <- function(z, n = 60, seed = 2) {
+  set.seed(seed)
+  sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+               a = rnorm(n), z = rep(z, length.out = n)),
+    coords = c("x", "y"), crs = 32632)
+}
+
+test_that("fit_gwr_model fits a two-valued NON-INTEGER response with a warning", {
+  # A left-censored measurement -- everything either at the detection limit
+  # (0.0031) or at a single higher reading -- has exactly two distinct values
+  # and is perfectly continuous.  Gaussian GWR on it is a well-defined
+  # least-squares problem, and the old error's advice to switch to
+  # family = "binomial" was nonsense for such values.  The same guard runs once
+  # per fold inside cv_gwr(), where a small training fold can legitimately hold
+  # only two distinct values, so a hard stop there aborted whole CV runs.
+  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
+
+  censored <- .gwr2v_points(c(0.0031, 12.7401))
+  expect_equal(length(unique(censored$z)), 2L)
+  expect_false(all(censored$z == round(censored$z)))
+
+  expect_warning(fit <- fit_gwr_model(censored, "z", "a", bandwidth = 300),
+                 "has only 2 distinct finite values")
+  expect_s3_class(fit, "gwr_fit")
+  # Warned, not refused: it is the design that is degenerate, not the model.
+  expect_warning(fit_gwr_model(censored, "z", "a", bandwidth = 300),
+                 "genuinely continuous \\(e.g. censored at a detection limit\\)")
+
+  # An integer-valued pair is still a hard error, with the binomial advice.
+  binary <- .gwr2v_points(c(0, 1))
+  expect_true(all(binary$z == round(binary$z)))
+  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 300),
+               "is binary \\(2 distinct values")
+  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 300),
+               "family = 'binomial'")
+})
+
+test_that("the two-valued response guard sits behind the GWmodel requirement", {
+  # Dependency-free companion to the skipped test above, and the reason it has
+  # to skip: fit_gwr_model() checks for its backend BEFORE it looks at the
+  # response, so nothing about the response can be observed without GWmodel.
+  # Both response shapes therefore produce the same missing-backend error, and
+  # neither the warning nor the binary stop is reachable on this install.
+  skip_if(requireNamespace("GWmodel", quietly = TRUE),
+          "GWmodel is installed, so the backend check passes")
+
+  for (z in list(c(0.0031, 12.7401), c(0, 1), c(1.5, 2.5, 3.5))) {
+    expect_error(fit_gwr_model(.gwr2v_points(z), "z", "a", bandwidth = 300),
+                 "package 'GWmodel' is required")
+  }
+})

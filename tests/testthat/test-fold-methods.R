@@ -348,3 +348,69 @@ test_that("a single block is refused rather than silently defeating blocked CV",
     "single block covering the whole extent"
   )
 })
+
+
+# ---------------------------------------------------------------------------
+# folds$params$crs: the CRS every length in params is measured in
+# ---------------------------------------------------------------------------
+
+test_that("folds$params records the CRS the folds were actually built in", {
+  # block_size, sac_range, buffer and median_buffer are lengths in the CRS
+  # make_folds() worked in -- which for geographic input is one
+  # ensure_projected() chose, not one the caller passed.  Without a label,
+  # "buffer = 500" is a number with no units attached to it.
+  set.seed(4)
+  n   <- 45
+  pts <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+    coords = c("x", "y"), crs = 32632)
+  grid <- sf::st_as_sf(
+    data.frame(x = runif(12, 0, 1000), y = runif(12, 0, 1000)),
+    coords = c("x", "y"), crs = 32632)
+
+  projected <- list(
+    block_kfold  = make_folds(pts, k = 3, method = "block_kfold", seed = 1),
+    buffered_loo = make_folds(pts, k = 3, method = "buffered_loo",
+                              buffer = 100, seed = 1),
+    nndm         = make_folds(pts, method = "nndm",
+                              prediction_points = grid, seed = 1)
+  )
+  for (m in names(projected)) {
+    expect_true("crs" %in% names(projected[[m]]$params), info = m)
+    # Projected input is used as it stands, so the label is the caller's CRS.
+    expect_identical(projected[[m]]$params$crs, "EPSG:32632", info = m)
+  }
+
+  # Geographic input is projected first, so the label must name the CRS
+  # actually used -- NOT the EPSG:4326 that was passed in.
+  set.seed(5)
+  ll <- sf::st_as_sf(
+    data.frame(x = runif(n, 9, 9.5), y = runif(n, 48, 48.5)),
+    coords = c("x", "y"), crs = 4326)
+  grid_ll <- sf::st_as_sf(
+    data.frame(x = runif(12, 9, 9.5), y = runif(12, 48, 48.5)),
+    coords = c("x", "y"), crs = 4326)
+
+  # What ensure_projected() picks for this extent, computed here rather than
+  # copied from a run.
+  used <- paste0("EPSG:", sf::st_crs(ensure_projected(ll))$epsg)
+  expect_identical(used, "EPSG:32632")          # the containing UTM zone
+
+  geographic <- list(
+    block_kfold  = make_folds(ll, k = 3, method = "block_kfold", seed = 1),
+    buffered_loo = make_folds(ll, k = 3, method = "buffered_loo",
+                              buffer = 500, seed = 1),
+    nndm         = make_folds(ll, method = "nndm",
+                              prediction_points = grid_ll, seed = 1)
+  )
+  for (m in names(geographic)) {
+    expect_identical(geographic[[m]]$params$crs, used, info = m)
+    expect_false(identical(geographic[[m]]$params$crs, "EPSG:4326"), info = m)
+  }
+
+  # The lengths the label explains are alongside it.
+  expect_true(all(c("block_size", "sac_range") %in%
+                    names(geographic$block_kfold$params)))
+  expect_equal(geographic$buffered_loo$params$buffer, 500)
+  expect_true("median_buffer" %in% names(geographic$nndm$params))
+})

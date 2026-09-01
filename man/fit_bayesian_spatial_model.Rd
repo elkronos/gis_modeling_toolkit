@@ -116,24 +116,55 @@ Model-specific metadata lives in \code{$info} (coords -- the names of the
 scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
-was calibrated over; gp_lscale_prior, loo, looic,
+was calibrated over; gp_lscale_prior -- the length-scale prior
+\code{brms::validate_prior()} reports the model will \emph{actually} use,
+which is not necessarily the one this function requested (several entries,
+semicolon-separated, if brms resolved the axes differently); loo, looic,
 convergence_ok,
 convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
 }
 \description{
-Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
+Fits a regression whose residual spatial structure is modelled explicitly, as
+a Gaussian process over the coordinates, rather than left in the errors.  Two
+things follow, and they are the reasons to reach for this backend.  First,
+every quantity comes with a posterior, so predictions carry calibrated
+intervals instead of point estimates -- score them with
+\code{\link{cv_bayes}()}, which reports held-out interval coverage and CRPS.
+Second, the fitted length-scale is itself an estimate of how far the spatial
+dependence reaches, a number you can read and report.
 }
 \details{
+Choose it over \code{\link{fit_gwr_model}()} when you want one global
+relationship plus an explicit spatial random field, and uncertainty you can
+defend; choose GWR instead when the question is how a coefficient
+\emph{varies} across the map.  Choose \code{\link{fit_rf_model}()} when
+predictive accuracy matters more than an interpretable model and the
+response is non-linear in the predictors.  The cost here is time: this is
+full MCMC via 'brms' and Stan, so it is minutes rather than seconds, and the
+GP is fitted through a reduced-rank basis approximation whose size
+(\code{gp_k}) trades fidelity against runtime.
+
 \strong{GP basis count and boundary factor.}
 \code{brms::gp()} builds a full tensor grid over its covariates, so a term
 \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions -- the
 \code{gp_k} argument is the count \emph{per dimension}, not the total rank.
 Both \code{gp_k} and \code{gp_c} are therefore chosen from the ratio of the
-estimated length-scale to the domain half-range, following
+estimated length-scale to the domain extent, following
 Riutort-Mayol et al. (2023), rather than from the number of observations:
 \code{gp_c} is set large enough to contain the upper length-scale bound,
 and \code{gp_k} large enough to resolve the lower one.  The derived value is
 typically 21-25 per dimension and is largely independent of \code{n}.
+
+The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
+the full pooled range of the column-centred coordinates
+(\code{brms:::choose_L()}), not the per-axis half-range in which
+Riutort-Mayol et al. state their inequalities.  Both constraints are really
+constraints on the boundary \eqn{L = c \times S}, so expressing them in
+brms's units is what keeps \code{gp_c}, \code{gp_k} and
+\code{$info$gp_ell_min} describing the basis brms actually builds.  A
+\code{gp_c} derived on the half-range convention and handed to
+\code{brms::gp()} produces a boundary twice as wide as intended, against
+which \code{gp_k} under-resolves by a factor of two.
 
 The GP term is built with \code{scale = FALSE}.  \code{brms::gp()} otherwise
 rescales its covariates so the maximum Euclidean distance between two points
@@ -201,6 +232,7 @@ Gaussian processes for probabilistic programming.
 Other model fitting: 
 \code{\link{fit_gwr_model}()},
 \code{\link{fit_rf_model}()},
+\code{\link{new_spatial_fit}()},
 \code{\link{prep_model_data}()}
 }
 \concept{model fitting}

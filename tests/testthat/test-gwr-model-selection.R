@@ -32,14 +32,35 @@ test_that(".gwr_ms_criterion matches the column name case-insensitively and igno
   expect_equal(res$values, c(5, 6))
 })
 
-test_that(".gwr_ms_criterion falls back to column 2 when the table is unlabelled", {
-  # This is what GWmodel's own documentation does: model.sel[[2]][, 2].
+test_that(".gwr_ms_criterion reads AICc from column 3 when the table is unlabelled", {
+  # GWmodel's GWR.df is documented AND built as c(bandwidth, AIC, AICc, RSS):
+  # in Model.selection.r it is rbind()ed from
+  #     c(bw, aic.rss[2], aic.rss[3], aic.rss[1])  with aic.rss = c(RSS, AIC, AICc)
+  # over UNNAMED vectors, so it never carries column names -- which makes this
+  # positional branch the path every real call takes, not a rare fallback.
+  #
+  # Column 2 is the UNCORRECTED AIC.  Reading it ranked models on AIC while
+  # labelling the answer AICc, which selects larger models: executed against a
+  # faithful GWmodel stub, the old code selected the model containing a
+  # pure-noise predictor that AICc drops.
+  m <- matrix(c(1, 2, 3, 40, 50, 60, 7, 8, 9, 100, 200, 300), ncol = 4)
+  res <- .gwr_ms_criterion(m)
+  expect_false(res$by_name)
+  expect_identical(res$column, 3L)
+  expect_equal(res$values, c(7, 8, 9))
+  expect_true(res$shape_ok)          # the documented four columns
+  expect_match(res$label, "assumed")
+})
+
+test_that(".gwr_ms_criterion flags a table that is not the documented shape", {
+  # Anything other than c(bandwidth, AIC, AICc, RSS) is a layout this code has
+  # never seen; it reads the same position but tells the caller the ranking is
+  # unverified, so gwr_model_selection() can warn instead of asserting AICc.
   m <- matrix(c(1, 2, 3, 40, 50, 60, 7, 8, 9), ncol = 3)
   res <- .gwr_ms_criterion(m)
   expect_false(res$by_name)
-  expect_identical(res$column, 2L)
-  expect_equal(res$values, c(40, 50, 60))
-  expect_match(res$label, "assumed")
+  expect_identical(res$column, 3L)
+  expect_false(res$shape_ok)
 })
 
 test_that(".gwr_ms_criterion falls back to column 1 for a single-column table", {
@@ -47,6 +68,7 @@ test_that(".gwr_ms_criterion falls back to column 1 for a single-column table", 
   res <- .gwr_ms_criterion(m)
   expect_identical(res$column, 1L)
   expect_equal(res$values, c(4, 5, 6))
+  expect_false(res$shape_ok)
 })
 
 test_that(".gwr_ms_criterion accepts a bare numeric vector", {

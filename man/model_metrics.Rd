@@ -22,7 +22,19 @@ see above).}
 A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
 }
 \description{
-Compute goodness-of-fit metrics for a spatial model
+Reports RMSE, MAE, MAPE, SMAPE, \eqn{R^2} and adjusted \eqn{R^2} for any
+\code{spatial_fit}, in one row and on one scale, so that fits from different
+backends can be read side by side.  Reach for it to score a model on data you
+hold out yourself (pass it as \code{newdata}), or to get a quick in-sample
+reading of how closely a fit tracks its training data.
+}
+\details{
+It is not a substitute for cross-validation.  With \code{newdata = NULL} the
+numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit} -- and a
+GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
+without predicting anything.  For a figure you can report, use
+\code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
+or \code{\link{compare_models_cv}()}.
 }
 \section{What the metrics are computed on}{
 

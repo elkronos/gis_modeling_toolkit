@@ -92,8 +92,18 @@ test_that("a supportable range is returned and carries its fit", {
   expect_true(is.finite(attr(r, "max_dist")))
   expect_true(is.finite(attr(r, "cutoff_dist")))
   expect_lte(as.numeric(r), attr(r, "cutoff_dist"))      # the default guard
-  expect_false(is.null(attr(r, "directional")))
-  expect_length(attr(r, "directional"), 2L)
+  # FOUR directions, named by azimuth.  A 0/90 sweep at +/-22.5 degrees covers
+  # only 90 of the 180 distinct azimuths, so a field oriented near 45 or 135
+  # degrees fell into neither window and had its range halved (measured: 151
+  # and 147 against a true 300, versus 255 and 249 at 0 and 90).  c(0, 45, 90,
+  # 135) tiles all of them.  An entry is NA when that direction's variogram
+  # never reached a sill and was excluded from the maximum.
+  d <- attr(r, "directional")
+  expect_false(is.null(d))
+  expect_length(d, 4L)
+  expect_identical(names(d), c("0", "45", "90", "135"))
+  expect_gte(sum(is.finite(d)), 2L)                # the minimum to use them
+  expect_equal(as.numeric(r), max(d, na.rm = TRUE), tolerance = 1e-10)
 
   # The field was simulated with a known exponential range, so the estimate
   # should land near it.  A wide band -- variogram estimation on 250 irregular
@@ -155,4 +165,121 @@ test_that("make_folds(auto_range) falls back when the range is unidentified", {
   # ... and the grid is still a real grid, not one block.
   expect_gt(f$params$grid_nx * f$params$grid_ny, 1L)
   expect_gte(length(f$folds), 2L)
+})
+
+
+# ---------------------------------------------------------------------------
+# Input validation and reproducibility
+# ---------------------------------------------------------------------------
+
+test_that("a factor response is refused rather than silently coded", {
+  # as.numeric() on a factor returns LEVEL CODES -- an arbitrary integer
+  # relabelling of the categories -- so a variogram fitted to them changed when
+  # the levels were reordered (3700 against 2497 on the same data).
+  skip_if_not_installed("gstat")
+  pts <- sac_test_field()
+  pts$grp <- factor(sample(c("a", "b", "c"), nrow(pts), replace = TRUE))
+  expect_error(estimate_sac_range(pts, "grp"), "factor")
+  pts$txt <- as.character(pts$grp)
+  expect_error(estimate_sac_range(pts, "txt"), "numeric")
+  # A missing column is named, not discovered downstream as "too few values".
+  expect_error(estimate_sac_range(pts, "nope"), "not found")
+  # Logical is fine: 0/1 is a well-defined variogram target.
+  pts$flag <- pts$z > stats::median(pts$z)
+  expect_false(is.null(estimate_sac_range(pts, "flag")))
+})
+
+test_that("the n_max subsample is reproducible and leaves the RNG alone", {
+  # `seed` defaults to a constant.  Unseeded, the subsample made the returned
+  # range differ between runs on identical input (19531 / 19589 / 19605) and
+  # silently advanced the caller's stream -- and make_folds(auto_range = TRUE)
+  # sizes its blocks from that number.
+  skip_if_not_installed("gstat")
+  set.seed(99)
+  n   <- 400
+  pts <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), z = rnorm(n)),
+    coords = c("x", "y"), crs = 32632)
+
+  a <- suppressWarnings(estimate_sac_range(pts, "z", n_max = 150L))
+  b <- suppressWarnings(estimate_sac_range(pts, "z", n_max = 150L))
+  expect_equal(as.numeric(a), as.numeric(b))
+
+  # The caller's stream is untouched across the call.
+  set.seed(1); before <- runif(3)
+  set.seed(1); invisible(suppressWarnings(estimate_sac_range(pts, "z", n_max = 150L)))
+  after <- runif(3)
+  expect_equal(before, after)
+
+  # And a different seed is still available for a sensitivity check.
+  d <- suppressWarnings(estimate_sac_range(pts, "z", n_max = 150L, seed = 999L))
+  expect_true(is.na(d) || is.numeric(as.numeric(d)))
+})
+
+test_that("all four azimuths are represented in the directional attribute", {
+  skip_if_not_installed("gstat")
+  r <- estimate_sac_range(sac_test_field(), "z", seed = 1)
+  d <- attr(r, "directional")
+  expect_identical(names(d), c("0", "45", "90", "135"))
+  # 0 and 90 alone at +/-22.5 degrees cover only half the azimuth circle.
+  covered <- function(az, tol) {
+    vapply(0:179, function(th) any(abs(((th - az + 90) %% 180) - 90) <= tol),
+           logical(1))
+  }
+  expect_equal(sum(covered(c(0, 90), 22.5)), 90L)
+  expect_equal(sum(covered(c(0, 45, 90, 135), 22.5)), 180L)
+})
+
+
+test_that("a non-converged variogram fit is refused but stays inspectable", {
+  # Two properties that pull against each other, and both matter.
+  #
+  # (1) The RANGE must be refused. gstat signals non-convergence with a warning
+  #     and then returns anyway, so the number it reports is wherever the
+  #     optimiser stopped rather than a fitted parameter, and
+  #     make_folds(auto_range = TRUE) would size blocks from it.
+  # (2) The VARIOGRAM must survive. A curve that never reaches a sill is
+  #     exactly the case worth looking at, so plot(type = "variogram") has to
+  #     keep working -- discarding the fit made it error with "the residual
+  #     variogram could not be fitted".
+  #
+  # And no bare gstat warning should reach the user: with the sweep at four
+  # azimuths each variogram gets about half the pairs, so a direction failing
+  # to converge is routine and the caller already handles it.
+  skip_if_not_installed("gstat")
+  set.seed(21)
+  n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  # A pure linear trend: the variogram rises monotonically and never sills.
+  pts <- sf::st_as_sf(
+    data.frame(x = x, y = y, z = 0.02 * x + 0.01 * y + rnorm(n, 0, 0.5)),
+    coords = c("x", "y"), crs = 3857)
+
+  expect_no_warning(r <- estimate_sac_range(pts, "z", seed = 1))
+
+  expect_true(is.na(r))                       # (1) refused
+  expect_s3_class(r, "sac_range")
+  expect_false(is.null(attr(r, "variogram")))          # (2) still inspectable
+  expect_false(is.null(attr(r, "variogram_model")))
+  expect_true(is.finite(attr(r, "rejected_range")))
+  expect_match(attr(r, "rejected_reason"),
+               "did not converge|exceeds the largest lag")
+  # It prints as a bare NA rather than dumping its attributes.
+  expect_output(print(r), "NA")
+})
+
+test_that("estimate_sac_range never emits a raw gstat warning", {
+  # The four-azimuth sweep makes a failed directional fit ordinary. Whatever
+  # the data, the failure is handled internally -- the direction is excluded,
+  # or the whole range is refused -- and never surfaces as gstat's own warning.
+  skip_if_not_installed("gstat")
+  for (s in 1:6) {
+    set.seed(100 + s)
+    n <- 120
+    pts <- sf::st_as_sf(
+      data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), z = rnorm(n)),
+      coords = c("x", "y"), crs = 32632)
+    expect_no_warning(estimate_sac_range(pts, "z", seed = 1),
+                      message = paste("seed", s))
+  }
 })
