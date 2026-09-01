@@ -119,11 +119,39 @@ test_that("a NULL correlation function yields all-NA rather than erroring", {
   expect_true(all(is.na(d)))
 })
 
-test_that("large cells are subsampled to the requested cap", {
+test_that("a subsampled cell reports ITS OWN design effect, not the subsample's", {
+  # deff = sum(R)/n_i = 1 + (n_i - 1) * Rbar.  Subsampling estimates Rbar just
+  # as well -- the subsample's pairwise-distance distribution is the cell's --
+  # but sum(R)/n_used answers for a cell of size n_used.  The old code returned
+  # the design effect of `max_n` points instead of the cell's, understating it
+  # by roughly n_i/max_n: measured on 4000 points with an exponential
+  # correlation of range 60, true deff 1821.8 and max_n = 500 returned 228.6.
   set.seed(4)
   n <- 300
   coords <- matrix(runif(n * 2, 0, 100), ncol = 2)
-  d <- cell_de(coords, rep("a", n), cor_fn(vgm_df(range = 30)), max_n = 50L)
-  expect_true(is.finite(d[["a"]]))
-  expect_lte(d[["a"]], 50)          # cannot exceed the subsampled n
+  f <- cor_fn(vgm_df(range = 30))
+
+  full <- cell_de(coords, rep("a", n), f, max_n = n)[["a"]]
+  sub  <- cell_de(coords, rep("a", n), f, max_n = 50L)[["a"]]
+
+  expect_true(is.finite(sub))
+  # Bounded by the CELL's size, which is the only meaningful ceiling.
+  expect_lte(sub, n)
+  # And close to the un-subsampled answer, which is the whole point.
+  expect_equal(sub, full, tolerance = 0.15)
+  # Regression guard: the old truncating form could not exceed max_n.
+  expect_gt(sub, 50)
+})
+
+test_that("an un-subsampled cell is unchanged by the rescale", {
+  # With n_used == n_i the new form is algebraically identical to sum(R)/n_i,
+  # so the common case must be bit-for-bit what it always was.
+  set.seed(9)
+  n <- 40
+  coords <- matrix(runif(n * 2, 0, 100), ncol = 2)
+  f <- cor_fn(vgm_df(range = 30))
+  d <- as.matrix(stats::dist(coords))
+  R <- matrix(f(as.numeric(d)), n, n); diag(R) <- 1
+  expect_equal(cell_de(coords, rep("a", n), f, max_n = n)[["a"]],
+               min(max(sum(R) / n, 1), n), tolerance = 1e-10)
 })

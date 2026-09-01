@@ -100,23 +100,87 @@ test_that(".elbow_from_wss rejects input it cannot use", {
   )
 }
 
-test_that(".morans_i_for_k returns the analytic value when every cell is a neighbour", {
+test_that(".morans_i_for_k refuses the complete-graph value below the floor", {
   # The weight matrix uses k = min(8, n_cells - 1) neighbours, so with 9 or
   # fewer cells EVERY other cell is a neighbour and W is the complete
   # row-standardised matrix W_ij = 1/(n-1).  Then W %*% e = -e/(n-1) for any
   # mean-zero residual vector, S0 = n, and Moran's I collapses to exactly
-  # -1/(n - 1) -- independent of the data.  That is a closed-form expectation,
-  # and it is the configuration the sparse crossprod() bug crashed on.
+  # -1/(n - 1): a function of the CELL COUNT ALONE that no data set can move.
+  #
+  # Returning that number would not merely be uninformative.  |I| = 1/(n - 1)
+  # falls monotonically in n for arithmetic reasons, so criterion = "morans_i"
+  # would rank the largest candidate best every single time.  The function
+  # refuses it and returns NA, and determine_optimal_levels() drops those
+  # candidates from the model-aware ranking.
   fx <- .mifk_fixture()
   mk <- spatialkit:::.morans_i_for_k
 
   for (n_cells in c(4L, 5L, 6L, 9L)) {
     clusters <- rep(seq_len(n_cells), length.out = nrow(fx$xy))
-    got <- mk(fx$xy, fx$spatial, fx$pred, clusters)
-    expect_equal(got, -1 / (n_cells - 1), tolerance = 1e-10,
-                 info = paste("n_cells =", n_cells))
-    expect_true(is.finite(got))
+    lbl <- paste("n_cells =", n_cells)
+    got  <- mk(fx$xy, fx$spatial, fx$pred, clusters)
+    flat <- mk(fx$xy, fx$flat,    fx$pred, clusters)
+    # The return is c(I = , z = ): BOTH must be NA, since z is the quantity
+    # the ranking uses and an NA I beside a finite z would still be ranked.
+    expect_identical(names(got), c("I", "z"), info = lbl)
+    expect_true(all(is.na(got)),  info = lbl)
+    # Refused for the flat response too -- the point is that the complete
+    # graph cannot tell these two apart, not that one of them is unusable.
+    expect_true(all(is.na(flat)), info = lbl)
   }
+})
+
+test_that(".morans_i_for_k reports a data-dependent value from ten cells up", {
+  # Ten cells is the first count above the floor: k = min(8, 9) = 8 of the 9
+  # other cells are neighbours, so W is no longer complete and I stops being a
+  # function of n.  A spatially coherent 5 x 2 partition, so the cell
+  # centroids are genuinely spread out rather than piled at the domain centre.
+  fx <- .mifk_fixture()
+  mk <- spatialkit:::.morans_i_for_k
+  clusters <- as.integer(cut(fx$xy[, 1], 5)) +
+    5L * (as.integer(cut(fx$xy[, 2], 2)) - 1L)
+  expect_equal(length(unique(clusters)), 10L)
+
+  # An independent reference: the dense (non-sparse) weight path plus the
+  # Cliff & Ord formula written out, so it shares no code with the branch
+  # under test.
+  ref_I <- function(resp) {
+    ids <- sort(unique(clusters)); nc <- length(ids)
+    cr <- numeric(nc); cxy <- matrix(0, nc, 2); cp <- matrix(0, nc, 1)
+    for (j in seq_along(ids)) {
+      m <- clusters == ids[j]
+      cr[j]   <- mean(resp[m])
+      cxy[j, ] <- colMeans(fx$xy[m, , drop = FALSE])
+      cp[j, ]  <- colMeans(fx$pred[m, , drop = FALSE])
+    }
+    r  <- stats::lm.fit(x = cbind(1, cp), y = cr)$residuals
+    W  <- spatialkit:::.build_knn_weights(cxy, k = min(8L, nc - 1L),
+                                          use_fnn = FALSE, use_matrix = FALSE)
+    rc <- r - mean(r)
+    (nc / sum(W)) * sum(rc * (W %*% rc)) / sum(rc^2)
+  }
+
+  I_spatial <- mk(fx$xy, fx$spatial, fx$pred, clusters)[["I"]]
+  I_flat    <- mk(fx$xy, fx$flat,    fx$pred, clusters)[["I"]]
+
+  expect_true(is.finite(I_spatial))
+  expect_true(is.finite(I_flat))
+  expect_equal(I_spatial, ref_I(fx$spatial), tolerance = 1e-10)
+  expect_equal(I_flat,    ref_I(fx$flat),    tolerance = 1e-10)
+
+  # The property the sub-floor case cannot have: two different residual
+  # vectors on the SAME clustering give two different statistics.
+  expect_false(isTRUE(all.equal(I_spatial, I_flat, tolerance = 1e-6)))
+  # And neither of them is the complete-graph constant the floor rejects.
+  expect_false(isTRUE(all.equal(I_spatial, -1 / 9, tolerance = 1e-6)))
+  expect_false(isTRUE(all.equal(I_flat,    -1 / 9, tolerance = 1e-6)))
+
+  # One cell fewer is below the floor and comes back NA, so ten is the
+  # boundary and not an arbitrary choice.
+  nine <- as.integer(cut(fx$xy[, 1], 3)) +
+    3L * (as.integer(cut(fx$xy[, 2], 3)) - 1L)
+  expect_equal(length(unique(nine)), 9L)
+  expect_true(all(is.na(mk(fx$xy, fx$spatial, fx$pred, nine))))
 })
 
 test_that(".morans_i_for_k matches a dense hand computation for many cells", {
@@ -149,197 +213,89 @@ test_that(".morans_i_for_k matches a dense hand computation for many cells", {
   rc  <- resid - mean(resid)
   expected <- (nc / sum(W)) * sum(rc * (W %*% rc)) / sum(rc^2)
 
-  expect_equal(spatialkit:::.morans_i_for_k(fx$xy, fx$spatial, fx$pred,
-                                            clusters),
-               expected, tolerance = 1e-10)
+  got <- spatialkit:::.morans_i_for_k(fx$xy, fx$spatial, fx$pred, clusters)
+  expect_equal(got[["I"]], expected, tolerance = 1e-10)
 
   # And the statistic discriminates: a response with no unexplained spatial
   # structure sits near zero, the trended one well above it.
-  flat_I <- spatialkit:::.morans_i_for_k(fx$xy, fx$flat, fx$pred, clusters)
+  flat <- spatialkit:::.morans_i_for_k(fx$xy, fx$flat, fx$pred, clusters)
   expect_gt(expected, 0.2)
-  expect_lt(abs(flat_I), 0.2)
-  expect_gt(expected, flat_I)
+  expect_lt(abs(flat[["I"]]), 0.2)
+  expect_gt(expected, flat[["I"]])
+
+  # The z companion is what determine_optimal_levels() ranks on, and it must
+  # be the Cliff & Ord standardised deviate of the SAME I -- recomputed here
+  # from the dense weights so the two paths share no code.
+  X   <- cbind(1, cell_pred)
+  mom <- spatialkit:::.morans_residual_moments(W = W, X = X, S0 = sum(W),
+                                               is_sparse = FALSE)
+  expect_false(is.null(mom))
+  expect_equal(got[["z"]], (expected - mom$EI) / sqrt(mom$VI), tolerance = 1e-10)
+  # The trended response is the significant one; the flat one is not.
+  expect_gt(got[["z"]], 2)
+  expect_lt(abs(flat[["z"]]), 2)
 })
 
 test_that(".morans_i_for_k returns NA rather than a number it cannot justify", {
   fx <- .mifk_fixture()
   mk <- spatialkit:::.morans_i_for_k
 
+  # Every refusal keeps the c(I, z) shape: a bare NA_real_ from one early exit
+  # and a length-2 vector from another would make moran_z[k] pick up the I of
+  # the next candidate.
+  expect_na2 <- function(v) {
+    expect_identical(names(v), c("I", "z"))
+    expect_true(all(is.na(v)))
+  }
   # Fewer than 4 cells: no usable weight graph.
-  expect_true(is.na(mk(fx$xy, fx$spatial, fx$pred,
-                       rep(1:3, length.out = nrow(fx$xy)))))
+  expect_na2(mk(fx$xy, fx$spatial, fx$pred, rep(1:3, length.out = nrow(fx$xy))))
   # Non-finite cell means leave fewer than 4 usable cells.
   broken <- fx$spatial; broken[] <- NA_real_
-  expect_true(is.na(mk(fx$xy, broken, fx$pred,
-                       rep(1:6, length.out = nrow(fx$xy)))))
+  expect_na2(mk(fx$xy, broken, fx$pred, rep(1:6, length.out = nrow(fx$xy))))
   # A perfectly explained response leaves zero residual variance.
   exact <- 3 + 2 * fx$pred[, 1]
-  expect_true(is.na(mk(fx$xy, exact, fx$pred,
-                       rep(1:6, length.out = nrow(fx$xy)))))
+  expect_na2(mk(fx$xy, exact, fx$pred, rep(1:6, length.out = nrow(fx$xy))))
 })
 
 
-# ---------------------------------------------------------------------------
-# determine_optimal_levels()
-# ---------------------------------------------------------------------------
+test_that("the ranking statistic is flat in k where |I| is not", {
+  # The reason determine_optimal_levels() ranks on z rather than |I|.  E[I] and
+  # Var(I) both move with the cell count, so across datasets with NO spatial
+  # structure the SAMPLING DISTRIBUTION of |I| shrinks as k grows -- an |I|
+  # ranking then prefers the finest candidate for arithmetic reasons alone.
+  #
+  # Fresh data per replicate is load-bearing.  Holding one dataset and only
+  # re-clustering it measures that realisation's own residual pattern, not the
+  # sampling distribution, and shows no such trend (it can even run the other
+  # way).  The claim is about the statistic, so the data must be resampled.
+  skip_on_cran()
+  mk <- spatialkit:::.morans_i_for_k
 
-.dol_two_clusters <- function(seed = 1) {
-  set.seed(seed)
-  sf::st_as_sf(
-    data.frame(x = c(runif(25, 0, 10), runif(25, 90, 100)),
-               y = c(runif(25, 0, 10), runif(25, 90, 100))),
-    coords = c("x", "y"), crs = 32632
-  )
-}
-
-.dol_model_points <- function(n = 150, seed = 3) {
-  set.seed(seed)
-  d <- sf::st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), a = rnorm(n)),
-    coords = c("x", "y"), crs = 32632)
-  d$z <- 0.01 * sf::st_coordinates(d)[, 1] + 2 * d$a + rnorm(n)
-  d
-}
-
-test_that("determine_optimal_levels finds the elbow of two separated clusters", {
-  # Two tight, far-apart clusters: WSS collapses between k = 1 and k = 2 and
-  # is nearly flat afterwards, so the knee is at 2 and the candidate set is
-  # its immediate neighbourhood.
-  out <- determine_optimal_levels(.dol_two_clusters(), max_levels = 6)
-
-  expect_type(out, "integer")
-  expect_true(2L %in% out)
-  expect_true(all(out >= 1L & out <= 6L))
-  # Under "geometric" the candidate set is the knee plus two neighbours, so at
-  # most three values come back however large top_n is.
-  expect_lte(length(out), 3L)
-  expect_lte(length(determine_optimal_levels(.dol_two_clusters(),
-                                             max_levels = 6, top_n = 10)), 3L)
-  expect_null(attr(out, "diagnostics"))     # no model-aware run, no diagnostics
-})
-
-test_that("determine_optimal_levels runs the model-aware criteria without crashing", {
-  # The regression: with FNN and Matrix installed, .morans_i_for_k() built a
-  # sparse weight matrix and base::crossprod() refused it, so every call with
-  # a model-aware criterion errored for >= 4 cells.
-  d <- .dol_model_points()
-
-  for (crit in c("morans_i", "combined")) {
-    out <- determine_optimal_levels(d, max_levels = 8, response_var = "z",
-                                    predictor_vars = "a", criterion = crit)
-    expect_type(out, "integer")
-    expect_gte(length(out), 1L)
-    expect_true(all(out >= 1L & out <= 8L))
-
-    diag <- attr(out, "diagnostics")
-    expect_false(is.null(diag), info = crit)
-    expect_true(any(is.finite(diag$moran_i)), info = crit)
-    expect_true(all(is.finite(diag$wss)), info = crit)
-    # Moran's I was actually evaluated over the elbow neighbourhood: finite for
-    # every k that yields at least 4 cells, NA below that (the documented
-    # n_cells < 4 guard in .morans_i_for_k()).
-    big   <- diag$eval_ks[diag$eval_ks >= 4L]
-    small <- diag$eval_ks[diag$eval_ks < 4L]
-    expect_gt(length(big), 0L)
-    expect_true(all(is.finite(diag$moran_i[big])), info = crit)
-    if (length(small))
-      expect_true(all(is.na(diag$moran_i[small])), info = crit)
-    # Every k the neighbourhood did NOT evaluate stays NA.
-    expect_true(all(is.na(diag$moran_i[setdiff(seq_along(diag$moran_i),
-                                               diag$eval_ks)])), info = crit)
+  grab <- function(k, reps = 25L) {
+    v <- vapply(seq_len(reps), function(r) {
+      set.seed(7000 + r)
+      n  <- 600
+      xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+      pr <- cbind(rnorm(n), rnorm(n))
+      rs <- as.numeric(1 + pr %*% c(1, -1) + rnorm(n))   # no spatial structure
+      cl <- stats::kmeans(xy, centers = k, iter.max = 50, nstart = 3)$cluster
+      mk(xy, rs, pr, cl)
+    }, c(I = 0, z = 0))
+    c(absI = mean(abs(v["I", ]), na.rm = TRUE),
+      absZ = mean(abs(v["z", ]), na.rm = TRUE))
   }
-})
+  lo <- grab(12L)
+  hi <- grab(45L)
 
-test_that("determine_optimal_levels auto-upgrades and falls back with a log line", {
-  d <- .dol_model_points()
-
-  # Supplying model variables under the default criterion upgrades to combined.
-  up <- capture_spatialkit_log(
-    out <- determine_optimal_levels(d, max_levels = 8, response_var = "z",
-                                    predictor_vars = "a"),
-    level = logger::INFO
-  )
-  expect_true(log_has(up, "using combined criterion"))
-  expect_equal(attr(out, "diagnostics")$criterion, "combined")
-
-  # Asking for a model-aware criterion without the variables falls back.
-  down <- capture_spatialkit_log(
-    geo <- determine_optimal_levels(d, max_levels = 6, criterion = "morans_i")
-  )
-  expect_true(log_has(down, "requires response_var and predictor_vars"))
-  expect_null(attr(geo, "diagnostics"))
-  expect_equal(geo, determine_optimal_levels(d, max_levels = 6))
-})
-
-test_that("determine_optimal_levels validates input and degenerate geometry", {
-  d <- .dol_model_points()
-
-  expect_error(determine_optimal_levels(sf::st_drop_geometry(d)),
-               "must be an sf object")
-
-  d$fac <- factor(sample(letters[1:3], nrow(d), replace = TRUE))
-  expect_error(
-    determine_optimal_levels(d, response_var = "z", predictor_vars = "fac"),
-    "`predictor_vars` must be numeric"
-  )
-
-  # Fewer than 3 rows: one level, no clustering attempted.
-  expect_equal(determine_optimal_levels(d[1:2, ], max_levels = 4), 1L)
-
-  # Only two distinct positions: k_max clamps to n_unique - 1 = 1, so again 1.
-  dup <- sf::st_as_sf(
-    data.frame(x = rep(c(0, 10), 10), y = rep(c(0, 10), 10)),
-    coords = c("x", "y"), crs = 32632)
-  expect_equal(determine_optimal_levels(dup, max_levels = 6), 1L)
-})
-
-test_that("determine_optimal_levels coerces MULTIPOINT before reading coordinates", {
-  # st_coordinates() returns one row per VERTEX, so a two-vertex MULTIPOINT
-  # layer produced an xy matrix twice as tall as resp_vec/pred_mat and every
-  # index below read a different feature than it thought.  Coercing to
-  # representative points first makes the MULTIPOINT layer and its own
-  # centroids give the same answer.
-  set.seed(21)
-  n <- 120
-  cx <- runif(n, 0, 1000); cy <- runif(n, 0, 1000)
-  mp <- sf::st_sfc(lapply(seq_len(n), function(i) {
-    sf::st_multipoint(rbind(c(cx[i] - 5, cy[i]), c(cx[i] + 5, cy[i])))
-  }), crs = 32632)
-
-  multi <- sf::st_sf(a = rnorm(n), geometry = mp)
-  multi$z <- 0.01 * cx + 2 * multi$a + rnorm(n)
-
-  pts <- multi
-  sf::st_geometry(pts) <- sf::st_sfc(
-    lapply(seq_len(n), function(i) sf::st_point(c(cx[i], cy[i]))), crs = 32632)
-
-  # One coordinate row per feature after coercion -- the property everything
-  # below depends on.
-  coerced <- coerce_to_points(multi, "auto")
-  expect_equal(nrow(sf::st_coordinates(coerced)), n)
-  expect_equal(unname(sf::st_coordinates(coerced)[, 1]), cx, tolerance = 1e-6)
-
-  geo_multi <- determine_optimal_levels(multi, max_levels = 6)
-  geo_pts   <- determine_optimal_levels(pts,   max_levels = 6)
-  expect_equal(geo_multi, geo_pts)
-
-  mod_multi <- determine_optimal_levels(multi, max_levels = 6,
-                                        response_var = "z",
-                                        predictor_vars = "a",
-                                        criterion = "combined")
-  mod_pts   <- determine_optimal_levels(pts, max_levels = 6,
-                                        response_var = "z",
-                                        predictor_vars = "a",
-                                        criterion = "combined")
-  expect_equal(as.integer(mod_multi), as.integer(mod_pts))
-  expect_equal(attr(mod_multi, "diagnostics")$moran_i,
-               attr(mod_pts, "diagnostics")$moran_i)
-})
-
-test_that("determine_optimal_levels restores the caller's RNG stream", {
-  d <- .dol_model_points()
-  set.seed(777); expected <- runif(3)
-  set.seed(777)
-  invisible(determine_optimal_levels(d, max_levels = 6, set_seed = 42L))
-  expect_equal(runif(3), expected)
+  # |I| falls materially across the window (measured ratio 0.60-0.65) ...
+  expect_lt(hi[["absI"]], 0.8 * lo[["absI"]])
+  # ... while |z| stays in the neighbourhood of E|N(0,1)| = 0.798 at both ends,
+  # so the two candidates are compared on the same scale.
+  for (v in c(lo[["absZ"]], hi[["absZ"]])) {
+    expect_gt(v, 0.5)
+    expect_lt(v, 1.3)
+  }
+  # And the drift in |z| is small next to the drift in |I|.
+  expect_lt(abs(hi[["absZ"]] / lo[["absZ"]] - 1),
+            abs(hi[["absI"]] / lo[["absI"]] - 1))
 })

@@ -29,7 +29,13 @@ cv_spatial(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{fit_fn}{A function(train_sf) that returns a \code{spatial_fit}.}
+\item{fit_fn}{A function of one argument, the training slice of
+\code{data_sf}, returning a \code{spatial_fit} built with
+\code{\link{new_spatial_fit}()}.  It is called once per fold on the
+training rows only, so anything done inside it -- scaling, tuning, an inner
+variable sweep -- is already nested and leak-free.  The \code{subclass} it
+stamps must have a \code{predict.<subclass>()} method registered, because
+that is how each fold is scored.}
 
 \item{folds}{Optional fold definitions. Built via block_kfold if NULL.}
 
@@ -79,7 +85,47 @@ Run K-fold CV for any model that returns a \code{spatial_fit} object.
 This is the extensibility point: to plug in a new model type, supply
 a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
 }
+\examples{
+library(sf)
+set.seed(1)
+n <- 80
+site <- st_as_sf(
+  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+  coords = c("x", "y"), crs = 32632
+)
+site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+
+# 1. A fit_fn returning a spatial_fit of your own subclass.
+lm_fit <- function(train_sf) {
+  new_spatial_fit(
+    subclass       = "lm_fit",
+    engine         = lm(price ~ elev, st_drop_geometry(train_sf)),
+    formula        = price ~ elev,
+    response_var   = "price",
+    predictor_vars = "elev",
+    data_sf        = train_sf
+  )
+}
+
+# 2. The predict() method cv_spatial() scores each fold with. Without it
+#    every fold fails and `overall` comes back all-NA.
+predict.lm_fit <- function(object, newdata = NULL, ...) {
+  if (is.null(newdata)) newdata <- object$data_sf
+  as.numeric(stats::predict(object$engine, st_drop_geometry(newdata)))
+}
+registerS3method("predict", "lm_fit", predict.lm_fit)
+
+cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
+cv$overall
+# Compare these before trusting the metrics above.
+c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+}
 \seealso{
+\code{\link{new_spatial_fit}()} for the constructor a \code{fit_fn}
+must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
+\code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
+over this function.
+
 Other cross-validation: 
 \code{\link{area_of_applicability}()},
 \code{\link{cv_bayes}()},

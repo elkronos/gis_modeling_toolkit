@@ -384,3 +384,102 @@ test_that("compare_models_cv restores the caller's RNG stream", {
   after <- runif(2)
   expect_equal(before, after)
 })
+
+
+# ---------------------------------------------------------------------------
+# .merge_args(): the four arguments that define WHAT is being compared
+# ---------------------------------------------------------------------------
+
+test_that(".merge_args refuses per-model overrides of the comparison itself", {
+  # compare_models_cv() exists to score several backends on ONE dataset with
+  # ONE set of folds.  A `gwr_args = list(folds = ...)` or
+  # `rf_args = list(data_sf = ...)` would quietly make the models
+  # incomparable while the result still looked like a comparison table, so the
+  # four defining arguments are stripped from the per-model lists.
+  merge_args <- spatialkit:::.merge_args
+  base <- list(data_sf = "THE DATA", response_var = "z",
+               predictor_vars = "w", folds = "THE FOLDS",
+               k = 5L, num_trees = 500L)
+
+  # A NULL is the sharpest case: modifyList() DELETES an element it is given as
+  # NULL, so an unstripped `folds = NULL` does not merely fail to override the
+  # folds -- it removes them from the argument list entirely, and the CV
+  # wrapper then silently falls back to random folds.
+  # `.` stands in for the quote glyph throughout: sQuote() emits curly
+  # quotes under a UTF-8 locale and straight ones otherwise.
+  expect_warning(out <- merge_args(base, list(folds = NULL), "rf_args"),
+                 "ignoring .folds.")
+  expect_identical(out, base)
+  expect_identical(out$folds, "THE FOLDS")
+
+  # A non-NULL override of each protected name is refused the same way, while
+  # everything else in the same list still takes effect.
+  for (nm in c("data_sf", "response_var", "predictor_vars", "folds")) {
+    extra <- stats::setNames(list("HIJACKED", 40L), c(nm, "num_trees"))
+    expect_warning(o <- merge_args(base, extra, "gwr_args"),
+                   sprintf("ignoring .%s.", nm))
+    expect_identical(o[[nm]], base[[nm]], info = nm)
+    expect_identical(o$num_trees, 40L, info = nm)
+  }
+
+  # Several at once are named together in one warning.
+  expect_warning(
+    both <- merge_args(base, list(data_sf = 1, folds = 2), "rf_args"),
+    ".data_sf., .folds.")
+  expect_identical(both, base)
+
+  # The message says WHY, not just that something was dropped.
+  expect_warning(merge_args(base, list(folds = 1), "rf_args"),
+                 "same data and the same folds")
+  expect_warning(merge_args(base, list(folds = 1), "bayes_args"),
+                 "`bayes_args`")
+
+  # Unprotected arguments merge by name, replacing rather than duplicating --
+  # and silently, because there is nothing to complain about.
+  expect_silent(ok <- merge_args(base, list(num_trees = 40L, mtry = 2L),
+                                 "rf_args"))
+  expect_identical(ok$num_trees, 40L)
+  expect_identical(ok$mtry, 2L)
+  expect_identical(ok$data_sf, "THE DATA")
+  expect_equal(anyDuplicated(names(ok)), 0L)
+
+  # Nothing supplied, nothing changed; an unnamed list is an error.
+  expect_identical(merge_args(base, NULL, "rf_args"), base)
+  expect_identical(merge_args(base, list(), "rf_args"), base)
+  expect_error(merge_args(base, list(40L), "rf_args"),
+               "every element of `rf_args` must be named")
+})
+
+
+# ---------------------------------------------------------------------------
+# "all folds failed" must name the cause
+# ---------------------------------------------------------------------------
+
+test_that("an all-folds-failed CV warning names the first underlying error", {
+  # "all 5 folds failed" on its own is not a diagnosis.  Overwhelmingly the
+  # reason is a missing optional backend, and the fitter says so plainly when
+  # called directly -- so the CV wrapper carries the first fold's error text
+  # into both the warning and the log line.
+  skip_if(requireNamespace("brms", quietly = TRUE),
+          "brms is installed, so every fold would succeed")
+  pts <- surf_test_points(50, seed = 4)
+
+  lines <- capture_spatialkit_log(
+    expect_warning(
+      res <- suppressMessages(cv_bayes(pts, "z", "w", k = 2, seed = 1)),
+      "all folds failed"
+    )
+  )
+  # The condition the user sees carries the cause, not just the count.
+  expect_warning(suppressMessages(cv_bayes(pts, "z", "w", k = 2, seed = 1)),
+                 "First error: .*package 'brms' is required")
+  # So does the log line, which also reports how many folds were attempted.
+  expect_true(log_has(lines, "all 2 folds failed"))
+  expect_true(log_has(lines, "First error: .*package 'brms' is required"))
+  # And each fold said why as it failed.
+  expect_true(log_has(lines, "fold 1 fit failed; skipping. Cause: .*'brms'"))
+
+  # The result is still a well-formed, empty CV object.
+  expect_equal(res$n_folds_attempted, 2L)
+  expect_equal(res$n_folds_succeeded, 0L)
+})

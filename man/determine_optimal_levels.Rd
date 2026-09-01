@@ -33,18 +33,22 @@ large \code{top_n} is; only the model-aware criteria can return more.}
 \code{predictor_vars}, enables model-aware level selection via Moran's I
 on OLS residuals.}
 
-\item{predictor_vars}{Optional predictor column names. Must be numeric;
-factor/character columns raise an error.}
+\item{predictor_vars}{Optional predictor column names. Must be numeric or
+logical (logicals are read as 0/1); factor/character columns raise an
+error.}
 
 \item{criterion}{One of \code{"geometric"} (default when no response given),
-\code{"morans_i"} (select k that minimizes |Moran's I|), or
-\code{"combined"} (rank-average of WSS elbow distance and |Moran's I|).
-Falls back to \code{"geometric"} if response/predictors are unavailable.}
+\code{"morans_i"} (select the k whose residual Moran's I is least
+\emph{significant}), or \code{"combined"} (rank-average of WSS elbow
+distance and that same quantity).  Falls back to \code{"geometric"} if
+response/predictors are unavailable, and also when no candidate clears the
+nine-cell resolution floor described in \strong{Details}.}
 }
 \value{
 An integer vector of candidate level counts. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
-attached with per-k Moran's I values — except when the model-aware path
+attached with per-k Moran's I values (\code{moran_i}) and their
+standardised deviates (\code{moran_z}) — except when the model-aware path
 itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), in
 which case no diagnostics are available and the attribute is absent. Both
@@ -71,6 +75,38 @@ lazily: k-means is re-run only for a focused neighbourhood around the
 elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 promising candidate k values incur the cost of the full Moran's I
 computation.
+
+\strong{The model-aware criteria rank on the standardised deviate, not on
+|Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
+cells, so \eqn{|I|} falls as \code{k} grows whether or not the finer
+tessellation is capturing anything.  Measured over 300 replicates of a
+response with \emph{no} spatial structure, mean \eqn{|I|} fell monotonically
+from 0.114 at \code{k = 10} to 0.050 at \code{k = 60} (\eqn{-56\%}), which
+made an \eqn{|I|} ranking prefer the largest candidate for arithmetic
+reasons alone.  Candidates are therefore ordered by
+\eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
+residual moments --- exact here, because the cell-level residuals are OLS
+residuals by construction.  Over the same runs \eqn{z} had mean \eqn{\approx
+0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\\% rejection rate of
+0.040--0.057 at every \code{k}.  Both quantities are reported in the
+\code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
+
+\strong{Resolution floor on the model-aware criteria.}  Moran's I is
+computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
+so it only carries information once there are more than nine cells.  At nine
+or fewer, every cell is a neighbour of every other, the row-standardised
+weight matrix is complete, and Moran's I collapses to exactly
+\eqn{-1/(k - 1)} for \emph{any} residual vector — a function of \code{k}
+alone, and one whose magnitude shrinks monotonically with \code{k}, which
+would make \code{criterion = "morans_i"} prefer the largest candidate every
+time.  Those candidates therefore return \code{NA} and are excluded from the
+model-aware ranking.  When no candidate in the elbow neighbourhood clears
+the floor — which is the usual outcome for small \code{max_levels} — the
+whole call falls back to the geometric ranking and logs a warning; raise
+\code{max_levels} above roughly 10 if you want the model-aware criteria to
+contribute.  Under \code{criterion = "combined"}, a candidate below the
+floor that sits alongside candidates above it is ranked last on the Moran's
+I axis while still competing on the geometric axis.
 }
 \examples{
 library(sf)
@@ -83,3 +119,13 @@ pts <- st_as_sf(
 )
 determine_optimal_levels(pts, max_levels = 6)
 }
+\seealso{
+\code{\link[=build_tessellation]{build_tessellation()}}, which takes the chosen level count as
+\code{approx_n_cells}; \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps that follow.
+
+Other aggregation: 
+\code{\link{assign_features_to_polygons}()},
+\code{\link{summarize_by_cell}()}
+}
+\concept{aggregation}

@@ -431,6 +431,18 @@ summary(rf_fit)
 rf_fit$info$importance     # coef() on an rf_fit errors: a forest has no coefficients
 ```
 
+The two printouts disagree in the third decimal of R² — `0.4733` above,
+`0.4715` here — while reporting an identical RMSE. Neither is wrong, and
+neither is a bug. Both read the *same* out-of-bag predictions; they differ only
+in the denominator of the variance they compare against. `print.rf_fit()`
+echoes `ranger`'s own `r.squared`, which is `1 - MSE_oob / var(y)` using the
+unbiased (n − 1) sample variance. `summary()` recomputes
+`1 - SS_res / SS_tot` from the predictions, where `SS_tot = sum((y - mean(y))^2)`
+— an n denominator. The unexplained fraction therefore differs by exactly the
+factor n / (n − 1), here 300/299, and RMSE, which involves no such comparison,
+matches to four decimals. If you need a figure comparable across backends, use
+`cv_rf()` rather than either.
+
 ### Residual diagnostics
 
 `plot()` on any `spatial_fit` maps the residuals; visible structure means

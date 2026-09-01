@@ -21,11 +21,50 @@ x, potentially with a new projected CRS.
 Coerces spatial objects to a projected coordinate reference system suitable
 for distance/area calculations.
 }
+\details{
+An object that already has a projected CRS is returned untouched. Only
+geographic (lon/lat) input is transformed, and the CRS chosen depends on the
+extent of the data — it is \strong{not} always UTM:
+
+\describe{
+\item{Local extents}{The UTM zone containing the data's centre
+(EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
+are close to true over a few degrees of longitude, which is the case
+this package is usually in.}
+\item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
+a UTM zone is designed for, a single zone would distort distances by
+several percent — and that error propagates straight into variogram
+ranges, block sizes, GWR bandwidths and GP length-scales. An equal-area
+projection centred on the data is used instead: Albers conic
+(\code{+proj=aea}) for extents wider than tall, Lambert azimuthal
+(\code{+proj=laea}) otherwise. A warning names the projection, the span that
+triggered it, and this argument.}
+\item{Missing CRS}{If \code{x} has no CRS at all but its bounding box looks
+like lon/lat, EPSG:4326 is assumed with a warning, then the rules above
+apply. Set the CRS explicitly to suppress it.}
+}
+
+\code{target_crs} overrides all of this: pass it whenever you need a specific,
+reproducible projection — comparing runs, matching an existing layer, or
+fixing the units that \code{\link[=make_folds]{make_folds()}}'s \code{block_size} will be interpreted in.
+}
 \examples{
 library(sf)
 pts_ll <- st_as_sf(
   data.frame(lon = c(9.1, 9.2), lat = c(48.7, 48.8)),
   coords = c("lon", "lat"), crs = 4326
 )
-st_crs(ensure_projected(pts_ll))$epsg  # auto-selected UTM zone (32632)
+# A local extent gets the containing UTM zone.
+st_crs(ensure_projected(pts_ll))$epsg  # 32632
+
+# A continental extent gets an equal-area projection instead, with a
+# warning naming it -- see Details.
+wide <- st_as_sf(
+  data.frame(lon = c(-120, -70), lat = c(30, 48)),
+  coords = c("lon", "lat"), crs = 4326
+)
+st_crs(ensure_projected(wide))$proj4string
+
+# target_crs overrides the choice entirely.
+st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
 }

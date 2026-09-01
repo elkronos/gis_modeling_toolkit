@@ -2,6 +2,14 @@
 #'
 #' Joins an sf layer of input features to a polygon layer via spatial join.
 #'
+#' This is the second step of the package's pipeline: it labels every
+#' observation with the cell it falls in, which is what
+#' [summarize_by_cell()] then aggregates over. Reach for it directly (rather
+#' than for [sf::st_join()]) when the join has to be *unambiguous* --- it
+#' resolves features matching several polygons by an explicit `tie_break` rule
+#' instead of silently duplicating rows, so the assigned layer keeps one row
+#' per input feature and cell-level counts mean what they say.
+#'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
 #' @param polygon_id_col Name of the polygon identifier column. Default "poly_id".
@@ -31,6 +39,9 @@
 #' grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 #' assigned <- assign_features_to_polygons(pts, grid)
 #' table(assigned$poly_id)
+#' @family aggregation
+#' @seealso [build_tessellation()] to build the polygon layer;
+#'   [summarize_by_cell()] for the aggregation step that consumes the result.
 #' @export
 assign_features_to_polygons <- function(
     features_sf, polygons_sf, polygon_id_col = "poly_id",
@@ -192,6 +203,42 @@ assign_features_to_polygons <- function(
 }
 
 
+#' Standard error of a cell mean under a design effect
+#'
+#' Two corrections, not one.  A design effect inflates the variance of the mean
+#' to \eqn{\sigma^2 \mathrm{deff} / n}, which is what \code{s/sqrt(n/deff)}
+#' applies --- but under the same within-cell correlation the ordinary sample
+#' variance is \emph{also} biased downward.  For exchangeable correlation
+#' \eqn{\rho} (Kish's own assumption), with \eqn{\mathrm{deff} = 1 + (n-1)\rho}:
+#' \deqn{E[s^2] = \sigma^2 (n - \mathrm{deff}) / (n - 1)}
+#' so \eqn{s^2} understates \eqn{\sigma^2} by very nearly the factor deff
+#' inflates the mean's variance by, and the two errors compound rather than
+#' cancel.  Measured 95\% CI coverage of the uncorrected form at \eqn{n = 30}
+#' over 20,000 replicates: 0.921 at \eqn{\rho = 0.2}, 0.844 at \eqn{\rho = 0.5},
+#' 0.628 at \eqn{\rho = 0.8}.  With the \eqn{\sqrt{(n-1)/(n-\mathrm{deff})}}
+#' rescale below: 0.948, 0.950, 0.949.
+#'
+#' At \code{deff = 1} the factor is exactly 1, so the default path is
+#' bit-identical to \code{s/sqrt(n)}.
+#'
+#' @param s Within-cell standard deviation.
+#' @param n Number of non-missing observations in the cell.
+#' @param deff Design effect for that cell, \eqn{\geq 1}.
+#' @return The standard error, or \code{NA_real_} when the cell carries no
+#'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy).
+#' @keywords internal
+#' @noRd
+.se_with_deff <- function(s, n, deff) {
+  if (!is.finite(s) || !is.finite(n) || n <= 1L) return(NA_real_)
+  if (!is.finite(deff) || deff <= 1) return(s / sqrt(n))
+  # deff is bounded above by n (every observation a copy of every other).  At
+  # that bound the cell holds one observation's worth of information and s
+  # carries none about sigma, so there is no standard error to report.
+  if (deff >= n) return(NA_real_)
+  s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))
+}
+
+
 #' Per-cell design effect from a fitted variogram
 #'
 #' For \code{n} observations in a cell with correlation matrix \code{R}, the
@@ -236,9 +283,19 @@ assign_features_to_polygons <- function(
     R <- matrix(as.numeric(cor_fn(as.numeric(d))), nrow = nrow(d), ncol = ncol(d))
     diag(R) <- 1
     n_used <- nrow(R)
-    # deff = sum(R) / n; bounded below by 1 (independence) and above by n
-    # (complete redundancy).
-    out[[as.character(id)]] <- min(max(sum(R) / n_used, 1), n_used)
+    # deff = sum(R)/n_i for the WHOLE cell, which is 1 + (n_i - 1) * Rbar with
+    # Rbar the mean off-diagonal correlation.  Subsampling estimates Rbar just
+    # as well (the subsample's pairwise-distance distribution is the cell's),
+    # but sum(R)/n_used answers for a cell of size n_used -- so a subsampled
+    # cell used to be reported at the design effect of `max_n` points rather
+    # than of its own n_i.  Measured: 4000 points, exponential correlation with
+    # a 60-unit range, true deff 1821.8; sum(R)/n_used at max_n = 500 gave
+    # 228.6, the rescale below gives 1825.2.
+    #
+    # When nothing was subsampled, n_used == n_i and this is algebraically
+    # identical to the old sum(R)/n_i, so unsubsampled cells are unchanged.
+    r_bar <- (sum(R) - n_used) / (n_used * (n_used - 1))
+    out[[as.character(id)]] <- min(max(1 + (n_i - 1) * r_bar, 1), n_i)
   }
   out
 }
@@ -248,6 +305,17 @@ assign_features_to_polygons <- function(
 #'
 #' Aggregates an sf point dataset into one row per cell. By default computes
 #' counts and means, but the aggregation function is configurable.
+#'
+#' This is the third step of the package's pipeline, taking the labelled layer
+#' from [assign_features_to_polygons()] down to cell level. What distinguishes
+#' it from a plain `dplyr::group_by()` + `summarise()` is that it carries the
+#' *uncertainty* of each aggregate with it: alongside every mean it returns a
+#' within-cell standard deviation, a standard error and an observation count,
+#' and it can correct that standard error for within-cell spatial
+#' autocorrelation via `deff`. Reach for it whenever the cell-level values will
+#' be modelled or mapped, because a cell mean over 2 observations and one over
+#' 200 are not the same measurement and nothing downstream can tell them apart
+#' otherwise.
 #'
 #' In addition to user-specified aggregation functions, this function always
 #' computes within-cell standard deviation (`..sd_<var>`) and standard error
@@ -358,6 +426,9 @@ assign_features_to_polygons <- function(
 #' cells <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
 #' cells
 #' attr(cells, "deff_applied")
+#' @family aggregation
+#' @seealso [assign_features_to_polygons()], which produces the input layer;
+#'   [build_tessellation()] for the cells themselves.
 #' @export
 summarize_by_cell <- function(assigned_points_sf,
                               response_var   = NULL,
@@ -548,7 +619,10 @@ summarize_by_cell <- function(assigned_points_sf,
         } else {
           deff_i <- .deff
         }
-        s / sqrt(n_valid / deff_i)
+        # NOT s / sqrt(n_valid / deff_i): that corrects the mean's variance for
+        # clustering but leaves s^2 biased low by the same clustering.  See
+        # .se_with_deff() for the derivation and the measured coverage.
+        .se_with_deff(s, n_valid, deff_i)
       }
     })
     fns
@@ -654,13 +728,22 @@ summarize_by_cell <- function(assigned_points_sf,
     }
   } else if (use_vgm && !is.null(vgm_deff)) {
     # Match each cell's deff by id, then rescale.  The ..se_ closures ran with
-    # deff = 1, and SE scales as sqrt(deff), so multiplying by sqrt(deff_i)
-    # yields exactly s / sqrt(n / deff_i).
+    # deff = 1, so they hold s / sqrt(n); the factor below is exactly what
+    # .se_with_deff() would have returned had the per-cell deff been available
+    # inside the closure -- sqrt(deff) for the mean's variance AND
+    # sqrt((n - 1)/(n - deff)) for the downward bias in s^2 itself.  Rescaling
+    # by sqrt(deff) alone would reproduce the under-coverage documented there.
     d_i <- unname(vgm_deff[as.character(out[[id_col]])])
     d_i[!is.finite(d_i) | d_i < 1] <- 1
 
+    n_i   <- out$n
+    infl  <- sqrt(d_i) * sqrt((n_i - 1) / (n_i - d_i))
+    # deff >= n is complete redundancy: no information about sigma is left.
+    infl[!is.finite(infl) | d_i >= n_i] <- NA_real_
+    infl[d_i <= 1] <- 1
+
     se_cols <- grep("^\\.\\.se_", names(out), value = TRUE)
-    for (cn in se_cols) out[[cn]] <- out[[cn]] * sqrt(d_i)
+    for (cn in se_cols) out[[cn]] <- out[[cn]] * infl
 
     out$cell_weight <- out$n / d_i
     attr(out, "deff_applied") <- list(

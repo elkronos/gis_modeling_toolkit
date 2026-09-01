@@ -276,3 +276,121 @@ test_that("negative permutation importance produces an actionable message", {
   expect_error(.aoa_weight_vector(c(a = 1, b = -0.01), c("a", "b")),
                "pmax\\(importance, 0\\)")
 })
+
+
+# --- .rf_align_levels / unseen factor levels ---------------------------------
+
+.mk_rf_grouped <- function(n = 240, seed = 7,
+                           train_levels = c("a", "b", "c")) {
+  set.seed(seed)
+  g   <- sample(c("a", "b", "c"), n, replace = TRUE)
+  eff <- c(a = 0, b = 50, c = 100)[g]
+  d <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+               g = factor(g, levels = train_levels),
+               z = unname(eff) + stats::rnorm(n, 0, 1)),
+    coords = c("x", "y"), crs = 32632
+  )
+  d
+}
+
+test_that("predict.rf_fit refuses a factor level the forest never saw", {
+  # ranger matches factor predictors by level, so a level absent at training
+  # has no split to follow: depending on the version it either errors from
+  # deep inside ranger -- which predict.rf_fit()'s tryCatch would flatten into
+  # an all-NA vector plus a log line -- or, as in ranger 0.16, silently returns
+  # a plausible-looking number.  Both are worse than an error naming the level.
+  skip_if_not_installed("ranger")
+  dat <- .mk_rf_grouped()
+  fit <- fit_rf_model(dat, "z", "g", num_trees = 100L, seed = 1)
+
+  nd <- dat[1:5, ]
+  nd$g <- factor(c("a", "b", "c", "zz", "a"))
+  expect_error(
+    predict(fit, newdata = nd),
+    # `.` for the quote glyph: sQuote() emits curly quotes under a UTF-8
+    # locale and straight ones otherwise, and neither is what is being tested.
+    "predictor 'g' in newdata has level\\(s\\) the forest was never grown with: .zz."
+  )
+  # The message also names what WAS trained, so the caller can see the gap.
+  expect_error(predict(fit, newdata = nd), "Trained levels: .a., .b., .c.")
+
+  # A character column is checked the same way -- the helper reads the training
+  # column's type, not newdata's.
+  nd_chr <- dat[1:5, ]
+  nd_chr$g <- c("a", "b", "c", "zz", "a")
+  expect_error(predict(fit, newdata = nd_chr), "was never grown with: .zz.")
+
+  # NA is not an unseen level: it is missing, and must not trip the guard.
+  nd_na <- dat[1:5, ]
+  nd_na$g <- factor(c("a", NA, "c", "b", "a"), levels = c("a", "b", "c"))
+  expect_no_error(suppressWarnings(predict(fit, newdata = nd_na)))
+
+  # And the ordinary case still predicts: the guard is not simply always on.
+  expect_true(all(is.finite(predict(fit, newdata = dat[1:5, ]))))
+})
+
+test_that(".rf_align_levels re-codes newdata against the TRAINING levels", {
+  # `factor(val)` -- newdata's own alphabetical level order -- is not the same
+  # factor as `factor(val, levels = <training levels>)`.  Their integer codes
+  # differ whenever newdata is missing a training level or the training levels
+  # are not in alphabetical order, and those codes are what a forest built
+  # through ranger's x/y interface is indexed by.
+  align <- spatialkit:::.rf_align_levels
+
+  # Training levels deliberately NOT alphabetical, and newdata missing one.
+  train_X <- data.frame(g = factor(c("c", "a", "b", "a"),
+                                   levels = c("c", "a", "b")),
+                        n = 1:4)
+  X <- data.frame(g = factor(c("b", "a")), n = c(9, 9))
+  expect_identical(levels(X$g), c("a", "b"))         # what newdata came with
+
+  out <- align(X, train_X)
+  expect_identical(levels(out$g), c("c", "a", "b"))  # training order, restored
+  expect_identical(as.integer(out$g), c(3L, 2L))     # ... and the codes with it
+  expect_identical(as.character(out$g), c("b", "a")) # labels never move
+  # Untouched columns pass through.
+  expect_identical(out$n, c(9, 9))
+
+  # Newdata's own coding would have been c(2L, 1L) -- a different forest path
+  # for every row.
+  expect_false(identical(as.integer(out$g),
+                         as.integer(factor(as.character(X$g)))))
+
+  # A character newdata column is coerced to the training levels too.
+  X_chr <- data.frame(g = c("b", "a"), n = c(9, 9), stringsAsFactors = FALSE)
+  out_chr <- align(X_chr, train_X)
+  expect_identical(levels(out_chr$g), c("c", "a", "b"))
+  expect_identical(as.integer(out_chr$g), c(3L, 2L))
+
+  # A character TRAINING column defines its levels as sorted unique values,
+  # and newdata is left as character for ranger to convert.
+  train_chr <- data.frame(g = c("c", "a", "b", "a"), stringsAsFactors = FALSE)
+  expect_identical(align(data.frame(g = c("b", "a"),
+                                    stringsAsFactors = FALSE),
+                         train_chr)$g,
+                   c("b", "a"))
+  # Numeric columns are not touched at all.
+  expect_identical(align(data.frame(v = c(1, 2)), data.frame(v = c(3, 4)))$v,
+                   c(1, 2))
+})
+
+test_that("predict.rf_fit is unaffected by newdata's own factor level order", {
+  # The user-visible consequence of the re-coding above: predicting on a slice
+  # that happens to contain only some of the training levels must give exactly
+  # what predicting on the full frame gave for those same rows.
+  skip_if_not_installed("ranger")
+  dat <- .mk_rf_grouped()
+  fit <- fit_rf_model(dat, "z", "g", num_trees = 200L, seed = 1)
+
+  p_full <- predict(fit, newdata = dat)
+  sub    <- which(dat$g %in% c("b", "c"))[1:40]
+  nd_sub <- dat[sub, ]
+  nd_sub$g <- droplevels(nd_sub$g)                   # levels become b, c
+  expect_identical(levels(nd_sub$g), c("b", "c"))
+
+  expect_equal(predict(fit, newdata = nd_sub), p_full[sub], tolerance = 1e-12)
+  # The predictions really do separate the groups, so the equality above is
+  # not satisfiable by a constant.
+  expect_gt(diff(range(p_full)), 50)
+})

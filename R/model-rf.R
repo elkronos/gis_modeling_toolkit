@@ -356,6 +356,12 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   with \code{predict.all} -- are rejected, because this method's contract is
 #'   one number per row of \code{newdata}. Call
 #'   \code{predict(fit$engine, data = ...)} directly for those.
+#'   \code{seed} defaults to a constant rather than being left unset: an unset
+#'   \code{seed} makes \code{ranger} draw one uniform from the global RNG
+#'   stream per call, so the number of \code{predict()} calls a script happens
+#'   to make (via \code{\link{predict_surface}}'s \code{chunk_size}, say) would
+#'   otherwise shift every later random draw. It does not affect a regression
+#'   forest's predictions; pass your own if you need one.
 #' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
 #'   rows dropped as incomplete.
 #' @export
@@ -383,8 +389,23 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   # over -- the added coordinate columns are numeric and simply skipped.
   X <- .rf_align_levels(X, sf::st_drop_geometry(object$data_sf))
 
+  # Supply a seed unless the caller passed one.
+  #
+  # ranger:::predict.ranger.forest does
+  #     if (is.null(seed)) seed <- runif(1, 0, .Machine$integer.max)
+  # so every seedless predict() draws one uniform from the GLOBAL stream.
+  # predict_surface() calls predict() once per chunk, which makes
+  # `chunk_size` -- a pure performance knob that must not change any answer --
+  # shift every subsequent random draw in the session: fold assignments
+  # measurably differ between a script that called predict_surface() and one
+  # that did not.  For a regression forest the seed changes nothing about the
+  # prediction (it seeds ranger's own RNG, which only quantile/probability
+  # prediction consumes), so pinning it costs nothing and makes this method
+  # RNG-neutral.
+  dots <- list(...)
+  if (!("seed" %in% names(dots))) dots$seed <- 1L
   p <- tryCatch(
-    stats::predict(object$engine, data = X, ...)$predictions,
+    do.call(stats::predict, c(list(object$engine, data = X), dots))$predictions,
     error = function(e) {
       .log_warn("predict.rf_fit(): ranger predict failed: %s",
                 conditionMessage(e))
@@ -430,6 +451,15 @@ fitted.rf_fit <- function(object, ...) {
 
 #' Out-of-bag residuals from a random forest fit
 #'
+#' Observed response minus \code{\link{fitted.rf_fit}}, which for a forest is
+#' the \strong{out-of-bag} prediction -- each observation predicted only by the
+#' trees that did not see it.  These are therefore already held-out residuals,
+#' unlike \code{residuals.gwr_fit()} and \code{residuals.bayesian_fit()},
+#' which are in-sample.  Feed them to \code{\link{residual_morans_i}()} to test
+#' whether spatial structure the forest failed to capture is still sitting in
+#' the residuals.  Out-of-bag is not a substitute for spatial CV: use
+#' \code{\link{cv_rf}()} for an honest map-accuracy figure.
+#'
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n}.
@@ -459,6 +489,12 @@ coef.rf_fit <- function(object, ...) {
 
 
 #' Print a random forest fit
+#'
+#' Shows the forest's shape -- formula, n, number of trees, \code{mtry}, node
+#' size -- along with the out-of-bag error and, prominently, whether the
+#' coordinates were used as predictors.  That last line is the one to check:
+#' a forest fitted with \code{include_coords = TRUE} can memorise location and
+#' score well out-of-bag while failing everywhere it has not been.
 #'
 #' @param x An \code{rf_fit}.
 #' @param ... Ignored.

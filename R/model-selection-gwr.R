@@ -15,17 +15,26 @@
 
 #' Extract the ranking criterion from GWmodel's model-selection diagnostics
 #'
-#' \code{GWmodel::gwr.model.selection()} returns its diagnostics as an
-#' unlabelled numeric matrix in some versions and a labelled one in others.
-#' The package's own documented usage indexes column 2 for AICc
-#' (\code{model.sel[[2]][, 2]}), so that is the fallback; a matching column
-#' name is preferred when one is present.
+#' \code{GWmodel::gwr.model.selection()} documents its diagnostic table
+#' (\code{GWR.df}) as "a data frame consited of four columns: bandwidth, AIC,
+#' AICc, RSS" -- so \strong{AICc is column 3}, and column 2 is the uncorrected
+#' AIC.  GWmodel builds the table with \code{rbind()} over unnamed vectors
+#' (\code{c(bw, aic.rss[2], aic.rss[3], aic.rss[1])} in \code{Model.selection.r}),
+#' so it never carries column names: the by-name branch below cannot fire on a
+#' real GWmodel return, and the positional fallback is the path every real call
+#' takes.  Getting it wrong is not a fallback-only risk, it is the normal case
+#' -- reading column 2 ranks on AIC while labelling the result AICc, which
+#' selects larger models than AICc would and can carry a pure-noise predictor.
+#'
+#' The by-name branch is kept for a future GWmodel that labels the table, and
+#' for injected test engines.
 #'
 #' @param gwr_df The second element of the \code{gwr.model.selection()} return.
 #' @param criterion Column name to look for, matched case-insensitively.
 #' @return A list with \code{values} (numeric, non-finite coerced to
-#'   \code{NA}), \code{column}, \code{column_name}, \code{by_name} and
-#'   \code{label}.
+#'   \code{NA}), \code{column}, \code{column_name}, \code{by_name},
+#'   \code{shape_ok} (\code{TRUE} when the table has the documented four
+#'   columns, or when the column was located by name) and \code{label}.
 #' @keywords internal
 #' @noRd
 .gwr_ms_criterion <- function(gwr_df, criterion = "AICc") {
@@ -38,7 +47,7 @@
     vals <- suppressWarnings(as.numeric(gwr_df))
     vals[!is.finite(vals)] <- NA_real_
     return(list(values = vals, column = 1L, column_name = NA_character_,
-                by_name = FALSE,
+                by_name = FALSE, shape_ok = FALSE,
                 label = sprintf("%s (assumed: unlabelled vector)", criterion)))
   }
 
@@ -57,8 +66,19 @@
       by_name <- TRUE
     }
   }
-  # Fallback: GWmodel's own examples read AICc from column 2.
-  if (is.na(col)) col <- if (ncols >= 2L) 2L else 1L
+  # Fallback.  GWmodel's GWR.df is documented AND implemented as
+  #   c(bandwidth, AIC, AICc, RSS)
+  # so AICc lives in column 3.  Column 2 is the UNCORRECTED AIC, which
+  # penalises the effective parameter count more weakly and therefore selects
+  # larger models -- on a forward sweep it will happily keep a pure-noise
+  # predictor that AICc drops, which is the failure AICc exists to prevent.
+  # Anything other than the documented four columns is a shape this code has
+  # never seen; read the same position but tell the caller to say so.
+  shape_ok <- TRUE
+  if (is.na(col)) {
+    col      <- if (ncols >= 3L) 3L else ncols   # ncols is 1 or 2 here
+    shape_ok <- identical(as.integer(ncols), 4L)
+  }
 
   raw  <- if (is_df) gwr_df[[col]] else gwr_df[, col]
   vals <- suppressWarnings(as.numeric(raw))
@@ -74,14 +94,17 @@
     else sprintf("%s (assumed: column %d, unlabelled)", criterion, col)
 
   list(values = vals, column = col, column_name = col_name,
-       by_name = by_name, label = label)
+       by_name = by_name, shape_ok = shape_ok, label = label)
 }
 
 
 #' Normalise GWmodel's model list into character vectors of predictors
 #'
-#' Handles the three shapes the element can take: \code{list(DeVar, InDeVars)}
-#' (what GWmodel returns), a formula, or a bare character vector.
+#' Handles the three shapes the element can take: a two-element list of the
+#' model's formula \emph{string} and its predictor vector -- which is what
+#' GWmodel returns, \code{list(Generate.formula(DeVar, vars), vars)}, i.e.
+#' \code{list("z ~ a + b", c("a", "b"))} -- a formula object, or a bare
+#' character vector.
 #'
 #' @param model_list The first element of the \code{gwr.model.selection()}
 #'   return.
@@ -99,7 +122,10 @@
       return(setdiff(all.vars(m), response_var))
     }
     if (is.list(m)) {
-      # GWmodel stores list(DeVar, InDeVars); take the second slot.
+      # GWmodel stores list("<response> ~ <v1>+<v2>", c(v1, v2)) -- the model's
+      # formula as a STRING in the first slot, the predictor names in the
+      # second.  Take the second slot; the setdiff() below is what keeps a
+      # first-slot fallback from returning the formula text as a variable name.
       part <- if (length(m) >= 2L) m[[2L]] else m[[1L]]
       return(setdiff(as.character(unlist(part, use.names = FALSE)),
                      response_var))
@@ -224,11 +250,20 @@
   if (is.null(bandwidth)) {
     full_fml <- stats::reformulate(termlabels = candidate_vars,
                                    response = response_var)
+    # bw.gwr() distinguishes a supplied distance matrix with missing(dMat),
+    # NOT is.null(dMat).  Passing dMat = NULL explicitly therefore takes the
+    # *supplied* branch, where dim(NULL)[1] != n evaluates to logical(0) and
+    # the if() dies with "missing value where TRUE/FALSE needed".  dMat is NULL
+    # on three ordinary paths -- dmat_max_n = 0, n_obs above dmat_max_n
+    # (default 2000), and a failed gw.dist() -- so every dataset over 2000
+    # points used to land in the fallback-bandwidth branch below with the
+    # message blaming GWmodel.  Build the call instead and simply omit the
+    # argument, which is what makes missing(dMat) true.
+    bw_args <- list(formula = full_fml, data = sp_dat, approach = bw_approach,
+                    kernel = kernel, adaptive = adaptive)
+    if (!is.null(dMat)) bw_args$dMat <- dMat
     bw <- tryCatch(
-      .gwr_quietly(suppressWarnings(
-        GWmodel::bw.gwr(full_fml, data = sp_dat, approach = bw_approach,
-                        kernel = kernel, adaptive = adaptive, dMat = dMat)
-      ), quiet),
+      .gwr_quietly(suppressWarnings(do.call(GWmodel::bw.gwr, bw_args)), quiet),
       error = function(e) {
         .log_warn("gwr_model_selection(): bw.gwr() failed: %s",
                   conditionMessage(e))
@@ -268,16 +303,42 @@
     if (bw > n_obs) bw <- as.integer(n_obs)
   }
 
+  # A FIXED bandwidth needs the distance matrix.  Without one,
+  # gwr.model.selection() sets dMat <- matrix(0, 0, 0) and then asserts
+  # stopifnot(bw > min(dMat)); min() of an empty matrix is Inf, so the
+  # assertion can never hold and the sweep dies with the bare
+  # "(bw > min(dMat)) is not TRUE".  Say so here, where the remedies are
+  # nameable, rather than letting a fixed-bandwidth sweep on n > dmat_max_n
+  # stop unexplained.
+  if (!isTRUE(adaptive) && is.null(dMat))
+    stop(sprintf(paste0("gwr_model_selection(): a fixed bandwidth ",
+                        "(adaptive = FALSE) requires the precomputed n x n ",
+                        "distance matrix, and none was built for these %d ",
+                        "observations%s. GWmodel asserts `bw > min(dMat)`, and ",
+                        "min() of the empty matrix it substitutes is Inf, so ",
+                        "the sweep cannot start. Either allow the matrix -- ",
+                        "`dmat_max_n = %d` or more, costing about %.3g MB -- ",
+                        "or use `adaptive = TRUE`, which needs no distance ",
+                        "matrix."),
+                 n_obs,
+                 if (is.finite(dmat_max_n) && n_obs > dmat_max_n)
+                   sprintf(" (dmat_max_n = %s)", format(dmat_max_n)) else "",
+                 n_obs, (as.numeric(n_obs)^2 * 8) / 1024^2),
+         call. = FALSE)
+
   # `approach` is deliberately NOT forwarded.  It only steers gwr.model.selection's
   # own bandwidth search, and bw is always explicit here; GWmodel's documented
   # example leaves it at its "CV" default and still reports AICc in the
   # diagnostic table, so passing it could only introduce a version-dependent
   # difference for no gain.
+  #
+  # `dMat` is omitted rather than passed as NULL for the same reason as in
+  # bw.gwr() above: gwr.model.selection() branches on missing(dMat).
+  ms_args <- list(DeVar = response_var, InDeVars = candidate_vars,
+                  data = sp_dat, bw = bw, adaptive = adaptive, kernel = kernel)
+  if (!is.null(dMat)) ms_args$dMat <- dMat
   res <- tryCatch(
-    .gwr_quietly(GWmodel::gwr.model.selection(
-      DeVar = response_var, InDeVars = candidate_vars, data = sp_dat,
-      bw = bw, adaptive = adaptive, kernel = kernel, dMat = dMat
-    ), quiet),
+    .gwr_quietly(do.call(GWmodel::gwr.model.selection, ms_args), quiet),
     error = function(e)
       stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s",
                    conditionMessage(e)), call. = FALSE)
@@ -379,7 +440,21 @@
 #'   \code{kernel} (the smoothing held fixed across the sweep, and where it
 #'   came from);
 #'   \code{n_obs}, \code{n_models}, \code{used_dmat}; and \code{raw}
-#'   (GWmodel's unmodified return, for \code{GWmodel::gwr.model.view()}).
+#'   (GWmodel's unmodified return: the two-element list of its model list and
+#'   its diagnostic table).
+#'
+#' @section Using $raw with GWmodel directly:
+#' \code{raw} is GWmodel's own \code{list(model.list, GWR.df)}, so its two
+#' elements have to be unpacked before GWmodel's own helpers will take them:
+#' \code{GWmodel::gwr.model.view()} takes \code{(DeVar, InDeVars, model.list)},
+#' so the call is
+#' \preformatted{
+#'   GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
+#' }
+#' -- \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
+#' \code{sel$raw[[2]]}, an unlabelled numeric matrix whose columns are
+#' \code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order; the
+#' \code{criterion} column of \code{$table} is its third column.
 #'
 #' @references
 #' Lu, B., Harris, P., Charlton, M. and Brunsdon, C. (2014). The GWmodel R
@@ -425,9 +500,10 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
   if (!is.character(response_var) || length(response_var) != 1L)
     stop("gwr_model_selection(): `response_var` must be a single column name.",
          call. = FALSE)
-  # match.arg() has already rejected every invalid value, so .validate_kernel()
-  # would be a no-op here; it earns its keep in cv_gwr(), where `kernel`
-  # arrives unvalidated.
+  # match.arg() is the only kernel validation this package needs: an invalid
+  # value never gets past it.  (.validate_kernel() in R/model-gwr.R exists and
+  # is called by cv_gwr(), but only ever *after* that function's own
+  # match.arg(), so it is unreachable there too -- see its @noRd block.)
   kernel      <- match.arg(kernel)
   bw_approach <- match.arg(bw_approach)
 
@@ -461,7 +537,11 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
          "there is nothing to select among otherwise.", call. = FALSE)
 
   p        <- length(candidate_vars)
-  n_models <- as.integer(p * (p + 1L) / 2L)
+  # as.numeric() before the multiply: p * (p + 1L) is integer arithmetic, which
+  # overflows to NA (with a warning) above p = 46341, and `NA > max_models` is
+  # NA -- so the guard that exists to refuse an impossible sweep would itself
+  # error on the very inputs it is meant to catch.
+  n_models <- as.numeric(p) * (as.numeric(p) + 1) / 2
   if (n_models > max_models)
     stop(sprintf(paste0("gwr_model_selection(): %d candidates would fit about ",
                         "%d GWR models, above max_models = %d. Screen the ",
@@ -481,11 +561,25 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
   crit    <- .gwr_ms_criterion(eng$gwr_df, criterion = "AICc")
   tab     <- .gwr_ms_table(varsets, crit$values, minimise = TRUE)
 
+  # GWmodel builds GWR.df with rbind() over unnamed vectors, so it never
+  # carries column names and this branch is the normal path, not an edge case.
+  # The documented column order is c(bandwidth, AIC, AICc, RSS): AICc is
+  # column 3.  Reading column 2 would rank on the uncorrected AIC while
+  # labelling the answer AICc.
   if (!crit$by_name)
-    .log_warn(paste0("gwr_model_selection(): GWmodel's diagnostic table has no ",
-                     "column named 'AICc'; reading column %d positionally, ",
-                     "which is what GWmodel's own documentation does. Check ",
+    .log_info(paste0("gwr_model_selection(): GWmodel's diagnostic table carries ",
+                     "no column names (it is built by rbind() over unnamed ",
+                     "vectors), so AICc is read positionally from column %d of ",
+                     "the documented c(bandwidth, AIC, AICc, RSS) layout. Check ",
                      "$raw if the ranking looks wrong."), crit$column)
+  # A shape other than those four columns means the assumption above no longer
+  # holds and the ranking may be built on a different criterion entirely.
+  if (!isTRUE(crit$shape_ok) && !isTRUE(crit$by_name))
+    .log_warn(paste0("gwr_model_selection(): GWmodel's diagnostic table does ",
+                     "not have the documented four columns (bandwidth, AIC, ",
+                     "AICc, RSS); AICc was read from column %d of a table with ",
+                     "a shape this version does not recognise. Treat the ",
+                     "ranking as unverified and check $raw."), crit$column)
 
   best_set <- attr(tab, "varsets")[[1L]]
   n_failed <- sum(is.na(tab$criterion))
@@ -518,6 +612,13 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 
 
 #' Print a GWR model selection result
+#'
+#' Shows the forward-selection trail: the response, the candidate predictors,
+#' and the top-ranked models with their criterion values, so you can see both
+#' which model won and by how much.  A shallow gap between the first few rows
+#' means the ranking is not well identified and the choice of predictors should
+#' not be treated as settled -- worth checking before reporting one model as
+#' the selected one.
 #'
 #' @param x A \code{gwr_model_selection} object.
 #' @param n Number of top-ranked models to show. Default 10.

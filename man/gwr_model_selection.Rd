@@ -69,7 +69,8 @@ candidate set the sweep ran over, both echoed by \code{print()});
 \code{kernel} (the smoothing held fixed across the sweep, and where it
 came from);
 \code{n_obs}, \code{n_models}, \code{used_dmat}; and \code{raw}
-(GWmodel's unmodified return, for \code{GWmodel::gwr.model.view()}).
+(GWmodel's unmodified return: the two-element list of its model list and
+its diagnostic table).
 }
 \description{
 Wraps \code{GWmodel::gwr.model.selection()}, which grows a GWR model one
@@ -111,6 +112,21 @@ you that none of the candidates help.
 The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates --
 55 at p = 10, 210 at p = 20 -- each over all \code{n} locations.
 \code{max_models} stops the call rather than letting it run for hours.
+}
+
+\section{Using $raw with GWmodel directly}{
+
+\code{raw} is GWmodel's own \code{list(model.list, GWR.df)}, so its two
+elements have to be unpacked before GWmodel's own helpers will take them:
+\code{GWmodel::gwr.model.view()} takes \code{(DeVar, InDeVars, model.list)},
+so the call is
+\preformatted{
+  GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
+}
+-- \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
+\code{sel$raw[[2]]}, an unlabelled numeric matrix whose columns are
+\code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order; the
+\code{criterion} column of \code{$table} is its third column.
 }
 
 \examples{

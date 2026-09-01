@@ -47,10 +47,21 @@ Ignored when \code{block_size} or \code{auto_range} override them.}
 
 \item{block_multiplier}{Numeric; target blocks multiplier. Default 3.}
 
-\item{block_size}{Optional positive numeric minimum block edge length
-(in projected CRS units).  When supplied, grid dimensions are clamped
-so that every block is at least this wide and tall.  Takes precedence
-over \code{block_nx}/\code{block_ny} and \code{block_multiplier}.}
+\item{block_size}{Optional positive numeric minimum block edge length,
+\strong{in the units of the CRS the folds are built in}.  When supplied,
+grid dimensions are clamped so that every block is at least this wide and
+tall.  Takes precedence over \code{block_nx}/\code{block_ny} and
+\code{block_multiplier}.
+
+Which CRS that is depends on the input.  Projected input is used as it
+stands, so \code{block_size} is in your own CRS's units.  Geographic
+(lon/lat) input is projected first by \code{\link{ensure_projected}()},
+which picks a local UTM zone or, at wide extents, an equal-area
+projection — a CRS you did not choose, whose units are metres but whose
+identity varies with the data.  \code{block_size} is then interpreted in
+\emph{that} CRS.  The CRS actually used is recorded in
+\code{params$crs} of the returned list; project the data yourself before
+calling if you want to fix the units in advance.}
 
 \item{auto_range}{Logical.  If \code{TRUE}, the spatial autocorrelation
 range is estimated via \code{estimate_sac_range()} — which fits
@@ -96,6 +107,19 @@ values (equal to row positions when the input has no pre-existing
 The returned \code{k} is the number of folds actually built, which is not
 always the \code{k} that was requested (see the \code{k} argument above),
 and \code{length(folds)} always matches it.
+
+For the methods that work in projected space — \code{"block_kfold"},
+\code{"buffered_loo"} and \code{"nndm"} — \code{params} carries a
+\code{crs} element naming the CRS the folds were built in (an
+\code{"EPSG:code"} string where there is one, otherwise the CRS's input
+definition).  Every length in \code{params} — \code{block_size},
+\code{sac_range}, \code{buffer}, \code{median_buffer} — is in that CRS's
+units, which for geographic input is a CRS
+\code{\link{ensure_projected}()} chose rather than one you passed.
+
+Rows whose geometry is empty or has non-finite coordinates are dropped
+before folding, with a logged warning naming the count; they appear in no
+fold and in no \code{assignment} row.
 }
 \description{
 Builds train/test splits using random K-fold, spatial block K-fold, or
