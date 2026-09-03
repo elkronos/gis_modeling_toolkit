@@ -74,7 +74,8 @@ anywhere it has not seen. Random cross-validation will not catch this --
 nearby points leak between folds, so the memorised surface scores well --
 which is how the practice became common. Meyer et al. (2019) show the
 collapse directly. \code{include_coords} therefore defaults to
-\code{FALSE}, and setting it to \code{TRUE} warns. If you do use it, score
+\code{FALSE}, and setting it to \code{TRUE} logs a caution (it is a
+deliberate choice, so it is not raised as an R warning). If you do use it, score
 the model with \code{\link{cv_spatial}} and blocked folds, never with the
 out-of-bag error.
 }

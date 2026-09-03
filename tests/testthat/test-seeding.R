@@ -128,9 +128,9 @@ test_that("get_voronoi_seeds(provided) returns every supplied seed and warns abo
 
   # `n` is documented as IGNORED here; a mismatch is announced rather than
   # silently truncating or padding.
-  lines <- capture_spatialkit_log(
+  expect_warning(lines <- capture_spatialkit_log(
     out_n <- get_voronoi_seeds(seeds = seeds, method = "provided", n = 9)
-  )
+  ), "ignores 'n'")
   expect_true(log_has(lines, "method = 'provided' ignores 'n'"))
   expect_equal(nrow(out_n), 4L)
 
@@ -214,8 +214,9 @@ test_that("voronoi_seeds_kmeans drops unusable points and reports having none", 
   expect_equal(nrow(mixed), n + 1L)
   expect_true(any(sf::st_is_empty(mixed)))
 
-  lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(mixed, k = 3,
-                                                              set_seed = 11))
+  expect_warning(lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(mixed, k = 3,
+                                                                             set_seed = 11)),
+                 "dropping 1 point")
   expect_true(log_has(lines, "dropping 1 point\\(s\\) with empty or non-finite"))
   expect_equal(nrow(out), 3L)
   expect_true(all(is.finite(sf::st_coordinates(out))))
@@ -231,7 +232,7 @@ test_that("voronoi_seeds_kmeans drops unusable points and reports having none", 
     geometry = sf::st_sfc(sf::st_point(), sf::st_point(), sf::st_point(),
                           crs = ll))
   expect_equal(nrow(allempty), 3L)
-  expect_error(voronoi_seeds_kmeans(allempty, k = 2),
+  expect_error(suppressWarnings(voronoi_seeds_kmeans(allempty, k = 2)),
                "has no usable coordinates; nothing to cluster")
 })
 
@@ -243,7 +244,8 @@ test_that("voronoi_seeds_kmeans clamps k to the distinct positions and says so",
     data.frame(x = rep(c(1, 2, 3), 4), y = rep(c(1, 2, 3), 4)),
     coords = c("x", "y"), crs = 32632)
 
-  lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(dup, k = 10))
+  expect_warning(lines <- capture_spatialkit_log(out <- voronoi_seeds_kmeans(dup, k = 10)),
+                 "clamping")
   expect_true(log_has(lines, "only 3 unique positions among 12 point\\(s\\)"))
   expect_true(log_has(lines, "clamping"))
   expect_equal(nrow(out), 3L)
@@ -423,15 +425,17 @@ test_that("k-means seeding clamps n to what k-means can actually produce", {
   # AT the ceiling and ABOVE it: clamped to nrow - 1, with a message naming the
   # count actually used.  No error either way.
   for (k in c(N, N + 3L)) {
-    lines <- capture_spatialkit_log(
+    expect_warning(lines <- capture_spatialkit_log(
       at <- get_voronoi_seeds(bnd, method = "kmeans", n = k,
-                              sample_points = cloud, set_seed = 1))
+                              sample_points = cloud, set_seed = 1)),
+      "clamping")
     expect_equal(nrow(at), N - 1L, info = paste("get_voronoi_seeds n =", k))
     expect_equal(at$seed_id, seq_len(N - 1L))
     expect_true(log_has(lines, "clamping"), info = paste("n =", k))
 
-    lines2 <- capture_spatialkit_log(
-      at2 <- voronoi_seeds_kmeans(cloud, k = k, set_seed = 1))
+    expect_warning(lines2 <- capture_spatialkit_log(
+      at2 <- voronoi_seeds_kmeans(cloud, k = k, set_seed = 1)),
+      "clamping")
     expect_equal(nrow(at2), N - 1L, info = paste("voronoi_seeds_kmeans k =", k))
     expect_true(log_has(lines2, "clamping to 11"), info = paste("k =", k))
   }

@@ -58,7 +58,8 @@ attributes:
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
 90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
-over smallest), \code{max_dist},
+over smallest), \code{crs} (the projected CRS the variogram was
+fitted in -- the unit of the range), \code{max_dist},
 \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
 \code{variogram_model} (the fitted \code{gstat} model), so the fit can
 be inspected rather than trusted.}
@@ -102,11 +103,12 @@ recovered 255 and 249 for major axes at 0° and 90° but only 151 and 147 at
 45° and 135°.  Since \code{make_folds(auto_range = TRUE)} sizes its blocks
 from this number, that halved the blocks for a diagonally oriented field.
 
-If any directional fit fails (e.g., too few point pairs in a direction),
-the function falls back to an omnidirectional (isotropic) variogram rather
-than taking the maximum over the directions that did fit — which would bias
-the answer downward precisely when the widest direction is the one that
-failed.
+A direction whose fit fails, does not converge, or reports a range beyond
+the longest fitted lag is excluded.  If at least two directions remain, the
+maximum over those is returned and the excluded ones are recorded as
+\code{NA} in the \code{directional} attribute; with fewer than two, the
+function falls back to an omnidirectional (isotropic) variogram, which pools
+every pair and is therefore the stable estimate on sparse data.
 
 A log warning is emitted when notable anisotropy is detected (ratio of the
 largest to the smallest directional range > 1.5).

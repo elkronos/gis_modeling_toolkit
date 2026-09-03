@@ -68,6 +68,19 @@
 .rf_align_levels <- function(X, train_X) {
   for (cn in intersect(names(X), names(train_X))) {
     tr <- train_X[[cn]]
+    # A column the forest was grown on as NUMERIC must arrive numeric.  ranger
+    # does not check: it factor-codes a character column and applies the
+    # numeric split thresholds to the codes, and predicts confidently from the
+    # result.  Measured: a numeric-at-fit predictor supplied as text at predict
+    # time gave cor(correct, returned) = 0.41 and R2 -1.91 against 0.98, with
+    # no condition raised.  predict.bayesian_fit() refuses this; so does this.
+    if (is.numeric(tr) && !is.numeric(X[[cn]]) && !is.logical(X[[cn]]))
+      stop(sprintf(paste0("predict.rf_fit(): predictor '%s' was numeric when ",
+                          "the forest was grown but is %s in `newdata`. ranger ",
+                          "would silently code it as a factor and apply numeric ",
+                          "split thresholds to the codes; convert the column ",
+                          "first."),
+                   cn, class(X[[cn]])[1L]), call. = FALSE)
     if (!(is.factor(tr) || is.character(tr))) next
     lv  <- if (is.factor(tr)) levels(tr) else sort(unique(as.character(tr)))
     val <- as.character(X[[cn]])
@@ -104,7 +117,8 @@
 #' nearby points leak between folds, so the memorised surface scores well --
 #' which is how the practice became common. Meyer et al. (2019) show the
 #' collapse directly. \code{include_coords} therefore defaults to
-#' \code{FALSE}, and setting it to \code{TRUE} warns. If you do use it, score
+#' \code{FALSE}, and setting it to \code{TRUE} logs a caution (it is a
+#' deliberate choice, so it is not raised as an R warning). If you do use it, score
 #' the model with \code{\link{cv_spatial}} and blocked folds, never with the
 #' out-of-bag error.
 #'
@@ -302,6 +316,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @param seed RNG seed. Default 123.
 #' @param parallel Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.
 #' @param block_size,auto_range,boundary Passed to \code{\link{cv_spatial}}.
+#' @param pointize How non-POINT geometry is reduced to a point before
+#'   fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.
 #' @param ... Passed to \code{\link{fit_rf_model}} on every fold.
 #' @return The \code{\link{cv_spatial}} result.
 #' @family cross-validation
@@ -322,14 +338,17 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
                   seed = 123, parallel = FALSE, block_size = NULL,
-                  auto_range = FALSE, boundary = NULL, ...) {
+                  auto_range = FALSE, boundary = NULL, pointize = "auto", ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("cv_rf(): package 'ranger' is required.", call. = FALSE)
   fit_fn <- function(train_sf)
     fit_rf_model(train_sf, response_var, predictor_vars,
                  .already_prepped = TRUE, ...)
+  # `pointize` is named here rather than left to `...`: it belongs to
+  # cv_spatial(), and through `...` it reached ranger() as an unused argument.
   cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
              folds = folds, k = k, seed = seed, boundary = boundary,
+             pointize = pointize,
              block_size = block_size, auto_range = auto_range,
              parallel = parallel)
 }
@@ -371,6 +390,7 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
     stop("predict.rf_fit(): package 'ranger' is required.", call. = FALSE)
 
   n_orig  <- nrow(newdata)
+  newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)
   newdata <- prep_model_data(newdata, object$response_var,

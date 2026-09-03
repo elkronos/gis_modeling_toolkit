@@ -286,18 +286,27 @@ test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate"
   expect_equal(.rescaled(1, 1e6), da_both$icc_pred, tolerance = 1e-10)
   expect_equal(.rescaled(1e6, 1), da_both$icc_pred, tolerance = 1e-10)
 
-  # --- Two-sided bracket on the pooled value --------------------------------
-  # Derivation.  Both columns are z-scored, so each contributes unit total
-  # variance and the cross term vanishes for independent columns:
-  #     SSB_pooled = (SSB_small + SSB_big) / 2  ~  SSB_small / 2
-  # while the cluster size n0 doubles (each cell now holds 2 * n_per values).
-  # The variance component is sigma_b^2 = (MSB - MSW) / n0, so halving the
-  # numerator and doubling n0 divides it by ~4; with sigma_w^2 ~ 1 the pooled
-  # ICC lands near rho_small / 4.  The bracket spans 0.15-0.40 of it: an
-  # un-z-scored pooling gives ~0 (below), and ignoring x_big entirely gives
-  # 1.0 (above).
-  expect_gte(da_both$icc_pred, 0.15 * da_small$icc_pred)
-  expect_lte(da_both$icc_pred, 0.40 * da_small$icc_pred)
+  # --- The pooled value is the (weighted) MEAN of the per-column ICCs -------
+  # Each z-scored column contributes its own cells as separate groups to one
+  # pooled one-way ANOVA, so with equal cell sizes the pooled ICC is the
+  # average of the per-column ICCs.  x_big has essentially no intra-cell
+  # correlation, so the pooled value sits near rho_small / 2.
+  #
+  # An earlier version of this test bracketed rho_small / 4 and derived it
+  # from pooling the two columns under the SAME cell labels.  That derivation
+  # was correct about the code and wrong about the statistic: independent
+  # per-column cell effects average away in a shared cell mean, and the
+  # between-cell sum of squares shrinks by about 1/m.  Measured with four
+  # columns at true rho = 0.5, the old pooled ICC was 0.12 (per-column ANOVA
+  # 0.495), so every predictor SE was ~44% too small.
+  out_big <- summarize_by_cell(pts, response_var = "y",
+                               predictor_vars = "x_big", deff = "kish")
+  icc_big <- attr(out_big, "deff_applied")$icc_pred
+  if (is.null(icc_big)) icc_big <- 0            # deff not applied when ICC <= 0
+  expect_equal(da_both$icc_pred, (da_small$icc_pred + icc_big) / 2,
+               tolerance = 0.06)
+  # Regression guard against the shared-label pooling: that gave ~rho/4.
+  expect_gt(da_both$icc_pred, 0.35 * da_small$icc_pred)
 
   # And it is genuinely pulled by BOTH: strictly under the small-only ICC.
   expect_lt(da_both$icc_pred, da_small$icc_pred)
@@ -568,4 +577,120 @@ test_that("the variogram deff survives the cells_sf join, realigned per cell", {
   expect_equal(unname(da$deff), unname(lookup[as.character(joined$poly_id)]))
   expect_true(is.na(da$deff[joined$poly_id == 99L]))
   expect_false(anyNA(da$deff[joined$poly_id != 99L]))
+})
+
+
+# ---------------------------------------------------------------------------
+# Fourth-pass regressions: design effects are built from what a column
+# actually observes, in the CRS the variogram was fitted in.
+# ---------------------------------------------------------------------------
+
+.vgm_na_fixture <- function() {
+  # 4 cells x 10 points on a projected grid; a fitted exponential variogram
+  # with a 60-unit range so within-cell pairs are strongly correlated.
+  set.seed(31)
+  ids <- rep(1:4, each = 10)
+  xy  <- cbind(runif(40, 0, 100) + 500 * ((ids - 1) %% 2),
+               runif(40, 0, 100) + 500 * ((ids - 1) %/% 2))
+  pts <- sf::st_sf(poly_id = ids, val = rnorm(40),
+                   geometry = sf::st_sfc(lapply(seq_len(40), function(i)
+                     sf::st_point(xy[i, ])), crs = 32632))
+  vgm <- gstat::vgm(psill = 1, model = "Exp", range = 20, nugget = 0)
+  sac <- structure(60, class = c("sac_range", "numeric"),
+                   variogram_model = vgm, crs = sf::st_crs(32632))
+  list(pts = pts, sac = sac)
+}
+
+test_that("NA-response rows do not move the variogram design effect or SE", {
+  # A row with no response contributes nothing to the response mean, so it
+  # cannot contribute to that mean's clustering either.  Previously the cell's
+  # deff was formed at the ROW count and the SE rescaled by it: adding 8
+  # NA-response rows to a 2-observation cell moved its SE from 8.46 to 26.38.
+  skip_if_not_installed("gstat")
+  fx <- .vgm_na_fixture()
+  a  <- suppressMessages(summarize_by_cell(fx$pts, response_var = "val",
+                                           deff = "variogram", sac = fx$sac))
+  # Blank out 8 of the 10 responses in cell 1 -- the locations stay.
+  p2 <- fx$pts; p2$val[p2$poly_id == 1][3:10] <- NA
+  b  <- suppressMessages(summarize_by_cell(p2, response_var = "val",
+                                           deff = "variogram", sac = fx$sac))
+  # Reference: the same 2 observed rows as their own 2-point cell.
+  p3 <- fx$pts[!(fx$pts$poly_id == 1 & seq_len(40) %in% 3:10), ]
+  cc <- suppressMessages(summarize_by_cell(p3, response_var = "val",
+                                           deff = "variogram", sac = fx$sac))
+  i_b <- which(b$poly_id == 1); i_c <- which(cc$poly_id == 1)
+  expect_equal(b[["..se_resp_val"]][i_b], cc[["..se_resp_val"]][i_c], tolerance = 1e-10)
+  expect_equal(b$cell_weight[i_b],        cc$cell_weight[i_c],        tolerance = 1e-10)
+  expect_equal(attr(b, "deff_applied")$deff[i_b], attr(cc, "deff_applied")$deff[i_c],
+               tolerance = 1e-10)
+  # `n` still counts rows; cell_weight counts what the response observed.
+  expect_equal(b$n[i_b], 10L)
+  expect_lt(b$cell_weight[i_b], 2 + 1e-9)
+  # Untouched cells are identical between the two runs.
+  expect_equal(b[["..se_resp_val"]][-i_b], a[["..se_resp_val"]][-which(a$poly_id == 1)])
+})
+
+test_that("cell_weight is the effective count of the response, not of rows", {
+  set.seed(5)
+  d <- data.frame(poly_id = rep(1:3, each = 10), val = rnorm(30),
+                  x = runif(30, 0, 100), y = runif(30, 0, 100))
+  d$val[d$poly_id == 1][1:7] <- NA           # 3 finite responses in cell 1
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  out <- summarize_by_cell(pts, response_var = "val", deff = 2)
+  i <- which(out$poly_id == 1)
+  expect_equal(out$n[i], 10L)
+  expect_equal(out$cell_weight[i], 3 / 2)     # was 10 / 2 = 5
+  expect_equal(out$cell_weight[-i], rep(10 / 2, 2))
+})
+
+test_that("the variogram design effect is evaluated in the variogram's CRS", {
+  # A range is a length in the CRS the variogram was fitted in (metres).
+  # Evaluating the correlation function at distances taken from lon/lat input
+  # (degrees) saturated every pair: measured SE ratio of 354 between UTM and
+  # EPSG:4326 input for the SAME points, cells and variogram.
+  skip_if_not_installed("gstat")
+  fx <- .vgm_na_fixture()
+  utm <- fx$pts
+  geo <- sf::st_transform(utm, 4326)
+  a <- suppressMessages(summarize_by_cell(utm, response_var = "val",
+                                          deff = "variogram", sac = fx$sac))
+  b <- suppressMessages(summarize_by_cell(geo, response_var = "val",
+                                          deff = "variogram", sac = fx$sac))
+  expect_equal(b[["..se_resp_val"]], a[["..se_resp_val"]], tolerance = 1e-6)
+  expect_equal(attr(b, "deff_applied")$deff, attr(a, "deff_applied")$deff,
+               tolerance = 1e-6)
+  # And the recorded CRS is the variogram's, whatever the input was in.
+  expect_equal(attr(b, "deff_applied")$crs, sf::st_crs(32632))
+})
+
+test_that("deff = 'kish' tolerates rows with no cell id", {
+  # keep_unassigned = TRUE output carries NA ids; those rows belong to no
+  # group and must be left out of the ICC rather than crash it.
+  set.seed(8)
+  d <- data.frame(poly_id = c(rep(1:3, each = 8), NA, NA), val = rnorm(26),
+                  x = runif(26, 0, 100), y = runif(26, 0, 100))
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  expect_no_error(out <- suppressMessages(
+    summarize_by_cell(pts, response_var = "val", deff = "kish")))
+  expect_true(all(is.finite(out[["..se_resp_val"]][!is.na(out$poly_id)])))
+})
+
+test_that("the pooled ICC groups by (variable, cell), not by cell alone", {
+  # Pooling m z-scored columns under one cell label averages independent cell
+  # effects away and shrinks the ICC by ~1/m.  With m = 4 columns at a common
+  # true rho, the pooled estimate must sit near rho, not rho / 4.
+  set.seed(77)
+  n_cells <- 40; n_per <- 12; rho <- 0.5
+  ids <- rep(seq_len(n_cells), each = n_per)
+  mk  <- function() sqrt(rho) * rnorm(n_cells)[ids] + sqrt(1 - rho) * rnorm(n_cells * n_per)
+  d <- data.frame(poly_id = ids, y = rnorm(length(ids)),
+                  p1 = mk(), p2 = mk(), p3 = mk(), p4 = mk(),
+                  x = runif(length(ids), 0, 100), y0 = runif(length(ids), 0, 100))
+  pts <- sf::st_as_sf(d, coords = c("x", "y0"), crs = 32632)
+  out <- suppressMessages(summarize_by_cell(pts, response_var = "y",
+                                            predictor_vars = c("p1", "p2", "p3", "p4"),
+                                            deff = "kish"))
+  icc <- attr(out, "deff_applied")$icc_pred
+  expect_gt(icc, 0.35)                        # rho/4 = 0.125 would fail this
+  expect_lt(icc, 0.65)
 })

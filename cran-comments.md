@@ -112,8 +112,9 @@ produce.
 `R CMD build` produces a 994 KB tarball, of which the built vignette HTML is the
 bulk. `checking running R code from vignettes` passes.
 
-`testthat` reports **2126 passing, 0 failures, 0 errors, 9 skips** with
-`NOT_CRAN=true` and both backends present. The nine skips are:
+`testthat` reports **3479 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
+with `NOT_CRAN=true` and both backends present, and no test runs with zero
+assertions. The nine skips are:
 
 * 5 Stan smoke tests in `test-bayes-smoke.R`, skipped because
   `SPATIALKIT_TEST_BRMS` is unset -- `skip_if_not_installed("brms")` alone was
@@ -250,6 +251,17 @@ well as in `NEWS.md`. In each case the measurement is recorded there.
     all directions covered by neither, and its `n_max` subsample was unseeded —
     so the range was irreproducible above `n_max` and the caller's RNG was
     advanced.
+
+A fourth, adversarial pass then set three reviewers the task of breaking the
+package on valid input. The corrections it produced are listed under "Fourth
+audit pass" in `NEWS.md`; the ones that changed results were the predictor ICC
+pooled under shared cell labels (under-estimated by ~1/m), the variogram design
+effect evaluated at degree distances on lon/lat input (SEs out by a factor of
+354), CRS-less coordinates interpreted one way at fit time and another at
+predict time (predictions at the training rows off by one response SD), and
+NNDM folds built by an approximation that left the realised distance
+distribution up to 0.17 above the target — now the paper's own deterministic
+procedure, verified removal for removal against a transcription of it.
 
 ## Reverse dependencies
 

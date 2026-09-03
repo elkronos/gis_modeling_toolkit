@@ -295,6 +295,12 @@ create_voronoi_polygons <- function(
 #'   projected with [ensure_projected()], which changes the CRS of the returned
 #'   grid; a message reports this unless `quiet = TRUE`.
 #' @param quiet Logical; suppress messages.
+#' @param max_cells Upper bound on the number of cells the grid may have,
+#'   estimated from the boundary's bounding box before anything is built.
+#'   Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
+#'   boundary in kilometres, say -- asks for a grid that cannot be built, and
+#'   this refuses it with a message rather than exhausting memory. Set to
+#'   \code{Inf} to disable.
 #' @return An sf polygon layer with poly_id column.
 #' @family tessellation
 #' @examples
@@ -312,7 +318,8 @@ create_voronoi_polygons <- function(
 #' @export
 create_grid_polygons <- function(
     boundary, target_cells = NULL, type = c("square", "hex"),
-    cellsize = NULL, n = NULL, clip = TRUE, crs = NULL, quiet = FALSE
+    cellsize = NULL, n = NULL, clip = TRUE, crs = NULL, quiet = FALSE,
+    max_cells = 1e6
 ) {
   type <- match.arg(type)
   .msg <- function(...) if (!quiet) message(...)
@@ -398,6 +405,26 @@ create_grid_polygons <- function(
     n  <- c(nx, ny)
     cellsize <- c(w / nx, h / ny)
   }
+
+  # Refuse an absurd grid before building it.  A `cellsize` in the wrong
+  # units -- 10 on a boundary measured in metres that spans 100 km -- asks for
+  # 1e8 polygons, which is ~80 GB and hours of st_make_grid() with nothing to
+  # say until R itself fails to allocate.  Estimate the count from the bbox
+  # first (hex cells are ~15% smaller, so the estimate is inflated by that).
+  n_est <- ceiling(w / cellsize[1L]) * ceiling(h / cellsize[2L])
+  if (identical(type, "hex")) n_est <- n_est / (sqrt(3) / 2)
+  if (is.finite(max_cells) && n_est > max_cells)
+    stop(sprintf(paste0("create_grid_polygons(): a cell size of %s x %s on a ",
+                        "boundary of %s x %s would produce about %s cells, above ",
+                        "`max_cells` = %s. Check that `cellsize` is in the ",
+                        "boundary's CRS units (%s), or raise `max_cells` if the ",
+                        "count is intended."),
+                 format(cellsize[1L], digits = 4), format(cellsize[2L], digits = 4),
+                 format(w, digits = 4), format(h, digits = 4),
+                 format(n_est, big.mark = ",", scientific = FALSE, digits = 3),
+                 format(max_cells, big.mark = ",", scientific = FALSE),
+                 sf::st_crs(boundary)$units_gdal %||% "unknown"),
+         call. = FALSE)
 
   grid_args <- list(x = env, what = "polygons",
                     square = identical(type, "square"))
@@ -531,11 +558,27 @@ build_tessellation <- function(
     if (!is.null(boundary))
       boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
   } else {
+    # ONE decision for points and boundary together.  A CRS-less layer goes
+    # through the same lon/lat heuristic as everywhere else; if it is taken as
+    # lon/lat, a CRS-less boundary is given the same interpretation before
+    # being aligned, and if it is not, the boundary stays in the same unnamed
+    # space (crs_arg = NA below tells create_grid_polygons() not to project it
+    # on its own).  Deciding separately for the two -- points left as they
+    # were, boundary projected inside create_grid_polygons() -- put grid and
+    # points in different CRSs and hex/square died in st_intersects() on
+    # input that voronoi/triangles accepted.
     if (.is_longlat(points_sf)) {
       .msg("build_tessellation(): projecting points to a local UTM CRS.")
       points_sf <- ensure_projected(points_sf)
+    } else if (is.na(sf::st_crs(points_sf))) {
+      points_sf <- ensure_projected(points_sf)
     }
-    if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
+    if (!is.null(boundary)) {
+      assumed <- attr(points_sf, "crs_assumed")
+      if (!is.null(assumed) && is.na(sf::st_crs(boundary)))
+        boundary <- sf::st_set_crs(boundary, sf::st_crs(assumed))
+      boundary <- .align_crs(boundary, points_sf)
+    }
   }
   if (!is.null(boundary)) {
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
@@ -567,7 +610,11 @@ build_tessellation <- function(
     # CRSs and breaking the st_intersects() below.
     grid <- create_grid_polygons(
       boundary = boundary, target_cells = approx_n_cells,
-      type = method, cellsize = cellsize, clip = clip, crs = crs_arg,
+      type = method, cellsize = cellsize, clip = clip,
+      # NA (not NULL) when the points are CRS-less: keep the boundary in the
+      # points' unnamed space instead of letting create_grid_polygons() run
+      # its own projection heuristic on it.
+      crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
       quiet = quiet
     )
     # Build point-to-cell index for grid tessellations

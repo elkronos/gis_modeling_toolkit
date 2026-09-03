@@ -53,7 +53,7 @@ get_voronoi_seeds <- function(boundary = NULL,
            call. = FALSE)
     .assert_sf(seeds, "POINT", "seeds")
     if (!is.null(n) && !identical(as.integer(n), nrow(seeds))) {
-      .log_warn(
+      .warn_and_log(
         "get_voronoi_seeds(): method = 'provided' ignores 'n'; returning all %d row(s) of 'seeds' rather than the %d requested.",
         nrow(seeds), as.integer(n)
       )
@@ -121,7 +121,7 @@ get_voronoi_seeds <- function(boundary = NULL,
       k_max  <- min(n_uniq, nrow(xy) - 1L)
       k_use  <- max(1L, min(as.integer(n), k_max))
       if (k_use < n) {
-        .log_warn("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
+        .warn_and_log("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
                   as.integer(n), k_use, n_uniq, nrow(xy))
       }
 
@@ -224,7 +224,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
     apply(coords, 1L, function(r) all(is.finite(r)))
   n_drop <- sum(!finite_rows)
   if (n_drop > 0L) {
-    .log_warn("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
+    .warn_and_log("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
               n_drop)
     coords <- coords[finite_rows, , drop = FALSE]
   }
@@ -241,7 +241,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
   k_max  <- min(n_uniq, n - 1L)
   k_use  <- max(1L, min(as.integer(k), k_max))
   if (k_use < k) {
-    .log_warn("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
+    .warn_and_log("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
               as.integer(k), n_uniq, n, k_use)
   }
 

@@ -25,9 +25,10 @@ When \code{NULL} (the default), a k-nearest-neighbour binary weight matrix
 (k = 8, row-standardised) is built from the observation coordinates.
 If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 to 1), the Cliff & Ord variance formula is still valid for general W
-and the computation proceeds, but a warning is emitted because the
-magnitude of I is not directly comparable to results obtained with
-row-standardised weights.}
+and the computation proceeds; a note is logged (not raised as an R
+warning) because the magnitude of I is not directly comparable to
+results obtained with row-standardised weights.  A \code{weights}
+argument that is not an n x n matrix is an error.}
 
 \item{k}{Integer number of nearest neighbours used when building the
 default weight matrix (ignored when \code{weights} is supplied).

@@ -45,7 +45,7 @@ ensure_stable_poly_id <- function(polygons_sf,
   keep   <- gtypes %in% c("POLYGON", "MULTIPOLYGON")
   if (any(!keep)) {
     dropped <- table(gtypes[!keep])
-    .log_warn(
+    .warn_and_log(
       "ensure_stable_poly_id(): dropping %d non-polygon row(s) (%s); only POLYGON/MULTIPOLYGON features are given IDs.",
       sum(!keep),
       paste(sprintf("%s: %d", names(dropped), as.integer(dropped)), collapse = ", ")

@@ -231,7 +231,10 @@
   # makes n_cand*(n_cand+1)/2 + bandwidth-search calls.  n^2 doubles: 2000
   # points is 32 MB, which is why this is capped rather than unconditional.
   dMat <- NULL
-  if (is.finite(dmat_max_n) && n_obs <= dmat_max_n) {
+  # `Inf` means no cap -- always precompute.  It was gated on is.finite(), so
+  # Inf meant NEVER precompute: with adaptive = FALSE the sweep then died on
+  # n = 100 (a fixed bandwidth needs the matrix) and blamed the caller.
+  if (!is.na(dmat_max_n) && n_obs <= dmat_max_n) {
     dMat <- tryCatch(
       GWmodel::gw.dist(dp.locat = sp::coordinates(sp_dat)),
       error = function(e) {
