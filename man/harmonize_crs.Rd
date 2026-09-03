@@ -33,8 +33,11 @@ A named list with components a and b.
 Aligns two sf objects to a common CRS.
 }
 \details{
-When one input carries no CRS, the other object's CRS (or \code{target_crs}) is
-\emph{stamped} onto it with \code{\link[sf:st_crs]{sf::st_set_crs()}}: the coordinates are \strong{not}
-reprojected, only relabelled.  That assumption is announced with a warning,
-matching what \code{\link[=ensure_projected]{ensure_projected()}} does in the same situation.
+When one input carries no CRS, the same lon/lat heuristic
+\code{\link[=ensure_projected]{ensure_projected()}} uses decides what happens, so both entry points place
+identical data in the same place: coordinates that look like degrees are
+taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
+\code{target_crs}); coordinates that do not are \emph{stamped} with
+\code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
+assumption is announced with a warning.
 }

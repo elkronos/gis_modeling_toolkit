@@ -15,9 +15,12 @@
 \code{x}, invisibly (called for its side effect).
 }
 \description{
-Shows the one-screen summary of any \code{spatial_fit}: backend, formula,
-number of observations, CRS, and the few backend-specific numbers worth
-seeing immediately (GWR bandwidth, GP basis size, forest settings).  It is
+Shows the one-screen summary of a \code{gwr_fit}, a \code{bayesian_fit} or a
+custom subclass: backend, formula, number of observations, CRS, and the few
+backend-specific numbers worth seeing immediately (GWR bandwidth, GP basis
+size).  An \code{rf_fit} has its own method -- see
+\code{\link{print.rf_fit}} -- which shows the same header plus the forest
+settings.  It is
 what you get by typing the object's name, and the quickest way to confirm a
 fit used the data, predictors and CRS you meant.  For fit quality use
 \code{\link{model_metrics}()} or \code{\link{summary}()} instead --

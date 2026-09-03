@@ -35,30 +35,63 @@ test_that("summarize_by_cell default deff=1 gives classic SE", {
 })
 
 
-test_that("summarize_by_cell deff=2 inflates SE by more than sqrt(2)", {
-  # sqrt(deff) is only HALF the correction.  deff inflates Var(xbar) to
-  # sigma^2 * deff / n, but under the same clustering the ordinary sample
-  # variance is biased low by exactly the amount that inflation assumes:
-  #     E[s^2] = sigma^2 (n - deff) / (n - 1).
-  # Applying sqrt(deff) alone therefore leaves the second error in place and
-  # the two compound.  Measured 95% CI coverage of the sqrt(deff)-only form at
-  # n = 20: 0.905 at rho = 0.3, 0.796 at rho = 0.6, 0.632 at rho = 0.8; with
-  # the sqrt((n-1)/(n-deff)) rescale, 0.952 / 0.952 / 0.953 against a nominal
-  # 0.95.
+test_that("a numeric deff inflates every SE by exactly sqrt(deff)", {
+  # A design effect the CALLER supplied is documented as "uniformly inflating"
+  # the standard errors, and that is what it now does.  The E[s^2] correction
+  # applied on the estimated paths (see the next test) is derived from
+  # within-cell correlation; there is no such structure behind an externally
+  # chosen constant, and applying it anyway made deff = 2 double a 3-point
+  # cell's SE instead of multiplying it by sqrt(2), and return NA for every
+  # cell with n <= deff.
   pts <- .make_test_points(rho = 0)
   out_1 <- summarize_by_cell(pts, response_var = "y", deff = 1)
   out_2 <- summarize_by_cell(pts, response_var = "y", deff = 2)
   ratio <- out_2[["..se_resp_y"]] / out_1[["..se_resp_y"]]
-  expect_equal(ratio, sqrt(2) * sqrt((out_1$n - 1) / (out_1$n - 2)),
-               tolerance = 1e-12)
-  # Strictly above the sqrt(deff)-only factor, which is the regression guard.
-  expect_true(all(ratio > sqrt(2)))
+  expect_equal(ratio, rep(sqrt(2), length(ratio)), tolerance = 1e-12)
+  expect_false(anyNA(out_2[["..se_resp_y"]]))
   # cell_weight halved
   expect_equal(out_2$cell_weight, out_2$n / 2)
   # attribute recorded
   da <- attr(out_2, "deff_applied")
   expect_equal(da$method, "fixed")
   expect_equal(da$deff, 2)
+
+  # Small cells: n = 3 with deff = 3 used to come back NA, and n = 3 with
+  # deff = 2 used to be doubled.  Both are now sqrt(deff) like every other cell.
+  small <- .make_test_points(n_cells = 3, pts_per_cell = 3, rho = 0)
+  s1 <- summarize_by_cell(small, response_var = "y", deff = 1)
+  s3 <- summarize_by_cell(small, response_var = "y", deff = 3)
+  expect_false(anyNA(s3[["..se_resp_y"]]))
+  expect_equal(s3[["..se_resp_y"]] / s1[["..se_resp_y"]],
+               rep(sqrt(3), nrow(s1)), tolerance = 1e-12)
+})
+
+
+test_that("an ESTIMATED design effect also corrects the biased sample variance", {
+  # sqrt(deff) is only HALF the correction when the clustering is real.  deff
+  # inflates Var(xbar) to sigma^2 * deff / n, but under the same clustering the
+  # ordinary sample variance is biased low by exactly the amount that inflation
+  # assumes:
+  #     E[s^2] = sigma^2 (n - deff) / (n - 1).
+  # Applying sqrt(deff) alone therefore leaves the second error in place and
+  # the two compound.  Measured 95% CI coverage of the sqrt(deff)-only form at
+  # n = 20: 0.905 at rho = 0.3, 0.796 at rho = 0.6, 0.632 at rho = 0.8; with
+  # the sqrt((n-1)/(n-deff)) rescale, 0.952 / 0.952 / 0.953 against a nominal
+  # 0.95.  This is what distinguishes the estimated paths from a constant.
+  pts   <- .make_test_points(n_cells = 8, pts_per_cell = 20, rho = 0.6)
+  o_iid <- summarize_by_cell(pts, response_var = "y", deff = 1)
+  o_k   <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+  da    <- attr(o_k, "deff_applied")
+  skip_if(is.null(da) || !is.numeric(da$deff),
+          "the ICC came out non-positive on this draw")
+
+  n <- o_iid$n
+  d <- da$deff
+  expect_equal(o_k[["..se_resp_y"]] / o_iid[["..se_resp_y"]],
+               sqrt(d / 1) * sqrt((n - 1) / (n - d)) / sqrt(1),
+               tolerance = 1e-10)
+  # Strictly above the sqrt(deff)-only factor, which is the regression guard.
+  expect_true(all(o_k[["..se_resp_y"]] / o_iid[["..se_resp_y"]] > sqrt(d) - 1e-12))
 })
 
 
@@ -313,16 +346,17 @@ test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate"
 })
 
 
-test_that("summarize_by_cell invalid deff falls back to 1", {
+test_that("summarize_by_cell invalid deff falls back to 1, with a real warning", {
   pts <- .make_test_points()
 
-  # The fallback is logged through logger, which raises no R condition, so it
-  # has to be captured (see helper-logging.R) -- expect_warning() would pass
-  # whether or not anything was emitted.
-  lines <- capture_spatialkit_log(
-    out <- summarize_by_cell(pts, response_var = "y", deff = -1)
+  # Silently substituting 1 for a value the caller chose means the standard
+  # errors are not the ones they asked for, and nothing in the returned object
+  # records that (no deff_applied is attached at deff = 1).  So this has to be
+  # a real R condition, not only a log line: assert the condition itself.
+  expect_warning(
+    out <- summarize_by_cell(pts, response_var = "y", deff = -1),
+    "must be a single number >= 1"
   )
-  expect_true(log_has(lines, "deff must be >= 1"))
 
   # ... and the fallback really is deff = 1: weights untouched, SE the classic
   # sd / sqrt(n), and no design effect recorded.
@@ -331,12 +365,27 @@ test_that("summarize_by_cell invalid deff falls back to 1", {
                tolerance = 1e-12)
   expect_null(attr(out, "deff_applied"))
 
-  # A non-numeric, non-keyword value takes the same branch.
-  lines2 <- capture_spatialkit_log(
-    out2 <- summarize_by_cell(pts, response_var = "y", deff = "nonsense")
+  # A design effect BELOW 1 would shrink the standard errors, so it takes the
+  # same branch rather than being honoured.
+  expect_warning(
+    out_half <- summarize_by_cell(pts, response_var = "y", deff = 0.5),
+    "must be a single number >= 1"
   )
-  expect_true(log_has(lines2, "deff must be >= 1"))
+  expect_equal(out_half[["..se_resp_y"]], out[["..se_resp_y"]],
+               tolerance = 1e-12)
+
+  # A non-numeric, non-keyword value takes the same branch.
+  expect_warning(
+    out2 <- summarize_by_cell(pts, response_var = "y", deff = "nonsense"),
+    "must be a single number >= 1"
+  )
   expect_null(attr(out2, "deff_applied"))
+
+  # A vector is not a single number either.
+  expect_warning(
+    summarize_by_cell(pts, response_var = "y", deff = c(2, 3)),
+    "must be a single number >= 1"
+  )
 })
 
 

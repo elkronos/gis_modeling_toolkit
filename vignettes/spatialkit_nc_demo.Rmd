@@ -337,10 +337,16 @@ This is the part the rest of the package exists to support.
 
 ### 5a. How far does correlation reach?
 
-`estimate_sac_range()` fits directional variograms and returns the effective
-range in CRS units — here, US survey feet. It returns `NA` (still classed
-`sac_range`, so it prints as a bare `NA`) when the empirical variogram never
-reaches a sill, because an unidentified range must not be used to size blocks.
+`estimate_sac_range()` fits an omnidirectional variogram and returns the
+effective range in CRS units — here, US survey feet. It also fits the four
+principal directions, and reports the widest of those *instead* only when all
+four converge, their ratio exceeds 1.5, and the widest is more than 1.5x the
+all-pairs estimate — that is, when the data give real evidence of anisotropy
+rather than the noise four thinner variograms always produce. The
+`anisotropy_used` attribute records which answer you got. It returns `NA` (still
+classed `sac_range`, so it prints as a bare `NA`) when the empirical variogram
+never reaches a sill, because an unidentified range must not be used to size
+blocks.
 
 ```{r sac-range, eval=has_ggplot && has_gstat}
 sac <- estimate_sac_range(points_sf, response_var = "y",
@@ -350,15 +356,18 @@ sac
 if (is.na(sac)) {
   cat("no identified range:", attr(sac, "rejected_reason"), "\n")
 } else {
-  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f\n",
-              as.numeric(sac), attr(sac, "anisotropy")))
+  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f; used %s\n",
+              as.numeric(sac), attr(sac, "anisotropy"),
+              attr(sac, "anisotropy_used")))
 }
 ```
 
 The fit is attached either way, so `plot(fit, type = "variogram")` on a fitted
-model can draw the curve and let you judge it rather than trust it. A rejected
-range must not be handed to `make_folds(auto_range = TRUE)`, which is why it
-comes back `NA` rather than as a long range.
+model can draw the curve and let you judge it rather than trust it — the
+distance axis is labelled in the units of the CRS the variogram was fitted in,
+and a fit that did not converge says so in the caption. A rejected range must
+not be handed to `make_folds(auto_range = TRUE)`, which is why it comes back
+`NA` rather than as a long range.
 
 ### 5b. Two fold schemes on the same data
 

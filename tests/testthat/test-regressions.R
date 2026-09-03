@@ -418,18 +418,50 @@ test_that("build_tessellation(crs=) stamps a CRS-less input rather than erroring
   d <- .rg_nocrs(n = 40)
   bb <- sf::st_as_sfc(sf::st_bbox(d))
 
+  # Stamping is announced with a real R warning, not only a log line: the
+  # coordinates are NOT moved, and a caller who did not mean to assume that
+  # needs to be able to catch it.
   for (m in c("voronoi", "triangles")) {
-    tess <- suppressMessages(build_tessellation(d, method = m, crs = 32632))
+    expect_warning(
+      tess <- suppressMessages(build_tessellation(d, method = m, crs = 32632)),
+      "WITHOUT reprojection")
     expect_identical(sf::st_crs(tess$cells)$epsg, 32632L, label = m)
     expect_true("cell_id" %in% names(tess$cells), label = m)
   }
   for (m in c("hex", "square")) {
-    tess <- suppressMessages(
-      build_tessellation(d, boundary = bb, method = m, crs = 32632,
-                         approx_n_cells = 16))
+    # Points AND boundary are both CRS-less here, so both are stamped and both
+    # warn; expect_warning() consumes one, so catch the rest explicitly.
+    expect_warning(
+      expect_warning(
+        tess <- suppressMessages(
+          build_tessellation(d, boundary = bb, method = m, crs = 32632,
+                             approx_n_cells = 16)),
+        "WITHOUT reprojection"),
+      "WITHOUT reprojection")
     expect_identical(sf::st_crs(tess$cells)$epsg, 32632L, label = m)
     expect_true("cell_id" %in% names(tess$cells), label = m)
   }
+})
+
+
+test_that("a CRS-less lon/lat input is REPROJECTED, not stamped", {
+  # The other half of the same decision, and the one that used to be missing:
+  # .transform_or_stamp() stamped unconditionally while ensure_projected()
+  # applied the lon/lat heuristic, so identical input landed 5,400 km apart
+  # depending on which entry point a caller used -- which is how
+  # summarize_by_cell(deff = "variogram") came to compare degree separations
+  # against a metre range, and how assign_features_to_polygons() came to return
+  # zero rows for points build_tessellation() had just tessellated correctly.
+  ll <- sf::st_as_sf(
+    data.frame(x = c(9.10, 9.15, 9.20, 9.12), y = c(48.70, 48.75, 48.72, 48.80)),
+    coords = c("x", "y"))                       # no CRS, but plainly lon/lat
+  expect_warning(out <- .transform_or_stamp(ll, sf::st_crs(32632)),
+                 "taken as EPSG:4326 and reprojected")
+  ref <- suppressWarnings(ensure_projected(ll, target_crs = sf::st_crs(32632)))
+  expect_equal(sf::st_coordinates(out), sf::st_coordinates(ref),
+               tolerance = 1e-9)
+  # Metres, not degrees.
+  expect_gt(max(abs(sf::st_coordinates(out)[, 1])), 1e5)
 })
 
 test_that("build_tessellation(crs=) still REPROJECTS input that has a CRS", {
@@ -461,12 +493,28 @@ test_that("compare_models_cv accepts rf_args that collide with base arguments", 
   d$a <- d$z + 0.01 * sf::st_coordinates(d)[, 1]
   fo <- make_folds(d, k = 3, method = "random_kfold", seed = 1)
 
-  for (extra in list(list(seed = 3), list(k = 3), list(num.trees = 50))) {
+  # Assert a RESULT, not merely a data.frame: `expect_true(is.data.frame(...))`
+  # under suppressWarnings() passed just as happily when every fold failed and
+  # the row came back all-NA, which is how `num.trees` reaching ranger twice
+  # went unnoticed.
+  for (extra in list(list(seed = 3), list(k = 3), list(num_trees = 50))) {
     res <- suppressWarnings(suppressMessages(
       compare_models_cv(d, "a", "z", models = "RF", folds = fo, rf_args = extra)))
     expect_true(is.data.frame(res$overall))
     expect_identical(res$overall$model, "RF")
+    expect_gt(res$overall$n_pred, 0L)
+    expect_true(is.finite(res$overall$RMSE))
   }
+
+  # ranger's OWN spellings of arguments the wrapper already sets are refused
+  # with a message naming the wrapper argument, instead of reaching ranger
+  # twice and failing every fold with "matched by multiple actual arguments".
+  expect_error(
+    suppressMessages(fit_rf_model(d, "a", "z", num.trees = 50)),
+    "num_trees", fixed = TRUE)
+  expect_error(
+    suppressMessages(fit_rf_model(d, "a", "z", min.node.size = 5)),
+    "min_node_size", fixed = TRUE)
 })
 
 test_that("compare_models_cv refuses extras that would break comparability", {

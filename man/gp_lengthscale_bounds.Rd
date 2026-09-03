@@ -8,7 +8,11 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 }
 \arguments{
 \item{coords_xy}{Numeric matrix or data.frame of coordinates with at least
-two columns; the first two are used.}
+two columns; the first two are used, and replicated rows are collapsed
+before the distance quantiles are taken — \code{brms::gp()} defaults to
+\code{gr = TRUE} and reduces its covariates to unique rows, so a
+heavily-sampled station would otherwise weight the quantile by how often it
+was measured rather than by where the sites are.}
 
 \item{q_small}{Numeric quantile for the lower bound, a single number in
 \code{[0, 1]}. Default 0.25.
@@ -16,11 +20,13 @@ Previous versions used 0.1, but the 10th percentile can be
 dominated by within-cluster spacing in clustered data, producing
 a misleadingly small lower bound.}
 
-\item{max_n}{Maximum number of points to use in distance computation.
-Default 1000. Set to \code{Inf} to use all points.}
+\item{max_n}{Maximum number of \emph{distinct} points to use in the distance
+computation.  Default 1000. Set to \code{Inf} to use all of them.}
 }
 \value{
-Named numeric vector \code{c(lower, upper)} on the length-scale.
+Named numeric vector \code{c(lower, upper)} on the length-scale;
+\code{c(lower = 0.001, upper = 1)} when fewer than two distinct locations
+or no positive distances remain.
 }
 \description{
 Computes sensible prior bounds for the GP length-scale parameter \eqn{\ell}

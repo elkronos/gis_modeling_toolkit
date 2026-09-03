@@ -25,7 +25,13 @@ create_grid_polygons_cached(
 \item{cache_env}{Environment for memoized grids. Default .gmt_cache.}
 }
 \value{
-An sf data frame with a stable poly_id column.
+An sf data frame with a stable poly_id column.  Note that the rows
+are re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
+which \code{\link{create_grid_polygons}} does not do: the same cell
+therefore carries a different \code{poly_id} depending on which of the two
+builders produced it.  Use one builder throughout an analysis; joining a
+summary keyed on IDs from one onto geometries from the other draws the
+values on the wrong polygons.
 }
 \description{
 Builds a grid via \code{create_grid_polygons()} and memoizes the result

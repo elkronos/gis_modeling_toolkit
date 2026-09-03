@@ -20,6 +20,12 @@ see above).}
 }
 \value{
 A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
+\code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
+exceeds the global predictor count and a GP model has no simple \code{p},
+so it is deliberately suppressed.  A non-numeric response is an error -- a
+character or factor response cannot be scored, and used to come back as
+\code{n = 0} with every metric \code{NA}; a logical response is treated
+as 0/1.
 }
 \description{
 Reports RMSE, MAE, MAPE, SMAPE, \eqn{R^2} and adjusted \eqn{R^2} for any

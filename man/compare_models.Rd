@@ -30,9 +30,9 @@ a tidy comparison table including in-sample metrics and model-specific
 information criteria (AICc, LOOIC).
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
 \concept{model evaluation}

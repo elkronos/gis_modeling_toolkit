@@ -16,7 +16,12 @@ estimate_sac_range(
 }
 \arguments{
 \item{points_sf}{An sf object with point geometries (will be projected
-automatically if in geographic CRS).}
+automatically if in geographic CRS).  Non-POINT geometry is reduced to
+representative points; any Z or M dimension is dropped, because
+\code{gstat::variogram()} uses every coordinate dimension and an XYZ layer
+would otherwise return a range in 3-D while every consumer of it works in
+2-D map distance; and rows with empty or non-finite coordinates are dropped
+with a logged count.}
 
 \item{response_var}{Character(1) name of the response column.}
 
@@ -58,7 +63,9 @@ attributes:
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
 90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
-over smallest), \code{crs} (the projected CRS the variogram was
+over smallest), \code{anisotropy_used} (logical: whether the returned
+range is the directional maximum rather than the all-pairs estimate),
+\code{crs} (the projected CRS the variogram was
 fitted in -- the unit of the range), \code{max_dist},
 \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
 \code{variogram_model} (the fitted \code{gstat} model), so the fit can
@@ -70,12 +77,14 @@ prints as a bare \code{NA} rather than dumping its attributes, and it
 carries \code{max_dist}, \code{cutoff_dist}, \code{variogram} and
 \code{variogram_model} --- the evidence for the rejection --- plus
 \code{rejected_range} (the value that was refused) and
-\code{rejected_reason}.  It does \strong{not} carry \code{directional}
-or \code{anisotropy}.}
+\code{rejected_reason}, plus \code{crs} — so the units the rejected
+number was in stay recoverable, which is what
+\code{plot(type = "variogram")} labels its axis from.  It does
+\strong{not} carry \code{directional} or \code{anisotropy}.}
 \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
 could not be attempted or produced nothing at all (\pkg{gstat}
-missing, fewer than 30 finite values, a degenerate extent, or a
-singular variogram fit).}
+missing, fewer than 30 finite values, a variable with no variance, a
+degenerate extent, or a singular variogram fit).}
 }
 Attributes and the class do not affect \code{is.na()} or
 \code{is.finite()}, so every downstream guard treats all three the same
@@ -90,11 +99,25 @@ Fits exponential (or spherical) variogram models and returns the
 To guard against anisotropy, the function first estimates directional
 variograms at 0° (N–S), 45°, 90° (E–W) and 135° azimuths, each with a
 ±22.5° tolerance.  Those four windows tile all 180 distinct azimuths
-exactly once, with no gap and no double-counted pair.  When all four fits
-succeed the \strong{maximum} of the four directional ranges is returned,
-which is the conservative choice for spatial block CV — blocks must be at
-least as large as the longest autocorrelation range to avoid information
-leakage.
+exactly once, with no gap and no double-counted pair.
+
+An \strong{omnidirectional} variogram is fitted as well, and it is the
+default answer.  Splitting 180° four ways leaves each directional variogram
+about a quarter of the point pairs, and the maximum of four noisy estimates
+is biased upward: on simulated \emph{isotropic} fields the max-of-four came
+back about 40\% above the truth, so blocks were sized 40\% too wide and every
+fold lost training data for no reason.  The all-pairs fit is the
+best-powered estimate available, so the directional maximum is returned only
+when anisotropy is \emph{established}: \strong{all four} directions must have
+produced a usable fit, the ratio of the largest to the smallest must exceed
+1.5, \strong{and} the widest must stand more than 1.5× above the all-pairs
+estimate.  (One further case: when the omnidirectional fit is itself
+unusable, the directional sweep is all there is and its maximum is returned
+whatever the ratio.  \code{anisotropy_used} records which answer you got.)
+That is the
+conservative choice where anisotropy is real (blocks must be at least as
+large as the longest autocorrelation range to avoid leakage) without paying
+for it where it is not.
 
 Sweeping only 0° and 90° would leave the azimuths between 23° and 67°, and
 between 113° and 157°, covered by neither window: on simulated fields with a
@@ -104,14 +127,21 @@ recovered 255 and 249 for major axes at 0° and 90° but only 151 and 147 at
 from this number, that halved the blocks for a diagonally oriented field.
 
 A direction whose fit fails, does not converge, or reports a range beyond
-the longest fitted lag is excluded.  If at least two directions remain, the
-maximum over those is returned and the excluded ones are recorded as
-\code{NA} in the \code{directional} attribute; with fewer than two, the
-function falls back to an omnidirectional (isotropic) variogram, which pools
-every pair and is therefore the stable estimate on sparse data.
+the longest fitted lag is excluded and recorded as \code{NA} in the
+\code{directional} attribute.  Fewer than two usable directions leaves the
+omnidirectional fit as the only estimate.
 
-A log warning is emitted when notable anisotropy is detected (ratio of the
-largest to the smallest directional range > 1.5).
+Every variogram model is fitted \strong{with a nugget}.  A nugget-free model
+forces the curve through the origin, and on any real measurement (which has
+one) \pkg{gstat}'s default N/h² weights buy that constraint by collapsing
+the range: with a 50\% nugget the fitted range came back at about 0.45 of the
+truth, so \code{make_folds(auto_range = TRUE)} built blocks less than half
+the correlation length it reported.
+
+A log warning is emitted when the directional maximum is used; where the
+all-pairs estimate is available it names both the ratio and that estimate.  A
+log note is emitted instead when the directional ranges vary but the spread
+is consistent with sampling noise.
 
 The returned range is in the coordinate units of the (projected) data and
 can be passed directly to \code{make_folds(block_size = ...)} to ensure
@@ -129,14 +159,14 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

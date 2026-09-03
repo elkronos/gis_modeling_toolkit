@@ -19,7 +19,9 @@ data.frame, out-of-bag for an \code{rf_fit}).
 }
 \description{
 Computes goodness-of-fit metrics from \code{fitted(object)} against the
-observed response.
+observed response.  A non-numeric response is an error -- a character or
+factor response cannot be scored, and used to come back as \code{n = 0} with
+every metric \code{NA}; a logical response is treated as 0/1.
 }
 \section{What the metrics are computed on}{
 

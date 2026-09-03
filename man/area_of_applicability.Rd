@@ -21,7 +21,10 @@ area_of_applicability(
 \arguments{
 \item{newdata}{Prediction locations: an \code{sf} object (typically from
 \code{\link{predict_surface}}) or a data.frame, carrying the predictor
-columns.}
+columns. For a model fitted with \code{include_coords = TRUE} an
+\code{sf} object is required, non-\code{POINT} geometry is reduced to
+representative points, and a CRS mismatch with the training data is
+reconciled; see \emph{Models fitted with the coordinates as predictors}.}
 
 \item{model}{A fitted \code{spatial_fit}, supplying the training data and
 predictor names. Optional if \code{train_sf} and \code{predictor_vars} are
@@ -59,11 +62,32 @@ computing the mean pairwise distance, which is quadratic. Default 5000.}
 Exposed so the dense fallback can be tested.}
 }
 \value{
-An object of class \code{aoa}: a list with \code{aoa} (the input
-\code{newdata} with numeric \code{DI} and logical \code{AOA} columns
-added), \code{threshold}, \code{train_DI}, \code{normalizer},
-\code{weights}, \code{predictor_vars}, \code{dropped_vars}, counts, and
-\code{params}.
+An object of class \code{aoa}: a list with
+\itemize{
+\item \code{aoa} -- \code{newdata} with a numeric \code{DI} column
+and a logical \code{AOA} column added. This is the object the
+computation ran on, which for a coordinate-using model is
+\code{newdata} after pointizing, CRS reconciliation and the addition
+of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
+are not all finite gets \code{NA} in both columns.
+\item \code{threshold} -- the DI cut-off used.
+\item \code{train_DI} -- the training points' own DI values.
+\item \code{normalizer} -- the mean pairwise training distance.
+\item \code{weights} -- the weight vector actually applied, named by
+\code{predictor_vars}.
+\item \code{predictor_vars} -- the predictors used, including
+\code{"..x"}/\code{"..y"} when the model uses coordinates and
+excluding \code{dropped_vars}.
+\item \code{dropped_vars} -- predictors dropped for negligible
+variance.
+\item \code{n_train}, \code{n_new}, \code{n_inside},
+\code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
+\code{n_new} count the rows that survived the finite-value filter.
+\item \code{params} -- a record of the call: \code{folds_supplied},
+\code{n_folds}, \code{threshold_supplied}, \code{normalizer_max_n},
+\code{normalizer_n_used}, \code{normalizer_subsampled},
+\code{weights_supplied} and \code{seed}.
+}
 }
 \description{
 Computes the dissimilarity index (DI) of Meyer & Pebesma (2021) for a set of
@@ -113,11 +137,35 @@ they actually left available, not merely "everything outside the fold".
 \section{Limitations}{
 
 Predictors must be numeric; categorical variables are refused rather than
-silently dummy-coded. Predictors with zero variance in the training data are
+silently dummy-coded. Predictors whose variance is negligible \emph{relative
+to their own magnitude} (the test is
+\code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
+metres and in gigametres is treated identically) are
 dropped, and a prediction point taking a different value there is a form of
 extrapolation this index cannot express. Without \code{weights} every
 predictor counts equally, which overstates dissimilarity along directions
 the model barely uses.
+}
+
+\section{Models fitted with the coordinates as predictors}{
+
+When \code{model} was fitted with \code{include_coords = TRUE} the model
+splits on location, so the dissimilarity index has to measure location too:
+the coordinates are added to both sides as the predictors \code{"..x"} and
+\code{"..y"} and are then centred, scaled and weighted like any other
+column. Without this a prediction point far outside the training extent but
+with ordinary covariate values reads as \emph{inside} the area of
+applicability -- exactly the extrapolation this index exists to catch.
+
+This path needs geometry on both sides, so \code{train_sf} and
+\code{newdata} must both be \code{sf} objects; a data.frame is refused
+rather than quietly measured without location. Non-\code{POINT}
+\code{newdata} (grid polygons, say) is reduced to representative points
+first, as \code{\link{coerce_to_points}} would. If exactly one side
+carries a CRS the other is brought into it -- reprojected when its
+coordinates look like longitude/latitude, stamped otherwise, with a warning
+either way -- because degrees fed into a metre-space index silently
+understate the distances.
 }
 
 \examples{
@@ -154,14 +202,14 @@ Ecology and Evolution} 12(9), 1620--1633. \doi{10.1111/2041-210X.13650}
 \code{\link{predict_surface}} to build the grid,
 \code{\link{make_folds}} for the fold scheme.
 
-Other cross-validation: 
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

@@ -27,10 +27,20 @@ make_folds(
 )
 }
 \arguments{
-\item{points_sf}{An sf object.}
+\item{points_sf}{An sf object.  Any Z or M dimension is dropped before
+folding: \code{sf::st_distance()} uses every coordinate dimension, so an
+XYZ layer would otherwise have elevation folded into every buffer, block
+and neighbour distance.  CRS-less points are aligned to a \code{boundary}
+or \code{prediction_points} that carries a CRS — reprojected when the
+coordinates look like lon/lat, otherwise stamped without reprojection,
+warning either way.}
 
-\item{k}{Integer; number of folds.  Required for every method, but not every
-method honours it: \code{"buffered_loo"} and \code{"nndm"} are
+\item{k}{Integer; number of folds.  Must be a single whole number >= 1 —
+a fraction, \code{NA} or a vector is an error, because a non-integer used
+to truncate silently and leave the last rows in no test set at all.
+Required for \code{"random_kfold"}, \code{"block_kfold"} and
+\code{"leave_location_out"}; \code{"buffered_loo"} and \code{"nndm"} are
+leave-one-out schemes and ignore it.  Not every method honours it: \code{"buffered_loo"} and \code{"nndm"} are
 leave-one-out schemes and always return \code{k = n} regardless of what
 was asked for, while \code{"block_kfold"} lowers it when the grid yields
 fewer than \code{k} non-empty blocks and \code{"leave_location_out"}
@@ -63,7 +73,11 @@ projection — a CRS you did not choose, whose units are metres but whose
 identity varies with the data.  \code{block_size} is then interpreted in
 \emph{that} CRS.  The CRS actually used is recorded in
 \code{params$crs} of the returned list; project the data yourself before
-calling if you want to fix the units in advance.}
+calling if you want to fix the units in advance.
+
+A \code{block_size} in the wrong unit asks for an enormous grid, so a
+request above 1,000,000 blocks is refused with an error naming the grid
+dimensions, the extent and the CRS's units, rather than being built.}
 
 \item{auto_range}{Logical.  If \code{TRUE}, the spatial autocorrelation
 range is estimated via \code{estimate_sac_range()} — which fits
@@ -89,7 +103,13 @@ sites it has already seen -- which random k-fold reports as excellent
 performance.}
 
 \item{prediction_points}{Optional \code{sf} layer of the locations you
-actually intend to predict onto.  Required for \code{method = "nndm"}.}
+actually intend to predict onto.  Required for \code{method = "nndm"}.
+The grid from \code{\link{predict_surface}()} is the natural choice; a
+non-POINT layer (grid cells, polygons) is reduced to representative points
+first, so the target distances are point-to-point rather than
+point-to-polygon — the latter is zero for every cell that contains a
+training point, which pulls the target distribution towards zero and
+degenerates the CV towards plain leave-one-out.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -105,8 +125,7 @@ Default \code{0.5}, as in \code{CAST::nndm()}.}
 \item{phi}{For \code{method = "nndm"}: the largest nearest-neighbour
 distance the exclusion will push a held-out point to, in the CRS the
 folds are built in.  Default \code{NULL} = the largest
-prediction-to-training distance.
-The grid from \code{predict_surface()} is the natural choice.}
+prediction-to-training distance.}
 
 \item{drop_empty_blocks}{Logical. Default TRUE.}
 }
@@ -206,14 +225,14 @@ distance matching Leave-One-Out Cross-Validation for map validation.
 \doi{10.1111/2041-210X.13851}
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

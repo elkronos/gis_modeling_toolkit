@@ -13,6 +13,12 @@
 #' @return An sf POINT layer with columns \code{..grid_x}, \code{..grid_y}.
 #' @keywords internal
 #' @noRd
+# Ceiling on the number of prediction cells.  A surface of more than a few
+# million points is not something anyone plots or writes out; a request for one
+# is a units mistake, and refusing it in milliseconds beats failing to allocate
+# after minutes.
+.surface_max_cells <- 5e6
+
 .make_prediction_grid <- function(bb, crs, cell_size = NULL, n_cells = 10000L) {
   w <- as.numeric(bb[["xmax"]] - bb[["xmin"]])
   h <- as.numeric(bb[["ymax"]] - bb[["ymin"]])
@@ -20,12 +26,50 @@
     stop("predict_surface(): the fitted data has no finite extent.", call. = FALSE)
 
   if (is.null(cell_size)) {
-    n_cells <- max(1L, as.integer(n_cells))
+    # as.integer() silently returns NA above 2^31, and the error below then
+    # blamed `cell_size` -- an argument the caller did not pass.  Validate the
+    # argument the caller actually gave.
+    if (!is.numeric(n_cells) || length(n_cells) != 1L || !is.finite(n_cells) ||
+        n_cells < 1)
+      stop("predict_surface(): `n_cells` must be a single positive finite number.",
+           call. = FALSE)
+    if (n_cells > .surface_max_cells)
+      stop(sprintf(paste0("predict_surface(): `n_cells` = %s is above the %s ",
+                          "cells this function will build."),
+                   format(n_cells, big.mark = ",", scientific = FALSE),
+                   format(.surface_max_cells, big.mark = ",",
+                          scientific = FALSE)), call. = FALSE)
     cell_size <- sqrt((w * h) / n_cells)
   }
-  if (!is.finite(cell_size) || cell_size <= 0)
+  if (!is.numeric(cell_size) || length(cell_size) != 1L ||
+      !is.finite(cell_size) || cell_size <= 0)
     stop("predict_surface(): `cell_size` must be a positive finite number.",
          call. = FALSE)
+
+  # Refuse an absurd grid before expand.grid() builds it.  The classic units
+  # mistake -- a cell_size in kilometres on a metre CRS -- asked for 3.7e10
+  # cells and R aborted trying to allocate 139.6 GB (or swapped the machine on
+  # a bigger one).  create_grid_polygons() guards the identical mistake and
+  # names the CRS units in its message; this builder is the sibling that did
+  # not.
+  n_est <- ceiling(w / cell_size) * ceiling(h / cell_size)
+  if (is.finite(n_est) && n_est > .surface_max_cells) {
+    unit_lbl <- tryCatch({
+      u <- sf::st_crs(crs)$units_gdal
+      if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
+    }, error = function(e) "CRS units")
+    stop(sprintf(paste0("predict_surface(): a cell size of %s on an extent of ",
+                        "%s x %s would produce about %s cells, above the %s ",
+                        "this function will build. Check that `cell_size` is in ",
+                        "the CRS units of the fitted data (%s), or raise ",
+                        "`n_cells` instead."),
+                 format(signif(cell_size, 6)), format(signif(w, 4)),
+                 format(signif(h, 4)),
+                 format(n_est, big.mark = ",", scientific = FALSE),
+                 format(.surface_max_cells, big.mark = ",", scientific = FALSE),
+                 unit_lbl),
+         call. = FALSE)
+  }
 
   # seq(from, to, by) ERRORS with "wrong sign in 'by' argument" when from > to,
   # rather than returning length 0 -- so a cell_size wider than the extent used
@@ -67,18 +111,32 @@
 #'   \code{fit_bayesian_spatial_model()}).
 #' @param grid Optional \code{sf} POINT layer to predict onto.  When
 #'   \code{NULL}, a regular grid is built over the training extent.  Must have
-#'   at least one row.
+#'   at least one row.  It is brought into the fit's CRS first: a CRS-less grid
+#'   is given the interpretation the training data got (the assumption recorded
+#'   on the fit), with a warning, and then reprojected -- otherwise a CRS-less
+#'   grid can land thousands of kilometres from the covariates and every cell
+#'   takes the same nearest feature.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
-#'   supplied; when \code{NULL}, derived from \code{n_cells}.
+#'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
+#'   would produce more than 5,000,000 cells is refused, naming the implied
+#'   count and the CRS units -- the usual cause is a value in the wrong unit.  A
+#'   \code{cell_size} wider than the extent yields a single centred cell.
 #' @param n_cells Approximate cell count used to derive \code{cell_size}.
-#'   Default 10000.  Also ignored when \code{grid} is supplied -- the grid you
+#'   Default 10000.  Must be a single positive finite number and at most
+#'   5,000,000; anything else is an error.  Also ignored when \code{grid} is supplied -- the grid you
 #'   pass is used verbatim.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc}; grid points outside
-#'   it are dropped.
+#'   it are dropped.  Put through the same CRS replay and reprojection as
+#'   \code{grid}.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
 #'   contain them.  Values are taken from the nearest feature.
-#' @param chunk_size Rows per prediction call. Default 5000.
+#' @param chunk_size Rows per prediction call. Default 5000.  A pure
+#'   performance knob for the GWR and random-forest backends, whose rows do not
+#'   interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
+#'   grid stays inside the training extent -- beyond it the GP boundary has to
+#'   grow and predictions depend on which rows share the call; see
+#'   \code{\link{predict.bayesian_fit}}.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
 #'   backend supports it.  Default FALSE.
 #' @param ... Passed to \code{predict()}.
@@ -138,13 +196,22 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     if (nrow(grid) == 0L)
       stop("predict_surface(): `grid` has no rows; there is nothing to ",
            "predict onto.", call. = FALSE)
+    # The same replay `covariates` gets, and for exactly the same reason: a
+    # CRS-less grid whose OWN bounding box does not trip the lon/lat heuristic
+    # had the fit's projected CRS stamped onto raw degrees, landing 5,300 km
+    # from the correctly-reprojected covariates.  st_nearest_feature() then
+    # handed every cell the same covariate row and the whole surface collapsed
+    # to one constant -- silently, with no error anywhere.
+    grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
     grid <- ensure_projected(grid, target_crs = .crs_or_null(target_crs))
   }
   res <- attr(grid, "cell_size")
 
   # ---- clip ----------------------------------------------------------------
   if (!is.null(boundary)) {
-    bnd <- ensure_projected(sf::st_geometry(boundary), target_crs = .crs_or_null(target_crs))
+    bnd <- .replay_crs_assumption(sf::st_geometry(boundary), train,
+                                  "predict_surface", "boundary")
+    bnd <- ensure_projected(bnd, target_crs = .crs_or_null(target_crs))
     keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)
@@ -174,7 +241,8 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       stop("predict_surface(): `covariates` lacks column(s) ",
            paste(sQuote(cov_missing), collapse = ", "), ".", call. = FALSE)
 
-    covariates <- .replay_crs_assumption(covariates, train, "predict_surface")
+    covariates <- .replay_crs_assumption(covariates, train, "predict_surface",
+                                        "covariates")
     covariates <- ensure_projected(covariates, target_crs = .crs_or_null(target_crs))
     nn  <- sf::st_nearest_feature(grid, covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]

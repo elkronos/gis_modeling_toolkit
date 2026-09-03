@@ -13,19 +13,27 @@
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
 #' @param polygon_id_col Name of the polygon identifier column. Default "poly_id".
-#' @param keep_unassigned Logical; retain unmatched features. Default FALSE.
+#' @param keep_unassigned Logical; retain features that fall inside no
+#'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
+#'   them.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
-#' @param largest Logical; for polygon-on-polygon joins with overlapping
-#'   polygons, keep the polygon with the largest overlap. Default TRUE. Only
-#'   effective with predicates that support it (e.g. st_intersects).
+#' @param largest Logical; when \code{features_sf} is itself polygonal, keep
+#'   the polygon with the largest overlap. Default TRUE. Ignored for point and
+#'   line features, and silently dropped if the \code{predicate} does not
+#'   support it (\code{sf::st_intersects} does).
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area, \code{"first"} keeps the first match (original order-dependent
 #'   behavior).
-#' @return An sf object with polygon_id_col attached. Any column of
-#'   `features_sf` whose name would collide with the polygon ID column is
-#'   dropped before the spatial join (with a warning), so re-assigning an
-#'   already-assigned layer replaces the old IDs rather than failing.
+#' @return An sf object with `polygon_id_col` attached, one row per input
+#'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
+#'   the CRS `features_sf` arrived in. Any column of `features_sf` whose name
+#'   would collide with the polygon ID column is dropped before the spatial
+#'   join (with a warning), so re-assigning an already-assigned layer replaces
+#'   the old IDs rather than failing. If *no* feature falls inside any polygon
+#'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
+#'   warning is raised, since the usual cause is two layers in different
+#'   places --- a CRS that could only be stamped, not reprojected.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -140,6 +148,23 @@ assign_features_to_polygons <- function(
   }
   joined[["..pre_join_row_id"]] <- NULL
 
+  n_unassigned <- sum(is.na(joined[[polygon_id_col]]))
+  # Zero matches is almost never what the caller meant, and it is silent: the
+  # function returns an empty sf and every downstream step reports zero rows
+  # without saying why.  The usual cause is a CRS mismatch that could only be
+  # stamped rather than reprojected, which puts the two layers in different
+  # places.
+  if (n_unassigned == nrow(joined) && nrow(joined) > 0L)
+    .warn_and_log(paste0("assign_features_to_polygons(): none of the %d ",
+                         "feature(s) fall inside any polygon. Check that the ",
+                         "two layers cover the same ground -- a CRS that had to ",
+                         "be stamped rather than reprojected is the usual ",
+                         "cause -- or pass a different `predicate`."),
+                  nrow(joined))
+  else if (n_unassigned > 0L)
+    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon.",
+              n_unassigned, nrow(joined))
+
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
   }
@@ -228,9 +253,17 @@ assign_features_to_polygons <- function(
 #'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy).
 #' @keywords internal
 #' @noRd
-.se_with_deff <- function(s, n, deff) {
+.se_with_deff <- function(s, n, deff, correct_s2 = TRUE) {
   if (!is.finite(s) || !is.finite(n) || n <= 1L) return(NA_real_)
   if (!is.finite(deff) || deff <= 1) return(s / sqrt(n))
+  # correct_s2 = FALSE for a design effect the CALLER supplied as a constant.
+  # The E[s^2] = sigma^2 (n - deff)/(n - 1) correction below is derived from a
+  # within-cell correlation structure, so it is right for an ICC- or
+  # variogram-derived deff and unjustified for an externally chosen number:
+  # applied to deff = 2 it doubled a 3-point cell's SE instead of multiplying
+  # it by sqrt(2), and returned NA for every cell with n <= deff -- neither of
+  # which is the "uniform inflation" the argument is documented as.
+  if (!isTRUE(correct_s2)) return(s * sqrt(deff / n))
   # deff is bounded above by n (every observation a copy of every other).  At
   # that bound the cell holds one observation's worth of information and s
   # carries none about sigma, so there is no standard error to report.
@@ -371,10 +404,18 @@ assign_features_to_polygons <- function(
 #'
 #' In addition to user-specified aggregation functions, this function always
 #' computes within-cell standard deviation (`..sd_<var>`) and standard error
-#' (`..se_<var>`) for every numeric response/predictor column, plus a
-#' `cell_weight` column equal to the observation count.
+#' (`..se_<var>`) for every numeric response/predictor column, plus an `n`
+#' column (rows falling in the cell) and a `cell_weight` column.
 #' These columns let downstream models account for the fact that a cell with
 #' 2 observations carries more aggregation uncertainty than one with 200.
+#'
+#' `cell_weight` is the *effective* sample size of the primary variable --- the
+#' response when one was supplied, otherwise the first predictor. It counts
+#' that variable's non-missing rows, not all rows (a cell of 10 rows with 3
+#' finite responses carries 3 observations' worth of information about the
+#' response, not 10), and it is divided by that cell's design effect when
+#' `deff` applied one. With `deff = 1` and no missing values it equals `n`.
+#' Pass it as the `weights` argument of a downstream regression.
 #'
 #' @section Spatial autocorrelation and standard-error bias:
 #' **Important:** By default (`deff = 1`), the `..se_*` columns are computed as
@@ -395,11 +436,46 @@ assign_features_to_polygons <- function(
 #' does not require a full spatial covariance model but does require enough
 #' cells and observations for a stable ICC estimate.
 #' You may also pass a fixed numeric design effect (e.g. `deff = 2`) to
-#' uniformly inflate standard errors.
+#' uniformly inflate standard errors: an externally supplied constant is
+#' applied as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive SE in
+#' every cell. (The `E[s^2]` correction that the estimated design effects also
+#' apply is derived from within-cell correlation and would not be justified for
+#' a number the caller chose.)
 #'
 #' Even with the Kish correction, the adjusted SE is an approximation.
 #' For rigorous inference under spatial dependence, consider fitting an
 #' explicit spatial covariance model (e.g. via \code{\link{fit_bayesian_spatial_model}}).
+#'
+#' @section What the standard error estimates:
+#' The `..se_*` columns are the standard error of the cell mean **as an
+#' estimate of the population (grand) mean** — the unconditional quantity, in
+#' which the cell's own realised deviation is part of the error. That is the
+#' right quantity when cells are treated as samples from a common population,
+#' and the design-effect correction is calibrated for it: measured 95% interval
+#' coverage of the grand mean is 0.95 with `deff = "kish"` (and 0.29 with the
+#' naive SE) on exchangeable within-cell correlation, and 0.93 with
+#' `deff = "variogram"` on a simulated Gaussian field.
+#'
+#' It is **not** the standard error of the cell's own mean (the block average
+#' over that cell), which is what a cell-level map or a regression on cell
+#' values usually wants. For that quantity the naive `sd / sqrt(n)` is the
+#' better estimate — measured coverage 0.95, against essentially 1.00 for the
+#' design-effect-corrected SE, which is about five times too wide. Use `deff`
+#' when the cell means feed a population-level inference; leave it at 1 when
+#' they are measurements of the cells themselves.
+#'
+#' @section Design effects and variable types:
+#' `deff = "kish"` estimates a separate ICC for response and predictor
+#' variables and applies each to its own columns. `deff = "variogram"` fits or
+#' accepts **one** correlation function and applies it to every numeric column,
+#' because a variogram is a property of the field being modelled rather than of
+#' a variable type; a predictor whose spatial structure differs markedly from
+#' the response's will have its SE corrected by the response's correlation.
+#' Note also that supplying `predictor_vars` makes the internally estimated
+#' variogram a **residual** variogram (that is what
+#' [estimate_sac_range()] does with predictors), so the response's own design
+#' effect depends on which predictors are listed. Pass `sac` explicitly when
+#' you want control over which variogram is used.
 #'
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell aggregation.
@@ -410,13 +486,17 @@ assign_features_to_polygons <- function(
 #'   \code{median}, \code{sum}, \code{sd}.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
-#'   the polygon geometry from cells_sf. When NULL (default), a plain
-#'   data.frame/tibble is returned (previous behaviour).
+#'   the polygon geometry from cells_sf, with one row per cell in `cells_sf`
+#'   --- cells that no feature fell in are kept, with `NA` summaries. Duplicate
+#'   ID values in `cells_sf` would multiply those rows, so they are reported
+#'   with a warning. When NULL (default), a plain data.frame/tibble is
+#'   returned (previous behaviour).
 #' @param deff Design-effect adjustment for standard errors. One of:
 #'   \describe{
-#'     \item{`1` (default)}{No adjustment; classic IID standard error.
-#'       Equivalent to previous behaviour but now emits a message (when
-#'       `quiet = FALSE`) reminding that SEs assume independence.}
+#'     \item{`1` (default)}{No adjustment; the classic IID standard error
+#'       `sd / sqrt(n)`, which assumes the observations within a cell are
+#'       independent. No `"deff_applied"` attribute is attached, so a result
+#'       carrying none was computed this way.}
 #'     \item{`"variogram"`}{Compute a per-cell design effect from a fitted
 #'       variogram: for `n` points in a cell with correlation matrix `R`, the
 #'       effective sample size of the mean is `n^2 / sum(R)`, so
@@ -436,26 +516,45 @@ assign_features_to_polygons <- function(
 #'       different scales contribute equally to the variance decomposition.
 #'       The response-specific ICC
 #'       is used for response SEs and the predictor-specific ICC for
-#'       predictor SEs. Requires at least 2 cells with 2+ observations;
-#'       falls back to `deff = 1` otherwise.}
+#'       predictor SEs. The response's ICC is never applied to predictor
+#'       columns or vice versa, and it is the response's ICC (not the
+#'       predictors') that sets `cell_weight` whenever a response was given.
+#'       Requires at least 2 cells with 2+ observations and at least 2 residual
+#'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 --- no
+#'       correction, no `"deff_applied"` attribute --- otherwise, and likewise
+#'       when the estimate itself comes out at or below 0.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
-#'       cell. Use when you have an external estimate of the design effect.}
+#'       cell, as `sd * sqrt(deff / n)` --- exactly `sqrt(deff)` times the
+#'       naive SE. Use when you have an external estimate of the design
+#'       effect. Anything that is not a single number `>= 1` --- including a
+#'       value below 1, which would *shrink* the standard errors --- is
+#'       refused with a warning and replaced by 1.}
 #'   }
 #' @param sac Optional `sac_range` object from [estimate_sac_range()], used
 #'   when `deff = "variogram"`. Supplying one avoids re-fitting the variogram
-#'   and lets you inspect the fit the design effect is based on.
+#'   and lets you inspect the fit the design effect is based on. A `sac_range`
+#'   whose fit was *rejected* (its `status` is not `"ok"`) carries no usable
+#'   correlation function, so `deff` falls back to 1 with a warning rather than
+#'   correcting by a shape that was not trusted enough to report a range.
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500.
 #' @param quiet Logical; suppress messages. Default TRUE.
-#' @return A tibble/data.frame (or sf if cells_sf given) with per-cell summaries
-#'   including `n`, `cell_weight`, and `..sd_*` / `..se_*` columns.
-#'   When `deff != 1`, an attribute `"deff_applied"` is attached to the result
-#'   recording the design effect(s) used — including when `cells_sf` is
-#'   supplied, in which case its per-cell `deff` vector is realigned to the
-#'   joined row order and cells with no observations carry `NA`. The one
-#'   exception is `deff = "kish"` with an estimated ICC of 0: no correction is
-#'   applied, so no attribute is attached.
+#' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
+#'   summaries: the ID column, `n` (rows in the cell --- an input column also
+#'   called `n` is not allowed to shadow it), one column per `agg_funs` entry
+#'   per variable, `..sd_*` / `..se_*` for every numeric response and predictor,
+#'   and `cell_weight`.
+#'
+#'   When a correction was actually applied, an attribute `"deff_applied"` is
+#'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
+#'   `deff`/`rbar`/`crs`/`max_n` for `"variogram"`, and `deff` alone for a
+#'   fixed number. When `cells_sf` is supplied, *every* per-cell vector in that
+#'   attribute (`deff` and `rbar` alike) is realigned to the joined row order,
+#'   so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
+#'   observations carry `NA`. No attribute is attached when no correction was
+#'   applied --- `deff = 1`, a `deff = "kish"` ICC of 0, or a `"variogram"`
+#'   request that could not be fitted.
 #'
 #'   The ID column keeps its input type when `cells_sf`'s ID column and the
 #'   summarised IDs already have the same class. When the classes differ, both
@@ -464,8 +563,12 @@ assign_features_to_polygons <- function(
 #' @examples
 #' library(sf)
 #' set.seed(1)
+#' n <- 200
+#' x <- runif(n, 0, 100)
+#' y <- runif(n, 0, 100)
+#' # A response with spatial structure, so the within-cell ICC is not zero.
 #' pts <- st_as_sf(
-#'   data.frame(x = runif(40, 0, 100), y = runif(40, 0, 100), val = rnorm(40)),
+#'   data.frame(x = x, y = y, val = 0.05 * x + 0.05 * y + rnorm(n, sd = 0.5)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -475,9 +578,12 @@ assign_features_to_polygons <- function(
 #' assigned <- assign_features_to_polygons(pts, grid)
 #'
 #' # IID standard errors (default) vs Kish design-effect adjustment
-#' cells <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
-#' cells
-#' attr(cells, "deff_applied")
+#' naive <- summarize_by_cell(assigned, response_var = "val")
+#' kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
+#' data.frame(n = naive$n,
+#'            se_naive = naive$..se_resp_val,
+#'            se_kish  = kish$..se_resp_val)
+#' attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
 #' @family aggregation
 #' @seealso [assign_features_to_polygons()], which produces the input layer;
 #'   [build_tessellation()] for the cells themselves.
@@ -524,7 +630,12 @@ summarize_by_cell <- function(assigned_points_sf,
   }
   if (!use_kish && !use_vgm) {
     if (!is.numeric(deff) || length(deff) != 1L || deff < 1) {
-      .log_warn("summarize_by_cell(): deff must be >= 1, \"kish\" or \"variogram\"; falling back to 1.")
+      # A real warning, not a log line: silently substituting 1 for a value the
+      # caller chose means the standard errors are not the ones they asked for,
+      # and nothing in the returned object records that (no `deff_applied` is
+      # attached when deff == 1).
+      .warn_and_log("summarize_by_cell(): `deff` must be a single number >= 1, \"kish\" or \"variogram\"; got %s. Falling back to deff = 1, so the standard errors are the uncorrected ones.",
+                    paste(format(deff), collapse = ", "))
       deff <- 1
     }
   }
@@ -569,6 +680,14 @@ summarize_by_cell <- function(assigned_points_sf,
 
     ni <- tabulate(grps)
     ni <- ni[ni > 0L]
+    # The documentation promises "at least 2 cells with 2+ observations; falls
+    # back to deff = 1 otherwise", and the k >= 2 / N >= 4 test above does not
+    # deliver it.  All-singleton groups give SSW = 0, MSW = 0 and therefore an
+    # ICC of exactly 1 -- a design effect of n from data carrying no
+    # within-cell information at all.  A single group with two members gives an
+    # ICC from one within-group degree of freedom, which is then applied to
+    # every cell.  Both are noise dressed as a measurement.
+    if (sum(ni >= 2L) < 2L || (N - k) < 2L) return(0)
     grand_mean <- mean(vals)
     group_means <- tapply(vals, grps, mean)
 
@@ -711,8 +830,12 @@ summarize_by_cell <- function(assigned_points_sf,
         }
         # NOT s / sqrt(n_valid / deff_i): that corrects the mean's variance for
         # clustering but leaves s^2 biased low by the same clustering.  See
-        # .se_with_deff() for the derivation and the measured coverage.
-        .se_with_deff(s, n_valid, deff_i)
+        # .se_with_deff() for the derivation and the measured coverage.  The
+        # E[s^2] correction applies only to a design effect this function
+        # DERIVED from the data's own clustering; a numeric `deff` supplied by
+        # the caller is applied as the uniform inflation it is documented to be.
+        .se_with_deff(s, n_valid, deff_i,
+                      correct_s2 = .kish || !is.null(.rbar))
       }
     })
     fns
@@ -726,6 +849,25 @@ summarize_by_cell <- function(assigned_points_sf,
   vgm_rbar <- NULL
   vgm_bits <- NULL
   if (use_vgm) {
+    # A REJECTED sac is not a fit.  estimate_sac_range() returns NA with a
+    # `rejected_reason` when the fitted range runs past the longest lag the
+    # variogram covers, or when the optimiser stopped at its iteration limit --
+    # and it says in as many words that such a range "is where the optimiser
+    # halted rather than a fitted parameter" and must not be used.  It still
+    # attaches `variogram_model` so the fit can be INSPECTED, and reading that
+    # attribute without checking the value took the refused model as gospel:
+    # the correlation function then saturated at every within-cell distance,
+    # deff came out equal to n, cell_weight collapsed to 1 and standard errors
+    # were inflated 40-50x.  Treat it like no fit at all.
+    if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
+        !is.null(attr(sac, "rejected_reason"))) {
+      .warn_and_log(paste0("summarize_by_cell(): the supplied `sac` reports no ",
+                           "usable range (%s), so its fitted variogram model ",
+                           "cannot size a design effect. Falling back to ",
+                           "deff = 1."),
+                    as.character(attr(sac, "rejected_reason")))
+      sac <- NULL
+    }
     vgm_model <- attr(sac, "variogram_model")
     vgm_crs   <- attr(sac, "crs")
     if (is.null(vgm_model)) {
@@ -734,9 +876,18 @@ summarize_by_cell <- function(assigned_points_sf,
         est <- try(estimate_sac_range(assigned_points_sf, response_var,
                                       predictor_vars = predictor_vars),
                    silent = TRUE)
-        if (!inherits(est, "try-error")) {
+        # Same test on the internally estimated fit: a rejected range means the
+        # model behind it is not usable either.
+        if (!inherits(est, "try-error") &&
+            !(is.na(suppressWarnings(as.numeric(est))[1L]) &&
+              !is.null(attr(est, "rejected_reason")))) {
           vgm_model <- attr(est, "variogram_model")
           vgm_crs   <- attr(est, "crs")
+        } else if (!inherits(est, "try-error")) {
+          .warn_and_log(paste0("summarize_by_cell(): the estimated variogram ",
+                               "reports no usable range (%s), so it cannot size ",
+                               "a design effect. Falling back to deff = 1."),
+                        as.character(attr(est, "rejected_reason")))
         }
       }
     }
@@ -799,7 +950,7 @@ summarize_by_cell <- function(assigned_points_sf,
   if (has_resp && has_pred) {
     out <- grouped |>
       dplyr::summarise(
-        n = dplyr::n(),
+        ..n_rows = dplyr::n(),
         dplyr::across(dplyr::all_of(resp_num), .build_funs("resp_", rho = resp_rho, rbar = vgm_rbar, vgm = vgm_bits),
                       .names = "{.fn}{.col}"),
         dplyr::across(dplyr::all_of(pred_num), .build_funs("pred_", rho = pred_rho, rbar = vgm_rbar, vgm = vgm_bits),
@@ -809,7 +960,7 @@ summarize_by_cell <- function(assigned_points_sf,
   } else if (has_resp) {
     out <- grouped |>
       dplyr::summarise(
-        n = dplyr::n(),
+        ..n_rows = dplyr::n(),
         dplyr::across(dplyr::all_of(resp_num), .build_funs("resp_", rho = resp_rho, rbar = vgm_rbar, vgm = vgm_bits),
                       .names = "{.fn}{.col}"),
         .groups = "drop"
@@ -817,15 +968,23 @@ summarize_by_cell <- function(assigned_points_sf,
   } else if (has_pred) {
     out <- grouped |>
       dplyr::summarise(
-        n = dplyr::n(),
+        ..n_rows = dplyr::n(),
         dplyr::across(dplyr::all_of(pred_num), .build_funs("pred_", rho = pred_rho, rbar = vgm_rbar, vgm = vgm_bits),
                       .names = "{.fn}{.col}"),
         .groups = "drop"
       )
   } else {
     out <- grouped |>
-      dplyr::summarise(n = dplyr::n(), .groups = "drop")
+      dplyr::summarise(..n_rows = dplyr::n(), .groups = "drop")
   }
+  # dplyr::summarise() makes each newly created column visible to the
+  # expressions that follow it, so naming the row count `n` here put it in
+  # scope for the across() calls below: a response or predictor column
+  # literally named `n` was silently summarised as the ROW COUNT (resp_mean_n
+  # equal to n, sd and se NA), with no message.  Build it under a reserved
+  # name and rename once nothing can shadow it.
+  names(out)[names(out) == "..n_rows"] <- "n"
+
   # cell_weight is the EFFECTIVE sample size of the primary variable -- the
   # response when there is one, else the first predictor -- so it is built from
   # that variable's non-missing count per cell, not from the row count: a cell
@@ -844,8 +1003,15 @@ summarize_by_cell <- function(assigned_points_sf,
   # cell_weight uses the response ICC (primary outcome); falls back to
   # predictor ICC when no response variable was supplied.
   if (use_kish) {
-    primary_rho <- if (has_resp && resp_rho > 0) resp_rho
-                   else if (has_pred && pred_rho > 0) pred_rho
+    # The fallback to the PREDICTOR's ICC is for the case the comment above
+    # describes -- no response variable at all.  Applying it whenever the
+    # response's own ICC came out <= 0 meant that adding a predictor to the
+    # call changed the response's regression weight (measured: by a factor of
+    # 20), deflating a cell whose response is uncorrelated on the strength of a
+    # predictor that happens to be clustered.  The response SE is already left
+    # at deff = 1 in that case, as documented; cell_weight has to agree with it.
+    primary_rho <- if (has_resp) max(resp_rho, 0)
+                   else if (has_pred) max(pred_rho, 0)
                    else 0
     if (primary_rho > 0) {
       deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
@@ -899,6 +1065,19 @@ summarize_by_cell <- function(assigned_points_sf,
         cells_id <- cells_id_found[[1]]
         # Keep only geometry + id from cells to avoid column collisions
         cells_slim <- cells_sf[, cells_id, drop = FALSE]
+        # A duplicated cell ID makes left_join() emit one summary row per
+        # matching cell, so sum(n) exceeded the number of points assigned (39
+        # for 30 points; 46 for 23 after st_cast(., "POLYGON") split a
+        # multi-part cell and each piece kept its poly_id).  Nothing checked
+        # it, and the inflated total is easy to mistake for a real count.
+        if (anyDuplicated(cells_slim[[cells_id]]))
+          .warn_and_log(paste0("summarize_by_cell(): `cells_sf$%s` has %d ",
+                               "duplicated value(s), so each summary row is ",
+                               "repeated once per matching cell and totals such ",
+                               "as sum(n) will exceed the number of points. Give ",
+                               "every cell its own ID (see ",
+                               "ensure_stable_poly_id())."),
+                        cells_id, sum(duplicated(cells_slim[[cells_id]])))
         if (cells_id != id_col) {
           names(cells_slim)[names(cells_slim) == cells_id] <- id_col
         }
@@ -925,9 +1104,16 @@ summarize_by_cell <- function(assigned_points_sf,
         out <- dplyr::left_join(cells_slim, out, by = id_col)
 
         if (!is.null(deff_attr)) {
-          if (length(deff_attr$deff) == length(pre_join_id)) {
-            lookup <- stats::setNames(deff_attr$deff, pre_join_id)
-            deff_attr$deff <- unname(lookup[as.character(out[[id_col]])])
+          # EVERY per-cell vector has to follow the join, not just $deff.
+          # Realigning $deff alone left $rbar in pre-join order and pre-join
+          # length, so deff[i] and rbar[i] described different cells and the
+          # identity deff = 1 + (n-1) * rbar no longer held row-wise.
+          for (fld in c("deff", "rbar")) {
+            v <- deff_attr[[fld]]
+            if (!is.null(v) && length(v) == length(pre_join_id)) {
+              lookup <- stats::setNames(v, pre_join_id)
+              deff_attr[[fld]] <- unname(lookup[as.character(out[[id_col]])])
+            }
           }
           attr(out, "deff_applied") <- deff_attr
         }

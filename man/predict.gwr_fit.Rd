@@ -16,7 +16,11 @@ is supported).  NULL = fitted values.}
 \item{...}{Ignored.}
 }
 \value{
-Numeric vector of predictions.
+Numeric vector aligned to \code{nrow(newdata)}, with \code{NA} for
+rows dropped as missing or non-finite.  If \code{GWmodel::gwr.predict()}
+fails, every value is \code{NA} and a warning says why.  CRS-less
+\code{newdata} first receives the interpretation the training data got, so
+the same rows land where they did at fit time.
 }
 \description{
 When \code{newdata} is NULL, returns the in-sample fitted values.

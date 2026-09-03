@@ -28,7 +28,13 @@ cv_gwr(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{folds}{Optional list of fold definitions.}
+\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
+value, or a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values.  Train and test must be disjoint — a fold that
+trains on its own test rows is not a cross-validation split and is refused
+with an error — and IDs naming no row in the prepared data are dropped with
+a logged count (expected when rows were removed for missing values; a sign
+the folds came from other data when they were not).}
 
 \item{k}{Number of folds. Default 5.}
 
@@ -105,14 +111,14 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

@@ -30,9 +30,9 @@ Does NOT refit — uses \code{fitted()} for in-sample and
 \code{predict()} for new data.
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{compare_models_cv}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
 \concept{model evaluation}
