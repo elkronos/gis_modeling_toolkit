@@ -15,6 +15,7 @@ cv_rf(
   block_size = NULL,
   auto_range = FALSE,
   boundary = NULL,
+  pointize = "auto",
   ...
 )
 }
@@ -34,6 +35,9 @@ cv_rf(
 \item{parallel}{Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.}
 
 \item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.}
+
+\item{pointize}{How non-POINT geometry is reduced to a point before
+fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
 
 \item{...}{Passed to \code{\link{fit_rf_model}} on every fold.}
 }

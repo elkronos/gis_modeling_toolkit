@@ -21,6 +21,8 @@ make_folds(
   predictor_vars = NULL,
   boundary = NULL,
   buffer = NULL,
+  min_train = 0.5,
+  phi = NULL,
   drop_empty_blocks = TRUE
 )
 }
@@ -87,8 +89,7 @@ sites it has already seen -- which random k-fold reports as excellent
 performance.}
 
 \item{prediction_points}{Optional \code{sf} layer of the locations you
-actually intend to predict onto.  Required for \code{method = "nndm"}.
-The grid from \code{predict_surface()} is the natural choice.}
+actually intend to predict onto.  Required for \code{method = "nndm"}.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -96,6 +97,16 @@ Passed to \code{estimate_sac_range()} for residual variogram estimation.}
 \item{boundary}{Optional polygonal sf/sfc for block_kfold.}
 
 \item{buffer}{Positive numeric distance for buffered_loo.}
+
+\item{min_train}{For \code{method = "nndm"}: the smallest fraction of the
+data any fold's training set may be reduced to by neighbour exclusion.
+Default \code{0.5}, as in \code{CAST::nndm()}.}
+
+\item{phi}{For \code{method = "nndm"}: the largest nearest-neighbour
+distance the exclusion will push a held-out point to, in the CRS the
+folds are built in.  Default \code{NULL} = the largest
+prediction-to-training distance.
+The grid from \code{predict_surface()} is the natural choice.}
 
 \item{drop_empty_blocks}{Logical. Default TRUE.}
 }
@@ -149,19 +160,30 @@ around each held-out point so that the resulting training-to-test distance
 distribution approaches the distribution of distances from your actual
 prediction locations to the training data.
 
-Each held-out point draws a target distance from the empirical
-prediction-distance CDF, then the nearest training points are excluded up to
-the one whose distance is closest to that target.  Matching is therefore
-\emph{as close as the training configuration permits}, not exact: the
-achievable distances are the order statistics of that point's neighbour
-distances, which are discrete and can leave gaps.  Clustered data is the
-hard case -- excluding everything inside a hard radius would remove a whole
-cluster and leave the nearest survivor in the next one, overshooting badly,
-which is why the nearest achievable distance is used instead.
+The procedure is the paper's own (as in \code{CAST::nndm()}), and it is
+deterministic.  Let \eqn{G_{ij}} be the empirical distribution of
+prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
+of each held-out point's nearest remaining training point.  Starting from
+plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
+realised distribution exceeds the target -- \eqn{G_j^*(r) > G_{ij}(r)} --
+has its nearest training neighbour removed, and this repeats until no such
+point remains, subject to two limits: a point's nearest-neighbour distance
+is never pushed beyond \code{phi} (default: the largest prediction distance,
+since a training point already further than every prediction distance has
+nothing to match), and no fold's training set is stripped below
+\code{min_train} of the data.
 
-This differs from the paper's iterative exclusion procedure.  Compare
-\code{params$target_median} against \code{params$realised_median} to see
-how well the matching worked on your data.
+The realised distribution is then never \emph{more optimistic} than the
+target: \eqn{G_j^*(r) \le G_{ij}(r)} up to the granularity of the
+neighbour distances, which is the property the method exists to deliver.
+An earlier version of this package drew one random radius per point from
+\eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
+which rounds down half the time: on a two-cluster layout the realised
+distribution exceeded the target by up to 0.17 (13\\% of folds had a
+nearest training point within 50 m against a target of 9\\%), an
+\emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
+the largest remaining excess; compare \code{params$target_median} with
+\code{params$realised_median} as well.
 }
 \examples{
 library(sf)

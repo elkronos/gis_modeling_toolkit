@@ -283,3 +283,17 @@ test_that("estimate_sac_range never emits a raw gstat warning", {
                       message = paste("seed", s))
   }
 })
+
+
+test_that("estimate_sac_range records the CRS its range is measured in", {
+  # The range is a length in this CRS; summarize_by_cell(deff = "variogram")
+  # transforms its points to it before evaluating within-cell distances.
+  skip_if_not_installed("gstat")
+  r <- estimate_sac_range(sac_test_field(), "z", seed = 1)
+  expect_s3_class(attr(r, "crs"), "crs")
+  expect_false(is.na(attr(r, "crs")))
+  # Geographic input is projected first, so the recorded CRS is projected too.
+  geo <- sf::st_transform(sac_test_field(), 4326)
+  rg  <- suppressWarnings(estimate_sac_range(geo, "z", seed = 1))
+  expect_false(isTRUE(sf::st_is_longlat(attr(rg, "crs"))))
+})

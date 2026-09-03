@@ -137,8 +137,10 @@ test_that("make_folds records a row probe in params", {
   p <- f$params$row_probe
   expect_false(is.null(p))
   expect_type(p$row_id, "integer")
-  expect_type(p$key, "character")
-  expect_equal(length(p$row_id), length(p$key))
+  expect_type(p$x, "double")
+  expect_type(p$y, "double")
+  expect_true(isTRUE(p$lonlat))                 # the input carried a CRS
+  expect_equal(length(p$row_id), length(p$x))
   expect_true(all(p$row_id %in% seq_len(60)))
 })
 
@@ -184,4 +186,94 @@ test_that("a folds object with no probe is passed through unchecked", {
   f <- make_folds(a, k = 3, method = "random_kfold", seed = 1)
   f$params$row_probe <- NULL
   expect_no_error(cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1))
+})
+
+
+# ---------------------------------------------------------------------------
+# Fourth pass: the probe must never refuse the caller's own data
+# ---------------------------------------------------------------------------
+
+test_that("the probe keeps a character ..row_id in its own type", {
+  # as.integer() on a character ID gave all-NA, which matched row 1 for every
+  # probe row and refused folds built on this very data.
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(11)
+  a$..row_id <- sprintf("site-%03d", seq_len(nrow(a)))
+  f <- make_folds(a, k = 3, method = "random_kfold", seed = 1)
+  expect_type(f$params$row_probe$row_id, "character")
+  expect_no_error(cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1))
+})
+
+test_that("folds built on polygons apply whatever pointize the cv call uses", {
+  # make_folds() reduced polygons with pointize 'auto' and fingerprinted THOSE
+  # points; cv_gwr()/cv_bayes()/cv_spatial() honour their own `pointize`, so
+  # 'centroid' or 'bbox_center' read as different data.  Both sides now probe
+  # the geometry as supplied.
+  skip_if_not_installed("ranger")
+  set.seed(12)
+  n <- 40
+  ctr <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+  polys <- sf::st_sfc(lapply(seq_len(n), function(i) {
+    w <- runif(1, 5, 30); h <- runif(1, 5, 30)
+    sf::st_polygon(list(rbind(ctr[i, ] + c(-w, -h), ctr[i, ] + c(w, -h),
+                              ctr[i, ] + c(w, h), ctr[i, ] + c(-w, 2 * h),
+                              ctr[i, ] + c(-w, -h))))
+  }), crs = 32632)
+  d <- sf::st_sf(a = rnorm(n), geometry = polys)
+  d$z <- 0.01 * ctr[, 1] + 2 * d$a + rnorm(n)
+  f <- make_folds(d, k = 3, method = "random_kfold", seed = 1)
+  for (pz in c("auto", "centroid", "bbox_center")) {
+    expect_no_error(cv_rf(d, "z", "a", folds = f, num_trees = 30, seed = 1,
+                          pointize = pz), message = pz)
+  }
+})
+
+test_that("a reprojection between make_folds() and the cv call is tolerated", {
+  # Comparing sprintf('%.7g') strings flipped on coordinates a round trip
+  # moved by ~5e-9 degrees; the comparison is numeric with a 1e-6 degree
+  # tolerance now.  A `boundary` in another projected CRS is the ordinary way
+  # a cv call ends up reprojecting relative to make_folds().
+  skip_if_not_installed("ranger")
+  set.seed(4)
+  m <- 400
+  p <- sf::st_as_sf(data.frame(x = runif(m, 300000, 700000),
+                               y = runif(m, 5000000, 5900000), a = rnorm(m)),
+                    coords = c("x", "y"), crs = 32632)
+  p$z <- 2 * p$a + rnorm(m)
+  bnd <- sf::st_transform(sf::st_as_sf(sf::st_as_sfc(sf::st_bbox(p))), 3035)
+  f <- make_folds(p, k = 3, method = "block_kfold", seed = 1)
+  expect_no_error(cv_rf(p, "z", "a", folds = f, num_trees = 30, seed = 1,
+                        boundary = bnd))
+  # And the probe itself is invariant to the route taken to EPSG:4326.
+  p$..row_id <- seq_len(m)
+  a <- spatialkit:::.fold_row_probe(p, max_probe = m)
+  b <- spatialkit:::.fold_row_probe(sf::st_transform(p, 3035), max_probe = m)
+  expect_lt(max(abs(a$x - b$x), abs(a$y - b$y)), 1e-6)
+})
+
+test_that("a duplicated ..row_id is refused up front", {
+  # match() resolves a duplicated ID to its first row: the others are never
+  # scored and can sit in train and test at once, with nothing said.
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(13)
+  a$..row_id <- rep(1:30, length.out = nrow(a))
+  expect_error(make_folds(a, k = 3, method = "random_kfold", seed = 1), "duplicated")
+  expect_error(cv_rf(a, "z", "a", k = 3, num_trees = 30, seed = 1), "duplicated")
+})
+
+test_that("n_folds_attempted counts the folds supplied, and a dropped fold warns", {
+  # A fold whose test rows were all removed as incomplete vanished silently,
+  # so a five-fold set reported attempted = succeeded = 4.
+  skip_if_not_installed("ranger")
+  a <- .probe_pts(14, n = 60)
+  f <- make_folds(a, k = 5, method = "random_kfold", seed = 1)
+  # Blank the predictor on every row of fold 5's test set.
+  kill <- f$folds[[5]]$test
+  a$a[a$..row_id %in% kill] <- NA
+  if (!("..row_id" %in% names(a))) a$..row_id <- seq_len(nrow(a))
+  a$a[kill] <- NA
+  expect_warning(cv <- cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1),
+                 "dropped before fitting")
+  expect_equal(cv$n_folds_attempted, 5L)
+  expect_equal(cv$n_folds_succeeded, 4L)
 })

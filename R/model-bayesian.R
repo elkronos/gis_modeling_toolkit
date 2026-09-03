@@ -652,6 +652,42 @@ fit_bayesian_spatial_model <- function(
     .log_info(
       "fit_bayesian_spatial_model(): user-supplied prior already includes lscale class; skipping automatic GP length-scale prior."
     )
+    # The user's prior must actually REACH Stan.  A global lscale prior
+    # (class = "lscale", no coef) is silently discarded by brms because every
+    # lscale coefficient already carries an individual default -- the very
+    # trap the package's own prior fell into.  Expand any global lscale row to
+    # the coefficient level, exactly as is done for the automatic prior above,
+    # so that supplying `prior = set_prior("normal(0, 1)", class = "lscale")`
+    # does what it says.
+    is_global_ls <- prior$class == "lscale" & !nzchar(prior$coef)
+    if (any(is_global_ls)) {
+      ls_coefs <- tryCatch({
+        gp_def <- brms::get_prior(fml, data = dat_df, family = family)
+        gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
+      }, error = function(e) character(0))
+      if (length(ls_coefs) > 0L) {
+        expanded <- NULL
+        for (i in which(is_global_ls)) {
+          for (k in ls_coefs) {
+            row <- brms::set_prior(prior$prior[i], class = "lscale", coef = k)
+            expanded <- if (is.null(expanded)) row else expanded + row
+          }
+        }
+        kept  <- prior[!is_global_ls, , drop = FALSE]
+        prior <- if (nrow(kept) > 0L) kept + expanded else expanded
+        .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
+                         "'lscale' prior was attached to %s so that brms uses ",
+                         "it (a global lscale prior is otherwise discarded)."),
+                  paste(sQuote(ls_coefs), collapse = ", "))
+      } else {
+        .log_warn(paste0("fit_bayesian_spatial_model(): the supplied prior has a ",
+                         "GLOBAL 'lscale' entry, which brms discards because ",
+                         "every length-scale coefficient already has an ",
+                         "individual prior, and brms reported no coefficient ",
+                         "names to attach it to. Check $info$gp_lscale_prior ",
+                         "against brms::make_stancode()."))
+      }
+    }
   }
 
   # Record the prior brms will actually use, not the one that was requested.

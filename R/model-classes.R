@@ -319,6 +319,15 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_hat <- predict(object, newdata = newdata, ...)
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
+  # A response that is not numeric cannot be scored, and is.finite() on a
+  # character column is FALSE everywhere -- so 100 perfectly good rows used
+  # to come back as n = 0 with every metric NA, silently.
+  if (is.logical(y_obs)) y_obs <- as.numeric(y_obs)
+  if (!is.numeric(y_obs))
+    stop(sprintf(paste0("model_metrics(): response '%s' is %s, not numeric, so ",
+                        "no metric can be computed from it. Convert the column ",
+                        "first."),
+                 object$response_var, class(y_obs)[1L]), call. = FALSE)
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
@@ -399,6 +408,10 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   # lon/lat input independent of training), after which gwr.predict()
   # would silently mix coordinates from two different systems.  This
   # mirrors predict.bayesian_fit().
+  # CRS-less newdata first gets the interpretation the TRAINING data got
+  # (recorded by ensure_projected() when it assumed lon/lat), so the same rows
+  # land where they did at fit time -- see .replay_crs_assumption().
+  newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.gwr_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
 
   # Use a sentinel row ID column so that after prep_model_data()'s single-pass
@@ -588,6 +601,7 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # predict.gwr_fit() and predict.rf_fit().
   n_orig       <- nrow(newdata)
   training_crs <- sf::st_crs(object$data_sf)
+  newdata      <- .replay_crs_assumption(newdata, object$data_sf, "predict.bayesian_fit")
   newdata      <- ensure_projected(newdata, target_crs = .crs_or_null(training_crs))
 
   # Sentinel row ID: after prep_model_data()'s single-pass cleaning (which also
@@ -736,8 +750,19 @@ fitted.bayesian_fit <- function(object, ...) {
   pred_df   <- .prepare_brms_pred_df(object, object$data_sf)
 
   draws <- try(brms::posterior_epred(model_obj, newdata = pred_df), silent = TRUE)
-  if (inherits(draws, "try-error") || !is.matrix(draws))
-    return(rep(NA_real_, object$n))
+  # An error here is an error: a posterior that cannot be drawn used to come
+  # back as all-NA fitted values with nothing said, and summary() and
+  # model_metrics() then reported n = 0 as though the data were missing.
+  # predict.bayesian_fit() has always raised; this matches it.
+  if (inherits(draws, "try-error"))
+    stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() failed ",
+                        "on the training data: %s"),
+                 conditionMessage(attr(draws, "condition"))), call. = FALSE)
+  if (!is.matrix(draws) || ncol(draws) != object$n)
+    stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() returned ",
+                        "%s where a draws x %d matrix was expected."),
+                 if (is.matrix(draws)) paste(dim(draws), collapse = " x ")
+                 else class(draws)[1L], object$n), call. = FALSE)
 
   fitted_vals <- colMeans(draws)
 

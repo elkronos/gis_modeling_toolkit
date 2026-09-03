@@ -235,6 +235,133 @@ whether it affects an analysis you have already run.
   simplified the length-1 result to a vector, making the neighbour index a
   1 x n matrix and every row after the first out of bounds.
 
+### Fourth audit pass (adversarial): corrections that change results
+
+Three reviewers were set the task of making the package fail or silently
+misbehave on valid input, with their own reproductions. Every finding below
+was reproduced here before it was touched; the figures quoted are from those
+reproductions.
+
+* **`summarize_by_cell(deff = "kish")` under-estimated the predictor ICC by
+  about a factor of `m`.** The pooled one-way ANOVA grouped the `m` z-scored
+  predictor columns under the same cell label, so independent per-column cell
+  effects averaged away in the shared cell mean and the between-cell sum of
+  squares shrank by ~1/m. Measured at true rho = 0.5 with m = 4: pooled ICC
+  **0.12** against 0.495 per column, so every predictor SE was ~44% too small.
+  The pooled group is now (variable, cell), which recovers 0.49.
+
+* **`summarize_by_cell(deff = "variogram")` evaluated the variogram at the
+  wrong distances on lon/lat input.** The range is a length in the CRS the
+  variogram was fitted in (metres); within-cell distances were taken from the
+  input as supplied, so degrees went into a metre-scaled correlation function
+  and every pair saturated. Same points, cells and variogram: median SE
+  **0.657 with UTM input, 235.9 with EPSG:4326 input** — a factor of 354. The
+  points are now transformed to the CRS the variogram records (a new `crs`
+  attribute on `estimate_sac_range()`'s result), else projected the way it
+  would have projected them.
+
+* **Design effects are built from what a column actually observes.** A cell
+  of 10 rows with 2 finite responses had its response SE formed at the
+  10-row design effect, then applied to a 2-observation mean: adding 8
+  NA-response rows moved the SE from 8.46 to **26.38**. Each column's design
+  effect now uses its own non-missing count, with the mean pairwise
+  correlation recomputed over the observed locations when a cell has NAs;
+  `cell_weight` is the effective count of the primary variable, not of rows
+  (`n` still counts rows).
+
+* **`make_folds(method = "nndm")` is now the paper's algorithm** (Milà et al.
+  2022, as in `CAST::nndm()`) and is deterministic. The previous version drew
+  one random radius per point from the target distribution and excluded up to
+  the order statistic *closest* to it, which rounds down half the time: on a
+  two-cluster layout the realised nearest-neighbour ECDF exceeded the target
+  by up to **0.17** (13% of folds kept a training point within 50 m against a
+  target of 9%) — an optimistic cross-validation. It now agrees with a
+  transcription of the paper's procedure removal for removal, reports
+  `params$max_ecdf_excess`, and gains `min_train` (default 0.5) and `phi`
+  arguments. No random numbers are drawn; the caller's RNG is untouched.
+
+* **CRS-less coordinates get ONE interpretation, wherever they enter.**
+  `prep_model_data()` assumed EPSG:4326 for CRS-less data that looked like
+  lon/lat and projected it, while every `predict()` method passed the fit's
+  CRS as a target — a branch that *stamped* it onto the raw numbers. The same
+  rows sat in two different places, and `predict(fit, newdata = training
+  rows)` disagreed with `fitted(fit)` by up to one response SD (R² 0.98
+  in-sample, 0.64 via newdata). The heuristic is now a single function used
+  by both branches; a fit records the assumption it was built under and
+  replays it on CRS-less `newdata`. Two further symptoms of the same split —
+  CRS-less LINESTRINGs aborting in `coerce_to_points()` ("crs not found"),
+  and hex/square `build_tessellation()` refusing input voronoi accepted — are
+  fixed with it. The assumption is now announced with a real R warning.
+
+* **`predict.rf_fit()` refuses a numeric-at-fit predictor supplied as text.**
+  `ranger` factor-codes the strings and applies numeric split thresholds to
+  the codes: R² collapsed from 0.98 to **−1.91** with nothing said.
+
+* **`residual_morans_i()` refuses a malformed `weights` matrix** instead of
+  silently substituting the default k-NN(8) matrix (I = 0.874 returned for
+  four malformed shapes against 0.805 for the weights actually supplied).
+
+* **`make_folds(method = "leave_location_out")` refuses empty-string
+  labels.** `names<-`/`[` treat `""` as *no name*, so rows with a blank site
+  code got fold `NA`, entered no test set, and put `NA` row-ids into the
+  training splits with nothing said. Lookup is positional now.
+
+* **The fold-provenance fingerprint no longer refuses the caller's own data.**
+  Three defects in the version introduced last pass: a character `..row_id`
+  was coerced to all-`NA` (and matched row 1 everywhere); coordinates were
+  compared as `"%.7g"` strings and flipped on the ~1 in 5000 that a
+  reprojection moved by 5e-9°; and polygon input was probed *after*
+  pointization, so a different `pointize` in the cv call read as different
+  data. Both sides now probe the geometry as supplied, keep IDs in their own
+  type, and compare numerically within 1e-6°.
+
+* **`n_folds_attempted` counts the folds supplied.** A fold whose test rows
+  were all removed as incomplete vanished before fitting and was absent from
+  both counts, so five supplied folds reported `4/4`. It is announced with a
+  real warning.
+
+* **`determine_optimal_levels()`'s elbow uses the signed deviation below the
+  chord.** `abs()` let a concave bump *above* the chord — a k where k-means
+  fell into a worse local optimum — win with the same magnitude.
+
+* **`estimate_sac_range()` returns `NA` for a constant variable** (an exactly
+  explained response, or a constant one) instead of a fitted "range" of 168
+  or 673 from a variogram that is identically zero. `make_folds(auto_range =
+  TRUE)` no longer re-opens the unseeded subsample by forwarding its own
+  `seed = NULL`.
+
+* **`fit_bayesian_spatial_model()` attaches a user-supplied *global*
+  `lscale` prior at coefficient level**, the same way it does its own, so
+  `set_prior(..., class = "lscale")` reaches Stan instead of being discarded.
+
+* **`fitted()` on a `gwr_fit` returns the prediction when a predictor is
+  named `prediction`.** The model-term exclusion added last pass was applied
+  to `gwr.predict()`'s SDF too, where coefficients are suffixed `_coef` and
+  the column literally named `prediction` *is* the prediction; `predict()`
+  returned all `NA`.
+
+* Smaller: `gwr_model_selection(dmat_max_n = Inf)` means *always precompute*
+  (it meant never); a logical response meets the same binary-response guard as
+  `0/1`; `model_metrics()` errors on a non-numeric response instead of
+  returning `n = 0`; `fitted.bayesian_fit()` errors when the posterior cannot
+  be drawn instead of returning silent `NA`; `create_grid_polygons()` refuses
+  a grid above `max_cells` (default 1e6) up front; `make_folds(method =
+  "buffered_loo")` states its guard in bytes (splits are ~4n² bytes; the old
+  n = 20000 cap admitted 1.6 GB); `-0` and `0` are the same coordinate in the
+  duplicate-aware k-NN; `.morans_i_for_k()` returns the `NA` pair whenever
+  the moments are unavailable; `cv_rf()` gains `pointize`.
+
+* **Documented warnings are now R warnings.** Eight paths the manual
+  described as warning only wrote a logger line, invisible to
+  `tryCatch(warning = )`, `expect_warning()` and `options(warn = 2)`:
+  `residual_morans_i()` returning `NULL`, the CRS assumption in
+  `ensure_projected()` and stamping in `harmonize_crs()`, GWR collinearity,
+  seed clamping in `voronoi_seeds_kmeans()` / `get_voronoi_seeds()`, dropped
+  rows in `ensure_stable_poly_id()`, and the dropped column in
+  `assign_features_to_polygons()`. Three deliberate methodological cautions
+  (`include_coords = TRUE`, `random_kfold` feature selection, non-standardised
+  Moran weights) stay logged and their documentation now says so.
+
 ### API and default changes
 
 * Removed the legacy wrappers `evaluate_models()`, `evaluate_models_cv()` and

@@ -154,6 +154,109 @@
 # Projection Enforcement
 # -----------------------------------------------------------------------------
 
+#' Return sampled points to the coordinate space of the input
+#'
+#' The line-midpoint branches project temporarily so that "halfway along the
+#' line" is measured in a length unit, then bring the midpoints back.  When
+#' the input had NO CRS and \code{ensure_projected()} interpreted it as
+#' lon/lat, "back" is EPSG:4326 -- the space the input's numbers were in --
+#' with the CRS then stripped again so the output matches the input.
+#' \code{sf::st_transform(x, NA_crs_)} is an error ("crs not found"), which
+#' is what every CRS-less LINESTRING layer inside the lon/lat envelope used
+#' to die with.
+#'
+#' @param pts sfc of points in the projected CRS.
+#' @param proj_obj The object \code{ensure_projected()} returned (carries
+#'   \code{attr(, "crs_assumed")} when an assumption was made).
+#' @param crs The input's \code{sf::st_crs()}, possibly \code{NA}.
+#' @return \code{pts} in the input's coordinate space.
+#' @keywords internal
+#' @noRd
+.back_to_input_crs <- function(pts, proj_obj, crs) {
+  pcrs <- sf::st_crs(proj_obj)
+  if (identical(pcrs, crs)) return(pts)
+  if (is.na(crs)) {
+    assumed <- attr(proj_obj, "crs_assumed")
+    if (!is.null(assumed) && !is.na(pcrs))
+      pts <- sf::st_transform(pts, sf::st_crs(assumed))
+    return(sf::st_set_crs(pts, NA))
+  }
+  sf::st_transform(pts, crs)
+}
+
+
+#' Do CRS-less coordinates look like longitude/latitude?
+#'
+#' The single heuristic behind every "assume EPSG:4326" decision in the
+#' package, so that the decision is the SAME wherever it is taken.  It used
+#' to live only in the no-target branch of \code{ensure_projected()}: fitting
+#' assumed lon/lat and projected, while every \code{predict()} method -- which
+#' passes a target -- stamped the fit's projected CRS onto the raw numbers.
+#' The same CRS-less rows then sat in two different places at fit and at
+#' predict time, and \code{predict(fit, newdata = training_rows)} disagreed
+#' with \code{fitted(fit)} by up to the response's standard deviation.
+#'
+#' Coordinates are taken to be lon/lat when the bounding box fits the
+#' [-180, 180] x [-90, 90] envelope AND the data look \emph{positively}
+#' geographic: an extent above one degree on some axis, or fractional
+#' coordinates with the precision of decimal degrees.  A local site survey in
+#' metres with coordinates in [0, 50] fails the second test on purpose.
+#'
+#' @param x An sf/sfc object with no CRS.
+#' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
+#'   \code{NULL} if it could not be taken).
+#' @keywords internal
+#' @noRd
+.looks_like_lonlat <- function(x) {
+  bb <- try(sf::st_bbox(x), silent = TRUE)
+  if (inherits(bb, "try-error") || !all(is.finite(bb)))
+    return(list(lonlat = FALSE, bb = NULL))
+  in_env <- bb["xmin"] >= -180 && bb["xmax"] <= 180 &&
+            bb["ymin"] >= -90  && bb["ymax"] <= 90
+  if (!in_env) return(list(lonlat = FALSE, bb = bb))
+
+  x_range <- bb["xmax"] - bb["xmin"]
+  y_range <- bb["ymax"] - bb["ymin"]
+  has_large_extent <- (x_range > 1) || (y_range > 1)
+  has_geo_precision <- FALSE
+  if (!has_large_extent) {
+    coords_mat <- try(sf::st_coordinates(x), silent = TRUE)
+    if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
+      frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
+      has_geo_precision <- any(frac > 0.001 & frac < 0.999)
+    }
+  }
+  list(lonlat = isTRUE(has_large_extent || has_geo_precision), bb = bb)
+}
+
+
+#' Re-apply the CRS assumption a fit was built under to CRS-less new data
+#'
+#' \code{ensure_projected()} records \code{attr(, "crs_assumed")} on data it
+#' interpreted as lon/lat.  A prediction frame with no CRS is given that same
+#' interpretation before being aligned to the fit, so that newdata drawn from
+#' the training rows -- even a subset whose own bounding box would not have
+#' triggered the heuristic -- lands where the training rows did.
+#'
+#' @param newdata sf, possibly CRS-less.
+#' @param training_sf The fit's \code{data_sf}.
+#' @param caller Name for the log line.
+#' @return \code{newdata}, with a CRS set when an assumption was replayed.
+#' @keywords internal
+#' @noRd
+.replay_crs_assumption <- function(newdata, training_sf, caller = "predict") {
+  if (!inherits(newdata, "sf") && !inherits(newdata, "sfc")) return(newdata)
+  if (!is.na(sf::st_crs(newdata))) return(newdata)
+  assumed <- attr(training_sf, "crs_assumed")
+  if (is.null(assumed)) return(newdata)
+  .warn_and_log(paste0("%s(): `newdata` has no CRS; interpreting it as %s, the ",
+                   "assumption the model was fitted under, so that it is placed ",
+                   "where the training data were. Set the CRS explicitly to ",
+                   "suppress this."), caller, assumed)
+  sf::st_set_crs(newdata, sf::st_crs(assumed))
+}
+
+
 #' Ensure an object has a projected CRS (with sensible defaults)
 #'
 #' Coerces spatial objects to a projected coordinate reference system suitable
@@ -231,8 +334,23 @@ ensure_projected <- function(x, target_crs = NULL) {
     }
     xcrs <- sf::st_crs(x)
     if (is.na(xcrs)) {
-      # No source CRS: we cannot reproject, only assume.  Make the
-      # assumption loud so silently misplaced data is traceable.
+      # No source CRS: we cannot reproject, only assume -- and the assumption
+      # must be the SAME one the no-target branch below makes, or the same
+      # rows land in different places at fit time (no target) and at predict
+      # time (target = the fit's CRS).  Measured: predict(fit, newdata =
+      # training rows) differed from fitted(fit) by up to one response SD.
+      ll <- .looks_like_lonlat(x)
+      if (isTRUE(ll$lonlat) && !isTRUE(sf::st_is_longlat(tcrs))) {
+        .warn_and_log(
+          "ensure_projected(): input has no CRS; its coordinates look like lon/lat (xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f), so they are taken as EPSG:4326 and reprojected to the target CRS ('%s'). Set the CRS explicitly to suppress this.",
+          ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"],
+          tcrs$input %||% "unknown"
+        )
+        sf::st_crs(x) <- sf::st_crs(4326)
+        x <- sf::st_transform(x, tcrs)
+        attr(x, "crs_assumed") <- "EPSG:4326"
+        return(x)
+      }
       .log_warn(
         "ensure_projected(): input has no CRS; stamping the supplied target CRS ('%s') WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS explicitly with sf::st_crs().",
         tcrs$input %||% "unknown"
@@ -246,48 +364,25 @@ ensure_projected <- function(x, target_crs = NULL) {
 
   xcrs <- sf::st_crs(x)
   if (is.na(xcrs)) {
-    bb <- try(sf::st_bbox(x), silent = TRUE)
-    if (!inherits(bb, "try-error") &&
-        all(is.finite(bb)) &&
-        bb["xmin"] >= -180 && bb["xmax"] <= 180 &&
-        bb["ymin"] >= -90  && bb["ymax"] <= 90) {
-
-      ## Secondary heuristic: guard against small projected coordinates
-      ## (e.g. a local site survey in metres with coords in [0, 50]) that
-      ## happen to fall inside the lon/lat envelope.  We require that the
-      ## data look *positively* like geographic coordinates:
-      ##
-      ##  (a) at least one coordinate has meaningful fractional degrees
-      ##      (|frac| > 0.001 and < 0.999), OR
-      ##  (b) the bounding-box extent exceeds 1 degree in at least one
-      ##      axis — too large to be a typical small-site survey.
-      x_range <- bb["xmax"] - bb["xmin"]
-      y_range <- bb["ymax"] - bb["ymin"]
-      has_large_extent <- (x_range > 1) || (y_range > 1)
-
-      has_geo_precision <- FALSE
-      if (!has_large_extent) {
-        coords_mat <- try(sf::st_coordinates(x), silent = TRUE)
-        if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
-          frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
-          has_geo_precision <- any(frac > 0.001 & frac < 0.999)
-        }
-      }
-
-      if (has_large_extent || has_geo_precision) {
-        .log_warn(
-          "ensure_projected(): CRS is missing; assuming EPSG:4326 because bbox looks like lon/lat (xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f). Set CRS explicitly to suppress this warning.",
-          bb["xmin"], bb["xmax"], bb["ymin"], bb["ymax"]
-        )
-        sf::st_crs(x) <- sf::st_crs(4326)
-        tr <- .pick_local_projected_crs(x)
-        x <- sf::st_transform(x, tr)
-      } else {
-        .log_warn(
-          "ensure_projected(): CRS is missing and coordinates fall within the lon/lat envelope, but they lack the decimal precision or extent typical of geographic coordinates (xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f). Not assuming EPSG:4326. Set CRS explicitly with sf::st_crs(x) <- sf::st_crs(...).",
-          bb["xmin"], bb["xmax"], bb["ymin"], bb["ymax"]
-        )
-      }
+    ll <- .looks_like_lonlat(x)
+    if (isTRUE(ll$lonlat)) {
+      .warn_and_log(
+        "ensure_projected(): CRS is missing; assuming EPSG:4326 because bbox looks like lon/lat (xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f). Set CRS explicitly to suppress this warning.",
+        ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"]
+      )
+      sf::st_crs(x) <- sf::st_crs(4326)
+      tr <- .pick_local_projected_crs(x)
+      x <- sf::st_transform(x, tr)
+      # Recorded so a predict() on CRS-less newdata can replay the same
+      # interpretation (see .replay_crs_assumption()).
+      attr(x, "crs_assumed") <- "EPSG:4326"
+    } else if (!is.null(ll$bb) &&
+               ll$bb["xmin"] >= -180 && ll$bb["xmax"] <= 180 &&
+               ll$bb["ymin"] >= -90  && ll$bb["ymax"] <= 90) {
+      .log_warn(
+        "ensure_projected(): CRS is missing and coordinates fall within the lon/lat envelope, but they lack the decimal precision or extent typical of geographic coordinates (xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f). Not assuming EPSG:4326. Set CRS explicitly with sf::st_crs(x) <- sf::st_crs(...).",
+        ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"]
+      )
     }
     return(x)
   }
@@ -338,7 +433,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
       sf::st_transform(x, to),
       error = function(e) {
         if (identical(on_transform_error, "set_crs")) {
-          .log_warn(
+          .warn_and_log(
             "harmonize_crs(): st_transform() failed (%s); falling back to st_set_crs(). WARNING: coordinates are NOT reprojected \u2014 downstream distances, joins, and areas may be wrong. Set on_transform_error='stop' (the default) to surface this error instead.",
             conditionMessage(e)
           )
@@ -362,7 +457,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
       if (is.null(inp) || length(inp) != 1L || is.na(inp) ||
           !nzchar(as.character(inp))) "unknown" else as.character(inp)
     }, error = function(e) "unknown")
-    .log_warn(
+    .warn_and_log(
       "harmonize_crs(): `%s` has no CRS; stamping '%s' onto it WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set it explicitly with sf::st_crs().",
       which_obj, lbl
     )
@@ -535,8 +630,7 @@ coerce_to_points <- function(
         g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
         midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
         midps     <- sf::st_cast(midps, "POINT")
-        if (!identical(sf::st_crs(g_ls_proj), crs))
-          midps <- sf::st_transform(midps, crs)
+        midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
         .check_midpoint_alignment(midps, idx_ls)
         out[idx_ls] <- as.list(midps)
       }
@@ -587,8 +681,7 @@ coerce_to_points <- function(
       g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
       midps    <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
       midps    <- sf::st_cast(midps, "POINT")
-      if (!identical(sf::st_crs(g_ls_proj), crs))
-        midps <- sf::st_transform(midps, crs)
+      midps    <- .back_to_input_crs(midps, g_ls_proj, crs)
       .check_midpoint_alignment(midps, idx_ls)
       out[idx_ls] <- as.list(midps)
     }
@@ -615,7 +708,7 @@ coerce_to_points <- function(
           k    <- if (length(lens)) which.max(lens) else 1L
           mp   <- sf::st_line_sample(parts[k], sample = 0.5)
           mp   <- sf::st_cast(mp, "POINT")
-          if (!identical(proj_crs, crs)) mp <- sf::st_transform(mp, crs)
+          mp   <- .back_to_input_crs(mp, g_mls_proj, crs)
           out[[idx_mls[j]]] <- mp[[1]]
         }
       }

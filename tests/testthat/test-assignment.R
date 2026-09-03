@@ -144,9 +144,10 @@ test_that("re-assigning an already-assigned layer drops the colliding column", {
   first  <- assign_features_to_polygons(.three_points(), .nested())
   expect_true("poly_id" %in% names(first))
 
-  lines <- capture_spatialkit_log(
-    second <- assign_features_to_polygons(first, .two_cells())
-  )
+  # A real warning as well as the log line: a user column is being dropped.
+  expect_warning(lines <- capture_spatialkit_log(
+    second <- assign_features_to_polygons(first, .two_cells())),
+    "already carries column")
   expect_true(log_has(lines, "already carries column\\(s\\) 'poly_id'"))
   expect_true(log_has(lines, "dropping them before the spatial join"))
 
@@ -161,10 +162,10 @@ test_that("re-assigning an already-assigned layer drops the colliding column", {
   # A custom id column name collides the same way.
   named <- first
   names(named)[names(named) == "poly_id"] <- "cell_id"
-  lines2 <- capture_spatialkit_log(
+  expect_warning(lines2 <- capture_spatialkit_log(
     third <- assign_features_to_polygons(named, .two_cells(),
                                          polygon_id_col = "cell_id")
-  )
+  ), "already carries column")
   expect_true(log_has(lines2, "already carries column\\(s\\) 'cell_id'"))
   expect_equal(nrow(third), 2L)
   expect_equal(third$cell_id, c(1L, 1L))

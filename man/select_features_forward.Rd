@@ -74,8 +74,9 @@ variables that look predictive only because nearby points leak between
 train and test -- and the outer loop then reports honest-looking numbers for
 a dishonestly chosen feature set, which is worse than not selecting at all,
 because the dishonesty is now hidden behind a defensible-looking validation.
-\code{method} therefore defaults to \code{"block_kfold"} and warns loudly if
-set to \code{"random_kfold"}.
+\code{method} therefore defaults to \code{"block_kfold"} and logs a loud
+caution if set to \code{"random_kfold"} (a deliberate choice, so it is not
+raised as an R warning).
 
 Call this \emph{inside} the \code{fit_fn} you pass to \code{cv_spatial()}.
 \code{.cv_fit_one_fold()} calls \code{fit_fn(train_sf)} on the training

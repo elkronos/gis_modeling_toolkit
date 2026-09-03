@@ -157,9 +157,19 @@
   sdf_lower   <- tolower(names(sdf_data))
   model_terms <- tolower(c(response_var, all.vars(formula)[-1L],
                            "Intercept", "(Intercept)"))
+  # The model-term exclusion is for gwr.basic()'s SDF, where the local
+  # coefficient columns carry the BARE predictor names.  gwr.predict()'s SDF
+  # suffixes them "_coef" (Intercept_coef, x_coef, ...) and names its
+  # prediction column "prediction" -- so there, a predictor that happens to
+  # be called `prediction` is NOT a reason to skip the column literally named
+  # prediction; it IS the prediction, and excluding it made predict() return
+  # all NA (0 finite of 100) while fitted() was fine.  Apply the exclusion only
+  # when no "_coef" columns exist.
+  has_coef_suffix <- any(grepl("_coef$", sdf_lower))
   hit <- NULL
   for (cand in pred_col_names) {
-    idx <- which(sdf_lower == cand & !(sdf_lower %in% model_terms))
+    idx <- which(sdf_lower == cand &
+                   (has_coef_suffix | !(sdf_lower %in% model_terms)))
     if (length(idx) >= 1L) { hit <- idx[[1L]]; break }
   }
   if (!is.null(hit)) {
@@ -423,6 +433,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # only two distinct values.  Non-integer 2-valued responses therefore take
   # the warning path below, not a hard stop.
   resp_vals <- sf::st_drop_geometry(dat)[[response_var]]
+  # TRUE/FALSE is the 0/1 coding by another name, and must meet the same
+  # guard: it used to bypass it (the guard sat behind is.numeric()) and fit a
+  # Gaussian GWR to a binary outcome without a word.
+  if (is.logical(resp_vals)) resp_vals <- as.numeric(resp_vals)
   if (is.numeric(resp_vals)) {
     usable   <- resp_vals[is.finite(resp_vals)]
     n_usable <- length(usable)
@@ -491,7 +505,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       xmat <- as.matrix(pred_df[, num_preds, drop = FALSE])
       cn <- tryCatch(kappa(xmat, exact = FALSE), error = function(e) Inf)
       if (is.finite(cn) && cn > 1e6) {
-        .log_warn(
+        .warn_and_log(
           "fit_gwr_model(): global predictor matrix condition number = %.0f (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
           cn
         )
@@ -538,12 +552,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       }
       frac_extreme <- n_local_extreme / n_spot
       if (frac_extreme > 0.25) {
-        .log_warn(
+        .warn_and_log(
           "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have condition number > 1e6. Local regressions may be unstable within bandwidth windows.",
           frac_extreme * 100, n_spot
         )
       } else if (n_local_extreme > 0L) {
-        .log_warn(
+        .warn_and_log(
           "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have condition number > 1e6.",
           n_local_extreme, n_spot
         )

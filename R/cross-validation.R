@@ -28,6 +28,15 @@
 #' @keywords internal
 #' @noRd
 .remap_folds <- function(folds, keep_idx, k = 5L, seed = 123L) {
+  # keep_idx is the data's ..row_id.  A duplicate there means match() will
+  # send every fold entry for that ID to its first row: the others are never
+  # scored, and can sit in train and test at once.
+  if (anyDuplicated(keep_idx))
+    stop(sprintf(paste0("cross-validation: `..row_id` has %d duplicated ",
+                        "value(s). Row IDs are what fold splits are made of, so ",
+                        "every row needs its own; drop the column to have the ",
+                        "rows numbered, or make the IDs unique."),
+                 sum(duplicated(keep_idx))), call. = FALSE)
   if (is.null(folds)) {
     .log_warn(
       ".remap_folds(): no fold specification provided; falling back to random k-fold CV (k=%d). Random folds leak spatial autocorrelation and overstate out-of-sample performance.",
@@ -79,6 +88,17 @@
   if (any(no_train))
     .log_warn(".remap_folds(): %d fold(s) have fewer than 2 training rows after remapping and cannot be fitted.",
               sum(no_train))
+  # A real warning as well as the log line: a fold that vanishes here never
+  # reaches the fitter, and used to be invisible in n_folds_attempted -- a
+  # five-fold set reported attempted = succeeded = 4 with no condition.
+  n_drop <- sum(no_test | no_train)
+  if (n_drop > 0L)
+    warning(sprintf(paste0("cross-validation: %d of %d fold(s) dropped before ",
+                           "fitting (empty test set, or fewer than 2 training ",
+                           "rows, after incomplete rows were removed). ",
+                           "n_folds_attempted counts the folds supplied, so ",
+                           "compare it with n_folds_succeeded."),
+                    n_drop, length(remapped)), call. = FALSE)
 
   remapped[!(no_test | no_train)]
 }
@@ -184,41 +204,61 @@
 #' observations entirely.  Nothing in the result said so.
 #'
 #' The probe stores the location of up to \code{max_probe} rows, spread evenly
-#' over the row IDs, so the check can ask whether row 37 is still the same
-#' point.  Two properties matter:
+#' over the rows, so the check can ask whether row 37 is still the same
+#' feature.  Four properties matter, and the first three were each broken by
+#' the previous version of this function:
 #' \itemize{
-#'   \item \strong{Projection-invariant.}  The probe rows are transformed to
-#'     EPSG:4326 before being recorded, because \code{make_folds()} and
-#'     \code{prep_model_data()} both run \code{\link{ensure_projected}()} and
-#'     may land in different CRSs.  Comparing raw coordinates would fire on
-#'     ordinary use.  Data with no CRS is probed as-is.
-#'   \item \strong{Tolerant of dropped rows.}  Per-row keys, not one digest
-#'     over all of them, so the comparison can be made over whichever probe
-#'     rows survived \code{prep_model_data()}'s complete-case filter.
+#'   \item \strong{Taken on the caller's input, on both sides.}
+#'     \code{make_folds()} probes the geometry it was handed, before
+#'     pointization; the \code{cv_*()} wrappers probe the \code{data_sf} they
+#'     were handed, before \code{prep_model_data()}.  Both therefore see the
+#'     same features, and a polygon layer reduced with a different
+#'     \code{pointize} in the two calls no longer reads as different data.
+#'     Non-point geometry is reduced to its centroid here, identically on both
+#'     sides, purely as a stable representative location.
+#'   \item \strong{Row IDs kept in their own type.}  A user-supplied character
+#'     \code{..row_id} used to be coerced with \code{as.integer()}, becoming
+#'     all-\code{NA} and matching row 1 on every probe.
+#'   \item \strong{Compared numerically, with a tolerance.}  Formatting the
+#'     coordinates with \code{"\%.7g"} and comparing strings flipped on the
+#'     ~1 in 5000 coordinates that a reprojection round trip moved across a
+#'     rounding boundary (by 2.6e-9 degrees).  Locations are now compared
+#'     within \code{1e-6} degrees (about 10 cm) after transformation to
+#'     EPSG:4326, or within a relative \code{1e-9} for CRS-less coordinates.
+#'   \item \strong{Tolerant of dropped rows.}  Per-row values, so the
+#'     comparison is made over whichever probe rows survived the complete-case
+#'     filter.
 #' }
 #'
 #' @param x An sf object carrying a \code{..row_id} column.
 #' @param max_probe Maximum number of rows to record.  64 keeps the folds
 #'   object small while making a same-size different-dataset collision
 #'   effectively impossible.
-#' @return A list with integer \code{row_id} and character \code{key}, or
-#'   \code{NULL} when no probe can be taken.
+#' @return A list with \code{row_id} (the IDs as supplied), numeric \code{x}
+#'   and \code{y}, and \code{lonlat} (whether the coordinates are in
+#'   EPSG:4326, i.e. the input carried a CRS), or \code{NULL} when no probe
+#'   can be taken.
 #' @keywords internal
 #' @noRd
 .fold_row_probe <- function(x, max_probe = 64L) {
   tryCatch({
     if (!inherits(x, "sf") || !("..row_id" %in% names(x)) || nrow(x) == 0L)
       return(NULL)
-    ids <- as.integer(x[["..row_id"]])
+    ids  <- x[["..row_id"]]
     take <- unique(round(seq(1, nrow(x), length.out = min(nrow(x), max_probe))))
-    g <- sf::st_geometry(x)[take]
-    cr <- suppressWarnings(sf::st_crs(x))
-    if (!is.na(cr))
-      g <- suppressWarnings(sf::st_transform(g, 4326))
+    g    <- sf::st_geometry(x)[take]
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
+      g <- suppressWarnings(sf::st_centroid(g))
+    cr     <- suppressWarnings(sf::st_crs(x))
+    lonlat <- FALSE
+    if (!is.na(cr)) {
+      g      <- suppressWarnings(sf::st_transform(g, 4326))
+      lonlat <- TRUE
+    }
     xy <- suppressWarnings(sf::st_coordinates(g))
     if (is.null(xy) || nrow(xy) != length(take)) return(NULL)
-    list(row_id = ids[take],
-         key    = sprintf("%.7g|%.7g", xy[, 1L], xy[, 2L]))
+    list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
+         lonlat = lonlat)
   }, error = function(e) NULL)
 }
 
@@ -226,24 +266,36 @@
 #' Refuse fold splits that describe a different dataset
 #'
 #' Compares \code{folds$params$row_probe} against the data being
-#' cross-validated, over whichever probe rows are still present.  A fold set
-#' built by an older version of this package carries no probe and is passed
-#' through unchecked.
+#' cross-validated -- the caller's own \code{data_sf}, before preparation --
+#' over whichever probe rows are present.  A fold set built by an older
+#' version of this package carries no probe and is passed through unchecked,
+#' as is one whose IDs cannot be matched (\code{NA} IDs) or whose coordinate
+#' space cannot be compared (one side carried a CRS and the other did not).
 #'
 #' @param folds A \code{make_folds()} return value, or \code{NULL}.
-#' @param dat_sf The (prepped) sf being cross-validated.
+#' @param data_sf The sf being cross-validated, as the caller supplied it,
+#'   with \code{..row_id} stamped.
 #' @param caller Name used in the error message.
 #' @return \code{invisible(NULL)}; called for the error.
 #' @keywords internal
 #' @noRd
-.check_fold_probe <- function(folds, dat_sf, caller) {
+.check_fold_probe <- function(folds, data_sf, caller) {
   probe <- tryCatch(folds$params$row_probe, error = function(e) NULL)
-  if (is.null(probe) || is.null(probe$row_id) || length(probe$row_id) == 0L)
+  if (is.null(probe) || is.null(probe$row_id) || length(probe$row_id) == 0L ||
+      is.null(probe$x) || anyNA(probe$row_id))
     return(invisible(NULL))
-  now <- .fold_row_probe(dat_sf, max_probe = nrow(dat_sf))
+  now <- .fold_row_probe(data_sf, max_probe = nrow(data_sf))
   if (is.null(now)) return(invisible(NULL))
+  if (!identical(isTRUE(probe$lonlat), isTRUE(now$lonlat))) {
+    .log_info(paste0("%s(): the supplied `folds` were built on data %s a CRS ",
+                     "and this data %s one, so their locations cannot be ",
+                     "compared; skipping the provenance check."),
+              caller, if (isTRUE(probe$lonlat)) "with" else "without",
+              if (isTRUE(now$lonlat)) "has" else "lacks")
+    return(invisible(NULL))
+  }
 
-  m <- match(probe$row_id, now$row_id)
+  m  <- match(probe$row_id, now$row_id)
   ok <- !is.na(m)
   if (!any(ok)) {
     stop(sprintf(paste0("%s(): none of the row IDs in `folds` are present in ",
@@ -251,7 +303,11 @@
                         "dataset; rebuild them with make_folds() on this one."),
                  caller), call. = FALSE)
   }
-  bad <- sum(probe$key[ok] != now$key[m[ok]])
+  tol <- if (isTRUE(probe$lonlat)) 1e-6
+         else max(1e-9 * max(abs(c(now$x, now$y)), na.rm = TRUE), 1e-9)
+  dx  <- abs(probe$x[ok] - now$x[m[ok]])
+  dy  <- abs(probe$y[ok] - now$y[m[ok]])
+  bad <- sum(!(dx <= tol & dy <= tol))
   if (bad > 0L)
     stop(sprintf(paste0("%s(): the supplied `folds` were built from different ",
                         "data -- %d of %d checked row IDs sit at a different ",
@@ -605,11 +661,12 @@
 #' 45° and 135°.  Since \code{make_folds(auto_range = TRUE)} sizes its blocks
 #' from this number, that halved the blocks for a diagonally oriented field.
 #'
-#' If any directional fit fails (e.g., too few point pairs in a direction),
-#' the function falls back to an omnidirectional (isotropic) variogram rather
-#' than taking the maximum over the directions that did fit — which would bias
-#' the answer downward precisely when the widest direction is the one that
-#' failed.
+#' A direction whose fit fails, does not converge, or reports a range beyond
+#' the longest fitted lag is excluded.  If at least two directions remain, the
+#' maximum over those is returned and the excluded ones are recorded as
+#' \code{NA} in the \code{directional} attribute; with fewer than two, the
+#' function falls back to an omnidirectional (isotropic) variogram, which pools
+#' every pair and is therefore the stable estimate on sparse data.
 #'
 #' A log warning is emitted when notable anisotropy is detected (ratio of the
 #' largest to the smallest directional range > 1.5).
@@ -653,7 +710,8 @@
 #'     \item{Success}{A positive effective range in projected coordinate units,
 #'       with the fit attached as attributes \code{directional} (the 0°, 45°,
 #'       90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
-#'       over smallest), \code{max_dist},
+#'       over smallest), \code{crs} (the projected CRS the variogram was
+#'       fitted in -- the unit of the range), \code{max_dist},
 #'       \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
 #'       \code{variogram_model} (the fitted \code{gstat} model), so the fit can
 #'       be inspected rather than trusted.}
@@ -786,6 +844,20 @@ estimate_sac_range <- function(points_sf, response_var,
   pts <- pts[is.finite(pts$..sac_var), , drop = FALSE]
   if (nrow(pts) < 30L) {
     .log_warn("estimate_sac_range(): too few finite values after filtering; returning NA.")
+    return(NA_real_)
+  }
+  # A variable with no variance has no autocorrelation structure to estimate:
+  # every semivariance is 0, and gstat's fit returned a finite "range" (168
+  # for an exactly-explained response, 673 for a constant one) that was then
+  # used to size blocks.  There is no range; say so.
+  if (stats::sd(pts$..sac_var) < sqrt(.Machine$double.eps) *
+        max(1, abs(mean(pts$..sac_var)))) {
+    .log_warn(paste0("estimate_sac_range(): the variable being modelled is ",
+                     "constant (zero variance%s), so it has no autocorrelation ",
+                     "range. Returning NA."),
+              if (!is.null(predictor_vars) && length(predictor_vars) > 0L)
+                " -- the OLS residuals are all zero, so the predictors explain the response exactly"
+              else "")
     return(NA_real_)
   }
 
@@ -1063,6 +1135,7 @@ estimate_sac_range <- function(points_sf, response_var,
       class           = c("sac_range", "numeric"),
       max_dist        = as.numeric(max_dist),
       cutoff_dist     = as.numeric(cutoff_dist),
+      crs             = sf::st_crs(pts),
       variogram       = vg_used,
       variogram_model = vgm_used,
       rejected_range  = as.numeric(effective_range),
@@ -1079,6 +1152,10 @@ estimate_sac_range <- function(points_sf, response_var,
     anisotropy      = anisotropy,
     max_dist        = as.numeric(max_dist),
     cutoff_dist     = as.numeric(cutoff_dist),
+    # The CRS the variogram was fitted in.  Its range is a length in these
+    # units; summarize_by_cell(deff = "variogram") transforms the points to it
+    # before evaluating the correlation function at within-cell distances.
+    crs             = sf::st_crs(pts),
     variogram       = vg_used,
     variogram_model = vgm_used
   )
@@ -1239,6 +1316,13 @@ print.sac_range <- function(x, ...) {
 #'   performance.
 #' @param prediction_points Optional \code{sf} layer of the locations you
 #'   actually intend to predict onto.  Required for \code{method = "nndm"}.
+#' @param min_train For \code{method = "nndm"}: the smallest fraction of the
+#'   data any fold's training set may be reduced to by neighbour exclusion.
+#'   Default \code{0.5}, as in \code{CAST::nndm()}.
+#' @param phi For \code{method = "nndm"}: the largest nearest-neighbour
+#'   distance the exclusion will push a held-out point to, in the CRS the
+#'   folds are built in.  Default \code{NULL} = the largest
+#'   prediction-to-training distance.
 #'   The grid from \code{predict_surface()} is the natural choice.
 #' @details
 #' \strong{Fold methods.}
@@ -1256,19 +1340,30 @@ print.sac_range <- function(x, ...) {
 #' distribution approaches the distribution of distances from your actual
 #' prediction locations to the training data.
 #'
-#' Each held-out point draws a target distance from the empirical
-#' prediction-distance CDF, then the nearest training points are excluded up to
-#' the one whose distance is closest to that target.  Matching is therefore
-#' \emph{as close as the training configuration permits}, not exact: the
-#' achievable distances are the order statistics of that point's neighbour
-#' distances, which are discrete and can leave gaps.  Clustered data is the
-#' hard case -- excluding everything inside a hard radius would remove a whole
-#' cluster and leave the nearest survivor in the next one, overshooting badly,
-#' which is why the nearest achievable distance is used instead.
+#' The procedure is the paper's own (as in \code{CAST::nndm()}), and it is
+#' deterministic.  Let \eqn{G_{ij}} be the empirical distribution of
+#' prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
+#' of each held-out point's nearest remaining training point.  Starting from
+#' plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
+#' realised distribution exceeds the target -- \eqn{G_j^*(r) > G_{ij}(r)} --
+#' has its nearest training neighbour removed, and this repeats until no such
+#' point remains, subject to two limits: a point's nearest-neighbour distance
+#' is never pushed beyond \code{phi} (default: the largest prediction distance,
+#' since a training point already further than every prediction distance has
+#' nothing to match), and no fold's training set is stripped below
+#' \code{min_train} of the data.
 #'
-#' This differs from the paper's iterative exclusion procedure.  Compare
-#' \code{params$target_median} against \code{params$realised_median} to see
-#' how well the matching worked on your data.
+#' The realised distribution is then never \emph{more optimistic} than the
+#' target: \eqn{G_j^*(r) \le G_{ij}(r)} up to the granularity of the
+#' neighbour distances, which is the property the method exists to deliver.
+#' An earlier version of this package drew one random radius per point from
+#' \eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
+#' which rounds down half the time: on a two-cluster layout the realised
+#' distribution exceeded the target by up to 0.17 (13\% of folds had a
+#' nearest training point within 50 m against a target of 9\%), an
+#' \emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
+#' the largest remaining excess; compare \code{params$target_median} with
+#' \code{params$realised_median} as well.
 #' @references
 #' Mila, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
 #' distance matching Leave-One-Out Cross-Validation for map validation.
@@ -1318,7 +1413,7 @@ make_folds <- function(points_sf, k,
                        auto_range = FALSE, range_frac = 1.0, response_var = NULL,
                        group_var = NULL, prediction_points = NULL,
                        predictor_vars = NULL, boundary = NULL,
-                       buffer = NULL,
+                       buffer = NULL, min_train = 0.5, phi = NULL,
                        drop_empty_blocks = TRUE) {
   method <- match.arg(method)
 
@@ -1336,10 +1431,24 @@ make_folds <- function(points_sf, k,
   # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
   # different feature than row i, and every fold below misaligns silently.
   # coerce_to_points() takes centroids, matching prep_model_data().
-  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- coerce_to_points(points_sf, "auto")
   if (!("..row_id" %in% names(points_sf)))
     points_sf$..row_id <- seq_len(nrow(points_sf))
+  # A duplicated ID cannot be split on: match() resolves it to its first row,
+  # so the other rows are never scored and can sit in train and test at once.
+  if (anyDuplicated(points_sf$..row_id))
+    stop(sprintf(paste0("make_folds(): `..row_id` has %d duplicated value(s). ",
+                        "Row IDs are what fold splits are made of, so every row ",
+                        "needs its own; drop the column to let make_folds() ",
+                        "number the rows, or make the IDs unique."),
+                 sum(duplicated(points_sf$..row_id))), call. = FALSE)
+  if (anyNA(points_sf$..row_id))
+    stop("make_folds(): `..row_id` contains NA; every row needs an ID.",
+         call. = FALSE)
+  # The provenance probe is taken on the geometry AS SUPPLIED -- before
+  # pointization -- because that is what the cv_*() wrappers will probe too.
+  row_probe <- .fold_row_probe(points_sf)
+  if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
+    points_sf <- coerce_to_points(points_sf, "auto")
 
   # Drop rows with no usable coordinates, AFTER ..row_id is stamped so the
   # survivors keep their original row identities and the dropped rows simply
@@ -1368,9 +1477,7 @@ make_folds <- function(points_sf, k,
 
   # One probe for every return path: .ret() is the single exit, so the folds
   # object cannot ship without the fingerprint that lets a later cv_*() refuse
-  # it if it is handed the wrong data.  Taken on `points_sf` AFTER the
-  # bad-geometry drop, so the recorded rows are ones that really are in a fold.
-  row_probe <- .fold_row_probe(points_sf)
+  # it if it is handed the wrong data.  (Taken above, on the input geometry.)
   .ret <- function(method, k, folds, assignment, params)
     list(method = method, k = k, folds = folds, assignment = assignment,
          params = c(params, list(row_probe = row_probe)))
@@ -1424,10 +1531,18 @@ make_folds <- function(points_sf, k,
     # --- Autocorrelation-aware block sizing ---
     sac_range <- NA_real_
     if (isTRUE(auto_range) && !is.null(response_var)) {
+      # `seed` here is make_folds()'s own, whose default is NULL -- meaning
+      # "do not seed the FOLD assignment".  Forwarding that NULL re-opened the
+      # unseeded n_max subsample inside estimate_sac_range(): the range, and
+      # with it the block size and every fold, changed on each default call
+      # (measured 199.45 / 204.18 / 208.99 across three identical calls).  The
+      # subsample is an internal approximation, not part of the answer, so it
+      # keeps estimate_sac_range()'s own reproducible default when make_folds()
+      # was not given a seed.
       sac_range <- estimate_sac_range(pts, response_var = response_var,
                                       predictor_vars = predictor_vars,
                                       range_frac = range_frac,
-                                      seed = seed)
+                                      seed = if (is.null(seed)) 123L else seed)
       if (is.finite(sac_range) && sac_range > 0) {
         message(sprintf(
           "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; using as minimum block size.",
@@ -1627,15 +1742,24 @@ make_folds <- function(points_sf, k,
       stop("make_folds(buffered_loo): `buffer` (positive numeric) is required.")
     pts <- ensure_projected(points_sf)
     n <- nrow(pts)
-    if (n > 20000L) {
-      stop(sprintf(
-        "make_folds(buffered_loo): n = %d exceeds safety threshold of 20000. Although st_is_within_distance uses spatial indexing (GEOS STRtree), buffered LOO still produces n fold-splits and can be slow for very large datasets. Consider using 'block_kfold' instead, or subset your data.",
-        n
-      ), call. = FALSE)
-    } else if (n > 5000L) {
+    # The cost is QUADRATIC in n whatever the buffer: every one of the n
+    # splits stores its own training-row vector of length about n, so the
+    # fold object alone is ~4 n^2 bytes.  The old threshold of 20000 admitted
+    # 1.6 GB of splits (measured 1.7 GB of R objects at n = 19999), before
+    # .remap_folds() copied them.  The cap is now stated in bytes and the
+    # message says what the request would cost.
+    split_gb <- 4 * as.numeric(n)^2 / 1024^3
+    if (split_gb > 0.6) {
+      stop(sprintf(paste0(
+        "make_folds(buffered_loo): n = %d would produce %d leave-one-out ",
+        "splits holding about %.2f GB of row indices (the training vector of ",
+        "every split is ~n long, so storage grows as n^2), before the model is ",
+        "refitted %d times. Use 'block_kfold' instead, or subset the data."),
+        n, n, split_gb, n), call. = FALSE)
+    } else if (split_gb > 0.1) {
       .log_warn(
-        "make_folds(buffered_loo): n = %d is large; buffered LOO produces n fold-splits which may be slow.",
-        n
+        "make_folds(buffered_loo): n = %d produces %d splits holding about %.2f GB of row indices, and the model will be refitted %d times; this may be slow.",
+        n, n, split_gb, n
       )
     }
     nb <- sf::st_is_within_distance(sf::st_geometry(pts), sf::st_geometry(pts),
@@ -1675,9 +1799,15 @@ make_folds <- function(points_sf, k,
            call. = FALSE)
 
     grp <- as.character(sf::st_drop_geometry(points_sf)[[group_var]])
-    if (anyNA(grp))
-      stop("make_folds(leave_location_out): `group_var` contains NA; every ",
-           "observation must belong to a location.", call. = FALSE)
+    # An empty string is refused on the same terms as NA: it is not a
+    # location.  It also used to be worse than NA -- names<- and [ by name
+    # treat "" as "no name", so grp_fold[""] returned NA and every row with a
+    # blank label silently got fold NA, entered no test set, and put 36 NA
+    # row-ids into the train splits, with no condition raised.
+    if (anyNA(grp) || any(!nzchar(grp)))
+      stop("make_folds(leave_location_out): `group_var` contains NA or empty ",
+           "labels; every observation must belong to a named location.",
+           call. = FALSE)
 
     row_ids <- points_sf$..row_id
     ug <- unique(grp)
@@ -1694,8 +1824,9 @@ make_folds <- function(points_sf, k,
     if (k < 2L) k <- 2L
 
     grp_fold <- sample(rep(seq_len(k), length.out = n_g))
-    names(grp_fold) <- ug
-    fold_of_row <- grp_fold[grp]
+    # Positional lookup via match(), never by name: name-indexing is what
+    # turned an unusual label into an NA fold.
+    fold_of_row <- grp_fold[match(grp, ug)]
 
     splits <- vector("list", k)
     for (j in seq_len(k)) {
@@ -1735,67 +1866,110 @@ make_folds <- function(points_sf, k,
       stop("make_folds(nndm): could not compute prediction-to-training ",
            "distances.", call. = FALSE)
 
-    # Give each held-out point a buffer drawn from the target distribution, so
-    # the realised test-to-train nearest-neighbour distances reproduce it by
-    # construction.  Exclusion uses st_is_within_distance (GEOS STRtree), not a
-    # dense n x n matrix -- at the 20000-point guard that would be over 3 GB.
-    # Re-seed, but do NOT register a second restore handler.  The .with_seed()
-    # at the top of make_folds() already owns save/restore for the whole
-    # function; a nested one is wrong twice over.  Reusing the name `cleanup`
-    # made both on.exit() expressions resolve to the inner closure, so the
-    # caller's state was never restored -- and merely renaming it is not enough
-    # either, because on.exit(add = TRUE) APPENDS: the outer handler would
-    # restore the caller's seed and the inner one would then immediately
-    # overwrite it with the intermediate post-set.seed(seed) state.
-    #
-    # All of which holds only for a NON-NULL seed.  With the default seed =
-    # NULL, .with_seed(NULL) returns a no-op that neither saves nor restores,
-    # so there is no outer handler to lean on -- and set.seed(NULL) does not
-    # mean "leave the RNG alone", it RE-INITIALISES the generator from the
-    # clock and process ID.  The ordinary call make_folds(pts, k, "nndm",
-    # prediction_points = grid) therefore used to destroy the caller's RNG
-    # state, silently.  Unseeded means unseeded: leave the stream alone and let
-    # runif() advance it the way any other unseeded function would.
-    if (!is.null(seed)) set.seed(seed)
-    radii <- stats::quantile(g_target,
-                             probs = stats::runif(n), names = FALSE, type = 7)
+    if (!is.numeric(min_train) || length(min_train) != 1L ||
+        !is.finite(min_train) || min_train <= 0 || min_train >= 1)
+      stop("make_folds(nndm): `min_train` must be a single number in (0, 1).",
+           call. = FALSE)
+    if (is.null(phi)) phi <- max(g_target)
+    if (!is.numeric(phi) || length(phi) != 1L || !is.finite(phi) || phi < 0)
+      stop("make_folds(nndm): `phi` must be a single non-negative number.",
+           call. = FALSE)
 
-    # For each held-out point, exclude the nearest training points up to the
-    # one whose distance is CLOSEST to that point's target radius -- rather
-    # than excluding everything inside a hard radius.
+    # ---- The paper's procedure (Mila et al. 2022; CAST::nndm) ---------------
+    # Deterministic: no radii are drawn.  Starting from plain LOO, the held-out
+    # point with the SMALLEST current nearest-neighbour distance at which the
+    # realised distribution exceeds the target has its nearest training
+    # neighbour removed, and this repeats until no such point remains.
     #
-    # The hard-radius version is what a naive reading of "match the
-    # distribution" suggests, but it systematically overshoots on clustered
-    # data: excluding everything within r of a point in a tight cluster removes
-    # the whole cluster, so the nearest survivor is in the NEXT cluster, far
-    # beyond r.  On a two-cluster test that produced a realised median of 596
-    # against a target of 193.  Choosing the order statistic nearest the target
-    # instead matches as closely as the training configuration allows, and
-    # degrades gracefully when no achievable distance is near the target.
-    xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
+    # Implemented as a single sweep over the points in increasing order of
+    # their current nearest-neighbour distance.  Removing a neighbour only ever
+    # INCREASES that point's distance, which moves it later in the order and
+    # lowers the realised distribution at every smaller value -- so a position
+    # that has passed the test can never fail it again, and the sweep never
+    # has to look back.  The greedy choice ("smallest violator first") is
+    # exactly the paper's.
+    xy      <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
     row_ids <- pts$..row_id
-    splits <- vector("list", n)
-    n_excluded <- integer(n)
-    realised  <- rep(NA_real_, n)
+    rmin    <- min_train * n
+    # A point may lose at most n - 1 - rmin neighbours, so only that many
+    # (plus one) of its sorted neighbour distances are ever consulted.
+    k_need <- as.integer(min(n - 1L, floor(n - 1L - rmin) + 1L))
+    k_need <- max(1L, k_need)
+    if (requireNamespace("FNN", quietly = TRUE)) {
+      kn <- FNN::get.knn(xy, k = min(k_need + 1L, n - 1L))
+      nn_d <- kn$nn.dist; nn_i <- kn$nn.index
+      # get.knn() can return a point's own index among its neighbours when
+      # coordinates are duplicated; drop such entries row by row.
+      for (i in seq_len(n)) {
+        self <- which(nn_i[i, ] == i)
+        if (length(self)) {
+          nn_d[i, ] <- c(nn_d[i, -self], Inf)
+          nn_i[i, ] <- c(nn_i[i, -self], NA_integer_)
+        }
+      }
+      nn_d <- nn_d[, seq_len(k_need), drop = FALSE]
+      nn_i <- nn_i[, seq_len(k_need), drop = FALSE]
+    } else {
+      nn_d <- matrix(Inf, n, k_need); nn_i <- matrix(NA_integer_, n, k_need)
+      for (i in seq_len(n)) {
+        d <- sqrt((xy[, 1] - xy[i, 1])^2 + (xy[, 2] - xy[i, 2])^2)
+        d[i] <- Inf
+        o <- order(d)[seq_len(k_need)]
+        nn_d[i, ] <- d[o]; nn_i[i, ] <- o
+      }
+    }
 
+    g_sorted <- sort(g_target)
+    n_g      <- length(g_sorted)
+    G_target <- function(r) findInterval(r, g_sorted) / n_g   # right-continuous ECDF
+
+    removed <- integer(n)
+    Gjstar  <- nn_d[, 1L]
+    o  <- order(Gjstar); sv <- Gjstar[o]; si <- o
+    k  <- 1L
+    n_iter <- 0L
+    while (k <= n) {
+      r   <- sv[k]
+      j   <- si[k]
+      cnt <- findInterval(r, sv)                    # realised count <= r
+      violates <- is.finite(r) && (cnt / n) > G_target(r) + 1e-12 &&
+                  r <= phi && (n - 1L - removed[j]) > rmin &&
+                  removed[j] + 1L < ncol(nn_d)
+      if (violates) {
+        removed[j] <- removed[j] + 1L
+        newv <- nn_d[j, removed[j] + 1L]
+        sv <- sv[-k]; si <- si[-k]
+        # Insert after every smaller value and, among equal values, after
+        # those belonging to points with a smaller index -- the same tie
+        # order as which.min() in the reference implementation, so that on
+        # clustered data (where pushed points pile up at the same
+        # cluster-to-cluster distance) the SAME points get pushed.
+        pos <- findInterval(newv, sv)
+        while (pos > 0L && sv[pos] == newv && si[pos] > j) pos <- pos - 1L
+        sv <- append(sv, newv, after = pos)
+        si <- append(si, j,    after = pos)
+        n_iter <- n_iter + 1L
+      } else {
+        k <- k + 1L
+      }
+    }
+    Gjstar[si] <- sv
+
+    splits     <- vector("list", n)
+    n_excluded <- removed
+    realised   <- Gjstar
     for (i in seq_len(n)) {
-      d <- sqrt((xy[, 1] - xy[i, 1])^2 + (xy[, 2] - xy[i, 2])^2)
-      d[i] <- Inf
-      o  <- order(d)
-      ds <- d[o]
-      keep_max <- n - 1L                      # all but the held-out point
-
-      # index of the achievable distance closest to this point's target
-      j <- which.min(abs(ds[seq_len(keep_max)] - radii[i]))
-      # never strip the training set below two points
-      if (j > keep_max - 1L) j <- max(1L, keep_max - 1L)
-
-      drop_idx <- if (j > 1L) o[seq_len(j - 1L)] else integer(0)
+      drop_idx <- if (removed[i] > 0L) nn_i[i, seq_len(removed[i])] else integer(0)
+      drop_idx <- drop_idx[!is.na(drop_idx)]
       train_i  <- setdiff(seq_len(n), c(i, drop_idx))
-      n_excluded[i] <- length(drop_idx)
-      realised[i]   <- ds[j]
       splits[[i]] <- list(train = row_ids[train_i], test = row_ids[i])
     }
+    # The paper's own diagnostic: largest excess of realised over target.
+    fin <- is.finite(realised)
+    max_excess <- if (any(fin)) {
+      rs <- sort(realised[fin])
+      max(findInterval(rs, rs) / length(rs) - G_target(rs))
+    } else NA_real_
 
     # Exclusion is not always needed.  When prediction locations sit no further
     # from the training data than training points sit from each other, plain
@@ -1805,19 +1979,24 @@ make_folds <- function(points_sf, k,
     # the training nearest-neighbour distances.
     .log_info(paste0("make_folds(nndm): %d folds. Target prediction-to-training ",
                      "distance: median %.1f. Realised test-to-training distance: ",
-                     "median %.1f. Median buffer %.1f, excluding a median of %.1f ",
-                     "training point(s) per fold."),
-              n, stats::median(g_target), stats::median(realised),
-              stats::median(radii), stats::median(n_excluded))
+                     "median %.1f, excluding a median of %.1f training point(s) ",
+                     "per fold (%d removals in total; largest remaining excess ",
+                     "of realised over target ECDF %.3f)."),
+              n, stats::median(g_target), stats::median(realised[fin]),
+              stats::median(n_excluded), n_iter, max_excess)
 
     return(.ret(method, n, splits,
                 .safe_tibble(row_id = row_ids, fold = seq_len(n)),
                 list(seed = seed, n_prediction_points = nrow(pred),
                      crs = .fold_crs_label(pts),
-                     median_buffer   = stats::median(radii),
+                     min_train = min_train, phi = phi,
+                     # The effective buffer each fold ended up with.
+                     median_buffer   = stats::median(realised[fin]),
                      median_excluded = stats::median(n_excluded),
+                     n_removed_total = n_iter,
+                     max_ecdf_excess = max_excess,
                      target_median   = stats::median(g_target),
-                     realised_median = stats::median(realised),
+                     realised_median = stats::median(realised[fin]),
                      target_distances   = g_target,
                      realised_distances = realised)))
   }
@@ -1923,7 +2102,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 
   # Refuse folds built from other data before anything is fitted: the splits
   # are row IDs, so a wrong `folds` of the right size applies silently.
-  .check_fold_probe(folds, dat_sf, "cv_gwr")
+  .check_fold_probe(folds, data_sf, "cv_gwr")
 
   if (is.null(folds)) {
     message("cv_gwr(): no folds supplied \u2014 using spatial block k-fold CV (k=", k, ").")
@@ -1981,7 +2160,10 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
                SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
                bandwidth = numeric())
 
-  n_attempted <- length(remapped_folds)
+  # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
+  # a fold dropped there is exactly the kind of thing this count exists to
+  # make visible against n_folds_succeeded.
+  n_attempted <- length(if (!is.null(folds$folds)) folds$folds else folds)
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
@@ -2105,7 +2287,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 
   # Refuse folds built from other data before anything is fitted: the splits
   # are row IDs, so a wrong `folds` of the right size applies silently.
-  .check_fold_probe(folds, dat_sf, "cv_bayes")
+  .check_fold_probe(folds, data_sf, "cv_bayes")
 
   if (is.null(folds)) {
     message("cv_bayes(): no folds supplied \u2014 using spatial block k-fold CV (k=", k, ").")
@@ -2212,7 +2394,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                CRPS = numeric(), gp_k = integer(),
                gp_n_basis = integer(), n_draws = integer())
 
-  n_attempted <- length(remapped_folds)
+  # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
+  # a fold dropped there is exactly the kind of thing this count exists to
+  # make visible against n_folds_succeeded.
+  n_attempted <- length(if (!is.null(folds$folds)) folds$folds else folds)
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
@@ -2358,7 +2543,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
 
   # Refuse folds built from other data before anything is fitted: the splits
   # are row IDs, so a wrong `folds` of the right size applies silently.
-  .check_fold_probe(folds, dat_sf, "cv_spatial")
+  .check_fold_probe(folds, data_sf, "cv_spatial")
 
   if (is.null(folds)) {
     message("cv_spatial(): no folds supplied \u2014 using spatial block k-fold CV (k=", k, ").")
@@ -2393,7 +2578,10 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   # to return an all-NA `overall` and an empty data.frame with nothing at R
   # condition level, so a fit_fn that failed on every fold looked like a
   # successful run that happened to score NA.
-  n_attempted <- length(remapped_folds)
+  # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
+  # a fold dropped there is exactly the kind of thing this count exists to
+  # make visible against n_folds_succeeded.
+  n_attempted <- length(if (!is.null(folds$folds)) folds$folds else folds)
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)

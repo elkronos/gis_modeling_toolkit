@@ -12,7 +12,8 @@ create_grid_polygons(
   n = NULL,
   clip = TRUE,
   crs = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  max_cells = 1e+06
 )
 }
 \arguments{
@@ -45,6 +46,13 @@ projected with \code{\link[=ensure_projected]{ensure_projected()}}, which change
 grid; a message reports this unless \code{quiet = TRUE}.}
 
 \item{quiet}{Logical; suppress messages.}
+
+\item{max_cells}{Upper bound on the number of cells the grid may have,
+estimated from the boundary's bounding box before anything is built.
+Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
+boundary in kilometres, say -- asks for a grid that cannot be built, and
+this refuses it with a message rather than exhausting memory. Set to
+\code{Inf} to disable.}
 }
 \value{
 An sf polygon layer with poly_id column.

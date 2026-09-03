@@ -51,6 +51,11 @@
 #' @noRd
 .transform_or_stamp <- function(x, crs, what = "input", caller = "spatialkit") {
   if (is.null(crs)) return(x)
+  # An NA target means "leave the coordinates in whatever space they are in":
+  # build_tessellation() passes it for CRS-less points that the lon/lat
+  # heuristic declined to interpret, so that the grid is built in the same
+  # unnamed space as the points rather than being projected on its own.
+  if (inherits(crs, "crs") && is.na(crs)) return(x)
   if (is.na(sf::st_crs(x))) {
     .log_warn(
       "%s(): `%s` has no CRS, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
@@ -78,6 +83,25 @@
 #' @noRd
 .log_warn <- function(fmt, ...) {
   logger::log_warn(sprintf(fmt, ...), namespace = "spatialkit")
+}
+
+#' Log a warning AND raise it as an R condition
+#'
+#' A logger line is invisible to \code{tryCatch(warning = )},
+#' \code{withCallingHandlers()}, \code{testthat::expect_warning()} and
+#' \code{options(warn = 2)}.  For a situation the caller should be able to
+#' catch or escalate -- data dropped, a CRS assumed, a result degraded -- the
+#' log line is not enough on its own.  Used wherever the reference manual says
+#' the function \emph{warns}; purely methodological cautions stay
+#' \code{.log_warn()} and their documentation says "logged".
+#'
+#' @keywords internal
+#' @noRd
+.warn_and_log <- function(fmt, ...) {
+  msg <- sprintf(fmt, ...)
+  logger::log_warn(msg, namespace = "spatialkit")
+  warning(msg, call. = FALSE)
+  invisible(msg)
 }
 
 

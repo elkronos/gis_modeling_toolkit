@@ -174,6 +174,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       stop("predict_surface(): `covariates` lacks column(s) ",
            paste(sQuote(cov_missing), collapse = ", "), ".", call. = FALSE)
 
+    covariates <- .replay_crs_assumption(covariates, train, "predict_surface")
     covariates <- ensure_projected(covariates, target_crs = .crs_or_null(target_crs))
     nn  <- sf::st_nearest_feature(grid, covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
