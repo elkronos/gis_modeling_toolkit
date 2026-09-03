@@ -17,7 +17,12 @@ coerce_to_points(
 \item{mode}{One of "auto", "centroid", "point_on_surface", "surface",
 "line_midpoint", "bbox_center".}
 
-\item{tmp_project}{Logical; temporarily project for line-based midpoints.}
+\item{tmp_project}{Logical; temporarily project for line-based midpoints.
+When \code{x} has no CRS and its coordinates fall inside the lon/lat
+envelope, that temporary projection interprets them as EPSG:4326 (with a
+warning) and the midpoints returned are geodesic ones brought back to the
+input's numbers, not planar midpoints.  Set the CRS, or pass
+\code{tmp_project = FALSE}, for planar data.}
 }
 \value{
 An sf object with geometry coerced to POINTs.

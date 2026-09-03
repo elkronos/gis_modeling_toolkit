@@ -37,7 +37,13 @@ variable sweep -- is already nested and leak-free.  The \code{subclass} it
 stamps must have a \code{predict.<subclass>()} method registered, because
 that is how each fold is scored.}
 
-\item{folds}{Optional fold definitions. Built via block_kfold if NULL.}
+\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
+value, or a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values.  Train and test must be disjoint — a fold that
+trains on its own test rows is not a cross-validation split and is refused
+with an error — and IDs naming no row in the prepared data are dropped with
+a logged count.
+Built via \code{block_kfold} when \code{NULL}.}
 
 \item{k}{Number of folds.}
 
@@ -126,14 +132,14 @@ must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
 \code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
 over this function.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

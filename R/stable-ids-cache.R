@@ -23,7 +23,15 @@
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
-#'   Default 4326. Set to NULL to disable.
+#'   Default 4326. This is the whole mechanism by which the IDs are stable ---
+#'   sorting in one common CRS is what makes the same layer get the same IDs
+#'   whichever projection it arrives in --- so if the transform fails the
+#'   function says so rather than quietly sorting in the input's own CRS. The
+#'   sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
+#'   the floating-point noise of a round trip through a different projection
+#'   cannot reverse two neighbouring cells. Set to NULL to sort in the input
+#'   CRS, which gives IDs that are reproducible but not comparable across
+#'   projections.
 #' @return An sf polygon layer re-ordered with sequential IDs in id_col.
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
@@ -108,7 +116,19 @@ ensure_stable_poly_id <- function(polygons_sf,
   area[!is.finite(area)] <- 0
   idx0 <- seq_len(nrow(polygons_sf))
 
-  ord <- do.call(order, list(xy[, 1], xy[, 2], area, idx0))
+  # Round the sort key before ordering.  The whole point of this function is
+  # that "the same layer gets the same IDs whichever projection it arrives in",
+  # and a raw double comparison cannot deliver that: cells in one column of a
+  # grid share an exact x only in the CRS the grid was built in, and after a
+  # round trip through another projection they differ by ~1e-11 degrees.  The
+  # within-column order was then decided by that noise -- 14 of 16 cells got a
+  # different ID depending on which CRS the layer arrived in, which is exactly
+  # the failure the function exists to prevent.  7 decimals is about a
+  # centimetre of longitude; the transform_for_sort default puts the key in
+  # degrees, and the tie-break on area then index keeps the result total.
+  kx <- round(xy[, 1], 7L)
+  ky <- round(xy[, 2], 7L)
+  ord <- do.call(order, list(kx, ky, signif(area, 9L), idx0))
 
   out <- polygons_sf[ord, , drop = FALSE]
   out[[id_col]] <- seq_len(nrow(out))
@@ -183,7 +203,13 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   [create_grid_polygons()].
 #' @param ... Additional arguments forwarded to create_grid_polygons().
 #' @param cache_env Environment for memoized grids. Default .gmt_cache.
-#' @return An sf data frame with a stable poly_id column.
+#' @return An sf data frame with a stable poly_id column.  Note that the rows
+#'   are re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
+#'   which \code{\link{create_grid_polygons}} does not do: the same cell
+#'   therefore carries a different \code{poly_id} depending on which of the two
+#'   builders produced it.  Use one builder throughout an analysis; joining a
+#'   summary keyed on IDs from one onto geometries from the other draws the
+#'   values on the wrong polygons.
 #' @export
 create_grid_polygons_cached <- function(boundary,
                                         target_cells,
@@ -202,6 +228,13 @@ create_grid_polygons_cached <- function(boundary,
   if (exists(key, envir = cache_env, inherits = FALSE))
     return(get(key, envir = cache_env, inherits = FALSE))
 
+  # ensure_stable_poly_id() is applied here and NOT in create_grid_polygons(),
+  # so the same cell carried a different poly_id depending on which of the two
+  # functions built it; mixing them (assign with one, join geometry with the
+  # other) drew cell statistics on the wrong polygons for 8 of 9 cells.  The
+  # cached builder is documented as memoizing create_grid_polygons(), so the
+  # renumbering has to be visible in its documentation -- see @return -- and
+  # callers must not mix the two builders for one analysis.
   out <- create_grid_polygons(bnd, target_cells = target_cells, type = type, ...)
   out <- ensure_stable_poly_id(out)
 

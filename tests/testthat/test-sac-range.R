@@ -103,7 +103,22 @@ test_that("a supportable range is returned and carries its fit", {
   expect_length(d, 4L)
   expect_identical(names(d), c("0", "45", "90", "135"))
   expect_gte(sum(is.finite(d)), 2L)                # the minimum to use them
-  expect_equal(as.numeric(r), max(d, na.rm = TRUE), tolerance = 1e-10)
+
+  # The returned number is the OMNIDIRECTIONAL fit unless anisotropy is
+  # established, and the `anisotropy_used` attribute says which.  Each
+  # direction sees about a quarter of the point pairs, so the maximum of four
+  # noisy estimates is biased upward: on this isotropic field two directions
+  # fail to reach a sill outright and the widest of the survivors reports 248
+  # against a true range of 80, while the all-pairs fit lands on 84.
+  expect_false(is.null(attr(r, "anisotropy_used")))
+  if (isTRUE(attr(r, "anisotropy_used"))) {
+    expect_equal(as.numeric(r), max(d, na.rm = TRUE), tolerance = 1e-10)
+  } else {
+    # All four directions must fit before their spread is believed.
+    expect_true(sum(is.finite(d)) < 4L ||
+                  !isTRUE(attr(r, "anisotropy") > 1.5) ||
+                  as.numeric(r) <= max(d, na.rm = TRUE))
+  }
 
   # The field was simulated with a known exponential range, so the estimate
   # should land near it.  A wide band -- variogram estimation on 250 irregular
@@ -111,6 +126,22 @@ test_that("a supportable range is returned and carries its fit", {
   # Exp 3a conversion being dropped.
   expect_gt(as.numeric(r), TRUE_RANGE / 3)
   expect_lt(as.numeric(r), TRUE_RANGE * 3)
+})
+
+
+test_that("the all-pairs fit is preferred when anisotropy is not established", {
+  # Regression: the estimate used to be max-of-four directions unconditionally,
+  # which on this isotropic field (true range 80) returned 248 -- the widest of
+  # the two directions that happened to fit -- and sized blocks from it.  Each
+  # direction sees about a quarter of the point pairs; the omnidirectional fit
+  # sees all of them.
+  skip_if_not_installed("gstat")
+  r <- suppressWarnings(estimate_sac_range(sac_test_field(), "z", seed = 1))
+  d <- attr(r, "directional")
+
+  expect_false(isTRUE(attr(r, "anisotropy_used")))
+  expect_lt(as.numeric(r), max(d, na.rm = TRUE))   # strictly below the max
+  expect_lt(abs(as.numeric(r) / TRUE_RANGE - 1), 0.5)
 })
 
 test_that("the returned range behaves as an ordinary number", {

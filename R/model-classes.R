@@ -17,14 +17,20 @@
 #' \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
 #' you chose -- \code{\link{cv_spatial}()} scores folds by calling the
 #' \code{predict()} generic on the fit, so without a matching
-#' \code{predict.<subclass>()} every fold fails.  Methods for
-#' \code{\link{fitted}()}, \code{\link{residuals}()} and \code{\link{coef}()}
-#' are optional; supply them if you want the corresponding helpers to work on
-#' your fits too.
+#' \code{predict.<subclass>()} every fold fails.  A
+#' \code{fitted.<subclass>()} method returning one value per row of the fit's
+#' \code{data_sf}, in the same order, is \strong{required} by
+#' \code{\link{summary}()} and \code{\link{model_metrics}()}: both error,
+#' naming the method to define, without one.  \code{\link{residuals}()} and
+#' \code{\link{coef}()} methods are optional.
 #'
 #' @section The coef() contract:
-#' \code{coef()} on a \code{spatial_fit} either returns the coefficients or
-#' signals an error -- it never returns \code{NULL}.  \code{coef.rf_fit()}
+#' \code{coef()} on one of the three built-in backends either returns the
+#' coefficients or signals an error -- it never returns \code{NULL}.  A custom
+#' subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
+#' so define a \code{coef.<subclass>()} that errors when your backend has no
+#' coefficients; otherwise the hazard described below applies to your own fits.
+#' \code{coef.rf_fit()}
 #' always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
 #' and \code{coef.bayesian_fit()} error when the backend cannot supply them
 #' (a missing package, an engine without the expected component).  A
@@ -151,9 +157,12 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 
 #' Print a fitted spatial model
 #'
-#' Shows the one-screen summary of any \code{spatial_fit}: backend, formula,
-#' number of observations, CRS, and the few backend-specific numbers worth
-#' seeing immediately (GWR bandwidth, GP basis size, forest settings).  It is
+#' Shows the one-screen summary of a \code{gwr_fit}, a \code{bayesian_fit} or a
+#' custom subclass: backend, formula, number of observations, CRS, and the few
+#' backend-specific numbers worth seeing immediately (GWR bandwidth, GP basis
+#' size).  An \code{rf_fit} has its own method -- see
+#' \code{\link{print.rf_fit}} -- which shows the same header plus the forest
+#' settings.  It is
 #' what you get by typing the object's name, and the quickest way to confirm a
 #' fit used the data, predictors and CRS you meant.  For fit quality use
 #' \code{\link{model_metrics}()} or \code{\link{summary}()} instead --
@@ -171,8 +180,16 @@ print.spatial_fit <- function(x, ...) {
     subclass
   )
   cat(sprintf("<%s> spatial model fit\n", label))
-  cat(sprintf("  Formula : %s\n", deparse(x$formula)))
+  # deparse(), not deparse1(): a long formula comes back as SEVERAL strings and
+  # sprintf() vectorises over them, printing "Formula :" once per line with the
+  # continuation indented as if it were a new field.  Every bayesian_fit hits
+  # this, because the gp() term this package builds is always long.
+  cat(sprintf("  Formula : %s\n", paste(deparse(x$formula), collapse = " ")))
   cat(sprintf("  n       : %d\n", x$n))
+  # The CRS is what ?print.spatial_fit promises and never printed, and it is
+  # the one thing a user cannot otherwise read off the object -- getting it
+  # wrong silently changes every distance in the model.
+  cat(sprintf("  CRS     : %s\n", .fold_crs_label(x$data_sf)))
 
   if (subclass == "gwr_fit") {
     cat(sprintf("  Bandwidth: %.4g (%s, %s kernel)\n",
@@ -195,10 +212,35 @@ print.spatial_fit <- function(x, ...) {
 }
 
 
+#' Coerce and check a response column before scoring it
+#'
+#' \code{is.finite()} on a character column is \code{FALSE} everywhere, so an
+#' unchecked non-numeric response silently produced \code{n = 0} and all-\code{NA}
+#' metrics from perfectly good data; a factor died inside \code{abs()} instead.
+#' Logical is a legitimate 0/1 response and is coerced.
+#'
+#' @param y The response values.
+#' @param nm The response column's name, for the message.
+#' @param caller Function name, for the message.
+#' @return \code{y}, numeric.
+#' @keywords internal
+#' @noRd
+.checked_response <- function(y, nm, caller) {
+  if (is.logical(y)) return(as.numeric(y))
+  if (!is.numeric(y))
+    stop(sprintf(paste0("%s(): response '%s' is %s, not numeric, so no metric ",
+                        "can be computed from it. Convert the column first."),
+                 caller, nm, class(y)[1L]), call. = FALSE)
+  y
+}
+
+
 #' Summarise a fitted spatial model
 #'
 #' Computes goodness-of-fit metrics from \code{fitted(object)} against the
-#' observed response.
+#' observed response.  A non-numeric response is an error -- a character or
+#' factor response cannot be scored, and used to come back as \code{n = 0} with
+#' every metric \code{NA}; a logical response is treated as 0/1.
 #'
 #' @section What the metrics are computed on:
 #' For a \code{gwr_fit} or a \code{bayesian_fit} these are \strong{in-sample}
@@ -223,6 +265,12 @@ print.spatial_fit <- function(x, ...) {
 summary.spatial_fit <- function(object, ...) {
   fit_vals <- .fitted_checked(object, .caller = "summary")
   y_obs    <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
+  # The same guard model_metrics() applies, for the same reason and on the same
+  # columns.  Without it summary() still did what model_metrics() was fixed to
+  # stop doing: a character response gave n = 0 and every metric NA with
+  # nothing said, and a factor died in `abs()`.  new_spatial_fit() is the
+  # documented entry point for a user's own backend and validates neither.
+  y_obs <- .checked_response(y_obs, object$response_var, "summary")
   # GWR fits locally varying coefficients at every observation, so the
   # global predictor count is not a valid effective-parameter count for
   # Adj R².  Pass p = NULL to suppress it, consistent with cv_gwr().
@@ -246,7 +294,7 @@ summary.spatial_fit <- function(object, ...) {
 #' @export
 print.summary.spatial_fit <- function(x, ...) {
   cat(sprintf("Summary of <%s> fit (n = %d)\n\n", x$class, x$n))
-  cat(sprintf("  Formula: %s\n", deparse(x$formula)))
+  cat(sprintf("  Formula: %s\n", paste(deparse(x$formula), collapse = " ")))
   # An rf_fit's fitted() values are out-of-bag, not in-sample.  Labelling them
   # "In-sample" understates a random hold-out as a memorised fit, which is the
   # opposite of the truth and the opposite of the caveat ?fit_rf_model carries.
@@ -300,6 +348,12 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   see above).
 #' @param ... Additional arguments passed to predict().
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
+#'   \code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
+#'   exceeds the global predictor count and a GP model has no simple \code{p},
+#'   so it is deliberately suppressed.  A non-numeric response is an error -- a
+#'   character or factor response cannot be scored, and used to come back as
+#'   \code{n = 0} with every metric \code{NA}; a logical response is treated
+#'   as 0/1.
 #' @export
 model_metrics <- function(object, ...) UseMethod("model_metrics")
 
@@ -319,15 +373,7 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_hat <- predict(object, newdata = newdata, ...)
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
-  # A response that is not numeric cannot be scored, and is.finite() on a
-  # character column is FALSE everywhere -- so 100 perfectly good rows used
-  # to come back as n = 0 with every metric NA, silently.
-  if (is.logical(y_obs)) y_obs <- as.numeric(y_obs)
-  if (!is.numeric(y_obs))
-    stop(sprintf(paste0("model_metrics(): response '%s' is %s, not numeric, so ",
-                        "no metric can be computed from it. Convert the column ",
-                        "first."),
-                 object$response_var, class(y_obs)[1L]), call. = FALSE)
+  y_obs <- .checked_response(y_obs, object$response_var, "model_metrics")
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
@@ -389,7 +435,11 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   The response variable need not be present (true out-of-sample prediction
 #'   is supported).  NULL = fitted values.
 #' @param ... Ignored.
-#' @return Numeric vector of predictions.
+#' @return Numeric vector aligned to \code{nrow(newdata)}, with \code{NA} for
+#'   rows dropped as missing or non-finite.  If \code{GWmodel::gwr.predict()}
+#'   fails, every value is \code{NA} and a warning says why.  CRS-less
+#'   \code{newdata} first receives the interpretation the training data got, so
+#'   the same rows land where they did at fit time.
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, ...) {
   if (is.null(newdata)) return(fitted(object))
@@ -477,7 +527,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
     rep(NA_real_, n_new)
   } else {
     .extract_gwr_values(pred_obj, newdata, object$formula, n_new,
-                         object$response_var)
+                         object$response_var, mode = "predict")
   }
 
   # Expand back to original length, filling dropped rows with NA.
@@ -533,8 +583,89 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 }
 
 
+#' Pin the GP boundary by appending the training coordinate extrema
+#'
+#' brms 2.x stores \code{Xgp}, \code{dmax} and \code{cmeans} in a fit's GP
+#' basis but \strong{not} the Hilbert-space boundary \code{L}, so
+#' \code{brms:::.data_gp()} recomputes
+#' \code{L = c * max(1, diff(range(centred Xgp)))} from whatever rows
+#' \code{predict()} is handed.  Every eigenfunction and eigenvalue of the
+#' approximation therefore moves with the newdata bounding box while the fitted
+#' basis coefficients stay put.
+#'
+#' Measured on a fitted model: \code{L} was 5.57 at fit time, 4.02 for a
+#' five-row \code{newdata} and 3.63 for one row; \code{predict_surface()} on the
+#' same 10,000-cell grid differed by 1.78 between \code{chunk_size = 5000} (the
+#' documented default) and one single call; and \code{cv_bayes()}, which
+#' predicts each test fold separately, scored every fold against a basis the
+#' model was never fitted with.
+#'
+#' The repair is to make the pooled centred range of the rows brms sees equal
+#' the training one: append two synthetic rows at the training extrema, predict,
+#' then drop their columns.  \code{cmeans} already comes from the stored basis,
+#' so pinning the range reproduces the fitted \code{L} exactly for any newdata
+#' inside the training envelope.
+#'
+#' @param object A \code{bayesian_fit}.
+#' @param pred_df The prediction data.frame from
+#'   \code{.prepare_brms_pred_df()}.
+#' @return A list with \code{df} (possibly with rows appended) and \code{n_pad}
+#'   (how many were appended, to be dropped from the draw matrix).
+#' @keywords internal
+#' @noRd
+.pin_gp_boundary_rows <- function(object, pred_df) {
+  rng <- object$info$gp_xy_range
+  if (is.null(rng) || !all(c("..x", "..y") %in% names(pred_df)) ||
+      !nrow(pred_df))
+    return(list(df = pred_df, n_pad = 0L))
+  xr <- suppressWarnings(as.numeric(rng$x))
+  yr <- suppressWarnings(as.numeric(rng$y))
+  if (length(xr) != 2L || length(yr) != 2L || !all(is.finite(c(xr, yr))))
+    return(list(df = pred_df, n_pad = 0L))
+
+  # Warn when newdata reaches outside the training envelope: the boundary then
+  # has to grow past the fitted one whatever we do, and the predictions there
+  # are extrapolation from a basis that was not built for them.
+  ox <- range(pred_df[["..x"]], na.rm = TRUE)
+  oy <- range(pred_df[["..y"]], na.rm = TRUE)
+  if (any(is.finite(c(ox, oy))) &&
+      (ox[1L] < xr[1L] || ox[2L] > xr[2L] ||
+       oy[1L] < yr[1L] || oy[2L] > yr[2L]))
+    .log_info(paste0("predict.bayesian_fit(): `newdata` reaches outside the ",
+                     "training coordinate envelope, so the GP basis is ",
+                     "evaluated beyond the boundary it was fitted with; those ",
+                     "predictions are extrapolation."))
+
+  pad <- pred_df[c(1L, 1L), , drop = FALSE]
+  pad[["..x"]] <- xr
+  pad[["..y"]] <- yr
+  rownames(pad) <- NULL
+  out <- rbind(pred_df, pad)
+  rownames(out) <- NULL
+  list(df = out, n_pad = 2L)
+}
+
+
 #' Predict from a Bayesian spatial GP model
 #'
+#' @section The GP boundary is pinned:
+#' brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
+#' basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
+#' \code{predict()} is handed -- which moved every eigenfunction of the
+#' approximation with the newdata bounding box while the fitted basis
+#' coefficients stayed put.  Two synthetic rows at the training coordinate
+#' extrema are therefore appended before the posterior draw and dropped from the
+#' result, reproducing the boundary the model was fitted with, so chunked,
+#' fold-wise and single-call predictions agree.
+#'
+#' That is exact only for \code{newdata} \strong{inside} the training
+#' coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
+#' predictions there are extrapolation from a basis that was not built for them
+#' \emph{and} depend on which other rows share the call -- including on
+#' \code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
+#' the log (not raised as a warning) when it happens.
+#'
+#' @description
 #' Applies the same newdata preparation pipeline as \code{predict.gwr_fit()}:
 #' non-point geometries are coerced to points, the data is projected to the
 #' CRS used during fitting (via \code{ensure_projected()}), and rows with
@@ -626,9 +757,15 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # Build prediction data.frame with scaled coordinates & standardised predictors
   pred_df <- .prepare_brms_pred_df(object, newdata)
 
-  # Draw from posterior
+  # Draw from posterior.  The two padding rows pin the GP boundary to the one
+  # the model was fitted with -- see .pin_gp_boundary_rows() -- and their
+  # columns are dropped again immediately.
+  pinned   <- .pin_gp_boundary_rows(object, pred_df)
   draw_fn <- if (type == "epred") brms::posterior_epred else brms::posterior_predict
-  draw_mat <- try(draw_fn(model_obj, newdata = pred_df), silent = TRUE)
+  draw_mat <- try(draw_fn(model_obj, newdata = pinned$df), silent = TRUE)
+  if (is.matrix(draw_mat) && pinned$n_pad > 0L &&
+      ncol(draw_mat) == nrow(pinned$df))
+    draw_mat <- draw_mat[, seq_len(ncol(draw_mat) - pinned$n_pad), drop = FALSE]
 
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
     .log_warn("predict.bayesian_fit(): posterior draw failed.")
@@ -677,7 +814,7 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 fitted.gwr_fit <- function(object, ...) {
   .extract_gwr_values(
     object$engine, object$data_sf, object$formula,
-    object$n, object$response_var
+    object$n, object$response_var, mode = "basic"
   )
 }
 

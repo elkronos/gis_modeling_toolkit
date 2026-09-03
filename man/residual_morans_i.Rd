@@ -165,7 +165,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   # should still carry spatial structure, and this is what detects it.
   dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
-  residual_morans_i(fit)  # z near 0 / p large = no residual structure
+  # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
+  # as constructed.  A z near 0 with a large p-value would be the opposite
+  # verdict -- no structure the model failed to capture.
+  residual_morans_i(fit)
 }
 }
 }
@@ -174,9 +177,9 @@ Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 Models and Applications}. Pion, London. Section 8.3.
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}}
 }
 \concept{model evaluation}

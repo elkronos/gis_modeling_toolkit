@@ -39,8 +39,10 @@
 #' with missing crs"), so any `if (!is.null(crs)) st_transform(x, crs)` turns a
 #' `crs =` argument into a hard error for exactly the users most likely to pass
 #' it — those whose data carries no CRS. Reprojection is impossible there, but
-#' assumption is not: stamp the target and say so loudly, matching what
-#' `ensure_projected()` already documents for the same situation.
+#' assumption is not. The lon/lat heuristic runs first, exactly as
+#' `ensure_projected()` does: coordinates that look like degrees are taken as
+#' EPSG:4326 and REPROJECTED; only when they do not is the target stamped. Both
+#' branches warn.
 #'
 #' @param x An sf or sfc object.
 #' @param crs Target CRS (anything `sf::st_crs()` accepts).
@@ -57,8 +59,28 @@
   # unnamed space as the points rather than being projected on its own.
   if (inherits(crs, "crs") && is.na(crs)) return(x)
   if (is.na(sf::st_crs(x))) {
-    .log_warn(
-      "%s(): `%s` has no CRS, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
+    # Stamping is the LAST resort, not the first.  ensure_projected() -- which
+    # this helper's own documentation says it matches -- runs the lon/lat
+    # heuristic first and REPROJECTS when the coordinates look like degrees.
+    # Stamping them instead put identical input 5,400 km apart depending on
+    # which of the two paths a caller happened to take, and it is how
+    # summarize_by_cell(deff = "variogram") came to compare degree separations
+    # against a metre range (deff = n for every cell) and how
+    # assign_features_to_polygons() came to return zero rows for points that
+    # build_tessellation() had just tessellated correctly.
+    ll <- .looks_like_lonlat(x)
+    if (isTRUE(ll$lonlat)) {
+      .warn_and_log(
+        paste0("%s(): `%s` has no CRS; its coordinates look like lon/lat ",
+               "(xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f), so they are ",
+               "taken as EPSG:4326 and reprojected to the target CRS. Set the ",
+               "CRS explicitly with sf::st_crs() to suppress this."),
+        caller, what, ll$bb[["xmin"]], ll$bb[["xmax"]],
+        ll$bb[["ymin"]], ll$bb[["ymax"]])
+      return(sf::st_transform(sf::st_set_crs(x, 4326), crs))
+    }
+    .warn_and_log(
+      "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
       caller, what)
     return(sf::st_set_crs(x, crs))
   }

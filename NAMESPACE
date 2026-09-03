@@ -58,24 +58,31 @@ export(predict_surface)
 export(prep_model_data)
 export(residual_morans_i)
 export(select_features_forward)
+export(spatialkit_quiet)
 export(summarize_by_cell)
 export(voronoi_seeds_kmeans)
 export(voronoi_seeds_random)
 importFrom(dplyr,.data)
-importFrom(methods,as)
-importFrom(methods,is)
-importFrom(stats,complete.cases)
-importFrom(stats,dist)
-importFrom(stats,fitted)
-importFrom(stats,kmeans)
-importFrom(stats,lm.fit)
-importFrom(stats,median)
-importFrom(stats,pnorm)
-importFrom(stats,predict)
-importFrom(stats,quantile)
-importFrom(stats,reformulate)
-importFrom(stats,residuals)
-importFrom(stats,sd)
-importFrom(stats,setNames)
-importFrom(utils,head)
-importFrom(utils,modifyList)
+importFrom(methods,
+  as,
+  is
+)
+importFrom(stats,
+  complete.cases,
+  dist,
+  fitted,
+  kmeans,
+  lm.fit,
+  median,
+  pnorm,
+  predict,
+  quantile,
+  reformulate,
+  residuals,
+  sd,
+  setNames
+)
+importFrom(utils,
+  head,
+  modifyList
+)

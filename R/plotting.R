@@ -24,7 +24,13 @@
 #'   \code{ggplot2::theme_void()}.  The default is resolved inside the function
 #'   rather than in the formals, so that a Suggests package is never evaluated
 #'   before the \code{requireNamespace()} check has run.
-#' @param target_crs Optional CRS for plotting.
+#' @param target_crs Optional CRS for plotting. When `NULL` (the default) the
+#'   tessellation's own CRS is used, or --- if the tessellation has none --- a
+#'   CRS borrowed from the first overlay that carries one, so a CRS-less grid
+#'   drawn with located features still lines up. Any layer that arrives without
+#'   a CRS is brought into the plot's CRS rather than dropped: reprojected when
+#'   its coordinates look like longitude/latitude, otherwise stamped with a
+#'   warning, since a stamp assumes the coordinates were already in that CRS.
 #' @param title,subtitle,caption Plot annotations.
 #' @param xlim,ylim Optional numeric vectors of length 2 for coordinate limits
 #'   (in the plot CRS). Default NULL (auto).
@@ -101,26 +107,45 @@ plot_tessellation_map <- function(tessellation_sf,
 
   # --- pick plot CRS ---
   plot_crs <- if (!is.null(target_crs)) sf::st_crs(target_crs) else sf::st_crs(tessellation_sf)
+  if (is.na(plot_crs)) {
+    # A CRS-less tessellation does not mean the plot has no CRS: an overlay may
+    # carry one, and coord_sf() then tries to transform the CRS-less layers
+    # into it and aborts inside ggplot_build() at print time.  Borrow the first
+    # CRS on offer so every layer can be brought into one space; only when NO
+    # layer has one is the plot genuinely CRS-less.
+    for (lyr in list(boundary, seeds_sf, features_sf)) {
+      if (is.null(lyr)) next
+      cr <- tryCatch(sf::st_crs(lyr), error = function(e) sf::NA_crs_)
+      if (!is.na(cr)) { plot_crs <- cr; break }
+    }
+  }
   if (is.na(plot_crs))
-    .log_warn("plot_tessellation_map(): CRS is undefined; drawing layers as-is.")
+    .log_warn("plot_tessellation_map(): no layer carries a CRS; drawing layers as-is.")
 
   # --- coerce & transform helper ---
-  maybe_transform <- function(x) {
+  maybe_transform <- function(x, what) {
     if (is.null(x)) return(NULL)
     if (inherits(x, "sfc")) x <- sf::st_as_sf(x)
     if (!inherits(x, c("sf", "sfc")))
       stop("plot_tessellation_map(): all layers must be sf/sfc when provided.")
     if (is.na(plot_crs)) return(x)
     x_crs <- sf::st_crs(x)
-    if (is.na(x_crs)) return(x)
+    # Returning a CRS-less overlay untouched was dead code, not a pass-through:
+    # coord_sf(crs = plot_crs) then aborted inside ggplot_build() -- at PRINT
+    # time, with sf's bare "cannot transform sfc object with missing crs",
+    # naming no layer and no spatialkit function -- while this function had
+    # just logged "drawing layers as-is" as though the case were supported.
+    if (is.na(x_crs))
+      return(.transform_or_stamp(x, plot_crs, what = what,
+                                 caller = "plot_tessellation_map"))
     if (x_crs == plot_crs) return(x)
     sf::st_transform(x, plot_crs)
   }
 
-  tess <- maybe_transform(tessellation_sf)
-  bnd  <- maybe_transform(boundary)
-  sds  <- maybe_transform(seeds_sf)
-  fea  <- maybe_transform(features_sf)
+  tess <- maybe_transform(tessellation_sf, "tessellation_sf")
+  bnd  <- maybe_transform(boundary, "boundary")
+  sds  <- maybe_transform(seeds_sf, "seeds_sf")
+  fea  <- maybe_transform(features_sf, "features_sf")
 
   # --- build ggplot ---
   p <- ggplot2::ggplot()

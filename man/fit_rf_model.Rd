@@ -47,7 +47,12 @@ is the default despite costing more.}
 \item{.already_prepped}{Internal; skip \code{prep_model_data()} because the
 caller has already projected and cleaned the data.}
 
-\item{...}{Passed to \code{ranger::ranger()}.}
+\item{...}{Passed to \code{ranger::ranger()}.  ranger's own spellings of
+the arguments this function already sets (\code{num.trees},
+\code{min.node.size}, \code{num.threads}, \code{mtry},
+\code{importance}, \code{seed}, \code{x}, \code{y}) are rejected with a
+message naming the wrapper argument to use instead -- passing them here
+would reach \code{ranger()} twice and fail the call.}
 }
 \value{
 An \code{rf_fit} object (inherits from \code{spatial_fit}).
@@ -135,10 +140,10 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 \code{\link{area_of_applicability}}, which can take
 \code{weights = pmax(fit$info$importance, 0)}.
 
-Other model fitting: 
-\code{\link{fit_bayesian_spatial_model}()},
-\code{\link{fit_gwr_model}()},
-\code{\link{new_spatial_fit}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=new_spatial_fit]{new_spatial_fit()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

@@ -82,8 +82,8 @@ fold construction differs:
 
 | Fold scheme | Pooled out-of-sample R² | RMSE |
 |---|---:|---:|
-| `make_folds(method = "random_kfold")` (the default) | **0.824** | 1.075 |
-| `make_folds(method = "block_kfold")` | **0.379** | 2.129 |
+| `make_folds(method = "random_kfold")` (the default) | **0.817** | 1.097 |
+| `make_folds(method = "block_kfold")` | **0.369** | 2.147 |
 
 ```r
 library(spatialkit)
@@ -216,9 +216,12 @@ cells <- summarize_by_cell(assigned, response_var = "price",
 head(as.data.frame(cells)[, c("cell_id", "n", "resp_mean_price",
                               "..sd_resp_price", "..se_resp_price")])
 #>   cell_id  n resp_mean_price ..sd_resp_price ..se_resp_price
-#> 1       1  7        51.44352        4.908403        4.204213
-#> 2       2  4        51.60967        5.925025        5.188861
-#> 3       3 11        53.47350        4.165362        3.528304
+#> 1       1  7        51.44352        4.908403        7.541977
+#> 2       2  4        51.60967        5.925025        9.308346
+#> 3       3 11        53.47350        4.165362        6.329458
+#> 4       4 12        52.60354        3.347488        5.078310
+#> 5       5 16        52.82437        4.242944        6.407563
+#> 6       6 18        52.44989        3.402188        5.130050
 
 attr(cells, "deff_applied")$method
 #> [1] "kish"
@@ -241,7 +244,7 @@ range
 # It prints as a bare NA and nothing else. The diagnosis is in the attributes
 # and in a logged WARN spelling out that the fitted range exceeds the largest
 # lag the variogram covers (7043), so it is unidentified, not long:
-attr(range, "rejected_range")    #> [1] 98348.32
+attr(range, "rejected_range")    #> [1] 22210.95
 attr(range, "rejected_reason")   #> [1] "fitted range exceeds the largest lag fitted"
 
 # That NA is the correct answer, not a failure: this synthetic field is a smooth
@@ -334,8 +337,8 @@ write.csv(data.frame(lon    = st_coordinates(st_transform(obs, 4326))[, 1],
 tab <- read.csv(csv)
 head(tab, 2)
 #>         lon      lat births sids
-#> 1 -81.49692 36.41746   1091    1
-#> 2 -81.12964 36.47430    487    0
+#> 1 -81.49694 36.41742   1091    1
+#> 2 -81.12962 36.47430    487    0
 
 # `crs =` is not optional and cannot be guessed. Lon/lat from a GPS, a web
 # API or a geocoder is almost always EPSG:4326; if the file came from a
@@ -360,19 +363,24 @@ Geographic (lon/lat) input is projected automatically, because degrees are not
 a length: `estimate_sac_range()`, the distance-based `make_folds()` methods,
 every `fit_*()` (via `prep_model_data()`) and `predict_surface()` route their
 input through `ensure_projected()` before measuring anything. The CRS it picks
-is chosen for your extent — a UTM zone from the data's centroid when the extent
-is narrow enough for one, an equal-area projection centred on the data when it
-is not, because forcing continental-width data into a single UTM zone costs
-percent-scale distance errors that propagate silently into ranges, block sizes
-and bandwidths. It says which, and why:
+is chosen for your extent, and chosen by *measurement*: the UTM zone your
+centroid falls in, a Lambert azimuthal equal-area projection centred on your
+data, and an Albers conic are each scored by comparing planar distances against
+geodesic ones over a sample of your own points, and the one with the smallest
+worst-case error wins. A single UTM zone costs percent-scale distance errors on
+continental-width data, and those errors propagate silently into ranges, block
+sizes and bandwidths. Data straddling the antimeridian gets a local projection
+rather than a wrapped one; only genuinely global coverage falls back to
+EPSG:3857. It says which it chose, and what the choice cost:
 
 ```r
 nc_pts <- ensure_projected(nc_pts_ll)
 #> WARN  .pick_local_projected_crs(): extent reaches 5.1 deg from the central
-#> meridian of UTM zone 17, well beyond the 3 deg the zone is designed for
-#> (8.1 deg longitude span in total). Using Albers equal-area (lat_1=34.5,
-#> lat_2=36.1, lon_0=-79.5) instead; ... Pass target_crs to ensure_projected()
-#> to override.
+#> meridian of UTM zone 17 (8.1 deg of longitude in total). Using Lambert
+#> azimuthal equal-area centred on (-79.5, 35.6) instead: measured worst-case
+#> distance error 0.23% against the zone's 0.40%, and that error propagates
+#> into variogram ranges, block sizes, GWR bandwidth and GP length-scales.
+#> Pass target_crs to ensure_projected() to override.
 
 st_crs(nc_pts)$units_gdal
 #> [1] "metre"
@@ -380,9 +388,9 @@ st_crs(nc_pts)$units_gdal
 
 Two consequences worth internalising:
 
-- **Project before you choose a number.** `make_folds(nc_pts_ll, block_size =
-  2000)` succeeds on lon/lat input, and the 2000 is in metres of a CRS you
-  never chose. Call `ensure_projected()` yourself, look at `st_bbox()`, and
+- **Project before you choose a number.** `make_folds(nc_pts_ll, k = 5,
+  block_size = 2000)` succeeds on lon/lat input, and the 2000 is in metres of a
+  CRS you never chose. Call `ensure_projected()` yourself, look at `st_bbox()`, and
   pick `block_size` against that. `folds$params$crs` records the CRS the folds
   were actually built in, which is the one `block_size` was in.
 - **Pin the CRS when it matters.** `ensure_projected(x, target_crs = 2264)`
@@ -580,7 +588,7 @@ k <- determine_optimal_levels(pts, response_var = "price",
                               predictor_vars = "elev", max_levels = 40,
                               criterion = "combined")
 as.integer(k)     # printing `k` itself dumps the diagnostics attribute too
-#> [1]  5  6 10
+#> [1] 5 6 4
 
 d <- attr(k, "diagnostics")             # present only when Moran's I ran
 round(d$moran_i[d$eval_ks], 4)
@@ -589,7 +597,8 @@ round(d$moran_i[d$eval_ks], 4)
 
 Seven `NA`s for k = 3..9, then two real values at k = 10 and 11. Only those two
 carry information, and both are near zero — this synthetic field leaves little
-residual structure at either resolution, so the elbow keeps the final say.
+residual structure at either resolution, so the elbow keeps the final say, and
+the ranking that comes back is the geometric one reordered only slightly.
 
 The same field cut at three resolutions, next to the raw observations — too
 coarse blurs the hotspot, too fine chases noise with near-empty cells, and the
@@ -781,20 +790,28 @@ fitted a variogram is for. Substituting a constant off-diagonal correlation
 recovers Kish exactly. Inspect what was applied via
 `attr(result, "deff_applied")`.
 
-**Reading a design effect.** A design effect is a *variance* multiplier, so
-standard errors move by its square root. Kish's is `deff_i = 1 + (n_i - 1) * rho`
-per cell, from the intra-class correlation `rho`.
+**Reading a design effect.** A design effect is a *variance* multiplier: it
+says the cell's `n` points carry the information of `n / deff` independent
+ones. Kish's is `deff_i = 1 + (n_i - 1) * rho` per cell, from the intra-class
+correlation `rho`, and `deff ≈ 1` means there was no within-cell correlation
+worth correcting for — the IID standard errors were already right.
 
-- **deff ≈ 1** — no within-cell correlation worth correcting for. The IID
-  standard errors were already right.
-- **deff = 4** — the cell's `n` points carry the information of `n/4`
-  independent ones, and its standard error is 2x the IID figure.
+**The SE moves by more than `sqrt(deff)`, and that is not a mistake.** A fixed
+numeric `deff` is applied as exactly `sqrt(deff)`, because a number you supplied
+says nothing about the within-cell variance. The *estimated* corrections
+(`"kish"` and `"variogram"`) carry a second term: when observations in a cell
+are positively correlated the within-cell sample variance is itself biased
+downward, `E[s^2] = sigma^2 (n - deff) / (n - 1)`, so `..sd_*` understates the
+spread before the effective sample size is applied at all. Correcting both gives
+an inflation of `sqrt(deff * (n - 1) / (n - deff))`, which exceeds `sqrt(deff)`
+and grows as `deff` approaches `n`.
 
 The demo script (`inst/scripts/example_nc_demo.R`, 300 points in 40 Voronoi
 cells) prints `ICC(response) = 0.742 | median deff = 5.45` and a median
-response-SE inflation of `2.33x`, which is `sqrt(5.45)`. That is a strongly
-clustered response: at ~7.5 points per cell, each cell carries the information
-of fewer than two independent observations.
+response-SE inflation of `4.60x` — against `sqrt(5.45) = 2.33x` from the
+effective-sample-size term alone. That is a strongly clustered response: at ~7.5
+points per cell, each cell carries the information of fewer than two independent
+observations.
 
 Cell size is the lever, and it moves the wrong way from most people's
 intuition. `deff` rises with cell occupancy, so *bigger* cells are worse.
@@ -802,11 +819,11 @@ Re-running the demo's aggregation at other seed counts, same data, same seed:
 
 | Voronoi cells | mean points/cell | ICC | median `deff` | SE inflation |
 |---:|---:|---:|---:|---:|
-| 10 | 30.0 | 0.665 | 21.28 | 4.61x |
-| 20 | 15.0 | 0.714 | 9.93 | 3.15x |
-| 40 | 7.5 | 0.742 | 5.45 | 2.33x |
-| 80 | 3.8 | 0.780 | 3.34 | 1.83x |
-| 120 | 2.5 | 0.790 | 1.79 | 1.61x |
+| 10 | 30.0 | 0.665 | 21.28 | 7.97x |
+| 20 | 15.0 | 0.714 | 9.93 | 5.89x |
+| 40 | 7.5 | 0.742 | 5.45 | 4.60x |
+| 80 | 3.8 | 0.780 | 3.34 | 3.90x |
+| 120 | 2.5 | 0.790 | 1.79 | 3.50x |
 
 So there are two honest responses, and picking between them is a modeling
 decision, not a formatting one:
@@ -826,7 +843,22 @@ decision, not a formatting one:
 
 If cells are large enough that "every pair inside is equally correlated" stops
 being credible, switch to `deff = "variogram"`, which lets the correlation
-decay with distance instead.
+decay with distance instead. Note that `"variogram"` fits **one** correlation
+function and applies it to every numeric column, response and predictors alike,
+because a variogram is a property of the field rather than of a variable type;
+`"kish"` is the option that estimates response and predictor ICCs separately.
+
+**Which quantity the `..se_*` columns estimate.** They are the standard error of
+the cell mean *as an estimate of the population (grand) mean* — the
+unconditional quantity, in which the cell's own realised deviation is part of
+the error. That is what the design-effect correction is calibrated for:
+measured 95% coverage of the grand mean is 0.95 with `deff = "kish"` against
+0.29 for the naive SE. They are **not** the standard error of the cell's own
+block average, which is what a cell-level map or a regression on cell values
+usually wants — for that, the naive `sd / sqrt(n)` is the better estimate
+(measured coverage 0.95, against essentially 1.00 for the corrected SE, roughly
+five times too wide). Use `deff` when the cell means feed a population-level
+inference; leave it at 1 when they are measurements of the cells themselves.
 
 ### Area of applicability
 
@@ -848,6 +880,13 @@ aoa  <- area_of_applicability(surf, model = fit, folds = folds)
 inside <- aoa$aoa$AOA %in% TRUE
 surf$.pred[!inside] <- NA          # blank out the extrapolations
 ```
+
+`area_of_applicability()` follows the model: when the fit used
+`include_coords = TRUE` the coordinates are measured as predictors too, so both
+sides must be `sf`, non-`POINT` `newdata` is reduced to representative points,
+and a CRS present on one side is applied to the other. Without that a point far
+outside the training extent but with ordinary covariate values would read as
+*inside*.
 
 Pass the `make_folds()` result you actually validated with. Without it the
 reference distance is each training point's nearest neighbour anywhere in the
@@ -929,6 +968,33 @@ outright; a response that came back as character from a CSV needs
 if that produces `NA`s. `fit_gwr_model()` additionally refuses an
 integer-coded two-valued response and points at `GWmodel::ggwr.basic()`.
 
+**`prep_model_data(): column name(s) 'B5-B4' are not syntactically valid R
+names`**
+Every backend builds a formula from the column names, and `make.names()` would
+silently rewrite them so the formula and the data disagree. Rename before
+fitting: `names(x) <- make.names(names(x))`.
+
+**`prep_model_data(): response 'y' is also listed in 'predictor_vars'.`**
+A model cannot use its own response as a predictor. Nothing downstream catches
+this: it is leakage in the forest (OOB R² near 1, the response at the top of
+the importance table), a silently reduced model in GWR, and duplicated rows in
+the GWR selection table. Drop the response from `predictor_vars`.
+
+**`fit_rf_model(): 'num.trees' is already set by this function and cannot be
+passed through `...` as well.`**
+ranger's own spelling of an argument this wrapper fixes would reach
+`ranger::ranger()` twice. Use the wrapper's spelling — `num_trees`,
+`min_node_size`, `num_threads`, `mtry`, `importance`, `seed` — and let it pass
+the value through.
+
+**`make_folds(block_kfold): the requested grid is ... cells, above the 1,000,000
+this function will build.`**
+`block_size` is in the units of the working CRS, and a value in the wrong unit
+(metres over a CRS in US survey feet, or a lon/lat degree figure) asks for a
+grid far finer than intended. The message prints the extent and the CRS units to
+compare against. `predict_surface()` refuses above 5,000,000 grid cells for the
+same reason.
+
 **`n = 6000 requires FNN for k-NN weights, and Matrix to hold them sparsely`**
 `residual_morans_i()` above n = 5,000. The fallback allocates a dense n x n
 matrix, which is why this is an error rather than a slow path.
@@ -1007,7 +1073,12 @@ Grid construction and posterior expectations are both expensive enough to
 memoise, so both are cached:
 
 - `create_grid_polygons_cached()` memoises grids keyed on boundary geometry,
-  CRS, target cell count and arguments. `clear_grid_cache()` empties it.
+  CRS, target cell count and arguments. `clear_grid_cache()` empties it. It is
+  not a drop-in swap for `create_grid_polygons()`: the cached version also runs
+  `ensure_stable_poly_id()`, so its cells come back re-ordered and re-numbered
+  by a projection-independent spatial sort. Use one or the other throughout an
+  analysis — mixing them means two grids over the same boundary whose `poly_id`
+  values do not line up.
 - `fitted()` on a `bayesian_fit` memoises `posterior_epred()` column means in
   an environment carried on the object, because `summary()`, `residuals()`,
   `model_metrics()` and `compare_models()` each call `fitted()` independently.
@@ -1018,11 +1089,21 @@ memoise, so both are cached:
 
 Detailed diagnostics are logged to a session temp file, and warnings are echoed
 to the console. Logging is scoped to the `"spatialkit"` namespace and never
-touches your global logger configuration. To customize:
+touches your global logger configuration.
+
+The two are separate `logger` appenders: **index 1** is the temp file (INFO+),
+**index 2** is the console echo (WARN+). Both `logger::log_appender()` and
+`logger::log_threshold()` default to `index = 1`, so you have to name index 2
+to change what is printed:
 
 ```r
-logger::log_appender(logger::appender_file("my_analysis.log"), namespace = "spatialkit")
-logger::log_threshold(logger::WARN, namespace = "spatialkit")
+spatialkit_quiet()          # silence the console echo
+spatialkit_quiet(FALSE)     # restore it
+
+# or, by hand:
+logger::log_appender(logger::appender_file("my_analysis.log"),
+                     namespace = "spatialkit", index = 2)
+logger::log_threshold(logger::FATAL, namespace = "spatialkit", index = 2)
 ```
 
 Note that these are `logger` messages, not R conditions: `tryCatch(warning = )`

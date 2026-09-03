@@ -15,7 +15,13 @@ that resolves to \code{NA_crs_}) raises an error rather than silently leaving
 \code{x} unprojected.}
 }
 \value{
-x, potentially with a new projected CRS.
+x, potentially with a new projected CRS.  CRS-less input
+additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
+the lon/lat heuristic fired, \code{"none"} when it declined.  That
+attribute is also read on the way IN — an object already carrying
+\code{"none"} is returned untouched, with the heuristic skipped, which is
+how a \code{predict()} method replays a fit's negative decision so that a
+subset of the training rows is not judged differently from the whole.
 }
 \description{
 Coerces spatial objects to a projected coordinate reference system suitable
@@ -32,16 +38,32 @@ extent of the data — it is \strong{not} always UTM:
 are close to true over a few degrees of longitude, which is the case
 this package is usually in.}
 \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
-a UTM zone is designed for, a single zone would distort distances by
+a UTM zone is designed for, a single zone can distort distances by
 several percent — and that error propagates straight into variogram
-ranges, block sizes, GWR bandwidths and GP length-scales. An equal-area
-projection centred on the data is used instead: Albers conic
-(\code{+proj=aea}) for extents wider than tall, Lambert azimuthal
-(\code{+proj=laea}) otherwise. A warning names the projection, the span that
-triggered it, and this argument.}
-\item{Missing CRS}{If \code{x} has no CRS at all but its bounding box looks
-like lon/lat, EPSG:4326 is assumed with a warning, then the rules above
-apply. Set the CRS explicitly to suppress it.}
+ranges, block sizes, GWR bandwidths and GP length-scales. Which
+projection is actually best is then \strong{measured, not assumed}: the zone,
+a Lambert azimuthal equal-area centred on the data and (where its
+standard parallels do not degenerate) an Albers conic are each scored by
+projecting representative points of the data — a non-POINT layer is
+reduced to points first — and comparing planar with geodesic pairwise
+distances, and the one that distorts least is used.
+The choice, both error figures and this argument are \strong{logged} (see the
+logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
+\code{tryCatch(warning = )} does not see them.}
+\item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
+hemisphere. The wrap is detected from the coordinates (one very large
+gap in the sorted longitudes) and an equal-area projection centred on
+the true extent is used. Only genuinely global coverage falls back to
+EPSG:3857.}
+\item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
+lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
+then apply; coordinates the heuristic declines are left exactly as they
+are. With \code{target_crs} supplied there is no source CRS to reproject
+from, so the same heuristic decides between two outcomes: lon/lat-looking
+coordinates are read as EPSG:4326 and reprojected to the target (a real
+warning), and anything else has the target \strong{stamped on without
+reprojection} — a relabel, logged only, so verify the coordinates really
+are in that CRS. Set the CRS explicitly to suppress either.}
 }
 
 \code{target_crs} overrides all of this: pass it whenever you need a specific,
@@ -57,8 +79,9 @@ pts_ll <- st_as_sf(
 # A local extent gets the containing UTM zone.
 st_crs(ensure_projected(pts_ll))$epsg  # 32632
 
-# A continental extent gets an equal-area projection instead, with a
-# warning naming it -- see Details.
+# A continental extent is scored against the zone and may get an equal-area
+# projection instead; the choice and both error figures are LOGGED, not
+# warned -- see Details and ?spatialkit_quiet.
 wide <- st_as_sf(
   data.frame(lon = c(-120, -70), lat = c(30, 48)),
   coords = c("lon", "lat"), crs = 4326

@@ -42,7 +42,12 @@ size so inner and outer blocks are on the same spatial scale.}
 \code{"R2"} (maximised). Default \code{"RMSE"}.}
 
 \item{tol}{Minimum improvement required to accept a variable.  Default 0,
-meaning any improvement is accepted.}
+meaning any improvement is accepted. The first variable is judged against
+the null (intercept-only) model, so \code{tol} bites from step 1 --- but
+only when that null model can be scored. Backends that refuse a
+zero-length \code{predictor_vars} (\code{\link{fit_rf_model}} and
+\code{\link{fit_gwr_model}} both do) have no null score, and there the
+first variable is accepted unconditionally.}
 
 \item{max_vars}{Optional cap on how many predictors to select.}
 
@@ -58,8 +63,13 @@ reproducible from this one value.}
 \item{quiet}{Suppress progress messages. Default FALSE.}
 }
 \value{
-A list with \code{selected}, \code{score}, \code{history} (a
-data.frame of every candidate evaluated at every step) and \code{params}.
+A list with \code{selected} (the chosen predictors, in the order
+they were added), \code{score} (their cross-validated \code{metric}),
+\code{history} and \code{params}. \code{history} is a data.frame with
+\code{step}, \code{variable} and \code{score}, holding every candidate
+evaluated at every step; when the null model could be scored it also
+carries a \code{step = 0} row named \code{"<none>"} giving that
+baseline, so the first variable's gain can be read off directly.
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a
@@ -108,14 +118,14 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}}
 }
 \concept{cross-validation}
