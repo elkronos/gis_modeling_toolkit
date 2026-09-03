@@ -147,6 +147,7 @@ test_that("harmonize_crs and ensure_projected place CRS-less input identically",
 
 
 test_that("predict() replays a NEGATIVE crs_assumed decision too", {
+  skip_if_not_installed("ranger")
   # A CRS-less training layer the heuristic declined to call lon/lat is fitted
   # in its own planar space.  Nothing recorded that, so predict() re-ran the
   # heuristic on newdata ALONE -- and a SUBSET of those same training rows,
