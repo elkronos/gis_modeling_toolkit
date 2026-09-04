@@ -9,12 +9,11 @@ actual submission.
 
 **This is an update to `spatialkit` 1.0.0, published on CRAN 2026-08-07.**
 
-The version to submit is **not** `1.0.0.9000` — that is the development string.
-Pick a release number before submitting and set `Version:` in `DESCRIPTION`
-accordingly. A **major** bump to `2.0.0` is the honest choice: three exported
-functions are removed, and several defaults change the result of a fit or a
-comparison (see "Breaking changes" in `NEWS.md`). Update this file's version
-references at the same time.
+The version being submitted is **2.0.0**. A major bump is the honest choice:
+three exported functions are removed, and several defaults change the result of
+a fit or a comparison — the same script gets a different block size, a
+different projection and different standard errors than it did under 1.0.0.
+See "Breaking changes" in `NEWS.md`.
 
 ### Reverse dependencies
 
