@@ -276,16 +276,14 @@ reproductions.
   the column literally named `prediction` *is* the prediction; `predict()`
   returned all `NA`.
 
-* Smaller: `gwr_model_selection(dmat_max_n = Inf)` means *always precompute*
-  (it meant never); a logical response meets the same binary-response guard as
-  `0/1`; `model_metrics()` errors on a non-numeric response instead of
+* Smaller: a logical response meets the same binary-response guard as `0/1`; `model_metrics()` errors on a non-numeric response instead of
   returning `n = 0`; `fitted.bayesian_fit()` errors when the posterior cannot
   be drawn instead of returning silent `NA`; `create_grid_polygons()` refuses
   a grid above `max_cells` (default 1e6) up front; `make_folds(method =
   "buffered_loo")` states its guard in bytes (splits are ~4n² bytes; the old
   n = 20000 cap admitted 1.6 GB); `-0` and `0` are the same coordinate in the
   duplicate-aware k-NN; `.morans_i_for_k()` returns the `NA` pair whenever
-  the moments are unavailable; `cv_rf()` gains `pointize`.
+  the moments are unavailable.
 
 * **Documented warnings are now R warnings.** Eight paths the manual
   described as warning only wrote a logger line, invisible to
@@ -670,16 +668,6 @@ reproductions.
   metres, and every local window came back empty with nothing raised. The
   argument's documentation now says so.
 
-* `fit_rf_model()` rejects ranger's own spellings of the arguments it already
-  sets (`num.trees`, `min.node.size`, `num.threads`, ...), naming the wrapper
-  argument to use. They reached `ranger()` twice and failed the call, which
-  through `cv_rf()` or `compare_models_cv(rf_args = )` meant every fold failed
-  and the result was an all-NA row.
-
-* `gwr_model_selection()` refuses factor and character candidates, which
-  `fit_gwr_model()` — the documented next step — rejects anyway, and which the
-  sweep counted as one variable while GWmodel fitted several columns.
-
 * `summary.spatial_fit()` applies the same response-type guard as
   `model_metrics()`. A character response still produced `n = 0` and all-`NA`
   metrics there, and a factor died inside `abs()`.
@@ -722,12 +710,6 @@ reproductions.
   of passing them through to fail inside `ggplot_build()` at print time with
   sf's message, naming no layer; and it borrows a CRS from an overlay when the
   tessellation itself has none.
-
-* `spatialkit_quiet()` is a new exported helper. Both
-  `logger::log_appender()` and `logger::log_threshold()` default to `index = 1`,
-  which is the temp-file trace, so the two-line recipe in the README could not
-  redirect or quieten the **console** echo (index 2) — there was no documented
-  way to silence the package. The README now says so too.
 
 * Documentation corrected where it did not match behaviour: `ensure_projected()`
   states how it chooses a projection for a wide extent (by centroid latitude at
@@ -859,15 +841,6 @@ reproductions.
   itself from the clock and process ID. One seed per fold is now drawn in the
   parent, making each fold's stream a function of `(seed, fold index)` alone.
 
-* `area_of_applicability()` resolves a `make_folds()` result correctly. Every
-  `make_folds()` branch emits `..row_id` **values** in its `train`/`test` slots,
-  and those coincide with row positions only when the input carried no
-  pre-existing `..row_id` — which `cv_gwr()`, `cv_bayes()` and `cv_spatial()` all
-  stamp on before prepping. Indexing the predictor matrix with them computed the
-  training reference distances for the wrong rows whenever the IDs landed inside
-  `1:n`, silently shifting the threshold. IDs are now resolved with `match()`,
-  and an ID absent from the training data is an error.
-
 * `estimate_sac_range()` rejects a singular variogram fit.
   `gstat::fit.variogram()` signals failure by setting `attr(., "singular")` and
   returning normally, so testing only for a `try-error` made the spherical
@@ -898,18 +871,6 @@ reproductions.
   with at least two numeric predictors, so the same script produced different
   fold assignments depending on how many predictors a model happened to carry.
   `cv_gwr()` calls it once per fold.
-
-* `select_features_forward()` builds the inner folds once, before the sweep,
-  instead of once per candidate. Fold construction does not depend on the
-  candidate set, so the old code produced the same splits `p^2/2` times, repeated
-  every block-size warning as many times, and put `make_folds()` outside the
-  `try()`, so one fold-construction failure killed the whole sweep.
-
-* `select_features_forward()` scores every candidate set on the same rows. Its
-  completeness filter now matches `prep_model_data()` exactly, including the
-  finiteness test: a candidate carrying a single `Inf` still reached
-  `cv_spatial()` with a smaller row set than its rivals — precisely the
-  comparison the filter exists to prevent.
 
 * `predict.gwr_fit()` returns an all-`NA` vector when every row of `newdata` is
   dropped as incomplete, matching the other two backends, rather than surfacing
@@ -1112,7 +1073,11 @@ reproductions.
   to ranger's predict unless the caller passes one, so prediction does not
   consume the global RNG and `predict_surface(chunk_size = )` — a performance
   knob — cannot shift later random draws. `cv_rf(seed = )` reaches the forest
-  in every fold. See `?fit_rf_model`.
+  in every fold, and gains `pointize`. Passing ranger's own spelling of an
+  argument the wrapper already sets (`num.trees`, `min.node.size`,
+  `num.threads`, `mtry`, `importance`, `seed`) through `...` is an error naming
+  the wrapper argument to use, rather than reaching `ranger()` twice.
+  See `?fit_rf_model`.
 
 * New `area_of_applicability()`, implementing the dissimilarity index of Meyer &
   Pebesma (2021, <doi:10.1111/2041-210X.13650>). Predictors are centred and
@@ -1134,6 +1099,8 @@ reproductions.
   relative to each column's magnitude rather than an absolute tolerance, so a
   predictor is not dropped for the **unit** it was recorded in. Categorical
   predictors are refused rather than dummy-coded; logicals are read as 0/1.
+  A `make_folds()` result is resolved by its `..row_id` **values**, which
+  coincide with row positions only when the input carried no prior IDs.
   See `?area_of_applicability`.
 
 * New `select_features_forward()`: greedy forward feature selection with
@@ -1145,8 +1112,12 @@ reproductions.
   to `"random_kfold"`. The empty set is scored first where the backend can fit
   it, so the first variable is judged against a null-model baseline rather than
   accepted unconditionally, and `history` carries that baseline as a `step = 0`
-  row. A `max_fits` budget guards against nesting a sweep inside leave-one-out
-  outer folds.
+  row. Every candidate set is scored on the same observations — the
+  completeness filter matches `prep_model_data()` exactly, finiteness test
+  included, so a candidate carrying a single `Inf` cannot be preferred for
+  having an easier subset — and the inner folds are built once, before the
+  sweep, rather than rebuilt per candidate. A `max_fits` budget guards against
+  nesting a sweep inside leave-one-out outer folds.
 
 * New `gwr_model_selection()`: wraps `GWmodel::gwr.model.selection()` (Lu et al.
   2014, <doi:10.1080/10095020.2014.917453>) and returns a ranked table instead
@@ -1154,7 +1125,8 @@ reproductions.
   `select_features_forward()` — the same forward search scored by **AICc**,
   read from the documented `c(bandwidth, AIC, AICc, RSS)` layout of GWmodel's
   `GWR.df`, which carries no column names; the result records whether the table
-  arrived in that shape. Candidates must be numeric. Both limitations are
+  arrived in that shape. Candidates must be numeric, and `dmat_max_n = Inf`
+  means *always precompute* the distance matrix. Both limitations are
   documented rather than papered over: one bandwidth is shared by every
   candidate (which is what makes the criteria comparable), and the null model
   is never evaluated, so the result always names at least one predictor. When
@@ -1245,15 +1217,13 @@ reproductions.
   extent. Without the label the units of a recorded block size were not
   recoverable from the result.
 
-## Documentation
+* `spatialkit_quiet()` is a new exported helper. Both
+  `logger::log_appender()` and `logger::log_threshold()` default to `index = 1`,
+  which is the temp-file trace, so the two-line recipe in the README could not
+  redirect or quieten the **console** echo (index 2) — there was no documented
+  way to silence the package. The README now says so too.
 
-* Every runnable example is now runnable. Four exported functions
-  (`select_features_forward()`, `predict_surface()`, `plot.spatial_fit()`,
-  `plot_folds()`) carried `\dontrun{}` stubs referring to an undefined `pts`;
-  they are now self-contained `\donttest{}` examples guarded on the backend they
-  need. The only remaining `\dontrun{}` blocks are the two that run full MCMC
-  via brms (`fit_bayesian_spatial_model()`, `cv_bayes()`).
-  `compare_models_cv()` gained a runnable RF example.
+## Documentation
 
 * `estimate_sac_range()` documents its three return shapes (a range, a rejected
   range, and no fit at all) and which attributes each carries.
