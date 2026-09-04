@@ -22,23 +22,37 @@ predict_surface(
 
 \item{grid}{Optional \code{sf} POINT layer to predict onto.  When
 \code{NULL}, a regular grid is built over the training extent.  Must have
-at least one row.}
+at least one row.  It is brought into the fit's CRS first: a CRS-less grid
+is given the interpretation the training data got (the assumption recorded
+on the fit), with a warning, and then reprojected -- otherwise a CRS-less
+grid can land thousands of kilometres from the covariates and every cell
+takes the same nearest feature.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
-supplied; when \code{NULL}, derived from \code{n_cells}.}
+supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
+would produce more than 5,000,000 cells is refused, naming the implied
+count and the CRS units -- the usual cause is a value in the wrong unit.  A
+\code{cell_size} wider than the extent yields a single centred cell.}
 
 \item{n_cells}{Approximate cell count used to derive \code{cell_size}.
-Default 10000.  Also ignored when \code{grid} is supplied -- the grid you
+Default 10000.  Must be a single positive finite number and at most
+5,000,000; anything else is an error.  Also ignored when \code{grid} is supplied -- the grid you
 pass is used verbatim.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc}; grid points outside
-it are dropped.}
+it are dropped.  Put through the same CRS replay and reprojection as
+\code{grid}.}
 
 \item{covariates}{Optional \code{sf} layer carrying the model's predictors.
 Required when the model has predictors and \code{grid} does not already
 contain them.  Values are taken from the nearest feature.}
 
-\item{chunk_size}{Rows per prediction call. Default 5000.}
+\item{chunk_size}{Rows per prediction call. Default 5000.  A pure
+performance knob for the GWR and random-forest backends, whose rows do not
+interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
+grid stays inside the training extent -- beyond it the GP boundary has to
+grow and predictions depend on which rows share the call; see
+\code{\link{predict.bayesian_fit}}.}
 
 \item{se}{Logical; also return a standard-error/posterior-SD column where the
 backend supports it.  Default FALSE.}

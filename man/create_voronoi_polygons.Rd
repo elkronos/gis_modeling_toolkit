@@ -30,7 +30,11 @@ create_voronoi_polygons(
 \item{quiet}{Logical; suppress messages.}
 }
 \value{
-A list with cells, index, boundary, method, params.
+A list with \code{cells}, \code{index}, \code{boundary},
+\code{method} and \code{params}.  \code{index} holds one \code{cell_id}
+per row of \code{points_sf}, and \code{NA} for a point that falls outside
+every cell -- outside the study area, in other words -- so a summary built
+from it counts only the points the tessellation actually covers.
 }
 \description{
 Assigns every location in the study area to its nearest input point, giving
@@ -43,7 +47,7 @@ instead when you need equal-area cells or a resolution independent of where
 the data happen to be.
 }
 \details{
-The heavy lifting is \code{\link[sf:geos_unary]{sf::st_voronoi()}}; what this adds is the surrounding
+The heavy lifting is \code{\link[sf:st_voronoi]{sf::st_voronoi()}}; what this adds is the surrounding
 bookkeeping — projecting lon/lat input, building and buffering an envelope
 so edge cells are bounded, clipping to \code{boundary}, restoring the
 point-to-cell correspondence that \code{st_voronoi()} scrambles, and stamping
@@ -61,10 +65,10 @@ res$cells   # one polygon per unique point, with stable cell_id
 res$index   # cell_id assignment for each input point
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
 }
 \concept{tessellation}

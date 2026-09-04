@@ -39,8 +39,29 @@ test_that("estimate_sac_range uses OLS residuals when they align", {
 
   # Residuals of resp ~ pred are not resp, so the two calls must disagree --
   # otherwise "no warning" would be satisfiable by ignoring predictor_vars.
-  raw <- estimate_sac_range(pts, response_var = "resp")
-  expect_false(isTRUE(all.equal(as.numeric(with_pred), as.numeric(raw))))
+  # The transect above is pure noise in both columns, and the honest answer for
+  # a variogram that never reaches a sill is NA on BOTH paths, so that fixture
+  # cannot discriminate.  Use one where the predictor carries a real trend: the
+  # raw response is then dominated by it and reports a long (or unidentified)
+  # range, while the residuals are the short-range structure underneath.
+  set.seed(7)
+  m  <- 200
+  cx <- runif(m, 0, 1000); cy <- runif(m, 0, 1000)
+  dd <- as.matrix(stats::dist(cbind(cx, cy)))
+  short <- as.numeric(t(chol(exp(-dd / 25) + diag(1e-6, m))) %*% rnorm(m))
+  trend <- st_pts <- NULL
+  trend <- 0.05 * cx                                   # a strong linear trend
+  tp <- sf::st_as_sf(data.frame(x = cx, y = cy, pred = cx,
+                                resp = trend + short),
+                     coords = c("x", "y"), crs = 32632)
+
+  with_trend_pred <- suppressWarnings(
+    estimate_sac_range(tp, response_var = "resp", predictor_vars = "pred"))
+  raw_trend <- suppressWarnings(estimate_sac_range(tp, response_var = "resp"))
+  expect_false(isTRUE(all.equal(as.numeric(with_trend_pred),
+                                as.numeric(raw_trend))))
+  # Detrending is what makes the short-range structure identifiable at all.
+  expect_true(is.finite(as.numeric(with_trend_pred)))
 })
 
 test_that("na.exclude keeps residuals aligned when a predictor has NAs", {

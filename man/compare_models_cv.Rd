@@ -29,7 +29,7 @@ compare_models_cv(
 \item{predictor_vars}{Predictor column names.}
 
 \item{models}{Character vector: any subset of \code{c("GWR", "Bayesian",
-  "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
+"RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 Names outside that set raise a warning and are dropped; if nothing
 recognised remains, this is an error rather than a silent fallback.
 A recognised model whose backend package is not installed is dropped with
@@ -42,7 +42,13 @@ compare and the call errors with \code{"no viable models."}.  Guard with
 
 \item{seed}{RNG seed. Default 123.}
 
-\item{folds}{Optional precomputed fold splits.}
+\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
+value, or a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values.  Train and test must be disjoint — a fold that
+trains on its own test rows is not a cross-validation split and is refused
+with an error — and IDs naming no row in the prepared data are dropped with
+a logged count (expected when rows were removed for missing values; a sign
+the folds came from other data when they were not).}
 
 \item{boundary}{Optional polygon sf/sfc.}
 
@@ -101,9 +107,9 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{evaluate_insample}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
 \concept{model evaluation}

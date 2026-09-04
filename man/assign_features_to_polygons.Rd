@@ -21,13 +21,16 @@ assign_features_to_polygons(
 
 \item{polygon_id_col}{Name of the polygon identifier column. Default "poly_id".}
 
-\item{keep_unassigned}{Logical; retain unmatched features. Default FALSE.}
+\item{keep_unassigned}{Logical; retain features that fall inside no
+polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
+them.}
 
 \item{predicate}{Binary spatial predicate function. Default sf::st_intersects.}
 
-\item{largest}{Logical; for polygon-on-polygon joins with overlapping
-polygons, keep the polygon with the largest overlap. Default TRUE. Only
-effective with predicates that support it (e.g. st_intersects).}
+\item{largest}{Logical; when \code{features_sf} is itself polygonal, keep
+the polygon with the largest overlap. Default TRUE. Ignored for point and
+line features, and silently dropped if the \code{predicate} does not
+support it (\code{sf::st_intersects} does).}
 
 \item{tie_break}{Strategy for resolving features that match multiple
 polygons: \code{"smallest_area"} (default) keeps the polygon with the
@@ -35,10 +38,15 @@ smallest area, \code{"first"} keeps the first match (original order-dependent
 behavior).}
 }
 \value{
-An sf object with polygon_id_col attached. Any column of
-\code{features_sf} whose name would collide with the polygon ID column is
-dropped before the spatial join (with a warning), so re-assigning an
-already-assigned layer replaces the old IDs rather than failing.
+An sf object with \code{polygon_id_col} attached, one row per input
+feature (fewer if \code{keep_unassigned = FALSE} dropped unmatched ones), in
+the CRS \code{features_sf} arrived in. Any column of \code{features_sf} whose name
+would collide with the polygon ID column is dropped before the spatial
+join (with a warning), so re-assigning an already-assigned layer replaces
+the old IDs rather than failing. If \emph{no} feature falls inside any polygon
+the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
+warning is raised, since the usual cause is two layers in different
+places --- a CRS that could only be stamped, not reprojected.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
@@ -70,8 +78,8 @@ table(assigned$poly_id)
 \code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
-Other aggregation: 
-\code{\link{determine_optimal_levels}()},
-\code{\link{summarize_by_cell}()}
+Other aggregation:
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}}
 }
 \concept{aggregation}

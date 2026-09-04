@@ -102,8 +102,9 @@ test_that("ensure_stable_poly_id drops non-polygon rows and refuses an empty res
                  sf::st_sf(v = 5L, geometry = sf::st_sfc(sf::st_point(c(9, 9)),
                                                          crs = 32632)))
 
-  lines <- capture_spatialkit_log(
-    out <- ensure_stable_poly_id(mixed, transform_for_sort = NULL))
+  expect_warning(lines <- capture_spatialkit_log(
+    out <- ensure_stable_poly_id(mixed, transform_for_sort = NULL)),
+    "dropping 1 non-polygon row")
   expect_true(log_has(lines, "dropping 1 non-polygon row\\(s\\) \\(POINT: 1\\)"))
   expect_equal(nrow(out), 4L)
   expect_equal(out$poly_id, 1:4)

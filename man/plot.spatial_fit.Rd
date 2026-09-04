@@ -18,6 +18,11 @@ the autocorrelation.}
 reference line.}
 \item{\code{"variogram"}}{Empirical variogram of the residuals with the
 fitted model overlaid, so the fit can be judged rather than trusted.
+The distance axis is labelled in the units of the CRS the variogram
+was actually fitted in, which is not necessarily the fit's own CRS
+(lon/lat data are projected first). A single-direction fit names its
+azimuth in the subtitle; a fit that did not converge says so in the
+caption, since the overlaid model line is then not a fit to believe.
 Requires 'gstat'.}
 }}
 
@@ -55,7 +60,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

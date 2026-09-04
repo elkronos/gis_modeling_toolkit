@@ -235,6 +235,352 @@ whether it affects an analysis you have already run.
   simplified the length-1 result to a vector, making the neighbour index a
   1 x n matrix and every row after the first out of bounds.
 
+### Fourth audit pass (adversarial): corrections that change results
+
+Three reviewers were set the task of making the package fail or silently
+misbehave on valid input, with their own reproductions. Every finding below
+was reproduced here before it was touched; the figures quoted are from those
+reproductions.
+
+* **`summarize_by_cell(deff = "kish")` under-estimated the predictor ICC by
+  about a factor of `m`.** The pooled one-way ANOVA grouped the `m` z-scored
+  predictor columns under the same cell label, so independent per-column cell
+  effects averaged away in the shared cell mean and the between-cell sum of
+  squares shrank by ~1/m. Measured at true rho = 0.5 with m = 4: pooled ICC
+  **0.12** against 0.495 per column, so every predictor SE was ~44% too small.
+  The pooled group is now (variable, cell), which recovers 0.49.
+
+* **`summarize_by_cell(deff = "variogram")` evaluated the variogram at the
+  wrong distances on lon/lat input.** The range is a length in the CRS the
+  variogram was fitted in (metres); within-cell distances were taken from the
+  input as supplied, so degrees went into a metre-scaled correlation function
+  and every pair saturated. Same points, cells and variogram: median SE
+  **0.657 with UTM input, 235.9 with EPSG:4326 input** — a factor of 354. The
+  points are now transformed to the CRS the variogram records (a new `crs`
+  attribute on `estimate_sac_range()`'s result), else projected the way it
+  would have projected them.
+
+* **Design effects are built from what a column actually observes.** A cell
+  of 10 rows with 2 finite responses had its response SE formed at the
+  10-row design effect, then applied to a 2-observation mean: adding 8
+  NA-response rows moved the SE from 8.46 to **26.38**. Each column's design
+  effect now uses its own non-missing count, with the mean pairwise
+  correlation recomputed over the observed locations when a cell has NAs;
+  `cell_weight` is the effective count of the primary variable, not of rows
+  (`n` still counts rows).
+
+* **`make_folds(method = "nndm")` is now the paper's algorithm** (Milà et al.
+  2022, as in `CAST::nndm()`) and is deterministic. The previous version drew
+  one random radius per point from the target distribution and excluded up to
+  the order statistic *closest* to it, which rounds down half the time: on a
+  two-cluster layout the realised nearest-neighbour ECDF exceeded the target
+  by up to **0.17** (13% of folds kept a training point within 50 m against a
+  target of 9%) — an optimistic cross-validation. It now agrees with a
+  transcription of the paper's procedure removal for removal, reports
+  `params$max_ecdf_excess`, and gains `min_train` (default 0.5) and `phi`
+  arguments. No random numbers are drawn; the caller's RNG is untouched.
+
+* **CRS-less coordinates get ONE interpretation, wherever they enter.**
+  `prep_model_data()` assumed EPSG:4326 for CRS-less data that looked like
+  lon/lat and projected it, while every `predict()` method passed the fit's
+  CRS as a target — a branch that *stamped* it onto the raw numbers. The same
+  rows sat in two different places, and `predict(fit, newdata = training
+  rows)` disagreed with `fitted(fit)` by up to one response SD (R² 0.98
+  in-sample, 0.64 via newdata). The heuristic is now a single function used
+  by both branches; a fit records the assumption it was built under and
+  replays it on CRS-less `newdata`. Two further symptoms of the same split —
+  CRS-less LINESTRINGs aborting in `coerce_to_points()` ("crs not found"),
+  and hex/square `build_tessellation()` refusing input voronoi accepted — are
+  fixed with it. The assumption is now announced with a real R warning.
+
+* **`predict.rf_fit()` refuses a numeric-at-fit predictor supplied as text.**
+  `ranger` factor-codes the strings and applies numeric split thresholds to
+  the codes: R² collapsed from 0.98 to **−1.91** with nothing said.
+
+* **`residual_morans_i()` refuses a malformed `weights` matrix** instead of
+  silently substituting the default k-NN(8) matrix (I = 0.874 returned for
+  four malformed shapes against 0.805 for the weights actually supplied).
+
+* **`make_folds(method = "leave_location_out")` refuses empty-string
+  labels.** `names<-`/`[` treat `""` as *no name*, so rows with a blank site
+  code got fold `NA`, entered no test set, and put `NA` row-ids into the
+  training splits with nothing said. Lookup is positional now.
+
+* **The fold-provenance fingerprint no longer refuses the caller's own data.**
+  Three defects in the version introduced last pass: a character `..row_id`
+  was coerced to all-`NA` (and matched row 1 everywhere); coordinates were
+  compared as `"%.7g"` strings and flipped on the ~1 in 5000 that a
+  reprojection moved by 5e-9°; and polygon input was probed *after*
+  pointization, so a different `pointize` in the cv call read as different
+  data. Both sides now probe the geometry as supplied, keep IDs in their own
+  type, and compare numerically within 1e-6°.
+
+* **`n_folds_attempted` counts the folds supplied.** A fold whose test rows
+  were all removed as incomplete vanished before fitting and was absent from
+  both counts, so five supplied folds reported `4/4`. It is announced with a
+  real warning.
+
+* **`determine_optimal_levels()`'s elbow uses the signed deviation below the
+  chord.** `abs()` let a concave bump *above* the chord — a k where k-means
+  fell into a worse local optimum — win with the same magnitude.
+
+* **`estimate_sac_range()` returns `NA` for a constant variable** (an exactly
+  explained response, or a constant one) instead of a fitted "range" of 168
+  or 673 from a variogram that is identically zero. `make_folds(auto_range =
+  TRUE)` no longer re-opens the unseeded subsample by forwarding its own
+  `seed = NULL`.
+
+* **`fit_bayesian_spatial_model()` attaches a user-supplied *global*
+  `lscale` prior at coefficient level**, the same way it does its own, so
+  `set_prior(..., class = "lscale")` reaches Stan instead of being discarded.
+
+* **`fitted()` on a `gwr_fit` returns the prediction when a predictor is
+  named `prediction`.** The model-term exclusion added last pass was applied
+  to `gwr.predict()`'s SDF too, where coefficients are suffixed `_coef` and
+  the column literally named `prediction` *is* the prediction; `predict()`
+  returned all `NA`.
+
+* Smaller: `gwr_model_selection(dmat_max_n = Inf)` means *always precompute*
+  (it meant never); a logical response meets the same binary-response guard as
+  `0/1`; `model_metrics()` errors on a non-numeric response instead of
+  returning `n = 0`; `fitted.bayesian_fit()` errors when the posterior cannot
+  be drawn instead of returning silent `NA`; `create_grid_polygons()` refuses
+  a grid above `max_cells` (default 1e6) up front; `make_folds(method =
+  "buffered_loo")` states its guard in bytes (splits are ~4n² bytes; the old
+  n = 20000 cap admitted 1.6 GB); `-0` and `0` are the same coordinate in the
+  duplicate-aware k-NN; `.morans_i_for_k()` returns the `NA` pair whenever
+  the moments are unavailable; `cv_rf()` gains `pointize`.
+
+* **Documented warnings are now R warnings.** Eight paths the manual
+  described as warning only wrote a logger line, invisible to
+  `tryCatch(warning = )`, `expect_warning()` and `options(warn = 2)`:
+  `residual_morans_i()` returning `NULL`, the CRS assumption in
+  `ensure_projected()` and stamping in `harmonize_crs()`, GWR collinearity,
+  seed clamping in `voronoi_seeds_kmeans()` / `get_voronoi_seeds()`, dropped
+  rows in `ensure_stable_poly_id()`, and the dropped column in
+  `assign_features_to_polygons()`. Three deliberate methodological cautions
+  (`include_coords = TRUE`, `random_kfold` feature selection, non-standardised
+  Moran weights) stay logged and their documentation now says so.
+
+### Fifth audit pass (adversarial): corrections that change results
+
+Seven reviewers were set the same task as the fourth pass, one per area of the
+package, each with their own reproductions. Every finding below was reproduced
+here before it was touched, and the figures quoted are from those
+reproductions.
+
+* **`predict()` on a Bayesian GP fit depended on which other rows shared the
+  call.** brms 2.x stores `Xgp`, `dmax` and `cmeans` in a fit's GP basis but
+  **not** the Hilbert-space boundary `L`, so `brms:::.data_gp()` recomputes it
+  from whatever rows `predict()` is handed. Every eigenfunction of the
+  approximation therefore moved with the newdata bounding box while the fitted
+  basis coefficients stayed put. Measured: `L` was 5.57 at fit time, 4.02 for a
+  five-row `newdata` and 3.63 for one row; `predict_surface()` on the same
+  10,000-cell grid differed by **1.78** between `chunk_size = 5000` (the
+  documented default) and a single call; and `cv_bayes()`, which predicts each
+  test fold separately, scored **every** fold against a basis the model was
+  never fitted with. `predict.bayesian_fit()` now pins the boundary by
+  appending the training coordinate extrema and dropping them again, so the
+  chunked, fold-wise and single-call answers are identical.
+
+* **A predictor whose name is not a syntactic R name fitted a different
+  model.** Every backend builds its formula from these names, so a column
+  called `"B5-B4"` was fitted as `B5 - B4` — a different model, silently, with
+  `$predictor_vars` still reporting `"B5-B4"` — and `"band 4"` died inside
+  `str2lang()` with a parser error naming no column. `prep_model_data()` now
+  refuses such names up front and says which column and what to do about it.
+  (Backticking is not a fix: the `sp` coercion GWmodel needs runs the names
+  through `make.names()` anyway, after which the formula and the data
+  disagree.)
+
+* **`make_folds(method = "nndm")` left a held-out point's exact-location twin
+  in its own training fold.** `FNN::get.knn()` returns the query point's own
+  index in place of one of its duplicates; dropping the self entry and padding
+  with `Inf` left the twin missing from the neighbour list altogether, so the
+  sweep could never exclude it. On 30 sites x 3 repeats, **60 of 90 folds**
+  trained on a point at distance 0 from the row they were scoring while
+  `params$realised_distances` reported a median buffer of 108.8. The package
+  now reproduces the reference implementation fold-for-fold on duplicated
+  coordinates.
+
+* **NNDM kept one training point too many whenever `n * min_train` was
+  fractional.** The sweep permits `ceiling(n - 1 - rmin)` removals but the
+  neighbour matrix had `floor(n - 1 - rmin) + 1` columns, so every fold that
+  reached the floor stopped one removal early — any odd `n` at the default
+  `min_train = 0.5`. Measured at n = 75: 2700 removals against the reference's
+  2775, with **all 75 folds** differing.
+
+* **`summarize_by_cell(deff = "kish")` weighted the response with a
+  predictor's ICC.** The fallback to the predictor ICC is for the case where
+  no response was supplied; applying it whenever the response's own ICC came
+  out non-positive meant that merely adding a predictor to the call changed the
+  response's regression weight by a factor of **20**, while the response SE was
+  (correctly) left at `deff = 1`.
+
+* **A column literally named `n` was summarised as the row count.**
+  `dplyr::summarise()` makes each new column visible to the expressions after
+  it, so the row count shadowed a response or predictor named `n`:
+  `resp_mean_n` came back equal to `n`, with `sd` and `se` `NA`, and no
+  message.
+
+* **`deff = "variogram"` on CRS-less lon/lat input compared degrees against a
+  metre range.** `estimate_sac_range()` assumed EPSG:4326 and fitted in UTM
+  metres, while `summarize_by_cell()` *stamped* the UTM CRS onto the degree
+  coordinates without reprojecting: within-cell separations of ~0.005 "m"
+  against a 350 m range saturated every pair, so `deff` equalled `n`,
+  `cell_weight` collapsed to 1 and the standard errors were **~350x** too
+  large. The root cause — `.transform_or_stamp()` and `harmonize_crs()`
+  stamping where `ensure_projected()` reprojects — placed identical input
+  **5,418 km** apart depending on which entry point a caller used, and is also
+  why `assign_features_to_polygons()` returned **zero rows** for points
+  `build_tessellation()` had just tessellated correctly. All three now apply
+  the same lon/lat heuristic and warn either way.
+
+* **A refused autocorrelation range still sized design effects.**
+  `estimate_sac_range()` returns `NA` with a `rejected_reason` when the fitted
+  range runs past the longest observed lag or the optimiser stopped at its
+  iteration limit, and attaches the model so the fit can be *inspected*.
+  `summarize_by_cell(deff = "variogram")` read that attribute without checking
+  the value, so the correlation function saturated at every within-cell
+  distance: `deff` equal to `n`, `cell_weight` 1, standard errors inflated
+  **40-50x**. Both the supplied and the internally estimated path now fall back
+  to `deff = 1` and say so.
+
+* **Variogram models are fitted with a nugget.** A nugget-free model forces the
+  curve through the origin, and gstat's default `N/h^2` weights buy that
+  constraint by collapsing the range: with a 50% nugget the fitted range came
+  back at about **0.45** of the truth, so `make_folds(auto_range = TRUE)` built
+  blocks less than half the correlation length it reported.
+
+* **The directional maximum is used only when anisotropy is established.**
+  Splitting 180 degrees four ways leaves each directional variogram about a
+  quarter of the point pairs, and the maximum of four noisy estimates is biased
+  upward: on isotropic simulated fields the returned range ran about **40%**
+  above the truth and the "notable anisotropy" warning fired on the majority of
+  them. An omnidirectional variogram is now fitted alongside and is the default
+  answer; the directional maximum is used when all four directions fit, their
+  ratio exceeds 1.5, **and** the widest stands more than 1.5x above the
+  all-pairs estimate. On the package's own test field (true range 80) the old
+  rule returned 248 and the new one returns 84; genuine 3:1 anisotropy is still
+  recovered.
+
+* **`.replay_crs_assumption()` now replays a negative decision too.** When
+  CRS-less training data were passed through as planar, nothing recorded that,
+  so every `predict()` re-ran the lon/lat heuristic on `newdata` alone — and a
+  **subset** of those same training rows, whose own bounding box sits inside
+  the lon/lat envelope, was judged differently from the whole: taken for
+  degrees, reprojected, and predicted about 1e6 m from where it was fitted.
+  `predict(fit, training_subset)` disagreed with `fitted(fit)[subset]` by more
+  than the response's standard deviation while `predict(fit, full_data)` agreed
+  exactly.
+
+* **Antimeridian data are no longer flattened onto EPSG:3857.** A bounding box
+  cannot distinguish global coverage from a layer straddling +/-180 degrees, but
+  the coordinates can (one very large gap in the sorted longitudes). Web
+  Mercator *splits* such a layer: two stations 41 km apart came out **40,068
+  km** apart, destroying every distance downstream. Only genuinely global
+  coverage now falls back to EPSG:3857.
+
+* **The projection for a wide extent is chosen by measurement, not by rule of
+  thumb.** Albers standard parallels came from the bounding box while the
+  conic/azimuthal branch came from the centroid latitude, so a
+  trans-equatorial extent put the parallels either side of the equator: at
+  `lat_1 = -lat_2` PROJ refused the string outright and `ensure_projected()`,
+  `make_folds()` and `build_tessellation()` all aborted with an
+  internal-looking "invalid crs", and just short of it the projection distorted
+  distances by **15.6%** against the single UTM zone's 1.65%. The candidates
+  are now scored by projecting a sample of the data's own points and comparing
+  planar with geodesic distances; the message reports both figures.
+
+* **`fitted.gwr_fit()` could return a coefficient surface.** Which GWmodel call
+  produced an SDF was inferred from its column names, so a *predictor* ending
+  in `_coef` made a `gwr.basic()` SDF look like a `gwr.predict()` one and
+  switched off the model-term exclusion; with a second predictor named `yhat`,
+  `fitted()` then returned that predictor's local coefficient surface (R2
+  **-2.28** against 0.986) and `residuals()`, `summary()` and `model_metrics()`
+  followed it. The mode is now passed explicitly.
+
+* **A factor level with no training rows was a guess, not an error.**
+  `.rf_align_levels()` checked the level *set* rather than the levels that
+  occur, so an ordinary subset — or a spatial-CV fold holding out a whole class
+  — let a level with zero training rows through and ranger returned another
+  level's prediction (49.9 where the truth was ~100). The documentation has
+  always said an unseen level is an error.
+
+* **A logical predictor supplied as text was silently mis-coded.**
+  `is.numeric`, `is.factor` and `is.character` are all `FALSE` for a logical, so
+  the type guard skipped it entirely: a `"TRUE"`/`"FALSE"` character column —
+  what a CSV round trip produces — was factor-coded 1/2 against splits built on
+  0/1, sending every row to the `TRUE` side (correlation **0.21** with the
+  correct predictions).
+
+* **`compare_models_cv()` scores every model on identical folds.** The
+  documented guarantee only held when `folds` was supplied: with `folds = NULL`
+  each backend built its own from `k`, `seed`, `block_size` and the rest, so a
+  per-model `block_size` put **104 of 150 rows** in different folds for GWR and
+  RF, and `seed = NULL` did the same with no overrides at all. The folds are now
+  built once, and the arguments that decide the split are protected.
+
+* **`select_features_forward()` has a null-model baseline.** `best` started at
+  `+/-Inf` with the stopping test gated on `is.finite(best)`, so the first step
+  was accepted whatever its score: on a pure-noise response a "predictive"
+  feature was selected in **100%** of runs, and in **23%** the returned set was
+  worse in CV RMSE than fitting nothing at all. The empty set is now scored
+  first (where the backend can fit it).
+
+* **User weights with a non-zero diagonal.** Every moment of Moran's I assumes
+  no observation is its own neighbour. A self-inclusive row-standardised kNN
+  matrix — an easy thing to build by hand — rejected the null on **75%** of
+  white-noise residuals at a nominal 5%, with no condition raised. The diagonal
+  is now zeroed with a warning.
+
+* **`build_tessellation()$index` no longer snaps outside points to the nearest
+  cell.** Points outside every cell were assigned to whichever was closest, so a
+  summary built from the index counted all 40 points of a layer whose study
+  area held 10, while `assign_features_to_polygons()` on the same cells
+  correctly reported 30 misses. Only a point within a thousandth of a cell
+  width is snapped now; the rest are `NA`, and the count is logged.
+
+* **`ensure_stable_poly_id()` is stable across projections again.** The sort
+  key was the raw double centroid, so cells sharing an exact `x` in one CRS
+  differed by ~1e-11 degrees after a round trip through another: **14 of 16**
+  cells got a different ID depending on which CRS the layer arrived in — the
+  exact failure the function exists to prevent. The key is now rounded to 7
+  decimals (about a centimetre).
+
+* **A numeric `deff` is applied as the uniform inflation it is documented to
+  be.** The `E[s^2]` correction the estimated design effects apply is derived
+  from within-cell correlation and is unjustified for a constant the caller
+  chose: `deff = 2` doubled a 3-point cell's SE instead of multiplying it by
+  `sqrt(2)`, and returned `NA` for every cell with `n <= deff`.
+
+* **The Kish ICC guard matches its documentation.** The docs promise "at least
+  2 cells with 2+ observations; falls back to `deff = 1` otherwise", and the
+  check was only `k >= 2, N >= 4`: all-singleton cells give a within-group sum
+  of squares of 0 and therefore an ICC of exactly **1** — a design effect of
+  `n` from data carrying no within-cell information at all.
+
+* **`gp_lengthscale_bounds()` and the GP basis use two dimensions and unique
+  locations.** `stats::dist()` uses every column, so POINT Z geometry gave
+  3-D length-scale bounds in mixed units; and `brms::gp()` defaults to
+  `gr = TRUE` and reduces its covariates to unique rows before taking the
+  boundary, so replicated locations made the package's `S` — and with it
+  `gp_c` and the basis-adequacy threshold `gp_ell_min` — wrong by that factor
+  (0.68x with one heavily-sampled station).
+
+* **`estimate_sac_range()` and `make_folds()` drop the Z dimension.**
+  `gstat::variogram()` and `sf::st_distance()` use every coordinate dimension,
+  so an XYZ layer had its elevation folded into each lag: the returned "range"
+  was a length in 3-D (413.6 against 136.8 for the same stations) while the
+  block grid, the buffered-LOO buffer, NNDM's neighbour distances and
+  `summarize_by_cell()` all work in 2-D map distance.
+
+* **`cv_rf(seed = )` reaches the forest.** `fit_rf_model()` carries its own
+  `seed = 123L` and `...` did not override it, so every fold's forest was grown
+  with ranger seed 123 whatever the caller passed — and no argument could
+  change it. Two different seeds returned bit-identical predictions on fixed
+  folds.
+
 ### API and default changes
 
 * Removed the legacy wrappers `evaluate_models()`, `evaluate_models_cv()` and
@@ -371,14 +717,165 @@ whether it affects an analysis you have already run.
   silently into `estimate_sac_range()`, `make_folds(block_kfold)` block sizing,
   GWR bandwidth selection and the GP length-scale. Extents reaching more than 5°
   from the candidate zone's central meridian now receive an equal-area
-  projection centred on the data — Albers for mid-latitudes, Lambert Azimuthal
-  Equal Area otherwise — with a logged explanation. Only longitude offset
-  triggers the switch, since `cos(lat)` shrinks the distance from the central
-  meridian and a tall narrow north-south extent is UTM's design case. Bounding
-  boxes spanning more than 180° of longitude cannot be distinguished from data
-  straddling the antimeridian and fall back to EPSG:3857 with a logged warning.
-  Pass
-  `target_crs` to override.
+  projection centred on the data, with a logged explanation. Only longitude
+  offset triggers the switch, since `cos(lat)` shrinks the distance from the
+  central meridian and a tall narrow north-south extent is UTM's design case.
+  (Which equal-area projection is no longer decided by latitude band — see
+  *The projection for a wide extent is chosen by measurement* under the fifth
+  audit pass below, which also replaced the EPSG:3857 fallback for wide
+  bounding boxes with antimeridian detection.) Pass `target_crs` to
+  override.
+
+### Fifth audit pass: guards, messages and documentation
+
+* `prep_model_data()` now drops rows whose geometry is empty or whose
+  coordinates are not finite, and counts them in its existing log line.
+  `st_geometry_type()` calls an EMPTY POINT a "POINT", so nothing ever looked
+  at the coordinates: such a row reached GWmodel as a raw `sp` coercion error
+  naming no row, `ranger(include_coords = TRUE)` as "Missing data in columns",
+  and brms at predict time as an infinite GP boundary that made **every** basis
+  function on the surface `NaN`. It also refuses a response listed among its
+  own predictors, which was leakage in the forest, a silently reduced model in
+  GWR, and duplicated rows plus a phantom `<none>` entry in the GWR selection
+  table.
+
+* `make_folds()` validates `k`. A non-integer `k` truncated inside
+  `rep(floor(n/k), k)`: only `floor(k)` folds were built, the last rows of the
+  permutation landed in **no** test set, and `k` was echoed back unchanged, so
+  `length(folds) != k`.
+
+* `make_folds(block_kfold)` refuses a grid it cannot build. There was no cap on
+  `nx * ny`, so `block_size` in the wrong unit asked for 1e8-1e11 cells and
+  exhausted memory; the message now names the implied cell count, the extent
+  and the CRS units, as `create_grid_polygons()` already did.
+  `predict_surface()` gained the same guard on `cell_size` and `n_cells`.
+
+* Hand-built `folds` are checked. Train and test overlapping is not
+  cross-validation — the model is fitted and scored on the same rows and the
+  result is reported as a CV score (RMSE 0.50 against 0.97 for the same data
+  properly split) — and is now refused; fold IDs that name no row were dropped
+  silently by `na.omit(match())` and are now counted and logged.
+
+* The fold provenance probe tolerates a row it could not measure. It was taken
+  before the empty-geometry filter, so it carried `NaN` coordinates and every
+  later `cv_*()` call on the same data died with R's internal "missing value
+  where TRUE/FALSE needed".
+
+* `make_folds(nndm)` pointizes `prediction_points`. A POLYGON prediction layer
+  — the package's own grid cells — gave point-to-polygon distances, zero for
+  every cell containing a training point, which pulled the target distribution
+  towards zero and degenerated the distance-matched CV towards plain LOO.
+  `make_folds()` also aligns CRS-less points to a `boundary` or
+  `prediction_points` that carries a CRS, as `prep_model_data()` already did,
+  instead of aborting inside sf.
+
+* `estimate_sac_range()` drops rows with unusable coordinates instead of
+  returning `NA` for the whole layer under the message "variogram model fit
+  failed", which blamed the fit rather than the row and disagreed with
+  `make_folds()` on the same data.
+
+* GWR's local collinearity spot-check now runs **after** the bandwidth is
+  chosen, includes the intercept column, and treats a non-finite condition
+  number as extreme. On the default path (`bandwidth = NULL`) it used a
+  stand-in window, so the documented warning never fired; without the intercept
+  it could not see an indicator constant inside a window; and
+  `is.finite(cn) && cn > 1e6` discarded exactly singular designs. A new post-fit
+  warning counts local regressions that returned non-finite coefficients —
+  previously `fitted()`, `summary()` and `model_metrics()` silently reported
+  metrics computed from the survivors (n = 18 of 200, R2 = 0.96).
+
+* `fit_gwr_model()` warns when a fixed bandwidth is implausibly small for the
+  data's extent. The bandwidth is a distance in the CRS the fit runs in, which
+  `prep_model_data()` may have chosen: 0.2 supplied for lon/lat data is 0.2
+  metres, and every local window came back empty with nothing raised. The
+  argument's documentation now says so.
+
+* `fit_rf_model()` rejects ranger's own spellings of the arguments it already
+  sets (`num.trees`, `min.node.size`, `num.threads`, ...), naming the wrapper
+  argument to use. They reached `ranger()` twice and failed the call, which
+  through `cv_rf()` or `compare_models_cv(rf_args = )` meant every fold failed
+  and the result was an all-NA row.
+
+* `gwr_model_selection()` refuses factor and character candidates, which
+  `fit_gwr_model()` — the documented next step — rejects anyway, and which the
+  sweep counted as one variable while GWmodel fitted several columns.
+
+* `summary.spatial_fit()` applies the same response-type guard as
+  `model_metrics()`. A character response still produced `n = 0` and all-`NA`
+  metrics there, and a factor died inside `abs()`.
+
+* `print.spatial_fit()` prints the CRS (which its documentation has always
+  promised) and one `Formula` line. `sprintf()` vectorised over a multi-element
+  `deparse()`, so every `bayesian_fit` printed its formula as two mangled
+  fields — the `gp()` term this package builds is always long.
+
+* `summarize_by_cell()` warns when `cells_sf` carries duplicated IDs (each
+  summary row is then repeated per matching cell, so `sum(n)` exceeds the
+  number of points), and realigns **every** per-cell vector in
+  `deff_applied` after the join, not only `deff`: `$rbar` was left in pre-join
+  order, so `deff[i]` and `rbar[i]` described different cells.
+
+* `assign_features_to_polygons()` warns when no feature falls in any polygon
+  instead of returning an empty layer silently.
+
+* `create_grid_polygons(target_cells = )` builds square cells for
+  `type = "square"`. `cellsize = c(w/nx, h/ny)` forced an exact bbox tiling, so
+  the cells were rectangles (aspect 10.5 on a 1000:1 strip). For `type = "hex"`
+  a differing `cellsize[2]` is now collapsed with a warning before the
+  `max_cells` estimate, which used both components and was therefore off by
+  their ratio.
+
+* `create_grid_polygons_cached()`'s renumbering is documented: it applies
+  `ensure_stable_poly_id()` and `create_grid_polygons()` does not, so the same
+  cell carries a different `poly_id` from the two builders.
+
+* `get_voronoi_seeds(method = "kmeans")` clusters in two dimensions and drops
+  rows with unusable coordinates, matching `voronoi_seeds_kmeans()`. It used
+  every column of `st_coordinates()`, so POINT Z geometry was clustered in 3-D
+  with elevation dominating, and an EMPTY POINT crashed inside `kmeans()`.
+
+* `area_of_applicability()` pointizes non-POINT `newdata` for a
+  coordinate-using model (a POLYGON layer aborted with "replacement has 45
+  rows, data has 9"), reconciles a CRS on either side through
+  `.transform_or_stamp()`, and its zero-variance test is relative to each
+  column's magnitude rather than an absolute 1.49e-8 — a predictor was being
+  dropped for the **unit** it was recorded in, which flipped an obvious
+  extrapolation (DI 25.9) into a point inside the AOA (DI 0.03).
+
+* `determine_optimal_levels()` refuses a factor or character response, which
+  `as.numeric()` silently turned into level codes: re-ordering the levels of
+  the same factor changed the chosen number of levels and every `moran_z`.
+
+* `plot(type = "variogram")` labels its axis in the units of the CRS the
+  variogram was fitted in (metres of an auto-chosen zone for a lon/lat fit, not
+  the "CRS units" it claimed), names the azimuth when a single direction is
+  drawn, and uses the right caption for a non-converged fit — the hard-coded
+  "exceeds the largest lag" wording was refuted by the two numbers printed
+  inside it.
+
+* `plot_tessellation_map()` brings CRS-less layers into the plot's CRS instead
+  of passing them through to fail inside `ggplot_build()` at print time with
+  sf's message, naming no layer; and it borrows a CRS from an overlay when the
+  tessellation itself has none.
+
+* `spatialkit_quiet()` is a new exported helper. Both
+  `logger::log_appender()` and `logger::log_threshold()` default to `index = 1`,
+  which is the temp-file trace, so the two-line recipe in the README could not
+  redirect or quieten the **console** echo (index 2) — there was no documented
+  way to silence the package. The README now says so too.
+
+* Documentation corrected where it did not match behaviour: `ensure_projected()`
+  states how it chooses a projection for a wide extent (by centroid latitude at
+  the time; by measured distortion since the fifth audit pass below) and that
+  the choice is announced rather than silent;
+  `.looks_like_lonlat()`'s two tests are a disjunction and the extent test
+  decides first, so a small planar survey inside the lon/lat envelope IS taken
+  for degrees — the trade and its reasoning are now stated;
+  `harmonize_crs()` no longer claims to match `ensure_projected()` while doing
+  something else; `summarize_by_cell()` states which estimand its standard
+  errors are for (the grand mean, where measured coverage is 0.95, not the
+  cell's own mean, where the naive SE is the better estimate) and that the
+  variogram path applies one correlation function to every column.
 
 ## Bug fixes
 

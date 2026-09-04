@@ -13,7 +13,7 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
-target is built in. Because \code{\link[sf:geos_unary]{sf::st_buffer()}} interprets \code{dist} as
+target is built in. Because \code{\link[sf:st_buffer]{sf::st_buffer()}} interprets \code{dist} as
 \strong{metres} for lon/lat data while the fraction-of-extent form is derived
 from a bounding box measured in \strong{degrees}, lon/lat input is projected to
 a local projected CRS first (see \verb{@return}), so both forms agree.}

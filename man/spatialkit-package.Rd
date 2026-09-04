@@ -82,5 +82,10 @@ Useful entry points by task:
 \author{
 \strong{Maintainer}: Justin Chase \email{jchase.msu@gmail.com} [copyright holder]
 
+Authors:
+\itemize{
+  \item Justin Chase \email{jchase.msu@gmail.com} [copyright holder]
+}
+
 }
 \keyword{internal}

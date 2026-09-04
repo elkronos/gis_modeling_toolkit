@@ -394,3 +394,21 @@ test_that("predict.rf_fit is unaffected by newdata's own factor level order", {
   # not satisfiable by a constant.
   expect_gt(diff(range(p_full)), 50)
 })
+
+
+test_that("predict.rf_fit refuses a numeric-at-fit predictor supplied as text", {
+  # ranger does not check: it factor-codes the strings and applies the numeric
+  # split thresholds to the codes, then predicts confidently.  Measured:
+  # cor(correct, returned) = 0.41, R2 -1.91 against 0.98, no condition raised.
+  skip_if_not_installed("ranger")
+  set.seed(3)
+  n <- 120
+  d <- sf::st_as_sf(data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+                               a = rnorm(n)), coords = c("x", "y"), crs = 32632)
+  d$z <- 2 * d$a + rnorm(n, 0, 0.2)
+  fit <- fit_rf_model(d, "z", "a", num_trees = 100, seed = 1)
+  txt <- d; txt$a <- as.character(txt$a)
+  expect_error(predict(fit, newdata = txt), "was numeric when the forest was grown")
+  # The numeric frame still predicts, and logicals are accepted as 0/1.
+  expect_length(predict(fit, newdata = d), n)
+})

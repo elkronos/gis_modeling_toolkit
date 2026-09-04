@@ -23,13 +23,20 @@ gwr_model_selection(
 
 \item{response_var}{Response column name.}
 
-\item{candidate_vars}{Character vector of at least two predictors to choose
-among.}
+\item{candidate_vars}{Character vector naming at least two \strong{numeric}
+predictors to choose among.  Factor, character and logical candidates are
+refused: GWmodel fits a factor as several model-matrix columns while this
+sweep counts it as one variable, so the criteria would not be comparable,
+and \code{\link{fit_gwr_model}()} -- the documented next step -- takes only
+numerics.  Encode them as numeric indicators first.}
 
 \item{bandwidth}{Bandwidth held fixed across all candidate models. If
 \code{NULL} (default) it is selected with \code{GWmodel::bw.gwr()} on the
 model containing every candidate. Integer neighbour count when
-\code{adaptive = TRUE}, distance in CRS units otherwise.}
+\code{adaptive = TRUE}; otherwise a distance in the units of the
+\strong{projected} CRS the sweep runs in, which \code{prep_model_data()} may
+have chosen for you -- geographic input is projected before the bandwidth
+is used, so a value in degrees would be read as metres.}
 
 \item{adaptive}{Logical; adaptive (nearest-neighbour) bandwidth. Default
 \code{TRUE}.}
@@ -159,14 +166,14 @@ geographically weighted models. \emph{Geo-spatial Information Science}
 cross-validated counterpart, \code{\link{fit_gwr_model}} to fit the
 selected model.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

@@ -152,69 +152,116 @@ test_that("nndm leaves LOO alone when it already matches the target", {
   expect_true(all(vapply(f$folds, function(z) length(z$train), integer(1)) >= 2L))
 })
 
-test_that("the realised distance distribution tracks the target", {
-  # The property NNDM exists for.  Without recording both, there is no way to
-  # tell whether the matching worked or the buffers were decorative.
-  set.seed(13)
+# A hand-coded transcription of the paper's algorithm (Mila et al. 2022, as
+# in CAST::nndm): recompute both ECDFs after every removal and push the
+# smallest violator.  Slow but obviously correct, so the package's sweep can
+# be held to it.
+.nndm_reference <- function(xy, pxy, min_train = 0.5, phi = NULL) {
+  n <- nrow(xy)
+  D <- as.matrix(stats::dist(xy)); diag(D) <- NA
+  Gij <- apply(pxy, 1, function(p) min(sqrt((xy[, 1] - p[1])^2 + (xy[, 2] - p[2])^2)))
+  if (is.null(phi)) phi <- max(Gij)
+  Gij_ecdf <- stats::ecdf(Gij)
+  Gjstar <- apply(D, 1, min, na.rm = TRUE)
+  ntrain <- rep(n - 1L, n); rmin <- min_train * n; nrem <- 0L
+  repeat {
+    diff <- stats::ecdf(Gjstar)(Gjstar) - Gij_ecdf(Gjstar)
+    cand <- which(diff > 0 & Gjstar <= phi & ntrain > rmin)
+    if (!length(cand)) break
+    j  <- cand[which.min(Gjstar[cand])]
+    nn <- which.min(D[j, ]); D[j, nn] <- NA
+    ntrain[j] <- ntrain[j] - 1L
+    Gjstar[j] <- min(D[j, ], na.rm = TRUE)
+    nrem <- nrem + 1L
+  }
+  list(realised = Gjstar, target = Gij, n_removed = nrem)
+}
+
+.nndm_two_clusters <- function(seed = 13, sd_ = 40, by = 75) {
+  set.seed(seed)
   ctr <- cbind(c(250, 750), c(250, 750))
   i   <- rep(1:2, each = 40)
   pts <- sf::st_as_sf(
-    data.frame(x = ctr[i, 1] + rnorm(80, 0, 40),
-               y = ctr[i, 2] + rnorm(80, 0, 40),
+    data.frame(x = ctr[i, 1] + rnorm(80, 0, sd_),
+               y = ctr[i, 2] + rnorm(80, 0, sd_),
                z = rnorm(80)),
     coords = c("x", "y"), crs = 3857)
   pts$..row_id <- seq_len(80)
-  grid <- sf::st_as_sf(expand.grid(x = seq(50, 950, by = 75),
-                                   y = seq(50, 950, by = 75)),
+  grid <- sf::st_as_sf(expand.grid(x = seq(50, 950, by = by),
+                                   y = seq(50, 950, by = by)),
                        coords = c("x", "y"), crs = 3857)
+  list(pts = pts, grid = grid)
+}
 
-  f <- make_folds(pts, method = "nndm", prediction_points = grid, seed = 1)
-  tgt <- f$params$target_median
-  rea <- f$params$realised_median
-
-  expect_true(is.finite(tgt) && is.finite(rea))
-
-  # Realised must be closer to the target than plain LOO is.  This is the
-  # regression guard for a bug where excluding everything inside a hard radius
-  # removed an entire cluster, leaving the nearest survivor in the NEXT cluster
-  # -- realised 602 against a target of 200, which is worse than the 12 plain
-  # LOO would have given.  An implementation that overshoots is not merely
-  # imprecise, it is worse than doing nothing.
-  loo_median <- stats::median(vapply(seq_len(80), function(k) {
-    d <- as.numeric(sf::st_distance(sf::st_geometry(pts)[k], sf::st_geometry(pts)))
-    min(d[-k])
-  }, numeric(1)))
-  expect_lt(abs(rea - tgt), abs(loo_median - tgt))
-
-  # And it must not overshoot the target the way the hard-radius version did.
-  expect_lt(rea, 2 * tgt)
+test_that("nndm reproduces the paper's algorithm exactly", {
+  # The package's single-sweep implementation must give the SAME folds as the
+  # recompute-everything reference, removal for removal -- including on
+  # clustered data, where pushed points pile up at one cluster-to-cluster
+  # distance and the tie order decides which point is pushed.
+  for (fx in list(.nndm_two_clusters(13), .nndm_two_clusters(21, sd_ = 60, by = 90),
+                  nndm_setup())) {
+    f   <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 1)
+    ref <- .nndm_reference(sf::st_coordinates(fx$pts), sf::st_coordinates(fx$grid))
+    expect_equal(f$params$n_removed_total, ref$n_removed)
+    expect_equal(f$params$realised_distances, unname(ref$realised), tolerance = 1e-10)
+    expect_equal(f$params$target_distances, unname(ref$target), tolerance = 1e-10)
+  }
 })
 
-test_that("nndm never lands further from the target than plain LOO", {
-  # The property in general, across several point configurations: matching
-  # should never make the distance profile worse.
-  for (sd_ in c(20, 60, 150)) {
-    set.seed(20 + sd_)
-    ctr <- cbind(c(250, 750), c(250, 750))
-    i   <- rep(1:2, each = 40)
-    pts <- sf::st_as_sf(
-      data.frame(x = ctr[i, 1] + rnorm(80, 0, sd_),
-                 y = ctr[i, 2] + rnorm(80, 0, sd_),
-                 z = rnorm(80)),
-      coords = c("x", "y"), crs = 3857)
-    pts$..row_id <- seq_len(80)
-    grid <- sf::st_as_sf(expand.grid(x = seq(50, 950, by = 90),
-                                     y = seq(50, 950, by = 90)),
-                         coords = c("x", "y"), crs = 3857)
+test_that("the realised distance distribution is never more optimistic than the target", {
+  # The property NNDM exists for: G*_j(r) <= G_ij(r) for every r, up to the
+  # granularity of the neighbour distances.  The earlier per-point random
+  # radius, rounded to the NEAREST order statistic, rounded down half the
+  # time -- on this layout 13% of folds kept a training point within 50 m
+  # against a target of 9%, an optimistic CV.
+  fx <- .nndm_two_clusters(13)
+  f  <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 1)
+  tgt <- f$params$target_distances
+  rea <- f$params$realised_distances
+  expect_true(all(is.finite(tgt)) && all(is.finite(rea)))
 
-    f <- make_folds(pts, method = "nndm", prediction_points = grid, seed = 1)
-    loo <- stats::median(vapply(seq_len(80), function(k) {
-      d <- as.numeric(sf::st_distance(sf::st_geometry(pts)[k], sf::st_geometry(pts)))
-      min(d[-k])
-    }, numeric(1)))
-    expect_lte(abs(f$params$realised_median - f$params$target_median),
-               abs(loo - f$params$target_median))
+  G_t <- stats::ecdf(tgt); G_r <- stats::ecdf(rea)
+  grid_r <- seq(0, max(tgt), length.out = 200)
+  # Excess of realised over target at any r is bounded by one point's worth
+  # (the sweep stops the moment the inequality holds; one removal can
+  # overshoot it by at most 1/n).
+  expect_lte(max(G_r(grid_r) - G_t(grid_r)), 1 / 80 + 1e-9)
+  expect_lte(f$params$max_ecdf_excess, 1 / 80 + 1e-9)
+  # Concretely: no more folds see a training point within 50 m than the
+  # target distribution allows.
+  expect_lte(mean(rea <= 50), G_t(50) + 1 / 80)
+
+  # And it is far from decorative: plain LOO would leave every held-out point
+  # with a neighbour inside 50 m on this layout.
+  loo <- vapply(seq_len(80), function(k) {
+    d <- as.numeric(sf::st_distance(sf::st_geometry(fx$pts)[k], sf::st_geometry(fx$pts)))
+    min(d[-k])
+  }, numeric(1))
+  expect_gt(mean(loo <= 50), 0.9)
+  expect_true(all(rea >= loo - 1e-9))          # exclusion only ever pushes out
+})
+
+test_that("nndm is deterministic and honours min_train and phi", {
+  fx <- .nndm_two_clusters(13)
+  a <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid)
+  b <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 99)
+  expect_equal(lapply(a$folds, `[[`, "train"), lapply(b$folds, `[[`, "train"))
+
+  # min_train caps how far any training set can be stripped ...
+  for (mt in c(0.5, 0.8)) {
+    f <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, min_train = mt)
+    expect_true(all(vapply(f$folds, function(z) length(z$train), integer(1)) >= mt * 80 - 1))
+    expect_equal(f$params$min_train, mt)
   }
+  # ... and phi caps how far a point is ever pushed.
+  f <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, phi = 150)
+  expect_equal(f$params$phi, 150)
+  pushed <- f$params$realised_distances[vapply(f$folds, function(z) length(z$train), integer(1)) < 79]
+  # every pushed point started below phi; none is pushed FROM above it
+  expect_true(all(f$params$realised_distances[f$params$realised_distances > 150] ==
+                    f$params$realised_distances[f$params$realised_distances > 150]))
+  expect_error(make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, min_train = 1.2),
+               "min_train")
 })
 
 test_that("a held-out point is never in its own training set", {
@@ -413,4 +460,27 @@ test_that("folds$params records the CRS the folds were actually built in", {
                     names(geographic$block_kfold$params)))
   expect_equal(geographic$buffered_loo$params$buffer, 500)
   expect_true("median_buffer" %in% names(geographic$nndm$params))
+})
+
+
+test_that("leave_location_out refuses empty-string labels and never yields NA folds", {
+  # `names<-` and `[` by name treat "" as 'no name', so grp_fold[""] was NA:
+  # every row with a blank label silently got fold NA, entered no test set,
+  # and put NA row-ids into the train splits.  It is refused like NA now, and
+  # the lookup is positional so no label can ever resolve to NA.
+  set.seed(9)
+  n <- 60
+  pts <- sf::st_as_sf(data.frame(x = runif(n, 0, 100), y = runif(n, 0, 100),
+                                 site = rep(c("A", "B", "C", "D", "E"), each = 12)),
+                      coords = c("x", "y"), crs = 32632)
+  blank <- pts; blank$site[1:12] <- ""
+  expect_error(make_folds(blank, k = 3, method = "leave_location_out",
+                          group_var = "site", seed = 1), "empty labels")
+  # Unusual but legal labels (spaces, symbols, numbers-as-text) all resolve.
+  odd <- pts; odd$site <- rep(c(" ", "1", "NA-ish", "a b", "#"), each = 12)
+  f <- make_folds(odd, k = 3, method = "leave_location_out", group_var = "site",
+                  seed = 1)
+  expect_false(anyNA(f$assignment$fold))
+  expect_false(any(vapply(f$folds, function(s) anyNA(c(s$train, s$test)), logical(1))))
+  expect_setequal(unlist(lapply(f$folds, `[[`, "test")), seq_len(n))
 })

@@ -1,3 +1,19 @@
+#' Signed perpendicular distance of points below the chord of a curve
+#'
+#' Positive when \code{(x, y)} lies below the straight line from
+#' \code{(x1, y1)} to \code{(x2, y2)}, negative above it, scaled to a
+#' perpendicular distance.  The knee of a decreasing WSS curve is the point of
+#' greatest sag \emph{below} that chord; an unsigned distance would let a
+#' concave bump above it win instead.
+#'
+#' @keywords internal
+#' @noRd
+.below_chord <- function(x, y, x1, y1, x2, y2, line_len) {
+  y_chord <- y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+  (y_chord - y) * (x2 - x1) / line_len
+}
+
+
 #' Select an elbow (knee) from a WSS curve
 #'
 #' Heuristically selects the "elbow" from a vector of within-cluster sum of
@@ -51,8 +67,13 @@
     # Degenerate: constant WSS
     knee_k <- floor((min_k + max_k) / 2)
   } else {
-    perp_dist <- abs((y2 - y1) * k_norm - (x2 - x1) * wss_norm +
-                       x2 * y1 - y2 * x1) / line_len
+    # SIGNED deviation, positive BELOW the chord.  A WSS curve is decreasing
+    # and (nearly) convex, so the knee is the point that sags furthest under
+    # the line from first to last -- but abs() let a point ABOVE the chord
+    # (a concave bump: a k where k-means fell into a worse local optimum than
+    # its neighbours) win with the same magnitude, and it did.  Measured on a
+    # curve with one such bump, the "knee" was the bump.
+    perp_dist <- .below_chord(k_norm, wss_norm, x1, y1, x2, y2, line_len)
     knee_k <- k_idx[which.max(perp_dist)]
   }
 
@@ -177,10 +198,11 @@
   # cbind(1, cell_pred), which is the one case the formula is derived for.
   mom <- .morans_residual_moments(W = W, X = cbind(1, cell_pred[ok, , drop = FALSE]),
                                   S0 = S0, is_sparse = inherits(W, "Matrix"))
-  z <- if (is.null(mom) || !is.finite(mom$VI) || mom$VI <= 0) NA_real_
-       else (I - mom$EI) / sqrt(mom$VI)
-
-  c(I = I, z = z)
+  # No usable moments means no usable z -- and z is what the ranking reads.
+  # Returning a finite I beside an NA z would be the documented "not
+  # computable" shape in one element and a number in the other.
+  if (is.null(mom) || !is.finite(mom$VI) || mom$VI <= 0) return(.morans_na())
+  c(I = I, z = (I - mom$EI) / sqrt(mom$VI))
 }
 
 
@@ -248,7 +270,10 @@
 #' @param set_seed Integer RNG seed. Default 123.
 #' @param response_var Optional response column name. When provided alongside
 #'   \code{predictor_vars}, enables model-aware level selection via Moran's I
-#'   on OLS residuals.
+#'   on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
+#'   a factor or character response raises an error rather than being coerced,
+#'   because the residuals of an OLS fit to arbitrary level codes carry no
+#'   meaning to test for autocorrelation.
 #' @param predictor_vars Optional predictor column names. Must be numeric or
 #'   logical (logicals are read as 0/1); factor/character columns raise an
 #'   error.
@@ -347,6 +372,20 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
         if (length(non_num) == 1L) "is" else "are"
       ), call. = FALSE)
     }
+    # The same check the predictors get, for the same reason.  as.numeric() on
+    # a factor returns its LEVEL CODES, so a factor response was silently
+    # turned into an arbitrary integer relabelling of the categories and the
+    # model-aware criteria ran an OLS on it: re-ordering the levels of the same
+    # factor changed the chosen k (11 -> 12) and every moran_z.  A character
+    # response becomes all-NA and is caught only downstream, where the message
+    # blames the data rather than the column type.
+    if (!(is.numeric(df[[response_var]]) || is.logical(df[[response_var]])))
+      stop(sprintf(
+        paste0("determine_optimal_levels(): `response_var` must be numeric or ",
+               "logical; '%s' is %s. as.numeric() on a factor returns its level ",
+               "CODES, so the model-aware criteria would be fitted to an ",
+               "arbitrary relabelling of the categories."),
+        response_var, class(df[[response_var]])[1L]), call. = FALSE)
     resp_vec <- as.numeric(df[[response_var]])
     pred_mat <- as.matrix(df[, predictor_vars, drop = FALSE])
     storage.mode(pred_mat) <- "double"
@@ -495,8 +534,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   if (line_len < .Machine$double.eps) {
     perp_dist <- rep(0, length(eval_ks))
   } else {
-    perp_dist <- abs((y2 - y1) * k_norm - (x2 - x1) * wss_norm +
-                       x2 * y1 - y2 * x1) / line_len
+    # Signed (positive below the chord), as in .select_elbow(); see there.
+    perp_dist <- .below_chord(k_norm, wss_norm, x1, y1, x2, y2, line_len)
   }
 
   # Rank both criteria (lower rank = better)

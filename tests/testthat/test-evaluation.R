@@ -234,7 +234,9 @@ test_that("residual_morans_i refuses inputs it cannot score", {
   pts <- surf_test_points(40)
   fit <- lm_spatial_fit(pts, predictor_vars = "w")
 
-  lines <- capture_spatialkit_log(out <- residual_morans_i(list(a = 1)))
+  # "Returns NULL with a warning" -- a real one, catchable by tryCatch().
+  expect_warning(lines <- capture_spatialkit_log(out <- residual_morans_i(list(a = 1))),
+                 "not a spatial_fit")
   expect_null(out)
   expect_true(log_has(lines, "not a spatial_fit"))
 
@@ -245,29 +247,45 @@ test_that("residual_morans_i refuses inputs it cannot score", {
   registerS3method("residuals", "constresid_fit",
                    function(object, ...) rep(3, nrow(object$data_sf)))
   class(const) <- c("constresid_fit", class(fit))
-  lines_c <- capture_spatialkit_log(out_c <- residual_morans_i(const))
+  expect_warning(lines_c <- capture_spatialkit_log(out_c <- residual_morans_i(const)),
+                 "zero residual variance")
   expect_null(out_c)
   expect_true(log_has(lines_c, "zero residual variance"))
 
   # Too few residuals to say anything.
   tiny <- lm_spatial_fit(surf_test_points(3), predictor_vars = character(0))
-  lines_t <- capture_spatialkit_log(out_t <- residual_morans_i(tiny))
+  expect_warning(lines_t <- capture_spatialkit_log(out_t <- residual_morans_i(tiny)),
+                 "n < 4")
   expect_null(out_t)
   expect_true(log_has(lines_t, "n < 4"))
 })
 
 
-test_that("residual_morans_i falls back to kNN for a wrongly shaped weights argument", {
+test_that("residual_morans_i refuses a wrongly shaped weights argument", {
+  # It used to log a line and fall back to the default kNN(8) matrix, so a
+  # user who supplied their own weights with one row too few -- or as a
+  # data.frame -- got the statistic for a weight matrix they never chose,
+  # with no R condition raised (measured: I = 0.874 for four malformed shapes
+  # against 0.805 for the weights actually supplied).  An error names the
+  # shape it saw.
   set.seed(23)
   pts <- surf_test_points(40)
   fit <- lm_spatial_fit(pts, predictor_vars = "w")
+  n   <- fit$n
 
-  lines <- capture_spatialkit_log(
-    out <- residual_morans_i(fit, weights = matrix(1, 5, 5))
-  )
-  expect_true(log_has(lines, "not an n x n matrix"))
-  # Fell back rather than failing, and to the same answer as no weights at all.
-  expect_equal(out$observed, residual_morans_i(fit)$observed)
+  expect_error(residual_morans_i(fit, weights = matrix(1, 5, 5)), "n x n")
+  expect_error(residual_morans_i(fit, weights = matrix(1, n - 1, n - 1)), "n x n")
+  expect_error(residual_morans_i(fit, weights = rep(1, n)), "n x n")
+  expect_error(residual_morans_i(fit, weights = matrix(1, n, n + 1)), "n x n")
+
+  # A data.frame of the right shape is accepted as a matrix ...
+  W  <- spatialkit:::.build_knn_weights(sf::st_coordinates(fit$data_sf), k = 4L,
+                                        use_fnn = FALSE, use_matrix = FALSE)
+  a  <- residual_morans_i(fit, weights = W)
+  b  <- residual_morans_i(fit, weights = as.data.frame(W))
+  expect_equal(a$observed, b$observed)
+  # ... and gives the user's answer, not the default's.
+  expect_false(isTRUE(all.equal(a$observed, residual_morans_i(fit)$observed)))
 })
 
 

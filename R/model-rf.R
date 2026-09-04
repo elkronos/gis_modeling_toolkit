@@ -68,8 +68,38 @@
 .rf_align_levels <- function(X, train_X) {
   for (cn in intersect(names(X), names(train_X))) {
     tr <- train_X[[cn]]
+    # A column the forest was grown on as NUMERIC must arrive numeric.  ranger
+    # does not check: it factor-codes a character column and applies the
+    # numeric split thresholds to the codes, and predicts confidently from the
+    # result.  Measured: a numeric-at-fit predictor supplied as text at predict
+    # time gave cor(correct, returned) = 0.41 and R2 -1.91 against 0.98, with
+    # no condition raised.  predict.bayesian_fit() refuses this; so does this.
+    # is.logical(tr) too: a LOGICAL-at-fit predictor fell through all three
+    # branches (is.numeric / is.factor / is.character are each FALSE) and was
+    # skipped entirely, so a "TRUE"/"FALSE" character column -- exactly what a
+    # CSV round trip produces -- was factor-coded 1/2 against splits built on
+    # 0/1, sending every row to the TRUE side.  Measured: cor(correct,
+    # returned) = 0.21 and FALSE rows predicted +1.5 where the truth was -1.75,
+    # with nothing raised.  ranger sees a logical as 0/1, so treat it as
+    # numeric here.
+    if ((is.numeric(tr) || is.logical(tr)) &&
+        !is.numeric(X[[cn]]) && !is.logical(X[[cn]]))
+      stop(sprintf(paste0("predict.rf_fit(): predictor '%s' was %s when ",
+                          "the forest was grown but is %s in `newdata`. ranger ",
+                          "would silently code it as a factor and apply numeric ",
+                          "split thresholds to the codes; convert the column ",
+                          "first."),
+                   cn, if (is.logical(tr)) "logical" else "numeric",
+                   class(X[[cn]])[1L]), call. = FALSE)
     if (!(is.factor(tr) || is.character(tr))) next
-    lv  <- if (is.factor(tr)) levels(tr) else sort(unique(as.character(tr)))
+    # Levels that OCCUR in the training rows, not the level SET.  An ordinary
+    # subset (dat[dat$g != "c", ], or a spatial-CV training fold in which a
+    # class sits entirely in the held-out block) keeps the unused level, so a
+    # level with zero training rows passed the guard and ranger returned some
+    # other level's prediction for it (49.9 where the truth was ~100).  The
+    # documentation promises "an unseen level is an error, not a guess", and an
+    # unseen level is one the forest never saw a row of.
+    lv  <- sort(unique(as.character(tr[!is.na(tr)])))
     val <- as.character(X[[cn]])
     unseen <- setdiff(unique(val[!is.na(val)]), lv)
     if (length(unseen) > 0L)
@@ -80,7 +110,7 @@
                    paste(sQuote(lv), collapse = ", ")), call. = FALSE)
     # Coerce with the TRAINING levels so the codes ranger sees are the codes
     # it was built with, whatever order newdata happens to carry.
-    X[[cn]] <- if (is.factor(tr)) factor(val, levels = lv) else val
+    X[[cn]] <- if (is.factor(tr)) factor(val, levels = levels(tr)) else val
   }
   X
 }
@@ -104,7 +134,8 @@
 #' nearby points leak between folds, so the memorised surface scores well --
 #' which is how the practice became common. Meyer et al. (2019) show the
 #' collapse directly. \code{include_coords} therefore defaults to
-#' \code{FALSE}, and setting it to \code{TRUE} warns. If you do use it, score
+#' \code{FALSE}, and setting it to \code{TRUE} logs a caution (it is a
+#' deliberate choice, so it is not raised as an R warning). If you do use it, score
 #' the model with \code{\link{cv_spatial}} and blocked folds, never with the
 #' out-of-bag error.
 #'
@@ -142,7 +173,12 @@
 #' @param num_threads Threads for ranger. \code{NULL} uses ranger's default.
 #' @param .already_prepped Internal; skip \code{prep_model_data()} because the
 #'   caller has already projected and cleaned the data.
-#' @param ... Passed to \code{ranger::ranger()}.
+#' @param ... Passed to \code{ranger::ranger()}.  ranger's own spellings of
+#'   the arguments this function already sets (\code{num.trees},
+#'   \code{min.node.size}, \code{num.threads}, \code{mtry},
+#'   \code{importance}, \code{seed}, \code{x}, \code{y}) are rejected with a
+#'   message naming the wrapper argument to use instead -- passing them here
+#'   would reach \code{ranger()} twice and fail the call.
 #'
 #' @return An \code{rf_fit} object (inherits from \code{spatial_fit}).
 #'   \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
@@ -243,6 +279,30 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
     stop("fit_rf_model(): fewer than two usable rows after cleaning.",
          call. = FALSE)
 
+  # `...` is documented as "passed to ranger::ranger()", and ranger's own
+  # spellings of the arguments this wrapper already fixes reach it TWICE:
+  # num.trees, min.node.size, num.threads, x, y, importance, seed.  R then
+  # refuses the call with "formal argument ... matched by multiple actual
+  # arguments" -- and through cv_rf() or compare_models_cv(rf_args =
+  # list(num.trees = 50)) that means every fold fails and the result is an
+  # all-NA row.  Name the wrapper argument the caller should have used.
+  dot_names <- names(list(...))
+  ranger_dupes <- c(num.trees = "num_trees", min.node.size = "min_node_size",
+                    num.threads = "num_threads", mtry = "mtry",
+                    importance = "importance", seed = "seed",
+                    x = NA_character_, y = NA_character_)
+  hit_dupes <- intersect(dot_names, names(ranger_dupes))
+  if (length(hit_dupes)) {
+    repl <- ranger_dupes[hit_dupes]
+    stop(sprintf(paste0("fit_rf_model(): %s already set by this function and ",
+                        "cannot be passed through `...` as well (ranger would ",
+                        "receive it twice). Use %s instead."),
+                 paste(sprintf("`%s` is", hit_dupes), collapse = ", "),
+                 paste(ifelse(is.na(repl), "the x/y interface",
+                              sprintf("`%s`", repl)), collapse = ", ")),
+         call. = FALSE)
+  }
+
   fit <- tryCatch(
     ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
                    mtry = mtry, min.node.size = min_node_size,
@@ -297,12 +357,28 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
-#' @param folds Optional fold definitions from \code{\link{make_folds}}.
+#' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
+#'   value, or a bare list of \code{list(train =, test =)} pairs of
+#'   \code{..row_id} values.  Train and test must be disjoint — a fold that
+#'   trains on its own test rows is not a cross-validation split and is refused
+#'   with an error — and IDs naming no row in the prepared data are dropped with
+#'   a logged count.
 #' @param k Number of folds when \code{folds} is \code{NULL}. Default 5.
-#' @param seed RNG seed. Default 123.
+#' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
+#'   through a per-fold draw, each fold's forest — so two different seeds give
+#'   different results even on identical \code{folds}.  Pass \code{seed}
+#'   through \code{...} to fix one ranger seed for every fold instead.
 #' @param parallel Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.
 #' @param block_size,auto_range,boundary Passed to \code{\link{cv_spatial}}.
-#' @param ... Passed to \code{\link{fit_rf_model}} on every fold.
+#' @param pointize How non-POINT geometry is reduced to a point before
+#'   fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.
+#' @param ... Passed to \code{\link{fit_rf_model}} on every fold —
+#'   \code{num_trees}, \code{mtry}, \code{importance}, \code{include_coords}
+#'   and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
+#'   and \code{.already_prepped} are set by this function and must not be
+#'   passed here (every fold would fail with "matched by multiple actual
+#'   arguments").  A \code{seed} given here overrides the per-fold draw
+#'   described above.
 #' @return The \code{\link{cv_spatial}} result.
 #' @family cross-validation
 #' @examples
@@ -322,14 +398,34 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
                   seed = 123, parallel = FALSE, block_size = NULL,
-                  auto_range = FALSE, boundary = NULL, ...) {
+                  auto_range = FALSE, boundary = NULL, pointize = "auto", ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("cv_rf(): package 'ranger' is required.", call. = FALSE)
-  fit_fn <- function(train_sf)
-    fit_rf_model(train_sf, response_var, predictor_vars,
-                 .already_prepped = TRUE, ...)
+  # `seed` has to reach the FOREST, not just the fold construction.
+  # fit_rf_model() carries its own seed = 123L default and `...` did not
+  # override it, so every fold's forest was grown with ranger seed 123
+  # whatever the caller passed -- cv_rf(seed = 1) and cv_rf(seed = 2) returned
+  # bit-identical predictions on fixed folds, and there was no argument through
+  # which the forest's seed could be changed at all.  .cv_run_folds() runs each
+  # fold under its own seeded stream, so drawing here gives a distinct,
+  # reproducible seed per (seed, fold).  A seed passed explicitly through `...`
+  # still wins.
+  dots <- list(...)
+  fit_fn <- if ("seed" %in% names(dots)) {
+    function(train_sf)
+      fit_rf_model(train_sf, response_var, predictor_vars,
+                   .already_prepped = TRUE, ...)
+  } else {
+    function(train_sf)
+      fit_rf_model(train_sf, response_var, predictor_vars,
+                   .already_prepped = TRUE,
+                   seed = sample.int(.Machine$integer.max, 1L), ...)
+  }
+  # `pointize` is named here rather than left to `...`: it belongs to
+  # cv_spatial(), and through `...` it reached ranger() as an unused argument.
   cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
              folds = folds, k = k, seed = seed, boundary = boundary,
+             pointize = pointize,
              block_size = block_size, auto_range = auto_range,
              parallel = parallel)
 }
@@ -348,8 +444,16 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #' @param newdata Optional sf object carrying the same predictors. It is
 #'   transformed to the CRS used at fitting time first, so a forest that
 #'   includes the coordinates is not fed a different coordinate system.
-#'   Categorical predictors must not carry levels absent from the training
-#'   data; an unseen level is an error, not a guess.
+#'   Categorical predictors must not carry a level the forest was never grown
+#'   with -- meaning a level with \strong{no training rows}, not merely one
+#'   absent from \code{levels()}: an ordinary subset, or a spatial-CV fold that
+#'   holds out a whole class, keeps the unused level while the forest has no
+#'   split for it.  An unseen level is an error, not a guess.  A predictor that
+#'   was numeric or logical when the forest was grown must also arrive numeric
+#'   or logical: ranger would otherwise factor-code a character column and apply
+#'   the numeric split thresholds to the codes, predicting confidently from
+#'   nonsense, so a character column is refused instead.  (ranger sees a logical
+#'   as 0/1, so either form is accepted for one.)
 #' @param ... Passed to \code{ranger}'s predict method. Arguments that make
 #'   \code{ranger} return a matrix rather than one value per row --
 #'   \code{predict.all = TRUE}, \code{type = "quantiles"}, \code{type = "se"}
@@ -371,6 +475,7 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
     stop("predict.rf_fit(): package 'ranger' is required.", call. = FALSE)
 
   n_orig  <- nrow(newdata)
+  newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
   newdata <- ensure_projected(newdata, target_crs = .crs_or_null(object$data_sf))
   newdata$..orig_row_id.. <- seq_len(n_orig)
   newdata <- prep_model_data(newdata, object$response_var,
@@ -502,8 +607,14 @@ coef.rf_fit <- function(object, ...) {
 #' @export
 print.rf_fit <- function(x, ...) {
   cat("<Random Forest (ranger)> spatial model fit\n")
-  cat(sprintf("  Formula : %s\n", deparse(x$formula)))
+  # paste(deparse(...)) and a CRS line, matching print.spatial_fit(): this
+  # method takes precedence for an rf_fit, so without them the one backend
+  # whose fits can carry the coordinates as predictors was the one that never
+  # showed which space they were in, and a long formula printed as two mangled
+  # fields.
+  cat(sprintf("  Formula : %s\n", paste(deparse(x$formula), collapse = " ")))
   cat(sprintf("  n       : %d\n", x$n))
+  cat(sprintf("  CRS     : %s\n", .fold_crs_label(x$data_sf)))
   cat(sprintf("  Trees   : %d (mtry = %s, min node = %s)\n",
               x$info$num_trees %||% NA_integer_,
               format(x$info$mtry %||% NA), format(x$info$min_node_size %||% NA)))
