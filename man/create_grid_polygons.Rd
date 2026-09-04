@@ -12,28 +12,38 @@ create_grid_polygons(
   n = NULL,
   clip = TRUE,
   crs = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  max_cells = 1e+06
 )
 }
 \arguments{
 \item{boundary}{Polygonal sf or sfc object.}
 
-\item{target_cells}{Optional approximate desired number of cells. For hex
-grids the count is adjusted for hexagonal packing density, but the final
-cell count after clipping to an irregular boundary may deviate
-substantially from the requested value.}
+\item{target_cells}{Optional approximate desired number of cells.  The cell
+\emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
+square grids get genuinely square cells; for hex grids the count is
+adjusted for hexagonal packing density.  The word "approximate" is load
+bearing: a grid of square cells over an elongated bounding box needs more
+of them than a grid of rectangles would (a 1000 x 1 strip at
+\code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
+and clipping to an irregular boundary moves the count again.  Pass
+\code{cellsize} when the count matters more than the shape.}
 
 \item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}.}
 
 \item{cellsize}{Optional numeric cell size (length 1 or 2), in the units of
 the working CRS. Takes precedence over \code{n}: if both are supplied,
 \code{cellsize} is used, \code{n} is ignored and a warning is logged. Supply exactly
-one of \code{target_cells}, \code{cellsize} and \code{n}.}
+one of \code{target_cells}, \code{cellsize} and \code{n}.  For \code{type = "hex"} a hexagon
+is defined by a single edge-to-edge distance, so only \code{cellsize[1]} is
+used and a differing \code{cellsize[2]} is ignored with a logged warning.}
 
 \item{n}{Optional grid resolution (integer, length 1 or 2) giving the number
 of columns and rows to divide the boundary's bounding box into; the cell
-size is derived from it. Applies to square grids only; \code{\link[sf:st_make_grid]{sf::st_make_grid()}}
-derives hexagon placement from \code{cellsize} alone. Ignored (with a logged
+size is derived from it. \code{\link[sf:st_make_grid]{sf::st_make_grid()}} derives hexagon placement
+from \code{cellsize} alone, so for \code{type = "hex"} \code{n} does not set the number of
+cells -- but it does change the grid, because the \code{cellsize} derived from
+it is what the hexagons are built with. Ignored (with a logged
 warning) when \code{cellsize} is also supplied — passing both would otherwise
 truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
 corner, covering only part of the boundary.}
@@ -45,6 +55,13 @@ projected with \code{\link[=ensure_projected]{ensure_projected()}}, which change
 grid; a message reports this unless \code{quiet = TRUE}.}
 
 \item{quiet}{Logical; suppress messages.}
+
+\item{max_cells}{Upper bound on the number of cells the grid may have,
+estimated from the boundary's bounding box before anything is built.
+Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
+boundary in kilometres, say -- asks for a grid that cannot be built, and
+this refuses it with a message rather than exhausting memory. Set to
+\code{Inf} to disable.}
 }
 \value{
 An sf polygon layer with poly_id column.
@@ -79,10 +96,10 @@ nrow(grid_sq)
 nrow(grid_hex)
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
 }
 \concept{tessellation}

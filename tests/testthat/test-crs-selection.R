@@ -159,15 +159,29 @@ test_that("the projection choice changes downstream distance estimates", {
 })
 
 
-test_that("hemisphere-spanning extents fall back rather than guess a centre", {
-  # A bbox cannot distinguish global coverage from data straddling the
-  # antimeridian.  In the latter case the centroid lands on the far side of the
-  # planet, which would centre an equal-area projection 180 deg from the data,
-  # so the function falls back to its documented EPSG:3857 behaviour.
-  pts   <- ll_points(c(-179, 179), c(-10, 10))
-  out   <- ensure_projected(pts)
-  expect_equal(sf::st_crs(out)$epsg, 3857L)
+test_that("antimeridian data are recognised, not flattened onto EPSG:3857", {
+  # A bounding BOX cannot distinguish global coverage from data straddling the
+  # antimeridian -- but the coordinates can: a wrapped layer leaves one very
+  # large gap in the sorted longitudes.  This matters because EPSG:3857 SPLITS
+  # such a layer: the two points below are 2 deg apart and Web Mercator puts
+  # them on opposite sides of the world.
+  pts <- ll_points(c(-179, 179), c(-10, 10))
+  out <- ensure_projected(pts)
 
   lines <- capture_spatialkit_log(ensure_projected(pts))
-  expect_true(log_has(lines, "antimeridian"))
+  expect_true(log_has(lines, "straddle the antimeridian"))
+  expect_false(isTRUE(sf::st_crs(out)$epsg == 3857L))
+
+  # The test that matters: distance survives the projection.
+  d_true <- as.numeric(sf::st_distance(pts)[1, 2])
+  d_proj <- as.numeric(stats::dist(sf::st_coordinates(out)))
+  expect_lt(abs(d_proj / d_true - 1), 0.05)
+
+  # Genuinely global coverage still falls back, because no local projection
+  # fits it -- and it says so.
+  glob <- ll_points(seq(-170, 170, by = 20), rep(c(-40, 0, 40), length.out = 18))
+  gout <- ensure_projected(glob)
+  expect_equal(sf::st_crs(gout)$epsg, 3857L)
+  glines <- capture_spatialkit_log(ensure_projected(glob))
+  expect_true(log_has(glines, "global coverage"))
 })

@@ -231,7 +231,10 @@
   # makes n_cand*(n_cand+1)/2 + bandwidth-search calls.  n^2 doubles: 2000
   # points is 32 MB, which is why this is capped rather than unconditional.
   dMat <- NULL
-  if (is.finite(dmat_max_n) && n_obs <= dmat_max_n) {
+  # `Inf` means no cap -- always precompute.  It was gated on is.finite(), so
+  # Inf meant NEVER precompute: with adaptive = FALSE the sweep then died on
+  # n = 100 (a fixed bandwidth needs the matrix) and blamed the caller.
+  if (!is.na(dmat_max_n) && n_obs <= dmat_max_n) {
     dMat <- tryCatch(
       GWmodel::gw.dist(dp.locat = sp::coordinates(sp_dat)),
       error = function(e) {
@@ -403,12 +406,19 @@
 #'
 #' @param data_sf An \code{sf} object with response, predictors and geometry.
 #' @param response_var Response column name.
-#' @param candidate_vars Character vector of at least two predictors to choose
-#'   among.
+#' @param candidate_vars Character vector naming at least two \strong{numeric}
+#'   predictors to choose among.  Factor, character and logical candidates are
+#'   refused: GWmodel fits a factor as several model-matrix columns while this
+#'   sweep counts it as one variable, so the criteria would not be comparable,
+#'   and \code{\link{fit_gwr_model}()} -- the documented next step -- takes only
+#'   numerics.  Encode them as numeric indicators first.
 #' @param bandwidth Bandwidth held fixed across all candidate models. If
 #'   \code{NULL} (default) it is selected with \code{GWmodel::bw.gwr()} on the
 #'   model containing every candidate. Integer neighbour count when
-#'   \code{adaptive = TRUE}, distance in CRS units otherwise.
+#'   \code{adaptive = TRUE}; otherwise a distance in the units of the
+#'   **projected** CRS the sweep runs in, which \code{prep_model_data()} may
+#'   have chosen for you -- geographic input is projected before the bandwidth
+#'   is used, so a value in degrees would be read as metres.
 #' @param adaptive Logical; adaptive (nearest-neighbour) bandwidth. Default
 #'   \code{TRUE}.
 #' @param kernel Weighting kernel. One of \code{"bisquare"} (default),
@@ -550,6 +560,30 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 
   dat <- prep_model_data(data_sf = data_sf, response_var = response_var,
                          predictor_vars = candidate_vars, pointize = "auto")
+
+  # The documented next step is fit_gwr_model(dat, response, sel$best), and
+  # fit_gwr_model() refuses every non-numeric predictor -- so a factor or
+  # character candidate got scored here, could be returned in $best, and then
+  # errored on the very next line of the example.  A factor is also counted as
+  # ONE variable while contributing several model-matrix columns, so its
+  # criterion is not comparable with the others'.  Refuse it where the sweep
+  # starts.
+  # is.numeric ONLY, matching fit_gwr_model()'s own guard.  Accepting logicals
+  # here let the sweep return a candidate in $best that the documented next
+  # step -- the last line of this function's own example -- then refused.
+  cand_types <- vapply(sf::st_drop_geometry(dat)[candidate_vars],
+                       is.numeric, logical(1))
+  if (any(!cand_types))
+    stop(sprintf(paste0("gwr_model_selection(): candidate(s) %s are not numeric. ",
+                        "GWmodel fits a factor as several model-matrix columns ",
+                        "while this sweep counts it as one variable, so the ",
+                        "criteria would not be comparable -- and fit_gwr_model(), ",
+                        "the documented next step, rejects it outright. Encode ",
+                        "them as numeric indicators first (a logical column ",
+                        "needs as.numeric() too -- fit_gwr_model() takes only ",
+                        "numerics)."),
+                 paste(sprintf("'%s'", candidate_vars[!cand_types]),
+                       collapse = ", ")), call. = FALSE)
 
   eng <- .engine(dat = dat, response_var = response_var,
                  candidate_vars = candidate_vars, bandwidth = bandwidth,

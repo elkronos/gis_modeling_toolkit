@@ -47,7 +47,12 @@ test_that("tol controls how readily variables are accepted", {
   tight <- select_features_forward(dat, "z", c("a", "b", "c1", "d", "e"),
                                    fs_fit, k = 4, tol = 1e6, seed = 1, quiet = TRUE)
   expect_lte(length(tight$selected), length(loose$selected))
-  expect_length(tight$selected, 1L)              # only the first step is free
+  # An impossible tol now selects NOTHING, not one variable.  `best` starts at
+  # the null (intercept-only) model's score rather than at +/-Inf, so the first
+  # step is tested like every other one -- previously it was accepted whatever
+  # its score, which is how a pure-noise response could still come back with a
+  # "predictive" variable.
+  expect_length(tight$selected, 0L)
 })
 
 test_that("max_vars caps the selection", {
@@ -102,7 +107,11 @@ test_that("history records every candidate at every step", {
   h <- sel$history
   expect_true(all(c("step", "variable", "score") %in% names(h)))
   expect_equal(sum(h$step == 1L), 3L)            # all three tried at step 1
-  expect_true(all(h$variable %in% c("a", "b", "c1")))
+  expect_true(all(h$variable %in% c("<none>", "a", "b", "c1")))
+  # Step 0 is the null model, the baseline the first step has to beat.
+  expect_equal(sum(h$step == 0L), 1L)
+  expect_equal(h$variable[h$step == 0L], "<none>")
+  expect_true(is.finite(h$score[h$step == 0L]))
 })
 
 test_that("bad input is rejected", {

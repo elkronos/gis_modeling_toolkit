@@ -151,7 +151,8 @@ test_that("harmonize_crs stamps a CRS-less input and says so", {
   b <- .wm_pt()
   a_na <- sf::st_sf(id = 1L, geometry = sf::st_sfc(sf::st_point(c(10, 50))))
 
-  lines <- capture_spatialkit_log(res <- harmonize_crs(a_na, b))
+  expect_warning(lines <- capture_spatialkit_log(res <- harmonize_crs(a_na, b)),
+                 "WITHOUT reprojection")
   expect_true(log_has(lines, "`a` has no CRS"))
   expect_true(log_has(lines, "WITHOUT reprojection"))
   expect_equal(sf::st_crs(res$a), sf::st_crs(3857))
@@ -159,7 +160,8 @@ test_that("harmonize_crs stamps a CRS-less input and says so", {
   expect_equal(unname(sf::st_coordinates(res$a)[1, 1:2]), c(10, 50))
 
   # The mirror branch, with the CRS-less object second.
-  lines_b <- capture_spatialkit_log(res_b <- harmonize_crs(b, a_na))
+  expect_warning(lines_b <- capture_spatialkit_log(res_b <- harmonize_crs(b, a_na)),
+                 "WITHOUT reprojection")
   expect_true(log_has(lines_b, "`b` has no CRS"))
   expect_equal(sf::st_crs(res_b$b), sf::st_crs(3857))
   expect_equal(unname(sf::st_coordinates(res_b$b)[1, 1:2]), c(10, 50))
@@ -224,7 +226,8 @@ test_that("ensure_projected refuses to assume lon/lat for a small integer-grid s
   # (a) More than a degree in ONE axis is enough to tip it the other way, so
   #     the extent test is doing real work and is not simply always false.
   wide_x <- nocrs(c(0, 0, 2, 2), c(0, 1, 0, 1))
-  lx <- capture_spatialkit_log(ox <- ensure_projected(wide_x))
+  expect_warning(lx <- capture_spatialkit_log(ox <- ensure_projected(wide_x)),
+                 "assuming EPSG:4326")
   expect_true(log_has(lx, "assuming EPSG:4326"))
   expect_false(is.na(sf::st_crs(ox)))
   expect_false(sf::st_is_longlat(ox))
@@ -235,7 +238,7 @@ test_that("ensure_projected refuses to assume lon/lat for a small integer-grid s
 
   # (b) So is fractional-degree precision within the same 1-degree box.
   fine <- nocrs(c(9.10, 9.20, 9.30, 9.15), c(48.70, 48.75, 48.80, 48.72))
-  lf <- capture_spatialkit_log(of <- ensure_projected(fine))
+  lf <- capture_spatialkit_log(of <- suppressWarnings(ensure_projected(fine)))
   expect_true(log_has(lf, "assuming EPSG:4326"))
   expect_equal(sf::st_crs(of)$epsg, 32632L)     # the containing UTM zone
 
@@ -247,4 +250,94 @@ test_that("ensure_projected refuses to assume lon/lat for a small integer-grid s
   expect_false(log_has(quiet, "assuming EPSG:4326"))
   expect_equal(sf::st_crs(os), sf::st_crs(32632))
   expect_equal(sf::st_coordinates(os), sf::st_coordinates(quad))
+})
+
+
+# ---------------------------------------------------------------------------
+# One interpretation of CRS-less coordinates, applied everywhere
+# ---------------------------------------------------------------------------
+
+.crsless_lonlat_pts <- function(n = 100, seed = 3) {
+  # Decimal-degree-looking coordinates with NO CRS: a layer that the lon/lat
+  # heuristic takes as EPSG:4326.
+  set.seed(seed)
+  d <- data.frame(x = runif(n, 24.1, 25.9), y = runif(n, 40.1, 41.4),
+                  elev = rnorm(n))
+  d$price <- 10 + 3 * d$elev + 2 * sin(d$x * 4) + rnorm(n, 0, 0.3)
+  sf::st_as_sf(d, coords = c("x", "y"), crs = NA)
+}
+
+test_that("predict() places CRS-less newdata where the fit placed the training rows", {
+  # prep_model_data() assumed lon/lat and PROJECTED the training data; every
+  # predict() method then passed the fit's CRS as a target, and the target
+  # branch used to STAMP it onto the raw numbers.  The same rows sat in two
+  # different places, and predict(fit, newdata = training rows) disagreed with
+  # fitted(fit) by up to one response SD (R2 0.98 in-sample, 0.64 via newdata).
+  skip_if_not_installed("ranger")
+  pts <- .crsless_lonlat_pts()
+  expect_warning(
+    fit <- fit_rf_model(pts, "price", "elev", include_coords = TRUE,
+                        num_trees = 200, seed = 1),
+    "assuming EPSG:4326")
+  # data_sf carries the assumption the fit was built under ...
+  expect_identical(attr(fit$data_sf, "crs_assumed"), "EPSG:4326")
+  # ... and newdata drawn from the raw, CRS-less rows lands where they did.
+  # The replayed assumption is announced too.
+  expect_warning(p_raw <- predict(fit, newdata = pts), "interpreting it as EPSG:4326")
+  p_fit <- predict(fit, newdata = fit$data_sf)
+  expect_equal(p_raw, p_fit, tolerance = 1e-10)
+  # A SUBSET whose own bounding box would not trigger the heuristic still
+  # gets the training-time interpretation, not a stamp.
+  sub <- pts[1:5, ]
+  expect_equal(suppressWarnings(predict(fit, newdata = sub)), p_fit[1:5], tolerance = 1e-10)
+})
+
+test_that("ensure_projected() interprets CRS-less lon/lat the same with and without a target", {
+  pts  <- .crsless_lonlat_pts()
+  expect_warning(auto <- ensure_projected(pts), "assuming EPSG:4326")   # no target
+  expect_warning(tgt  <- ensure_projected(pts, target_crs = sf::st_crs(auto)),
+                 "taken as EPSG:4326")                                   # target given
+  expect_equal(sf::st_coordinates(tgt), sf::st_coordinates(auto), tolerance = 1e-9)
+  expect_identical(attr(tgt, "crs_assumed"), "EPSG:4326")
+  # Coordinates that do NOT look like lon/lat -- inside the envelope but with
+  # neither decimal precision nor an extent above one degree, the site-survey
+  # case the heuristic exists to leave alone -- are still stamped, as before.
+  loc <- sf::st_as_sf(data.frame(x = c(0, 1, 0, 1), y = c(0, 0, 1, 1), v = 1),
+                      coords = c("x", "y"), crs = NA)
+  st  <- ensure_projected(loc, target_crs = sf::st_crs(32632))
+  expect_equal(sf::st_coordinates(st),
+               cbind(X = c(0, 1, 0, 1), Y = c(0, 0, 1, 1)), ignore_attr = TRUE)
+  expect_null(attr(st, "crs_assumed"))
+})
+
+test_that("CRS-less LINESTRINGs inside the lon/lat envelope get midpoints", {
+  # The temporary projection used for 'halfway along the line' was reversed
+  # with st_transform(<midpoints>, NA_crs_), which errors: 'crs not found'.
+  set.seed(4)
+  n <- 12
+  ls <- lapply(seq_len(n), function(i) {
+    x0 <- runif(1, 24, 26); y0 <- runif(1, 40, 41)
+    sf::st_linestring(rbind(c(x0, y0), c(x0 + 0.01, y0 + 0.02)))
+  })
+  lsf <- sf::st_sf(v = rnorm(n), geometry = sf::st_sfc(ls, crs = sf::NA_crs_))
+  expect_no_error(mp <- suppressWarnings(coerce_to_points(lsf, "line_midpoint")))
+  expect_true(all(sf::st_geometry_type(mp) == "POINT"))
+  expect_true(is.na(sf::st_crs(mp)))                 # output space == input space
+  xy <- sf::st_coordinates(mp)
+  expect_true(all(xy[, 1] > 24 & xy[, 1] < 26.1))   # back in the input's numbers
+  expect_no_error(suppressWarnings(prep_model_data(lsf, "v", character(0))))
+})
+
+test_that("hex and square grids accept the CRS-less input voronoi accepts", {
+  # The points were left CRS-less while create_grid_polygons() projected the
+  # boundary on its own; st_intersects() then refused the pair.
+  pts <- .crsless_lonlat_pts(60)
+  bnd <- sf::st_as_sfc(sf::st_bbox(pts))
+  bnd <- sf::st_set_crs(bnd, NA)
+  for (m in c("voronoi", "hex", "square")) {
+    expect_no_error(t <- suppressWarnings(
+      build_tessellation(pts, boundary = bnd, method = m,
+                         approx_n_cells = 12, quiet = TRUE)), message = m)
+    expect_gt(nrow(t$cells), 0)
+  }
 })

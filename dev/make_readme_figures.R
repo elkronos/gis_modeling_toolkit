@@ -132,9 +132,13 @@ ggsave("man/figures/readme-spatial-cv.png", p2,
        width = 8.5, height = 7, dpi = 150, bg = "white")
 
 # --- Figure 3: resolution sweep, with the selected k labelled ---------------
-# determine_optimal_levels() combines a geometric WSS elbow with Moran's I
-# on OLS residuals (val ~ west) at each candidate k; the first candidate is
-# the best-ranked cell count.
+# determine_optimal_levels() is asked for the combined criterion (a geometric
+# WSS elbow plus Moran's I on OLS residuals of val ~ west), but on this data
+# every candidate in the elbow neighbourhood sits below the nine-cell floor
+# where Moran's I on a complete k-NN graph is arithmetically degenerate, so it
+# falls back to the geometric ranking and logs a warning.  The label therefore
+# names the elbow's choice.  See "How many cells?" in README.md.
+# The first element of the returned vector is the best-ranked cell count.
 k_sel <- determine_optimal_levels(pts, max_levels = 15,
                                   response_var = "val",
                                   predictor_vars = "west")[1]

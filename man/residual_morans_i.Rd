@@ -25,9 +25,10 @@ When \code{NULL} (the default), a k-nearest-neighbour binary weight matrix
 (k = 8, row-standardised) is built from the observation coordinates.
 If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 to 1), the Cliff & Ord variance formula is still valid for general W
-and the computation proceeds, but a warning is emitted because the
-magnitude of I is not directly comparable to results obtained with
-row-standardised weights.}
+and the computation proceeds; a note is logged (not raised as an R
+warning) because the magnitude of I is not directly comparable to
+results obtained with row-standardised weights.  A \code{weights}
+argument that is not an n x n matrix is an error.}
 
 \item{k}{Integer number of nearest neighbours used when building the
 default weight matrix (ignored when \code{weights} is supplied).
@@ -164,7 +165,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   # should still carry spatial structure, and this is what detects it.
   dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
-  residual_morans_i(fit)  # z near 0 / p large = no residual structure
+  # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
+  # as constructed.  A z near 0 with a large p-value would be the opposite
+  # verdict -- no structure the model failed to capture.
+  residual_morans_i(fit)
 }
 }
 }
@@ -173,9 +177,9 @@ Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 Models and Applications}. Pion, London. Section 8.3.
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}}
 }
 \concept{model evaluation}

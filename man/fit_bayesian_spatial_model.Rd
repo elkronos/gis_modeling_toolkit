@@ -115,6 +115,9 @@ Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 Model-specific metadata lives in \code{$info} (coords -- the names of the
 scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
+gp_S -- the pooled centred range \code{brms::gp(c = )} multiplies;
+gp_xy_range -- the training extrema of the scaled coordinates, which
+\code{predict()} uses to pin the GP boundary;
 gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
 was calibrated over; gp_lscale_prior -- the length-scale prior
 \code{brms::validate_prior()} reports the model will \emph{actually} use,
@@ -157,7 +160,10 @@ typically 21-25 per dimension and is largely independent of \code{n}.
 
 The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
 the full pooled range of the column-centred coordinates
-(\code{brms:::choose_L()}), not the per-axis half-range in which
+(\code{brms:::choose_L()}, taken over the \strong{unique} coordinate rows,
+because \code{brms:::.data_gp()} reduces the covariates to unique rows first
+under the default \code{gr = TRUE} -- so repeat visits to one location do not
+widen the domain), not the per-axis half-range in which
 Riutort-Mayol et al. state their inequalities.  Both constraints are really
 constraints on the boundary \eqn{L = c \times S}, so expressing them in
 brms's units is what keeps \code{gp_c}, \code{gp_k} and
@@ -229,10 +235,10 @@ Gaussian processes for probabilistic programming.
 \doi{10.1007/s11222-022-10167-2}
 }
 \seealso{
-Other model fitting: 
-\code{\link{fit_gwr_model}()},
-\code{\link{fit_rf_model}()},
-\code{\link{new_spatial_fit}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
+\code{\link[=new_spatial_fit]{new_spatial_fit()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

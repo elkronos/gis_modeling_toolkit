@@ -35,7 +35,12 @@ assuming \code{n}.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
 
-\item{sample_points}{Optional sf POINT cloud for k-means clustering.}
+\item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
+the first two coordinate columns are clustered, so a Z or M dimension does
+not join the distance calculation and dominate it; rows with empty or
+non-finite coordinates are dropped with a warning rather than reaching
+\code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
+cloud is projected before clustering.}
 
 \item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10.}
 
@@ -59,10 +64,10 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{plot_tessellation_map}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
 }
 \concept{tessellation}

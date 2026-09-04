@@ -58,15 +58,21 @@ There are two obligations.  Return an object built here from your
 \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
 you chose -- \code{\link{cv_spatial}()} scores folds by calling the
 \code{predict()} generic on the fit, so without a matching
-\code{predict.<subclass>()} every fold fails.  Methods for
-\code{\link{fitted}()}, \code{\link{residuals}()} and \code{\link{coef}()}
-are optional; supply them if you want the corresponding helpers to work on
-your fits too.
+\code{predict.<subclass>()} every fold fails.  A
+\code{fitted.<subclass>()} method returning one value per row of the fit's
+\code{data_sf}, in the same order, is \strong{required} by
+\code{\link{summary}()} and \code{\link{model_metrics}()}: both error,
+naming the method to define, without one.  \code{\link{residuals}()} and
+\code{\link{coef}()} methods are optional.
 }
 \section{The coef() contract}{
 
-\code{coef()} on a \code{spatial_fit} either returns the coefficients or
-signals an error -- it never returns \code{NULL}.  \code{coef.rf_fit()}
+\code{coef()} on one of the three built-in backends either returns the
+coefficients or signals an error -- it never returns \code{NULL}.  A custom
+subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
+so define a \code{coef.<subclass>()} that errors when your backend has no
+coefficients; otherwise the hazard described below applies to your own fits.
+\code{coef.rf_fit()}
 always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
 and \code{coef.bayesian_fit()} error when the backend cannot supply them
 (a missing package, an engine without the expected component).  A
@@ -115,10 +121,10 @@ c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
 \code{\link{fit_rf_model}()} for a worked built-in fitter.
 
-Other model fitting: 
-\code{\link{fit_bayesian_spatial_model}()},
-\code{\link{fit_gwr_model}()},
-\code{\link{fit_rf_model}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

@@ -56,7 +56,12 @@ A list with components:
 a \code{cell_id} column; the \code{"hex"} and \code{"square"} methods additionally
 carry \code{poly_id}, which holds the same values.}
 \item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
-\code{points_sf}.}
+\code{points_sf}, and \code{NA} for a point that falls inside no cell --- one
+outside the study area, in other words. Only a point within a
+thousandth of the median cell width of a cell is snapped to it, which
+covers points sitting exactly on a shared edge without quietly
+dragging genuinely-outside points in. A summary built from \code{index}
+therefore counts only the points the tessellation actually covers.}
 \item{\code{boundary}}{The boundary used (possibly derived and/or reprojected).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with.}
@@ -95,10 +100,10 @@ tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
 tess$cells
 }
 \seealso{
-Other tessellation: 
-\code{\link{create_grid_polygons}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()}
+Other tessellation:
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
 }
 \concept{tessellation}

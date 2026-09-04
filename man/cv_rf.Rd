@@ -15,6 +15,7 @@ cv_rf(
   block_size = NULL,
   auto_range = FALSE,
   boundary = NULL,
+  pointize = "auto",
   ...
 )
 }
@@ -25,17 +26,34 @@ cv_rf(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{folds}{Optional fold definitions from \code{\link{make_folds}}.}
+\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
+value, or a bare list of \code{list(train =, test =)} pairs of
+\code{..row_id} values.  Train and test must be disjoint — a fold that
+trains on its own test rows is not a cross-validation split and is refused
+with an error — and IDs naming no row in the prepared data are dropped with
+a logged count.}
 
 \item{k}{Number of folds when \code{folds} is \code{NULL}. Default 5.}
 
-\item{seed}{RNG seed. Default 123.}
+\item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
+through a per-fold draw, each fold's forest — so two different seeds give
+different results even on identical \code{folds}.  Pass \code{seed}
+through \code{...} to fix one ranger seed for every fold instead.}
 
 \item{parallel}{Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.}
 
 \item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.}
 
-\item{...}{Passed to \code{\link{fit_rf_model}} on every fold.}
+\item{pointize}{How non-POINT geometry is reduced to a point before
+fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
+
+\item{...}{Passed to \code{\link{fit_rf_model}} on every fold —
+\code{num_trees}, \code{mtry}, \code{importance}, \code{include_coords}
+and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
+and \code{.already_prepped} are set by this function and must not be
+passed here (every fold would fail with "matched by multiple actual
+arguments").  A \code{seed} given here overrides the per-fold draw
+described above.}
 }
 \value{
 The \code{\link{cv_spatial}} result.
@@ -62,14 +80,14 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

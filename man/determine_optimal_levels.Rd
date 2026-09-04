@@ -31,7 +31,10 @@ large \code{top_n} is; only the model-aware criteria can return more.}
 
 \item{response_var}{Optional response column name. When provided alongside
 \code{predictor_vars}, enables model-aware level selection via Moran's I
-on OLS residuals.}
+on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
+a factor or character response raises an error rather than being coerced,
+because the residuals of an OLS fit to arbitrary level codes carry no
+meaning to test for autocorrelation.}
 
 \item{predictor_vars}{Optional predictor column names. Must be numeric or
 logical (logicals are read as 0/1); factor/character columns raise an
@@ -124,8 +127,8 @@ determine_optimal_levels(pts, max_levels = 6)
 \code{approx_n_cells}; \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps that follow.
 
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{summarize_by_cell}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}}
 }
 \concept{aggregation}

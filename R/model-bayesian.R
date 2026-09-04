@@ -201,7 +201,10 @@
 #'
 #' The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
 #' the full pooled range of the column-centred coordinates
-#' (\code{brms:::choose_L()}), not the per-axis half-range in which
+#' (\code{brms:::choose_L()}, taken over the \strong{unique} coordinate rows,
+#' because \code{brms:::.data_gp()} reduces the covariates to unique rows first
+#' under the default \code{gr = TRUE} -- so repeat visits to one location do not
+#' widen the domain), not the per-axis half-range in which
 #' Riutort-Mayol et al. state their inequalities.  Both constraints are really
 #' constraints on the boundary \eqn{L = c \times S}, so expressing them in
 #' brms's units is what keeps \code{gp_c}, \code{gp_k} and
@@ -252,6 +255,9 @@
 #'   Model-specific metadata lives in \code{$info} (coords -- the names of the
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
+#'   gp_S -- the pooled centred range \code{brms::gp(c = )} multiplies;
+#'   gp_xy_range -- the training extrema of the scaled coordinates, which
+#'   \code{predict()} uses to pin the GP boundary;
 #'   gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
 #'   was calibrated over; gp_lscale_prior -- the length-scale prior
 #'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
@@ -652,6 +658,42 @@ fit_bayesian_spatial_model <- function(
     .log_info(
       "fit_bayesian_spatial_model(): user-supplied prior already includes lscale class; skipping automatic GP length-scale prior."
     )
+    # The user's prior must actually REACH Stan.  A global lscale prior
+    # (class = "lscale", no coef) is silently discarded by brms because every
+    # lscale coefficient already carries an individual default -- the very
+    # trap the package's own prior fell into.  Expand any global lscale row to
+    # the coefficient level, exactly as is done for the automatic prior above,
+    # so that supplying `prior = set_prior("normal(0, 1)", class = "lscale")`
+    # does what it says.
+    is_global_ls <- prior$class == "lscale" & !nzchar(prior$coef)
+    if (any(is_global_ls)) {
+      ls_coefs <- tryCatch({
+        gp_def <- brms::get_prior(fml, data = dat_df, family = family)
+        gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
+      }, error = function(e) character(0))
+      if (length(ls_coefs) > 0L) {
+        expanded <- NULL
+        for (i in which(is_global_ls)) {
+          for (k in ls_coefs) {
+            row <- brms::set_prior(prior$prior[i], class = "lscale", coef = k)
+            expanded <- if (is.null(expanded)) row else expanded + row
+          }
+        }
+        kept  <- prior[!is_global_ls, , drop = FALSE]
+        prior <- if (nrow(kept) > 0L) kept + expanded else expanded
+        .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
+                         "'lscale' prior was attached to %s so that brms uses ",
+                         "it (a global lscale prior is otherwise discarded)."),
+                  paste(sQuote(ls_coefs), collapse = ", "))
+      } else {
+        .log_warn(paste0("fit_bayesian_spatial_model(): the supplied prior has a ",
+                         "GLOBAL 'lscale' entry, which brms discards because ",
+                         "every length-scale coefficient already has an ",
+                         "individual prior, and brms reported no coefficient ",
+                         "names to attach it to. Check $info$gp_lscale_prior ",
+                         "against brms::make_stancode()."))
+      }
+    }
   }
 
   # Record the prior brms will actually use, not the one that was requested.
@@ -824,6 +866,20 @@ fit_bayesian_spatial_model <- function(
       gp_lscale_prior          = gp_lscale_prior_used,
       gp_n_basis               = gp_k^2,
       gp_ell_min               = gp_ell_min,
+      # The scaled-coordinate extrema of the training data, and the pooled
+      # centred range brms derived the boundary from.  predict() needs them:
+      # brms 2.x stores only Xgp/dmax/cmeans in the fit's GP basis, NOT the
+      # Hilbert-space boundary L, so brms:::.data_gp() RECOMPUTES
+      # L = c * range(centred newdata) from whatever rows predict() is handed.
+      # Without pinning, a point's prediction depends on which other points
+      # share the predict() call -- predict_surface()'s chunk_size changed the
+      # surface, and every cv_bayes() fold was scored against a basis the model
+      # was not fitted with.  See .pin_gp_boundary_rows().
+      gp_xy_range              = list(
+        x = range(dat_df[["..x"]], na.rm = TRUE),
+        y = range(dat_df[["..y"]], na.rm = TRUE)
+      ),
+      gp_S                     = gp_spec$S,
       gp_lengthscale_bounds    = ls_bounds,
       convergence_ok           = convergence_ok,
       convergence_diagnostics  = convergence_diagnostics,

@@ -15,8 +15,9 @@
 #' train and test -- and the outer loop then reports honest-looking numbers for
 #' a dishonestly chosen feature set, which is worse than not selecting at all,
 #' because the dishonesty is now hidden behind a defensible-looking validation.
-#' \code{method} therefore defaults to \code{"block_kfold"} and warns loudly if
-#' set to \code{"random_kfold"}.
+#' \code{method} therefore defaults to \code{"block_kfold"} and logs a loud
+#' caution if set to \code{"random_kfold"} (a deliberate choice, so it is not
+#' raised as an R warning).
 #'
 #' Call this \emph{inside} the \code{fit_fn} you pass to \code{cv_spatial()}.
 #' \code{.cv_fit_one_fold()} calls \code{fit_fn(train_sf)} on the training
@@ -39,7 +40,12 @@
 #' @param metric Score to optimise: \code{"RMSE"}, \code{"MAE"} (minimised) or
 #'   \code{"R2"} (maximised). Default \code{"RMSE"}.
 #' @param tol Minimum improvement required to accept a variable.  Default 0,
-#'   meaning any improvement is accepted.
+#'   meaning any improvement is accepted. The first variable is judged against
+#'   the null (intercept-only) model, so \code{tol} bites from step 1 --- but
+#'   only when that null model can be scored. Backends that refuse a
+#'   zero-length \code{predictor_vars} (\code{\link{fit_rf_model}} and
+#'   \code{\link{fit_gwr_model}} both do) have no null score, and there the
+#'   first variable is accepted unconditionally.
 #' @param max_vars Optional cap on how many predictors to select.
 #' @param max_fits Abort if the sweep would exceed this many model fits.
 #'   Default 5000.
@@ -49,8 +55,13 @@
 #'   \emph{learner} inside every fold.  A stochastic \code{fit_fn} is therefore
 #'   reproducible from this one value.
 #' @param quiet Suppress progress messages. Default FALSE.
-#' @return A list with \code{selected}, \code{score}, \code{history} (a
-#'   data.frame of every candidate evaluated at every step) and \code{params}.
+#' @return A list with \code{selected} (the chosen predictors, in the order
+#'   they were added), \code{score} (their cross-validated \code{metric}),
+#'   \code{history} and \code{params}. \code{history} is a data.frame with
+#'   \code{step}, \code{variable} and \code{score}, holding every candidate
+#'   evaluated at every step; when the null model could be scored it also
+#'   carries a \code{step = 0} row named \code{"<none>"} giving that
+#'   baseline, so the first variable's gain can be read off directly.
 #' @family cross-validation
 #' @examples
 #' \donttest{
@@ -185,8 +196,33 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
 
   selected  <- character(0)
   remaining <- candidate_vars
-  best      <- worst
   history   <- list()
+
+  # Score the EMPTY set first, so step 1 has something to beat.  `best` used to
+  # start at Inf/-Inf with the stopping test gated on is.finite(best), which
+  # made the first step unconditional: whatever the winning candidate's score,
+  # it was accepted.  On a pure-noise response a "predictive" feature was
+  # therefore selected in 100% of runs, and in 23% of them the returned set was
+  # WORSE in CV RMSE than fitting nothing at all -- while the documentation
+  # says the sweep stops "when no candidate improves it by more than `tol`".
+  # An intercept-only fit is not something every backend can do, so fall back
+  # to the old unconditional first step when it fails, and say so.
+  # suppressWarnings(): a backend that cannot fit an intercept-only model --
+  # fit_rf_model() and fit_gwr_model() both refuse a zero-length
+  # predictor_vars -- makes cv_spatial() report "all folds failed", which is
+  # expected here and handled by the fallback below.  Letting it escape turned
+  # a silent, working call into one that warns about a fit the user never
+  # asked for.
+  null_score <- suppressWarnings(score_set(character(0)))
+  best <- if (is.finite(null_score)) null_score else worst
+  if (!is.finite(null_score))
+    .msg("select_features_forward(): the null (intercept-only) model could not ",
+         "be scored, so the first variable is accepted unconditionally.")
+  else
+    history[[length(history) + 1L]] <- data.frame(
+      step = 0L, variable = "<none>", score = unname(null_score),
+      stringsAsFactors = FALSE
+    )
 
   repeat {
     if (length(remaining) == 0L || length(selected) >= max_steps) break

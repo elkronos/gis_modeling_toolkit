@@ -38,7 +38,17 @@
     stop(sprintf("compare_models_cv(): every element of `%s` must be named.",
                  arg_label), call. = FALSE)
 
-  protected <- c("data_sf", "response_var", "predictor_vars", "folds")
+  # Everything that DECIDES THE SPLIT is protected, not just `folds`.  The
+  # documented guarantee is that every model is cross-validated on the same
+  # folds, and with folds = NULL each cv_*() built its own from k, seed,
+  # block_size, auto_range, boundary and pointize -- so a per-model block_size
+  # or seed silently gave the models different splits and the comparison table
+  # then ranked models scored on different data.  (compare_models_cv() now
+  # builds one fold set up front when folds = NULL, so these would be ignored
+  # in any case; saying so is better than ignoring them quietly.)
+  protected <- c("data_sf", "response_var", "predictor_vars", "folds",
+                 "k", "seed", "block_size", "auto_range", "boundary",
+                 "pointize")
   clash <- intersect(names(extra), protected)
   if (length(clash) > 0L) {
     warning(sprintf(
@@ -216,8 +226,11 @@
   # "%.17g" round-trips a double exactly, so two rows share a key iff they are
   # bit-identical.  (as.character() would stop at 15 significant digits and
   # could merge two points a few ulps apart -- harmless, but only by accident.)
-  key <- paste(sprintf("%.17g", coords[, 1L]),
-               sprintf("%.17g", coords[, 2L]), sep = "\r")
+  # `+ 0` normalises a negative zero: sprintf("%.17g", -0) is "-0", which
+  # would put a point at (-0, y) in a different group from one at (0, y)
+  # although they are the same location and st_distance() says 0.
+  key <- paste(sprintf("%.17g", coords[, 1L] + 0),
+               sprintf("%.17g", coords[, 2L] + 0), sep = "\r")
   gid     <- match(key, key)              # representative row index per point
   reps    <- which(!duplicated(gid))      # one row index per distinct location
   gid     <- match(gid, gid[reps])        # 1..G
@@ -557,9 +570,10 @@
 #'   (k = 8, row-standardised) is built from the observation coordinates.
 #'   If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 #'   to 1), the Cliff & Ord variance formula is still valid for general W
-#'   and the computation proceeds, but a warning is emitted because the
-#'   magnitude of I is not directly comparable to results obtained with
-#'   row-standardised weights.
+#'   and the computation proceeds; a note is logged (not raised as an R
+#'   warning) because the magnitude of I is not directly comparable to
+#'   results obtained with row-standardised weights.  A \code{weights}
+#'   argument that is not an n x n matrix is an error.
 #' @param k Integer number of nearest neighbours used when building the
 #'   default weight matrix (ignored when \code{weights} is supplied).
 #'   Default 8.
@@ -615,7 +629,10 @@
 #'   # should still carry spatial structure, and this is what detects it.
 #'   dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
 #'   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
-#'   residual_morans_i(fit)  # z near 0 / p large = no residual structure
+#'   # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
+#'   # as constructed.  A z near 0 with a large p-value would be the opposite
+#'   # verdict -- no structure the model failed to capture.
+#'   residual_morans_i(fit)
 #' }
 #' }
 #' @export
@@ -628,14 +645,14 @@ residual_morans_i <- function(fit,
   null        <- match.arg(null)
 
   if (!inherits(fit, "spatial_fit")) {
-    .log_warn("residual_morans_i(): `fit` is not a spatial_fit object.")
+    .warn_and_log("residual_morans_i(): `fit` is not a spatial_fit object.")
     return(NULL)
   }
 
   # --- Extract residuals & coordinates ---
   resid <- tryCatch(residuals(fit), error = function(e) NULL)
   if (is.null(resid) || length(resid) < 4L) {
-    .log_warn("residual_morans_i(): could not extract enough residuals (n < 4).")
+    .warn_and_log("residual_morans_i(): could not extract enough residuals (n < 4).")
     return(NULL)
   }
 
@@ -645,14 +662,14 @@ residual_morans_i <- function(fit,
   }, error = function(e) NULL)
 
   if (is.null(coords) || nrow(coords) != length(resid)) {
-    .log_warn("residual_morans_i(): coordinate extraction failed.")
+    .warn_and_log("residual_morans_i(): coordinate extraction failed.")
     return(NULL)
   }
 
   # Drop any non-finite residuals
   ok <- is.finite(resid)
   if (sum(ok) < 4L) {
-    .log_warn("residual_morans_i(): fewer than 4 finite residuals.")
+    .warn_and_log("residual_morans_i(): fewer than 4 finite residuals.")
     return(NULL)
   }
   resid  <- resid[ok]
@@ -664,12 +681,46 @@ residual_morans_i <- function(fit,
     # Accept base matrices AND Matrix-package sparse/dense matrices
     # (is.matrix() is FALSE for e.g. dgCMatrix, which previously caused a
     # misleading "wrong dimensions" warning and a silent kNN fallback).
+    # A data.frame of weights is accepted as a matrix; anything else that is
+    # not an n x n matrix is an ERROR.  It used to be a logged line and a
+    # silent fall-back to the default kNN(8) matrix -- so a user who supplied
+    # their own weights with one row too few, or as a data.frame, got the
+    # statistic for a weight matrix they never chose, with no R condition
+    # raised (measured: I = 0.874 returned for four malformed shapes, against
+    # 0.805 for the weights actually supplied).
+    if (is.data.frame(weights)) weights <- as.matrix(weights)
     is_mat_like <- is.matrix(weights) || inherits(weights, "Matrix")
     if (!is_mat_like || nrow(weights) != n || ncol(weights) != n) {
-      .log_warn("residual_morans_i(): user-supplied `weights` is not an n x n matrix (n = %d); falling back to kNN.", n)
-      W <- .build_knn_weights(coords, k = k)
+      stop(sprintf(paste0("residual_morans_i(): `weights` must be an n x n matrix ",
+                          "(base matrix or Matrix), with n = %d the number of ",
+                          "finite residuals; got %s of dimension %s. Omit ",
+                          "`weights` to use the default k-nearest-neighbour ",
+                          "matrix."),
+                   n, paste(class(weights), collapse = "/"),
+                   if (is_mat_like) paste(dim(weights), collapse = " x ")
+                   else paste0("length ", length(weights))),
+           call. = FALSE)
     } else {
       W <- weights
+      # A non-zero diagonal breaks the null distribution, not just the
+      # interpretation.  Every moment formula in this file -- E[I], Var[I]
+      # under randomisation, and the regression-residual moments -- assumes
+      # w_ii = 0, so a self-inclusive weights matrix (an easy mistake when
+      # building one by hand) rejected the null on 75% of white-noise
+      # residuals at a nominal 5%, with no warning, error or log line: the
+      # permutation E[I] for such a W is +0.10 where the function reported
+      # -0.01.  Zero the diagonal and say so; the alternative is a p-value
+      # that means nothing.
+      w_diag <- if (inherits(W, "Matrix")) Matrix::diag(W) else diag(W)
+      if (any(is.finite(w_diag) & w_diag != 0)) {
+        .warn_and_log(paste0("residual_morans_i(): `weights` has %d non-zero ",
+                             "diagonal entr(y/ies). Moran's I and every moment ",
+                             "of its null distribution assume no observation is ",
+                             "its own neighbour, so the diagonal is set to zero ",
+                             "(rows are NOT re-standardised)."),
+                      sum(is.finite(w_diag) & w_diag != 0))
+        if (inherits(W, "Matrix")) Matrix::diag(W) <- 0 else diag(W) <- 0
+      }
       # Validate row-standardisation: each row should sum to 1 (or 0 for
       # isolates).  If not, the Moran's I statistic is still computed
       # correctly for a general W via the Cliff & Ord formula, but the
@@ -704,7 +755,7 @@ residual_morans_i <- function(fit,
   resid_c <- resid - mean(resid)
   ss_c    <- sum(resid_c^2)
   if (S0 < .Machine$double.eps || ss_c < .Machine$double.eps) {
-    .log_warn("residual_morans_i(): degenerate weights or zero residual variance.")
+    .warn_and_log("residual_morans_i(): degenerate weights or zero residual variance.")
     return(NULL)
   }
 
@@ -1040,7 +1091,13 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \code{requireNamespace()} when the model set is not known in advance.
 #' @param k Number of folds. Default 5.
 #' @param seed RNG seed. Default 123.
-#' @param folds Optional precomputed fold splits.
+#' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
+#'   value, or a bare list of \code{list(train =, test =)} pairs of
+#'   \code{..row_id} values.  Train and test must be disjoint — a fold that
+#'   trains on its own test rows is not a cross-validation split and is refused
+#'   with an error — and IDs naming no row in the prepared data are dropped with
+#'   a logged count (expected when rows were removed for missing values; a sign
+#'   the folds came from other data when they were not).
 #' @param boundary Optional polygon sf/sfc.
 #' @param pointize Geometry coercion strategy.
 #' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
@@ -1127,6 +1184,27 @@ compare_models_cv <- function(
   cleanup <- .with_seed(seed)
   on.exit(cleanup(), add = TRUE)
 
+  # Build the folds ONCE.  Leaving folds = NULL let each backend call
+  # make_folds() for itself, and any difference in the arguments that reach it
+  # -- or simply seed = NULL -- produced a different split per model: measured,
+  # 104 of 150 rows sat in different folds for GWR and RF under a per-model
+  # block_size, and 99 of 150 under seed = NULL with no overrides at all.  The
+  # comparison is only a comparison if the splits are identical.
+  if (is.null(folds)) {
+    folds <- tryCatch(
+      make_folds(data_sf, k = k, method = "block_kfold",
+                 seed = if (is.null(seed)) 123L else seed,
+                 boundary = boundary),
+      error = function(e) {
+        .log_warn(paste0("compare_models_cv(): could not build a shared fold ",
+                         "set (%s); each backend will build its own, so the ",
+                         "models may not be scored on identical splits."),
+                  conditionMessage(e))
+        NULL
+      }
+    )
+  }
+
   comparison_rows <- list(); by_fold_rows <- list(); cv_results <- list()
 
   if ("GWR" %in% models) {
@@ -1176,12 +1254,15 @@ compare_models_cv <- function(
   if ("RF" %in% models) {
     .msg("compare_models_cv(): running CV for RF ...")
     # cv_rf() has `...` (forwarded to fit_rf_model() and on to ranger), so
-    # nothing in rf_args is filtered out; `pointize` is deliberately not
-    # passed, because cv_rf() has no such formal and it would land in ranger.
+    # nothing in rf_args is filtered out.  `pointize` IS passed: the comment
+    # that used to sit here said cv_rf() had no such formal, which stopped
+    # being true when it gained one -- so a documented argument was a no-op for
+    # one of the compared models, and polygon input was scored on "auto" points
+    # whatever the caller asked for.
     base <- .merge_args(
       list(data_sf = data_sf, response_var = response_var,
            predictor_vars = predictor_vars, folds = folds,
-           k = k, seed = seed, boundary = boundary),
+           k = k, seed = seed, boundary = boundary, pointize = pointize),
       rf_args, "rf_args"
     )
     rf_cv <- do.call(cv_rf, base)

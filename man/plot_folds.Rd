@@ -35,7 +35,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.spatial_fit}()}
+Other plotting:
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}}
 }
 \concept{plotting}

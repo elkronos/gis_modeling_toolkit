@@ -26,6 +26,11 @@
 #'       reference line.}
 #'     \item{\code{"variogram"}}{Empirical variogram of the residuals with the
 #'       fitted model overlaid, so the fit can be judged rather than trusted.
+#'       The distance axis is labelled in the units of the CRS the variogram
+#'       was actually fitted in, which is not necessarily the fit's own CRS
+#'       (lon/lat data are projected first). A single-direction fit names its
+#'       azimuth in the subtitle; a fit that did not converge says so in the
+#'       caption, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
 #'   }
 #' @param ... Ignored.
@@ -130,11 +135,35 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
     stop("plot.spatial_fit(): the residual variogram could not be fitted; ",
          "there may be too few finite residuals to model.", call. = FALSE)
 
+  # The axis is in the units of the CRS the VARIOGRAM was fitted in, which
+  # estimate_sac_range() chose with ensure_projected() -- not necessarily the
+  # fit's own CRS.  Labelling it "CRS units" for a lon/lat fit named degrees
+  # while the numbers were metres of an auto-chosen UTM zone that appeared
+  # nowhere on the plot.  estimate_sac_range() returns the CRS for exactly this.
+  vg_units <- tryCatch({
+    u <- sf::st_crs(attr(sac, "crs"))$units_gdal
+    if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
+  }, error = function(e) "CRS units")
+
+  # Which variogram is this?  When anisotropy was established,
+  # estimate_sac_range() returns the single azimuth with the widest range --
+  # about a quarter of the point pairs -- and calling that plainly "Residual
+  # variogram" overstates the leftover structure for the plot whose whole
+  # purpose is to show how much there is.
+  vg_title <- "Residual variogram"
+  if (isTRUE(attr(sac, "anisotropy_used"))) {
+    dir_r <- attr(sac, "directional")
+    az <- if (!is.null(dir_r) && length(dir_r))
+      names(dir_r)[which.max(replace(dir_r, is.na(dir_r), -Inf))] else NA
+    vg_title <- if (is.na(az)) "Residual variogram (widest direction only)"
+      else sprintf("Residual variogram, %s\u00b0 \u00b1 22.5\u00b0 (the widest of four directions)", az)
+  }
+
   p <- ggplot2::ggplot(vg, ggplot2::aes(x = .data$dist, y = .data$gamma)) +
     ggplot2::geom_point(ggplot2::aes(size = .data$np), alpha = 0.7) +
     ggplot2::scale_size_continuous(name = "Pairs") +
-    ggplot2::labs(title = "Residual variogram",
-                  x = "Distance (CRS units)", y = "Semivariance") +
+    ggplot2::labs(title = vg_title,
+                  x = sprintf("Distance (%s)", vg_units), y = "Semivariance") +
     ggplot2::theme_minimal()
 
   if (!is.null(vm)) {
@@ -148,17 +177,27 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   if (is.finite(sac)) {
     p <- p + ggplot2::geom_vline(xintercept = as.numeric(sac),
                                  linetype = "dotted", colour = "#B2182B") +
-      ggplot2::labs(subtitle = sprintf("Effective range = %.1f CRS units",
-                                       as.numeric(sac)))
+      ggplot2::labs(subtitle = sprintf("Effective range = %.1f %s",
+                                       as.numeric(sac), vg_units))
   } else if (!is.null(attr(sac, "rejected_range"))) {
     # A variogram that never reaches a sill is the single most useful thing to
     # SEE, so draw it and label why no range is marked, rather than refusing.
+    # estimate_sac_range() records WHICH of two reasons applied; hard-coding
+    # the sill wording for both captioned a non-converged fit with a sentence
+    # its own two numbers refute (range 11 "exceeds" a cutoff of 682).
+    reason <- attr(sac, "rejected_reason")
     p <- p + ggplot2::labs(
-      subtitle = sprintf(paste0("No effective range: the fitted range (%.0f) ",
-                                "exceeds the largest lag fitted (%.0f), so the ",
-                                "variogram never reached a sill."),
-                         attr(sac, "rejected_range"),
-                         attr(sac, "cutoff_dist")))
+      subtitle = if (identical(reason, "variogram model did not converge"))
+        sprintf(paste0("No effective range: the fit stopped at gstat's ",
+                       "iteration limit, so the range it reports (%.0f) is ",
+                       "where the optimiser halted, not a fitted parameter."),
+                attr(sac, "rejected_range"))
+      else
+        sprintf(paste0("No effective range: the fitted range (%.0f) ",
+                       "exceeds the largest lag fitted (%.0f), so the ",
+                       "variogram never reached a sill."),
+                attr(sac, "rejected_range"),
+                attr(sac, "cutoff_dist")))
   }
   p
 }

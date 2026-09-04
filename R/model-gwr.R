@@ -114,7 +114,9 @@
 #' @keywords internal
 #' @noRd
 .extract_gwr_values <- function(gwr_obj, data_sf, formula, n,
-                                response_var = all.vars(formula)[1]) {
+                                response_var = all.vars(formula)[1],
+                                mode = c("auto", "basic", "predict")) {
+  mode <- match.arg(mode)
   na_vec <- rep(NA_real_, n)
   
   sdf <- tryCatch(gwr_obj$SDF, error = function(e) NULL)
@@ -157,9 +159,31 @@
   sdf_lower   <- tolower(names(sdf_data))
   model_terms <- tolower(c(response_var, all.vars(formula)[-1L],
                            "Intercept", "(Intercept)"))
+  # The model-term exclusion is for gwr.basic()'s SDF, where the local
+  # coefficient columns carry the BARE predictor names.  gwr.predict()'s SDF
+  # suffixes them "_coef" (Intercept_coef, x_coef, ...) and names its
+  # prediction column "prediction" -- so there, a predictor that happens to
+  # be called `prediction` is NOT a reason to skip the column literally named
+  # prediction; it IS the prediction, and excluding it made predict() return
+  # all NA (0 finite of 100) while fitted() was fine.  Apply the exclusion only
+  # when no "_coef" columns exist.
+  # `mode` says which GWmodel call produced this SDF, because inferring it from
+  # the column names cannot be made safe: a PREDICTOR whose name happens to end
+  # in "_coef" made a gwr.basic() SDF look like a gwr.predict() one, which
+  # switched off the model-term exclusion -- and with a second predictor named
+  # `yhat`, fitted() then returned that predictor's local coefficient surface
+  # instead of the fitted values (R2 -2.28 against 0.986), silently, for
+  # residuals(), summary() and model_metrics() alike.  "auto" keeps the old
+  # inference for any caller that has not been updated.
+  has_coef_suffix <- switch(mode,
+    basic   = FALSE,
+    predict = TRUE,
+    any(grepl("_coef$", sdf_lower))
+  )
   hit <- NULL
   for (cand in pred_col_names) {
-    idx <- which(sdf_lower == cand & !(sdf_lower %in% model_terms))
+    idx <- which(sdf_lower == cand &
+                   (has_coef_suffix | !(sdf_lower %in% model_terms)))
     if (length(idx) >= 1L) { hit <- idx[[1L]]; break }
   }
   if (!is.null(hit)) {
@@ -255,9 +279,18 @@
 #'   bandwidth is an integer number of nearest neighbours. When FALSE,
 #'   bandwidth is a fixed distance in CRS units.
 #' @param bandwidth Optional numeric bandwidth value. For adaptive mode this
-#'   is an integer (number of neighbours); for fixed mode a distance in CRS
-#'   units. If NULL (default), bandwidth is selected automatically via
-#'   \code{GWmodel::bw.gwr()}.
+#'   is an integer (number of neighbours); for fixed mode a distance in the
+#'   units of the **projected** CRS the fit runs in -- \code{prep_model_data()}
+#'   projects geographic input before the bandwidth is used, so 0.2 supplied
+#'   for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS off
+#'   \code{sf::st_crs(fit$data_sf)}, or pass \code{target_crs} to
+#'   \code{\link{ensure_projected}} beforehand to fix the units yourself.
+#'   If NULL (default), bandwidth is selected automatically via
+#'   \code{GWmodel::bw.gwr()}.  With \code{adaptive = FALSE}, a bandwidth
+#'   smaller than a ten-thousandth of the data's extent raises a warning naming
+#'   the extent and the CRS the fit runs in: every local window is then likely
+#'   to be empty, which used to produce a fit whose coefficients were all
+#'   \code{NaN} with nothing raised anywhere.
 #' @param kernel Kernel function type. One of "bisquare" (default),
 #'   "gaussian", "tricube", "boxcar", "exponential".
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
@@ -270,23 +303,43 @@
 #' The function checks the condition number of the predictor matrix and warns
 #' when it exceeds a threshold.
 #' A **global** condition number is computed on the full predictor matrix.
-#' In addition, a **local** spot-check is performed at a small random sample
-#' of locations: for each sampled point, the nearest neighbours within the
-#' bandwidth window are selected and the condition number of that local
-#' (weighted) design sub-matrix is evaluated.  If the fraction of sampled
-#' locations with an extreme local condition number (> 1e6) exceeds 25\%, a
-#' separate warning is issued.
+#' In addition, a **local** spot-check is performed at up to 30 locations --
+#' every location when there are 30 or fewer, otherwise a fixed sample of 30
+#' drawn under a constant seed, so the diagnostic is reproducible and the count
+#' is not configurable.  For each sampled point the nearest neighbours within
+#' the bandwidth window -- the bandwidth the model is actually fitted with, not
+#' a stand-in -- are selected and the condition number of that local design
+#' sub-matrix is evaluated.  That sub-matrix is the predictors **plus an
+#' intercept column**, matching the design GWmodel fits, and is unweighted; the
+#' global condition number is computed on the predictors alone, so the two
+#' numbers are not directly comparable.  An indicator that is constant inside a
+#' window is collinear with the intercept and with nothing else, which is why
+#' the intercept has to be there.  A non-finite condition number counts as
+#' extreme: `kappa()` returns `Inf` for an exactly singular design, which is the
+#' worst case, not an exempt one.
 #'
-#' Because the local spot-check examines only a subset of locations (up to 30
-#' by default), it may not detect every problematic neighbourhood.  Users
-#' working with highly clustered data or near-collinear predictors should
-#' consider a full local-collinearity audit as a post-fit diagnostic.
+#' A warning is issued whenever **any** sampled location has a singular or
+#' near-singular local design; the wording reports a percentage when more than
+#' 25\% of sampled locations are affected and a count otherwise.  Both are real
+#' R warnings, not log lines.
+#'
+#' After the fit, the local coefficient surfaces are scanned and a further
+#' warning counts local regressions that came back non-finite -- their windows
+#' were singular.  `fitted()`, `residuals()`, `summary()` and
+#' [model_metrics()] all drop those rows, so when this warning fires the
+#' metrics describe only the part of the study area that fitted.
+#'
+#' Because the local spot-check examines only a subset of locations, it may not
+#' detect every problematic neighbourhood.  Users working with highly clustered
+#' data or near-collinear predictors should consider a full local-collinearity
+#' audit as a post-fit diagnostic.
 #'
 #' @return A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 #'   Model-specific metadata lives in \code{$info} (bandwidth, adaptive,
-#'   kernel, AICc).  The raw GWmodel result is in \code{$engine}.
+#'   kernel, AICc, and \code{bandwidth_is_fallback} -- \code{TRUE} when
+#'   automatic selection failed and the arbitrary fallback was used).  The raw GWmodel result is in \code{$engine}.
 #' @family model fitting
 #' @examples
 #' \donttest{
@@ -423,6 +476,10 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # only two distinct values.  Non-integer 2-valued responses therefore take
   # the warning path below, not a hard stop.
   resp_vals <- sf::st_drop_geometry(dat)[[response_var]]
+  # TRUE/FALSE is the 0/1 coding by another name, and must meet the same
+  # guard: it used to bypass it (the guard sat behind is.numeric()) and fit a
+  # Gaussian GWR to a binary outcome without a word.
+  if (is.logical(resp_vals)) resp_vals <- as.numeric(resp_vals)
   if (is.numeric(resp_vals)) {
     usable   <- resp_vals[is.finite(resp_vals)]
     n_usable <- length(usable)
@@ -485,69 +542,30 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       .log_warn("fit_gwr_model(): predictor '%s' has near-zero variance; GWR may be unstable.", pv)
     }
   }
+  local_collinearity <- NULL
   if (length(predictor_vars) >= 2L) {
     num_preds <- predictor_vars[vapply(pred_df[predictor_vars], is.numeric, logical(1))]
     if (length(num_preds) >= 2L) {
       xmat <- as.matrix(pred_df[, num_preds, drop = FALSE])
       cn <- tryCatch(kappa(xmat, exact = FALSE), error = function(e) Inf)
-      if (is.finite(cn) && cn > 1e6) {
-        .log_warn(
-          "fit_gwr_model(): global predictor matrix condition number = %.0f (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
-          cn
+      # A non-finite condition number is an EXACTLY singular design -- the worst
+      # case there is -- and `is.finite(cn) && ...` silently let it through.
+      if (!is.finite(cn) || cn > 1e6) {
+        .warn_and_log(
+          "fit_gwr_model(): global predictor matrix condition number = %s (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
+          if (is.finite(cn)) sprintf("%.0f", cn) else "infinite (exactly singular)"
         )
       }
-      # --- Local collinearity spot-check ---
-      # Sample a few locations and check the condition number of the local
-      # (nearest-neighbour) design sub-matrix.  This catches cases where the
-      # global condition number looks benign but spatially clustered subsets
-      # have near-zero predictor variance.
-      #
-      # The sample is drawn under .with_seed() and the previous RNG state is
-      # restored on exit, as .safe_dist() and make_folds() already do.  Drawing
-      # from the global stream would make a diagnostic silently shift every
-      # downstream random draw -- and it fires only when n_obs > 30 AND there
-      # are >= 2 numeric predictors, so the same script would give different
-      # fold assignments depending on how many predictors a model happens to
-      # carry.  cv_gwr() calls this once per fold.
-      coords <- sf::st_coordinates(dat)
-      n_spot <- min(30L, n_obs)
-      spot_idx <- if (n_obs <= 30L) {
-        seq_len(n_obs)
-      } else {
-        cleanup_spot <- .with_seed(42L)
-        on.exit(cleanup_spot(), add = TRUE)
-        sample.int(n_obs, n_spot)
-      }
-      n_local_extreme <- 0L
-      for (si in spot_idx) {
-        dists <- sqrt((coords[, 1] - coords[si, 1])^2 +
-                        (coords[, 2] - coords[si, 2])^2)
-        # Use the same neighbour count that will be used for fitting;
-        # for adaptive, take bw-nearest; for fixed, take points within bw.
-        if (adaptive) {
-          local_bw <- if (!is.null(bandwidth)) as.integer(bandwidth) else min(50L, n_obs)
-          nn_idx <- order(dists)[seq_len(min(local_bw, n_obs))]
-        } else {
-          local_bw_dist <- if (!is.null(bandwidth)) as.numeric(bandwidth) else Inf
-          nn_idx <- which(dists <= local_bw_dist)
-          if (length(nn_idx) < length(num_preds) + 1L) nn_idx <- order(dists)[seq_len(length(num_preds) + 1L)]
-        }
-        local_xmat <- xmat[nn_idx, , drop = FALSE]
-        local_cn <- tryCatch(kappa(local_xmat, exact = FALSE), error = function(e) Inf)
-        if (is.finite(local_cn) && local_cn > 1e6) n_local_extreme <- n_local_extreme + 1L
-      }
-      frac_extreme <- n_local_extreme / n_spot
-      if (frac_extreme > 0.25) {
-        .log_warn(
-          "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have condition number > 1e6. Local regressions may be unstable within bandwidth windows.",
-          frac_extreme * 100, n_spot
-        )
-      } else if (n_local_extreme > 0L) {
-        .log_warn(
-          "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have condition number > 1e6.",
-          n_local_extreme, n_spot
-        )
-      }
+      # The LOCAL collinearity spot-check is deferred until the bandwidth is
+      # known -- see .gwr_local_collinearity_check() below the bandwidth
+      # selection.  Running it here meant that on the default path
+      # (bandwidth = NULL, which is most calls) it used a stand-in window --
+      # min(50, n) neighbours when adaptive, the whole data set when fixed --
+      # instead of the window the model is actually fitted with, so the
+      # documented warning simply never fired: identical data warned when the
+      # bandwidth was passed explicitly and stayed silent when the same value
+      # was selected automatically.
+      local_collinearity <- list(xmat = xmat, num_preds = num_preds)
     }
   }
   
@@ -567,6 +585,32 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # --- Bandwidth selection ---
   bandwidth_is_fallback <- FALSE
   bw_fallback_raw       <- NA_real_
+  # A fixed bandwidth is a length in the CRS the fit runs in, and that is not
+  # necessarily the CRS the caller was looking at: prep_model_data() projects
+  # geographic input, so 0.2 "degrees" becomes 0.2 metres and every local
+  # regression is empty -- all coefficients NaN, all fitted values NA,
+  # summary() reporting n = 0 -- with nothing raised anywhere.  Say so at the
+  # moment the mismatch is visible.
+  if (!is.null(bandwidth) && !adaptive) {
+    fit_units <- tryCatch(sf::st_crs(dat)$units_gdal, error = function(e) NULL)
+    extent_x  <- suppressWarnings({
+      bb <- sf::st_bbox(dat); as.numeric(bb[["xmax"]] - bb[["xmin"]])
+    })
+    if (is.finite(extent_x) && extent_x > 0 &&
+        as.numeric(bandwidth) < extent_x / 1e4) {
+      .warn_and_log(paste0("fit_gwr_model(): a fixed bandwidth of %s is less ",
+                           "than a ten-thousandth of the data's extent (%s %s ",
+                           "across). The bandwidth is a distance in the CRS the ",
+                           "fit runs in (%s), which prep_model_data() may have ",
+                           "chosen -- geographic input is projected first, so a ",
+                           "value in degrees is read as metres. Every local ",
+                           "window is likely to be empty."),
+                    format(as.numeric(bandwidth)), format(signif(extent_x, 4)),
+                    if (is.null(fit_units) || is.na(fit_units)) "unit"
+                    else fit_units,
+                    tryCatch(sf::st_crs(dat)$input, error = function(e) "unknown"))
+    }
+  }
   if (is.null(bandwidth)) {
     # .gwr_quietly(): bw.gwr() writes its golden-section search trace with bare
     # cat(), which neither suppressMessages() nor suppressWarnings() touches.
@@ -635,6 +679,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     )
   }
 
+  # Now that the bandwidth is known, run the local collinearity spot-check on
+  # the window the model will actually be fitted with.
+  if (!is.null(local_collinearity))
+    .gwr_local_collinearity_check(sf::st_coordinates(dat),
+                                  local_collinearity$xmat,
+                                  adaptive, bw, n_obs)
 
   # --- Fit GWR ---
   fit <- tryCatch(
@@ -646,6 +696,34 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     }
   )
   
+  # A local regression whose design is singular comes back as NaN rather than
+  # as an error, and nothing downstream says so: fitted(), residuals(),
+  # summary() and model_metrics() all drop the non-finite rows, so a fit in
+  # which 182 of 200 local regressions failed reported n = 18 and R2 = 0.96 as
+  # though that were the whole model.  Count them and say so.
+  n_bad_local <- tryCatch({
+    sdf <- fit$SDF
+    if (is.null(sdf)) 0L else {
+      b <- as.data.frame(sdf)
+      cols <- intersect(c("Intercept", predictor_vars), names(b))
+      if (!length(cols)) 0L
+      else {
+        ok <- vapply(b[cols],
+                     function(z) is.finite(suppressWarnings(as.numeric(z))),
+                     logical(nrow(b)))
+        if (!is.matrix(ok)) ok <- matrix(ok, nrow = nrow(b))
+        sum(!apply(ok, 1L, all))
+      }
+    }
+  }, error = function(e) 0L)
+  if (n_bad_local > 0L)
+    .warn_and_log(paste0("fit_gwr_model(): %d of %d local regression(s) ",
+                         "returned non-finite coefficients -- their windows are ",
+                         "singular. fitted(), residuals() and every metric are ",
+                         "computed from the %d that succeeded, so they describe ",
+                         "part of the study area only."),
+                  n_bad_local, n_obs, n_obs - n_bad_local)
+
   # AICc extraction
   AICc_val <- NA_real_
   if (!is.null(fit$GW.diagnostic) && !is.null(fit$GW.diagnostic$AICc)) {
@@ -667,4 +745,71 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       bandwidth_is_fallback = bandwidth_is_fallback
     )
   )
+}
+
+
+#' Spot-check local collinearity inside the fitting window
+#'
+#' Samples locations, forms the LOCAL design matrix each of them will be fitted
+#' with, and counts how many are numerically singular or nearly so.
+#'
+#' Two things this deliberately does differently from the global check:
+#' \itemize{
+#'   \item The intercept column is included (\code{cbind(1, xmat)}).  GWmodel
+#'     fits an intercept, and the case this check exists for -- an indicator
+#'     that is constant inside a window -- is collinear with the INTERCEPT and
+#'     with nothing else, so a check on the predictors alone cannot see it.
+#'   \item A non-finite condition number counts as extreme.  \code{kappa()}
+#'     returns \code{Inf} for an exactly singular matrix, and
+#'     \code{is.finite(cn) && cn > 1e6} discarded precisely the worst case.
+#' }
+#'
+#' @param coords Matrix of coordinates, one row per observation.
+#' @param xmat Numeric matrix of the numeric predictors.
+#' @param adaptive Logical; TRUE when the bandwidth counts neighbours.
+#' @param bw The bandwidth the model will actually be fitted with.
+#' @param n_obs Number of observations.
+#' @return Invisibly \code{NULL}; called for the warning.
+#' @keywords internal
+#' @noRd
+.gwr_local_collinearity_check <- function(coords, xmat, adaptive, bw, n_obs) {
+  if (!is.matrix(xmat) || ncol(xmat) < 2L || n_obs < 1L) return(invisible(NULL))
+  if (is.null(bw) || !is.finite(bw)) return(invisible(NULL))
+  n_spot <- min(30L, n_obs)
+  spot_idx <- if (n_obs <= 30L) {
+    seq_len(n_obs)
+  } else {
+    cleanup_spot <- .with_seed(42L)
+    on.exit(cleanup_spot(), add = TRUE)
+    sample.int(n_obs, n_spot)
+  }
+  n_extreme <- 0L
+  for (si in spot_idx) {
+    dists <- sqrt((coords[, 1] - coords[si, 1])^2 +
+                    (coords[, 2] - coords[si, 2])^2)
+    if (adaptive) {
+      nn_idx <- order(dists)[seq_len(min(max(1L, as.integer(bw)), n_obs))]
+    } else {
+      nn_idx <- which(dists <= as.numeric(bw))
+      if (length(nn_idx) < ncol(xmat) + 1L)
+        nn_idx <- order(dists)[seq_len(min(ncol(xmat) + 1L, n_obs))]
+    }
+    local_xmat <- cbind(1, xmat[nn_idx, , drop = FALSE])
+    local_cn <- tryCatch(kappa(local_xmat, exact = FALSE),
+                         error = function(e) Inf)
+    if (!is.finite(local_cn) || local_cn > 1e6) n_extreme <- n_extreme + 1L
+  }
+  frac <- n_extreme / n_spot
+  if (frac > 0.25) {
+    .warn_and_log(
+      "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have a singular or near-singular local design (condition number > 1e6) at the bandwidth in use. Local regressions there are unstable and their coefficients may come back non-finite.",
+      frac * 100, n_spot
+    )
+  } else if (n_extreme > 0L) {
+    .warn_and_log(
+      "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have a singular or near-singular local design (condition number > 1e6) at the bandwidth in use.",
+      n_extreme, n_spot
+    )
+  }
+  invisible(NULL)
 }

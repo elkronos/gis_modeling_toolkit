@@ -19,7 +19,12 @@
 #'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result rather than
 #'   assuming `n`.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
-#' @param sample_points Optional sf POINT cloud for k-means clustering.
+#' @param sample_points Optional sf POINT cloud for k-means clustering. Only
+#'   the first two coordinate columns are clustered, so a Z or M dimension does
+#'   not join the distance calculation and dominate it; rows with empty or
+#'   non-finite coordinates are dropped with a warning rather than reaching
+#'   `stats::kmeans()`, which fails on them without naming a cause. A lon/lat
+#'   cloud is projected before clustering.
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100.
 #' @param set_seed Optional integer RNG seed.
@@ -53,7 +58,7 @@ get_voronoi_seeds <- function(boundary = NULL,
            call. = FALSE)
     .assert_sf(seeds, "POINT", "seeds")
     if (!is.null(n) && !identical(as.integer(n), nrow(seeds))) {
-      .log_warn(
+      .warn_and_log(
         "get_voronoi_seeds(): method = 'provided' ignores 'n'; returning all %d row(s) of 'seeds' rather than the %d requested.",
         nrow(seeds), as.integer(n)
       )
@@ -111,7 +116,27 @@ get_voronoi_seeds <- function(boundary = NULL,
         .log_info("get_voronoi_seeds(kmeans): projecting cloud from lon/lat before k-means clustering.")
       }
       xy <- sf::st_coordinates(cloud_for_km)
-      
+      # Only the map coordinates.  st_coordinates() on POINT Z returns X, Y, Z,
+      # and kmeans() would then cluster in 3-D with elevation dominating the
+      # distance -- the returned "seeds" were 3-D points whose XY was wrong
+      # (max |dx| 18.4 against a 2-D reference).  voronoi_seeds_kmeans(), the
+      # sibling that does the same job, uses the first two columns.
+      if (ncol(xy) >= 2L) xy <- xy[, 1:2, drop = FALSE]
+      # And only usable rows.  An EMPTY POINT survives as an all-NA row and
+      # kmeans() dies with "NA/NaN/Inf in foreign function call (arg 1)", a
+      # message naming nothing; voronoi_seeds_kmeans() drops such rows with a
+      # warning, so do the same here.
+      bad_xy <- !stats::complete.cases(xy) |
+                !is.finite(xy[, 1L]) | !is.finite(xy[, 2L])
+      if (any(bad_xy)) {
+        .warn_and_log("get_voronoi_seeds(kmeans): dropping %d point(s) with empty or non-finite coordinates.",
+                      sum(bad_xy))
+        xy <- xy[!bad_xy, , drop = FALSE]
+      }
+      if (nrow(xy) < 2L)
+        stop("get_voronoi_seeds(kmeans): fewer than 2 usable points in the sampling cloud.",
+             call. = FALSE)
+
       # Two separate ceilings, both of which stats::kmeans() enforces with a
       # raw message the caller cannot act on.  `n_uniq` is "more cluster
       # centers than distinct data points"; nrow(xy) - 1L is "number of cluster
@@ -121,7 +146,7 @@ get_voronoi_seeds <- function(boundary = NULL,
       k_max  <- min(n_uniq, nrow(xy) - 1L)
       k_use  <- max(1L, min(as.integer(n), k_max))
       if (k_use < n) {
-        .log_warn("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
+        .warn_and_log("get_voronoi_seeds(kmeans): requested %d seeds but the sampling cloud supports at most %d (%d unique position(s) among %d point(s)); clamping.",
                   as.integer(n), k_use, n_uniq, nrow(xy))
       }
 
@@ -224,7 +249,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
     apply(coords, 1L, function(r) all(is.finite(r)))
   n_drop <- sum(!finite_rows)
   if (n_drop > 0L) {
-    .log_warn("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
+    .warn_and_log("voronoi_seeds_kmeans(): dropping %d point(s) with empty or non-finite coordinates.",
               n_drop)
     coords <- coords[finite_rows, , drop = FALSE]
   }
@@ -241,7 +266,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
   k_max  <- min(n_uniq, n - 1L)
   k_use  <- max(1L, min(as.integer(k), k_max))
   if (k_use < k) {
-    .log_warn("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
+    .warn_and_log("voronoi_seeds_kmeans(): requested %d seeds but only %d unique positions among %d point(s); clamping to %d.",
               as.integer(k), n_uniq, n, k_use)
   }
 

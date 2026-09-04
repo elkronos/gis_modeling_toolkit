@@ -21,14 +21,26 @@ make_folds(
   predictor_vars = NULL,
   boundary = NULL,
   buffer = NULL,
+  min_train = 0.5,
+  phi = NULL,
   drop_empty_blocks = TRUE
 )
 }
 \arguments{
-\item{points_sf}{An sf object.}
+\item{points_sf}{An sf object.  Any Z or M dimension is dropped before
+folding: \code{sf::st_distance()} uses every coordinate dimension, so an
+XYZ layer would otherwise have elevation folded into every buffer, block
+and neighbour distance.  CRS-less points are aligned to a \code{boundary}
+or \code{prediction_points} that carries a CRS — reprojected when the
+coordinates look like lon/lat, otherwise stamped without reprojection,
+warning either way.}
 
-\item{k}{Integer; number of folds.  Required for every method, but not every
-method honours it: \code{"buffered_loo"} and \code{"nndm"} are
+\item{k}{Integer; number of folds.  Must be a single whole number >= 1 —
+a fraction, \code{NA} or a vector is an error, because a non-integer used
+to truncate silently and leave the last rows in no test set at all.
+Required for \code{"random_kfold"}, \code{"block_kfold"} and
+\code{"leave_location_out"}; \code{"buffered_loo"} and \code{"nndm"} are
+leave-one-out schemes and ignore it.  Not every method honours it: \code{"buffered_loo"} and \code{"nndm"} are
 leave-one-out schemes and always return \code{k = n} regardless of what
 was asked for, while \code{"block_kfold"} lowers it when the grid yields
 fewer than \code{k} non-empty blocks and \code{"leave_location_out"}
@@ -61,7 +73,11 @@ projection — a CRS you did not choose, whose units are metres but whose
 identity varies with the data.  \code{block_size} is then interpreted in
 \emph{that} CRS.  The CRS actually used is recorded in
 \code{params$crs} of the returned list; project the data yourself before
-calling if you want to fix the units in advance.}
+calling if you want to fix the units in advance.
+
+A \code{block_size} in the wrong unit asks for an enormous grid, so a
+request above 1,000,000 blocks is refused with an error naming the grid
+dimensions, the extent and the CRS's units, rather than being built.}
 
 \item{auto_range}{Logical.  If \code{TRUE}, the spatial autocorrelation
 range is estimated via \code{estimate_sac_range()} — which fits
@@ -88,7 +104,12 @@ performance.}
 
 \item{prediction_points}{Optional \code{sf} layer of the locations you
 actually intend to predict onto.  Required for \code{method = "nndm"}.
-The grid from \code{predict_surface()} is the natural choice.}
+The grid from \code{\link{predict_surface}()} is the natural choice; a
+non-POINT layer (grid cells, polygons) is reduced to representative points
+first, so the target distances are point-to-point rather than
+point-to-polygon — the latter is zero for every cell that contains a
+training point, which pulls the target distribution towards zero and
+degenerates the CV towards plain leave-one-out.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -96,6 +117,15 @@ Passed to \code{estimate_sac_range()} for residual variogram estimation.}
 \item{boundary}{Optional polygonal sf/sfc for block_kfold.}
 
 \item{buffer}{Positive numeric distance for buffered_loo.}
+
+\item{min_train}{For \code{method = "nndm"}: the smallest fraction of the
+data any fold's training set may be reduced to by neighbour exclusion.
+Default \code{0.5}, as in \code{CAST::nndm()}.}
+
+\item{phi}{For \code{method = "nndm"}: the largest nearest-neighbour
+distance the exclusion will push a held-out point to, in the CRS the
+folds are built in.  Default \code{NULL} = the largest
+prediction-to-training distance.}
 
 \item{drop_empty_blocks}{Logical. Default TRUE.}
 }
@@ -149,19 +179,30 @@ around each held-out point so that the resulting training-to-test distance
 distribution approaches the distribution of distances from your actual
 prediction locations to the training data.
 
-Each held-out point draws a target distance from the empirical
-prediction-distance CDF, then the nearest training points are excluded up to
-the one whose distance is closest to that target.  Matching is therefore
-\emph{as close as the training configuration permits}, not exact: the
-achievable distances are the order statistics of that point's neighbour
-distances, which are discrete and can leave gaps.  Clustered data is the
-hard case -- excluding everything inside a hard radius would remove a whole
-cluster and leave the nearest survivor in the next one, overshooting badly,
-which is why the nearest achievable distance is used instead.
+The procedure is the paper's own (as in \code{CAST::nndm()}), and it is
+deterministic.  Let \eqn{G_{ij}} be the empirical distribution of
+prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
+of each held-out point's nearest remaining training point.  Starting from
+plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
+realised distribution exceeds the target -- \eqn{G_j^*(r) > G_{ij}(r)} --
+has its nearest training neighbour removed, and this repeats until no such
+point remains, subject to two limits: a point's nearest-neighbour distance
+is never pushed beyond \code{phi} (default: the largest prediction distance,
+since a training point already further than every prediction distance has
+nothing to match), and no fold's training set is stripped below
+\code{min_train} of the data.
 
-This differs from the paper's iterative exclusion procedure.  Compare
-\code{params$target_median} against \code{params$realised_median} to see
-how well the matching worked on your data.
+The realised distribution is then never \emph{more optimistic} than the
+target: \eqn{G_j^*(r) \le G_{ij}(r)} up to the granularity of the
+neighbour distances, which is the property the method exists to deliver.
+An earlier version of this package drew one random radius per point from
+\eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
+which rounds down half the time: on a two-cluster layout the realised
+distribution exceeded the target by up to 0.17 (13\\% of folds had a
+nearest training point within 50 m against a target of 9\\%), an
+\emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
+the largest remaining excess; compare \code{params$target_median} with
+\code{params$realised_median} as well.
 }
 \examples{
 library(sf)
@@ -184,14 +225,14 @@ distance matching Leave-One-Out Cross-Validation for map validation.
 \doi{10.1111/2041-210X.13851}
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

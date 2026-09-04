@@ -32,14 +32,18 @@ summarize_by_cell(
 
 \item{cells_sf}{Optional polygon sf layer to join cell geometries onto
 the output. When supplied, the return value is an sf object with
-the polygon geometry from cells_sf. When NULL (default), a plain
-data.frame/tibble is returned (previous behaviour).}
+the polygon geometry from cells_sf, with one row per cell in \code{cells_sf}
+--- cells that no feature fell in are kept, with \code{NA} summaries. Duplicate
+ID values in \code{cells_sf} would multiply those rows, so they are reported
+with a warning. When NULL (default), a plain data.frame/tibble is
+returned (previous behaviour).}
 
 \item{deff}{Design-effect adjustment for standard errors. One of:
 \describe{
-\item{\code{1} (default)}{No adjustment; classic IID standard error.
-Equivalent to previous behaviour but now emits a message (when
-\code{quiet = FALSE}) reminding that SEs assume independence.}
+\item{\code{1} (default)}{No adjustment; the classic IID standard error
+\code{sd / sqrt(n)}, which assumes the observations within a cell are
+independent. No \code{"deff_applied"} attribute is attached, so a result
+carrying none was computed this way.}
 \item{\code{"variogram"}}{Compute a per-cell design effect from a fitted
 variogram: for \code{n} points in a cell with correlation matrix \code{R}, the
 effective sample size of the mean is \code{n^2 / sum(R)}, so
@@ -59,15 +63,27 @@ each column is z-scored before pooling so that variables with
 different scales contribute equally to the variance decomposition.
 The response-specific ICC
 is used for response SEs and the predictor-specific ICC for
-predictor SEs. Requires at least 2 cells with 2+ observations;
-falls back to \code{deff = 1} otherwise.}
+predictor SEs. The response's ICC is never applied to predictor
+columns or vice versa, and it is the response's ICC (not the
+predictors') that sets \code{cell_weight} whenever a response was given.
+Requires at least 2 cells with 2+ observations and at least 2 residual
+degrees of freedom (\code{N - k >= 2}); the ICC is taken as 0 --- no
+correction, no \code{"deff_applied"} attribute --- otherwise, and likewise
+when the estimate itself comes out at or below 0.}
 \item{A positive number}{Applied as a uniform design effect to every
-cell. Use when you have an external estimate of the design effect.}
+cell, as \code{sd * sqrt(deff / n)} --- exactly \code{sqrt(deff)} times the
+naive SE. Use when you have an external estimate of the design
+effect. Anything that is not a single number \verb{>= 1} --- including a
+value below 1, which would \emph{shrink} the standard errors --- is
+refused with a warning and replaced by 1.}
 }}
 
 \item{sac}{Optional \code{sac_range} object from \code{\link[=estimate_sac_range]{estimate_sac_range()}}, used
 when \code{deff = "variogram"}. Supplying one avoids re-fitting the variogram
-and lets you inspect the fit the design effect is based on.}
+and lets you inspect the fit the design effect is based on. A \code{sac_range}
+whose fit was \emph{rejected} (its \code{status} is not \code{"ok"}) carries no usable
+correlation function, so \code{deff} falls back to 1 with a warning rather than
+correcting by a shape that was not trusted enough to report a range.}
 
 \item{deff_max_n}{Cells with more than this many points are subsampled
 before forming the \verb{n x n} correlation matrix used by
@@ -76,14 +92,21 @@ before forming the \verb{n x n} correlation matrix used by
 \item{quiet}{Logical; suppress messages. Default TRUE.}
 }
 \value{
-A tibble/data.frame (or sf if cells_sf given) with per-cell summaries
-including \code{n}, \code{cell_weight}, and \verb{..sd_*} / \verb{..se_*} columns.
-When \code{deff != 1}, an attribute \code{"deff_applied"} is attached to the result
-recording the design effect(s) used — including when \code{cells_sf} is
-supplied, in which case its per-cell \code{deff} vector is realigned to the
-joined row order and cells with no observations carry \code{NA}. The one
-exception is \code{deff = "kish"} with an estimated ICC of 0: no correction is
-applied, so no attribute is attached.
+A tibble/data.frame (or sf if cells_sf given) with per-cell
+summaries: the ID column, \code{n} (rows in the cell --- an input column also
+called \code{n} is not allowed to shadow it), one column per \code{agg_funs} entry
+per variable, \verb{..sd_*} / \verb{..se_*} for every numeric response and predictor,
+and \code{cell_weight}.
+
+When a correction was actually applied, an attribute \code{"deff_applied"} is
+attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} for \code{"kish"},
+\code{deff}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"}, and \code{deff} alone for a
+fixed number. When \code{cells_sf} is supplied, \emph{every} per-cell vector in that
+attribute (\code{deff} and \code{rbar} alike) is realigned to the joined row order,
+so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
+observations carry \code{NA}. No attribute is attached when no correction was
+applied --- \code{deff = 1}, a \code{deff = "kish"} ICC of 0, or a \code{"variogram"}
+request that could not be fitted.
 
 The ID column keeps its input type when \code{cells_sf}'s ID column and the
 summarised IDs already have the same class. When the classes differ, both
@@ -108,10 +131,18 @@ otherwise.
 
 In addition to user-specified aggregation functions, this function always
 computes within-cell standard deviation (\verb{..sd_<var>}) and standard error
-(\verb{..se_<var>}) for every numeric response/predictor column, plus a
-\code{cell_weight} column equal to the observation count.
+(\verb{..se_<var>}) for every numeric response/predictor column, plus an \code{n}
+column (rows falling in the cell) and a \code{cell_weight} column.
 These columns let downstream models account for the fact that a cell with
 2 observations carries more aggregation uncertainty than one with 200.
+
+\code{cell_weight} is the \emph{effective} sample size of the primary variable --- the
+response when one was supplied, otherwise the first predictor. It counts
+that variable's non-missing rows, not all rows (a cell of 10 rows with 3
+finite responses carries 3 observations' worth of information about the
+response, not 10), and it is divided by that cell's design effect when
+\code{deff} applied one. With \code{deff = 1} and no missing values it equals \code{n}.
+Pass it as the \code{weights} argument of a downstream regression.
 }
 \section{Spatial autocorrelation and standard-error bias}{
 
@@ -133,18 +164,61 @@ adjustment, and each cell's effective sample size is reduced to
 does not require a full spatial covariance model but does require enough
 cells and observations for a stable ICC estimate.
 You may also pass a fixed numeric design effect (e.g. \code{deff = 2}) to
-uniformly inflate standard errors.
+uniformly inflate standard errors: an externally supplied constant is
+applied as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the naive SE in
+every cell. (The \code{E[s^2]} correction that the estimated design effects also
+apply is derived from within-cell correlation and would not be justified for
+a number the caller chose.)
 
 Even with the Kish correction, the adjusted SE is an approximation.
 For rigorous inference under spatial dependence, consider fitting an
 explicit spatial covariance model (e.g. via \code{\link{fit_bayesian_spatial_model}}).
 }
 
+\section{What the standard error estimates}{
+
+The \verb{..se_*} columns are the standard error of the cell mean \strong{as an
+estimate of the population (grand) mean} — the unconditional quantity, in
+which the cell's own realised deviation is part of the error. That is the
+right quantity when cells are treated as samples from a common population,
+and the design-effect correction is calibrated for it: measured 95\% interval
+coverage of the grand mean is 0.95 with \code{deff = "kish"} (and 0.29 with the
+naive SE) on exchangeable within-cell correlation, and 0.93 with
+\code{deff = "variogram"} on a simulated Gaussian field.
+
+It is \strong{not} the standard error of the cell's own mean (the block average
+over that cell), which is what a cell-level map or a regression on cell
+values usually wants. For that quantity the naive \code{sd / sqrt(n)} is the
+better estimate — measured coverage 0.95, against essentially 1.00 for the
+design-effect-corrected SE, which is about five times too wide. Use \code{deff}
+when the cell means feed a population-level inference; leave it at 1 when
+they are measurements of the cells themselves.
+}
+
+\section{Design effects and variable types}{
+
+\code{deff = "kish"} estimates a separate ICC for response and predictor
+variables and applies each to its own columns. \code{deff = "variogram"} fits or
+accepts \strong{one} correlation function and applies it to every numeric column,
+because a variogram is a property of the field being modelled rather than of
+a variable type; a predictor whose spatial structure differs markedly from
+the response's will have its SE corrected by the response's correlation.
+Note also that supplying \code{predictor_vars} makes the internally estimated
+variogram a \strong{residual} variogram (that is what
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} does with predictors), so the response's own design
+effect depends on which predictors are listed. Pass \code{sac} explicitly when
+you want control over which variogram is used.
+}
+
 \examples{
 library(sf)
 set.seed(1)
+n <- 200
+x <- runif(n, 0, 100)
+y <- runif(n, 0, 100)
+# A response with spatial structure, so the within-cell ICC is not zero.
 pts <- st_as_sf(
-  data.frame(x = runif(40, 0, 100), y = runif(40, 0, 100), val = rnorm(40)),
+  data.frame(x = x, y = y, val = 0.05 * x + 0.05 * y + rnorm(n, sd = 0.5)),
   coords = c("x", "y"), crs = 32632
 )
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -154,16 +228,19 @@ grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)
 
 # IID standard errors (default) vs Kish design-effect adjustment
-cells <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
-cells
-attr(cells, "deff_applied")
+naive <- summarize_by_cell(assigned, response_var = "val")
+kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
+data.frame(n = naive$n,
+           se_naive = naive$..se_resp_val,
+           se_kish  = kish$..se_resp_val)
+attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
 }
 \seealso{
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, which produces the input layer;
 \code{\link[=build_tessellation]{build_tessellation()}} for the cells themselves.
 
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
 }
 \concept{aggregation}

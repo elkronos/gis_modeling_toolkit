@@ -26,9 +26,18 @@ bandwidth is an integer number of nearest neighbours. When FALSE,
 bandwidth is a fixed distance in CRS units.}
 
 \item{bandwidth}{Optional numeric bandwidth value. For adaptive mode this
-is an integer (number of neighbours); for fixed mode a distance in CRS
-units. If NULL (default), bandwidth is selected automatically via
-\code{GWmodel::bw.gwr()}.}
+is an integer (number of neighbours); for fixed mode a distance in the
+units of the \strong{projected} CRS the fit runs in -- \code{prep_model_data()}
+projects geographic input before the bandwidth is used, so 0.2 supplied
+for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS off
+\code{sf::st_crs(fit$data_sf)}, or pass \code{target_crs} to
+\code{\link{ensure_projected}} beforehand to fix the units yourself.
+If NULL (default), bandwidth is selected automatically via
+\code{GWmodel::bw.gwr()}.  With \code{adaptive = FALSE}, a bandwidth
+smaller than a ten-thousandth of the data's extent raises a warning naming
+the extent and the CRS the fit runs in: every local window is then likely
+to be empty, which used to produce a fit whose coefficients were all
+\code{NaN} with nothing raised anywhere.}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
 "gaussian", "tricube", "boxcar", "exponential".}
@@ -44,7 +53,8 @@ A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 Model-specific metadata lives in \code{$info} (bandwidth, adaptive,
-kernel, AICc).  The raw GWmodel result is in \code{$engine}.
+kernel, AICc, and \code{bandwidth_is_fallback} -- \code{TRUE} when
+automatic selection failed and the arbitrary fallback was used).  The raw GWmodel result is in \code{$engine}.
 }
 \description{
 Fits a GWR using GWmodel on an sf dataset with either adaptive or fixed
@@ -55,17 +65,36 @@ bandwidth.
 The function checks the condition number of the predictor matrix and warns
 when it exceeds a threshold.
 A \strong{global} condition number is computed on the full predictor matrix.
-In addition, a \strong{local} spot-check is performed at a small random sample
-of locations: for each sampled point, the nearest neighbours within the
-bandwidth window are selected and the condition number of that local
-(weighted) design sub-matrix is evaluated.  If the fraction of sampled
-locations with an extreme local condition number (> 1e6) exceeds 25\\%, a
-separate warning is issued.
+In addition, a \strong{local} spot-check is performed at up to 30 locations --
+every location when there are 30 or fewer, otherwise a fixed sample of 30
+drawn under a constant seed, so the diagnostic is reproducible and the count
+is not configurable.  For each sampled point the nearest neighbours within
+the bandwidth window -- the bandwidth the model is actually fitted with, not
+a stand-in -- are selected and the condition number of that local design
+sub-matrix is evaluated.  That sub-matrix is the predictors \strong{plus an
+intercept column}, matching the design GWmodel fits, and is unweighted; the
+global condition number is computed on the predictors alone, so the two
+numbers are not directly comparable.  An indicator that is constant inside a
+window is collinear with the intercept and with nothing else, which is why
+the intercept has to be there.  A non-finite condition number counts as
+extreme: \code{kappa()} returns \code{Inf} for an exactly singular design, which is the
+worst case, not an exempt one.
 
-Because the local spot-check examines only a subset of locations (up to 30
-by default), it may not detect every problematic neighbourhood.  Users
-working with highly clustered data or near-collinear predictors should
-consider a full local-collinearity audit as a post-fit diagnostic.
+A warning is issued whenever \strong{any} sampled location has a singular or
+near-singular local design; the wording reports a percentage when more than
+25\\% of sampled locations are affected and a count otherwise.  Both are real
+R warnings, not log lines.
+
+After the fit, the local coefficient surfaces are scanned and a further
+warning counts local regressions that came back non-finite -- their windows
+were singular.  \code{fitted()}, \code{residuals()}, \code{summary()} and
+\code{\link[=model_metrics]{model_metrics()}} all drop those rows, so when this warning fires the
+metrics describe only the part of the study area that fitted.
+
+Because the local spot-check examines only a subset of locations, it may not
+detect every problematic neighbourhood.  Users working with highly clustered
+data or near-collinear predictors should consider a full local-collinearity
+audit as a post-fit diagnostic.
 }
 
 \examples{
@@ -87,10 +116,10 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other model fitting: 
-\code{\link{fit_bayesian_spatial_model}()},
-\code{\link{fit_rf_model}()},
-\code{\link{new_spatial_fit}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
+\code{\link[=new_spatial_fit]{new_spatial_fit()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

@@ -21,57 +21,40 @@
 # make_folds(nndm, seed = NULL) must not re-seed from the clock
 # ---------------------------------------------------------------------------
 
-test_that("nndm with the default seed leaves the caller's RNG deterministic", {
-  # `set.seed(NULL)` does NOT mean "leave the RNG alone": it RE-INITIALISES the
-  # generator from the clock and process ID.  The ordinary call
-  # make_folds(pts, method = "nndm", prediction_points = grid) therefore used
-  # to destroy the caller's stream, so nothing downstream of it was
-  # reproducible -- and the folds themselves changed run to run.
+test_that("nndm draws no random numbers and leaves the caller's RNG untouched", {
+  # History: `set.seed(NULL)` RE-INITIALISES the generator from the clock, so
+  # the ordinary unseeded call once destroyed the caller's stream.  A later
+  # version drew one uniform per point for a random radius, advancing the
+  # stream by exactly n.  The current implementation is the paper's own
+  # deterministic procedure and draws NOTHING: the stream is exactly where the
+  # caller left it, and the folds do not depend on the caller's seed at all.
   set.seed(3)
   pts  <- sf::st_as_sf(data.frame(x = runif(30, 0, 1000), y = runif(30, 0, 1000)),
                        coords = c("x", "y"), crs = 3857)
   grid <- sf::st_as_sf(data.frame(x = runif(10, 0, 1000), y = runif(10, 0, 1000)),
                        coords = c("x", "y"), crs = 3857)
 
-  # Unseeded means unseeded: the stream ADVANCES, by exactly the n uniforms the
-  # radius draw consumes, and by nothing else.
-  set.seed(999); invisible(stats::runif(nrow(pts))); expected <- stats::runif(3)
+  set.seed(999); expected <- stats::runif(3)
   set.seed(999)
-  f1 <- suppressMessages(make_folds(pts, method = "nndm",
-                                    prediction_points = grid))
+  f1 <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
   after1 <- stats::runif(3)
-  expect_equal(after1, expected)
+  expect_equal(after1, expected)                  # nothing consumed
 
-  # Same caller seed, same folds and same continuation -- which clock seeding
-  # cannot deliver.
-  set.seed(999)
-  f2 <- suppressMessages(make_folds(pts, method = "nndm",
-                                    prediction_points = grid))
-  after2 <- stats::runif(3)
-  expect_equal(f1$folds, f2$folds)
-  expect_equal(after1, after2)
-
-  # A different caller seed really does give different folds, so the equality
-  # above is not satisfiable by a deterministic implementation.
+  # A different caller seed gives the SAME folds: the procedure is
+  # deterministic in the data.
   set.seed(1000)
-  f3 <- suppressMessages(make_folds(pts, method = "nndm",
-                                    prediction_points = grid))
-  expect_false(isTRUE(all.equal(f1$folds, f3$folds)))
+  f3 <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
+  expect_equal(f1$folds, f3$folds)
 
-  # An explicit seed is independent of the caller's stream, as before.
-  set.seed(1); a <- suppressMessages(make_folds(pts, method = "nndm",
-                                                prediction_points = grid,
-                                                seed = 42))
-  set.seed(2); b <- suppressMessages(make_folds(pts, method = "nndm",
-                                                prediction_points = grid,
-                                                seed = 42))
-  expect_equal(a$folds, b$folds)
+  # An explicit seed is accepted and changes nothing -- and still leaves the
+  # caller's stream alone.
+  set.seed(1); before <- stats::runif(3)
+  set.seed(1)
+  a <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid, seed = 42))
+  expect_equal(stats::runif(3), before)
+  expect_equal(a$folds, f1$folds)
 })
 
-
-# ---------------------------------------------------------------------------
-# .remap_folds() must not renumber the folds that survive
-# ---------------------------------------------------------------------------
 
 test_that(".remap_folds keeps the original fold labels when one is dropped", {
   # Dropping an unusable fold removes an element from the list.  Renumbering
@@ -85,8 +68,12 @@ test_that(".remap_folds keeps the original fold labels when one is dropped", {
   dropped  <- 2L
   keep_idx <- setdiff(seq_len(40), folds$folds[[dropped]]$test)
 
-  lines <- capture_spatialkit_log(
-    remapped <- spatialkit:::.remap_folds(folds, keep_idx, k = 4, seed = 7))
+  # Both a log line AND a real warning: the dropped fold used to be invisible
+  # to tryCatch()/expect_warning() and absent from n_folds_attempted.
+  expect_warning(
+    lines <- capture_spatialkit_log(
+      remapped <- spatialkit:::.remap_folds(folds, keep_idx, k = 4, seed = 7)),
+    "dropped before fitting")
   expect_true(log_has(lines, "empty test sets after remapping"))
 
   expect_length(remapped, 3L)
@@ -115,7 +102,8 @@ test_that(".remap_folds drops folds left with fewer than two training rows", {
   )
   keep <- 1:6
 
-  lines <- capture_spatialkit_log(out <- remap(folds, keep))
+  expect_warning(lines <- capture_spatialkit_log(out <- remap(folds, keep)),
+                 "2 of 4 fold")
   expect_true(log_has(lines, "fewer than 2 training rows"))
   expect_true(log_has(lines, "2 fold\\(s\\)"))
 
@@ -208,14 +196,19 @@ test_that("cv_spatial reports fold labels that match make_folds()", {
   holed <- pts
   holed$w[folds$folds[[2]]$test] <- NA
 
-  res <- suppressWarnings(suppressMessages(
-    cv_spatial(holed, "z", "w",
-               fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
-               folds = folds, seed = 1)))
+  # The vanished fold is announced with a real warning, not only a log line.
+  expect_warning(
+    res <- suppressMessages(
+      cv_spatial(holed, "z", "w",
+                 fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
+                 folds = folds, seed = 1)),
+    "dropped before fitting")
 
   expect_equal(sort(unique(res$fold_metrics$fold)), c(1L, 3L, 4L))
   expect_equal(sort(unique(res$predictions$fold)), c(1L, 3L, 4L))
-  expect_equal(res$n_folds_attempted, 3L)
+  # attempted counts the folds SUPPLIED; a fold that vanished before fitting
+  # used to be invisible in both counts, so 4 supplied read as 3/3.
+  expect_equal(res$n_folds_attempted, 4L)
   expect_equal(res$n_folds_succeeded, 3L)
   # The labels are a subset of the fold numbers make_folds() assigned.
   expect_true(all(res$fold_metrics$fold %in% unique(folds$assignment$fold)))
@@ -378,24 +371,26 @@ test_that("CRS-less data still flows through predict, folds and surfaces", {
   d <- .rg_nocrs()
   expect_true(is.na(sf::st_crs(d)))
 
-  fit <- suppressMessages(fit_rf_model(d, "a", "z"))
-  expect_length(suppressMessages(predict(fit, newdata = d)), nrow(d))
+  # Whether the lon/lat heuristic fires depends on the fixture's extent; this
+  # test is about the data FLOWING, so any CRS-assumption warning is muffled.
+  fit <- suppressWarnings(suppressMessages(fit_rf_model(d, "a", "z")))
+  expect_length(suppressWarnings(suppressMessages(predict(fit, newdata = d))), nrow(d))
 
-  expect_no_error(suppressMessages(
-    make_folds(d, k = 3, method = "nndm", prediction_points = d)))
-  expect_no_error(suppressMessages(
+  expect_no_error(suppressWarnings(suppressMessages(
+    make_folds(d, k = 3, method = "nndm", prediction_points = d))))
+  expect_no_error(suppressWarnings(suppressMessages(
     make_folds(d, k = 3, method = "block_kfold",
-               boundary = sf::st_as_sfc(sf::st_bbox(d)))))
-  expect_no_error(suppressMessages(
-    prep_model_data(d, "a", "z", boundary = sf::st_as_sfc(sf::st_bbox(d)))))
-  expect_no_error(suppressMessages(
-    predict_surface(fit, n_cells = 50, covariates = d)))
+               boundary = sf::st_as_sfc(sf::st_bbox(d))))))
+  expect_no_error(suppressWarnings(suppressMessages(
+    prep_model_data(d, "a", "z", boundary = sf::st_as_sfc(sf::st_bbox(d))))))
+  expect_no_error(suppressWarnings(suppressMessages(
+    predict_surface(fit, n_cells = 50, covariates = d))))
 })
 
 test_that("cv_rf on CRS-less data predicts every row instead of failing silently", {
   skip_if_not_installed("ranger")
   d <- .rg_nocrs()
-  cv <- suppressMessages(cv_rf(d, "a", "z", k = 3))
+  cv <- suppressWarnings(suppressMessages(cv_rf(d, "a", "z", k = 3)))
   # The regression's signature was n_pred = 0 with RMSE = NA and a
   # "all folds failed" warning -- shape intact, content empty.
   expect_identical(cv$n_folds_succeeded, 3L)
@@ -423,18 +418,50 @@ test_that("build_tessellation(crs=) stamps a CRS-less input rather than erroring
   d <- .rg_nocrs(n = 40)
   bb <- sf::st_as_sfc(sf::st_bbox(d))
 
+  # Stamping is announced with a real R warning, not only a log line: the
+  # coordinates are NOT moved, and a caller who did not mean to assume that
+  # needs to be able to catch it.
   for (m in c("voronoi", "triangles")) {
-    tess <- suppressMessages(build_tessellation(d, method = m, crs = 32632))
+    expect_warning(
+      tess <- suppressMessages(build_tessellation(d, method = m, crs = 32632)),
+      "WITHOUT reprojection")
     expect_identical(sf::st_crs(tess$cells)$epsg, 32632L, label = m)
     expect_true("cell_id" %in% names(tess$cells), label = m)
   }
   for (m in c("hex", "square")) {
-    tess <- suppressMessages(
-      build_tessellation(d, boundary = bb, method = m, crs = 32632,
-                         approx_n_cells = 16))
+    # Points AND boundary are both CRS-less here, so both are stamped and both
+    # warn; expect_warning() consumes one, so catch the rest explicitly.
+    expect_warning(
+      expect_warning(
+        tess <- suppressMessages(
+          build_tessellation(d, boundary = bb, method = m, crs = 32632,
+                             approx_n_cells = 16)),
+        "WITHOUT reprojection"),
+      "WITHOUT reprojection")
     expect_identical(sf::st_crs(tess$cells)$epsg, 32632L, label = m)
     expect_true("cell_id" %in% names(tess$cells), label = m)
   }
+})
+
+
+test_that("a CRS-less lon/lat input is REPROJECTED, not stamped", {
+  # The other half of the same decision, and the one that used to be missing:
+  # .transform_or_stamp() stamped unconditionally while ensure_projected()
+  # applied the lon/lat heuristic, so identical input landed 5,400 km apart
+  # depending on which entry point a caller used -- which is how
+  # summarize_by_cell(deff = "variogram") came to compare degree separations
+  # against a metre range, and how assign_features_to_polygons() came to return
+  # zero rows for points build_tessellation() had just tessellated correctly.
+  ll <- sf::st_as_sf(
+    data.frame(x = c(9.10, 9.15, 9.20, 9.12), y = c(48.70, 48.75, 48.72, 48.80)),
+    coords = c("x", "y"))                       # no CRS, but plainly lon/lat
+  expect_warning(out <- .transform_or_stamp(ll, sf::st_crs(32632)),
+                 "taken as EPSG:4326 and reprojected")
+  ref <- suppressWarnings(ensure_projected(ll, target_crs = sf::st_crs(32632)))
+  expect_equal(sf::st_coordinates(out), sf::st_coordinates(ref),
+               tolerance = 1e-9)
+  # Metres, not degrees.
+  expect_gt(max(abs(sf::st_coordinates(out)[, 1])), 1e5)
 })
 
 test_that("build_tessellation(crs=) still REPROJECTS input that has a CRS", {
@@ -466,12 +493,28 @@ test_that("compare_models_cv accepts rf_args that collide with base arguments", 
   d$a <- d$z + 0.01 * sf::st_coordinates(d)[, 1]
   fo <- make_folds(d, k = 3, method = "random_kfold", seed = 1)
 
-  for (extra in list(list(seed = 3), list(k = 3), list(num.trees = 50))) {
+  # Assert a RESULT, not merely a data.frame: `expect_true(is.data.frame(...))`
+  # under suppressWarnings() passed just as happily when every fold failed and
+  # the row came back all-NA, which is how `num.trees` reaching ranger twice
+  # went unnoticed.
+  for (extra in list(list(seed = 3), list(k = 3), list(num_trees = 50))) {
     res <- suppressWarnings(suppressMessages(
       compare_models_cv(d, "a", "z", models = "RF", folds = fo, rf_args = extra)))
     expect_true(is.data.frame(res$overall))
     expect_identical(res$overall$model, "RF")
+    expect_gt(res$overall$n_pred, 0L)
+    expect_true(is.finite(res$overall$RMSE))
   }
+
+  # ranger's OWN spellings of arguments the wrapper already sets are refused
+  # with a message naming the wrapper argument, instead of reaching ranger
+  # twice and failing every fold with "matched by multiple actual arguments".
+  expect_error(
+    suppressMessages(fit_rf_model(d, "a", "z", num.trees = 50)),
+    "num_trees", fixed = TRUE)
+  expect_error(
+    suppressMessages(fit_rf_model(d, "a", "z", min.node.size = 5)),
+    "min_node_size", fixed = TRUE)
 })
 
 test_that("compare_models_cv refuses extras that would break comparability", {

@@ -60,6 +60,15 @@
 #' @keywords internal
 #' @noRd
 .aoa_add_coords <- function(data_sf) {
+  # st_coordinates() returns one row per VERTEX, so a POLYGON or MULTIPOINT
+  # layer -- this package's own create_grid_polygons() output, say -- produced
+  # a longer vector than the data frame has rows and the assignment below died
+  # with a bare "replacement has 45 rows, data has 9", naming nothing.  Every
+  # sibling (make_folds(), estimate_sac_range(), prep_model_data()) pointizes
+  # first; do the same.
+  if (inherits(data_sf, "sf") &&
+      !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
+    data_sf <- coerce_to_points(data_sf, "auto")
   crd <- sf::st_coordinates(data_sf)
   if (ncol(crd) < 2L)
     stop("area_of_applicability(): could not extract X/Y coordinates.",
@@ -79,7 +88,17 @@
 .aoa_scaling <- function(X_train, tol = .Machine$double.eps^0.5) {
   ctr <- colMeans(X_train)
   scl <- apply(X_train, 2L, stats::sd)
-  keep <- is.finite(ctr) & is.finite(scl) & scl > tol
+  # RELATIVE tolerance.  An absolute floor on the raw standard deviation
+  # (1.49e-8) drops a predictor for being recorded in the wrong UNIT rather
+  # than for being constant: the same variable in metres and in gigametres has
+  # the same information and the same standardised values, but only the first
+  # survived -- and the second's absence flipped an obvious extrapolation
+  # (DI 25.9, outside the AOA) into a point comfortably inside it (DI 0.03).
+  # The manual says "predictors with zero variance are dropped"; scale the test
+  # by the column's own magnitude so that is what it means.
+  mag  <- apply(abs(X_train), 2L, function(z) max(z, na.rm = TRUE))
+  mag[!is.finite(mag) | mag <= 0] <- 1
+  keep <- is.finite(ctr) & is.finite(scl) & scl > tol * mag
   names(keep) <- colnames(X_train)
   list(center = ctr, scale = scl, keep = keep)
 }
@@ -462,15 +481,40 @@
 #'
 #' @section Limitations:
 #' Predictors must be numeric; categorical variables are refused rather than
-#' silently dummy-coded. Predictors with zero variance in the training data are
+#' silently dummy-coded. Predictors whose variance is negligible \emph{relative
+#' to their own magnitude} (the test is
+#' \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
+#' metres and in gigametres is treated identically) are
 #' dropped, and a prediction point taking a different value there is a form of
 #' extrapolation this index cannot express. Without \code{weights} every
 #' predictor counts equally, which overstates dissimilarity along directions
 #' the model barely uses.
 #'
+#' @section Models fitted with the coordinates as predictors:
+#' When \code{model} was fitted with \code{include_coords = TRUE} the model
+#' splits on location, so the dissimilarity index has to measure location too:
+#' the coordinates are added to both sides as the predictors \code{"..x"} and
+#' \code{"..y"} and are then centred, scaled and weighted like any other
+#' column. Without this a prediction point far outside the training extent but
+#' with ordinary covariate values reads as \emph{inside} the area of
+#' applicability -- exactly the extrapolation this index exists to catch.
+#'
+#' This path needs geometry on both sides, so \code{train_sf} and
+#' \code{newdata} must both be \code{sf} objects; a data.frame is refused
+#' rather than quietly measured without location. Non-\code{POINT}
+#' \code{newdata} (grid polygons, say) is reduced to representative points
+#' first, as \code{\link{coerce_to_points}} would. If exactly one side
+#' carries a CRS the other is brought into it -- reprojected when its
+#' coordinates look like longitude/latitude, stamped otherwise, with a warning
+#' either way -- because degrees fed into a metre-space index silently
+#' understate the distances.
+#'
 #' @param newdata Prediction locations: an \code{sf} object (typically from
 #'   \code{\link{predict_surface}}) or a data.frame, carrying the predictor
-#'   columns.
+#'   columns. For a model fitted with \code{include_coords = TRUE} an
+#'   \code{sf} object is required, non-\code{POINT} geometry is reduced to
+#'   representative points, and a CRS mismatch with the training data is
+#'   reconciled; see \emph{Models fitted with the coordinates as predictors}.
 #' @param model A fitted \code{spatial_fit}, supplying the training data and
 #'   predictor names. Optional if \code{train_sf} and \code{predictor_vars} are
 #'   given directly, which lets this be used with any model.
@@ -497,11 +541,32 @@
 #' @param use_fnn Use \pkg{FNN} for nearest-neighbour search when available.
 #'   Exposed so the dense fallback can be tested.
 #'
-#' @return An object of class \code{aoa}: a list with \code{aoa} (the input
-#'   \code{newdata} with numeric \code{DI} and logical \code{AOA} columns
-#'   added), \code{threshold}, \code{train_DI}, \code{normalizer},
-#'   \code{weights}, \code{predictor_vars}, \code{dropped_vars}, counts, and
-#'   \code{params}.
+#' @return An object of class \code{aoa}: a list with
+#'   \itemize{
+#'     \item \code{aoa} -- \code{newdata} with a numeric \code{DI} column
+#'       and a logical \code{AOA} column added. This is the object the
+#'       computation ran on, which for a coordinate-using model is
+#'       \code{newdata} after pointizing, CRS reconciliation and the addition
+#'       of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
+#'       are not all finite gets \code{NA} in both columns.
+#'     \item \code{threshold} -- the DI cut-off used.
+#'     \item \code{train_DI} -- the training points' own DI values.
+#'     \item \code{normalizer} -- the mean pairwise training distance.
+#'     \item \code{weights} -- the weight vector actually applied, named by
+#'       \code{predictor_vars}.
+#'     \item \code{predictor_vars} -- the predictors used, including
+#'       \code{"..x"}/\code{"..y"} when the model uses coordinates and
+#'       excluding \code{dropped_vars}.
+#'     \item \code{dropped_vars} -- predictors dropped for negligible
+#'       variance.
+#'     \item \code{n_train}, \code{n_new}, \code{n_inside},
+#'       \code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
+#'       \code{n_new} count the rows that survived the finite-value filter.
+#'     \item \code{params} -- a record of the call: \code{folds_supplied},
+#'       \code{n_folds}, \code{threshold_supplied}, \code{normalizer_max_n},
+#'       \code{normalizer_n_used}, \code{normalizer_subsampled},
+#'       \code{weights_supplied} and \code{seed}.
+#'   }
 #'
 #' @references
 #' Meyer, H. and Pebesma, E. (2021). Predicting into unknown space? Estimating
@@ -585,9 +650,21 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
       stop("area_of_applicability(): this model uses the coordinates as ",
            "predictors, so both the training data and `newdata` must be sf ",
            "objects carrying geometry.", call. = FALSE)
+    # Both directions matter.  st_transform() on CRS-less newdata aborts with
+    # sf's bare "cannot transform sfc object with missing crs", and when the
+    # TRAINING data has no CRS the guard short-circuited entirely, so degrees
+    # were fed into a metre-space index with nothing said (DI 0.13/0.19 for the
+    # same points that gave 0.24/0.34 correctly projected).
     tr_crs <- sf::st_crs(train_sf)
-    if (!is.na(tr_crs) && !identical(sf::st_crs(newdata), tr_crs))
-      newdata <- sf::st_transform(newdata, tr_crs)
+    if (!is.na(tr_crs)) {
+      if (!identical(sf::st_crs(newdata), tr_crs))
+        newdata <- .transform_or_stamp(newdata, tr_crs, what = "newdata",
+                                       caller = "area_of_applicability")
+    } else if (!is.na(sf::st_crs(newdata))) {
+      train_sf <- .transform_or_stamp(train_sf, sf::st_crs(newdata),
+                                      what = "the training data",
+                                      caller = "area_of_applicability")
+    }
     train_sf <- .aoa_add_coords(train_sf)
     newdata  <- .aoa_add_coords(newdata)
     predictor_vars <- unique(c(predictor_vars, "..x", "..y"))

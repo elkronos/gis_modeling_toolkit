@@ -101,7 +101,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'
 #' @param pts An sf POINT object.
 #' @param cells_sf An sf polygon object with a `cell_id` column.
-#' @return Integer vector of cell_id values, one per row of `pts`.
+#' @return Integer vector of cell_id values, one per row of `pts`, with
+#'   \code{NA} for points that fall outside every cell.
 #' @keywords internal
 #' @noRd
 .build_point_cell_index <- function(pts, cells_sf) {
@@ -119,13 +120,42 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
     min(cell_ids[row_idx])
   }, integer(1))
 
-  # Fallback for unmatched points: assign to nearest cell
+  # Points that fall in no cell.  For a Voronoi tessellation, or a grid clipped
+  # to a boundary, "outside every cell" means outside the study area, and
+  # snapping such a point to the NEAREST cell silently counts it as if it were
+  # inside: a summary built from this index counted all 40 points of a layer
+  # whose study area held 10, while assign_features_to_polygons() on the same
+  # cells correctly reported 30 misses.  Nearest-cell assignment is still the
+  # right repair for a point a hair outside a cell edge (floating-point, a
+  # clipped sliver), so keep it -- but bound it by the cell size and say how
+  # many points were snapped, and leave the genuinely-outside ones NA.
   unmatched <- which(is.na(index))
   if (length(unmatched) > 0L) {
-    near <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
+    near  <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
     valid <- is.finite(near)
-    index[unmatched[valid]] <- cell_ids[near[valid]]
+    if (any(valid)) {
+      d <- suppressWarnings(as.numeric(sf::st_distance(
+        sf::st_geometry(pts[unmatched[valid], ]),
+        sf::st_geometry(cells_sf)[near[valid]], by_element = TRUE)))
+      # A tolerance of one thousandth of the median cell width: wide enough for
+      # any rounding at a shared edge, far too narrow to swallow a point that
+      # is genuinely outside the study area.
+      cw  <- suppressWarnings(stats::median(vapply(
+        sf::st_geometry(cells_sf), function(g) {
+          bb <- sf::st_bbox(g)
+          as.numeric(bb[["xmax"]] - bb[["xmin"]])
+        }, numeric(1)), na.rm = TRUE))
+      tol <- if (is.finite(cw) && cw > 0) cw / 1000 else 0
+      snap <- valid
+      snap[valid] <- is.finite(d) & d <= tol
+      index[unmatched[snap]] <- cell_ids[near[snap]]
+    }
   }
+  n_out <- sum(is.na(index))
+  if (n_out > 0L)
+    .log_info(paste0("build_tessellation(): %d of %d point(s) fall outside every ",
+                     "cell and are recorded as NA in `index`."),
+              n_out, length(index))
 
   index
 }
@@ -158,7 +188,11 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @param keep_duplicates Logical; keep coincident points for graph construction.
 #' @param crs Optional target CRS.
 #' @param quiet Logical; suppress messages.
-#' @return A list with cells, index, boundary, method, params.
+#' @return A list with \code{cells}, \code{index}, \code{boundary},
+#'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
+#'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
+#'   every cell -- outside the study area, in other words -- so a summary built
+#'   from it counts only the points the tessellation actually covers.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -274,19 +308,28 @@ create_voronoi_polygons <- function(
 #' for what happens when more than one is given.
 #'
 #' @param boundary Polygonal sf or sfc object.
-#' @param target_cells Optional approximate desired number of cells. For hex
-#'   grids the count is adjusted for hexagonal packing density, but the final
-#'   cell count after clipping to an irregular boundary may deviate
-#'   substantially from the requested value.
+#' @param target_cells Optional approximate desired number of cells.  The cell
+#'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
+#'   square grids get genuinely square cells; for hex grids the count is
+#'   adjusted for hexagonal packing density.  The word "approximate" is load
+#'   bearing: a grid of square cells over an elongated bounding box needs more
+#'   of them than a grid of rectangles would (a 1000 x 1 strip at
+#'   \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
+#'   and clipping to an irregular boundary moves the count again.  Pass
+#'   \code{cellsize} when the count matters more than the shape.
 #' @param type Grid type: `"square"` (the default) or `"hex"`.
 #' @param cellsize Optional numeric cell size (length 1 or 2), in the units of
 #'   the working CRS. Takes precedence over `n`: if both are supplied,
 #'   `cellsize` is used, `n` is ignored and a warning is logged. Supply exactly
-#'   one of `target_cells`, `cellsize` and `n`.
+#'   one of `target_cells`, `cellsize` and `n`.  For `type = "hex"` a hexagon
+#'   is defined by a single edge-to-edge distance, so only `cellsize[1]` is
+#'   used and a differing `cellsize[2]` is ignored with a logged warning.
 #' @param n Optional grid resolution (integer, length 1 or 2) giving the number
 #'   of columns and rows to divide the boundary's bounding box into; the cell
-#'   size is derived from it. Applies to square grids only; [sf::st_make_grid()]
-#'   derives hexagon placement from `cellsize` alone. Ignored (with a logged
+#'   size is derived from it. [sf::st_make_grid()] derives hexagon placement
+#'   from `cellsize` alone, so for `type = "hex"` `n` does not set the number of
+#'   cells -- but it does change the grid, because the `cellsize` derived from
+#'   it is what the hexagons are built with. Ignored (with a logged
 #'   warning) when `cellsize` is also supplied — passing both would otherwise
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
@@ -295,6 +338,12 @@ create_voronoi_polygons <- function(
 #'   projected with [ensure_projected()], which changes the CRS of the returned
 #'   grid; a message reports this unless `quiet = TRUE`.
 #' @param quiet Logical; suppress messages.
+#' @param max_cells Upper bound on the number of cells the grid may have,
+#'   estimated from the boundary's bounding box before anything is built.
+#'   Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
+#'   boundary in kilometres, say -- asks for a grid that cannot be built, and
+#'   this refuses it with a message rather than exhausting memory. Set to
+#'   \code{Inf} to disable.
 #' @return An sf polygon layer with poly_id column.
 #' @family tessellation
 #' @examples
@@ -312,7 +361,8 @@ create_voronoi_polygons <- function(
 #' @export
 create_grid_polygons <- function(
     boundary, target_cells = NULL, type = c("square", "hex"),
-    cellsize = NULL, n = NULL, clip = TRUE, crs = NULL, quiet = FALSE
+    cellsize = NULL, n = NULL, clip = TRUE, crs = NULL, quiet = FALSE,
+    max_cells = 1e6
 ) {
   type <- match.arg(type)
   .msg <- function(...) if (!quiet) message(...)
@@ -396,8 +446,63 @@ create_grid_polygons <- function(
     nx <- max(1L, round(sqrt(effective_target * (w / h))))
     ny <- max(1L, round(ceiling(effective_target / nx)))
     n  <- c(nx, ny)
-    cellsize <- c(w / nx, h / ny)
+    # cellsize = c(w/nx, h/ny) forces an exact tiling of the bbox, which means
+    # the "square" grid is only square when w/nx happens to equal h/ny: on a
+    # 2:1 boundary target_cells = 9 gave 50 x 33.3 cells, and on a 1000:1 strip
+    # 10.5:1 rectangles and 95 cells for a requested 9.  Derive ONE edge from
+    # the area per cell so the cells are square, as the type name and the
+    # "equal-area cells" documentation both say, and let the grid overhang the
+    # bbox (clip = TRUE trims it, and `n` is dropped below so st_make_grid()
+    # covers the whole boundary).
+    if (!identical(type, "hex")) {
+      side <- sqrt((w * h) / effective_target)
+      if (is.finite(side) && side > 0) {
+        cellsize <- c(side, side)
+        n <- NULL
+      } else {
+        cellsize <- c(w / nx, h / ny)
+      }
+    } else {
+      cellsize <- c(w / nx, h / ny)
+    }
   }
+
+  # st_make_grid(square = FALSE) uses only cellsize[1] for a hexagon -- the
+  # distance between opposite edges -- so a length-2 `cellsize` had its second
+  # component silently ignored while the max_cells estimate below used BOTH,
+  # putting the estimate out by cellsize[2]/cellsize[1]: a grid refused at
+  # max_cells = 200 via c(10, 10) was built (1,319 cells) via c(10, 100).
+  # Collapse it here so the guard measures the grid that will actually be
+  # built.
+  if (identical(type, "hex") && length(cellsize) == 2L &&
+      !isTRUE(all.equal(cellsize[1L], cellsize[2L]))) {
+    if (cellsize_supplied)
+      .log_warn(paste0("create_grid_polygons(): hexagonal cells are defined by a ",
+                       "single edge-to-edge distance; using cellsize[1] = %s and ",
+                       "ignoring cellsize[2] = %s."),
+                format(cellsize[1L]), format(cellsize[2L]))
+    cellsize[2L] <- cellsize[1L]
+  }
+
+  # Refuse an absurd grid before building it.  A `cellsize` in the wrong
+  # units -- 10 on a boundary measured in metres that spans 100 km -- asks for
+  # 1e8 polygons, which is ~80 GB and hours of st_make_grid() with nothing to
+  # say until R itself fails to allocate.  Estimate the count from the bbox
+  # first (hex cells are ~15% smaller, so the estimate is inflated by that).
+  n_est <- ceiling(w / cellsize[1L]) * ceiling(h / cellsize[2L])
+  if (identical(type, "hex")) n_est <- n_est / (sqrt(3) / 2)
+  if (is.finite(max_cells) && n_est > max_cells)
+    stop(sprintf(paste0("create_grid_polygons(): a cell size of %s x %s on a ",
+                        "boundary of %s x %s would produce about %s cells, above ",
+                        "`max_cells` = %s. Check that `cellsize` is in the ",
+                        "boundary's CRS units (%s), or raise `max_cells` if the ",
+                        "count is intended."),
+                 format(cellsize[1L], digits = 4), format(cellsize[2L], digits = 4),
+                 format(w, digits = 4), format(h, digits = 4),
+                 format(n_est, big.mark = ",", scientific = FALSE, digits = 3),
+                 format(max_cells, big.mark = ",", scientific = FALSE),
+                 sf::st_crs(boundary)$units_gdal %||% "unknown"),
+         call. = FALSE)
 
   grid_args <- list(x = env, what = "polygons",
                     square = identical(type, "square"))
@@ -499,7 +604,12 @@ create_grid_polygons <- function(
 #'       a `cell_id` column; the `"hex"` and `"square"` methods additionally
 #'       carry `poly_id`, which holds the same values.}
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
-#'       `points_sf`.}
+#'       `points_sf`, and `NA` for a point that falls inside no cell --- one
+#'       outside the study area, in other words. Only a point within a
+#'       thousandth of the median cell width of a cell is snapped to it, which
+#'       covers points sitting exactly on a shared edge without quietly
+#'       dragging genuinely-outside points in. A summary built from `index`
+#'       therefore counts only the points the tessellation actually covers.}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or reprojected).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with.}
@@ -531,11 +641,27 @@ build_tessellation <- function(
     if (!is.null(boundary))
       boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
   } else {
+    # ONE decision for points and boundary together.  A CRS-less layer goes
+    # through the same lon/lat heuristic as everywhere else; if it is taken as
+    # lon/lat, a CRS-less boundary is given the same interpretation before
+    # being aligned, and if it is not, the boundary stays in the same unnamed
+    # space (crs_arg = NA below tells create_grid_polygons() not to project it
+    # on its own).  Deciding separately for the two -- points left as they
+    # were, boundary projected inside create_grid_polygons() -- put grid and
+    # points in different CRSs and hex/square died in st_intersects() on
+    # input that voronoi/triangles accepted.
     if (.is_longlat(points_sf)) {
       .msg("build_tessellation(): projecting points to a local UTM CRS.")
       points_sf <- ensure_projected(points_sf)
+    } else if (is.na(sf::st_crs(points_sf))) {
+      points_sf <- ensure_projected(points_sf)
     }
-    if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
+    if (!is.null(boundary)) {
+      assumed <- attr(points_sf, "crs_assumed")
+      if (!is.null(assumed) && is.na(sf::st_crs(boundary)))
+        boundary <- sf::st_set_crs(boundary, sf::st_crs(assumed))
+      boundary <- .align_crs(boundary, points_sf)
+    }
   }
   if (!is.null(boundary)) {
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
@@ -567,7 +693,11 @@ build_tessellation <- function(
     # CRSs and breaking the st_intersects() below.
     grid <- create_grid_polygons(
       boundary = boundary, target_cells = approx_n_cells,
-      type = method, cellsize = cellsize, clip = clip, crs = crs_arg,
+      type = method, cellsize = cellsize, clip = clip,
+      # NA (not NULL) when the points are CRS-less: keep the boundary in the
+      # points' unnamed space instead of letting create_grid_polygons() run
+      # its own projection heuristic on it.
+      crs = if (is.null(crs_arg)) sf::NA_crs_ else crs_arg,
       quiet = quiet
     )
     # Build point-to-cell index for grid tessellations
