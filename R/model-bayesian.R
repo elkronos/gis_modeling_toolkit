@@ -180,7 +180,13 @@
 #'   \code{detectCores() - 1} took every core but one on any machine, which
 #'   is not what a shared server or a check farm wants.
 #' @param seed Integer seed. Default 123.
-#' @param backend "auto", "cmdstanr", or "rstan".
+#' @param backend "auto" (default), "cmdstanr", or "rstan". "auto" uses
+#'   \pkg{cmdstanr} only when a CmdStan build is actually available -- the
+#'   \pkg{cmdstanr} package is a thin interface and can be installed without
+#'   one (\code{cmdstanr::install_cmdstan()} builds it) -- and \pkg{rstan}
+#'   otherwise, which \pkg{brms} always brings. An explicit "cmdstanr" with no
+#'   usable CmdStan is an error that says how to install it, rather than a
+#'   failure from inside the sampler.
 #' @param control Named list of sampler controls, \emph{merged} over the
 #'   package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)} rather
 #'   than replacing them.  Passing \code{list(max_treedepth = 15)} therefore
@@ -354,9 +360,7 @@ fit_bayesian_spatial_model <- function(
   # stats family functions directly.
   if (is.null(family)) family <- stats::gaussian()
 
-  backend <- match.arg(backend)
-  if (identical(backend, "auto"))
-    backend <- if (requireNamespace("cmdstanr", quietly = TRUE)) "cmdstanr" else "rstan"
+  backend <- .resolve_stan_backend(match.arg(backend))
 
   # detectCores() (used in the `cores` default) can return NA on some
   # platforms; collapse NA/invalid values to 1 before handing to brms.
@@ -901,4 +905,60 @@ fit_bayesian_spatial_model <- function(
       predictor_scaling        = predictor_scaling
     )
   )
+}
+
+
+#' Is a CmdStan build available to cmdstanr?
+#'
+#' The \pkg{cmdstanr} package is an interface; the CmdStan toolchain it drives
+#' is installed separately (\code{cmdstanr::install_cmdstan()}) and is absent
+#' on many machines that have the package -- a runner that installed it to
+#' satisfy Suggests, a laptop where only the package was installed.  Choosing
+#' the backend on \code{requireNamespace("cmdstanr")} alone therefore sent
+#' every fit into "CmdStan path has not been set yet. See ?set_cmdstan_path",
+#' raised from inside the sampler, on such machines.
+#'
+#' @param has_pkg Whether the \pkg{cmdstanr} package can be loaded.
+#' @param path_fn A function returning the CmdStan path, which errors when
+#'   none is set.  Both arguments exist so the decision can be tested without
+#'   a CmdStan installation.
+#' @return \code{TRUE} when a CmdStan directory is set and exists.
+#' @keywords internal
+#' @noRd
+.cmdstan_usable <- function(has_pkg = requireNamespace("cmdstanr", quietly = TRUE),
+                            path_fn = function() cmdstanr::cmdstan_path()) {
+  if (!isTRUE(has_pkg)) return(FALSE)
+  p <- tryCatch(path_fn(), error = function(e) NULL)
+  is.character(p) && length(p) == 1L && !is.na(p) && nzchar(p) && dir.exists(p)
+}
+
+
+#' Resolve the Stan backend for brms
+#'
+#' @param backend One of "auto", "cmdstanr", "rstan" (already matched).
+#' @param cmdstan_ok Whether a CmdStan build is usable; see
+#'   \code{.cmdstan_usable()}.
+#' @return "cmdstanr" or "rstan".
+#' @keywords internal
+#' @noRd
+.resolve_stan_backend <- function(backend, cmdstan_ok = .cmdstan_usable()) {
+  if (identical(backend, "auto")) {
+    chosen <- if (isTRUE(cmdstan_ok)) "cmdstanr" else "rstan"
+    .log_info("fit_bayesian_spatial_model(): backend = \"auto\" resolved to %s%s.",
+              chosen,
+              if (identical(chosen, "rstan") &&
+                  requireNamespace("cmdstanr", quietly = TRUE))
+                " (the cmdstanr package is installed but no CmdStan build is; see cmdstanr::install_cmdstan())"
+              else "")
+    return(chosen)
+  }
+  if (identical(backend, "cmdstanr") && !isTRUE(cmdstan_ok))
+    stop(paste0("fit_bayesian_spatial_model(): backend = \"cmdstanr\" needs the ",
+                "cmdstanr package AND a CmdStan build, and ",
+                if (requireNamespace("cmdstanr", quietly = TRUE))
+                  "no CmdStan path is set (run cmdstanr::install_cmdstan(), or cmdstanr::set_cmdstan_path() if it is already built)"
+                else "the cmdstanr package is not installed",
+                ". Use backend = \"rstan\" for the backend brms always provides."),
+         call. = FALSE)
+  backend
 }

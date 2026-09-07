@@ -65,7 +65,11 @@ Still to run before any submission:
 * GitHub Actions `check-brms.yaml` (weekly, ubuntu-latest, R release) with
   `brms` and the Stan toolchain, which is the only job that sets
   `SPATIALKIT_TEST_BRMS` and therefore the only one that runs the five Stan
-  smoke tests. — <fill in>
+  smoke tests. Its scheduled runs of 2026-08-31 and 2026-09-07 failed because
+  `backend = "auto"` chose `cmdstanr` on the package's presence alone while
+  the runner has no CmdStan build (fixed in this tree; see `NEWS.md`), so it
+  must be re-run by hand (`workflow_dispatch`) on the submitted commit.
+  — <fill in>
 
 ## R CMD check results
 
@@ -112,7 +116,7 @@ produce.
 `R CMD build` produces a 1.1 MB tarball, of which the built vignette HTML is the
 bulk. `checking running R code from vignettes` passes.
 
-`testthat` reports **6,149 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
+`testthat` reports **6,162 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
 with `NOT_CRAN=true` and both backends present, and no test runs with zero
 assertions. The nine skips are:
 
@@ -127,7 +131,7 @@ assertions. The nine skips are:
 Under `R CMD check`, where `NOT_CRAN` is unset, nine further tests skip on
 purpose -- the `parallel::mclapply()` fork tests in `test-cv-parallel.R` and
 `test-audit-pass6.R`, and two slow simulation checks -- all `skip_on_cran()`.
-The check's own count is **6,126 passing, 0 failures, 18 skips**.
+The check's own count is **6,139 passing, 0 failures, 18 skips**.
 
 With the optional backends absent (`sp`, `GWmodel`, `ranger`, `brms`, `gstat`,
 `FNN`, `geometry`, `loo`, `patchwork`, `spdep` hidden, as in the CI matrix
