@@ -300,9 +300,15 @@
 #'   default \code{FALSE}.
 #'
 #' @section Collinearity diagnostics:
-#' The function checks the condition number of the predictor matrix and warns
-#' when it exceeds a threshold.
-#' A **global** condition number is computed on the full predictor matrix.
+#' The function computes the **scaled condition index** of the design --
+#' the ratio of the largest to the smallest singular value after each column
+#' is scaled to unit length (Belsley, Kuh & Welsch 1980) -- and warns when it
+#' exceeds 30, the conventional threshold, which Wheeler & Tiefelsdorf (2005)
+#' carry over to the local designs of GWR.  Scaling makes the index
+#' independent of the predictors' units; \code{kappa()} on the raw matrix is
+#' not, and a threshold on it is a threshold on nothing in particular.
+#' A **global** index is computed on the full design (intercept plus
+#' predictors).
 #' In addition, a **local** spot-check is performed at up to 30 locations --
 #' every location when there are 30 or fewer, otherwise a fixed sample of 30
 #' drawn under a constant seed, so the diagnostic is reproducible and the count
@@ -547,12 +553,16 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     num_preds <- predictor_vars[vapply(pred_df[predictor_vars], is.numeric, logical(1))]
     if (length(num_preds) >= 2L) {
       xmat <- as.matrix(pred_df[, num_preds, drop = FALSE])
-      cn <- tryCatch(kappa(xmat, exact = FALSE), error = function(e) Inf)
+      # The scaled condition INDEX (Belsley), thresholded at the literature's
+      # 30 -- not kappa() on the raw matrix at 1e6, which depends on the
+      # predictors' units and let a design with condition index 1322 through.
+      # The global design includes the intercept, as the local windows do.
+      cn <- .condition_index(cbind(1, xmat))
       # A non-finite condition number is an EXACTLY singular design -- the worst
       # case there is -- and `is.finite(cn) && ...` silently let it through.
-      if (!is.finite(cn) || cn > 1e6) {
+      if (!is.finite(cn) || cn > 30) {
         .warn_and_log(
-          "fit_gwr_model(): global predictor matrix condition number = %s (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
+          "fit_gwr_model(): global design (intercept + predictors) has scaled condition index %s, above the conventional 30 (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
           if (is.finite(cn)) sprintf("%.0f", cn) else "infinite (exactly singular)"
         )
       }
@@ -795,19 +805,18 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
         nn_idx <- order(dists)[seq_len(min(ncol(xmat) + 1L, n_obs))]
     }
     local_xmat <- cbind(1, xmat[nn_idx, , drop = FALSE])
-    local_cn <- tryCatch(kappa(local_xmat, exact = FALSE),
-                         error = function(e) Inf)
-    if (!is.finite(local_cn) || local_cn > 1e6) n_extreme <- n_extreme + 1L
+    local_cn <- .condition_index(local_xmat)
+    if (!is.finite(local_cn) || local_cn > 30) n_extreme <- n_extreme + 1L
   }
   frac <- n_extreme / n_spot
   if (frac > 0.25) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have a singular or near-singular local design (condition number > 1e6) at the bandwidth in use. Local regressions there are unstable and their coefficients may come back non-finite.",
+      "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have a collinear local design (scaled condition index > 30, or singular) at the bandwidth in use. Local regressions there are unstable and their coefficients may come back non-finite or implausibly large.",
       frac * 100, n_spot
     )
   } else if (n_extreme > 0L) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have a singular or near-singular local design (condition number > 1e6) at the bandwidth in use.",
+      "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have a collinear local design (scaled condition index > 30, or singular) at the bandwidth in use.",
       n_extreme, n_spot
     )
   }

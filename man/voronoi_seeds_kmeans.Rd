@@ -37,3 +37,13 @@ Lon/lat input is projected first so the k-means distances are metric rather
 than degrees. Rows with empty or non-finite coordinates are dropped with a
 warning, and \code{k} is clamped to the number of distinct positions.
 }
+\examples{
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = runif(100, 0, 1000), y = runif(100, 0, 1000)),
+  coords = c("x", "y"), crs = 32632
+)
+seeds <- voronoi_seeds_kmeans(pts, k = 8)
+nrow(seeds)   # at most 8
+}

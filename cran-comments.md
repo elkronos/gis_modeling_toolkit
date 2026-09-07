@@ -1,9 +1,9 @@
 # cran-comments
 
-**Status: draft. Nothing is being submitted.** This file describes the working
-tree so it does not drift out of date while development continues. Every
-"<fill in>" below must be replaced with a real result before this is used for an
-actual submission.
+**Before submitting**, replace every "<fill in>" below with the result of the
+run it names: the local macOS check, the two win-builder runs, and the three
+GitHub Actions workflows. Everything else in this file describes the tree as
+it is.
 
 ## What this submission is
 
@@ -59,8 +59,9 @@ Still to run before any submission:
   ubuntu-latest R release; ubuntu-latest R oldrel-1. R-devel and oldrel-1 are
   tested on Linux only. — <fill in>
 * GitHub Actions `backends` job (ubuntu-latest, R release) with `sp`, `GWmodel`,
-  `gstat`, `FNN`, `Matrix`, `geometry`, `ranger` and `tibble` installed, so the
-  optional code paths actually execute rather than skip. — <fill in>
+  `gstat`, `FNN`, `Matrix`, `geometry`, `ranger`, `tibble` and `spdep`
+  installed, so the optional code paths actually execute rather than skip.
+  — <fill in>
 * GitHub Actions `check-brms.yaml` (weekly, ubuntu-latest, R release) with
   `brms` and the Stan toolchain, which is the only job that sets
   `SPATIALKIT_TEST_BRMS` and therefore the only one that runs the five Stan
@@ -108,10 +109,10 @@ the status line. And building with `--no-build-vignettes` adds two WARNINGs
 "Directory 'inst/doc' does not exist") that a normal `R CMD build` does not
 produce.
 
-`R CMD build` produces a 994 KB tarball, of which the built vignette HTML is the
+`R CMD build` produces a 1.1 MB tarball, of which the built vignette HTML is the
 bulk. `checking running R code from vignettes` passes.
 
-`testthat` reports **3479 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
+`testthat` reports **6,149 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
 with `NOT_CRAN=true` and both backends present, and no test runs with zero
 assertions. The nine skips are:
 
@@ -123,9 +124,15 @@ assertions. The nine skips are:
 * 3 that skip *because* an optional backend is installed: they assert the
   behaviour seen when `GWmodel` or `brms` is absent
 
-Under `R CMD check`, where `NOT_CRAN` is unset, four further tests skip on
-purpose -- the `parallel::mclapply()` fork tests in `test-cv-parallel.R`, which
-are `skip_on_cran()`.
+Under `R CMD check`, where `NOT_CRAN` is unset, nine further tests skip on
+purpose -- the `parallel::mclapply()` fork tests in `test-cv-parallel.R` and
+`test-audit-pass6.R`, and two slow simulation checks -- all `skip_on_cran()`.
+The check's own count is **6,126 passing, 0 failures, 18 skips**.
+
+With the optional backends absent (`sp`, `GWmodel`, `ranger`, `brms`, `gstat`,
+`FNN`, `geometry`, `loo`, `patchwork`, `spdep` hidden, as in the CI matrix
+jobs), the suite reports **2,175 passing, 0 failures, 137 skips**: every test
+that needs a backend skips rather than fails.
 
 `README.md` does not restate these counts, precisely so the two cannot drift
 apart.
@@ -136,7 +143,7 @@ Three exported functions have been removed: `evaluate_models()`,
 `evaluate_models_cv()` and `phi_prior_bounds()`. All three were thin wrappers
 the package's own documentation described as legacy, and each has a documented
 replacement (`compare_models()`, `compare_models_cv()` and
-`gp_lengthscale_bounds()`). `NAMESPACE` now exports 40 objects.
+`gp_lengthscale_bounds()`). `NAMESPACE` now exports 41 objects.
 
 Default results from `fit_bayesian_spatial_model()` also change, as a
 consequence of three corrections to the Gaussian process path (the basis count,
@@ -161,8 +168,10 @@ but a user upgrading should know about them:
   falls back to the geometric ranking, which changes which cell counts it
   returns at the default `max_levels`.
 
-`NEWS.md` is the full record: 20 breaking changes, 62 bug fixes, 13 new
-features and 19 documentation entries relative to 1.0.0.
+`NEWS.md` is the full record relative to 1.0.0: 57 corrections that change
+results (across four audit passes), 22 API and default changes, 26 new guards
+and message changes, 54 bug fixes, 15 new features and 21 documentation
+entries.
 
 ## What was wrong in 1.0.0
 
@@ -262,6 +271,28 @@ NNDM folds built by an approximation that left the realised distance
 distribution up to 0.17 above the target — now the paper's own deterministic
 procedure, verified removal for removal against a transcription of it.
 
+A fifth pass set seven reviewers on the package one area each, and a sixth set
+eight on it with lenses the earlier passes had not used — differential testing
+against reference implementations (`spdep`, `CAST`, `brms`'s own basis
+construction, `GWmodel`), invariance under rotation, translation and row order,
+mutation testing of the test suite, and a CRAN-policy read. Both are recorded
+under their own headings in `NEWS.md`. The sixth pass's corrections that change
+results are: `determine_optimal_levels()` returned the elbow's *neighbour* as
+its top-ranked candidate (the candidates were sorted ascending, so `k[1]` and
+`top_n = 1` were knee − 1 — in 1.0.0 too); `estimate_sac_range()` was not
+rotation invariant (its lag cutoff came from the bounding-box diagonal, and the
+axis-anchored directional sweep declared anisotropy on an isotropic field in 14
+of 18 orientations — the all-pairs fit is now the estimate); `residual_morans_i()`
+broke k-nearest-neighbour distance ties by row order, so repeat-visit and
+gridded data gave a different statistic in a different row order or with a
+different optional package installed (ties are now split); and the GWR
+collinearity diagnostic was `kappa()` on the raw matrix at 1e6, a threshold
+that depended on the predictors' units (now Belsley's scaled condition index
+at 30). The mutation-testing reviewer measured the suite's mutation score at
+79% (66 of 84 non-equivalent mutants killed) and named every survivor; each
+now has a test that kills it, most of them against an independent reference
+rather than the package's own formula.
+
 ## Reverse dependencies
 
 None listed on the CRAN page for 1.0.0. Re-confirm with
@@ -309,6 +340,14 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
   nothing is restored: unseeded functions advance the caller's stream the way
   any other unseeded R function does, rather than re-initialising it. That
   distinction is the subject of fix 5 above.
+
+* Core use is bounded. No function defaults to `parallel::detectCores()`:
+  `fit_bayesian_spatial_model(cores = )` and `fit_rf_model(num_threads = )`
+  default to `getOption("mc.cores", 1L)`, `predict()` on a random forest passes
+  the same, `cv_*(parallel = TRUE)` is capped by that option and by the machine,
+  and every worker count is capped at two when `_R_CHECK_LIMIT_CORES_` is set.
+  `cv_rf(parallel = )` runs each forked fold's forest on one thread, so a worker
+  count is never multiplied by a thread count.
 
 * `NEWS.md` is long. The package changed substantially since the 1.0.0 tag, and
   several of the changes alter results that users may have already reported, so

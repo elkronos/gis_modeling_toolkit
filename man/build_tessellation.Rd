@@ -47,7 +47,9 @@ methods ignore it (the value you passed is still echoed back in
 
 \item{crs}{Optional target CRS.}
 
-\item{quiet}{Logical; suppress messages.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
 }
 \value{
 A list with components:
@@ -100,10 +102,10 @@ tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
 tess$cells
 }
 \seealso{
-Other tessellation:
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{create_grid_polygons}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

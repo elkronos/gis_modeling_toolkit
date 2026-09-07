@@ -16,7 +16,7 @@ fit_bayesian_spatial_model(
   chains = 4,
   iter = 2000,
   warmup = floor(iter/2),
-  cores = max(1L, parallel::detectCores() - 1L),
+  cores = getOption("mc.cores", 1L),
   seed = 123,
   backend = c("auto", "cmdstanr", "rstan"),
   control = list(),
@@ -76,7 +76,12 @@ automatically unless \code{prior} already contains an entry with
 
 \item{warmup}{Warmup iterations. Default floor(iter/2).}
 
-\item{cores}{Number of parallel cores.}
+\item{cores}{Number of cores for the sampler, one chain per core. Default
+\code{getOption("mc.cores", 1L)} -- the same convention \pkg{brms} uses
+itself, so \code{options(mc.cores = 4)} once per session runs the four
+default chains in parallel everywhere. The previous default of
+\code{detectCores() - 1} took every core but one on any machine, which
+is not what a shared server or a check farm wants.}
 
 \item{seed}{Integer seed. Default 123.}
 
@@ -210,6 +215,8 @@ strategy, and \code{$info$gp_iso} records which kernel was used.
 }
 \examples{
 \dontrun{
+# Not run: fits with Stan, which needs a working C++ toolchain and takes
+# minutes of MCMC -- both outside what an example may assume.
 if (requireNamespace("brms", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -235,10 +242,10 @@ Gaussian processes for probabilistic programming.
 \doi{10.1007/s11222-022-10167-2}
 }
 \seealso{
-Other model fitting:
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=fit_rf_model]{fit_rf_model()}},
-\code{\link[=new_spatial_fit]{new_spatial_fit()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_gwr_model}()},
+\code{\link{fit_rf_model}()},
+\code{\link{new_spatial_fit}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

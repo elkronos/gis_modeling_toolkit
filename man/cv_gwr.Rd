@@ -42,7 +42,13 @@ the folds came from other data when they were not).}
 
 \item{adaptive}{Logical; use adaptive bandwidth. Default TRUE.}
 
-\item{bandwidth}{Optional bandwidth value.}
+\item{bandwidth}{Optional bandwidth, applied to every fold. For
+\code{adaptive = TRUE} an integer number of neighbours; for
+\code{adaptive = FALSE} a distance in the units of the \strong{projected}
+CRS the folds are fitted in (geographic input is projected first, so a
+value in degrees is read as metres). \code{NULL} (default) selects a
+bandwidth per fold with \code{GWmodel::bw.gwr()}, which is reported in
+\code{fold_metrics$bandwidth}. See \code{\link{fit_gwr_model}}.}
 
 \item{kernel}{Kernel function type.}
 
@@ -111,14 +117,14 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

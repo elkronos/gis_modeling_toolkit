@@ -22,10 +22,22 @@
 #'   **metres** for lon/lat data while the fraction-of-extent form is derived
 #'   from a bounding box measured in **degrees**, lon/lat input is projected to
 #'   a local projected CRS first (see `@return`), so both forms agree.
-#' @param quiet Logical; suppress messages.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return An sf polygon layer representing the clip target. For lon/lat input
 #'   the layer is returned in the automatically selected local projected CRS,
 #'   not the input CRS; a message reports this unless `quiet = TRUE`.
+#' @examples
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = runif(30, 0, 100), y = runif(30, 0, 100)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' # No boundary: the convex hull, expanded by 10% of the extent
+#' hull <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
+#' st_area(hull)
 #' @export
 clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALSE) {
   .msg <- function(...) if (!quiet) message(...)
@@ -187,7 +199,9 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @param clip Logical; intersect cells with boundary.
 #' @param keep_duplicates Logical; keep coincident points for graph construction.
 #' @param crs Optional target CRS.
-#' @param quiet Logical; suppress messages.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with \code{cells}, \code{index}, \code{boundary},
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
@@ -337,7 +351,9 @@ create_voronoi_polygons <- function(
 #' @param crs Optional target CRS. When `NULL` (default) the boundary is
 #'   projected with [ensure_projected()], which changes the CRS of the returned
 #'   grid; a message reports this unless `quiet = TRUE`.
-#' @param quiet Logical; suppress messages.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @param max_cells Upper bound on the number of cells the grid may have,
 #'   estimated from the boundary's bounding box before anything is built.
 #'   Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
@@ -597,7 +613,9 @@ create_grid_polygons <- function(
 #' @param clip Logical; clip to boundary.
 #' @param keep_duplicates Logical; keep duplicate points.
 #' @param crs Optional target CRS.
-#' @param quiet Logical; suppress messages.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with components:
 #'   \describe{
 #'     \item{`cells`}{An sf polygon layer, one row per cell. It always carries

@@ -43,3 +43,14 @@ Ensures that a polygon layer has a reproducible, deterministic identifier
 column by sorting features using representative point coordinates (and
 secondary tie-breakers) and then assigning sequential IDs.
 }
+\examples{
+library(sf)
+bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+))), crs = 32632))
+g <- create_grid_polygons(bnd, target_cells = 9)
+# Reverse the rows: the IDs come back in the same spatial order regardless
+ids_fwd <- ensure_stable_poly_id(g)$poly_id
+ids_rev <- ensure_stable_poly_id(g[nrow(g):1, ])$poly_id
+identical(sort(ids_fwd), sort(ids_rev))
+}

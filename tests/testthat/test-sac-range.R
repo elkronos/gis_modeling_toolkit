@@ -27,7 +27,14 @@ sac_test_field <- function(n = 250, extent = 1000, true_range = 80, seed = 1) {
   # converts to the 95% practical range 3a.  So a = true_range / 3.
   C <- exp(-d / (true_range / 3))
   diag(C) <- diag(C) + 1e-4                     # nugget for numerical PD
-  z <- as.numeric(t(chol(C)) %*% rnorm(n)) + rnorm(n, 0, 0.05)
+  # A real measurement nugget (sd 0.3 on a unit-sill field), not a token one.
+  # Nugget-free, the weighted least-squares fit sits against the nugget's zero
+  # bound and gstat's exponential fit fails to converge from every start
+  # while its spherical fit is flagged singular or not depending on
+  # floating-point details: the same field fitted on Linux and came back
+  # singular on an arm64 Mac.  With a nugget every start converges to one
+  # optimum on both.
+  z <- as.numeric(t(chol(C)) %*% rnorm(n)) + rnorm(n, 0, 0.3)
   sf::st_as_sf(data.frame(x = x, y = y, z = z),
                coords = c("x", "y"), crs = 3857)
 }
@@ -102,23 +109,21 @@ test_that("a supportable range is returned and carries its fit", {
   expect_false(is.null(d))
   expect_length(d, 4L)
   expect_identical(names(d), c("0", "45", "90", "135"))
-  expect_gte(sum(is.finite(d)), 2L)                # the minimum to use them
+  # Each direction sees about a quarter of the pairs, so on 250 points some
+  # of the four are expected to come back NA; that is a diagnostic, not a
+  # failure, since nothing is built from them any more.
+  expect_true(all(is.na(d) | d > 0))
 
-  # The returned number is the OMNIDIRECTIONAL fit unless anisotropy is
-  # established, and the `anisotropy_used` attribute says which.  Each
-  # direction sees about a quarter of the point pairs, so the maximum of four
-  # noisy estimates is biased upward: on this isotropic field two directions
-  # fail to reach a sill outright and the widest of the survivors reports 248
-  # against a true range of 80, while the all-pairs fit lands on 84.
+  # The returned number is the OMNIDIRECTIONAL fit whenever that fit is
+  # usable; the directional ranges are a diagnostic.  Each direction sees
+  # about a quarter of the point pairs, so the maximum of four noisy estimates
+  # is biased upward (on this isotropic field with a true range of 80 the
+  # surviving direction reports 93 while the all-pairs fit lands on 56), and
+  # the windows are fixed to the axes, so nothing built from them is rotation
+  # invariant.  `anisotropy_used` is TRUE only when the all-pairs fit failed.
   expect_false(is.null(attr(r, "anisotropy_used")))
-  if (isTRUE(attr(r, "anisotropy_used"))) {
-    expect_equal(as.numeric(r), max(d, na.rm = TRUE), tolerance = 1e-10)
-  } else {
-    # All four directions must fit before their spread is believed.
-    expect_true(sum(is.finite(d)) < 4L ||
-                  !isTRUE(attr(r, "anisotropy") > 1.5) ||
-                  as.numeric(r) <= max(d, na.rm = TRUE))
-  }
+  expect_false(isTRUE(attr(r, "anisotropy_used")))
+  expect_true(is.finite(attr(r, "anisotropy")) || sum(is.finite(d)) < 2L)
 
   # The field was simulated with a known exponential range, so the estimate
   # should land near it.  A wide band -- variogram estimation on 250 irregular
@@ -129,10 +134,10 @@ test_that("a supportable range is returned and carries its fit", {
 })
 
 
-test_that("the all-pairs fit is preferred when anisotropy is not established", {
+test_that("the all-pairs fit is the estimate, not the widest direction", {
   # Regression: the estimate used to be max-of-four directions unconditionally,
-  # which on this isotropic field (true range 80) returned 248 -- the widest of
-  # the two directions that happened to fit -- and sized blocks from it.  Each
+  # which on an isotropic field returned the widest of the directions that
+  # happened to fit -- three times the truth -- and sized blocks from it.  Each
   # direction sees about a quarter of the point pairs; the omnidirectional fit
   # sees all of them.
   skip_if_not_installed("gstat")
@@ -140,8 +145,41 @@ test_that("the all-pairs fit is preferred when anisotropy is not established", {
   d <- attr(r, "directional")
 
   expect_false(isTRUE(attr(r, "anisotropy_used")))
+  expect_true(any(is.finite(d)))
   expect_lt(as.numeric(r), max(d, na.rm = TRUE))   # strictly below the max
   expect_lt(abs(as.numeric(r) / TRUE_RANGE - 1), 0.5)
+})
+
+test_that("the variogram fit does not depend on gstat's default starting range", {
+  # gstat starts the optimiser at a third of the longest lag.  For a field
+  # whose range is a small fraction of the extent that is ten times too long,
+  # and whether the iteration lands or collapses to a singular model depended
+  # on floating-point details: the same 250-point field fitted on Linux and
+  # came back singular on an arm64 Mac, where the estimate then fell through
+  # to the directional maximum (315 against a true range of 80).  Several
+  # starting ranges are tried now, and the best converged fit by gstat's own
+  # criterion is kept.  Made deterministic: the default start (range = NA)
+  # is forced singular, and the answer must be the one the other starts give.
+  skip_if_not_installed("gstat")
+  pts <- sac_test_field()
+  plain <- estimate_sac_range(pts, "z", seed = 1)
+  expect_false(is.na(plain))
+  real_fit <- gstat::fit.variogram
+  local_mocked_bindings(
+    fit.variogram = function(object, model, ...) {
+      if (anyNA(model$range)) {
+        model$psill <- c(0, 0); model$range <- c(0, max(object$dist) / 3)
+        attr(model, "singular") <- TRUE
+        return(model)
+      }
+      real_fit(object, model, ...)
+    },
+    .package = "gstat")
+  retried <- estimate_sac_range(pts, "z", seed = 1)
+  expect_false(is.na(retried))
+  expect_false(isTRUE(attr(retried, "anisotropy_used")))
+  expect_equal(as.numeric(retried), as.numeric(plain), tolerance = 0.1)
+  expect_lt(abs(as.numeric(retried) / TRUE_RANGE - 1), 0.5)
 })
 
 test_that("the returned range behaves as an ordinary number", {
@@ -178,6 +216,26 @@ test_that("make_folds(auto_range) uses an identified range as the block size", {
   expect_gt(f$params$grid_nx * f$params$grid_ny, 1L)
   expect_true(is.finite(f$params$sac_range))
   expect_gt(f$params$sac_range, 0)
+
+  # "Use it as the minimum block size" means the block size IS the range and
+  # every block edge is at least that long.  Nothing related block_size or
+  # the grid to sac_range, so blocks of half the range -- smaller than the
+  # correlation length, the leakage blocked CV exists to prevent -- passed
+  # (mutation testing, pass 6).
+  expect_equal(f$params$block_size, f$params$sac_range)
+  bb <- sf::st_bbox(pts)
+  edge_x <- as.numeric(bb["xmax"] - bb["xmin"]) / f$params$grid_nx
+  edge_y <- as.numeric(bb["ymax"] - bb["ymin"]) / f$params$grid_ny
+  expect_gte(min(edge_x, edge_y), f$params$sac_range)
+  # ... and the grid is the one that block size implies, not the geometric
+  # block_multiplier * k default.
+  expect_equal(f$params$grid_nx,
+               max(1L, floor(as.numeric(bb["xmax"] - bb["xmin"]) / f$params$sac_range)))
+  expect_equal(f$params$grid_ny,
+               max(1L, floor(as.numeric(bb["ymax"] - bb["ymin"]) / f$params$sac_range)))
+  # The range that sized the blocks is the one estimate_sac_range() reports.
+  r <- estimate_sac_range(pts, "z", seed = 1)
+  expect_equal(as.numeric(f$params$sac_range), as.numeric(r))
 })
 
 test_that("make_folds(auto_range) falls back when the range is unidentified", {

@@ -121,10 +121,10 @@ c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
 \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
 \code{\link{fit_rf_model}()} for a worked built-in fitter.
 
-Other model fitting:
-\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=fit_rf_model]{fit_rf_model()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_gwr_model}()},
+\code{\link{fit_rf_model}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

@@ -156,6 +156,13 @@ test_that("nndm leaves LOO alone when it already matches the target", {
 # in CAST::nndm): recompute both ECDFs after every removal and push the
 # smallest violator.  Slow but obviously correct, so the package's sweep can
 # be held to it.
+#
+# Ties in the smallest violator -- every mutual-nearest-neighbour pair shares
+# one distance, and pushed points pile up at one cluster-to-cluster distance
+# -- are broken by the point's rank in (x, y) lexicographic order, which is
+# what the package does.  CAST breaks them by row index, which makes the
+# folds depend on the order the rows happen to arrive in (see the row-order
+# test below); the paper itself does not specify.
 .nndm_reference <- function(xy, pxy, min_train = 0.5, phi = NULL) {
   n <- nrow(xy)
   D <- as.matrix(stats::dist(xy)); diag(D) <- NA
@@ -163,12 +170,13 @@ test_that("nndm leaves LOO alone when it already matches the target", {
   if (is.null(phi)) phi <- max(Gij)
   Gij_ecdf <- stats::ecdf(Gij)
   Gjstar <- apply(D, 1, min, na.rm = TRUE)
+  tie_key <- order(order(xy[, 1], xy[, 2]))
   ntrain <- rep(n - 1L, n); rmin <- min_train * n; nrem <- 0L
   repeat {
     diff <- stats::ecdf(Gjstar)(Gjstar) - Gij_ecdf(Gjstar)
     cand <- which(diff > 0 & Gjstar <= phi & ntrain > rmin)
     if (!length(cand)) break
-    j  <- cand[which.min(Gjstar[cand])]
+    j  <- cand[order(Gjstar[cand], tie_key[cand])[1L]]
     nn <- which.min(D[j, ]); D[j, nn] <- NA
     ntrain[j] <- ntrain[j] - 1L
     Gjstar[j] <- min(D[j, ], na.rm = TRUE)
@@ -205,6 +213,37 @@ test_that("nndm reproduces the paper's algorithm exactly", {
     expect_equal(f$params$n_removed_total, ref$n_removed)
     expect_equal(f$params$realised_distances, unname(ref$realised), tolerance = 1e-10)
     expect_equal(f$params$target_distances, unname(ref$target), tolerance = 1e-10)
+  }
+})
+
+test_that("nndm folds do not depend on the row order of the input", {
+  # Identical data must give identical folds.  Ties in the nearest-neighbour
+  # distance -- every mutual-NN pair, all of a regular grid -- used to be
+  # broken by row index, so shuffling the rows of one layer gave 6-18
+  # different folds out of 300 and moved 72 of 100 points on a 10 x 10 grid.
+  as_sets <- function(f) {
+    o <- order(vapply(f$folds, function(z) z$test, integer(1)))
+    lapply(f$folds[o], function(z) list(train = sort(z$train), test = z$test))
+  }
+  fixtures <- list(.nndm_two_clusters(13), .nndm_two_clusters(21, sd_ = 60, by = 90))
+  # ... and a regular grid, where EVERY point ties with its four neighbours.
+  g <- expand.grid(x = seq(50, 950, by = 100), y = seq(50, 950, by = 100))
+  gp <- sf::st_as_sf(data.frame(g, z = seq_len(nrow(g))), coords = c("x", "y"),
+                     crs = 3857)
+  gp$..row_id <- seq_len(nrow(gp))
+  fixtures$grid <- list(pts = gp, grid = nndm_setup()$grid)
+  for (fx in fixtures) {
+    f0 <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 1)
+    for (s in 1:3) {
+      set.seed(100 + s)
+      perm <- sample(nrow(fx$pts))
+      f1 <- make_folds(fx$pts[perm, ], method = "nndm",
+                       prediction_points = fx$grid, seed = 1)
+      expect_equal(as_sets(f1), as_sets(f0))
+      expect_equal(f1$params$n_removed_total, f0$params$n_removed_total)
+      expect_equal(sort(f1$params$realised_distances),
+                   sort(f0$params$realised_distances), tolerance = 1e-10)
+    }
   }
 })
 
@@ -382,6 +421,33 @@ test_that("MULTIPOINT input is coerced before folds are built", {
   f <- suppressMessages(make_folds(pts, k = 2, method = "random_kfold", seed = 1))
   expect_identical(sort(unlist(lapply(f$folds, `[[`, "test"))), 1:4)
 })
+
+test_that("block_kfold's geometric grid targets block_multiplier * k blocks, default 3", {
+  # The documented default was pinned nowhere: with block_multiplier = 1 the
+  # grid held 4 blocks instead of 16 and k was silently reduced from 5 to 4,
+  # and no test noticed (mutation testing, pass 6).
+  pts <- plain_points(200, seed = 5)
+  f <- make_folds(pts, k = 5, method = "block_kfold", seed = 1)
+  expect_equal(f$params$block_multiplier, 3)
+  expect_equal(f$k, 5L)
+  # The grid is round(sqrt(3k * ratio)) x round(3k / nx) on the bbox ratio,
+  # so it holds 15 blocks give or take the rounding.
+  n_blocks <- f$params$grid_nx * f$params$grid_ny
+  expect_gte(n_blocks, 12L)
+  expect_lte(n_blocks, 18L)
+  expect_equal(length(f$folds), 5L)
+  expect_equal(sort(unique(f$assignment$fold)), 1:5)
+
+  # A different multiplier changes the grid accordingly, and is recorded.
+  f1 <- suppressWarnings(
+    make_folds(pts, k = 5, method = "block_kfold", seed = 1, block_multiplier = 1))
+  expect_equal(f1$params$block_multiplier, 1)
+  expect_lt(f1$params$grid_nx * f1$params$grid_ny, n_blocks / 2)
+  f6 <- make_folds(pts, k = 5, method = "block_kfold", seed = 1, block_multiplier = 6)
+  expect_gt(f6$params$grid_nx * f6$params$grid_ny, 1.5 * n_blocks)
+  expect_equal(f6$k, 5L)
+})
+
 
 test_that("a single block is refused rather than silently defeating blocked CV", {
   # One block means one fold with an EMPTY training set: blocked CV degenerating

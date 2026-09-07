@@ -62,9 +62,15 @@ bandwidth.
 }
 \section{Collinearity diagnostics}{
 
-The function checks the condition number of the predictor matrix and warns
-when it exceeds a threshold.
-A \strong{global} condition number is computed on the full predictor matrix.
+The function computes the \strong{scaled condition index} of the design --
+the ratio of the largest to the smallest singular value after each column
+is scaled to unit length (Belsley, Kuh & Welsch 1980) -- and warns when it
+exceeds 30, the conventional threshold, which Wheeler & Tiefelsdorf (2005)
+carry over to the local designs of GWR.  Scaling makes the index
+independent of the predictors' units; \code{kappa()} on the raw matrix is
+not, and a threshold on it is a threshold on nothing in particular.
+A \strong{global} index is computed on the full design (intercept plus
+predictors).
 In addition, a \strong{local} spot-check is performed at up to 30 locations --
 every location when there are 30 or fewer, otherwise a fixed sample of 30
 drawn under a constant seed, so the diagnostic is reproducible and the count
@@ -116,10 +122,10 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other model fitting:
-\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_rf_model]{fit_rf_model()}},
-\code{\link[=new_spatial_fit]{new_spatial_fit()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_rf_model}()},
+\code{\link{new_spatial_fit}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

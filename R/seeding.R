@@ -230,6 +230,15 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()].
+#' @examples
+#' library(sf)
+#' set.seed(1)
+#' pts <- st_as_sf(
+#'   data.frame(x = runif(100, 0, 1000), y = runif(100, 0, 1000)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' seeds <- voronoi_seeds_kmeans(pts, k = 8)
+#' nrow(seeds)   # at most 8
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
   .assert_sf(points_sf, "POINT", "points_sf")
@@ -309,6 +318,13 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #'   inside an awkward geometry can fall short of `k`, which is warned about),
 #'   with `seed_id` and `method = "random"` columns matching
 #'   [get_voronoi_seeds()].
+#' @examples
+#' library(sf)
+#' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+#' ))), crs = 32632))
+#' seeds <- voronoi_seeds_random(bnd, k = 10)
+#' nrow(seeds)   # at most 10
 #' @export
 voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
   # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.

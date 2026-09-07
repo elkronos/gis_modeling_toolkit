@@ -42,7 +42,14 @@ is the default despite costing more.}
 
 \item{seed}{Seed passed to ranger. Default 123.}
 
-\item{num_threads}{Threads for ranger. \code{NULL} uses ranger's default.}
+\item{num_threads}{Threads for ranger. Default \code{NULL} means
+\code{getOption("mc.cores", 1L)}: one thread unless the session has
+opted in to more, the convention \pkg{brms} and \pkg{parallel} use.
+ranger's own default is every core on the machine, which is the wrong
+default for a package function (a check farm limits jobs to two cores,
+and \code{cv_rf(parallel = )} would multiply it by the worker count).
+Predictions do not depend on the thread count, only speed does; pass
+\code{parallel::detectCores()} to use them all.}
 
 \item{.already_prepped}{Internal; skip \code{prep_model_data()} because the
 caller has already projected and cleaned the data.}
@@ -140,10 +147,10 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 \code{\link{area_of_applicability}}, which can take
 \code{weights = pmax(fit$info$importance, 0)}.
 
-Other model fitting:
-\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
-\code{\link[=fit_gwr_model]{fit_gwr_model()}},
-\code{\link[=new_spatial_fit]{new_spatial_fit()}},
-\code{\link[=prep_model_data]{prep_model_data()}}
+Other model fitting: 
+\code{\link{fit_bayesian_spatial_model}()},
+\code{\link{fit_gwr_model}()},
+\code{\link{new_spatial_fit}()},
+\code{\link{prep_model_data}()}
 }
 \concept{model fitting}

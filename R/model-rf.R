@@ -170,7 +170,14 @@
 #' @param include_coords Add the coordinates as predictors. Default
 #'   \code{FALSE}; see above.
 #' @param seed Seed passed to ranger. Default 123.
-#' @param num_threads Threads for ranger. \code{NULL} uses ranger's default.
+#' @param num_threads Threads for ranger. Default \code{NULL} means
+#'   \code{getOption("mc.cores", 1L)}: one thread unless the session has
+#'   opted in to more, the convention \pkg{brms} and \pkg{parallel} use.
+#'   ranger's own default is every core on the machine, which is the wrong
+#'   default for a package function (a check farm limits jobs to two cores,
+#'   and \code{cv_rf(parallel = )} would multiply it by the worker count).
+#'   Predictions do not depend on the thread count, only speed does; pass
+#'   \code{parallel::detectCores()} to use them all.
 #' @param .already_prepped Internal; skip \code{prep_model_data()} because the
 #'   caller has already projected and cleaned the data.
 #' @param ... Passed to \code{ranger::ranger()}.  ranger's own spellings of
@@ -303,6 +310,12 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
          call. = FALSE)
   }
 
+  # NULL reaching ranger means "every core" -- ranger resolves it to
+  # hardware_concurrency().  Resolve it here instead, to the session's
+  # mc.cores opt-in or one thread.
+  num_threads <- .sanitize_core_count(
+    if (is.null(num_threads)) getOption("mc.cores", 1L) else num_threads)
+
   fit <- tryCatch(
     ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
                    mtry = mtry, min.node.size = min_node_size,
@@ -366,9 +379,14 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @param k Number of folds when \code{folds} is \code{NULL}. Default 5.
 #' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
 #'   through a per-fold draw, each fold's forest — so two different seeds give
-#'   different results even on identical \code{folds}.  Pass \code{seed}
-#'   through \code{...} to fix one ranger seed for every fold instead.
+#'   different results even on identical \code{folds}. To grow every fold's
+#'   forest from one fixed ranger seed instead, call \code{\link{cv_spatial}}
+#'   with your own \code{fit_fn} wrapping \code{fit_rf_model(seed = )}.
 #' @param parallel Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.
+#'   Under forked workers each fold's forest runs single-threaded unless
+#'   \code{num_threads} is passed explicitly, so \code{parallel = 4} means
+#'   four threads in total rather than four times the session's
+#'   \code{mc.cores}.
 #' @param block_size,auto_range,boundary Passed to \code{\link{cv_spatial}}.
 #' @param pointize How non-POINT geometry is reduced to a point before
 #'   fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.
@@ -405,25 +423,30 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
   # fit_rf_model() carries its own seed = 123L default and `...` did not
   # override it, so every fold's forest was grown with ranger seed 123
   # whatever the caller passed -- cv_rf(seed = 1) and cv_rf(seed = 2) returned
-  # bit-identical predictions on fixed folds, and there was no argument through
-  # which the forest's seed could be changed at all.  .cv_run_folds() runs each
-  # fold under its own seeded stream, so drawing here gives a distinct,
-  # reproducible seed per (seed, fold).  A seed passed explicitly through `...`
-  # still wins.
+  # bit-identical predictions on fixed folds.  .cv_run_folds() runs each fold
+  # under its own seeded stream, so drawing here gives a distinct,
+  # reproducible seed per (seed, fold).  (`seed` is a formal of this function,
+  # so it can never arrive in `...`; the branch that once tested for that was
+  # dead code, and the doc that offered it as a way to fix one forest seed for
+  # every fold described something that could not happen.)
+  #
+  # Thread policy under forked workers: each worker would otherwise read the
+  # session's mc.cores opt-in for itself, so parallel = 4 with mc.cores = 8
+  # meant 32 threads.  One thread per worker unless the caller says otherwise.
   dots <- list(...)
-  fit_fn <- if ("seed" %in% names(dots)) {
-    function(train_sf)
-      fit_rf_model(train_sf, response_var, predictor_vars,
-                   .already_prepped = TRUE, ...)
-  } else {
-    function(train_sf)
-      fit_rf_model(train_sf, response_var, predictor_vars,
+  n_workers <- .resolve_n_cores(parallel)
+  if (n_workers > 1L && !("num_threads" %in% names(dots)))
+    dots$num_threads <- 1L
+  fit_fn <- function(train_sf)
+    do.call(fit_rf_model,
+            c(list(train_sf, response_var, predictor_vars,
                    .already_prepped = TRUE,
-                   seed = sample.int(.Machine$integer.max, 1L), ...)
-  }
+                   seed = sample.int(.Machine$integer.max, 1L)),
+              dots))
   # `pointize` is named here rather than left to `...`: it belongs to
   # cv_spatial(), and through `...` it reached ranger() as an unused argument.
   cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
+             .caller = "cv_rf",
              folds = folds, k = k, seed = seed, boundary = boundary,
              pointize = pointize,
              block_size = block_size, auto_range = auto_range,
@@ -470,9 +493,16 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   rows dropped as incomplete.
 #' @export
 predict.rf_fit <- function(object, newdata = NULL, ...) {
-  if (is.null(newdata)) return(fitted(object))
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("predict.rf_fit(): package 'ranger' is required.", call. = FALSE)
+  # Only ranger's own predict arguments pass; `data` and `object` are set
+  # here, and anything else would vanish inside ranger's `...`.
+  ranger_ok <- setdiff(names(formals(utils::getS3method("predict", "ranger",
+                                                        envir = asNamespace("ranger")))),
+                       c("object", "data", "..."))
+  .check_dots(list(...), "predict.rf_fit", allowed = ranger_ok)
+  if (is.null(newdata)) return(fitted(object))
+  .check_predict_newdata(newdata, object, "predict.rf_fit")
 
   n_orig  <- nrow(newdata)
   newdata <- .replay_crs_assumption(newdata, object$data_sf, "predict.rf_fit")
@@ -509,6 +539,10 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   # RNG-neutral.
   dots <- list(...)
   if (!("seed" %in% names(dots))) dots$seed <- 1L
+  # Same thread policy as the fit: ranger's predict also defaults to every
+  # core when num.threads is unset.
+  if (!("num.threads" %in% names(dots)))
+    dots$num.threads <- .sanitize_core_count(getOption("mc.cores", 1L))
   p <- tryCatch(
     do.call(stats::predict, c(list(object$engine, data = X), dots))$predictions,
     error = function(e) {

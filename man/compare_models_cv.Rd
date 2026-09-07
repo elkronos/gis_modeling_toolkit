@@ -29,7 +29,7 @@ compare_models_cv(
 \item{predictor_vars}{Predictor column names.}
 
 \item{models}{Character vector: any subset of \code{c("GWR", "Bayesian",
-"RF")}, in any order.  Each is cross-validated on the same \code{folds}.
+  "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 Names outside that set raise a warning and are dropped; if nothing
 recognised remains, this is an error rather than a silent fallback.
 A recognised model whose backend package is not installed is dropped with
@@ -72,7 +72,9 @@ to \code{ranger::ranger()}.}
 
 \item{summary}{"mean" or "median" for Bayesian predictions.}
 
-\item{quiet}{Logical; suppress messages.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
 }
 \value{
 A list with overall, by_fold, and per-model cv_results
@@ -107,9 +109,9 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=evaluate_insample]{evaluate_insample()}},
-\code{\link[=residual_morans_i]{residual_morans_i()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{evaluate_insample}()},
+\code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

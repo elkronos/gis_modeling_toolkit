@@ -275,7 +275,7 @@ test_that("build_tessellation validates its inputs", {
                "geometry must be one of: POINT, MULTIPOINT")
   expect_error(build_tessellation(sf::st_drop_geometry(pts), method = "voronoi",
                                   quiet = TRUE),
-               "Expected an sf object")
+               "build_tessellation\\(\\): `points_sf` must be an sf object")
   expect_error(build_tessellation(pts, method = "nonsense", quiet = TRUE),
                "'arg' should be one of")
 })

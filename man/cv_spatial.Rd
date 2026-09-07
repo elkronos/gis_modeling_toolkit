@@ -19,7 +19,8 @@ cv_spatial(
   p = NULL,
   block_size = NULL,
   auto_range = FALSE,
-  parallel = FALSE
+  parallel = FALSE,
+  .caller = "cv_spatial"
 )
 }
 \arguments{
@@ -73,6 +74,9 @@ auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).}
+
+\item{.caller}{Internal. The name the messages carry, so a wrapper such as
+\code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.}
 }
 \value{
 A list with \code{overall}, \code{fold_metrics}, \code{predictions},
@@ -132,14 +136,14 @@ must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
 \code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
 over this function.
 
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

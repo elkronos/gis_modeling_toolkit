@@ -238,6 +238,6 @@ test_that("predict.bayesian_fit() errors early when predictor columns are missin
 
   expect_error(
     predict(fake_fit, newdata = bad_nd),
-    "missing required predictor column.*x2"
+    "predict.bayesian_fit\\(\\): `newdata` is missing predictor column\\(s\\) 'x2'"
   )
 })

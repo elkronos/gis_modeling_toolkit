@@ -36,6 +36,30 @@ test_that("correlation decays from the sill ratio to zero", {
   expect_true(all(diff(f(h)) < 0))
 })
 
+test_that("the spherical and Gaussian families follow the textbook formulas", {
+  # Only the exponential branch was ever evaluated; (h/r)^2 in place of the
+  # spherical (h/r)^3 passed every test (mutation testing, pass 6).  A user
+  # can hand summarize_by_cell(deff = "variogram") a gstat Sph or Gau fit
+  # directly, and estimate_sac_range() itself falls back to Sph.
+  h <- c(0, 25, 50, 75, 100, 150)
+  f_sph <- cor_fn(vgm_df(nugget = 0.2, psill = 0.8, range = 100, model = "Sph"))
+  u <- h / 100
+  expect_equal(f_sph(h),
+               ifelse(u >= 1, 0, 0.8 * (1 - 1.5 * u + 0.5 * u^3)),
+               tolerance = 1e-12)
+  expect_equal(f_sph(50), 0.25)                 # 0.8 * (1 - 0.75 + 0.0625)
+  f_gau <- cor_fn(vgm_df(nugget = 0.2, psill = 0.8, range = 100, model = "Gau"))
+  expect_equal(f_gau(h), 0.8 * exp(-(h / 100)^2), tolerance = 1e-12)
+  f_exp <- cor_fn(vgm_df(nugget = 0.2, psill = 0.8, range = 100, model = "Exp"))
+  expect_equal(f_exp(h), 0.8 * exp(-h / 100), tolerance = 1e-12)
+  # The three families are distinct at every interior lag, so the checks
+  # above cannot be satisfied by one formula standing in for another.
+  inner <- h[h > 0 & h < 100]
+  expect_true(all(abs(f_sph(inner) - f_exp(inner)) > 1e-3))
+  expect_true(all(abs(f_gau(inner) - f_exp(inner)) > 1e-3))
+  expect_true(all(abs(f_gau(inner) - f_sph(inner)) > 1e-3))
+})
+
 test_that("a pure-nugget model yields no correlation between distinct points", {
   f <- cor_fn(vgm_df(nugget = 1, psill = 1e-8, range = 50))
   expect_lt(f(0), 1e-6)      # even coincident distinct observations

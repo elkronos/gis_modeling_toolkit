@@ -111,176 +111,166 @@
 # Post-fit residual spatial autocorrelation check (Moran's I)
 # ---------------------------------------------------------------------------
 
-#' Index pairs of the k nearest *other* observations
+#' Nearest-neighbour pairs and weights that depend on the geometry alone
 #'
-#' Returns the \code{(i, j)} pairs of a k-nearest-neighbour graph with every
-#' self-match removed, so the weight matrix built from them has a zero
-#' diagonal.  That is not cosmetic: Moran's I is defined only for
-#' \eqn{w_{ii} = 0}, and both \eqn{E[I] = -1/(n-1)} and the Cliff & Ord
-#' variance assume it.
+#' Returns, for every observation, its \code{k} nearest \emph{other}
+#' observations as \code{(i, j, w)} triples whose weights already sum to one
+#' per row.  The point of returning weights rather than a bare index set is
+#' TIES.  A k-nearest-neighbour set is only well defined when the k-th and
+#' (k+1)-th distances differ; when they do not -- every regular sampling grid
+#' at most \code{k}, every site with repeat visits, every pair of co-located
+#' points -- "the k nearest" is a choice, and any rule that makes it
+#' (row index, kd-tree order, \code{order()}'s stability) makes Moran's I a
+#' function of something other than the data.  Measured before this change:
+#' shuffling the rows of 40 sites x 5 repeats moved I from -0.079 to -0.009
+#' at k = 2 (p 0.24 to 0.96); on a 10 x 10 grid at k = 6, the kd-tree and the
+#' dense fallback disagreed for 76 of 100 rows (I 0.027 vs 0.051), and
+#' \code{spdep::knearneigh()} gave a third answer.
 #'
-#' \code{FNN::get.knn()} reports a point's OWN index among its neighbours
-#' whenever exact duplicate coordinates are present, which put \eqn{1/k} on the
-#' diagonal and added a strictly positive \eqn{w_{ii} e_i^2} term to the
-#' numerator.  Repeat observations at one site are exactly what
-#' \code{make_folds(method = "leave_location_out")} is for, and
-#' \code{residual_morans_i()} reads \code{fit$data_sf} without de-duplicating,
-#' so this was a mainstream input rather than a corner case: with 40 sites x 4
-#' repeats and a response carrying no spatial structure at all, 120 of 160 rows
-#' gained a self-weight, mean I came out at +0.086 against
-#' \eqn{E[I] = -0.0063}, and 77\% of samples were "significant" at
-#' \eqn{p < 0.05} (nominal 5\%).  \code{spdep::knearneigh()} never returns a
-#' self-match, and neither did the dense fallback, so the statistic also
-#' depended silently on whether \pkg{FNN} happened to be installed.
+#' The rule here has no tie-break at all.  With \eqn{m} neighbours strictly
+#' closer than the k-th distance and \eqn{t} candidates tied at it, each of
+#' the \eqn{m} receives \eqn{1/k} and each of the \eqn{t} receives
+#' \eqn{(k - m) / (t k)}: the tied candidates share the slots they tie for.
+#' Rows still sum to one, the diagonal is still zero, and the result is
+#' invariant to row order, to which backend found the neighbours, and to
+#' translation, rotation and rescaling of the coordinates.  Co-located twins
+#' are the \eqn{d = 0} case of the same rule and need no special handling.
 #'
-#' The kd-tree path therefore asks for \code{k + 1} neighbours, drops any
-#' \code{j == i}, and keeps the \code{k} nearest of what remains.
+#' The kd-tree path asks \pkg{FNN} for more than \code{k} neighbours, drops
+#' any self-match (FNN returns a point's own index among exact duplicates),
+#' and then checks whether the tie group at the k-th distance could extend
+#' past what was returned; the few rows where it might -- a site with more
+#' repeats than the query width -- are answered from a dense row instead.
+#' The dense path applies the same rule to a full distance row, so the two
+#' backends produce identical weights, ties included.
 #'
 #' @param coords Numeric matrix (n x 2) of projected coordinates.
 #' @param k Integer neighbour count, already clamped to \code{n - 1}.
 #' @param use_fnn Logical; use \pkg{FNN}'s kd-tree rather than a dense
 #'   \code{dist()} scan.
-#' @return A list with integer vectors \code{i} and \code{j} of equal length.
+#' @return A list with integer vectors \code{i}, \code{j} and a numeric
+#'   vector \code{w} of equal length; \code{tapply(w, i, sum)} is 1 for every
+#'   row.
 #' @keywords internal
 #' @noRd
 .knn_pairs <- function(coords, k, use_fnn) {
   n <- nrow(coords)
+  k <- as.integer(k)
 
-  # At k >= n - 1 every point neighbours every other, so no lookup can add
-  # anything -- and asking FNN for n - 1 neighbours of duplicated points can
-  # spend one of them on a self-match, silently losing a genuine neighbour.
+  # Floating-point ties.  Two distances that differ by less than the rounding
+  # error of the coordinates themselves are one distance: coordinates near
+  # 1e7 (state-plane feet) carry ~1e-9 of absolute noise, and a grid
+  # translated there must still tie the way it does at the origin.
+  cscale  <- max(1, max(abs(coords), na.rm = TRUE))
+  tol_abs <- 1e-9 * cscale
+  # "within tolerance of dk" -- used both to extend the candidate set past the
+  # k-th slot and to decide which candidates share it.
+  tie_of  <- function(d, dk) abs(d - dk) <= dk * 1e-9 + tol_abs
+
+  # Weights for one row from its candidate distances/indices (any order).
+  row_weights <- function(js, ds) {
+    o  <- order(ds)
+    js <- js[o]; ds <- ds[o]
+    dk    <- ds[k]
+    tied  <- tie_of(ds, dk)
+    close <- !tied & ds < dk
+    m     <- sum(close)
+    t     <- sum(tied)
+    w     <- numeric(length(ds))
+    w[close] <- 1 / k
+    w[tied]  <- (k - m) / (t * k)
+    keep  <- close | tied
+    list(j = js[keep], w = w[keep])
+  }
+
+  dense_row <- function(i) {
+    d <- sqrt((coords[, 1L] - coords[i, 1L])^2 + (coords[, 2L] - coords[i, 2L])^2)
+    d[i] <- Inf
+    dk   <- sort(d, partial = k)[k]
+    cand <- which(d < dk | tie_of(d, dk))          # at or within the k-th distance
+    cand <- cand[cand != i]
+    row_weights(cand, d[cand])
+  }
+
+  out_i <- vector("list", n); out_j <- vector("list", n); out_w <- vector("list", n)
+
+  # Complete graph: every other point is a neighbour with equal weight.  No
+  # lookup can add anything, and the tie rule reduces to 1/(n-1) each.
   if (k >= n - 1L) {
-    return(list(
-      i = rep(seq_len(n), each = n - 1L),
-      j = as.integer(unlist(lapply(seq_len(n), function(i) seq_len(n)[-i]),
-                            use.names = FALSE))
-    ))
+    for (i in seq_len(n)) {
+      out_i[[i]] <- rep.int(i, n - 1L)
+      out_j[[i]] <- seq_len(n)[-i]
+      out_w[[i]] <- rep.int(1 / (n - 1L), n - 1L)
+    }
+    return(list(i = as.integer(unlist(out_i)), j = as.integer(unlist(out_j)),
+                w = as.numeric(unlist(out_w))))
   }
 
+  need_dense <- rep(TRUE, n)
   if (isTRUE(use_fnn)) {
-    kq     <- k + 1L                                # k + 1 <= n - 1 here
-    nn_idx <- FNN::get.knn(coords, k = kq)$nn.index  # n x kq, nearest first
-    # Entries within a row are distinct point indices, so at most one of them
-    # can be i itself.
-    self <- nn_idx == seq_len(n)     # recycles down columns: [i, j] against i
+    # FNN's kd-tree is unreliable on EXACT duplicates: with five points at one
+    # location a k = 12 query returned self plus three of the four twins for
+    # 160 of 200 rows, silently dropping one.  So the tree is queried on the
+    # distinct LOCATIONS, which cannot tie against themselves, and each
+    # location's members are expanded afterwards -- every co-located twin is
+    # then a candidate at distance 0, as it must be.
+    #
+    # "%.17g" round-trips a double exactly, so two rows share a location iff
+    # they are bit-identical; `+ 0` folds -0 into 0.  Points a few ulps apart
+    # are distinct locations here and become ties through `tie_of` instead.
+    key     <- paste(sprintf("%.17g", coords[, 1L] + 0),
+                     sprintf("%.17g", coords[, 2L] + 0), sep = "\r")
+    gid     <- match(key, unique(key))            # 1..G
+    members <- split(seq_len(n), gid)
+    G       <- length(members)
+    reps    <- vapply(members, `[`, integer(1), 1L)
 
-    if (!any(self)) {
-      # No slot was spent on a self-match, so all k + 1 returned neighbours are
-      # genuine and the k nearest of them are a correct k-NN set.
-      idx <- nn_idx[, seq_len(k), drop = FALSE]
-      return(list(i = rep(seq_len(n), each = k), j = as.integer(t(idx))))
+    if (G > 1L) {
+      kq  <- min(G - 1L, 2L * k + 8L)
+      nn  <- FNN::get.knn(coords[reps, , drop = FALSE], k = kq)
+      idx <- matrix(nn$nn.index, nrow = G, ncol = kq)
+      dst <- matrix(nn$nn.dist,  nrow = G, ncol = kq)
     }
 
-    # A self-match means exact duplicate coordinates, and dropping it is NOT
-    # enough: the slot it occupied displaced a genuine tied neighbour, so the
-    # k that remain are not the k nearest.  Measured on 25 sites x 4 repeats,
-    # k = 3: 75 of 400 retained pairs were a point at distance 121 standing in
-    # for a co-located one at distance 0.  Group the duplicates and answer
-    # exactly instead.
-    return(.knn_pairs_dup(coords, k))
-  }
-
-  dmat <- as.matrix(stats::dist(coords))
-  diag(dmat) <- Inf                                 # self is never a neighbour
-  # matrix(..., nrow = n, ncol = k) forces the shape apply() will not.
-  # At k = 1 the inner function returns a scalar, so apply() simplifies to a
-  # length-n VECTOR and t() turns it into a 1 x n matrix -- making nn_idx[i, ]
-  # fail with "subscript out of bounds" for every i > 1.
-  # residual_morans_i(fit, k = 1) reached this on any machine without FNN.
-  nn_idx <- matrix(t(apply(dmat, 1, function(row) order(row)[seq_len(k)])),
-                   nrow = n, ncol = k)
-  list(i = rep(seq_len(n), each = k), j = as.integer(t(nn_idx)))
-}
-
-
-#' Exact k-nearest-neighbour pairs when the coordinates contain exact duplicates
-#'
-#' \code{FNN::get.knn()} answers a tied query by returning \emph{some} of the
-#' tied points, and the point's own index is eligible to be one of them --- so
-#' with duplicates a \code{k + 1} query can come back holding self \emph{and}
-#' having dropped a genuine co-located neighbour, leaving a farther point in
-#' its place.  Requesting one extra neighbour therefore removes the self-weight
-#' but does not restore the neighbour it displaced.
-#'
-#' Duplicates are not exotic here: repeat observations at one site are exactly
-#' what \code{make_folds(method = "leave_location_out")} exists for, and
-#' \code{residual_morans_i()} reads \code{fit$data_sf} without de-duplicating.
-#'
-#' The structure of the problem makes an exact answer cheap.  Points sharing a
-#' coordinate are at distance 0 from each other and at an identical distance
-#' from everything else, so the neighbour set is determined group-wise: take
-#' the other members of the point's own group first, then fill from the nearest
-#' \emph{other} groups in order.  The k-d tree runs on the group
-#' representatives, which are distinct by construction and so cannot tie
-#' against themselves.
-#'
-#' @param coords Numeric matrix (n x 2) of projected coordinates.
-#' @param k Integer neighbour count, already known to be \code{< n - 1}.
-#' @return A list with integer vectors \code{i} and \code{j}, \code{k} entries
-#'   per row of \code{coords}.
-#' @keywords internal
-#' @noRd
-.knn_pairs_dup <- function(coords, k) {
-  n <- nrow(coords)
-
-  # "%.17g" round-trips a double exactly, so two rows share a key iff they are
-  # bit-identical.  (as.character() would stop at 15 significant digits and
-  # could merge two points a few ulps apart -- harmless, but only by accident.)
-  # `+ 0` normalises a negative zero: sprintf("%.17g", -0) is "-0", which
-  # would put a point at (-0, y) in a different group from one at (0, y)
-  # although they are the same location and st_distance() says 0.
-  key <- paste(sprintf("%.17g", coords[, 1L] + 0),
-               sprintf("%.17g", coords[, 2L] + 0), sep = "\r")
-  gid     <- match(key, key)              # representative row index per point
-  reps    <- which(!duplicated(gid))      # one row index per distinct location
-  gid     <- match(gid, gid[reps])        # 1..G
-  members <- split(seq_len(n), gid)
-  G       <- length(reps)
-
-  # Every point at one location: k < n - 1 already, so the first k of the other
-  # members is a correct answer (they are all at distance 0).
-  if (G == 1L) {
-    j <- unlist(lapply(seq_len(n), function(i) seq_len(n)[-i][seq_len(k)]),
-                use.names = FALSE)
-    return(list(i = rep(seq_len(n), each = k), j = as.integer(j)))
-  }
-
-  # Nearest other GROUPS, in distance order.  k groups always suffice: each
-  # supplies at least one member and at most k are ever needed.  Ask for one
-  # extra and filter, so a self-match here could only cost an unused slot.
-  kg  <- min(k + 1L, G - 1L)
-  nn  <- FNN::get.knn(coords[reps, , drop = FALSE], k = kg)$nn.index
-  nn  <- matrix(nn, nrow = G, ncol = kg)
-
-  out_i <- vector("list", G)
-  out_j <- vector("list", G)
-  for (g in seq_len(G)) {
-    mem <- members[[g]]
-    m   <- length(mem)
-
-    # Members of the nearest other groups, in order, enough to top up any point
-    # of this group.  Identical for every point in the group, since they share
-    # a coordinate.
-    ext <- integer(0)
-    if (k > m - 1L) {
-      for (h in nn[g, ]) {
-        if (h == g) next                  # defensive; representatives are distinct
-        ext <- c(ext, members[[h]])
-        if (length(ext) >= k - (m - 1L)) break
+    for (g in seq_len(G)) {
+      mem <- members[[g]]
+      m_g <- length(mem)
+      # Candidates shared by every member of the group: the other members at
+      # distance 0, then the members of the nearest other locations in order.
+      cj <- integer(0); cd <- numeric(0)
+      if (G > 1L) {
+        for (h in seq_len(kq)) {
+          hg <- idx[g, h]
+          if (hg == g) next                         # defensive; reps are distinct
+          cj <- c(cj, members[[hg]])
+          cd <- c(cd, rep.int(dst[g, h], length(members[[hg]])))
+        }
       }
-      ext <- ext[seq_len(k - (m - 1L))]
+      # Enough candidates, and the last one clear of the k-th distance?  If the
+      # tie group might extend past the query width, answer densely instead.
+      for (i in mem) {
+        own <- mem[mem != i]
+        js  <- c(own, cj); ds <- c(rep.int(0, length(own)), cd)
+        if (length(js) < k) next
+        dk  <- sort(ds, partial = k)[k]
+        if (length(js) < n - 1L && G > 1L && tie_of(cd[length(cd)], dk)) next
+        rw  <- row_weights(js, ds)
+        out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+        need_dense[i] <- FALSE
+      }
     }
+  }
 
-    js <- lapply(mem, function(i) {
-      own <- mem[mem != i]
-      if (length(own) >= k) own[seq_len(k)] else c(own, ext)
-    })
-    out_i[[g]] <- rep(mem, each = k)
-    out_j[[g]] <- unlist(js, use.names = FALSE)
+  if (any(need_dense)) {
+    for (i in which(need_dense)) {
+      rw <- dense_row(i)
+      out_i[[i]] <- rep.int(i, length(rw$j)); out_j[[i]] <- rw$j; out_w[[i]] <- rw$w
+    }
   }
 
   list(i = as.integer(unlist(out_i, use.names = FALSE)),
-       j = as.integer(unlist(out_j, use.names = FALSE)))
+       j = as.integer(unlist(out_j, use.names = FALSE)),
+       w = as.numeric(unlist(out_w, use.names = FALSE)))
 }
 
 
@@ -338,24 +328,28 @@
   if (!(has_fnn && has_matrix) && n > 5000L)
     stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
 
-  # Both backends share one neighbour lookup, so the zero diagonal (and the
-  # k + 1 request that FNN needs to guarantee it) cannot drift apart between
-  # them.  The two paths differ only in how W is stored.
+  # The sparse path is bounded too.  k >= n - 1 is a complete graph -- n(n-1)
+  # weights however they are stored -- and the guard above only covered the
+  # dense fallback, so with FNN and Matrix present n = 6000, k = n built
+  # 36 million non-zeros (1.5 GB) without a word.
+  if (as.numeric(n) * k > 2e7)
+    stop("k = ", k, " neighbours over n = ", n, " observations is ",
+         format(as.numeric(n) * k, big.mark = ",", scientific = FALSE),
+         " weights; that is not a sparse matrix. Use a smaller `k`.",
+         call. = FALSE)
+
+  # Both backends share one neighbour lookup AND one tie rule, so the zero
+  # diagonal, the row sums and the handling of tied distances cannot drift
+  # apart between them.  The two paths differ only in how W is stored.
   pr    <- .knn_pairs(coords, k = k, use_fnn = has_fnn)
-  row_i <- pr$i
-  col_j <- pr$j
-  deg   <- tabulate(row_i, nbins = n)   # neighbours actually kept per row
-  deg[deg == 0L] <- 1L                  # isolate: leave a zero row, not NaN
 
   if (has_fnn && has_matrix) {
     # --- Fast path: O(n*k) kd-tree lookup + sparse matrix ----
-    W <- Matrix::sparseMatrix(
-      i = row_i, j = col_j, x = 1 / deg[row_i],             # row-standardised
-      dims = c(n, n), repr = "C"
-    )
+    W <- Matrix::sparseMatrix(i = pr$i, j = pr$j, x = pr$w,
+                              dims = c(n, n), repr = "C")
   } else {
     W <- matrix(0, n, n)
-    W[cbind(row_i, col_j)] <- 1 / deg[row_i]
+    W[cbind(pr$i, pr$j)] <- pr$w
   }
 
   W
@@ -546,12 +540,16 @@
 #'   random forest    \tab 0.128 \tab 0.200 \cr
 #'   GWR              \tab 0.000 \tab 0.000
 #' }
-#' An in-sample random forest is anticonservative under both — its residuals
-#' are shrunk and spatially heteroscedastic, so the variance is understated
-#' whichever moments are used (\eqn{sd(z) \approx 1.3}) — and GWR is
-#' conservative under both, because it removes far more structure than a rank-p
-#' projection does.  Treat the p-value from those backends as a rough
-#' indicator, and prefer cross-validated residuals or an explicit spatial
+#' The random forest is anticonservative under both.  Its residuals here are
+#' the \strong{out-of-bag} ones (\code{residuals.rf_fit()}), not in-sample
+#' fits -- they are inflated rather than shrunk (measured sd 1.08 against a
+#' true 1.00) -- but they are not a linear projection of the response and
+#' they are spatially heteroscedastic, so neither set of moments describes
+#' their null distribution and the variance is understated whichever is used
+#' (\eqn{sd(z) \approx 1.3}).  GWR is conservative under both, because it
+#' removes far more structure than a rank-p projection does.  Treat the
+#' p-value from those backends as a rough indicator, and prefer
+#' spatially-blocked cross-validated residuals or an explicit spatial
 #' covariance model when the answer has to carry weight.
 #'
 #' A permutation null was considered and rejected: permuting the residual
@@ -566,8 +564,14 @@
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
 #' @param weights Optional user-supplied n x n weight matrix — a base
 #'   matrix or a \pkg{Matrix}-package matrix (e.g. a sparse dgCMatrix).
-#'   When \code{NULL} (the default), a k-nearest-neighbour binary weight matrix
-#'   (k = 8, row-standardised) is built from the observation coordinates.
+#'   When \code{NULL} (the default), a row-standardised k-nearest-neighbour
+#'   weight matrix (k = 8) is built from the observation coordinates.  Ties
+#'   at the k-th distance -- every regular grid, every site with repeat
+#'   visits -- share that slot's weight equally rather than being broken by
+#'   row order or by which backend found them, so the matrix is a function
+#'   of the geometry alone; on distinct, untied coordinates it equals
+#'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
+#'   exactly.
 #'   If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 #'   to 1), the Cliff & Ord variance formula is still valid for general W
 #'   and the computation proceeds; a note is logged (not raised as an R
@@ -576,7 +580,9 @@
 #'   argument that is not an n x n matrix is an error.
 #' @param k Integer number of nearest neighbours used when building the
 #'   default weight matrix (ignored when \code{weights} is supplied).
-#'   Default 8.
+#'   Default 8.  \code{k >= n - 1} is a complete graph -- \eqn{n(n-1)}
+#'   weights however they are stored -- and is refused above 20 million of
+#'   them.
 #' @param null Which null distribution the expectation, variance and p-value
 #'   are computed against.  One of:
 #'   \describe{
@@ -923,8 +929,24 @@ residual_morans_i <- function(fit,
 #' @return A data.frame with one row per model and columns for
 #'   model name and all regression metrics.
 #' @family model evaluation
+#' @examples
+#' \donttest{
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+#'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#'   evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
+#'   evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
+#' }
+#' }
 #' @export
 evaluate_insample <- function(fits, newdata = NULL, ...) {
+  .check_dots_newdata(list(...), newdata, "evaluate_insample")
   # Accept a single fit
 
   if (inherits(fits, "spatial_fit")) {
@@ -998,8 +1020,24 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   read its caveats in \code{?residual_morans_i} before treating silence as
 #'   evidence of no residual structure.
 #' @family model evaluation
+#' @examples
+#' \donttest{
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+#'   fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
+#'                RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
+#'   compare_models(fits)
+#' }
+#' }
 #' @export
 compare_models <- function(fits, newdata = NULL, ...) {
+  .check_dots_newdata(list(...), newdata, "compare_models")
   # Wrap a bare fit exactly as evaluate_insample() does.  Without this, a
   # single spatial_fit passes the is.list() check below (a fit *is* a list),
   # and every downstream loop then iterates the fit's own components instead
@@ -1114,7 +1152,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   anything it does not recognise on to \code{\link{fit_rf_model}} and thence
 #'   to \code{ranger::ranger()}.
 #' @param summary "mean" or "median" for Bayesian predictions.
-#' @param quiet Logical; suppress messages.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
 #'   Only the models that actually ran appear, so check which names are present

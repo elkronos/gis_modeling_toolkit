@@ -23,8 +23,13 @@ test_that(".elbow_from_wss finds a hand-placed knee", {
   out <- eb(.knee_curve)
 
   expect_equal(out$knee_k, 4L)
-  # Neighbours of the knee, clamped into [min_k, max_k].
-  expect_equal(out$candidates, c(3L, 4L, 5L))
+  # The knee FIRST, then its neighbours, clamped into [min_k, max_k].  They
+  # were sorted ascending, which put the knee in the middle: `k[1]` and
+  # `top_n = 1` -- documented as "the top-ranked candidate" -- returned
+  # knee - 1 on every geometric call (the default), and the help example
+  # answered "1" for two clearly separated clusters.  Same code in 1.0.0.
+  expect_equal(out$candidates, c(4L, 3L, 5L))
+  expect_equal(out$candidates[1L], out$knee_k)
   expect_equal(out$diagnostics$wss, .knee_curve)
   expect_equal(out$diagnostics$d1, diff(.knee_curve))
   expect_equal(out$diagnostics$d2, diff(diff(.knee_curve)))
@@ -38,6 +43,25 @@ test_that(".elbow_from_wss finds a hand-placed knee", {
   expect_equal(eb(later)$knee_k, 7L)
   earlier <- c(100, 20, 19, 18, 17, 16, 15, 14, 13, 12)
   expect_equal(eb(earlier)$knee_k, 2L)
+})
+
+test_that("determine_optimal_levels() puts the elbow first on the geometric path", {
+  # Two clearly separated clusters: the help example.  The elbow is at k = 2
+  # and the documented "top-ranked" k[1] -- and top_n = 1 -- must be 2, not
+  # the ascending neighbour 1.  (The README's quick-start data has the same
+  # shape one step up: 4 3 5, not 3 4 5.)
+  set.seed(1)
+  pts <- sf::st_as_sf(
+    data.frame(x = c(runif(25, 0, 10), runif(25, 90, 100)),
+               y = c(runif(25, 0, 10), runif(25, 90, 100))),
+    coords = c("x", "y"), crs = 32632)
+  k <- determine_optimal_levels(pts, max_levels = 6)
+  expect_equal(k, c(2L, 1L, 3L))
+  expect_equal(determine_optimal_levels(pts, max_levels = 6, top_n = 1), 2L)
+  expect_equal(k[1L], 2L)
+  # ... whatever the window, and top_n truncates the ranked vector.
+  expect_equal(determine_optimal_levels(pts, max_levels = 3), c(2L, 1L, 3L))
+  expect_equal(determine_optimal_levels(pts, max_levels = 6, top_n = 2), c(2L, 1L))
 })
 
 test_that(".elbow_from_wss is invariant to an affine rescaling of WSS", {

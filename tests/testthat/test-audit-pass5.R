@@ -387,24 +387,37 @@ test_that("one unusable geometry does not void the whole estimate", {
 })
 
 
-test_that("the directional maximum is used only when anisotropy is established", {
+test_that("the range is the all-pairs fit and is invariant to rotating the axes", {
   skip_if_not_installed("gstat")
   # Isotropic field: each direction sees about a quarter of the pairs, so the
-  # max of four is biased upward.  All four must fit, the ratio must be
-  # notable, and the widest must stand above the all-pairs estimate.
+  # max of four is biased upward, and the four windows are fixed to the axes.
+  # Three hurdles (all four fitted, ratio > 1.5, max > 1.5 x all-pairs) still
+  # "established" anisotropy in 14 of 18 rotations of one isotropic field and
+  # returned ranges from 225 to 529.  The all-pairs fit is the estimate now;
+  # a rotation must not move it.  (The cutoff used to come from the bbox
+  # diagonal, which alone moved the fit from 257 to 394 at 45 degrees.)
   set.seed(51); n <- 300
   xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
   D  <- as.matrix(stats::dist(xy))
   z  <- as.numeric(t(chol(exp(-D / 30) + diag(1e-6, n))) %*% rnorm(n))
-  d  <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], z = z),
-                     coords = c("x", "y"), crs = 32632)
-  r  <- suppressWarnings(estimate_sac_range(d, "z", seed = 1))
-  dirs <- attr(r, "directional")
-  expect_false(is.null(attr(r, "anisotropy_used")))
-  if (!isTRUE(attr(r, "anisotropy_used")))
-    expect_lte(as.numeric(r), max(dirs, na.rm = TRUE) + 1e-9)
-  if (sum(is.finite(dirs)) < 4L)
-    expect_false(isTRUE(attr(r, "anisotropy_used")))
+  mk <- function(xy) sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], z = z),
+                                  coords = c("x", "y"), crs = 32632)
+  rot <- function(xy, th) {
+    c0 <- colMeans(xy)
+    sweep(sweep(xy, 2, c0) %*% matrix(c(cos(th), sin(th), -sin(th), cos(th)), 2),
+          2, c0, "+")
+  }
+  r0 <- suppressWarnings(estimate_sac_range(mk(xy), "z", seed = 1))
+  expect_false(isTRUE(attr(r0, "anisotropy_used")))
+  expect_true(is.finite(as.numeric(r0)))
+  for (th in c(pi / 4, 0.6, pi / 2)) {
+    rt <- suppressWarnings(estimate_sac_range(mk(rot(xy, th)), "z", seed = 1))
+    expect_equal(attr(rt, "max_dist"), attr(r0, "max_dist"), tolerance = 1e-9)
+    expect_equal(as.numeric(rt), as.numeric(r0), tolerance = 1e-6,
+                 info = sprintf("rotation %.2f rad", th))
+  }
+  # The directional ranges are still reported, as a diagnostic.
+  expect_length(attr(r0, "directional"), 4L)
 })
 
 
@@ -691,13 +704,13 @@ test_that("the local collinearity check sees the intercept and singular windows"
       })
     w
   }
-  expect_true(any(grepl("singular or near-singular",
+  expect_true(any(grepl("collinear local design",
     .warns(fit_gwr_model(d, "z", c("a", "urban"),
                          adaptive = TRUE, bandwidth = 20)))))
 
   # And quiet where there is nothing to report: a bandwidth wide enough to span
   # the clusters gives every window both values of `urban`.
-  expect_false(any(grepl("singular or near-singular",
+  expect_false(any(grepl("collinear local design",
     .warns(fit_gwr_model(d, "z", c("a", "urban"),
                          adaptive = TRUE, bandwidth = 199)))))
 
@@ -714,9 +727,34 @@ test_that("the local collinearity check sees the intercept and singular windows"
   nn   <- i1[1L]
   nn   <- order((xy[, 1] - xy[i1, 1])^2 + (xy[, 2] - xy[i1, 2])^2)[1:20]
   expect_true(all(xmat[nn, "urban"] == 1))
-  expect_lt(kappa(xmat[nn, ], exact = FALSE), 1e6)          # what it used to check
-  expect_gt(kappa(cbind(1, xmat[nn, ]), exact = FALSE), 1e6)
+  expect_lt(.condition_index(xmat[nn, ]), 30)                # predictors alone: fine
+  expect_equal(.condition_index(cbind(1, xmat[nn, ])), Inf)  # with the intercept: singular
   expect_lt(qr(cbind(1, xmat[nn, ]))$rank, 3L)              # genuinely rank-deficient
+})
+
+
+test_that("the collinearity diagnostic is the scaled condition index, thresholded at 30", {
+  # kappa() on the raw matrix depends on the predictors' UNITS: rescaling a
+  # column changes it, so a threshold of 1e6 on it was a threshold on nothing.
+  # Belsley's index scales every column to unit length first; the literature's
+  # threshold is 30.  A design with condition index ~1300 whose local GWR
+  # coefficients ran -86..+150 around a true 2 raised nothing under kappa.
+  set.seed(9)
+  n  <- 60
+  a  <- rnorm(n)
+  b  <- a + rnorm(n, sd = 0.01)                # near-collinear pair
+  X  <- cbind(1, a, b)
+  ci <- .condition_index(X)
+  expect_gt(ci, 30)
+  # Unit invariance: rescaling a column does not move the index.
+  expect_equal(.condition_index(cbind(1, a * 1e6, b)), ci, tolerance = 1e-8)
+  # Whereas raw kappa is moved by orders of magnitude by the same rescaling.
+  expect_gt(kappa(cbind(1, a * 1e6, b), exact = TRUE) / kappa(X, exact = TRUE), 1e3)
+  # A well-conditioned design sits far below 30.
+  expect_lt(.condition_index(cbind(1, rnorm(n), rnorm(n))), 30)
+  # Exactly singular -> Inf; more columns than rows -> Inf.
+  expect_equal(.condition_index(cbind(1, a, a)), Inf)
+  expect_equal(.condition_index(matrix(rnorm(6), 2, 3)), Inf)
 })
 
 

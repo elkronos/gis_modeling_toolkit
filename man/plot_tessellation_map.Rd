@@ -114,10 +114,10 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()}
 }
 \concept{tessellation}

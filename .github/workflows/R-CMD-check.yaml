@@ -119,7 +119,9 @@ jobs:
       # dependencies.  tibble is here because .safe_tibble()'s tibble branch is
       # otherwise dead code in every job, so the tibble-vs-data.frame drop
       # semantics that folds$assignment and cv$predictions inherit went
-      # untested.
+      # untested.  spdep is the independent reference the Moran's I tests
+      # compare the regression-residual moments against; without it that
+      # comparison skips.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'
@@ -137,6 +139,7 @@ jobs:
             any::geometry
             any::ranger
             any::tibble
+            any::spdep
           needs: check
 
       - name: Confirm optional backends are installed

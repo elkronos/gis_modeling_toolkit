@@ -339,14 +339,18 @@ This is the part the rest of the package exists to support.
 
 `estimate_sac_range()` fits an omnidirectional variogram and returns the
 effective range in CRS units — here, US survey feet. It also fits the four
-principal directions, and reports the widest of those *instead* only when all
-four converge, their ratio exceeds 1.5, and the widest is more than 1.5x the
-all-pairs estimate — that is, when the data give real evidence of anisotropy
-rather than the noise four thinner variograms always produce. The
-`anisotropy_used` attribute records which answer you got. It returns `NA` (still
-classed `sac_range`, so it prints as a bare `NA`) when the empirical variogram
-never reaches a sill, because an unidentified range must not be used to size
-blocks.
+principal directions and reports their ranges in the `directional` attribute
+(with their largest-over-smallest ratio in `anisotropy`), but only as a
+diagnostic: each direction sees about a quarter of the point pairs, the maximum
+of four such fits is biased upward, and the windows are fixed to the coordinate
+axes, so nothing built from them is invariant to rotating the layer. The
+all-pairs fit is the estimate whenever it is usable; the directional maximum
+stands in for it only when the all-pairs fit fails, and the `anisotropy_used`
+attribute is `TRUE` in that case alone. If you *know* the field is anisotropic,
+size blocks from `max(attr(sac, "directional"))` explicitly. It returns `NA`
+(still classed `sac_range`, so it prints as a bare `NA`) when the empirical
+variogram never reaches a sill, because an unidentified range must not be used
+to size blocks.
 
 ```{r sac-range, eval=has_ggplot && has_gstat}
 sac <- estimate_sac_range(points_sf, response_var = "y",

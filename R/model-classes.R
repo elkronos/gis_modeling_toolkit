@@ -354,6 +354,21 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   character or factor response cannot be scored, and used to come back as
 #'   \code{n = 0} with every metric \code{NA}; a logical response is treated
 #'   as 0/1.
+#' @examples
+#' \donttest{
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+#'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#'   model_metrics(fit)                          # in-sample (out-of-bag for RF)
+#'   model_metrics(fit, newdata = pts[1:20, ])   # on held-out rows
+#' }
+#' }
 #' @export
 model_metrics <- function(object, ...) UseMethod("model_metrics")
 
@@ -361,6 +376,7 @@ model_metrics <- function(object, ...) UseMethod("model_metrics")
 #' @rdname model_metrics
 #' @export
 model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
+  .check_dots_newdata(list(...), newdata, "model_metrics")
   if (is.null(newdata)) {
     y_hat <- .fitted_checked(object, .caller = "model_metrics")
     y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -442,7 +458,9 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   the same rows land where they did at fit time.
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, ...) {
+  .check_dots(list(...), "predict.gwr_fit")
   if (is.null(newdata)) return(fitted(object))
+  .check_predict_newdata(newdata, object, "predict.gwr_fit")
 
   if (!requireNamespace("GWmodel", quietly = TRUE))
     stop("predict.gwr_fit(): package 'GWmodel' is required.", call. = FALSE)
@@ -696,6 +714,7 @@ predict.bayesian_fit <- function(object, newdata = NULL,
                                  summary = c("mean", "median"),
                                  type = c("epred", "predict"),
                                  draws = FALSE, ...) {
+  .check_dots(list(...), "predict.bayesian_fit")
   summary <- match.arg(summary)
   type    <- match.arg(type)
 
@@ -708,15 +727,10 @@ predict.bayesian_fit <- function(object, newdata = NULL,
     newdata <- object$data_sf
   }
 
-  # ---- Early validation: ensure all predictor columns are present ----
+  # ---- Early validation: the shared newdata contract ----
   # Done BEFORE the brms availability check: this is a structural check on
   # newdata that needs no backend, and it gives the most informative error.
-  missing_preds <- setdiff(object$predictor_vars, names(newdata))
-  if (length(missing_preds) > 0L)
-    stop(sprintf(
-      "predict.bayesian_fit(): newdata is missing required predictor column(s): %s",
-      paste(missing_preds, collapse = ", ")
-    ), call. = FALSE)
+  .check_predict_newdata(newdata, object, "predict.bayesian_fit")
 
   if (!requireNamespace("brms", quietly = TRUE))
     stop("predict.bayesian_fit(): package 'brms' is required.", call. = FALSE)
@@ -957,6 +971,21 @@ fitted.bayesian_fit <- function(object, ...) {
 #'
 #' @param object A \code{bayesian_fit} object.
 #' @return \code{object}, invisibly (called for side effect).
+#' @examples
+#' \donttest{
+#' # Only a bayesian_fit carries the cache; on any other fit this is a no-op.
+#' if (requireNamespace("ranger", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(1)
+#'   pts <- st_as_sf(
+#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     coords = c("x", "y"), crs = 32632
+#'   )
+#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+#'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+#'   clear_fitted_cache(fit)
+#' }
+#' }
 #' @export
 clear_fitted_cache <- function(object) {
   cache <- object$info$.cache
@@ -1109,4 +1138,58 @@ coef.bayesian_fit <- function(object, ...) {
     stop(sprintf("coef.bayesian_fit(): brms::fixef() failed: %s",
                  conditionMessage(fx)), call. = FALSE)
   fx
+}
+
+
+#' One `newdata` contract for every `predict()` method
+#'
+#' The three methods documented one contract and enforced three.  A predictor
+#' that arrived as character was refused by name by \code{rf_fit} and
+#' \code{bayesian_fit} and returned all-\code{NA} with a generic backend
+#' warning from \code{gwr_fit}; a bare \code{sfc} died inside two of them with
+#' R's "argument must be coercible to non-negative integer"; a missing column
+#' was reported by two different functions in two wordings.  This runs first
+#' in all three, so the message is the same whichever fit is behind it.
+#'
+#' @param newdata Whatever the caller passed.
+#' @param object The \code{spatial_fit}.
+#' @param caller The method name for the message.
+#' @return \code{newdata}, invisibly.
+#' @keywords internal
+#' @noRd
+.check_predict_newdata <- function(newdata, object, caller) {
+  if (inherits(newdata, "sfc"))
+    stop(caller, "(): `newdata` is a bare geometry column (sfc) and carries no ",
+         "predictor columns; pass an sf object with the ",
+         "predictors ", paste(sQuote(object$predictor_vars), collapse = ", "),
+         ".", call. = FALSE)
+  if (!inherits(newdata, "sf"))
+    stop(caller, "(): `newdata` must be an sf object -- the prediction ",
+         "locations are its geometry; got ",
+         paste(class(newdata), collapse = "/"),
+         if (is.data.frame(newdata))
+           ". Build one with sf::st_as_sf(newdata, coords = c(\"x\", \"y\"), crs = )"
+         else "", ".", call. = FALSE)
+  pv <- object$predictor_vars
+  miss <- setdiff(pv, names(newdata))
+  if (length(miss))
+    stop(caller, "(): `newdata` is missing predictor column(s) ",
+         paste(sQuote(miss), collapse = ", "), ".", call. = FALSE)
+  # Type agreement with the training data.  A CSV round-trip that turned a
+  # numeric predictor into character must be named, not silently coerced or
+  # passed on to a backend that fails for its own reasons.
+  tr <- tryCatch(sf::st_drop_geometry(object$data_sf), error = function(e) NULL)
+  if (!is.null(tr)) {
+    for (cn in intersect(pv, names(tr))) {
+      a <- tr[[cn]]; b <- newdata[[cn]]
+      if ((is.numeric(a) || is.logical(a)) && !(is.numeric(b) || is.logical(b)))
+        stop(sprintf(paste0("%s(): predictor '%s' was %s at fit time but is %s ",
+                            "in `newdata`. Convert it (as.numeric() after ",
+                            "checking for a stray thousands separator or ",
+                            "\"NA\" string) rather than letting it be coerced."),
+                     caller, cn, if (is.logical(a)) "logical" else "numeric",
+                     class(b)[1L]), call. = FALSE)
+    }
+  }
+  invisible(newdata)
 }

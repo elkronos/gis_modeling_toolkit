@@ -173,15 +173,45 @@ test_that("duplicate coordinates leave a zero diagonal and row sums of 1", {
       lbl <- paste(nm, "k =", k)
       expect_equal(max(abs(diag(W))), 0, info = lbl)
       expect_equal(unname(rowSums(W)), rep(1, nrow(co)), info = lbl)
-      expect_equal(unique(rowSums(W != 0)), k, info = lbl)
+      # At least k neighbours per row; MORE exactly when the k-th distance is
+      # tied, which is what co-located twins produce.
+      expect_true(all(rowSums(W != 0) >= k), info = lbl)
     }
   }
 })
 
-test_that("with duplicates the kd-tree keeps the k NEAREST, not k of any", {
-  # The property a k + 1 query and a self-drop does NOT give you.  Measured on
-  # 25 sites x 4 repeats at k = 3, that approach retained 75 of 400 pairs at a
-  # distance of 121 where a co-located neighbour at distance 0 existed.
+test_that("ties at the k-th distance share that slot's weight -- no tie-break", {
+  # A k-NN set is only well defined when the k-th and (k+1)-th distances
+  # differ.  Where they tie, any rule that picks (row index, kd-tree order,
+  # order()'s stability) makes the statistic depend on something other than
+  # the data.  The rule here: m neighbours strictly closer than the k-th
+  # distance get 1/k each; the t tied at it get (k - m)/(t k) each.
+  build <- knn_fn()
+  # One point at the origin, 2 at distance 1, 4 at distance 2, 3 at distance 5.
+  co <- rbind(c(0, 0),
+              c(1, 0), c(-1, 0),
+              c(0, 2), c(0, -2), c(2, 0), c(-2, 0),
+              c(5, 0), c(0, 5), c(-5, 0))
+  for (fnn in c(TRUE, FALSE)) {
+    if (fnn && !requireNamespace("FNN", quietly = TRUE)) next
+    W <- as.matrix(build(co, k = 4L, use_fnn = fnn, use_matrix = FALSE))
+    # k = 4 for the origin: 2 strictly closer at d = 1 (1/4 each), then the
+    # 4 tied at d = 2 share the remaining 2 slots: (4 - 2)/(4 * 4) = 1/8 each.
+    expect_equal(unname(W[1, 2:3]), c(0.25, 0.25), info = paste("fnn =", fnn))
+    expect_equal(unname(W[1, 4:7]), rep(0.125, 4), info = paste("fnn =", fnn))
+    expect_equal(unname(W[1, 8:10]), c(0, 0, 0), info = paste("fnn =", fnn))
+    expect_equal(sum(W[1, ]), 1)
+    # k = 1 for the origin: both d = 1 points tie for the single slot.
+    W1 <- as.matrix(build(co, k = 1L, use_fnn = fnn, use_matrix = FALSE))
+    expect_equal(unname(W1[1, 2:3]), c(0.5, 0.5), info = paste("fnn =", fnn))
+  }
+})
+
+test_that("with duplicates every co-located twin is a neighbour at distance 0", {
+  # FNN's kd-tree drops one exact duplicate per co-located group (measured:
+  # five points at a site, a k = 12 query returned self plus three of the
+  # four twins for 160 of 200 rows).  The lookup runs on distinct locations
+  # and expands them, so no twin is ever missing.
   skip_if_not_installed("FNN")
   skip_if_not_installed("Matrix")
   build <- knn_fn()
@@ -193,38 +223,97 @@ test_that("with duplicates the kd-tree keeps the k NEAREST, not k of any", {
       W <- as.matrix(build(co, k = k, use_fnn = TRUE, use_matrix = TRUE))
       lbl <- paste(nm, "k =", k)
       for (i in seq_len(nrow(co))) {
-        expect_equal(sort(unname(D[i, W[i, ] != 0])),
-                     unname(sort(D[i, ])[seq_len(k)]), info = lbl)
+        dk   <- sort(D[i, ])[k]
+        # every retained neighbour is within the k-th distance ...
+        expect_true(all(D[i, W[i, ] != 0] <= dk * (1 + 1e-9) + 1e-9), info = lbl)
+        # ... and every candidate at the k-th distance or closer is retained
+        expect_true(all(W[i, D[i, ] <= dk * (1 - 1e-9)] != 0), info = lbl)
+        twins <- which(D[i, ] == 0)
+        if (length(twins)) expect_true(all(W[i, twins] > 0), info = lbl)
       }
     }
   }
 })
 
-test_that("the kd-tree and the dense fallback agree on the same weights", {
-  # The statistic must not depend on whether FNN happens to be installed.  On
-  # distinct coordinates the two matrices are identical; with ties they may
-  # break them differently, so the retained NEIGHBOUR DISTANCES are compared.
+test_that("the kd-tree and the dense fallback build IDENTICAL weights, ties included", {
+  # The statistic must not depend on whether FNN happens to be installed.
+  # Before the tie rule, on a 10 x 10 grid at k = 6 the two backends
+  # disagreed for 76 of 100 rows (I 0.027 vs 0.051).
   skip_if_not_installed("FNN")
   skip_if_not_installed("Matrix")
   build <- knn_fn()
   set.seed(7)
-  distinct <- cbind(runif(200, 0, 1000), runif(200, 0, 1000))
-  for (k in c(1L, 3L, 8L)) {
-    A <- as.matrix(build(distinct, k = k, use_fnn = TRUE,  use_matrix = TRUE))
-    B <- build(distinct, k = k, use_fnn = FALSE, use_matrix = FALSE)
-    expect_equal(A, B, ignore_attr = TRUE, info = paste("distinct, k =", k))
-  }
-  for (nm in names(.dup_layouts())) {
-    co <- .dup_layouts()[[nm]]
-    D  <- as.matrix(stats::dist(co)); diag(D) <- Inf
-    for (k in c(1L, 3L)) {
+  layouts <- c(list(distinct = cbind(runif(200, 0, 1000), runif(200, 0, 1000)),
+                    grid = as.matrix(expand.grid(x = seq(0, 900, 100),
+                                                 y = seq(0, 900, 100)))),
+               .dup_layouts())
+  for (nm in names(layouts)) {
+    co <- layouts[[nm]]
+    for (k in c(1L, 3L, 4L, 6L, 8L)) {
       if (k >= nrow(co) - 1L) next
       A <- as.matrix(build(co, k = k, use_fnn = TRUE,  use_matrix = TRUE))
       B <- build(co, k = k, use_fnn = FALSE, use_matrix = FALSE)
-      expect_equal(sort(D[A != 0]), sort(D[B != 0]),
+      expect_equal(A, B, ignore_attr = TRUE, tolerance = 0,
                    info = paste(nm, "k =", k))
     }
   }
+})
+
+test_that("the weights are invariant to row order, translation and rotation", {
+  # Row order: 40 sites x 5 repeats.  Before the tie rule, shuffling the rows
+  # changed the neighbour set of 156 of 200 rows at k = 2 and moved I from
+  # -0.079 to -0.009.
+  build <- knn_fn()
+  set.seed(5)
+  sites <- cbind(runif(40, 0, 1000), runif(40, 0, 1000))
+  co    <- sites[rep(seq_len(40), each = 5), ]
+  grid  <- as.matrix(expand.grid(x = seq(0, 900, 100), y = seq(0, 900, 100)))
+  rot   <- function(xy, th) xy %*% matrix(c(cos(th), sin(th), -sin(th), cos(th)), 2)
+  for (fnn in c(TRUE, FALSE)) {
+    if (fnn && !requireNamespace("FNN", quietly = TRUE)) next
+    for (k in c(2L, 6L, 8L)) {
+      for (co_k in list(dup = co, grid = grid)) {
+        p  <- sample(nrow(co_k))
+        W  <- as.matrix(build(co_k,       k = k, use_fnn = fnn, use_matrix = FALSE))
+        Wp <- as.matrix(build(co_k[p, ],  k = k, use_fnn = fnn, use_matrix = FALSE))
+        expect_equal(Wp[order(p), order(p)], W, tolerance = 0)
+        Wt <- as.matrix(build(co_k + 1e7, k = k, use_fnn = fnn, use_matrix = FALSE))
+        expect_equal(Wt, W, tolerance = 0)
+        Wr <- as.matrix(build(rot(co_k, 0.37), k = k, use_fnn = fnn, use_matrix = FALSE))
+        expect_equal(Wr, W, tolerance = 1e-12)
+      }
+    }
+  }
+})
+
+test_that("on distinct coordinates the weights equal spdep's k-NN listw exactly", {
+  skip_if_not_installed("spdep")
+  build <- knn_fn()
+  set.seed(3)
+  co <- cbind(runif(150, 0, 1000), runif(150, 0, 1000))
+  for (k in c(1L, 4L, 8L)) {
+    W  <- as.matrix(build(co, k = k, use_fnn = FALSE, use_matrix = FALSE))
+    # suppressWarnings(): newer spdep warns that a k = 1 graph has many
+    # sub-graphs, which is a property of the reference, not of the test.
+    lw <- suppressWarnings(
+      spdep::nb2listw(spdep::knn2nb(spdep::knearneigh(co, k = k)), style = "W"))
+    expect_equal(W, spdep::listw2mat(lw), ignore_attr = TRUE, tolerance = 1e-14)
+  }
+})
+
+test_that("the sparse path refuses a complete graph it cannot hold", {
+  # k >= n - 1 is n(n-1) weights however they are stored; the dense guard
+  # never covered the sparse path, which built 36 million non-zeros (1.5 GB)
+  # for n = 6000, k = n.
+  skip_if_not_installed("FNN")
+  skip_if_not_installed("Matrix")
+  build <- knn_fn()
+  co <- cbind(runif(6000), runif(6000))
+  expect_error(build(co, k = 5999L, use_fnn = TRUE, use_matrix = TRUE),
+               "not a sparse matrix")
+  # k = n - 1 on a SMALL n is fine and gives 1/(n-1) everywhere off-diagonal
+  W <- as.matrix(build(co[1:6, ], k = 10L, use_fnn = TRUE, use_matrix = TRUE))
+  expect_equal(unname(W[1, -1]), rep(0.2, 5))
 })
 
 test_that("k = 1 works on the dense path", {

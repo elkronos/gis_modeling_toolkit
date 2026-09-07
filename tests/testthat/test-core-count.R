@@ -31,12 +31,38 @@ test_that(".resolve_n_cores returns sane values for the sequential paths", {
   expect_identical(f(parallel = NULL), 1L)
 
   skip_on_os("windows")
-  expect_identical(f(parallel = 3), 3L)
-  expect_identical(f(parallel = 2L), 2L)
-  expect_identical(f(parallel = FALSE, n_cores = 2), 2L)
+  # An explicit request is honoured up to the machine's core count, and up to
+  # two under R CMD check (_R_CHECK_LIMIT_CORES_), which is what CRAN's check
+  # farm enforces; more workers than cores is not parallelism.
+  cap <- function(x) {
+    x <- min(x, parallel::detectCores(logical = TRUE))
+    if (nzchar(Sys.getenv("_R_CHECK_LIMIT_CORES_"))) x <- min(x, 2L)
+    as.integer(x)
+  }
+  expect_identical(suppressMessages(f(parallel = 3)), cap(3L))
+  expect_identical(suppressMessages(f(parallel = 2L)), cap(2L))
+  expect_identical(suppressMessages(f(parallel = FALSE, n_cores = 2)), cap(2L))
   # n_cores wins over parallel, and is sanitised on the way through.
-  expect_identical(f(parallel = 8L, n_cores = 3L), 3L)
+  expect_identical(suppressMessages(f(parallel = 8L, n_cores = 3L)), cap(3L))
   expect_identical(f(parallel = TRUE, n_cores = NA), 1L)
+  # The machine cap says so, and never returns more than the machine has.
+  n_machine <- parallel::detectCores(logical = TRUE)
+  if (is.finite(n_machine) && !nzchar(Sys.getenv("_R_CHECK_LIMIT_CORES_"))) {
+    expect_message(got <- f(parallel = n_machine + 5L),
+                   "workers requested on a machine with")
+    expect_identical(got, as.integer(n_machine))
+  }
+  # Under R CMD check the cap is two whatever was asked for.
+  with_check_limit <- function(expr) {
+    old <- Sys.getenv("_R_CHECK_LIMIT_CORES_", unset = NA)
+    Sys.setenv("_R_CHECK_LIMIT_CORES_" = "TRUE")
+    on.exit(if (is.na(old)) Sys.unsetenv("_R_CHECK_LIMIT_CORES_") else
+              Sys.setenv("_R_CHECK_LIMIT_CORES_" = old))
+    force(expr)
+  }
+  expect_lte(with_check_limit(suppressMessages(f(parallel = 8L))), 2L)
+  expect_identical(with_check_limit(suppressMessages(f(parallel = 2L))),
+                   min(2L, as.integer(n_machine)))
 })
 
 

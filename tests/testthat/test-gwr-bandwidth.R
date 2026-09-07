@@ -82,6 +82,19 @@ test_that("a successful bandwidth selection is not labelled a fallback", {
   auto <- fit_gwr_model(dat, "y", "x1", adaptive = TRUE)
   expect_false(auto$info$bandwidth_is_fallback)
   expect_true(is.finite(auto$info$bandwidth) && auto$info$bandwidth > 0)
+
+  # ... and it is the AICc-selected one, as documented -- not merely finite.
+  # Selecting on approach = "CV" instead picked 5 neighbours (the smallest
+  # candidate; residual SS always prefers the most local fit) with an AICc
+  # of 506 against 149, and passed (mutation testing, pass 6).
+  sp_dat <- spatialkit:::.to_sp(prep_model_data(dat, "y", "x1"), c("y", "x1"))
+  ref <- spatialkit:::.gwr_quietly(suppressWarnings(
+    GWmodel::bw.gwr(y ~ x1, data = sp_dat, approach = "AICc",
+                    kernel = "bisquare", adaptive = TRUE)))
+  expect_equal(auto$info$bandwidth, ref)
+  expect_true(is.finite(auto$info$AICc))
+  small <- fit_gwr_model(dat, "y", "x1", bandwidth = 5, adaptive = TRUE)
+  expect_lt(auto$info$AICc, small$info$AICc)
 })
 
 

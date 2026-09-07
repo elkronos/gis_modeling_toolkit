@@ -36,6 +36,16 @@
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
 #'   raised.
+#' @examples
+#' library(sf)
+#' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+#' ))), crs = 32632))
+#' g <- create_grid_polygons(bnd, target_cells = 9)
+#' # Reverse the rows: the IDs come back in the same spatial order regardless
+#' ids_fwd <- ensure_stable_poly_id(g)$poly_id
+#' ids_rev <- ensure_stable_poly_id(g[nrow(g):1, ])$poly_id
+#' identical(sort(ids_fwd), sort(ids_rev))
 #' @export
 ensure_stable_poly_id <- function(polygons_sf,
                                   id_col = "poly_id",
@@ -183,7 +193,10 @@ ensure_stable_poly_id <- function(polygons_sf,
   # as.integer() truncated it, so 25.2 and 25.7 collided on one key (the second
   # call silently got the first one's grid), and a NULL target_cells collapsed
   # paste0() to character(0), which crashes the exists() lookup downstream.
-  paste0(type, "::",
+  # The "spatialkit_grid::" prefix marks the entry as ours, so
+  # clear_grid_cache() can tell its own bindings from anything else living in
+  # the environment it is handed.
+  paste0("spatialkit_grid::", type, "::",
          digest::digest(list(geom_hash = geom_hash, crs = crs_token,
                              target_cells = target_cells, args = dots)))
 }
@@ -210,6 +223,14 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   builders produced it.  Use one builder throughout an analysis; joining a
 #'   summary keyed on IDs from one onto geometries from the other draws the
 #'   values on the wrong polygons.
+#' @examples
+#' library(sf)
+#' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+#' ))), crs = 32632))
+#' g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+#' nrow(g)
+#' head(g$poly_id)   # stable IDs from ensure_stable_poly_id()
 #' @export
 create_grid_polygons_cached <- function(boundary,
                                         target_cells,
@@ -249,9 +270,21 @@ create_grid_polygons_cached <- function(boundary,
 #'
 #' @param cache_env Environment to clear. Default .gmt_cache.
 #' @return Invisibly, the number of entries removed.
+#' @examples
+#' library(sf)
+#' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+#' ))), crs = 32632))
+#' g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
+#' g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
+#' clear_grid_cache()                                          # entries removed
 #' @export
 clear_grid_cache <- function(cache_env = .gmt_cache) {
+  # Only OUR entries.  rm(ls()) wiped every binding in the environment it was
+  # given -- a user who passed their own workspace lost unrelated objects and
+  # was told they were "entries removed".
   keys <- ls(envir = cache_env, all.names = TRUE)
-  rm(list = keys, envir = cache_env)
+  keys <- keys[startsWith(keys, "spatialkit_grid::")]
+  if (length(keys)) rm(list = keys, envir = cache_env)
   invisible(length(keys))
 }

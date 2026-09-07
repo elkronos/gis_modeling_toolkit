@@ -48,7 +48,11 @@ response/predictors are unavailable, and also when no candidate clears the
 nine-cell resolution floor described in \strong{Details}.}
 }
 \value{
-An integer vector of candidate level counts. When
+An integer vector of candidate level counts, \strong{best first}:
+under the geometric criterion the elbow, then its lower and upper
+neighbours; under the model-aware criteria the candidates in rank order.
+\code{k[1]} is therefore the top-ranked count on every path, and
+\code{top_n = 1} returns it alone. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
 attached with per-k Moran's I values (\code{moran_i}) and their
 standardised deviates (\code{moran_z}) — except when the model-aware path
@@ -100,10 +104,13 @@ so it only carries information once there are more than nine cells.  At nine
 or fewer, every cell is a neighbour of every other, the row-standardised
 weight matrix is complete, and Moran's I collapses to exactly
 \eqn{-1/(k - 1)} for \emph{any} residual vector — a function of \code{k}
-alone, and one whose magnitude shrinks monotonically with \code{k}, which
-would make \code{criterion = "morans_i"} prefer the largest candidate every
-time.  Those candidates therefore return \code{NA} and are excluded from the
-model-aware ranking.  When no candidate in the elbow neighbourhood clears
+alone.  The criterion ranks on \eqn{|z|}, not on \eqn{|I|}, and at the
+floor the residual moments give \eqn{E[I] = I} and \eqn{\mathrm{Var}[I] =
+0} identically (the algebra holds to \eqn{10^{-16}}), so the standardised
+deviate is \eqn{0/0}: it carries no information about the tessellation, and
+whichever way rounding noise resolves it those candidates would rank first
+or last on nothing.  They therefore return \code{NA} and are excluded from
+the model-aware ranking.  When no candidate in the elbow neighbourhood clears
 the floor — which is the usual outcome for small \code{max_levels} — the
 whole call falls back to the geometric ranking and logs a warning; raise
 \code{max_levels} above roughly 10 if you want the model-aware criteria to
@@ -120,15 +127,15 @@ pts <- st_as_sf(
              y = c(runif(25, 0, 10), runif(25, 90, 100))),
   coords = c("x", "y"), crs = 32632
 )
-determine_optimal_levels(pts, max_levels = 6)
+determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 }
 \seealso{
 \code{\link[=build_tessellation]{build_tessellation()}}, which takes the chosen level count as
 \code{approx_n_cells}; \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps that follow.
 
-Other aggregation:
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}}
+Other aggregation: 
+\code{\link{assign_features_to_polygons}()},
+\code{\link{summarize_by_cell}()}
 }
 \concept{aggregation}

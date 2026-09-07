@@ -275,11 +275,14 @@
     n <- length(g)
     if (n < 2L) return(NA_real_)
     if (n > max_n) g <- g[unique(round(seq(1, n, length.out = max_n)))]
-    d_geo <- suppressMessages(as.numeric(sf::st_distance(g)))
+    # Ellipsoidal geodesics, not sf's s2 sphere: the sphere is itself
+    # 0.24-0.56% off WGS84, which is the size of the errors being ranked.
+    ll  <- sf::st_coordinates(sf::st_transform(g, 4326))[, 1:2, drop = FALSE]
+    ij  <- which(lower.tri(matrix(0, nrow(ll), nrow(ll))), arr.ind = TRUE)
+    d_geo <- .geod_distance(ll[ij[, 2], 1], ll[ij[, 2], 2],
+                            ll[ij[, 1], 1], ll[ij[, 1], 2])
     d_prj <- as.numeric(stats::dist(
       sf::st_coordinates(sf::st_transform(g, crs))[, 1:2, drop = FALSE]))
-    # st_distance() returns the full matrix, dist() the lower triangle.
-    d_geo <- as.numeric(stats::as.dist(matrix(d_geo, nrow = length(g))))
     keep  <- is.finite(d_geo) & is.finite(d_prj) & d_geo > 0
     if (!any(keep)) return(NA_real_)
     max(abs(d_prj[keep] / d_geo[keep] - 1))
@@ -627,6 +630,13 @@ ensure_projected <- function(x, target_crs = NULL) {
 #'   option exists only for rare edge cases where you are certain the
 #'   coordinates already match the target CRS definition.
 #' @return A named list with components a and b.
+#' @examples
+#' library(sf)
+#' a <- st_as_sf(data.frame(x = c(500000, 500100), y = c(4000000, 4000100)),
+#'               coords = c("x", "y"), crs = 32632)
+#' b <- st_transform(a, 4326)                 # same points, lon/lat
+#' h <- harmonize_crs(a, b)                    # b is brought into a's CRS
+#' st_crs(h$a) == st_crs(h$b)
 #' @export
 harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
                           on_transform_error = c("stop", "set_crs")) {
@@ -841,7 +851,7 @@ coerce_to_points <- function(
   if (mode == "line_midpoint") {
     gtypes <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
     if (any(gtypes %in% c("MULTILINESTRING", "GEOMETRYCOLLECTION"))) {
-      stop("line_midpoint only supports LINESTRING; cast MULTILINESTRING first.")
+      stop("coerce_to_points(): method \"line_midpoint\" only supports LINESTRING; cast MULTILINESTRING first.", call. = FALSE)
     }
     idx_ls <- which(gtypes == "LINESTRING")
     idx_other <- which(gtypes != "LINESTRING")

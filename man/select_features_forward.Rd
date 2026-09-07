@@ -60,7 +60,9 @@ which draws one RNG stream per fold from it, so it also seeds the
 \emph{learner} inside every fold.  A stochastic \code{fit_fn} is therefore
 reproducible from this one value.}
 
-\item{quiet}{Suppress progress messages. Default FALSE.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
 }
 \value{
 A list with \code{selected} (the chosen predictors, in the order
@@ -118,14 +120,14 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()}
 }
 \concept{cross-validation}

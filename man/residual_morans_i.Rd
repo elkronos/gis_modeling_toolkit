@@ -21,8 +21,14 @@ residual_morans_i(
 
 \item{weights}{Optional user-supplied n x n weight matrix — a base
 matrix or a \pkg{Matrix}-package matrix (e.g. a sparse dgCMatrix).
-When \code{NULL} (the default), a k-nearest-neighbour binary weight matrix
-(k = 8, row-standardised) is built from the observation coordinates.
+When \code{NULL} (the default), a row-standardised k-nearest-neighbour
+weight matrix (k = 8) is built from the observation coordinates.  Ties
+at the k-th distance -- every regular grid, every site with repeat
+visits -- share that slot's weight equally rather than being broken by
+row order or by which backend found them, so the matrix is a function
+of the geometry alone; on distinct, untied coordinates it equals
+\code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
+exactly.
 If a non-row-standardised matrix is supplied (i.e. rows do not all sum
 to 1), the Cliff & Ord variance formula is still valid for general W
 and the computation proceeds; a note is logged (not raised as an R
@@ -32,7 +38,9 @@ argument that is not an n x n matrix is an error.}
 
 \item{k}{Integer number of nearest neighbours used when building the
 default weight matrix (ignored when \code{weights} is supplied).
-Default 8.}
+Default 8.  \code{k >= n - 1} is a complete graph -- \eqn{n(n-1)}
+weights however they are stored -- and is refused above 20 million of
+them.}
 
 \item{null}{Which null distribution the expectation, variance and p-value
 are computed against.  One of:
@@ -134,12 +142,16 @@ OLS              \tab 0.035 \tab 0.060 \cr
 random forest    \tab 0.128 \tab 0.200 \cr
 GWR              \tab 0.000 \tab 0.000
 }
-An in-sample random forest is anticonservative under both — its residuals
-are shrunk and spatially heteroscedastic, so the variance is understated
-whichever moments are used (\eqn{sd(z) \approx 1.3}) — and GWR is
-conservative under both, because it removes far more structure than a rank-p
-projection does.  Treat the p-value from those backends as a rough
-indicator, and prefer cross-validated residuals or an explicit spatial
+The random forest is anticonservative under both.  Its residuals here are
+the \strong{out-of-bag} ones (\code{residuals.rf_fit()}), not in-sample
+fits -- they are inflated rather than shrunk (measured sd 1.08 against a
+true 1.00) -- but they are not a linear projection of the response and
+they are spatially heteroscedastic, so neither set of moments describes
+their null distribution and the variance is understated whichever is used
+(\eqn{sd(z) \approx 1.3}).  GWR is conservative under both, because it
+removes far more structure than a rank-p projection does.  Treat the
+p-value from those backends as a rough indicator, and prefer
+spatially-blocked cross-validated residuals or an explicit spatial
 covariance model when the answer has to carry weight.
 
 A permutation null was considered and rejected: permuting the residual
@@ -177,9 +189,9 @@ Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 Models and Applications}. Pion, London. Section 8.3.
 }
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=compare_models_cv]{compare_models_cv()}},
-\code{\link[=evaluate_insample]{evaluate_insample()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{compare_models_cv}()},
+\code{\link{evaluate_insample}()}
 }
 \concept{model evaluation}

@@ -2,8 +2,19 @@
 # Small geometry utilities: input assertions, target clipping, grid cells.
 # ===========================================================================
 
-test_that(".assert_sf rejects non-sf objects", {
-  expect_error(spatialkit:::.assert_sf(data.frame(x = 1)), "Expected an sf object")
+test_that(".assert_sf rejects non-sf objects, naming the user-facing function", {
+  expect_error(spatialkit:::.assert_sf(data.frame(x = 1), caller = "f"),
+               "^f\\(\\): `data.frame\\(x = 1\\)` must be an sf object\\.$")
+  # Without `caller` the name is taken from the calling function -- a pkg::
+  # prefix on the call is dropped.
+  g <- function(x) spatialkit:::.assert_sf(x, label = "x")
+  expect_error(g(1), "^g\\(\\): `x` must be an sf object")
+  h <- function(x) spatialkit:::.assert_sf(x, label = "x", caller = "spatialkit::k")
+  expect_error(h(1), "^spatialkit::k\\(\\): `x`")   # explicit caller is verbatim
+  # A build_tessellation() result passed whole gets the hint to use $cells.
+  fake <- list(cells = 1, seeds = 2)
+  expect_error(spatialkit:::.assert_sf(fake, caller = "f"),
+               "looks like a build_tessellation\\(\\) result; pass its `\\$cells`")
 })
 
 

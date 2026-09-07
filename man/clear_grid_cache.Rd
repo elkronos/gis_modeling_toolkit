@@ -15,3 +15,12 @@ Invisibly, the number of entries removed.
 \description{
 Removes all memoized grid results from the internal cache environment.
 }
+\examples{
+library(sf)
+bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+))), crs = 32632))
+g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
+g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
+clear_grid_cache()                                          # entries removed
+}

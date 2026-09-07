@@ -31,24 +31,32 @@
 
   # P(X < lower) = 1 - pgamma(1/lower, a, rate = b)
   # P(X > upper) =     pgamma(1/upper, a, rate = b)
-  obj <- function(par) {
-    a <- exp(par[[1]]); b <- exp(par[[2]])
-    lo <- 1 - stats::pgamma(1 / lower, shape = a, rate = b)
-    hi <- stats::pgamma(1 / upper, shape = a, rate = b)
-    (lo - tail)^2 + (hi - tail)^2
+  #
+  # The two tail conditions have one exact solution, and it is a 1-D root.
+  # With X = 1/Y, Y ~ Gamma(a, rate = b), and pgamma(q, a, rate = b) =
+  # pgamma(q * b, a): the upper-tail condition gives b = upper * qgamma(tail,
+  # a), and substituting into the lower-tail one leaves
+  #     qgamma(1 - tail, a) / qgamma(tail, a) = upper / lower,
+  # whose left side is monotone decreasing in a.  A 2-D Nelder-Mead on
+  # (log a, log b) from a fixed start failed to reach the tails whenever
+  # upper/lower exceeded ~65 -- every clustered layout -- and was sensitive
+  # to the absolute scale of the bounds, so the fit silently fell back to the
+  # half-normal this very function calls the worse prior.
+  ratio <- upper / lower
+  f <- function(loga) {
+    a <- exp(loga)
+    stats::qgamma(1 - tail, shape = a) / stats::qgamma(tail, shape = a) - ratio
   }
-
-  # Start from an inverse-gamma whose mode is the geometric mean of the bounds:
-  # mode = b / (a + 1), so with a = 3, b = 4 * sqrt(lower * upper).
-  init <- c(log(3), log(4 * sqrt(lower * upper)))
-  fit  <- tryCatch(
-    stats::optim(init, obj, method = "Nelder-Mead",
-                 control = list(maxit = 2000, reltol = 1e-12)),
-    error = function(e) NULL
-  )
-  if (is.null(fit)) return(bad)
-
-  a <- exp(fit$par[[1]]); b <- exp(fit$par[[2]])
+  root <- tryCatch({
+    # a in [1e-4, 1e4]: ratio(1e-4) is astronomically large, ratio(1e4) is
+    # ~1.05, so every ratio > 1.05 is bracketed.
+    lo_a <- log(1e-4); hi_a <- log(1e4)
+    if (f(hi_a) > 0) hi_a <- log(1e6)
+    stats::uniroot(f, c(lo_a, hi_a), tol = 1e-12, maxiter = 1000L)$root
+  }, error = function(e) NULL)
+  if (is.null(root)) return(bad)
+  a <- exp(root)
+  b <- upper * stats::qgamma(tail, shape = a)
   if (!is.finite(a) || !is.finite(b) || a <= 0 || b <= 0) return(bad)
 
   lo <- 1 - stats::pgamma(1 / lower, shape = a, rate = b)
@@ -165,7 +173,12 @@
 #' @param chains Number of MCMC chains. Default 4.
 #' @param iter Total iterations per chain. Default 2000.
 #' @param warmup Warmup iterations. Default floor(iter/2).
-#' @param cores Number of parallel cores.
+#' @param cores Number of cores for the sampler, one chain per core. Default
+#'   \code{getOption("mc.cores", 1L)} -- the same convention \pkg{brms} uses
+#'   itself, so \code{options(mc.cores = 4)} once per session runs the four
+#'   default chains in parallel everywhere. The previous default of
+#'   \code{detectCores() - 1} took every core but one on any machine, which
+#'   is not what a shared server or a check farm wants.
 #' @param seed Integer seed. Default 123.
 #' @param backend "auto", "cmdstanr", or "rstan".
 #' @param control Named list of sampler controls, \emph{merged} over the
@@ -268,6 +281,8 @@
 #' @family model fitting
 #' @examples
 #' \dontrun{
+#' # Not run: fits with Stan, which needs a working C++ toolchain and takes
+#' # minutes of MCMC -- both outside what an example may assume.
 #' if (requireNamespace("brms", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -302,7 +317,7 @@ fit_bayesian_spatial_model <- function(
     chains      = 4,
     iter        = 2000,
     warmup      = floor(iter / 2),
-    cores       = max(1L, parallel::detectCores() - 1L),
+    cores       = getOption("mc.cores", 1L),
     seed        = 123,
     backend     = c("auto", "cmdstanr", "rstan"),
     control     = list(),

@@ -78,8 +78,8 @@ table(assigned$poly_id)
 \code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
-Other aggregation:
-\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
-\code{\link[=summarize_by_cell]{summarize_by_cell()}}
+Other aggregation: 
+\code{\link{determine_optimal_levels}()},
+\code{\link{summarize_by_cell}()}
 }
 \concept{aggregation}

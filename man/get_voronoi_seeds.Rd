@@ -64,10 +64,10 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_grid_polygons]{create_grid_polygons()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

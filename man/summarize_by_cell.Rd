@@ -89,7 +89,10 @@ correcting by a shape that was not trusted enough to report a range.}
 before forming the \verb{n x n} correlation matrix used by
 \code{deff = "variogram"}. Default 500.}
 
-\item{quiet}{Logical; suppress messages. Default TRUE.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE} --
+unlike the tessellation functions, whose default is \code{FALSE}.}
 }
 \value{
 A tibble/data.frame (or sf if cells_sf given) with per-cell
@@ -189,10 +192,17 @@ naive SE) on exchangeable within-cell correlation, and 0.93 with
 It is \strong{not} the standard error of the cell's own mean (the block average
 over that cell), which is what a cell-level map or a regression on cell
 values usually wants. For that quantity the naive \code{sd / sqrt(n)} is the
-better estimate — measured coverage 0.95, against essentially 1.00 for the
-design-effect-corrected SE, which is about five times too wide. Use \code{deff}
-when the cell means feed a population-level inference; leave it at 1 when
-they are measurements of the cells themselves.
+better of the two on offer — measured coverage 0.95 under exchangeable
+within-cell correlation, against essentially 1.00 for the
+design-effect-corrected SE, which is about five times too wide. That 0.95
+is exact under the exchangeable model and holds under a spatial covariance
+model only when the cell's points are spread through the cell; with
+\emph{clustered} sampling inside a cell it is anticonservative for the block
+average too (measured 0.58), and the honest answer there is a block-kriging
+variance, which this function does not compute. Use \code{deff} when the cell
+means feed a population-level inference; leave it at 1 when they are
+measurements of the cells themselves and the sampling within cells is
+reasonably uniform.
 }
 
 \section{Design effects and variable types}{
@@ -203,11 +213,15 @@ accepts \strong{one} correlation function and applies it to every numeric column
 because a variogram is a property of the field being modelled rather than of
 a variable type; a predictor whose spatial structure differs markedly from
 the response's will have its SE corrected by the response's correlation.
-Note also that supplying \code{predictor_vars} makes the internally estimated
-variogram a \strong{residual} variogram (that is what
-\code{\link[=estimate_sac_range]{estimate_sac_range()}} does with predictors), so the response's own design
-effect depends on which predictors are listed. Pass \code{sac} explicitly when
-you want control over which variogram is used.
+The internally estimated variogram is fitted to the \strong{response itself},
+never to OLS residuals, whatever \code{predictor_vars} holds: the \verb{..se_resp_*}
+columns estimate the grand mean of the response, so the correlation to
+correct for is the response's own. (A residual variogram, whose correlation
+is that of the part the predictors do not explain, is weaker; using it here
+dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
+listed.) Pass \code{sac} explicitly when you want a different variogram --
+a residual one from \code{estimate_sac_range(..., predictor_vars = )}, say --
+and check \code{attr(sac, "detrended")} to know which you have.
 }
 
 \examples{
@@ -239,8 +253,8 @@ attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, which produces the input layer;
 \code{\link[=build_tessellation]{build_tessellation()}} for the cells themselves.
 
-Other aggregation:
-\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
-\code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
+Other aggregation: 
+\code{\link{assign_features_to_polygons}()},
+\code{\link{determine_optimal_levels}()}
 }
 \concept{aggregation}

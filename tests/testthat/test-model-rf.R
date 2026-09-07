@@ -408,7 +408,8 @@ test_that("predict.rf_fit refuses a numeric-at-fit predictor supplied as text", 
   d$z <- 2 * d$a + rnorm(n, 0, 0.2)
   fit <- fit_rf_model(d, "z", "a", num_trees = 100, seed = 1)
   txt <- d; txt$a <- as.character(txt$a)
-  expect_error(predict(fit, newdata = txt), "was numeric when the forest was grown")
+  expect_error(predict(fit, newdata = txt),
+               "predictor 'a' was numeric at fit time but is character in `newdata`")
   # The numeric frame still predicts, and logicals are accepted as 0/1.
   expect_length(predict(fit, newdata = d), n)
 })

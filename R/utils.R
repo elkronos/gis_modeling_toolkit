@@ -212,12 +212,24 @@
 #' @param x An object.
 #' @param what Character vector of acceptable geometry type names.
 #' @param label Label used in error messages.
+#' @param caller Name of the user-facing function, for the message prefix.
+#'   Defaults to the name of the function that called this one.
 #' @keywords internal
 #' @noRd
 .assert_sf <- function(x, what = c("POINT", "POLYGON", "MULTIPOLYGON"),
-                       label = deparse(substitute(x))) {
+                       label = deparse(substitute(x)),
+                       caller = NULL) {
+  if (is.null(caller)) {
+    cl <- sys.call(-1L)
+    caller <- if (is.null(cl)) "spatialkit" else
+      sub("^.*:::?", "", deparse(cl[[1L]])[1L])   # drop a pkg:: prefix
+  }
   if (!inherits(x, "sf"))
-    stop(sprintf("Expected an sf object for `%s`.", label), call. = FALSE)
+    stop(sprintf("%s(): `%s` must be an sf object%s.", caller, label,
+                 if (is.list(x) && !is.null(x$cells))
+                   " (this looks like a build_tessellation() result; pass its `$cells`)"
+                 else ""),
+         call. = FALSE)
   gcls <- unique(as.character(sf::st_geometry_type(x, by_geometry = TRUE)))
   # `all`, not `any`: a mixed-geometry layer with one acceptable type used to
   # pass, contradicting the error text below and letting e.g. a POINT/POLYGON
@@ -225,8 +237,9 @@
   # layer failing as it did under `any()` -- all() is vacuously TRUE on the
   # empty set.
   if (length(gcls) == 0L || !all(gcls %in% what))
-    stop(sprintf("`%s` geometry must be one of: %s (found: %s).",
-                 label, paste(what, collapse = ", "), paste(gcls, collapse = ", ")),
+    stop(sprintf("%s(): `%s` geometry must be one of: %s (found: %s).",
+                 caller, label, paste(what, collapse = ", "),
+                 paste(gcls, collapse = ", ")),
          call. = FALSE)
 }
 
@@ -356,4 +369,168 @@
     xy <- xy[sample.int(n, max_n), , drop = FALSE]
   }
   as.numeric(stats::dist(xy))
+}
+
+
+#' Refuse arguments in `...` that nothing downstream will read
+#'
+#' A function whose `...` is forwarded to another, or documented as
+#' "Ignored", has no terminal check anywhere: a name that matches no formal
+#' vanishes without a condition.  For the evaluation functions the one
+#' argument they exist to take is `newdata`, and a one-character slip
+#' (`newdta = hold`) silently turned an out-of-sample RMSE of 25.24 into the
+#' in-sample 1.086 with the same return shape.  `create_grid_polygons()`, which
+#' has no `...`, rejects the same typo.
+#'
+#' @param dots `list(...)` from the caller.
+#' @param fn Name of the user-facing function, for the message.
+#' @param allowed Character vector of names that ARE consumed downstream.
+#' @return `dots`, invisibly, when every name is allowed.
+#' @keywords internal
+#' @noRd
+.check_dots <- function(dots, fn, allowed = character(0)) {
+  if (!length(dots)) return(invisible(dots))
+  nm <- names(dots)
+  if (is.null(nm)) nm <- rep("", length(dots))
+  unnamed <- !nzchar(nm)
+  bad     <- !unnamed & !(nm %in% allowed)
+  if (any(unnamed))
+    stop(fn, "(): ", sum(unnamed), " unnamed argument(s) in `...` would be ",
+         "ignored. Name every argument.", call. = FALSE)
+  if (any(bad))
+    stop(fn, "(): unused argument(s) ",
+         paste(sprintf("`%s`", nm[bad]), collapse = ", "),
+         if (length(allowed)) paste0(" (this method accepts ",
+                                     paste(sprintf("`%s`", allowed), collapse = ", "),
+                                     " through `...`)")
+         else " (this method takes nothing through `...`)",
+         ". A misspelt `newdata` here would silently return in-sample values.",
+         call. = FALSE)
+  invisible(dots)
+}
+
+
+#' Catch a misspelt `newdata` on the evaluation functions
+#'
+#' `model_metrics()`, `evaluate_insample()` and `compare_models()` forward
+#' `...` to `predict()`, which checks it -- but only on the out-of-sample
+#' branch.  A misspelt `newdata` leaves `newdata` NULL and the typo in `...`,
+#' the in-sample branch never calls `predict()`, and the in-sample metrics
+#' come back with the out-of-sample return shape.  So: arguments in `...`
+#' with no `newdata` is an error here.
+#'
+#' @param dots `list(...)`.
+#' @param newdata The caller's `newdata`.
+#' @param fn User-facing function name.
+#' @keywords internal
+#' @noRd
+.check_dots_newdata <- function(dots, newdata, fn) {
+  if (is.null(newdata) && length(dots)) {
+    nm <- names(dots)
+    if (is.null(nm)) nm <- rep("", length(dots))
+    nm <- ifelse(nzchar(nm), sprintf("`%s`", nm), "<unnamed>")
+    stop(fn, "(): argument(s) ", paste(nm, collapse = ", "),
+         " were supplied but `newdata` was not; nothing reads them in the ",
+         "in-sample case, and the in-sample metrics would be returned as if ",
+         "they were out-of-sample. Did you mean `newdata = `?", call. = FALSE)
+  }
+  invisible(dots)
+}
+
+
+#' Belsley condition index of a design matrix
+#'
+#' The collinearity diagnostic the literature actually thresholds: the ratio
+#' of the largest to the smallest singular value of the design matrix after
+#' each column has been scaled to unit Euclidean length (Belsley, Kuh & Welsch
+#' 1980; for GWR, Wheeler & Tiefelsdorf 2005).  Columns are scaled but NOT
+#' centred, so an intercept column stays in and a column that is constant
+#' inside a window shows up as collinear with it.  The conventional threshold
+#' is 30.  \code{kappa()} on the raw matrix depends on the predictors' units
+#' -- a design with condition index 1322, whose local coefficients ran from
+#' -86 to +150 around a true value of 2, had a raw kappa under 1e6 and raised
+#' nothing.
+#'
+#' @param X Numeric matrix.
+#' @return A non-negative number; \code{Inf} for an exactly singular design or
+#'   a zero column.
+#' @keywords internal
+#' @noRd
+.condition_index <- function(X) {
+  X <- as.matrix(X)
+  if (!nrow(X) || !ncol(X)) return(NA_real_)
+  if (nrow(X) < ncol(X)) return(Inf)
+  nrm <- sqrt(colSums(X^2))
+  if (any(!is.finite(nrm)) || any(nrm == 0)) return(Inf)
+  sv <- tryCatch(svd(sweep(X, 2L, nrm, "/"), nu = 0, nv = 0)$d,
+                 error = function(e) NULL)
+  if (is.null(sv) || !length(sv)) return(Inf)
+  if (min(sv) <= .Machine$double.eps * max(sv)) return(Inf)
+  max(sv) / min(sv)
+}
+
+
+#' Ellipsoidal (WGS84) geodesic distance between lon/lat pairs
+#'
+#' Vincenty's inverse formula, vectorised over pairs.  \code{sf::st_distance()}
+#' on lon/lat geometry uses s2's SPHERE (R = 6371 km), and the sphere-to-WGS84
+#' gap of 0.24-0.56\% is the same size as the projection distortions
+#' \code{.crs_distance_error()} compares -- so the "measured error X\% vs Y\%"
+#' figures were off by up to half a percentage point and the least-distorting
+#' candidate was mis-ranked in 16 of 40 random wide extents.  The ellipsoidal
+#' distance needs no Suggests package (\pkg{lwgeom} is not a dependency).
+#'
+#' @param lon1,lat1,lon2,lat2 Numeric vectors in decimal degrees, recycled.
+#' @return Distances in metres.  Nearly antipodal pairs, where the iteration
+#'   does not converge, fall back to the spherical distance.
+#' @keywords internal
+#' @noRd
+.geod_distance <- function(lon1, lat1, lon2, lat2) {
+  a <- 6378137; f <- 1 / 298.257223563; b <- a * (1 - f)
+  rad <- pi / 180
+  U1 <- atan((1 - f) * tan(lat1 * rad)); U2 <- atan((1 - f) * tan(lat2 * rad))
+  L  <- (lon2 - lon1) * rad
+  sU1 <- sin(U1); cU1 <- cos(U1); sU2 <- sin(U2); cU2 <- cos(U2)
+  n <- max(length(U1), length(U2), length(L))
+  lambda <- rep_len(L, n); U1 <- rep_len(U1, n); U2 <- rep_len(U2, n)
+  sU1 <- rep_len(sU1, n); cU1 <- rep_len(cU1, n)
+  sU2 <- rep_len(sU2, n); cU2 <- rep_len(cU2, n)
+  L   <- rep_len(L, n)
+  sinSigma <- cosSigma <- sigma <- cosSqAlpha <- cos2SigmaM <- numeric(n)
+  active <- rep(TRUE, n)
+  for (iter in seq_len(200L)) {
+    sl <- sin(lambda[active]); cl <- cos(lambda[active])
+    ss <- sqrt((cU2[active] * sl)^2 +
+               (cU1[active] * sU2[active] - sU1[active] * cU2[active] * cl)^2)
+    cs <- sU1[active] * sU2[active] + cU1[active] * cU2[active] * cl
+    sg <- atan2(ss, cs)
+    sinAlpha <- ifelse(ss == 0, 0, cU1[active] * cU2[active] * sl / ss)
+    csa <- 1 - sinAlpha^2
+    c2sm <- ifelse(csa == 0, 0, cs - 2 * sU1[active] * sU2[active] / csa)
+    C  <- f / 16 * csa * (4 + f * (4 - 3 * csa))
+    lambda_new <- L[active] + (1 - C) * f * sinAlpha *
+      (sg + C * ss * (c2sm + C * cs * (-1 + 2 * c2sm^2)))
+    sinSigma[active] <- ss; cosSigma[active] <- cs; sigma[active] <- sg
+    cosSqAlpha[active] <- csa; cos2SigmaM[active] <- c2sm
+    done <- abs(lambda_new - lambda[active]) < 1e-12
+    lambda[active] <- lambda_new
+    active[active] <- !done
+    if (!any(active)) break
+  }
+  uSq <- cosSqAlpha * (a^2 - b^2) / b^2
+  A <- 1 + uSq / 16384 * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)))
+  B <- uSq / 1024 * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)))
+  dSigma <- B * sinSigma * (cos2SigmaM + B / 4 *
+    (cosSigma * (-1 + 2 * cos2SigmaM^2) -
+     B / 6 * cos2SigmaM * (-3 + 4 * sinSigma^2) * (-3 + 4 * cos2SigmaM^2)))
+  d <- b * A * (sigma - dSigma)
+  # Non-converged (near-antipodal) pairs: spherical fallback.
+  if (any(active)) {
+    la1 <- rep_len(lat1, n)[active] * rad; la2 <- rep_len(lat2, n)[active] * rad
+    dl  <- L[active]
+    d[active] <- 6371008.8 * acos(pmin(1, pmax(-1,
+      sin(la1) * sin(la2) + cos(la1) * cos(la2) * cos(dl))))
+  }
+  d[rep_len(lon1, n) == rep_len(lon2, n) & rep_len(lat1, n) == rep_len(lat2, n)] <- 0
+  d
 }
