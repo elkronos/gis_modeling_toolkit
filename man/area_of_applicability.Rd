@@ -169,7 +169,6 @@ understate the distances.
 }
 
 \examples{
-\donttest{
 library(sf)
 set.seed(1)
 n <- 120
@@ -191,7 +190,6 @@ res <- area_of_applicability(newpts, train_sf = train,
                              predictor_vars = c("a", "b"))
 res
 table(res$aoa$AOA)
-}
 }
 \references{
 Meyer, H. and Pebesma, E. (2021). Predicting into unknown space? Estimating

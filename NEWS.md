@@ -1025,11 +1025,13 @@ touched, and the figures quoted are from those reproductions.
   vector gave "the condition has length > 1", and with `adaptive = FALSE` a zero
   or negative distance reached GWmodel untouched.
 
-* `fit_gwr_model()`'s local-collinearity spot-check no longer disturbs the
-  caller's RNG. It sampled from the global stream and fires only when `n > 30`
-  with at least two numeric predictors, so the same script produced different
-  fold assignments depending on how many predictors a model happened to carry.
-  `cv_gwr()` calls it once per fold.
+* `fit_gwr_model()`'s local-collinearity spot-check no longer touches the RNG
+  at all. It sampled its 30 locations from the global stream and fires only
+  when `n > 30` with at least two numeric predictors, so the same script
+  produced different fold assignments depending on how many predictors a model
+  happened to carry; `cv_gwr()` calls it once per fold. The 30 locations are
+  now evenly spaced ranks of the observations ordered by x, then y --
+  reproducible, independent of the row order, and drawing no random numbers.
 
 * `predict.gwr_fit()` returns an all-`NA` vector when every row of `newdata` is
   dropped as incomplete, matching the other two backends, rather than surfacing
@@ -1608,6 +1610,21 @@ touched, and the figures quoted are from those reproductions.
   section no longer promises a specific version from CRAN; the resolution
   figure and the quick-start output are regenerated for the elbow-first
   ordering (`4 3 5`, `k = 4`).
+
+* The DESCRIPTION now cites the methods it implements -- Lu et al. (2014) for
+  `GWmodel`, Riutort-Mayol et al. (2023) for the Hilbert space Gaussian
+  process, Strobl et al. (2007) for the permutation importance, Mila et al.
+  (2022) for NNDM folds and Meyer and Pebesma (2021) for the area of
+  applicability -- each with its DOI, and quotes only software names. The
+  Riutort-Mayol reference on `fit_bayesian_spatial_model()`'s help page gives
+  the article number (33, 17) rather than "33, 1".
+
+* No example is wrapped in `\donttest{}` any more: the fifteen that were --
+  every fit, cross-validation, comparison, plotting and surface example that
+  needs a Suggests package -- run unconditionally behind their
+  `requireNamespace()` guards, the slowest in under 2 s. The two Stan examples
+  (`fit_bayesian_spatial_model()`, `cv_bayes()`) keep `\dontrun{}` because they
+  need a C++ toolchain and minutes of MCMC, and say so in a leading comment.
 
 # spatialkit 1.0.0
 

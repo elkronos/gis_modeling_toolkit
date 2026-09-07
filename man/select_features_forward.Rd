@@ -99,7 +99,6 @@ that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 \code{max_fits} guards against that.
 }
 \examples{
-\donttest{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
     requireNamespace("sp", quietly = TRUE)) {
   library(sf)
@@ -116,7 +115,6 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   sel <- select_features_forward(pts, "resp", c("a", "b", "noise"), fit_fn,
                                  k = 3, quiet = TRUE)
   sel$selected
-}
 }
 }
 \seealso{

@@ -72,9 +72,11 @@ not, and a threshold on it is a threshold on nothing in particular.
 A \strong{global} index is computed on the full design (intercept plus
 predictors).
 In addition, a \strong{local} spot-check is performed at up to 30 locations --
-every location when there are 30 or fewer, otherwise a fixed sample of 30
-drawn under a constant seed, so the diagnostic is reproducible and the count
-is not configurable.  For each sampled point the nearest neighbours within
+every location when there are 30 or fewer, otherwise 30 spread evenly over
+the extent (evenly spaced ranks of the observations ordered by x, then y),
+so the diagnostic is reproducible, draws no random numbers, does not depend
+on the row order of the data, and the count is not configurable.  For each
+sampled point the nearest neighbours within
 the bandwidth window -- the bandwidth the model is actually fitted with, not
 a stand-in -- are selected and the condition number of that local design
 sub-matrix is evaluated.  That sub-matrix is the predictors \strong{plus an
@@ -104,7 +106,6 @@ audit as a post-fit diagnostic.
 }
 
 \examples{
-\donttest{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
     requireNamespace("sp", quietly = TRUE)) {
   library(sf)
@@ -118,7 +119,6 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
   summary(fit)
   head(predict(fit, newdata = dat))   # newdata is re-projected if needed
-}
 }
 }
 \seealso{

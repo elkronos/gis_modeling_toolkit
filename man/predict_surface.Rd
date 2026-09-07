@@ -86,7 +86,6 @@ matrix is \code{n_draws x n_newdata}, which will exhaust memory on a fine
 grid long before the fit itself would.
 }
 \examples{
-\donttest{
 # Any spatial_fit works here; a forest keeps the example free of the
 # optional GWR/Stan backends.
 if (requireNamespace("ranger", quietly = TRUE)) {
@@ -103,7 +102,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   surf[".pred"]
   # Check where that surface is extrapolating before mapping it.
   area_of_applicability(surf, model = fit)
-}
 }
 }
 \concept{prediction}

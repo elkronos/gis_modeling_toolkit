@@ -263,7 +263,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' Choose GP basis count and boundary factor from the length-scale/domain ratio
 #'
 #' Implements the practical recommendations of Riutort-Mayol et al. (2023,
-#' Statistics and Computing 33:1) for the squared-exponential kernel used by
+#' Statistics and Computing 33:17) for the squared-exponential kernel used by
 #' \code{brms::gp()}:
 #' \preformatted{
 #'   c >= 3.2 * (ell/S),  c >= 1.25

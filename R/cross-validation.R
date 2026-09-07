@@ -2637,7 +2637,6 @@ make_folds <- function(points_sf, k,
 #'   well-formed all-\code{NA} row either way.
 #' @family cross-validation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
 #'     requireNamespace("sp", quietly = TRUE)) {
 #'   library(sf)
@@ -2651,7 +2650,6 @@ make_folds <- function(points_sf, k,
 #'   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
 #'   cv$overall
 #'   cv$fold_metrics
-#' }
 #' }
 #' @export
 cv_gwr <- function(data_sf, response_var, predictor_vars,

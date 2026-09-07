@@ -55,7 +55,6 @@ same way.
 }
 
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -67,6 +66,5 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
   model_metrics(fit)                          # in-sample (out-of-bag for RF)
   model_metrics(fit, newdata = pts[1:20, ])   # on held-out rows
-}
 }
 }

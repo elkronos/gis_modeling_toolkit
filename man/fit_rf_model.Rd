@@ -115,7 +115,6 @@ that.
 }
 
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -129,7 +128,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   fit <- fit_rf_model(dat, "z", c("a", "b"))
   fit
   fit$info$importance
-}
 }
 }
 \references{

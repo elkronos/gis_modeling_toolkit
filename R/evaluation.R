@@ -620,7 +620,6 @@
 #'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
 #' @examples
-#' \donttest{
 #' # Works on any spatial_fit; a forest keeps the example free of the optional
 #' # GWR/Stan backends.
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -639,7 +638,6 @@
 #'   # as constructed.  A z near 0 with a large p-value would be the opposite
 #'   # verdict -- no structure the model failed to capture.
 #'   residual_morans_i(fit)
-#' }
 #' }
 #' @export
 residual_morans_i <- function(fit,
@@ -930,7 +928,6 @@ residual_morans_i <- function(fit,
 #'   model name and all regression metrics.
 #' @family model evaluation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -942,7 +939,6 @@ residual_morans_i <- function(fit,
 #'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
 #'   evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
 #'   evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
-#' }
 #' }
 #' @export
 evaluate_insample <- function(fits, newdata = NULL, ...) {
@@ -1021,7 +1017,6 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   evidence of no residual structure.
 #' @family model evaluation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -1033,7 +1028,6 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
 #'                RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
 #'   compare_models(fits)
-#' }
 #' }
 #' @export
 compare_models <- function(fits, newdata = NULL, ...) {
@@ -1164,7 +1158,6 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \code{"no viable models."} instead of returning an empty comparison.
 #' @family model evaluation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -1177,7 +1170,6 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
 #'                            rf_args = list(num_trees = 100))
 #'   cmp$overall
-#' }
 #' }
 #' @export
 compare_models_cv <- function(

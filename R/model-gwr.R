@@ -310,9 +310,11 @@
 #' A **global** index is computed on the full design (intercept plus
 #' predictors).
 #' In addition, a **local** spot-check is performed at up to 30 locations --
-#' every location when there are 30 or fewer, otherwise a fixed sample of 30
-#' drawn under a constant seed, so the diagnostic is reproducible and the count
-#' is not configurable.  For each sampled point the nearest neighbours within
+#' every location when there are 30 or fewer, otherwise 30 spread evenly over
+#' the extent (evenly spaced ranks of the observations ordered by x, then y),
+#' so the diagnostic is reproducible, draws no random numbers, does not depend
+#' on the row order of the data, and the count is not configurable.  For each
+#' sampled point the nearest neighbours within
 #' the bandwidth window -- the bandwidth the model is actually fitted with, not
 #' a stand-in -- are selected and the condition number of that local design
 #' sub-matrix is evaluated.  That sub-matrix is the predictors **plus an
@@ -348,7 +350,6 @@
 #'   automatic selection failed and the arbitrary fallback was used).  The raw GWmodel result is in \code{$engine}.
 #' @family model fitting
 #' @examples
-#' \donttest{
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
 #'     requireNamespace("sp", quietly = TRUE)) {
 #'   library(sf)
@@ -362,7 +363,6 @@
 #'   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
 #'   summary(fit)
 #'   head(predict(fit, newdata = dat))   # newdata is re-projected if needed
-#' }
 #' }
 #' @export
 fit_gwr_model <- function(data_sf, response_var, predictor_vars,
@@ -789,9 +789,12 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   spot_idx <- if (n_obs <= 30L) {
     seq_len(n_obs)
   } else {
-    cleanup_spot <- .with_seed(42L)
-    on.exit(cleanup_spot(), add = TRUE)
-    sample.int(n_obs, n_spot)
+    # Evenly spaced ranks along the x-then-y ordering: spreads the spot-check
+    # over the extent, draws no random numbers (nothing to seed, nothing to
+    # restore -- a constant seed inside a function is what a reviewer reads
+    # as hidden state), and is invariant to the row order of the input.
+    o <- order(coords[, 1], coords[, 2])
+    o[unique(round(seq(1, n_obs, length.out = n_spot)))]
   }
   n_extreme <- 0L
   for (si in spot_idx) {

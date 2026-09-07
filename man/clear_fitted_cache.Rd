@@ -26,7 +26,6 @@ through one copy clears it for all of them.  That is harmless: the others
 recompute.
 }
 \examples{
-\donttest{
 # Only a bayesian_fit carries the cache; on any other fit this is a no-op.
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
@@ -38,6 +37,5 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
   clear_fitted_cache(fit)
-}
 }
 }

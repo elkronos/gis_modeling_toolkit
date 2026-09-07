@@ -151,7 +151,6 @@
 #'   infer.
 #' @family prediction
 #' @examples
-#' \donttest{
 #' # Any spatial_fit works here; a forest keeps the example free of the
 #' # optional GWR/Stan backends.
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -168,7 +167,6 @@
 #'   surf[".pred"]
 #'   # Check where that surface is extrapolating before mapping it.
 #'   area_of_applicability(surf, model = fit)
-#' }
 #' }
 #' @export
 predict_surface <- function(object, grid = NULL, cell_size = NULL,

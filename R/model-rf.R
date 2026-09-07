@@ -212,7 +212,6 @@
 #'   \code{weights = pmax(fit$info$importance, 0)}.
 #' @family model fitting
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -226,7 +225,6 @@
 #'   fit <- fit_rf_model(dat, "z", c("a", "b"))
 #'   fit
 #'   fit$info$importance
-#' }
 #' }
 #' @export
 fit_rf_model <- function(data_sf, response_var, predictor_vars,
@@ -400,7 +398,6 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @return The \code{\link{cv_spatial}} result.
 #' @family cross-validation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -411,7 +408,6 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   )
 #'   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
 #'   cv_rf(dat, "z", "a", k = 4)$overall
-#' }
 #' }
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,

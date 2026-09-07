@@ -137,7 +137,6 @@ so the call is
 }
 
 \examples{
-\donttest{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
     requireNamespace("sp", quietly = TRUE)) {
   library(sf)
@@ -152,7 +151,6 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
   sel$best
   fit <- fit_gwr_model(dat, "z", sel$best)
-}
 }
 }
 \references{

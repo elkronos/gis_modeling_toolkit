@@ -37,7 +37,6 @@
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' \donttest{
 #' # Works on any spatial_fit; a forest keeps the example free of the optional
 #' # GWR/Stan backends.
 #' if (requireNamespace("ranger", quietly = TRUE) &&
@@ -55,7 +54,6 @@
 #'   plot(fit, type = "observed_predicted")
 #'   if (requireNamespace("gstat", quietly = TRUE))
 #'     plot(fit, type = "variogram")
-#' }
 #' }
 #' @export
 plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
