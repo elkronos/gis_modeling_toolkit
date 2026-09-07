@@ -42,12 +42,16 @@ brms 2.20.4.
 **`GWmodel` was present only as a faithful API stub built from CRAN sources** --
 argument names and order, return shapes, SDF column naming and the `GWR.df`
 column order, with real weighted least squares -- because the real package would
-not install in this container. And although `brms` itself is installed, **Stan
-could not compile here**, so no posterior was ever sampled: the brms findings
-were established with `make_stancode()`, `make_standata()`, `get_prior()` and
-`validate_prior()`, which need no compilation. **Every GWR and brms result
-recorded below must be re-confirmed on a machine with the real packages before
-submission.** Not installed: `cmdstanr`, `loo`.
+not install in this container. `brms` is installed, and `rstan` was made to
+compile by pointing it at the system Boost headers, which is how the
+`backend = "auto"` fix was verified: the five Stan smoke tests in
+`test-bayes-smoke.R` sampled and passed here (34 expectations). That is the only
+sampling done in this container; every other brms finding was established with
+`make_stancode()`, `make_standata()`, `get_prior()` and `validate_prior()`,
+which need no compilation. **Every GWR and brms result recorded below must be
+re-confirmed on a machine with the real packages before submission** -- the
+full suite has passed on macOS with both installed (6,162 expectations, below).
+Not installed: `cmdstanr`, `loo`.
 
 Still to run before any submission:
 
@@ -73,18 +77,38 @@ Still to run before any submission:
 
 ## R CMD check results
 
-<fill in: `R CMD check --as-cran` has not been run against the current tree on a
-release-R machine, and neither has the manual (no LaTeX here).>
+<fill in: `R CMD check --as-cran` on a release-R machine with LaTeX and
+network access, so the manual and the network-dependent incoming checks (URL
+validity, the `Additional_repositories` lookup for `cmdstanr`) are exercised for
+real.>
 
-On the environment above, `R CMD check --no-manual` on the built tarball --
-with the vignette built, the `GWmodel` stub and `brms` installed, and
-`_R_CHECK_CRAN_INCOMING_=false` because `--as-cran` needs network access to
-CRAN that this container does not have -- reports **1 NOTE and nothing else**.
+On the environment above, `R CMD check --as-cran --run-donttest --timings
+--no-manual` on the built tarball -- with the vignette built, the `GWmodel`
+stub and `brms` installed, `_R_CHECK_FORCE_SUGGESTS_=false` because `cmdstanr`
+is not installed, and the incoming-feasibility check pointed at a local copy
+of CRAN's package index because this container cannot reach CRAN -- reports
+**3 NOTEs and nothing else**:
+
+* **NOTE -- "checking CRAN incoming feasibility".** Two parts. The "Possibly
+  misspelled words in DESCRIPTION" list, discussed under "Comments for
+  reviewers"; and six URLs reported as 403 or "CONNECT tunnel failed" -- the
+  package's own GitHub and issues pages, the README badge and licence links,
+  r-spatial.github.io and www.r-project.org -- because every outbound
+  connection from this container is refused by its proxy. Expect the spelling
+  part on CRAN and nothing else.
 
 * **NOTE -- "Package suggested but not available for checking: 'cmdstanr'".**
   Environmental, and expected: `cmdstanr` is not on CRAN. It is reached through
   `Additional_repositories`, is used strictly conditionally via
   `requireNamespace()`, and the `check-brms` CI job installs it.
+
+* **NOTE -- "checking for future file timestamps ... unable to verify current
+  time".** The container cannot reach the clock service the check consults.
+  It does not occur on a networked machine.
+
+`checking examples` runs all 42 examples in 6.5 s elapsed; the slowest,
+`select_features_forward()`, takes 1.6 s. `checking tests` takes 72 s and
+`checking re-building of vignette outputs` 18 s.
 
 Everything previously recorded here as a blocker is resolved:
 
@@ -131,12 +155,17 @@ assertions. The nine skips are:
 Under `R CMD check`, where `NOT_CRAN` is unset, nine further tests skip on
 purpose -- the `parallel::mclapply()` fork tests in `test-cv-parallel.R` and
 `test-audit-pass6.R`, and two slow simulation checks -- all `skip_on_cran()`.
-The check's own count is **6,139 passing, 0 failures, 18 skips**.
+The check's own count is **6,139 passing, 0 failures, 18 skips**, or 6,137
+under `--as-cran`, which sets `_R_CHECK_LIMIT_CORES_` and thereby switches off
+two expectations in `test-core-count.R` that read the machine's core count.
 
 With the optional backends absent (`sp`, `GWmodel`, `ranger`, `brms`, `gstat`,
 `FNN`, `geometry`, `loo`, `patchwork`, `spdep` hidden, as in the CI matrix
-jobs), the suite reports **2,175 passing, 0 failures, 137 skips**: every test
-that needs a backend skips rather than fails.
+jobs), `R CMD check` reports the Suggests-not-available NOTE and nothing else:
+all 42 examples run, since each guards its optional packages with
+`requireNamespace()`, the vignette builds, and the suite reports **2,188
+passing, 0 failures, 137 skips** -- every test that needs a backend skips rather
+than fails.
 
 `README.md` does not restate these counts, precisely so the two cannot drift
 apart.
@@ -203,7 +232,7 @@ In descending order of user impact:
    previous rule reduced to `max(15, floor(sqrt(n)))` for any n above 45 —
    making the basis count identically n. A model at n = 10,000 carried 10,000
    basis functions. The count is now derived from the length-scale-to-domain
-   ratio following Riutort-Mayol et al. (2023, Statistics and Computing 33:1).
+   ratio following Riutort-Mayol et al. (2023, Statistics and Computing 33:17).
    Measured on `dev/baseline-structural.rds`: at n = 2,000, `gp_k` 44 to 24 and
    the basis count 1,936 to 576 on the elongated layout (44 to 22 and 1,936 to
    484 on the clustered one); at n = 10,000, 100 to 23 and 10,000 to 529; at
@@ -304,8 +333,13 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
 
 ## Comments for reviewers
 
-* Words flagged by the spell checker in DESCRIPTION (Voronoi, Delaunay, GWR,
-  backends) are correctly spelled domain terms or standard abbreviations.
+* The incoming check's "Possibly misspelled words in DESCRIPTION" NOTE lists
+  Delaunay, Voronoi, the surnames Riutort-Mayol, Mila, Pebesma and Strobl, and
+  "et al" (reproduced here with CRAN's own aspell configuration: `en_US` plus
+  `en_GB` and the `en_stats` dictionary, quoted names and `<doi:...>` targets
+  ignored). All are the names of the two tessellations and the authors of the
+  five references cited in the Description; every DOI was resolved against
+  Crossref and matches its citation.
 
 * `cmdstanr` (Suggests) is not on CRAN; it is available from the repository
   declared in `Additional_repositories` (https://stan-dev.r-universe.dev). It is
@@ -325,10 +359,15 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
   `gstat`, `geometry` and `patchwork` present and `GWmodel` absent.
 
 * Exactly two examples are wrapped in `\dontrun{}`: `fit_bayesian_spatial_model()`
-  and `cv_bayes()`, both of which run full MCMC via `brms` and require Stan
-  compilation. Every other example runs, using `\donttest{}` plus a
-  `requireNamespace()` guard where it needs an optional backend. `checking
-  examples` passes.
+  and `cv_bayes()`. Both cannot be executed as examples: they compile a Stan
+  model, which needs a C++ toolchain (or a CmdStan build) that neither the
+  package nor `brms` can supply, and then run minutes of MCMC. The block opens
+  with a comment saying so. `brms` itself wraps its fitting examples the same
+  way. No example uses `\donttest{}`: every other example runs unconditionally,
+  behind a `requireNamespace()` guard where it needs a Suggests package, and
+  the slowest of the 42 takes 1.8 s (7.2 s for all of them together, see the
+  timings below), so none is close to the 5 s threshold. `checking examples`
+  passes.
 
 * Logging writes INFO+ to a session `tempdir()` file and WARN+ to the console
   (see `.onLoad` in `R/zzz.R`), all within a package-specific `logger` namespace
@@ -339,8 +378,12 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
 
 * RNG state is saved and restored around seeded operations via an internal
   `.with_seed()` helper — the per-fold streams used by the parallel
-  cross-validation path, the k-means seeding functions, and `fit_gwr_model()`'s
-  local-collinearity spot-check. Where `seed` is `NULL`, nothing is seeded and
+  cross-validation path, the k-means seeding functions, the NNDM and
+  subsampled paths. No function body calls `set.seed()` with a literal: every
+  seed is an argument the caller can change or set to `NULL`, and
+  `fit_gwr_model()`'s local-collinearity spot-check, which used to draw its
+  sample under a constant seed, now draws no random numbers at all. Where
+  `seed` is `NULL`, nothing is seeded and
   nothing is restored: unseeded functions advance the caller's stream the way
   any other unseeded R function does, rather than re-initialising it. That
   distinction is the subject of fix 5 above.

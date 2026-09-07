@@ -30,7 +30,6 @@ a tidy comparison table including in-sample metrics and model-specific
 information criteria (AICc, LOOIC).
 }
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -42,7 +41,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
                RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
   compare_models(fits)
-}
 }
 }
 \seealso{

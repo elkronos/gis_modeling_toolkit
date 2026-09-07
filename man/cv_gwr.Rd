@@ -99,7 +99,6 @@ of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
 folds.
 }
 \examples{
-\donttest{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
     requireNamespace("sp", quietly = TRUE)) {
   library(sf)
@@ -113,7 +112,6 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
   cv$overall
   cv$fold_metrics
-}
 }
 }
 \seealso{

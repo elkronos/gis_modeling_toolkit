@@ -30,7 +30,6 @@ Does NOT refit — uses \code{fitted()} for in-sample and
 \code{predict()} for new data.
 }
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -42,7 +41,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
   evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
   evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
-}
 }
 }
 \seealso{

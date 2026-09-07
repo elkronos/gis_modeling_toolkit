@@ -92,7 +92,6 @@ perform fitting (inside CV folds), because CV inherently requires
 repeated fitting.
 }
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -105,7 +104,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
                            rf_args = list(num_trees = 100))
   cmp$overall
-}
 }
 }
 \seealso{

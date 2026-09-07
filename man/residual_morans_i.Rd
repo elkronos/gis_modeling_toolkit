@@ -162,7 +162,6 @@ randomisation null rather than correcting it.
 }
 
 \examples{
-\donttest{
 # Works on any spatial_fit; a forest keeps the example free of the optional
 # GWR/Stan backends.
 if (requireNamespace("ranger", quietly = TRUE)) {
@@ -181,7 +180,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   # as constructed.  A z near 0 with a large p-value would be the opposite
   # verdict -- no structure the model failed to capture.
   residual_morans_i(fit)
-}
 }
 }
 \references{

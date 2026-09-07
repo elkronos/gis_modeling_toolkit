@@ -38,7 +38,6 @@ checks most likely to reveal a problem -- is there structure left in the
 residuals, and where is it -- had to be written by hand each time.
 }
 \examples{
-\donttest{
 # Works on any spatial_fit; a forest keeps the example free of the optional
 # GWR/Stan backends.
 if (requireNamespace("ranger", quietly = TRUE) &&
@@ -56,7 +55,6 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   plot(fit, type = "observed_predicted")
   if (requireNamespace("gstat", quietly = TRUE))
     plot(fit, type = "variogram")
-}
 }
 }
 \seealso{

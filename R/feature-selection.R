@@ -66,7 +66,6 @@
 #'   baseline, so the first variable's gain can be read off directly.
 #' @family cross-validation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
 #'     requireNamespace("sp", quietly = TRUE)) {
 #'   library(sf)
@@ -83,7 +82,6 @@
 #'   sel <- select_features_forward(pts, "resp", c("a", "b", "noise"), fit_fn,
 #'                                  k = 3, quiet = TRUE)
 #'   sel$selected
-#' }
 #' }
 #' @export
 select_features_forward <- function(train_sf, response_var, candidate_vars,

@@ -577,7 +577,6 @@
 #'   \code{\link{make_folds}} for the fold scheme.
 #' @family cross-validation
 #' @examples
-#' \donttest{
 #' library(sf)
 #' set.seed(1)
 #' n <- 120
@@ -599,7 +598,6 @@
 #'                              predictor_vars = c("a", "b"))
 #' res
 #' table(res$aoa$AOA)
-#' }
 #' @export
 area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
                                   predictor_vars = NULL, weights = NULL,

@@ -355,7 +355,6 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   \code{n = 0} with every metric \code{NA}; a logical response is treated
 #'   as 0/1.
 #' @examples
-#' \donttest{
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -367,7 +366,6 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
 #'   model_metrics(fit)                          # in-sample (out-of-bag for RF)
 #'   model_metrics(fit, newdata = pts[1:20, ])   # on held-out rows
-#' }
 #' }
 #' @export
 model_metrics <- function(object, ...) UseMethod("model_metrics")
@@ -972,7 +970,6 @@ fitted.bayesian_fit <- function(object, ...) {
 #' @param object A \code{bayesian_fit} object.
 #' @return \code{object}, invisibly (called for side effect).
 #' @examples
-#' \donttest{
 #' # Only a bayesian_fit carries the cache; on any other fit this is a no-op.
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
@@ -984,7 +981,6 @@ fitted.bayesian_fit <- function(object, ...) {
 #'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
 #'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
 #'   clear_fitted_cache(fit)
-#' }
 #' }
 #' @export
 clear_fitted_cache <- function(object) {

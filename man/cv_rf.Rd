@@ -70,7 +70,6 @@ whole spatial blocks, so neighbours of a held-out point are not sitting in
 the training set.
 }
 \examples{
-\donttest{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -81,7 +80,6 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
   cv_rf(dat, "z", "a", k = 4)$overall
-}
 }
 }
 \seealso{

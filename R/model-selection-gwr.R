@@ -477,7 +477,6 @@
 #'   selected model.
 #' @family cross-validation
 #' @examples
-#' \donttest{
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
 #'     requireNamespace("sp", quietly = TRUE)) {
 #'   library(sf)
@@ -492,7 +491,6 @@
 #'   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
 #'   sel$best
 #'   fit <- fit_gwr_model(dat, "z", sel$best)
-#' }
 #' }
 #' @export
 gwr_model_selection <- function(data_sf, response_var, candidate_vars,

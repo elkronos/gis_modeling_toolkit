@@ -244,7 +244,7 @@ if (requireNamespace("brms", quietly = TRUE)) {
 Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. and
 Vehtari, A. (2023). Practical Hilbert space approximate Bayesian
 Gaussian processes for probabilistic programming.
-\emph{Statistics and Computing} \strong{33}, 1.
+\emph{Statistics and Computing} \strong{33}, 17.
 \doi{10.1007/s11222-022-10167-2}
 }
 \seealso{
