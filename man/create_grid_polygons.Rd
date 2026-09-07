@@ -54,7 +54,9 @@ corner, covering only part of the boundary.}
 projected with \code{\link[=ensure_projected]{ensure_projected()}}, which changes the CRS of the returned
 grid; a message reports this unless \code{quiet = TRUE}.}
 
-\item{quiet}{Logical; suppress messages.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
 
 \item{max_cells}{Upper bound on the number of cells the grid may have,
 estimated from the boundary's bounding box before anything is built.
@@ -96,10 +98,10 @@ nrow(grid_sq)
 nrow(grid_hex)
 }
 \seealso{
-Other tessellation:
-\code{\link[=build_tessellation]{build_tessellation()}},
-\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
-\code{\link[=plot_tessellation_map]{plot_tessellation_map()}}
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()}
 }
 \concept{tessellation}

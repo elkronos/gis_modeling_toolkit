@@ -37,3 +37,12 @@ values on the wrong polygons.
 Builds a grid via \code{create_grid_polygons()} and memoizes the result
 so repeated calls with the same inputs return instantly.
 }
+\examples{
+library(sf)
+bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+))), crs = 32632))
+g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
+nrow(g)
+head(g$poly_id)   # stable IDs from ensure_stable_poly_id()
+}

@@ -141,9 +141,10 @@ rule it out now rather than after the quick start:
 install.packages("spatialkit")
 ```
 
-That gets you **1.0.0** (published 2026-08-07). The development version below
-is ahead of it and changes several defaults — see `NEWS.md` before upgrading a
-running analysis.
+The CRAN release is the version to use. The development version below may be
+ahead of it; `NEWS.md` lists what changed between releases, and it is worth
+reading before upgrading a running analysis, since 2.0.0 changed several
+defaults relative to 1.0.0.
 
 ```r
 # Development version from GitHub
@@ -533,7 +534,7 @@ nrow(hex$cells)
 `approx_n_cells` is a target, not a promise: `clip = TRUE` intersects the
 lattice with the boundary and drops what falls outside, so the count comes back
 near, not at, what you asked — the same call with `method = "square"` returns
-32. Pass `cellsize` instead when the cell edge, in CRS units, is the thing you
+36. Pass `cellsize` instead when the cell edge, in CRS units, is the thing you
 need to hold fixed.
 
 ### How many cells?
@@ -560,9 +561,9 @@ k <- determine_optimal_levels(pts, response_var = "price",
 #> WARN  determine_optimal_levels(): Moran's I could not be computed;
 #> falling back to geometric.
 k
-#> [1] 3 4 5
+#> [1] 4 3 5
 k[1]                          # the top-ranked candidate
-#> [1] 3
+#> [1] 4
 ```
 
 **Below ten cells, the elbow does all of the work — and that is most calls.**
@@ -768,11 +769,18 @@ exposes draws, and `boundary =` a polygon to clip to a study area.
 
 ### Residual spatial autocorrelation
 
-`residual_morans_i()` computes Moran's I on model residuals with the Cliff &
-Ord randomisation variance, using row-standardised k-NN weights by default
-(sparse via `FNN` + `Matrix` when available) or a user-supplied weight matrix
-(base or sparse `Matrix`). `compare_models()` runs it automatically and logs a
-warning when residual spatial structure remains.
+`residual_morans_i()` computes Moran's I on model residuals with Cliff & Ord
+moments, using row-standardised k-NN weights by default (sparse via `FNN` +
+`Matrix` when available; tied distances share a slot's weight, so the result
+does not depend on row order or on which backend found the neighbours) or a
+user-supplied weight matrix (base or sparse `Matrix`). The default
+`null = "auto"` uses the *regression-residual* moments when the fit's
+residuals are the OLS residuals on its own design — a GWR wide enough to have
+collapsed to global OLS, say — and the randomisation moments otherwise; the
+two give different p-values on the same residuals, and `$null` records which
+was used. Neither is exact for a random forest or a working-bandwidth GWR, so
+`compare_models()`'s "significant" flag on those backends is a rough
+indicator; `?residual_morans_i` gives the measured sizes.
 
 ### Aggregation standard errors
 
@@ -855,10 +863,13 @@ the error. That is what the design-effect correction is calibrated for:
 measured 95% coverage of the grand mean is 0.95 with `deff = "kish"` against
 0.29 for the naive SE. They are **not** the standard error of the cell's own
 block average, which is what a cell-level map or a regression on cell values
-usually wants — for that, the naive `sd / sqrt(n)` is the better estimate
-(measured coverage 0.95, against essentially 1.00 for the corrected SE, roughly
-five times too wide). Use `deff` when the cell means feed a population-level
-inference; leave it at 1 when they are measurements of the cells themselves.
+usually wants — for that, the naive `sd / sqrt(n)` is the better of the two
+(measured coverage 0.95 with points spread through the cell, against
+essentially 1.00 for the corrected SE, roughly five times too wide; with
+*clustered* sampling inside a cell it is anticonservative too, 0.58, and the
+honest answer is a block-kriging variance the package does not compute). Use
+`deff` when the cell means feed a population-level inference; leave it at 1
+when they are measurements of the cells themselves.
 
 ### Area of applicability
 
@@ -920,10 +931,12 @@ cross-checking against the blocked estimate when the answer matters.
 
 ### Backend-specific notes
 
-**GWR collinearity.** `fit_gwr_model()` checks the global condition number of
-the predictor matrix *and* spot-checks local condition numbers within bandwidth
-windows at sampled locations, since spatially clustered subsets can be
-collinear even when the global matrix is not.
+**GWR collinearity.** `fit_gwr_model()` computes Belsley's scaled condition
+index of the design (intercept included, every column scaled to unit length, so
+the diagnostic does not depend on the predictors' units) and warns above the
+conventional 30 -- globally, *and* in a spot-check of local windows at sampled
+locations, since spatially clustered subsets can be collinear even when the
+global design is not.
 
 **GWR bandwidth fallback.** If automatic bandwidth selection fails, a heuristic
 fallback is used, a `warning()` is raised, and
@@ -1048,7 +1061,7 @@ run:
 # result, not an error -- a per-fold WARN naming the cause, one summarising
 # R warning(), and $overall all-NA with n_pred = 0:
 cv <- cv_bayes(site, "price", "elev", k = 5, parallel = TRUE)  # auto-detect cores
-#> WARN  .cv_run_folds(): fold 1 fit failed; skipping.
+#> WARN  cross-validation: fold 1 fit failed; skipping.
 #>       Cause: fit_bayesian_spatial_model(): package 'brms' is required.
 #> ... (once per fold)
 #> Warning: cv_bayes(): all folds failed; cross-validation results contain no

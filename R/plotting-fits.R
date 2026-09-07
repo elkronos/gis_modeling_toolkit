@@ -132,8 +132,9 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   vg  <- attr(sac, "variogram")
   vm  <- attr(sac, "variogram_model")
   if (is.null(vg))
-    stop("plot.spatial_fit(): the residual variogram could not be fitted; ",
-         "there may be too few finite residuals to model.", call. = FALSE)
+    stop("plot.spatial_fit(): the residual variogram could not be computed; ",
+         "there may be too few finite residuals, or the fit's data_sf may ",
+         "carry no usable geometry.", call. = FALSE)
 
   # The axis is in the units of the CRS the VARIOGRAM was fitted in, which
   # estimate_sac_range() chose with ensure_projected() -- not necessarily the
@@ -192,6 +193,12 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
                        "iteration limit, so the range it reports (%.0f) is ",
                        "where the optimiser halted, not a fitted parameter."),
                 attr(sac, "rejected_range"))
+      else if (isTRUE(grepl("^no variogram model", reason)))
+        # Both model fits singular: the picture of residuals with no spatial
+        # structure at the lags resolved.  There is no model line to draw.
+        paste0("No effective range: no variogram model could be fitted ",
+               "(a flat, nugget-only variogram -- no spatial structure at ",
+               "these lags).")
       else
         sprintf(paste0("No effective range: the fitted range (%.0f) ",
                        "exceeds the largest lag fitted (%.0f), so the ",

@@ -459,10 +459,17 @@ assign_features_to_polygons <- function(
 #' It is **not** the standard error of the cell's own mean (the block average
 #' over that cell), which is what a cell-level map or a regression on cell
 #' values usually wants. For that quantity the naive `sd / sqrt(n)` is the
-#' better estimate — measured coverage 0.95, against essentially 1.00 for the
-#' design-effect-corrected SE, which is about five times too wide. Use `deff`
-#' when the cell means feed a population-level inference; leave it at 1 when
-#' they are measurements of the cells themselves.
+#' better of the two on offer — measured coverage 0.95 under exchangeable
+#' within-cell correlation, against essentially 1.00 for the
+#' design-effect-corrected SE, which is about five times too wide. That 0.95
+#' is exact under the exchangeable model and holds under a spatial covariance
+#' model only when the cell's points are spread through the cell; with
+#' *clustered* sampling inside a cell it is anticonservative for the block
+#' average too (measured 0.58), and the honest answer there is a block-kriging
+#' variance, which this function does not compute. Use `deff` when the cell
+#' means feed a population-level inference; leave it at 1 when they are
+#' measurements of the cells themselves and the sampling within cells is
+#' reasonably uniform.
 #'
 #' @section Design effects and variable types:
 #' `deff = "kish"` estimates a separate ICC for response and predictor
@@ -471,11 +478,15 @@ assign_features_to_polygons <- function(
 #' because a variogram is a property of the field being modelled rather than of
 #' a variable type; a predictor whose spatial structure differs markedly from
 #' the response's will have its SE corrected by the response's correlation.
-#' Note also that supplying `predictor_vars` makes the internally estimated
-#' variogram a **residual** variogram (that is what
-#' [estimate_sac_range()] does with predictors), so the response's own design
-#' effect depends on which predictors are listed. Pass `sac` explicitly when
-#' you want control over which variogram is used.
+#' The internally estimated variogram is fitted to the **response itself**,
+#' never to OLS residuals, whatever `predictor_vars` holds: the `..se_resp_*`
+#' columns estimate the grand mean of the response, so the correlation to
+#' correct for is the response's own. (A residual variogram, whose correlation
+#' is that of the part the predictors do not explain, is weaker; using it here
+#' dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
+#' listed.) Pass `sac` explicitly when you want a different variogram --
+#' a residual one from `estimate_sac_range(..., predictor_vars = )`, say --
+#' and check `attr(sac, "detrended")` to know which you have.
 #'
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell aggregation.
@@ -539,7 +550,10 @@ assign_features_to_polygons <- function(
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500.
-#' @param quiet Logical; suppress messages. Default TRUE.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE} --
+#'   unlike the tessellation functions, whose default is \code{FALSE}.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell --- an input column also
 #'   called `n` is not allowed to shadow it), one column per `agg_funs` entry
@@ -873,8 +887,17 @@ summarize_by_cell <- function(assigned_points_sf,
     if (is.null(vgm_model)) {
       if (!is.null(response_var) && requireNamespace("gstat", quietly = TRUE)) {
         .msg("summarize_by_cell(): no fitted variogram supplied; estimating one.")
-        est <- try(estimate_sac_range(assigned_points_sf, response_var,
-                                      predictor_vars = predictor_vars),
+        # On the RESPONSE, not on OLS residuals.  The ..se_resp_* columns are
+        # the SE of the cell mean as an estimate of the grand mean of the
+        # response, so the correlation that has to be corrected for is the
+        # response's own.  Passing predictor_vars here fitted a RESIDUAL
+        # variogram -- the correlation of the part the predictors do not
+        # explain, which is weaker -- and grand-mean coverage fell from 0.927
+        # to 0.507 the moment a predictor was listed (which is the normal
+        # thing to do, since that is also how per-cell predictor summaries are
+        # requested).  A caller who wants the residual field's correlation
+        # can pass it through `sac`.
+        est <- try(estimate_sac_range(assigned_points_sf, response_var),
                    silent = TRUE)
         # Same test on the internally estimated fit: a rejected range means the
         # model behind it is not usable either.

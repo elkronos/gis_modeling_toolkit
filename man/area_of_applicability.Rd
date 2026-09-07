@@ -202,14 +202,14 @@ Ecology and Evolution} 12(9), 1620--1633. \doi{10.1111/2041-210X.13650}
 \code{\link{predict_surface}} to build the grid,
 \code{\link{make_folds}} for the fold scheme.
 
-Other cross-validation:
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

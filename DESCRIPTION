@@ -52,6 +52,7 @@ Suggests:
     patchwork,
     FNN,
     Matrix,
+    spdep,
     testthat (>= 3.1.5),
     knitr,
     rmarkdown

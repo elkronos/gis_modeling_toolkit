@@ -13,12 +13,14 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
-target is built in. Because \code{\link[sf:st_buffer]{sf::st_buffer()}} interprets \code{dist} as
+target is built in. Because \code{\link[sf:geos_unary]{sf::st_buffer()}} interprets \code{dist} as
 \strong{metres} for lon/lat data while the fraction-of-extent form is derived
 from a bounding box measured in \strong{degrees}, lon/lat input is projected to
 a local projected CRS first (see \verb{@return}), so both forms agree.}
 
-\item{quiet}{Logical; suppress messages.}
+\item{quiet}{Logical; suppress this function's progress \code{message()}s.
+It does not silence R warnings, nor the package's console log echo
+(see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
 }
 \value{
 An sf polygon layer representing the clip target. For lon/lat input
@@ -35,4 +37,15 @@ polygon actually contains the observations before tessellating, or to pass
 the same envelope to \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and
 \code{\link[=create_grid_polygons]{create_grid_polygons()}} so that two tessellations of one dataset cover
 identical ground.
+}
+\examples{
+library(sf)
+set.seed(1)
+pts <- st_as_sf(
+  data.frame(x = runif(30, 0, 100), y = runif(30, 0, 100)),
+  coords = c("x", "y"), crs = 32632
+)
+# No boundary: the convex hull, expanded by 10\% of the extent
+hull <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
+st_area(hull)
 }

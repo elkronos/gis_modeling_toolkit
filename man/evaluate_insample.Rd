@@ -29,10 +29,26 @@ Accepts a single \code{spatial_fit} object or a named list of them.
 Does NOT refit — uses \code{fitted()} for in-sample and
 \code{predict()} for new data.
 }
+\examples{
+\donttest{
+if (requireNamespace("ranger", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  pts <- st_as_sf(
+    data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+  evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
+  evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
+}
+}
+}
 \seealso{
-Other model evaluation:
-\code{\link[=compare_models]{compare_models()}},
-\code{\link[=compare_models_cv]{compare_models_cv()}},
-\code{\link[=residual_morans_i]{residual_morans_i()}}
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{compare_models_cv}()},
+\code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

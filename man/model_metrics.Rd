@@ -54,3 +54,19 @@ returned data.frame carries no label distinguishing the two, so check
 same way.
 }
 
+\examples{
+\donttest{
+if (requireNamespace("ranger", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  pts <- st_as_sf(
+    data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+  model_metrics(fit)                          # in-sample (out-of-bag for RF)
+  model_metrics(fit, newdata = pts[1:20, ])   # on held-out rows
+}
+}
+}

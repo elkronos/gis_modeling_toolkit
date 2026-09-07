@@ -197,6 +197,32 @@ test_that(".gp_basis_spec returns brms's own domain measure, not the half-range"
                tolerance = 0.05)
 })
 
+test_that(".gp_basis_spec and gp_lengthscale_bounds ignore replicated locations", {
+  # brms:::.data_gp() reduces the covariate matrix to its UNIQUE rows before
+  # centring and taking the range, so a station measured 200 times must not
+  # move the boundary S, the basis count k or the factor c.  Neither this
+  # file nor test-lscale-prior.R contained a replicated coordinate, and
+  # dropping the reduction changed S by 1.65x and k from 19 to 25 with no
+  # test noticing (mutation testing, pass 6).
+  set.seed(2)
+  xy     <- cbind(runif(40, 0, 1000), runif(40, 0, 1000))   # 40 distinct sites
+  xy_rep <- rbind(xy, xy[rep(1L, 200), ])                    # one site, 200 visits
+  b      <- gp_lengthscale_bounds(xy)
+  s0 <- spatialkit:::.gp_basis_spec(xy, b)
+  s1 <- spatialkit:::.gp_basis_spec(xy_rep, b)
+  expect_equal(s1, s0)
+  # And S is brms's own measure on the unique rows: c * max(1, range) of the
+  # column-centred pooled matrix.
+  Xc <- sweep(xy, 2L, colMeans(xy))
+  expect_equal(s0$S, max(1, max(Xc) - min(Xc)))
+  # Without the reduction the replicated row would drag the centring, and
+  # this design is sensitive to it -- so the equality above is not vacuous.
+  Xc_rep <- sweep(xy_rep, 2L, colMeans(xy_rep))
+  expect_gt(abs((max(Xc_rep) - min(Xc_rep)) / s0$S - 1), 0.05)
+  # The length-scale bounds are built on the same unique-site reduction.
+  expect_equal(gp_lengthscale_bounds(xy_rep), b)
+})
+
 test_that(".gp_basis_spec survives degenerate coordinates", {
   xy <- cbind(rep(0, 10), rep(0, 10))          # zero extent -> S guard
   s  <- spatialkit:::.gp_basis_spec(xy, c(lower = 0.1, upper = 1))

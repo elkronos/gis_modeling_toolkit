@@ -34,3 +34,11 @@ Sampling is by rejection inside the polygon, so an awkward geometry can
 return fewer than \code{k} seeds; that shortfall is warned about rather than
 silently padded.
 }
+\examples{
+library(sf)
+bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+))), crs = 32632))
+seeds <- voronoi_seeds_random(bnd, k = 10)
+nrow(seeds)   # at most 10
+}

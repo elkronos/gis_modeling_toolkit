@@ -87,6 +87,11 @@ test_that("a misaligned residual vector is detected and the raw response used", 
   pts <- .sac_pts()
 
   raw <- estimate_sac_range(pts, response_var = "resp")
+  expect_false(attr(raw, "detrended"))
+  # (Before the mock below, which lives to the end of the test.)
+  expect_true(attr(suppressWarnings(
+    estimate_sac_range(pts, response_var = "resp", predictor_vars = "pred")),
+    "detrended"))
 
   lines <- capture_spatialkit_log({
     local_mocked_bindings(
@@ -97,13 +102,18 @@ test_that("a misaligned residual vector is detected and the raw response used", 
       },
       .package = "stats"
     )
-    fallback <- estimate_sac_range(pts, response_var = "resp",
-                                   predictor_vars = "pred")
+    # Falling through to the raw response is a different estimand, so it is
+    # an R warning as well as a log line (it used to be a log line only).
+    expect_warning(
+      fallback <- estimate_sac_range(pts, response_var = "resp",
+                                     predictor_vars = "pred"),
+      "OLS residual length .* fitted to the RAW response")
   })
 
   expect_true(log_has(lines, "OLS residual length"))
-  expect_true(log_has(lines, "using raw response"))
+  expect_true(log_has(lines, "fitted to the RAW response"))
   # It really did fall back: the answer is the raw-response answer, not the
-  # residual one (which the first test showed differs).
+  # residual one (which the first test showed differs), and it says so.
   expect_equal(as.numeric(fallback), as.numeric(raw))
+  expect_false(attr(fallback, "detrended"))
 })

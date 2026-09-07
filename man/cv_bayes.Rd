@@ -39,7 +39,10 @@ the folds came from other data when they were not).}
 
 \item{k}{Number of folds. Default 5.}
 
-\item{seed}{RNG seed. Default 123.}
+\item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
+through a per-fold draw, each fold's Stan sampler, so two seeds give
+different posteriors even on identical \code{folds}. A \code{seed} in
+\code{fit_args} overrides the per-fold draw with one fixed sampler seed.}
 
 \item{boundary}{Optional polygonal sf/sfc for CRS alignment.}
 
@@ -104,6 +107,8 @@ has settled.
 }
 \examples{
 \dontrun{
+# Not run: fits with Stan, which needs a working C++ toolchain and takes
+# minutes of MCMC -- both outside what an example may assume.
 if (requireNamespace("brms", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -121,14 +126,14 @@ if (requireNamespace("brms", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

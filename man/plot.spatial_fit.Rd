@@ -60,7 +60,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 }
 \seealso{
-Other plotting:
-\code{\link[=plot_folds]{plot_folds()}}
+Other plotting: 
+\code{\link{plot_folds}()}
 }
 \concept{plotting}

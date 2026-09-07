@@ -61,11 +61,14 @@ test_that("a fit without geometry is rejected", {
 test_that("the residual variogram plot builds", {
   skip_if_not_installed("ggplot2")
   skip_if_not_installed("gstat")
-  # A field with real short-range structure, so the variogram is identifiable.
+  # A field with real structure at the lags the variogram resolves (the
+  # default binning is cutoff/15 ~ 40 units here), so the range is
+  # identifiable.  An earlier a = 25 field was flat by the first lag bin and
+  # fitted only by luck.
   set.seed(5); n <- 200
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
   d <- as.matrix(stats::dist(cbind(x, y)))
-  z <- as.numeric(t(chol(exp(-d / 25) + diag(1e-4, n))) %*% rnorm(n))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(1e-4, n))) %*% rnorm(n))
   pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z, w = rnorm(n)),
                       coords = c("x", "y"), crs = 3857)
   fit <- lm_spatial_fit(pts, predictor_vars = "w")
@@ -73,6 +76,60 @@ test_that("the residual variogram plot builds", {
   p <- plot(fit, type = "variogram")
   expect_s3_class(p, "ggplot")
   expect_no_error(ggplot2::ggplot_build(p))
+  # The fitted model line and the range marker are on it.
+  layers <- vapply(p$layers, function(l) class(l$geom)[1L], character(1))
+  expect_true("GeomLine" %in% layers)
+  expect_true("GeomVline" %in% layers)
+
+  # Residuals with NO spatial structure give a flat, nugget-only variogram
+  # that no model fits: every start is singular, or the optimiser never
+  # converges.  That is the picture most worth seeing, and it used to be
+  # refused with "could not be fitted; there may be too few finite
+  # residuals": estimate_sac_range() now returns NA WITH the empirical
+  # variogram attached whichever way the fit failed, and the plot draws the
+  # points, with a model line only when a (non-converged) model exists.
+  flat <- pts
+  set.seed(6); flat$z <- rnorm(n)
+  fit_flat <- lm_spatial_fit(flat, predictor_vars = "w")
+  sac_flat <- suppressWarnings(estimate_sac_range(
+    sf::st_sf(.resid = residuals(fit_flat), geometry = sf::st_geometry(flat)),
+    ".resid"))
+  expect_true(is.na(sac_flat))
+  expect_s3_class(attr(sac_flat, "variogram"), "data.frame")
+  expect_match(attr(sac_flat, "rejected_reason"),
+               "no variogram model|did not converge")
+  p2 <- plot(fit_flat, type = "variogram")
+  expect_s3_class(p2, "ggplot")
+  expect_no_error(ggplot2::ggplot_build(p2))
+  layers2 <- vapply(p2$layers, function(l) class(l$geom)[1L], character(1))
+  expect_true("GeomPoint" %in% layers2)
+  expect_false("GeomVline" %in% layers2)               # no range marker
+  expect_equal("GeomLine" %in% layers2, !is.null(attr(sac_flat, "variogram_model")))
+  expect_match(p2$labels$subtitle, "^No effective range")
+
+  # The all-singular outcome, made deterministic: every fit.variogram() call
+  # reports a singular model.  The NA carries the empirical variogram and no
+  # model, and the plot says why there is no range.
+  local_mocked_bindings(
+    fit.variogram = function(object, model, ...) {
+      model$psill <- c(0, 0); model$range <- c(0, 1)
+      attr(model, "singular") <- TRUE
+      model
+    },
+    .package = "gstat")
+  sac_sing <- suppressWarnings(estimate_sac_range(
+    sf::st_sf(.resid = residuals(fit_flat), geometry = sf::st_geometry(flat)),
+    ".resid"))
+  expect_true(is.na(sac_sing))
+  expect_s3_class(attr(sac_sing, "variogram"), "data.frame")
+  expect_null(attr(sac_sing, "variogram_model"))
+  expect_match(attr(sac_sing, "rejected_reason"), "^no variogram model could be fitted")
+  p3 <- plot(fit_flat, type = "variogram")
+  expect_no_error(ggplot2::ggplot_build(p3))
+  layers3 <- vapply(p3$layers, function(l) class(l$geom)[1L], character(1))
+  expect_true("GeomPoint" %in% layers3)
+  expect_false("GeomLine" %in% layers3)
+  expect_match(p3$labels$subtitle, "no variogram model could be fitted")
 })
 
 

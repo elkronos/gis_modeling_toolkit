@@ -32,8 +32,10 @@ better reflects the autocorrelation that the spatial model must handle.}
 \item{n_max}{Maximum number of points to subsample before fitting.
 Variogram estimation is O(n²) so this keeps runtime bounded.}
 
-\item{cutoff}{Fraction of the maximum inter-point distance to use as
-the variogram lag cutoff.  Default 0.5.}
+\item{cutoff}{Fraction of the maximum inter-point distance (the farthest
+pair, found on the convex hull -- not the bounding-box diagonal, which
+depends on how the axes are oriented) to use as the variogram lag cutoff.
+Default 0.5.}
 
 \item{range_frac}{Positive numeric.  A fitted range exceeding
 \code{range_frac * cutoff * max_dist} -- that is, beyond the longest lag
@@ -63,8 +65,13 @@ attributes:
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
 90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
-over smallest), \code{anisotropy_used} (logical: whether the returned
-range is the directional maximum rather than the all-pairs estimate),
+over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
+the all-pairs fit was unusable and the directional maximum stands in
+for it), \code{detrended} (logical: whether the variogram is of the
+OLS residuals on \code{predictor_vars} rather than the raw response
+-- a missing predictor is an error, and a failed detrending fit
+warns and falls back to the raw response with this set to
+\code{FALSE}),
 \code{crs} (the projected CRS the variogram was
 fitted in -- the unit of the range), \code{max_dist},
 \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
@@ -96,40 +103,34 @@ Fits exponential (or spherical) variogram models and returns the
 ~95 \\% of the sill.
 }
 \details{
-To guard against anisotropy, the function first estimates directional
-variograms at 0° (N–S), 45°, 90° (E–W) and 135° azimuths, each with a
-±22.5° tolerance.  Those four windows tile all 180 distinct azimuths
-exactly once, with no gap and no double-counted pair.
+The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
+variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
+azimuths with a ±22.5° tolerance -- four windows that tile all 180 distinct
+azimuths exactly once -- and their ranges are returned in the
+\code{directional} attribute, with their largest-over-smallest ratio in
+\code{anisotropy}.  They are a diagnostic, not the answer, for two reasons.
+Each direction sees about a quarter of the point pairs, and the maximum of
+four quarter-sample fits is biased upward: on simulated \emph{isotropic}
+fields it came in about 40\\% above the truth, and no hurdle placed in
+front of it (all four directions fitted, ratio above 1.5, maximum above
+1.5× the all-pairs fit) kept it out -- one isotropic field rotated in 10°
+steps "established" anisotropy in 14 of 18 orientations.  And the windows
+are fixed to the coordinate axes, so any answer built from them changes
+when the layer is rotated, which a property of the field must not do.  The
+all-pairs fit is the best-powered estimate available and is invariant to
+rotation.
 
-An \strong{omnidirectional} variogram is fitted as well, and it is the
-default answer.  Splitting 180° four ways leaves each directional variogram
-about a quarter of the point pairs, and the maximum of four noisy estimates
-is biased upward: on simulated \emph{isotropic} fields the max-of-four came
-back about 40\% above the truth, so blocks were sized 40\% too wide and every
-fold lost training data for no reason.  The all-pairs fit is the
-best-powered estimate available, so the directional maximum is returned only
-when anisotropy is \emph{established}: \strong{all four} directions must have
-produced a usable fit, the ratio of the largest to the smallest must exceed
-1.5, \strong{and} the widest must stand more than 1.5× above the all-pairs
-estimate.  (One further case: when the omnidirectional fit is itself
-unusable, the directional sweep is all there is and its maximum is returned
-whatever the ratio.  \code{anisotropy_used} records which answer you got.)
-That is the
-conservative choice where anisotropy is real (blocks must be at least as
-large as the longest autocorrelation range to avoid leakage) without paying
-for it where it is not.
-
-Sweeping only 0° and 90° would leave the azimuths between 23° and 67°, and
-between 113° and 157°, covered by neither window: on simulated fields with a
-3:1 anisotropy and a true major-axis range of 300, a two-direction sweep
-recovered 255 and 249 for major axes at 0° and 90° but only 151 and 147 at
-45° and 135°.  Since \code{make_folds(auto_range = TRUE)} sizes its blocks
-from this number, that halved the blocks for a diagonally oriented field.
+Where a field is \emph{known} to be anisotropic, blocks must be at least
+as large as the longest autocorrelation range to avoid leakage, and the
+conservative choice is to size them from
+\code{max(attr(range, "directional"))} explicitly.  A ratio above 1.5 is
+logged so the case is not missed, with that advice.  Only when the
+omnidirectional fit is itself unusable is the directional maximum returned
+in its place, and \code{anisotropy_used} is \code{TRUE} in that case alone.
 
 A direction whose fit fails, does not converge, or reports a range beyond
 the longest fitted lag is excluded and recorded as \code{NA} in the
-\code{directional} attribute.  Fewer than two usable directions leaves the
-omnidirectional fit as the only estimate.
+\code{directional} attribute.
 
 Every variogram model is fitted \strong{with a nugget}.  A nugget-free model
 forces the curve through the origin, and on any real measurement (which has
@@ -159,14 +160,14 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_rf]{cv_rf()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_rf}()},
+\code{\link{cv_spatial}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

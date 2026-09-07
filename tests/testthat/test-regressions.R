@@ -116,7 +116,11 @@ test_that(".remap_folds drops folds left with fewer than two training rows", {
   expect_true(all(vapply(out, function(z) length(z$train) >= 2L, logical(1))))
 
   # A fold with exactly two training rows is on the right side of the line.
-  edge <- remap(list(list(train = c(1L, 2L, 90L), test = 3L)), keep)
+  # (Rows 4:6 are named by no fold, which is now reported -- see
+  # test-audit-pass6.R -- so that warning is expected here.)
+  expect_warning(
+    edge <- remap(list(list(train = c(1L, 2L, 90L), test = 3L)), keep),
+    "3 of 6 rows in the data are named by no fold")
   expect_length(edge, 1L)
   expect_equal(edge[[1]]$train, 1:2)
 })

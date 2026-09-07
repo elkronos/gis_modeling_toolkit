@@ -1,7 +1,9 @@
 #' @noRd
 .onLoad <- function(libname, pkgname) {
   # Set up default logging in a package-specific namespace so we never
-  # overwrite the user's global logger configuration.
+  # overwrite the user's global logger configuration -- and, the other way
+  # round, so the user's global configuration cannot break ours (see the
+  # formatter note below).
   # Users can reconfigure the spatialkit namespace after loading -- but note
   # that logger::log_appender() and log_threshold() BOTH default to index = 1,
   # so the two-line recipe below without an index touches only the temp-file
@@ -11,6 +13,19 @@
   #                        namespace = "spatialkit", index = 2)
   #   logger::log_threshold(logger::FATAL, namespace = "spatialkit", index = 2)
   # spatialkit_quiet() does the second of those for you.
+
+  # The FORMATTER is pinned, not inherited.  logger seeds a new namespace
+  # from the user's global one, so the appender/threshold lines below left
+  # the formatter to be whatever the user had set -- and every helper in
+  # utils.R hands logger an ALREADY-formatted string.  Under the default
+  # formatter_glue a `{` in a message was re-evaluated (a fold error reading
+  # "diverged at {iter=3}" logged as "diverged at 3"); under a user's
+  # formatter_sprintf every message containing a literal `%` -- the CRS
+  # distortion figures, the GWR collinearity percentage -- hard-errored with
+  # "too few arguments", and because .warn_and_log() logs before it warns,
+  # the R warning the manual promises died with it.  formatter_paste does no
+  # interpolation, so the message logged is the message written.
+  logger::log_formatter(logger::formatter_paste, namespace = "spatialkit")
 
   # Index 1: full INFO+ trace to a session temp file (detailed diagnostics).
   log_path <- file.path(tempdir(), "spatialkit_model_log.log")

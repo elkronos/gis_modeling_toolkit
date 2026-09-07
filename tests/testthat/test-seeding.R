@@ -185,7 +185,7 @@ test_that("voronoi_seeds_kmeans reproduces its centres and validates input", {
   expect_error(voronoi_seeds_kmeans(.seed_sq(), k = 3),
                "`points_sf` geometry must be one of: POINT")
   expect_error(voronoi_seeds_kmeans(sf::st_drop_geometry(pts), k = 3),
-               "Expected an sf object")
+               "voronoi_seeds_kmeans\\(\\): `points_sf` must be an sf object")
   # A zero-row layer never reaches the clustering code: .assert_sf() rejects it
   # first, because an empty geometry set has no type to check.  Without the
   # regexp this expectation passed on that message and looked like coverage of
@@ -288,7 +288,8 @@ test_that("voronoi_seeds_random accepts sf or sfc and stays inside the boundary"
 
   expect_error(voronoi_seeds_random(.seed_points(5), k = 3),
                "`boundary` geometry must be one of: POLYGON")
-  expect_error(voronoi_seeds_random(list(), k = 3), "Expected an sf object")
+  expect_error(voronoi_seeds_random(list(), k = 3),
+               "voronoi_seeds_random\\(\\): `boundary` must be an sf object")
 })
 
 

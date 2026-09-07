@@ -54,7 +54,9 @@
 #'   which draws one RNG stream per fold from it, so it also seeds the
 #'   \emph{learner} inside every fold.  A stochastic \code{fit_fn} is therefore
 #'   reproducible from this one value.
-#' @param quiet Suppress progress messages. Default FALSE.
+#' @param quiet Logical; suppress this function's progress \code{message()}s.
+#'   It does not silence R warnings, nor the package's console log echo
+#'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with \code{selected} (the chosen predictors, in the order
 #'   they were added), \code{score} (their cross-validated \code{metric}),
 #'   \code{history} and \code{params}. \code{history} is a data.frame with
@@ -207,13 +209,18 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   # says the sweep stops "when no candidate improves it by more than `tol`".
   # An intercept-only fit is not something every backend can do, so fall back
   # to the old unconditional first step when it fails, and say so.
-  # suppressWarnings(): a backend that cannot fit an intercept-only model --
-  # fit_rf_model() and fit_gwr_model() both refuse a zero-length
-  # predictor_vars -- makes cv_spatial() report "all folds failed", which is
-  # expected here and handled by the fallback below.  Letting it escape turned
-  # a silent, working call into one that warns about a fit the user never
-  # asked for.
-  null_score <- suppressWarnings(score_set(character(0)))
+  # A backend that cannot fit an intercept-only model -- fit_rf_model() and
+  # fit_gwr_model() both refuse a zero-length predictor_vars -- makes
+  # cv_spatial() report "all folds failed", which is expected here and handled
+  # by the fallback below.  suppressWarnings() silences the R condition, but
+  # the k "fold i fit failed" lines and the "all k folds failed" line are
+  # LOGGER records, which no condition handler touches: every successful
+  # RF/GWR run printed them, identical to a genuinely failed run's, even with
+  # quiet = TRUE.  Raise the console threshold for the probe alone; the file
+  # trace (index 1) keeps the lines, where a diagnostic belongs.
+  null_score <- logger::with_log_threshold(
+    suppressWarnings(score_set(character(0))),
+    threshold = logger::FATAL, namespace = "spatialkit", index = 2)
   best <- if (is.finite(null_score)) null_score else worst
   if (!is.finite(null_score))
     .msg("select_features_forward(): the null (intercept-only) model could not ",

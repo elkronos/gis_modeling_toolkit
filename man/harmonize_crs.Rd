@@ -38,6 +38,14 @@ When one input carries no CRS, the same lon/lat heuristic
 identical data in the same place: coordinates that look like degrees are
 taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
 \code{target_crs}); coordinates that do not are \emph{stamped} with
-\code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
+\code{\link[sf:st_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
 assumption is announced with a warning.
+}
+\examples{
+library(sf)
+a <- st_as_sf(data.frame(x = c(500000, 500100), y = c(4000000, 4000100)),
+              coords = c("x", "y"), crs = 32632)
+b <- st_transform(a, 4326)                 # same points, lon/lat
+h <- harmonize_crs(a, b)                    # b is brought into a's CRS
+st_crs(h$a) == st_crs(h$b)
 }

@@ -25,3 +25,19 @@ The cache environment is shared by every copy of a fit, so clearing it
 through one copy clears it for all of them.  That is harmless: the others
 recompute.
 }
+\examples{
+\donttest{
+# Only a bayesian_fit carries the cache; on any other fit this is a no-op.
+if (requireNamespace("ranger", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  pts <- st_as_sf(
+    data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+    coords = c("x", "y"), crs = 32632
+  )
+  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
+  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
+  clear_fitted_cache(fit)
+}
+}
+}

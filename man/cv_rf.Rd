@@ -37,10 +37,15 @@ a logged count.}
 
 \item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
 through a per-fold draw, each fold's forest — so two different seeds give
-different results even on identical \code{folds}.  Pass \code{seed}
-through \code{...} to fix one ranger seed for every fold instead.}
+different results even on identical \code{folds}. To grow every fold's
+forest from one fixed ranger seed instead, call \code{\link{cv_spatial}}
+with your own \code{fit_fn} wrapping \code{fit_rf_model(seed = )}.}
 
-\item{parallel}{Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.}
+\item{parallel}{Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.
+Under forked workers each fold's forest runs single-threaded unless
+\code{num_threads} is passed explicitly, so \code{parallel = 4} means
+four threads in total rather than four times the session's
+\code{mc.cores}.}
 
 \item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.}
 
@@ -80,14 +85,14 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation:
-\code{\link[=area_of_applicability]{area_of_applicability()}},
-\code{\link[=cv_bayes]{cv_bayes()}},
-\code{\link[=cv_gwr]{cv_gwr()}},
-\code{\link[=cv_spatial]{cv_spatial()}},
-\code{\link[=estimate_sac_range]{estimate_sac_range()}},
-\code{\link[=gwr_model_selection]{gwr_model_selection()}},
-\code{\link[=make_folds]{make_folds()}},
-\code{\link[=select_features_forward]{select_features_forward()}}
+Other cross-validation: 
+\code{\link{area_of_applicability}()},
+\code{\link{cv_bayes}()},
+\code{\link{cv_gwr}()},
+\code{\link{cv_spatial}()},
+\code{\link{estimate_sac_range}()},
+\code{\link{gwr_model_selection}()},
+\code{\link{make_folds}()},
+\code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

@@ -42,11 +42,11 @@
                  sum(duplicated(keep_idx))), call. = FALSE)
   if (is.null(folds)) {
     .log_warn(
-      ".remap_folds(): no fold specification provided; falling back to random k-fold CV (k=%d). Random folds leak spatial autocorrelation and overstate out-of-sample performance.",
+      "cross-validation: no fold specification provided; falling back to random k-fold CV (k=%d). Random folds leak spatial autocorrelation and overstate out-of-sample performance.",
       k
     )
     warning(
-      ".remap_folds(): falling back to random k-fold CV. For spatial data, use make_folds(method='block_kfold') to avoid optimistic performance estimates.",
+      "cross-validation: falling back to random k-fold CV. For spatial data, use make_folds(method='block_kfold') to avoid optimistic performance estimates.",
       call. = FALSE
     )
     cleanup <- .with_seed(seed)
@@ -94,7 +94,7 @@
       sum(is.na(match(c(f$train, f$test), keep_idx)))
   }
   if (unknown_total > 0L)
-    .log_info(paste0(".remap_folds(): %d fold entr(y/ies) name row IDs that are ",
+    .log_info(paste0("cross-validation: %d fold entr(y/ies) name row IDs that are ",
                      "not in the data and were dropped. This is expected when ",
                      "rows were removed for missing values; if it is not, the ",
                      "folds were built on different data."),
@@ -109,6 +109,23 @@
     )
   })
 
+  # The mirror of the check above.  Fold IDs naming no row are reported; rows
+  # that no fold names were not -- a folds object built on site[1:45, ] and
+  # applied to all 90 rows scored 45 of them and reported attempted =
+  # succeeded = 3 with nothing said.  Those rows enter no fit and no score,
+  # and a caller who did not intend that needs to hear it as an R condition.
+  covered <- unique(unlist(lapply(remapped, function(f) c(f$train, f$test)),
+                           use.names = FALSE))
+  orphan  <- setdiff(keep_idx, covered)
+  if (length(orphan))
+    .warn_and_log(paste0("cross-validation: %d of %d rows in the data are ",
+                         "named by no fold (e.g. row ID %s). They enter no ",
+                         "training set and are never scored. If the folds ",
+                         "were built on a different or subsetted layer, ",
+                         "rebuild them with make_folds() on this one."),
+                  length(orphan), length(keep_idx),
+                  paste(utils::head(format(orphan), 3L), collapse = ", "))
+
   # An empty TRAINING set is just as fatal as an empty test set and was not
   # checked at all: buffered_loo with a buffer spanning the data, or
   # random_kfold on a single row, produces folds nothing can be fitted on.
@@ -118,10 +135,10 @@
   no_test  <- vapply(remapped, function(f) length(f$test) == 0L, logical(1))
   no_train <- vapply(remapped, function(f) length(f$train) < 2L, logical(1))
   if (any(no_test))
-    .log_warn(".remap_folds(): %d fold(s) have empty test sets after remapping.",
+    .log_warn("cross-validation: %d fold(s) have empty test sets after remapping.",
               sum(no_test))
   if (any(no_train))
-    .log_warn(".remap_folds(): %d fold(s) have fewer than 2 training rows after remapping and cannot be fitted.",
+    .log_warn("cross-validation: %d fold(s) have fewer than 2 training rows after remapping and cannot be fitted.",
               sum(no_train))
   # A real warning as well as the log line: a fold that vanishes here never
   # reaches the fitter, and used to be invisible in n_folds_attempted -- a
@@ -204,6 +221,25 @@
          else conditionMessage(cond)
   txt <- gsub("[\r\n]+", " ", paste(txt, collapse = " "))
   trimws(txt)
+}
+
+
+#' The per-fold metrics frame with no rows, typed
+#'
+#' Every \code{cv_*()} returns this shape when no fold produced a prediction,
+#' so downstream code that subsets on a metric column works the same whether
+#' the run succeeded or not.  \code{extra} names backend-specific columns
+#' (\code{bandwidth} for GWR).
+#'
+#' @keywords internal
+#' @noRd
+.empty_fold_metrics <- function(extra = character(0)) {
+  base <- data.frame(fold = integer(), n_train = integer(), n_test = integer(),
+                     n_pred = integer(),
+                     RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
+                     SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric())
+  for (e in extra) base[[e]] <- numeric()
+  base
 }
 
 
@@ -295,6 +331,36 @@
     list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
          lonlat = lonlat)
   }, error = function(e) NULL)
+}
+
+
+#' Turn a vector of fold labels into train/test splits keyed by `..row_id`
+#'
+#' \code{area_of_applicability()} accepts a plain label vector (one per row);
+#' every \code{cv_*()} documents the same three shapes but a vector reached
+#' \code{.remap_folds()} and died with R's bare "$ operator is invalid for
+#' atomic vectors".  Called right after \code{..row_id} is assigned, so the
+#' i-th label maps to the i-th row's ID whatever rows are dropped later.
+#'
+#' @keywords internal
+#' @noRd
+.folds_from_labels <- function(folds, data_sf, caller) {
+  if (is.null(folds) || is.list(folds) || !is.atomic(folds)) return(folds)
+  n <- nrow(data_sf)
+  if (length(folds) != n)
+    stop(sprintf("%s(): `folds` has %d labels but the data has %d rows.",
+                 caller, length(folds), n), call. = FALSE)
+  f <- droplevels(as.factor(folds))
+  if (anyNA(f))
+    stop(caller, "(): `folds` contains missing labels.", call. = FALSE)
+  if (nlevels(f) < 2L)
+    stop(caller, "(): `folds` must define at least two non-empty folds.",
+         call. = FALSE)
+  ids <- data_sf[["..row_id"]]
+  lapply(levels(f), function(lv) {
+    te <- ids[f == lv]
+    list(train = setdiff(ids, te), test = te)
+  })
 }
 
 
@@ -402,14 +468,14 @@
   fit_obj <- try(fit_one(train_sf), silent = TRUE)
   if (inherits(fit_obj, "try-error")) {
     msg <- .try_error_message(fit_obj)
-    .log_warn(".cv_run_folds(): fold %d fit failed; skipping. Cause: %s",
+    .log_warn("cross-validation: fold %d fit failed; skipping. Cause: %s",
               fold_lab, msg)
     return(list(error = msg))
   }
   if (!inherits(fit_obj, "spatial_fit")) {
     msg <- sprintf("fit_fn() returned a %s, not a spatial_fit",
                    paste(class(fit_obj), collapse = "/"))
-    .log_warn(".cv_run_folds(): fold %d did not return a spatial_fit; skipping.", fold_lab)
+    .log_warn("cross-validation: fold %d did not return a spatial_fit; skipping.", fold_lab)
     return(list(error = msg))
   }
 
@@ -423,7 +489,7 @@
     msg <- if (inherits(y_hat, "try-error")) .try_error_message(y_hat) else
       sprintf("predict() returned a %s, not a numeric vector",
               paste(class(y_hat), collapse = "/"))
-    .log_warn(".cv_run_folds(): fold %d predict failed; skipping. Cause: %s",
+    .log_warn("cross-validation: fold %d predict failed; skipping. Cause: %s",
               fold_lab, msg)
     return(list(error = msg))
   }
@@ -434,7 +500,7 @@
   # 4 test rows yields a 4-row frame with the predictions repeated and metrics
   # computed against fabricated pairs.
   if (length(y_hat) != length(y_true)) {
-    .log_warn(".cv_run_folds(): fold %d predicted %d value(s) for %d test row(s); skipping.",
+    .log_warn("cross-validation: fold %d predicted %d value(s) for %d test row(s); skipping.",
               fold_lab, length(y_hat), length(y_true))
     return(NULL)
   }
@@ -525,13 +591,27 @@
     eff <- .sanitize_core_count(n_cores)
   } else if (isTRUE(parallel)) {
     # detectCores() can return NA on some platforms; sanitize before use.
-    eff <- .sanitize_core_count(parallel::detectCores(logical = FALSE) - 1L)
+    # A session-wide mc.cores opt-in caps the auto-detected count, the
+    # convention brms and parallel::mclapply() itself follow.
+    auto <- .sanitize_core_count(parallel::detectCores(logical = FALSE) - 1L)
+    eff  <- min(auto, .sanitize_core_count(getOption("mc.cores", auto), auto))
   } else if (is.numeric(parallel) && length(parallel) == 1L &&
              !is.na(parallel) && parallel > 1) {
     eff <- .sanitize_core_count(parallel)
   } else {
     return(1L)
   }
+  # More workers than cores is not parallelism, it is a fork bomb with a
+  # memory bill: cap at the machine, and at two under R CMD check, which is
+  # the limit CRAN's check farm enforces.
+  n_machine <- .sanitize_core_count(parallel::detectCores(logical = TRUE),
+                                    fallback = eff)
+  if (eff > n_machine) {
+    message("cv parallel: ", eff, " workers requested on a machine with ",
+            n_machine, " cores; using ", n_machine, ".")
+    eff <- n_machine
+  }
+  if (nzchar(Sys.getenv("_R_CHECK_LIMIT_CORES_")) && eff > 2L) eff <- 2L
   if (.Platform$OS.type == "windows" && eff > 1L) {
     message("cv parallel: forked parallelism (mclapply) is not available on Windows. ",
             "Falling back to sequential execution. For Windows parallelism, consider ",
@@ -574,11 +654,12 @@
 #'   cores; if \code{FALSE} (default), run sequentially.
 #' @param n_cores \emph{Deprecated.}
 #'   Explicit core count; overrides \code{parallel} when set.
-#' @param seed Integer RNG seed, or \code{NULL} to leave fold RNG unseeded.
-#'   When supplied, one seed per fold is drawn in the parent process and
-#'   applied inside the fold worker, so results depend on (seed, fold index)
-#'   alone and \code{parallel = TRUE} reproduces \code{parallel = FALSE}
-#'   exactly.
+#' @param seed Integer RNG seed, or \code{NULL} to draw the per-fold seeds
+#'   from the session's RNG stream.  Either way one seed per fold is drawn in
+#'   the parent process and applied inside the fold worker, so results depend
+#'   on (seed, fold index) alone and \code{parallel = TRUE} reproduces
+#'   \code{parallel = FALSE} exactly; with \code{NULL}, a \code{set.seed()}
+#'   before the call makes both reproducible.
 #' @return List with pred_rows and fold_stats.
 #' @keywords internal
 #' @noRd
@@ -597,8 +678,15 @@
   # current time and process ID unless the L'Ecuyer-CMRG generator is in use,
   # so without this the parallel path is irreproducible for any fit_fn that
   # consumes RNG (see cv_spatial(), which accepts an arbitrary learner).
+  # seed = NULL draws the per-fold seeds from the session's stream instead of
+  # leaving the folds unseeded.  Unseeded forked workers are seeded by
+  # mclapply() from the clock and the process ID, so `set.seed(1); cv_*(seed =
+  # NULL, parallel = 2)` was irreproducible while the sequential call was --
+  # against the README's unqualified promise.  Drawing from the caller's
+  # stream (and advancing it, as any RNG-consuming call would) makes both
+  # paths a function of the state set.seed() left, and identical to each other.
   fold_seeds <- if (is.null(seed)) {
-    rep(NA_integer_, n_folds)
+    sample.int(.Machine$integer.max, n_folds)
   } else {
     cleanup_draw <- .with_seed(seed)
     on.exit(cleanup_draw(), add = TRUE)
@@ -623,9 +711,30 @@
   if (cores > 1L) {
     message(sprintf("cv: running %d folds in parallel on %d cores.",
                     n_folds, cores))
+    # A warning raised inside a forked child dies with the child: R
+    # conditions do not cross the fork, so fit_gwr_model()'s documented
+    # integer-response warning, raised in every fold, reached nobody under
+    # parallel = 2 while the sequential run showed all four.  Collect them in
+    # the worker and re-raise in the parent, once per distinct message.
+    caught_worker <- function(i) {
+      msgs <- character(0)
+      res  <- withCallingHandlers(
+        fold_worker(i),
+        warning = function(w) {
+          msgs <<- c(msgs, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        })
+      # .cv_fit_one_fold() returns NULL for an unusable fold; NULL cannot
+      # carry an attribute, so wrap the pair instead.
+      list(res = res, fold_warnings = msgs)
+    }
     results <- parallel::mclapply(
-      seq_along(remapped_folds), fold_worker, mc.cores = cores
+      seq_along(remapped_folds), caught_worker, mc.cores = cores
     )
+    relayed <- unique(unlist(lapply(results, function(z)
+      if (!inherits(z, "try-error")) z$fold_warnings), use.names = FALSE))
+    for (m in relayed) warning(m, call. = FALSE)
+    results <- lapply(results, function(z) if (inherits(z, "try-error")) z else z$res)
   } else {
     results <- lapply(seq_along(remapped_folds), fold_worker)
   }
@@ -689,40 +798,34 @@
 #' \emph{effective range} — the distance at which the semivariance reaches
 #' ~95 \% of the sill.
 #'
-#' To guard against anisotropy, the function first estimates directional
-#' variograms at 0° (N–S), 45°, 90° (E–W) and 135° azimuths, each with a
-#' ±22.5° tolerance.  Those four windows tile all 180 distinct azimuths
-#' exactly once, with no gap and no double-counted pair.
+#' The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
+#' variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
+#' azimuths with a ±22.5° tolerance -- four windows that tile all 180 distinct
+#' azimuths exactly once -- and their ranges are returned in the
+#' \code{directional} attribute, with their largest-over-smallest ratio in
+#' \code{anisotropy}.  They are a diagnostic, not the answer, for two reasons.
+#' Each direction sees about a quarter of the point pairs, and the maximum of
+#' four quarter-sample fits is biased upward: on simulated \emph{isotropic}
+#' fields it came in about 40\% above the truth, and no hurdle placed in
+#' front of it (all four directions fitted, ratio above 1.5, maximum above
+#' 1.5× the all-pairs fit) kept it out -- one isotropic field rotated in 10°
+#' steps "established" anisotropy in 14 of 18 orientations.  And the windows
+#' are fixed to the coordinate axes, so any answer built from them changes
+#' when the layer is rotated, which a property of the field must not do.  The
+#' all-pairs fit is the best-powered estimate available and is invariant to
+#' rotation.
 #'
-#' An \strong{omnidirectional} variogram is fitted as well, and it is the
-#' default answer.  Splitting 180° four ways leaves each directional variogram
-#' about a quarter of the point pairs, and the maximum of four noisy estimates
-#' is biased upward: on simulated \emph{isotropic} fields the max-of-four came
-#' back about 40% above the truth, so blocks were sized 40% too wide and every
-#' fold lost training data for no reason.  The all-pairs fit is the
-#' best-powered estimate available, so the directional maximum is returned only
-#' when anisotropy is \emph{established}: \strong{all four} directions must have
-#' produced a usable fit, the ratio of the largest to the smallest must exceed
-#' 1.5, \strong{and} the widest must stand more than 1.5× above the all-pairs
-#' estimate.  (One further case: when the omnidirectional fit is itself
-#' unusable, the directional sweep is all there is and its maximum is returned
-#' whatever the ratio.  \code{anisotropy_used} records which answer you got.)
-#' That is the
-#' conservative choice where anisotropy is real (blocks must be at least as
-#' large as the longest autocorrelation range to avoid leakage) without paying
-#' for it where it is not.
-#'
-#' Sweeping only 0° and 90° would leave the azimuths between 23° and 67°, and
-#' between 113° and 157°, covered by neither window: on simulated fields with a
-#' 3:1 anisotropy and a true major-axis range of 300, a two-direction sweep
-#' recovered 255 and 249 for major axes at 0° and 90° but only 151 and 147 at
-#' 45° and 135°.  Since \code{make_folds(auto_range = TRUE)} sizes its blocks
-#' from this number, that halved the blocks for a diagonally oriented field.
+#' Where a field is \emph{known} to be anisotropic, blocks must be at least
+#' as large as the longest autocorrelation range to avoid leakage, and the
+#' conservative choice is to size them from
+#' \code{max(attr(range, "directional"))} explicitly.  A ratio above 1.5 is
+#' logged so the case is not missed, with that advice.  Only when the
+#' omnidirectional fit is itself unusable is the directional maximum returned
+#' in its place, and \code{anisotropy_used} is \code{TRUE} in that case alone.
 #'
 #' A direction whose fit fails, does not converge, or reports a range beyond
 #' the longest fitted lag is excluded and recorded as \code{NA} in the
-#' \code{directional} attribute.  Fewer than two usable directions leaves the
-#' omnidirectional fit as the only estimate.
+#' \code{directional} attribute.
 #'
 #' Every variogram model is fitted \strong{with a nugget}.  A nugget-free model
 #' forces the curve through the origin, and on any real measurement (which has
@@ -753,8 +856,10 @@
 #'   better reflects the autocorrelation that the spatial model must handle.
 #' @param n_max Maximum number of points to subsample before fitting.
 #'   Variogram estimation is O(n²) so this keeps runtime bounded.
-#' @param cutoff Fraction of the maximum inter-point distance to use as
-#'   the variogram lag cutoff.  Default 0.5.
+#' @param cutoff Fraction of the maximum inter-point distance (the farthest
+#'   pair, found on the convex hull -- not the bounding-box diagonal, which
+#'   depends on how the axes are oriented) to use as the variogram lag cutoff.
+#'   Default 0.5.
 #' @param range_frac Positive numeric.  A fitted range exceeding
 #'   \code{range_frac * cutoff * max_dist} -- that is, beyond the longest lag
 #'   the empirical variogram was actually fitted over -- is treated as
@@ -780,8 +885,13 @@
 #'     \item{Success}{A positive effective range in projected coordinate units,
 #'       with the fit attached as attributes \code{directional} (the 0°, 45°,
 #'       90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
-#'       over smallest), \code{anisotropy_used} (logical: whether the returned
-#'       range is the directional maximum rather than the all-pairs estimate),
+#'       over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
+#'       the all-pairs fit was unusable and the directional maximum stands in
+#'       for it), \code{detrended} (logical: whether the variogram is of the
+#'       OLS residuals on \code{predictor_vars} rather than the raw response
+#'       -- a missing predictor is an error, and a failed detrending fit
+#'       warns and falls back to the raw response with this set to
+#'       \code{FALSE}),
 #'       \code{crs} (the projected CRS the variogram was
 #'       fitted in -- the unit of the range), \code{max_dist},
 #'       \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
@@ -845,8 +955,8 @@ estimate_sac_range <- function(points_sf, response_var,
 
   # A row with an empty or non-finite geometry makes gstat fail in EVERY
   # direction, so one bad point among 200 turned the whole layer's estimate
-  # into NA under the message "variogram model fit failed" -- blaming the fit
-  # rather than the row, and disagreeing with make_folds(), which drops such
+  # into NA under a "no variogram model could be fitted" message -- blaming
+  # the fit rather than the row, and disagreeing with make_folds(), which drops such
   # rows and says how many.
   bad_geom <- sf::st_is_empty(points_sf)
   if (!all(bad_geom)) {
@@ -920,21 +1030,38 @@ estimate_sac_range <- function(points_sf, response_var,
            call. = FALSE)
     }
   }
+  detrended <- FALSE
   if (!is.null(predictor_vars) && length(predictor_vars) > 0L) {
     df <- pts_df
-    ok_preds <- intersect(predictor_vars, names(df))
-    if (length(ok_preds) > 0L) {
-      fml <- stats::reformulate(ok_preds, response_var)
-      lm_fit <- try(stats::lm(fml, data = df, na.action = stats::na.exclude),
-                     silent = TRUE)
-      if (!inherits(lm_fit, "try-error")) {
-        resid <- stats::residuals(lm_fit)
-        if (length(resid) != nrow(pts)) {
-          .log_warn("estimate_sac_range(): OLS residual length (%d) does not match data rows (%d); using raw response.",
-                    length(resid), nrow(pts))
-        } else {
-          y <- resid
-        }
+    # A predictor that is not a column is an error, as it is everywhere else
+    # in the package: intersect() used to drop it silently, and with every
+    # name unknown the RAW response was modelled -- so make_folds(auto_range =
+    # TRUE) sized blocks from range 88.5 instead of the residual range 362.2
+    # with nothing said.
+    missing_preds <- setdiff(predictor_vars, names(df))
+    if (length(missing_preds))
+      stop("estimate_sac_range(): predictor_vars ",
+           paste(sQuote(missing_preds), collapse = ", "),
+           " not found in the data.", call. = FALSE)
+    fml <- stats::reformulate(predictor_vars, response_var)
+    lm_fit <- try(stats::lm(fml, data = df, na.action = stats::na.exclude),
+                  silent = TRUE)
+    if (inherits(lm_fit, "try-error")) {
+      # Falling through to the raw response is a different estimand, so it
+      # is an R warning, not a log line.
+      .warn_and_log(paste0("estimate_sac_range(): the OLS detrending on %s ",
+                           "failed (%s); the variogram is fitted to the RAW ",
+                           "response instead, which includes the trend."),
+                    paste(predictor_vars, collapse = " + "),
+                    .try_error_message(lm_fit))
+    } else {
+      resid <- stats::residuals(lm_fit)
+      if (length(resid) != nrow(pts)) {
+        .warn_and_log("estimate_sac_range(): OLS residual length (%d) does not match data rows (%d); the variogram is fitted to the RAW response instead.",
+                      length(resid), nrow(pts))
+      } else {
+        y <- resid
+        detrended <- TRUE
       }
     }
   }
@@ -960,10 +1087,17 @@ estimate_sac_range <- function(points_sf, response_var,
     return(NA_real_)
   }
 
-  # Empirical variogram
+  # Empirical variogram.  The lag cutoff is a fraction of the maximum
+  # inter-point distance, as documented -- NOT of the bounding-box diagonal.
+  # The diagonal is a property of the axes, not of the points: it grows by up
+  # to sqrt(2) when the same layer is rotated 45 degrees, so the variogram was
+  # binned differently and the fitted range moved (257 vs 394 on one field;
+  # pinning the cutoff restored 257 exactly).  The farthest pair lies on the
+  # convex hull, whose vertex count is tiny, so this is cheap at any n.
   max_dist <- try({
-    bb <- sf::st_bbox(pts)
-    sqrt((bb["xmax"] - bb["xmin"])^2 + (bb["ymax"] - bb["ymin"])^2)
+    hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(pts)))
+    hv   <- unique(sf::st_coordinates(hull)[, 1:2, drop = FALSE])
+    if (nrow(hv) < 2L) 0 else max(stats::dist(hv))
   }, silent = TRUE)
 
   if (inherits(max_dist, "try-error") || !is.finite(max_dist) || max_dist <= 0)
@@ -999,7 +1133,6 @@ estimate_sac_range <- function(points_sf, response_var,
   # Other warnings are muffled but LOGGED rather than dropped: they say
   # something about the data even when the fit is usable.
   .fit_one_vgm <- function(vg, model_type) {
-    converged <- TRUE
     # WITH a nugget.  gstat::vgm(model = "Exp") alone is a nugget-free model,
     # which forces the fitted curve through the origin; on any real
     # measurement (which has one) gstat's default N/h^2 weights then buy that
@@ -1010,39 +1143,75 @@ estimate_sac_range <- function(points_sf, response_var,
     # variogram recovered the truth (ratio 1.09).  The partial-sill range is
     # the one to keep, and fit.variogram() returns the nugget as row 1 and the
     # structured component as row 2, which .vgm_range_of() already reads.
-    m <- withCallingHandlers(
-      try(gstat::fit.variogram(
-            vg, gstat::vgm(psill = NA, model = model_type, range = NA,
-                           nugget = NA)),
-          silent = TRUE),
-      warning = function(w) {
-        msg <- conditionMessage(w)
-        if (grepl("convergence", msg, ignore.case = TRUE)) {
-          converged <<- FALSE
-        } else {
-          .log_info("estimate_sac_range(): gstat::fit.variogram(%s) warned: %s",
-                    model_type, msg)
+    fit_from <- function(range0) {
+      converged <- TRUE
+      m <- withCallingHandlers(
+        try(gstat::fit.variogram(
+              vg, gstat::vgm(psill = NA, model = model_type, range = range0,
+                             nugget = NA)),
+            silent = TRUE),
+        warning = function(w) {
+          msg <- conditionMessage(w)
+          if (grepl("convergence", msg, ignore.case = TRUE)) {
+            converged <<- FALSE
+          } else {
+            .log_info("estimate_sac_range(): gstat::fit.variogram(%s) warned: %s",
+                      model_type, msg)
+          }
+          invokeRestart("muffleWarning")
         }
-        invokeRestart("muffleWarning")
-      }
-    )
-    if (inherits(m, "try-error") || !is.data.frame(m)) return(NULL)
-    if (isTRUE(attr(m, "singular"))) return(NULL)
-    # NOT `return(NULL)` on non-convergence.  The range it carries must never
-    # size a block -- that is what the `converged` flag below is for -- but the
-    # MODEL and its empirical variogram are still the most useful thing a user
-    # can look at, and a sill-less variogram is precisely the case worth
-    # looking at.  Discarding it here made plot(fit, type = "variogram")
-    # error out with "the residual variogram could not be fitted" on exactly
-    # that input.  Mark it and let the caller decide.
-    attr(m, "converged") <- converged
-    m
+      )
+      if (inherits(m, "try-error") || !is.data.frame(m)) return(NULL)
+      if (isTRUE(attr(m, "singular"))) return(NULL)
+      attr(m, "converged") <- converged
+      m
+    }
+    # SEVERAL starting ranges, not gstat's one.  With `range = NA` gstat
+    # starts the optimiser at a third of the longest lag; for a field whose
+    # range is a small fraction of the extent that start is ten times too
+    # long, the nugget and the partial sill trade off along the way, and
+    # whether the Gauss-Newton iteration lands or collapses to a singular
+    # model depends on floating-point details -- the same 250-point field fitted
+    # on one machine and came back singular on another.  Shorter and longer
+    # starts are tried as well, and the winner is the converged, non-singular
+    # fit with the smallest weighted sum of squares (gstat's own criterion,
+    # attr "SSErr"), which is a property of the data rather than of the path
+    # the optimiser took.  A non-converged fit is kept only when nothing
+    # converged: its range must never size a block -- that is what the
+    # `converged` flag is for -- but the model and its empirical variogram are
+    # still the most useful thing a user can look at, and a sill-less
+    # variogram is precisely the case worth looking at.
+    dmax <- max(vg$dist, na.rm = TRUE)
+    starts <- if (is.finite(dmax) && dmax > 0)
+      c(NA_real_, dmax / 10, dmax / 30, dmax / 2) else NA_real_
+    fits <- Filter(Negate(is.null), lapply(starts, fit_from))
+    if (!length(fits)) return(NULL)
+    conv <- vapply(fits, function(m) !identical(attr(m, "converged"), FALSE),
+                   logical(1))
+    if (any(conv)) fits <- fits[conv]
+    sse <- vapply(fits, function(m) {
+      v <- attr(m, "SSErr")
+      if (is.null(v) || !is.finite(v)) Inf else as.numeric(v)
+    }, numeric(1))
+    fits[[which.min(sse)]]
   }
 
   .fit_vgm_range <- function(vg) {
     if (inherits(vg, "try-error") || !inherits(vg, "data.frame") || NROW(vg) < 3L) return(NA_real_)
-    vgm_model <- .fit_one_vgm(vg, "Exp")
-    if (is.null(vgm_model)) vgm_model <- .fit_one_vgm(vg, "Sph")
+    # Exponential first, spherical as the fallback -- but a CONVERGED fit of
+    # either beats a non-converged fit of the preferred one.  On a field with
+    # no nugget the exponential fit runs into the nugget's zero bound and
+    # gstat reports non-convergence from every start, while the spherical fit
+    # converges cleanly; taking the exponential's non-converged range would
+    # then throw away a usable estimate (and the caller must refuse a
+    # non-converged range, so the omnidirectional fit would count as failed).
+    fits <- list(Exp = .fit_one_vgm(vg, "Exp"))
+    conv <- function(m) !is.null(m) && !identical(attr(m, "converged"), FALSE)
+    if (!conv(fits$Exp)) fits$Sph <- .fit_one_vgm(vg, "Sph")
+    vgm_model <- if (conv(fits$Exp)) fits$Exp
+      else if (conv(fits$Sph)) fits$Sph
+      else if (!is.null(fits$Exp)) fits$Exp
+      else fits$Sph
     if (is.null(vgm_model)) {
       # Both the exponential and the spherical fit were singular or errored:
       # there is no identified range, so say so rather than returning one.
@@ -1180,40 +1349,31 @@ estimate_sac_range <- function(points_sf, response_var,
     # a field with a true range of 80 came back at 248 (the all-pairs fit said
     # 84).  Then the usual two: a ratio the sweep considers notable, and a
     # maximum that stands clearly above the all-pairs estimate.
-    aniso_established <- sum(dir_ok) == length(dir_az) &&
-      is.finite(anisotropy) && anisotropy > 1.5 &&
-      (!iso_ok || dir_max > 1.5 * as.numeric(iso_fit_always))
-
-    if (aniso_established) {
-      aniso_used      <- TRUE
-      effective_range <- dir_max
-      vg_used  <- dir_fits[[winner]]$vg
-      vgm_used <- attr(dir_fits[[winner]]$fit, "vgm_model")
-      .log_warn(
-        paste0("estimate_sac_range(): directional ranges vary by a factor of ",
-               "%.1f and the widest, %.1f, stands above the all-directions ",
-               "estimate of %s, so the maximum is used -- the conservative ",
-               "choice for sizing blocks. Directional ranges: %s. Each ",
-               "direction sees about a quarter of the point pairs, so at ",
-               "modest sample sizes part of this spread is sampling noise; ",
-               "pass an explicit block_size if you know the field's anisotropy."),
-        anisotropy, dir_max,
-        if (iso_ok) sprintf("%.1f", as.numeric(iso_fit_always)) else "n/a",
-        paste(sprintf("%d\u00b0 = %.1f", dir_az[dir_ok], dir_ranges[dir_ok]),
-              collapse = ", ")
-      )
-    } else if (iso_ok) {
+    # The directional maximum is NEVER preferred over a usable all-pairs fit.
+    # Three hurdles were tried (all four directions fitted, ratio > 1.5,
+    # maximum > 1.5 x the all-pairs estimate) and still let the noise through:
+    # on ONE isotropic exponential field (true range 150, n = 300) they
+    # declared anisotropy in 14 of 18 axis orientations and returned ranges
+    # from 225 to 529 -- a 2.35x spread produced by nothing but the direction
+    # the axes happened to point.  Four windows fixed in CRS azimuth cannot
+    # give a rotation-invariant answer, and the maximum of four quarter-sample
+    # fits is biased upward whatever hurdle is put in front of it.  So the
+    # all-pairs range is the estimate; the directional ranges are reported as
+    # a diagnostic, and a caller who KNOWS the field is anisotropic can size
+    # blocks from max(attr(x, "directional")) explicitly.
+    if (iso_ok) {
       effective_range <- as.numeric(iso_fit_always)
       vg_used  <- vg_iso_always
       vgm_used <- attr(iso_fit_always, "vgm_model")
       if (is.finite(anisotropy) && anisotropy > 1.5)
         .log_info(
           paste0("estimate_sac_range(): the directional ranges vary by a factor ",
-                 "of %.1f (%s), but the widest does not stand above the ",
-                 "all-directions estimate (%.1f), so the spread is consistent ",
-                 "with sampling noise -- each direction sees about a quarter of ",
-                 "the point pairs. Using the all-directions estimate. Pass an ",
-                 "explicit block_size if you know the field is anisotropic."),
+                 "of %.1f (%s). Each direction sees about a quarter of the ",
+                 "point pairs and the windows are fixed to the coordinate axes, ",
+                 "so this spread is expected on an isotropic field too; the ",
+                 "all-directions estimate (%.1f) is used. If the field is known ",
+                 "to be anisotropic, size blocks from ",
+                 "max(attr(range, \"directional\")) instead."),
           anisotropy,
           paste(sprintf("%d\u00b0 = %.1f", dir_az[dir_ok], dir_ranges[dir_ok]),
                 collapse = ", "),
@@ -1234,11 +1394,10 @@ estimate_sac_range <- function(points_sf, response_var,
     }
   } else {
     # --- Isotropic variogram (fallback when directional fits fail) ----------
-    vg_iso <- try(
-      gstat::variogram(..sac_var ~ 1, data = pts, cutoff = cutoff_dist),
-      silent = TRUE
-    )
-    iso_range <- .fit_vgm_range(vg_iso)
+    # The same all-pairs variogram and fit as above; it was recomputed here,
+    # which cost a second fit and logged its failure twice.
+    vg_iso    <- vg_iso_always
+    iso_range <- iso_fit_always
     if (is.finite(iso_range)) {
       # A gstat fit that stopped at its iteration limit reports a range that is
       # wherever the optimiser happened to be, not a fitted parameter.  Record
@@ -1252,9 +1411,29 @@ estimate_sac_range <- function(points_sf, response_var,
       vg_used  <- vg_iso
       vgm_used <- attr(iso_range, "vgm_model")
     } else {
-      # Neither directional nor isotropic succeeded
-      .log_warn("estimate_sac_range(): variogram model fit failed; returning NA.")
-      return(NA_real_)
+      # Neither directional nor isotropic succeeded.  The VALUE is NA, but the
+      # empirical variogram is still the thing to look at: both fits being
+      # singular is what a flat, nugget-only variogram produces -- residuals
+      # with no spatial structure at the lags resolved -- and returning a bare
+      # NA left plot(type = "variogram") unable to draw exactly that picture
+      # ("could not be fitted; there may be too few finite residuals").
+      .log_warn(paste0("estimate_sac_range(): no variogram model could be fitted ",
+                       "(the exponential and spherical fits are both singular, ",
+                       "which is what a flat, nugget-only variogram produces); ",
+                       "returning NA. The empirical variogram is attached for ",
+                       "inspection: plot(type = \"variogram\")."))
+      return(structure(
+        NA_real_,
+        class           = c("sac_range", "numeric"),
+        detrended       = isTRUE(detrended),
+        max_dist        = as.numeric(max_dist),
+        cutoff_dist     = as.numeric(cutoff_dist),
+        crs             = sf::st_crs(pts),
+        variogram       = if (inherits(vg_iso, "data.frame")) vg_iso else NULL,
+        variogram_model = NULL,
+        rejected_range  = NA_real_,
+        rejected_reason = "no variogram model could be fitted (singular fits)"
+      ))
     }
   }
 
@@ -1322,6 +1501,7 @@ estimate_sac_range <- function(points_sf, response_var,
     return(structure(
       NA_real_,
       class           = c("sac_range", "numeric"),
+      detrended       = isTRUE(detrended),
       max_dist        = as.numeric(max_dist),
       cutoff_dist     = as.numeric(cutoff_dist),
       crs             = sf::st_crs(pts),
@@ -1344,6 +1524,10 @@ estimate_sac_range <- function(points_sf, response_var,
     # attribute alone cannot tell a caller which of the two was used, and
     # plot(type = "variogram") needs to know whose variogram it is drawing.
     anisotropy_used = isTRUE(aniso_used),
+    # Whether the variogram is of OLS residuals on `predictor_vars` (TRUE) or
+    # of the raw response.  make_folds(auto_range = TRUE) and
+    # summarize_by_cell(deff = "variogram") both need to know which.
+    detrended       = isTRUE(detrended),
     max_dist        = as.numeric(max_dist),
     cutoff_dist     = as.numeric(cutoff_dist),
     # The CRS the variogram was fitted in.  Its range is a length in these
@@ -1678,6 +1862,17 @@ make_folds <- function(points_sf, k,
            paste(format(k), collapse = ", "), ".", call. = FALSE)
     k <- as.integer(k)
   }
+  # block_size was tested with `is.numeric(block_size) && block_size > 0` and
+  # anything failing that was silently ignored -- yet echoed back unchanged in
+  # params$block_size, so a negative, zero or character value looked honoured.
+  # NA and a length-2 vector reached the grid arithmetic and died as internal
+  # R errors.  Validate it once, the way `k` is.
+  if (!is.null(block_size) &&
+      (!is.numeric(block_size) || length(block_size) != 1L ||
+       !is.finite(block_size) || block_size <= 0))
+    stop("make_folds(): `block_size` must be a single positive number in the ",
+         "units of the data's CRS; got ",
+         paste(format(block_size), collapse = ", "), ".", call. = FALSE)
   # The provenance probe is taken on the geometry AS SUPPLIED -- before
   # pointization -- because that is what the cv_*() wrappers will probe too.
   row_probe <- .fold_row_probe(points_sf)
@@ -1774,7 +1969,23 @@ make_folds <- function(points_sf, k,
       b <- .safe_make_valid(sf::st_union(b))
       mat <- sf::st_intersects(pts, b, sparse = FALSE)
       inside_any <- apply(mat, 1L, any)
+      if (!any(inside_any))
+        # No point inside the boundary at all is almost certainly two layers
+        # in different places -- a CRS that could only be stamped -- and
+        # extending the region to cover them would hide it.
+        stop("make_folds(block_kfold): none of the ", nrow(pts), " points fall ",
+             "inside `boundary`. Check that the two layers cover the same ",
+             "ground; a CRS that had to be stamped rather than reprojected is ",
+             "the usual cause.", call. = FALSE)
       if (!all(inside_any)) {
+        # Points outside the boundary were silently absorbed by extending
+        # the region to the points' bounding box.  Say so: those points get
+        # blocks, but the boundary the caller drew is not the one used.
+        .warn_and_log(paste0("make_folds(block_kfold): %d of %d points fall ",
+                             "outside `boundary`; the block region has been ",
+                             "extended to the points' bounding box so every ",
+                             "point receives a block."),
+                      sum(!inside_any), nrow(pts))
         bb_pts <- sf::st_as_sfc(sf::st_bbox(pts)) |> sf::st_set_crs(sf::st_crs(pts))
         b <- suppressWarnings(
           sf::st_union(.safe_make_valid(sf::st_sf(geometry = c(b, bb_pts)))))
@@ -1910,12 +2121,16 @@ make_folds <- function(points_sf, k,
         u <- sf::st_crs(reg)$units_gdal
         if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
       }, error = function(e) "CRS units")
-      stop(sprintf(paste0("make_folds(block_kfold): the requested grid is %d x ",
-                          "%d = %s cells, above the %s this function will ",
+      # %s, not %d: nx and ny are doubles from floor(), and a block_size in
+      # the wrong unit -- the very mistake this guard exists to explain --
+      # gives counts past 2^31 that %d refuses with "invalid format".
+      stop(sprintf(paste0("make_folds(block_kfold): the requested grid is %s x ",
+                          "%s = %s cells, above the %s this function will ",
                           "build. Check that `block_size` (%s) is expressed in ",
                           "the data's CRS units (%s) over an extent of %s x %s; ",
                           "a value in the wrong unit is the usual cause."),
-                  nx, ny, format(n_cells_est, big.mark = ",", scientific = FALSE),
+                  format(nx, scientific = FALSE), format(ny, scientific = FALSE),
+                  format(n_cells_est, big.mark = ",", scientific = FALSE),
                   format(.block_max_cells, big.mark = ",", scientific = FALSE),
                   if (is.null(block_size)) "unset" else format(block_size),
                   unit_lbl,
@@ -1966,9 +2181,14 @@ make_folds <- function(points_sf, k,
       # block_size is NULL when the caller set block_nx/block_ny directly, and
       # sprintf() on a zero-length argument yields character(0) -- an empty
       # error message.
-      how <- if (is.null(block_size))
-        "the requested block_nx/block_ny" else
+      # Three ways to arrive here; name the one the caller actually used, not
+      # an argument they never passed.
+      how <- if (!is.null(block_size))
         sprintf("the block size (%s)", format(block_size))
+      else if (!is.null(block_nx) || !is.null(block_ny))
+        "the requested block_nx/block_ny"
+      else
+        "the automatic grid (block_multiplier x k blocks over the extent)"
       stop(sprintf(paste0("make_folds(block_kfold): %s produces a single block ",
                           "covering the whole extent, so there is no spatial ",
                           "split to make and the one fold would have an empty ",
@@ -2263,7 +2483,14 @@ make_folds <- function(points_sf, k,
 
     removed <- integer(n)
     Gjstar  <- nn_d[, 1L]
-    o  <- order(Gjstar); sv <- Gjstar[o]; si <- o
+    # Ties in Gjstar -- every mutual-nearest-neighbour pair, all of a regular
+    # grid -- are broken by a key that depends on the GEOMETRY, not on the
+    # row order: the point's rank in (x, y) lexicographic order.  CAST breaks
+    # them by row index (which.min), so shuffling the rows of one layer gave
+    # 6-18 different folds out of 300 and moved 72 of 100 points on a 10 x 10
+    # grid.  Identical data must give identical folds.
+    tie_key <- order(order(xy[, 1L], xy[, 2L]))
+    o  <- order(Gjstar, tie_key); sv <- Gjstar[o]; si <- o
     k  <- 1L
     n_iter <- 0L
     while (k <= n) {
@@ -2278,12 +2505,13 @@ make_folds <- function(points_sf, k,
         newv <- nn_d[j, removed[j] + 1L]
         sv <- sv[-k]; si <- si[-k]
         # Insert after every smaller value and, among equal values, after
-        # those belonging to points with a smaller index -- the same tie
-        # order as which.min() in the reference implementation, so that on
+        # those belonging to points with a smaller tie_key, so that on
         # clustered data (where pushed points pile up at the same
-        # cluster-to-cluster distance) the SAME points get pushed.
+        # cluster-to-cluster distance) the SAME points get pushed whatever
+        # the row order.
         pos <- findInterval(newv, sv)
-        while (pos > 0L && sv[pos] == newv && si[pos] > j) pos <- pos - 1L
+        while (pos > 0L && sv[pos] == newv && tie_key[si[pos]] > tie_key[j])
+          pos <- pos - 1L
         sv <- append(sv, newv, after = pos)
         si <- append(si, j,    after = pos)
         n_iter <- n_iter + 1L
@@ -2380,7 +2608,13 @@ make_folds <- function(points_sf, k,
 #' @param k Number of folds. Default 5.
 #' @param seed RNG seed. Default 123.
 #' @param adaptive Logical; use adaptive bandwidth. Default TRUE.
-#' @param bandwidth Optional bandwidth value.
+#' @param bandwidth Optional bandwidth, applied to every fold. For
+#'   \code{adaptive = TRUE} an integer number of neighbours; for
+#'   \code{adaptive = FALSE} a distance in the units of the \strong{projected}
+#'   CRS the folds are fitted in (geographic input is projected first, so a
+#'   value in degrees is read as metres). \code{NULL} (default) selects a
+#'   bandwidth per fold with \code{GWmodel::bw.gwr()}, which is reported in
+#'   \code{fold_metrics$bandwidth}. See \code{\link{fit_gwr_model}}.
 #' @param kernel Kernel function type.
 #' @param boundary Optional polygonal sf/sfc for CRS alignment.
 #' @param pointize Geometry coercion strategy.
@@ -2438,6 +2672,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   kernel <- .validate_kernel(kernel)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
+  folds <- .folds_from_labels(folds, data_sf, "cv_gwr")
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   if (!("..row_id" %in% names(dat_sf)))
     stop("cv_gwr(): `prep_model_data()` must preserve `..row_id`.")
@@ -2498,11 +2733,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
     data.frame(`..row_id` = integer(), fold = integer(),
                y = numeric(), yhat = numeric(), y_train_mean = numeric())
   folds_df <- if (length(res$fold_stats)) as.data.frame(dplyr::bind_rows(res$fold_stats)) else
-    data.frame(fold = integer(), n_train = integer(), n_test = integer(),
-               n_pred = integer(),
-               RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
-               SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
-               bandwidth = numeric())
+    .empty_fold_metrics("bandwidth")
 
   # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
   # a fold dropped there is exactly the kind of thing this count exists to
@@ -2564,7 +2795,10 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
 #' @param k Number of folds. Default 5.
-#' @param seed RNG seed. Default 123.
+#' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
+#'   through a per-fold draw, each fold's Stan sampler, so two seeds give
+#'   different posteriors even on identical \code{folds}. A \code{seed} in
+#'   \code{fit_args} overrides the per-fold draw with one fixed sampler seed.
 #' @param boundary Optional polygonal sf/sfc for CRS alignment.
 #' @param pointize Geometry coercion strategy.
 #' @param fit_args Named list of extra arguments for fit_bayesian_spatial_model().
@@ -2600,6 +2834,8 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #' @family cross-validation
 #' @examples
 #' \dontrun{
+#' # Not run: fits with Stan, which needs a working C++ toolchain and takes
+#' # minutes of MCMC -- both outside what an example may assume.
 #' if (requireNamespace("brms", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
@@ -2628,6 +2864,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   if (!inherits(data_sf, "sf")) stop("cv_bayes(): `data_sf` must be an sf object.")
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
+  folds <- .folds_from_labels(folds, data_sf, "cv_bayes")
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   if (!("..row_id" %in% names(dat_sf)))
     stop("cv_bayes(): `prep_model_data()` must preserve `..row_id`.")
@@ -2662,11 +2899,19 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
     # rank per training fold.  (Previously `gp_k = NULL` was passed through
     # modifyList(), which *removes* NULL elements and therefore silently
     # deleted the user's gp_k.)
+    # `seed` reaches the SAMPLER, as cv_rf()'s reaches the forest.  It did
+    # not: fit_bayesian_spatial_model() carries seed = 123 and fold_fit_args
+    # never set it, so every fold of every run sampled from Stan seed 123 and
+    # cv_bayes(seed = ) changed nothing on fixed folds.  .cv_run_folds() runs
+    # each fold under its own seeded stream, so a draw here is distinct and
+    # reproducible per (seed, fold).  A seed in fit_args still wins.
     fold_fit_args <- modifyList(fit_args, list(
       compute_loo = FALSE, boundary = boundary,
       pointize = pointize,
       .already_prepped = TRUE
     ))
+    if (is.null(fit_args$seed))
+      fold_fit_args$seed <- sample.int(.Machine$integer.max, 1L)
     do.call(fit_bayesian_spatial_model,
             c(list(data_sf = train_sf, response_var = response_var,
                    predictor_vars = predictor_vars), fold_fit_args))
@@ -2834,6 +3079,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).
+#' @param .caller Internal. The name the messages carry, so a wrapper such as
+#'   \code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.
 #' @return A list with \code{overall}, \code{fold_metrics}, \code{predictions},
 #'   \code{folds}, and the two fold counts \code{n_folds_attempted} and
 #'   \code{n_folds_succeeded}.  The counts are reported deliberately: a
@@ -2889,20 +3136,22 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
                        boundary = NULL, pointize = "auto",
                        predict_args = list(), fold_info_fn = NULL,
                        p = NULL, block_size = NULL,
-                       auto_range = FALSE, parallel = FALSE) {
-  if (!inherits(data_sf, "sf")) stop("cv_spatial(): `data_sf` must be an sf object.")
-  if (!is.function(fit_fn)) stop("cv_spatial(): `fit_fn` must be a function.")
+                       auto_range = FALSE, parallel = FALSE,
+                       .caller = "cv_spatial") {
+  if (!inherits(data_sf, "sf")) stop(.caller, "(): `data_sf` must be an sf object.", call. = FALSE)
+  if (!is.function(fit_fn)) stop(.caller, "(): `fit_fn` must be a function.", call. = FALSE)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
+  folds <- .folds_from_labels(folds, data_sf, .caller)
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   keep_idx <- dat_sf$`..row_id`
 
   # Refuse folds built from other data before anything is fitted: the splits
   # are row IDs, so a wrong `folds` of the right size applies silently.
-  .check_fold_probe(folds, data_sf, "cv_spatial")
+  .check_fold_probe(folds, data_sf, .caller)
 
   if (is.null(folds)) {
-    message("cv_spatial(): no folds supplied \u2014 using spatial block k-fold CV (k=", k, ").")
+    message(.caller, "(): no folds supplied \u2014 using spatial block k-fold CV (k=", k, ").")
     folds <- make_folds(dat_sf, k = k, method = "block_kfold",
                         seed = seed, boundary = boundary,
                         block_size = block_size, auto_range = auto_range,
@@ -2927,8 +3176,11 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
     data.frame(`..row_id` = integer(), fold = integer(),
                y = numeric(), yhat = numeric(), y_train_mean = numeric())
+  # Typed even when empty: cv_gwr() and cv_bayes() return a 0-row frame with
+  # the metric columns, and a bare data.frame() here made
+  # subset(fold_metrics, RMSE < 5) error for two of the four cv_*().
   folds_df <- if (length(res$fold_stats)) as.data.frame(dplyr::bind_rows(res$fold_stats)) else
-    data.frame()
+    .empty_fold_metrics()
 
   # cv_gwr() and cv_bayes() both raise a real condition here; cv_spatial() used
   # to return an all-NA `overall` and an empty data.frame with nothing at R
@@ -2941,13 +3193,13 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .log_warn("cv_spatial(): all %d folds failed to produce predictions; results are empty.%s",
-              n_attempted, why)
-    warning("cv_spatial(): all folds failed; cross-validation results contain ",
+    .log_warn("%s(): all %d folds failed to produce predictions; results are empty.%s",
+              .caller, n_attempted, why)
+    warning(.caller, "(): all folds failed; cross-validation results contain ",
             "no predictions.", why, call. = FALSE)
   } else if (n_succeeded < n_attempted) {
-    .log_warn("cv_spatial(): %d of %d folds produced predictions.",
-              n_succeeded, n_attempted)
+    .log_warn("%s(): %d of %d folds produced predictions.",
+              .caller, n_succeeded, n_attempted)
   }
 
   list(overall = .cv_overall_metrics(preds),

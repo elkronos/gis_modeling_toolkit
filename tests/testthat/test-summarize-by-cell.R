@@ -135,8 +135,34 @@ test_that("summarize_by_cell deff='kish' applies Kish's exact 1 + (n-1) rho", {
   )
 
   out <- summarize_by_cell(pts, response_var = "y", deff = "kish")
-  rho <- attr(out, "deff_applied")$icc_resp
+
+  # The ICC itself, from an INDEPENDENT one-way random-effects ANOVA with
+  # Donner's (1986) n0 for unbalanced cells -- what ?summarize_by_cell
+  # promises.  Reading rho back from the attribute and checking the SE against
+  # it made any estimator self-consistent: MSB = SSB/k, n0 = mean cell size, a
+  # denominator of MSB + n0*MSW and even MSB + MSW in the numerator all passed
+  # (mutation testing, pass 6).  The unbalanced sizes are what make the (k-1)
+  # and n0 terms load-bearing.
+  hand_icc <- function(v, g) {
+    g   <- factor(g); k <- nlevels(g); N <- length(v); ni <- tabulate(g)
+    gm  <- tapply(v, g, mean)
+    SSB <- sum(ni * (gm - mean(v))^2); SSW <- sum((v - gm[g])^2)
+    MSB <- SSB / (k - 1); MSW <- SSW / (N - k)
+    n0  <- (N - sum(ni^2) / N) / (k - 1)
+    max(0, min(1, (MSB - MSW) / (MSB + (n0 - 1) * MSW)))
+  }
+  rho <- hand_icc(pts$y, pts$poly_id)
   expect_gt(rho, 0)          # otherwise deff is floored at 1 and pins nothing
+  expect_equal(attr(out, "deff_applied")$icc_resp, rho, tolerance = 1e-10)
+  # ... and the nearest wrong estimators are visibly different on this design.
+  rho_bal_n0 <- {
+    g <- factor(pts$poly_id); k <- nlevels(g); N <- n; ni <- tabulate(g)
+    gm <- tapply(pts$y, g, mean)
+    MSB <- sum(ni * (gm - mean(pts$y))^2) / (k - 1)
+    MSW <- sum((pts$y - gm[g])^2) / (N - k)
+    (MSB - MSW) / (MSB + (mean(ni) - 1) * MSW)
+  }
+  expect_gt(abs(rho - rho_bal_n0), 1e-3)
   expect_equal(out$n, n_per)
 
   deff  <- pmax(1, 1 + (out$n - 1) * rho)
@@ -258,6 +284,24 @@ test_that("summarize_by_cell deff='kish' estimates separate ICC for response and
   expect_equal(da$method, "kish")
   # Response ICC should be much larger than predictor ICC
   expect_true(da$icc_resp > da$icc_pred)
+
+  # Each variable's SE is built from ITS OWN ICC.  Nothing compared the
+  # response SEs between a response-only call and a response-plus-predictor
+  # call, so handing the predictor's ICC to the response closures -- which
+  # shrank ..se_resp_y by a factor of 20 the moment predictor_vars was added
+  # -- passed every test (mutation testing, pass 6).  The same coupling was
+  # once a real bug for cell_weight (see the source), so pin all three.
+  only      <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+  pred_only <- summarize_by_cell(pts, response_var = "x", deff = "kish")
+  expect_equal(out[["..se_resp_y"]], only[["..se_resp_y"]], tolerance = 1e-12)
+  expect_equal(out[["..se_pred_x"]], pred_only[["..se_resp_x"]], tolerance = 1e-12)
+  expect_equal(out$cell_weight, only$cell_weight, tolerance = 1e-12)
+  expect_equal(da$icc_resp, attr(only, "deff_applied")$icc_resp)
+  # With ICC(x) ~ 0 the predictor's SE is the plain sd/sqrt(n), while the
+  # response's is inflated: the two ICCs are visibly different in the output.
+  expect_equal(out[["..se_pred_x"]], out[["..sd_pred_x"]] / sqrt(out$n),
+               tolerance = 1e-12)
+  expect_true(all(out[["..se_resp_y"]] > 2 * out[["..sd_resp_y"]] / sqrt(out$n)))
 })
 
 
@@ -518,11 +562,55 @@ test_that("summarize_by_cell passes deff_max_n through to the subsampler", {
   expect_true(any(da_cap$deff > 10))           # the old form could not exceed 10
   expect_equal(unname(da_cap$deff), unname(attr(full, "deff_applied")$deff),
                tolerance = 0.35)
+
+  # The SE path must use the same cell-sized design effect as the attribute.
+  # The attribute is computed separately from the ..se_ closures, and only the
+  # attribute was checked: building the closure's deff from the SUBSAMPLE size
+  # understated the SE of a 25-point cell by 2.5x with the attribute unchanged
+  # (mutation testing, pass 6).  Same identity as the uncapped test above.
+  iid <- summarize_by_cell(pts, response_var = "z", deff = 1)
+  expect_equal(capped[["..se_resp_z"]],
+               iid[["..se_resp_z"]] * sqrt(da_cap$deff) *
+                 sqrt((capped$n - 1) / (capped$n - da_cap$deff)),
+               tolerance = 1e-10)
+  expect_equal(capped[["..se_resp_z"]], full[["..se_resp_z"]], tolerance = 0.35)
+  expect_equal(capped$cell_weight, capped$n / da_cap$deff, tolerance = 1e-10)
   # A cap larger than every cell changes nothing at all.
   wide <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
                             sac = sac, deff_max_n = 5000L)
   expect_equal(attr(wide, "deff_applied")$deff,
                attr(full, "deff_applied")$deff)
+})
+
+
+test_that(".se_with_deff returns NA, not Inf, at the bound deff == n", {
+  # deff is bounded above by n; at the bound the cell holds one observation's
+  # worth of information and s carries none about sigma.  The documented
+  # answer is NA_real_.  Inf is the worse answer -- it survives is.na()
+  # filters and max()/range(), and a downstream 1/se^2 weight becomes 0
+  # silently -- and a `>` in place of `>=` produced it with no test noticing
+  # (mutation testing, pass 6).
+  f <- spatialkit:::.se_with_deff
+  expect_identical(f(2, 5, 5), NA_real_)
+  expect_identical(f(2, 5, 5.5), NA_real_)
+  expect_true(is.finite(f(2, 5, 4.999)))
+  expect_gt(f(2, 5, 4.999), f(2, 5, 4.9))
+  expect_equal(f(2, 5, 1), 2 / sqrt(5))
+  # The bound is reachable end to end: repeat measurements at ONE location
+  # under a nugget-free variogram correlate at exactly 1, so deff = n.
+  pts <- sf::st_sf(
+    poly_id = c(rep(1L, 5), rep(2L, 5)), z = c(1.2, 0.4, -0.3, 2.1, 0.9,
+                                             -1.0, 0.2, 1.7, -0.6, 0.8),
+    geometry = sf::st_sfc(c(lapply(1:5, function(i) sf::st_point(c(0, 0))),
+                            lapply(1:5, function(i) sf::st_point(c(1000 + 100 * i, 0)))),
+                          crs = 32632))
+  sac <- structure(300, class = c("sac_range", "numeric"),
+                   variogram_model = data.frame(model = "Exp", psill = 1, range = 100),
+                   crs = sf::st_crs(32632))
+  out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac)
+  expect_equal(attr(out, "deff_applied")$deff[1], 5)
+  expect_identical(out[["..se_resp_z"]][1], NA_real_)
+  expect_true(is.finite(out[["..se_resp_z"]][2]))
 })
 
 
