@@ -770,3 +770,40 @@ test_that("parallel defaults follow getOption('mc.cores') and never exceed the m
   detected <- parallel::detectCores(logical = FALSE)
   if (!is.na(detected) && detected > 1L) expect_lte(auto, detected - 1L)
 })
+
+
+# --------------------------------------------------------------------------
+# The weekly check-brms job: backend = "auto" must not pick cmdstanr without
+# a CmdStan build behind it
+# --------------------------------------------------------------------------
+
+test_that("the Stan backend is chosen by a usable CmdStan build, not by the package alone", {
+  # The cmdstanr package is a thin interface; CmdStan itself is installed
+  # separately.  "auto" chose cmdstanr on requireNamespace("cmdstanr") alone,
+  # so on a machine with the package but no build -- the check-brms runner,
+  # which installs it to satisfy Suggests -- every fit died inside the
+  # sampler with "CmdStan path has not been set yet. See ?set_cmdstan_path",
+  # and the five smoke tests failed on every scheduled run.
+  usable  <- spatialkit:::.cmdstan_usable
+  resolve <- spatialkit:::.resolve_stan_backend
+  expect_false(usable(has_pkg = FALSE))
+  expect_false(usable(has_pkg = TRUE,
+                      path_fn = function() stop("CmdStan path has not been set yet.")))
+  expect_false(usable(has_pkg = TRUE, path_fn = function() NULL))
+  expect_false(usable(has_pkg = TRUE, path_fn = function() file.path(tempdir(), "no-such-dir")))
+  expect_true(usable(has_pkg = TRUE, path_fn = function() tempdir()))
+
+  expect_identical(resolve("auto", cmdstan_ok = FALSE), "rstan")
+  expect_identical(resolve("auto", cmdstan_ok = TRUE), "cmdstanr")
+  expect_identical(resolve("rstan", cmdstan_ok = FALSE), "rstan")
+  expect_identical(resolve("cmdstanr", cmdstan_ok = TRUE), "cmdstanr")
+  # An explicit request for a backend that cannot run is an error that says
+  # how to install it, not a failure from inside the sampler.
+  expect_error(resolve("cmdstanr", cmdstan_ok = FALSE),
+               "^fit_bayesian_spatial_model\\(\\): backend = \"cmdstanr\" needs the cmdstanr package AND a CmdStan build")
+  expect_error(resolve("cmdstanr", cmdstan_ok = FALSE), "backend = \"rstan\"")
+  # On this machine the default resolves without error either way.
+  expect_true(resolve("auto") %in% c("cmdstanr", "rstan"))
+  if (!requireNamespace("cmdstanr", quietly = TRUE))
+    expect_identical(resolve("auto"), "rstan")
+})

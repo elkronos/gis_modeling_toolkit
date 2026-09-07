@@ -4,8 +4,7 @@
 # slow for every push.  This job runs it on a schedule, and can be triggered by
 # hand before a CRAN submission.
 #
-# WHAT THIS ACTUALLY VALIDATES.  Be precise about it, because the obvious
-# reading ("the brms code paths are exercised") is not true today:
+# WHAT THIS ACTUALLY VALIDATES:
 #
 #   * that brms and its Stan toolchain install and load at all, which is the
 #     single most common way this optional backend breaks for users;
@@ -13,20 +12,23 @@
 #     from the matrix jobs: every requireNamespace("brms") guard flips, so
 #     .model_available("Bayesian") becomes TRUE and compare_models_cv() takes
 #     its Bayesian branch rather than dropping it;
-#   * exactly ONE test that guards on brms
-#     (tests/testthat/test-multipoint-geometry.R, the .already_prepped
-#     MULTIPOINT rejection).
+#   * the five Stan smoke tests in tests/testthat/test-bayes-smoke.R, which
+#     SPATIALKIT_TEST_BRMS (set below, and nowhere else) switches on: a ~40-row
+#     model is fitted end to end and its predictions, cache, CV wrapper and
+#     control merging are checked.  They sample through rstan.  cmdstanr is
+#     installed here only because it is in Suggests and the dependency graph
+#     must solve; CmdStan itself is NOT built on the runner, and
+#     fit_bayesian_spatial_model(backend = "auto") checks for a usable build
+#     before choosing cmdstanr.  (It used to choose it on the package's
+#     presence alone, and every scheduled run from the day the smoke tests
+#     landed failed inside the sampler with "CmdStan path has not been set
+#     yet".)  To exercise the cmdstanr path as well, add a step that runs
+#     cmdstanr::install_cmdstan() before the check; it takes several minutes.
 #
-# It does NOT sample a single posterior.  test-gp-basis.R exercises the basis
-# and prior internals, which need no brms at all, and both brms examples
-# (fit_bayesian_spatial_model, cv_bayes) are in \dontrun{} precisely because
-# they compile Stan models -- so R CMD check never runs them.
-#
-# TO CLOSE THE REMAINING GAP, the test suite needs a small end-to-end smoke
-# test: skip_if_not_installed("brms") + skip_on_cran(), a ~40-row dataset,
-# chains = 1, iter = 200, compute_loo = FALSE, asserting that the fit is a
-# bayesian_fit and that predict()/fitted() return nrow(data) finite values.
-# That belongs in tests/, not here.
+# The "Error:" annotations GitHub attaches to lines such as "mtry can not be
+# larger than number of variables in data" are ranger's own stderr output
+# from a test that deliberately drives it into that error; they are not
+# check failures.
 on:
   schedule:
     - cron: '0 6 * * 1'   # Mondays 06:00 UTC

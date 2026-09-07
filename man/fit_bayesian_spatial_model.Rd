@@ -85,7 +85,13 @@ is not what a shared server or a check farm wants.}
 
 \item{seed}{Integer seed. Default 123.}
 
-\item{backend}{"auto", "cmdstanr", or "rstan".}
+\item{backend}{"auto" (default), "cmdstanr", or "rstan". "auto" uses
+\pkg{cmdstanr} only when a CmdStan build is actually available -- the
+\pkg{cmdstanr} package is a thin interface and can be installed without
+one (\code{cmdstanr::install_cmdstan()} builds it) -- and \pkg{rstan}
+otherwise, which \pkg{brms} always brings. An explicit "cmdstanr" with no
+usable CmdStan is an error that says how to install it, rather than a
+failure from inside the sampler.}
 
 \item{control}{Named list of sampler controls, \emph{merged} over the
 package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)} rather

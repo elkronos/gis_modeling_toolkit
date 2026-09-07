@@ -1220,6 +1220,18 @@ touched, and the figures quoted are from those reproductions.
   namespace's formatter is now pinned to `formatter_paste`, so the message
   logged is the message written.
 
+* `fit_bayesian_spatial_model(backend = "auto")` chooses **cmdstanr** only
+  when a CmdStan build is actually available. It chose it whenever the
+  **cmdstanr** *package* could be loaded — a thin interface that is often
+  installed without the toolchain it drives — so on such a machine every fit
+  died inside the sampler with "CmdStan path has not been set yet. See
+  ?set_cmdstan_path". The package's own weekly `check-brms` job was one such
+  machine: it installs **cmdstanr** to satisfy Suggests and never builds
+  CmdStan, and every scheduled run since the Stan smoke tests landed failed
+  there. "auto" now falls back to **rstan**, which **brms** always brings,
+  and logs the choice; an explicit `backend = "cmdstanr"` with no usable
+  build is an error that says to run `cmdstanr::install_cmdstan()`.
+
 * `cv_bayes(seed = )` reaches the sampler. `fit_bayesian_spatial_model()`
   carries `seed = 123` and the per-fold `fit_args` never set it, so every fold
   of every run sampled from Stan seed 123 and changing `seed` changed nothing
