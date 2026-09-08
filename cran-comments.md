@@ -50,8 +50,8 @@ sampling done in this container; every other brms finding was established with
 `make_stancode()`, `make_standata()`, `get_prior()` and `validate_prior()`,
 which need no compilation. **Every GWR and brms result recorded below must be
 re-confirmed on a machine with the real packages before submission** -- the
-full suite has passed on macOS with both installed (6,162 expectations, below).
-Not installed: `cmdstanr`, `loo`.
+full suite has passed on macOS with both installed (6,162 expectations before
+the Low-list pass, below). Not installed: `cmdstanr`.
 
 Still to run before any submission:
 
@@ -106,9 +106,10 @@ of CRAN's package index because this container cannot reach CRAN -- reports
   time".** The container cannot reach the clock service the check consults.
   It does not occur on a networked machine.
 
-`checking examples` runs all 42 examples in 6.5 s elapsed; the slowest,
-`select_features_forward()`, takes 1.6 s. `checking tests` takes 72 s and
-`checking re-building of vignette outputs` 18 s.
+`checking examples` runs all 42 examples in 7.0 s elapsed on the latest run
+(6.5--8.7 s across runs); the slowest, `select_features_forward()`, takes
+1.6--2.3 s. `checking tests` takes 72--93 s and `checking re-building of
+vignette outputs` 18--26 s.
 
 Everything previously recorded here as a blocker is resolved:
 
@@ -137,12 +138,15 @@ the status line. And building with `--no-build-vignettes` adds two WARNINGs
 "Directory 'inst/doc' does not exist") that a normal `R CMD build` does not
 produce.
 
-`R CMD build` produces a 1.1 MB tarball, of which the built vignette HTML is the
+`R CMD build` produces a 1.2 MB tarball, of which the built vignette HTML is the
 bulk. `checking running R code from vignettes` passes.
 
-`testthat` reports **6,162 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
-with `NOT_CRAN=true` and both backends present, and no test runs with zero
-assertions. The nine skips are:
+`testthat` reports **6,225 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
+in this container with `NOT_CRAN=true` and both backends present (the `GWmodel`
+stub, real `brms`), and no test runs with zero assertions. On macOS with the
+real `GWmodel` the count before the Low-list pass was 6,162 with the same
+nine skips; the macOS `<fill in>` above carries the current one. The nine
+skips are:
 
 * 5 Stan smoke tests in `test-bayes-smoke.R`, skipped because
   `SPATIALKIT_TEST_BRMS` is unset -- `skip_if_not_installed("brms")` alone was
@@ -155,16 +159,17 @@ assertions. The nine skips are:
 Under `R CMD check`, where `NOT_CRAN` is unset, nine further tests skip on
 purpose -- the `parallel::mclapply()` fork tests in `test-cv-parallel.R` and
 `test-audit-pass6.R`, and two slow simulation checks -- all `skip_on_cran()`.
-The check's own count is **6,139 passing, 0 failures, 18 skips**, or 6,137
-under `--as-cran`, which sets `_R_CHECK_LIMIT_CORES_` and thereby switches off
-two expectations in `test-core-count.R` that read the machine's core count.
+The check's own count under `--as-cran` is **6,200 passing, 0 failures, 18
+skips**; `--as-cran` sets `_R_CHECK_LIMIT_CORES_`, which switches off two
+expectations in `test-core-count.R` that read the machine's core count, so a
+plain `R CMD check` counts two more.
 
 With the optional backends absent (`sp`, `GWmodel`, `ranger`, `brms`, `gstat`,
 `FNN`, `geometry`, `loo`, `patchwork`, `spdep` hidden, as in the CI matrix
 jobs), `R CMD check` reports the Suggests-not-available NOTE and nothing else:
 all 42 examples run, since each guards its optional packages with
-`requireNamespace()`, the vignette builds, and the suite reports **2,188
-passing, 0 failures, 137 skips** -- every test that needs a backend skips rather
+`requireNamespace()`, the vignette builds, and the suite reports **2,234
+passing, 0 failures, 139 skips** -- every test that needs a backend skips rather
 than fails.
 
 `README.md` does not restate these counts, precisely so the two cannot drift
@@ -203,8 +208,10 @@ but a user upgrading should know about them:
 
 `NEWS.md` is the full record relative to 1.0.0: 57 corrections that change
 results (across four audit passes), 22 API and default changes, 26 new guards
-and message changes, 54 bug fixes, 15 new features and 21 documentation
-entries.
+and message changes plus the 14 entries of the sixth pass's Low list (two of
+which change a number: nested variogram models in the design effect, and
+`cv_bayes()`'s `yhat_sd` column), 54 bug fixes, 15 new features and 21
+documentation entries.
 
 ## What was wrong in 1.0.0
 

@@ -824,9 +824,11 @@ fit_bayesian_spatial_model <- function(
     # gp_k is derived from a PRIOR length-scale bound computed from inter-point
     # spacing.  If the posterior length-scale lands below what (gp_k, gp_c) can
     # resolve, the Hilbert-space approximation is inadequate and nothing else
-    # here would say so.  This is the diagnostic Riutort-Mayol et al. (2023)
-    # recommend, and it is what makes a smaller default gp_k safe rather than
-    # merely cheaper.
+    # here would say so.  Riutort-Mayol et al. (2023) recommend checking that
+    # the posterior length-scale lies inside the region the basis resolves and
+    # raising m when it does not; the 10% posterior-mass trigger below is this
+    # package's operationalisation of that check, not a figure from the paper.
+    # It is what makes a smaller default gp_k safe rather than merely cheaper.
     #
     # brms names GP parameters lscale(gp...) / sdgp(gp...), embedding the
     # covariate names, so match on the prefix rather than a literal term name.

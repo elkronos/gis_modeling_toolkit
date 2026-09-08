@@ -179,3 +179,64 @@ test_that("an un-subsampled cell is unchanged by the rescale", {
   expect_equal(cell_de(coords, rep("a", n), f, max_n = n)[["a"]],
                min(max(sum(R) / n, 1), n), tolerance = 1e-10)
 })
+
+
+# ---------------------------------------------------------------------------
+# Nested models and unsupported families (sixth pass, reviewer A's Low list)
+# ---------------------------------------------------------------------------
+
+test_that("every structured component counts, weighted by its partial sill", {
+  # The function read the single largest component, so a user-built
+  # Nug + Exp + Sph model gave 0.108 at h = 200 where the model implies 0.197.
+  # Reference: rho(h) = 1 - gamma(h) / total sill, written out by hand from
+  # gstat's parametrisation of each family.
+  vm <- data.frame(model = c("Nug", "Exp", "Sph"),
+                   psill = c(0.2, 0.5, 0.3), range = c(0, 100, 500),
+                   stringsAsFactors = FALSE)
+  f  <- cor_fn(vm)
+  expect_false(is.null(f))
+  h  <- c(0, 1, 10, 50, 100, 200, 400, 499, 500, 800)
+  sph <- ifelse(h >= 500, 0, 1 - 1.5 * (h / 500) + 0.5 * (h / 500)^3)
+  ref <- (0.5 * exp(-h / 100) + 0.3 * sph) / 1.0
+  expect_equal(f(h), ref, tolerance = 1e-12)
+  expect_equal(f(200), 0.1973, tolerance = 1e-3)
+  # A single-component model is unchanged by the generalisation.
+  f1 <- cor_fn(vgm_df(nugget = 0.2, psill = 0.8, range = 50))
+  expect_equal(f1(c(0, 25, 100)), 0.8 * exp(-c(0, 25, 100) / 50))
+})
+
+test_that("the nested-model correlation agrees with gstat::variogramLine()", {
+  skip_if_not_installed("gstat")
+  vm <- gstat::vgm(psill = 0.3, model = "Sph", range = 500,
+                   add.to = gstat::vgm(psill = 0.5, model = "Exp", range = 100,
+                                       nugget = 0.2))
+  f <- cor_fn(vm)
+  h <- c(1, 5, 10, 25, 50, 75, 100, 150, 200, 300, 500, 800, 1200)
+  g <- gstat::variogramLine(vm, dist_vector = h)$gamma
+  expect_equal(f(h), 1 - g / sum(vm$psill), tolerance = 1e-10)
+})
+
+test_that("a variogram family the function does not implement is refused, not read as exponential", {
+  vm <- data.frame(model = c("Nug", "Mat"), psill = c(0.2, 0.8),
+                   range = c(0, 100), stringsAsFactors = FALSE)
+  expect_null(cor_fn(vm))
+  vm2 <- data.frame(model = c("Nug", "Exp", "Pow"), psill = c(0.2, 0.5, 0.3),
+                    range = c(0, 100, 1), stringsAsFactors = FALSE)
+  expect_null(cor_fn(vm2))
+  # End to end: summarize_by_cell() says which family it cannot use and
+  # falls back to deff = 1 -- the naive SE, no deff_applied attribute.
+  set.seed(77)
+  pts <- sf::st_as_sf(
+    data.frame(x = rep(c(0, 300, 600), each = 20) + runif(60, 0, 60),
+               y = runif(60, 0, 60), z = rnorm(60),
+               poly_id = rep(1:3, each = 20)),
+    coords = c("x", "y"), crs = 32632)
+  sac <- structure(300, class = c("sac_range", "numeric"),
+                   variogram_model = vm, crs = sf::st_crs(pts))
+  expect_warning(
+    out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac),
+    "supports exponential, spherical and Gaussian variogram models.*'Mat'")
+  expect_null(attr(out, "deff_applied"))
+  naive <- summarize_by_cell(pts, "z", deff = 1)
+  expect_equal(out[["..se_resp_z"]], naive[["..se_resp_z"]])
+})

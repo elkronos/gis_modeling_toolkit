@@ -461,6 +461,19 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
          call. = FALSE)
 
 
+  # With n <= p + 1 no local regression can have a residual degree of freedom
+  # -- every window is at best exactly determined -- so the fit that came
+  # back was all-NA fitted values behind three warnings (n = 2 warned "only
+  # 2 observations", "fallback bandwidth", then "2 of 2 local regressions
+  # singular").  One error, up front, before the response is even looked at.
+  if (nrow(dat) <= length(predictor_vars) + 1L)
+    stop(sprintf(paste0("fit_gwr_model(): %d observation(s) for %d parameters ",
+                        "(intercept + %d predictor(s)); a GWR needs at least ",
+                        "%d, and far more to be useful."),
+                 nrow(dat), length(predictor_vars) + 1L,
+                 length(predictor_vars), length(predictor_vars) + 2L),
+         call. = FALSE)
+
   # Warn or error if response looks non-continuous.
   # Gaussian GWR assumes a continuous response; binary data should error.
   #
@@ -541,7 +554,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   
   n_obs <- nrow(dat)
   n_params <- length(predictor_vars) + 1L  # +1 for intercept
-  
+
   pred_df <- sf::st_drop_geometry(dat)[, predictor_vars, drop = FALSE]
   for (pv in predictor_vars) {
     if (is.numeric(pred_df[[pv]]) && stats::sd(pred_df[[pv]], na.rm = TRUE) < .Machine$double.eps * 100) {

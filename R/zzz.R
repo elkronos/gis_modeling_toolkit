@@ -42,6 +42,23 @@
   logger::log_threshold(logger::WARN, namespace = "spatialkit", index = 2)
 }
 
+#' @noRd
+.onUnload <- function(libpath) {
+  # logger keeps the "spatialkit" namespace alive after unloadNamespace(),
+  # with index 1 still pointing at this session's temp-file path.  Nothing
+  # logs into it once the package is gone, but leave nothing dangling: both
+  # appenders become no-ops.  .onLoad() re-registers them on the next load.
+  # Guarded so that an unload can never fail on the logger's account.
+  # (A plain no-op function rather than logger::appender_void, which older
+  # logger releases do not export.)
+  tryCatch({
+    void <- function(lines) invisible(NULL)
+    logger::log_appender(void, namespace = "spatialkit", index = 1)
+    logger::log_appender(void, namespace = "spatialkit", index = 2)
+  }, error = function(e) NULL)
+  invisible(NULL)
+}
+
 
 #' Quieten (or restore) spatialkit's console log
 #'
@@ -56,20 +73,32 @@
 #' and \code{tryCatch(warning = )} do not see them.  Conditions the package
 #' raises as real R warnings are unaffected by this function.
 #'
-#' @param quiet Logical.  \code{TRUE} (default) silences the console echo;
-#'   \code{FALSE} restores the WARN+ default.
-#' @return Invisibly, the threshold that was in force before the change.
+#' @param quiet \code{TRUE} (default) silences the console echo;
+#'   \code{FALSE} restores the package default, WARN+.  A \pkg{logger}
+#'   threshold (\code{logger::ERROR}, or the value a previous call returned)
+#'   sets that level instead, which is how to put back exactly what was in
+#'   force rather than the default: \code{old <- spatialkit_quiet();
+#'   spatialkit_quiet(old)}.
+#' @return Invisibly, the threshold that was in force before the change --
+#'   a \pkg{logger} level that can be passed back as \code{quiet}.
 #' @family utilities
 #' @examples
 #' old <- spatialkit_quiet()      # console echo off
-#' spatialkit_quiet(FALSE)        # back to WARN+
+#' spatialkit_quiet(old)          # back to whatever it was
+#' spatialkit_quiet(FALSE)        # or back to the WARN+ default
 #' @export
 spatialkit_quiet <- function(quiet = TRUE) {
-  if (!is.logical(quiet) || length(quiet) != 1L || is.na(quiet))
-    stop("spatialkit_quiet(): `quiet` must be TRUE or FALSE.", call. = FALSE)
   prev <- tryCatch(logger::log_threshold(namespace = "spatialkit", index = 2),
                    error = function(e) NULL)
-  logger::log_threshold(if (quiet) logger::FATAL else logger::WARN,
-                        namespace = "spatialkit", index = 2)
+  level <- if (inherits(quiet, "loglevel")) {
+    quiet
+  } else if (is.logical(quiet) && length(quiet) == 1L && !is.na(quiet)) {
+    if (quiet) logger::FATAL else logger::WARN
+  } else {
+    stop("spatialkit_quiet(): `quiet` must be TRUE, FALSE or a logger threshold ",
+         "such as logger::ERROR (or the value an earlier call returned).",
+         call. = FALSE)
+  }
+  logger::log_threshold(level, namespace = "spatialkit", index = 2)
   invisible(prev)
 }

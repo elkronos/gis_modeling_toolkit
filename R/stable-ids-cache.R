@@ -158,10 +158,15 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' @param type Character grid/tessellation type.
 #' @param target_cells Approximate desired cells.
 #' @param ... Additional parameters affecting the grid.
+#' @param version The package version, hashed into the key so that a cache
+#'   that outlives a package upgrade (one persisted by a user, say) cannot
+#'   hand a grid built by an older \code{create_grid_polygons()} to a newer
+#'   one.  An argument only so that tests can vary it.
 #' @return A length-1 character vector.
 #' @keywords internal
 #' @noRd
-.cache_key <- function(boundary, type, target_cells, ...) {
+.cache_key <- function(boundary, type, target_cells, ...,
+                       version = .spatialkit_version()) {
   crs_obj <- sf::st_crs(boundary)
   crs_token <- if (!is.null(crs_obj) && !is.na(crs_obj)) {
     inp <- crs_obj$input
@@ -198,7 +203,36 @@ ensure_stable_poly_id <- function(polygons_sf,
   # the environment it is handed.
   paste0("spatialkit_grid::", type, "::",
          digest::digest(list(geom_hash = geom_hash, crs = crs_token,
-                             target_cells = target_cells, args = dots)))
+                             target_cells = target_cells, args = dots,
+                             version = as.character(version))))
+}
+
+# The installed version string; a separate function so that the key can be
+# computed with the package loaded any way (installed or via pkgload).
+.spatialkit_version <- function() {
+  v <- tryCatch(as.character(utils::packageVersion("spatialkit")),
+                error = function(e) NA_character_)
+  if (is.na(v)) "unknown" else v
+}
+
+# Insertion order of each cache environment's entries, so that the oldest can
+# be evicted when the cache is full.  Kept here, keyed by the environment's
+# identity, rather than as a binding inside the cache environment: a user
+# who hands over their own environment gets nothing written into it but the
+# grids.  A recycled address is harmless because the order is re-derived
+# from what is still bound before it is used.
+.gmt_cache_meta <- new.env(parent = emptyenv())
+
+.cache_env_id <- function(cache_env) format(cache_env)
+
+.cache_order <- function(cache_env) {
+  o <- get0(.cache_env_id(cache_env), envir = .gmt_cache_meta, inherits = FALSE)
+  if (is.character(o)) o else character(0)
+}
+
+.set_cache_order <- function(cache_env, order) {
+  assign(.cache_env_id(cache_env), order, envir = .gmt_cache_meta)
+  invisible(order)
 }
 
 # -----------------------------------------------------------------------------
@@ -216,6 +250,11 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   [create_grid_polygons()].
 #' @param ... Additional arguments forwarded to create_grid_polygons().
 #' @param cache_env Environment for memoized grids. Default .gmt_cache.
+#' @param max_entries Maximum number of grids the cache holds.  Default 50.
+#'   Once full, adding a grid evicts the one added earliest, so a loop over
+#'   many boundaries holds at most this many grids (about 2 MB per 2,500-cell
+#'   grid) rather than every grid it ever built for the life of the session.
+#'   \code{\link{clear_grid_cache}} empties it outright.
 #' @return An sf data frame with a stable poly_id column.  Note that the rows
 #'   are re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
 #'   which \code{\link{create_grid_polygons}} does not do: the same cell
@@ -236,8 +275,14 @@ create_grid_polygons_cached <- function(boundary,
                                         target_cells,
                                         type = c("square", "hex"),
                                         ...,
-                                        cache_env = .gmt_cache) {
+                                        cache_env = .gmt_cache,
+                                        max_entries = 50L) {
   type <- match.arg(type)
+  if (!is.numeric(max_entries) || length(max_entries) != 1L ||
+      !is.finite(max_entries) || max_entries < 1)
+    stop("create_grid_polygons_cached(): `max_entries` must be a single number >= 1.",
+         call. = FALSE)
+  max_entries <- as.integer(max_entries)
 
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
@@ -259,7 +304,18 @@ create_grid_polygons_cached <- function(boundary,
   out <- create_grid_polygons(bnd, target_cells = target_cells, type = type, ...)
   out <- ensure_stable_poly_id(out)
 
+  # Evict the oldest entries first when the cache is full.  The order vector
+  # is re-derived from what is actually bound, so an entry removed behind
+  # our back (rm() by the user) does not count against the cap.
+  order <- .cache_order(cache_env)
+  order <- order[vapply(order, exists, logical(1), envir = cache_env,
+                        inherits = FALSE)]
+  while (length(order) >= max_entries) {
+    rm(list = order[1L], envir = cache_env)
+    order <- order[-1L]
+  }
   assign(key, out, envir = cache_env)
+  .set_cache_order(cache_env, c(order, key))
   out
 }
 
@@ -286,5 +342,7 @@ clear_grid_cache <- function(cache_env = .gmt_cache) {
   keys <- ls(envir = cache_env, all.names = TRUE)
   keys <- keys[startsWith(keys, "spatialkit_grid::")]
   if (length(keys)) rm(list = keys, envir = cache_env)
+  if (exists(.cache_env_id(cache_env), envir = .gmt_cache_meta, inherits = FALSE))
+    rm(list = .cache_env_id(cache_env), envir = .gmt_cache_meta)
   invisible(length(keys))
 }

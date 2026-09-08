@@ -52,12 +52,21 @@ off-diagonal correlation recovers \code{1 + (n - 1) * rho} exactly -- but
 lets correlation decay with distance, which matters increasingly as
 cells get larger and Kish's single-\code{rho} assumption degrades. Supply
 the fit via \code{sac}, or it is estimated when \code{response_var} is given and
-'gstat' is available.}
+'gstat' is available. Exponential, spherical and Gaussian models are
+supported, with a nugget and with several structured components
+(each weighted by its partial sill); a model of any other family
+falls back to \code{deff = 1} with a warning naming it.}
 \item{\code{"kish"}}{Estimate per-variable-type intra-class correlations
 (ICCs) from the grouped data using a one-way random-effects ANOVA
 decomposition — one ICC for the response variable and a separate
 ICC for the predictor variables — then apply Kish's formula per
-cell: \code{deff_i = 1 + (n_i - 1) * rho}. When multiple columns are
+cell: \code{deff_i = 1 + (n_i - 1) * rho}. The ICC is the ANOVA
+(method-of-moments) estimator with Donner's \code{n0} for unequal cell
+sizes, not the REML estimate a mixed model returns: on a single
+unbalanced draw the two can differ by 0.1--0.2 (one check with cell
+sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
+while balanced designs agree to about 0.01. Neither is wrong, so do
+not read the difference as a defect. When multiple columns are
 pooled for a single ICC estimate (e.g. several predictor variables),
 each column is z-scored before pooling so that variables with
 different scales contribute equally to the variance decomposition.

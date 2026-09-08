@@ -29,9 +29,14 @@ cv_bayes(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
-value, or a bare list of \code{list(train =, test =)} pairs of
-\code{..row_id} values.  Train and test must be disjoint — a fold that
+\item{folds}{Optional fold definitions, in any of three shapes: a
+\code{\link{make_folds}()} return value; a bare list of
+\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
+of fold labels, one per row, which becomes leave-that-label-out splits.
+The label vector is how folds built by another package are used here --
+\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
+refused by name.  Train and test must be disjoint — a fold that
 trains on its own test rows is not a cross-validation split and is refused
 with an error — and IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
@@ -79,7 +84,13 @@ A list with \code{overall}, \code{fold_metrics},
 \code{predictions}, \code{folds}, \code{n_folds_attempted},
 \code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
 The two fold counts make a run where every fold failed visible in the
-return value rather than only in a warning.
+return value rather than only in a warning.  \code{predictions} carries,
+beyond the columns its siblings share, \code{yhat_sd}: the posterior
+predictive standard deviation of each held-out row, from the same draws
+that give the coverage below (\code{NA} when
+\code{compute_pred_intervals = FALSE} or the draws failed for that fold).
+\code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
+see \code{\link{cv_spatial}}.
 The \code{predictive_coverage} entries (one per
 \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
 folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold

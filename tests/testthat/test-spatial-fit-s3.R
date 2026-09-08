@@ -154,8 +154,8 @@ test_that("print.summary.spatial_fit distinguishes in-sample from out-of-bag", {
   txt <- .s3_printed(summary(fit))
   expect_match(txt, "Summary of <lmsurf_fit> fit (n = 60)", fixed = TRUE)
   expect_match(txt, "In-sample metrics:", fixed = TRUE)
-  expect_match(txt, "RMSE  =")
-  expect_match(txt, "MAE   =")
+  expect_match(txt, "RMSE\\s+=")
+  expect_match(txt, "MAE\\s+=")
   # The R-squared label carries a superscript 2, which capture.output()
   # renders as a <U+00B2> escape in a C locale -- match around it, not on it.
   expect_match(txt, "\\n    R\\S*\\s*= 0\\.")

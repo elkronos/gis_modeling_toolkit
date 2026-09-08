@@ -178,7 +178,21 @@ assign_features_to_polygons <- function(
 #'
 #' Converts a fitted variogram to a correlation function of distance, giving
 #' the correlation between two \strong{distinct} observations a distance
-#' \code{h} apart: \code{partial_sill * f(h) / (nugget + partial_sill)}.
+#' \code{h} apart.  For a nested model with nugget \eqn{c_0} and structured
+#' components \eqn{(c_i, a_i)} the semivariance is
+#' \eqn{\gamma(h) = c_0 + \sum_i c_i (1 - f_i(h))}, so the correlation is
+#' \eqn{1 - \gamma(h) / (c_0 + \sum_i c_i) = \sum_i c_i f_i(h) / (c_0 + \sum_i c_i)}:
+#' every structured component contributes, weighted by its partial sill.  The
+#' function used to read the single largest component only, which for a
+#' user-built \code{Nug + Exp + Sph} model gave 0.108 at \code{h = 200} where
+#' \code{gstat::variogramLine()} implies 0.197.
+#'
+#' Only the exponential, spherical and Gaussian families are implemented.  A
+#' model carrying any other family (Matern, power, circular, ...) returns
+#' \code{NULL} rather than being silently read as exponential, so the caller
+#' falls back to \code{deff = 1} and says so.  \code{\link{estimate_sac_range}}
+#' only ever produces single-component \code{Exp} or \code{Sph} models; other
+#' shapes reach this function through a user-built \code{sac}.
 #'
 #' There is deliberately no special case at \code{h = 0}.  The nugget captures
 #' measurement error and variation below the sampling resolution, so two
@@ -189,43 +203,52 @@ assign_features_to_polygons <- function(
 #' @param vgm_model A fitted \code{gstat} variogram model (a data frame with
 #'   \code{model}, \code{psill} and \code{range} columns).
 #' @return A function of distance returning correlation, or \code{NULL} if the
-#'   model cannot be interpreted.
+#'   model cannot be interpreted or uses a family this function does not
+#'   implement.
 #' @keywords internal
 #' @noRd
 .vgm_correlation_fn <- function(vgm_model) {
   if (is.null(vgm_model) || !is.data.frame(vgm_model)) return(NULL)
   if (!all(c("model", "psill", "range") %in% names(vgm_model))) return(NULL)
 
-  is_nug <- as.character(vgm_model$model) == "Nug"
+  fam    <- as.character(vgm_model$model)
+  is_nug <- fam == "Nug"
   nugget <- sum(vgm_model$psill[is_nug], na.rm = TRUE)
   struct <- vgm_model[!is_nug, , drop = FALSE]
   if (nrow(struct) == 0L) return(NULL)
+  if (!all(as.character(struct$model) %in% names(.vgm_shape_fns))) return(NULL)
 
   psill <- sum(struct$psill, na.rm = TRUE)
   total <- nugget + psill
   if (!is.finite(total) || total <= 0 || !is.finite(psill) || psill <= 0)
     return(NULL)
+  c_i <- as.numeric(struct$psill)
+  a_i <- as.numeric(struct$range)
+  if (any(!is.finite(c_i) | c_i < 0) || any(!is.finite(a_i) | a_i <= 0))
+    return(NULL)
+  f_i <- .vgm_shape_fns[as.character(struct$model)]
 
-  rng  <- struct$range[which.max(struct$psill)]
-  type <- as.character(struct$model[which.max(struct$psill)])
-  if (!is.finite(rng) || rng <= 0) return(NULL)
-
-  ratio <- psill / total
   function(h) {
-    f <- switch(
-      type,
-      Exp = exp(-h / rng),
-      Sph = ifelse(h >= rng, 0, 1 - 1.5 * (h / rng) + 0.5 * (h / rng)^3),
-      Gau = exp(-(h / rng)^2),
-      exp(-h / rng)                     # sensible default for other families
-    )
+    num <- 0
+    for (i in seq_along(c_i)) num <- num + c_i[i] * f_i[[i]](h, a_i[i])
     # No special case at h = 0: this is the correlation between two DISTINCT
     # observations, which the nugget discounts even when they coincide.  An
     # observation with itself correlates at 1, and the caller imposes that on
     # the diagonal.
-    pmin(pmax(ratio * f, 0), 1)
+    pmin(pmax(num / total, 0), 1)
   }
 }
+
+# Correlation shape f(h; a) of each supported gstat family, so that the
+# semivariance of a component with partial sill c is c * (1 - f(h; a)).
+# These are gstat's own parametrisations (variogramLine() reproduces them):
+# the exponential's `a` is the range PARAMETER, reaching 95% of the sill at
+# 3a; the spherical reaches its sill exactly at a; the Gaussian at ~1.73a.
+.vgm_shape_fns <- list(
+  Exp = function(h, a) exp(-h / a),
+  Sph = function(h, a) ifelse(h >= a, 0, 1 - 1.5 * (h / a) + 0.5 * (h / a)^3),
+  Gau = function(h, a) exp(-(h / a)^2)
+)
 
 
 #' Standard error of a cell mean under a design effect
@@ -516,12 +539,21 @@ assign_features_to_polygons <- function(
 #'       lets correlation decay with distance, which matters increasingly as
 #'       cells get larger and Kish's single-`rho` assumption degrades. Supply
 #'       the fit via `sac`, or it is estimated when `response_var` is given and
-#'       'gstat' is available.}
+#'       'gstat' is available. Exponential, spherical and Gaussian models are
+#'       supported, with a nugget and with several structured components
+#'       (each weighted by its partial sill); a model of any other family
+#'       falls back to `deff = 1` with a warning naming it.}
 #'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
 #'       (ICCs) from the grouped data using a one-way random-effects ANOVA
 #'       decomposition — one ICC for the response variable and a separate
 #'       ICC for the predictor variables — then apply Kish's formula per
-#'       cell: `deff_i = 1 + (n_i - 1) * rho`. When multiple columns are
+#'       cell: `deff_i = 1 + (n_i - 1) * rho`. The ICC is the ANOVA
+#'       (method-of-moments) estimator with Donner's `n0` for unequal cell
+#'       sizes, not the REML estimate a mixed model returns: on a single
+#'       unbalanced draw the two can differ by 0.1--0.2 (one check with cell
+#'       sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
+#'       while balanced designs agree to about 0.01. Neither is wrong, so do
+#'       not read the difference as a defect. When multiple columns are
 #'       pooled for a single ICC estimate (e.g. several predictor variables),
 #'       each column is z-scored before pooling so that variables with
 #'       different scales contribute equally to the variance decomposition.
@@ -916,10 +948,23 @@ summarize_by_cell <- function(assigned_points_sf,
     }
     cor_fn <- .vgm_correlation_fn(vgm_model)
     if (is.null(cor_fn)) {
-      .log_warn(paste0("summarize_by_cell(): deff = \"variogram\" requires a ",
-                       "fitted variogram model; none was available (pass one ",
-                       "via `sac = estimate_sac_range(...)`). Falling back to ",
-                       "deff = 1."))
+      # Name the family when that is the reason: a user-built Matern or power
+      # model used to be read as exponential without a word.
+      other <- if (is.data.frame(vgm_model) && "model" %in% names(vgm_model))
+        setdiff(unique(as.character(vgm_model$model)),
+                c("Nug", names(.vgm_shape_fns))) else character(0)
+      if (length(other)) {
+        .warn_and_log(paste0("summarize_by_cell(): deff = \"variogram\" ",
+                             "supports exponential, spherical and Gaussian ",
+                             "variogram models (plus a nugget); the supplied ",
+                             "model uses %s. Falling back to deff = 1."),
+                      paste(sQuote(other, FALSE), collapse = ", "))
+      } else {
+        .log_warn(paste0("summarize_by_cell(): deff = \"variogram\" requires a ",
+                         "fitted variogram model; none was available (pass one ",
+                         "via `sac = estimate_sac_range(...)`). Falling back to ",
+                         "deff = 1."))
+      }
       use_vgm <- FALSE
       deff <- 1
     } else {

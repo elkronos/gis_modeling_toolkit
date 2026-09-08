@@ -206,7 +206,7 @@ print.spatial_fit <- function(x, ...) {
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
     if (!isTRUE(x$info$convergence_ok))
-      cat("  ** Convergence warnings present \u2014 see $info$convergence_diagnostics\n")
+      cat("  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
 }
@@ -303,13 +303,15 @@ print.summary.spatial_fit <- function(x, ...) {
   else
     cat("\n  In-sample metrics:\n")
   m <- x$in_sample
-  cat(sprintf("    RMSE  = %.4f\n", m$RMSE))
-  cat(sprintf("    MAE   = %.4f\n", m$MAE))
-  cat(sprintf("    R\u00b2    = %.4f\n", m$R2))
+  # ASCII on purpose: a superscript two rendered as R<U+00B2> on every
+  # non-UTF-8 console, and the labels were not aligned.
+  cat(sprintf("    RMSE    = %.4f\n", m$RMSE))
+  cat(sprintf("    MAE     = %.4f\n", m$MAE))
+  cat(sprintf("    R^2     = %.4f\n", m$R2))
   if (is.finite(m$Adj_R2 %||% NA_real_))
-    cat(sprintf("    Adj R\u00b2= %.4f\n", m$Adj_R2))
+    cat(sprintf("    Adj R^2 = %.4f\n", m$Adj_R2))
   if (is.finite(m$SMAPE %||% NA_real_))
-    cat(sprintf("    SMAPE = %.2f%%\n", m$SMAPE))
+    cat(sprintf("    SMAPE   = %.2f%%\n", m$SMAPE))
   invisible(x)
 }
 

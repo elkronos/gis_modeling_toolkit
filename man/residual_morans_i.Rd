@@ -54,6 +54,13 @@ back to \code{"randomisation"} with a logged warning if the design
 cannot be rebuilt, and warns (but proceeds) if the residuals are not
 the OLS residuals on it, in which case the moments are approximate.}
 }
+Both \code{"auto"} and \code{"residual"} also fall back to
+\code{"randomisation"} when the residual degrees of freedom
+\eqn{n - p} are below 4 (the residual variance divides by
+\eqn{(n-p)(n-p+2)} and the normal approximation means nothing there);
+\code{"residual"} logs a warning when it does, \code{"auto"} does not,
+and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
+the result rather than assuming.
 See \strong{Which null, and when it is approximate} above.}
 }
 \value{

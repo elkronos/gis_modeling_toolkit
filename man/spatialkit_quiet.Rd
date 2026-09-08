@@ -7,11 +7,16 @@
 spatialkit_quiet(quiet = TRUE)
 }
 \arguments{
-\item{quiet}{Logical.  \code{TRUE} (default) silences the console echo;
-\code{FALSE} restores the WARN+ default.}
+\item{quiet}{\code{TRUE} (default) silences the console echo;
+\code{FALSE} restores the package default, WARN+.  A \pkg{logger}
+threshold (\code{logger::ERROR}, or the value a previous call returned)
+sets that level instead, which is how to put back exactly what was in
+force rather than the default: \code{old <- spatialkit_quiet();
+  spatialkit_quiet(old)}.}
 }
 \value{
-Invisibly, the threshold that was in force before the change.
+Invisibly, the threshold that was in force before the change --
+a \pkg{logger} level that can be passed back as \code{quiet}.
 }
 \description{
 The package writes an INFO+ trace to a session temp file (logger appender
@@ -28,6 +33,7 @@ raises as real R warnings are unaffected by this function.
 }
 \examples{
 old <- spatialkit_quiet()      # console echo off
-spatialkit_quiet(FALSE)        # back to WARN+
+spatialkit_quiet(old)          # back to whatever it was
+spatialkit_quiet(FALSE)        # or back to the WARN+ default
 }
 \concept{utilities}

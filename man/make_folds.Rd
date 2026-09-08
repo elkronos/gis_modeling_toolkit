@@ -57,7 +57,16 @@ value; a reduction is logged.}
 \item{block_nx, block_ny}{Optional grid dimensions for block_kfold.
 Ignored when \code{block_size} or \code{auto_range} override them.}
 
-\item{block_multiplier}{Numeric; target blocks multiplier. Default 3.}
+\item{block_multiplier}{Numeric, default 3.  When neither \code{block_size}
+nor \code{block_nx}/\code{block_ny} is given, the automatic grid aims for
+\code{block_multiplier * k} blocks over the extent (aspect-preserving),
+so each fold holds out about \code{block_multiplier} blocks.  With 1,
+every fold is one contiguous region and the score depends heavily on
+which region each fold happened to get; with many, the blocks shrink
+towards single points and the scheme drifts back towards random k-fold.
+3 is a compromise between those two, not a published constant.  The
+block size that matters for leakage is the autocorrelation range, which
+is what \code{block_size} and \code{auto_range} control.}
 
 \item{block_size}{Optional positive numeric minimum block edge length,
 \strong{in the units of the CRS the folds are built in}.  When supplied,
@@ -83,7 +92,14 @@ dimensions, the extent and the CRS's units, rather than being built.}
 range is estimated via \code{estimate_sac_range()} — which fits
 directional variograms to account for anisotropy — and used as the
 minimum \code{block_size}.  Requires \code{response_var}.  An explicit
-\code{block_size} takes precedence.  Default \code{FALSE}.}
+\code{block_size} takes precedence.  Default \code{FALSE}.  Sizing
+blocks from the autocorrelation range is the recommendation of Roberts
+et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019) automates;
+note that \pkg{blockCV} takes the fitted variogram's range
+\emph{parameter} as the block size, whereas this uses the
+\emph{effective} range \code{estimate_sac_range()} returns -- three
+times that parameter for an exponential fit -- so its blocks are larger
+than \pkg{blockCV}'s from the same variogram.}
 
 \item{range_frac}{Passed through to \code{estimate_sac_range()} when
 \code{auto_range = TRUE}.  A fitted range beyond the longest lag the
@@ -122,10 +138,15 @@ Passed to \code{estimate_sac_range()} for residual variogram estimation.}
 data any fold's training set may be reduced to by neighbour exclusion.
 Default \code{0.5}, as in \code{CAST::nndm()}.}
 
-\item{phi}{For \code{method = "nndm"}: the largest nearest-neighbour
-distance the exclusion will push a held-out point to, in the CRS the
-folds are built in.  Default \code{NULL} = the largest
-prediction-to-training distance.}
+\item{phi}{For \code{method = "nndm"}: the distance up to which the two
+nearest-neighbour distance distributions are matched, in the CRS the
+folds are built in; the exclusion never pushes a held-out point's
+nearest neighbour beyond it.  In Mila et al. (2022) -- and
+\code{CAST::nndm()} -- \eqn{\phi} is the autocorrelation range of the
+outcome: beyond it observations are effectively independent, so
+matching is unnecessary.  \code{\link{estimate_sac_range}()} gives such
+a value.  Default \code{NULL} = the largest prediction-to-training
+distance, which matches everywhere (\code{CAST}'s \code{phi = "max"}).}
 
 \item{drop_empty_blocks}{Logical. Default TRUE.}
 }
@@ -223,6 +244,19 @@ Mila, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
 distance matching Leave-One-Out Cross-Validation for map validation.
 \emph{Methods in Ecology and Evolution} \strong{13}, 1304-1316.
 \doi{10.1111/2041-210X.13851}
+
+Roberts, D. R., Bahn, V., Ciuti, S., Boyce, M. S., Elith, J.,
+Guillera-Arroita, G., Hauenstein, S., Lahoz-Monfort, J. J., Schroder, B.,
+Thuiller, W., Warton, D. I., Wintle, B. A., Hartig, F. and Dormann, C. F.
+(2017). Cross-validation strategies for data with temporal, spatial,
+hierarchical, or phylogenetic structure. \emph{Ecography} \strong{40},
+913-929. \doi{10.1111/ecog.02881}
+
+Valavi, R., Elith, J., Lahoz-Monfort, J. J. and Guillera-Arroita, G. (2019).
+blockCV: An R package for generating spatially or environmentally separated
+folds for k-fold cross-validation of species distribution models.
+\emph{Methods in Ecology and Evolution} \strong{10}, 225-232.
+\doi{10.1111/2041-210X.13107}
 }
 \seealso{
 Other cross-validation: 

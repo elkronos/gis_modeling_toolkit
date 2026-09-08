@@ -654,7 +654,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
       error = function(e) {
         if (identical(on_transform_error, "set_crs")) {
           .warn_and_log(
-            "harmonize_crs(): st_transform() failed (%s); falling back to st_set_crs(). WARNING: coordinates are NOT reprojected \u2014 downstream distances, joins, and areas may be wrong. Set on_transform_error='stop' (the default) to surface this error instead.",
+            "harmonize_crs(): st_transform() failed (%s); falling back to st_set_crs(). WARNING: coordinates are NOT reprojected -- downstream distances, joins, and areas may be wrong. Set on_transform_error='stop' (the default) to surface this error instead.",
             conditionMessage(e)
           )
           sf::st_set_crs(x, to)
