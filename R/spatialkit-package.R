@@ -25,8 +25,11 @@
 #'     explicit spatial Gaussian process with calibrated uncertainty, or
 #'     \code{\link{fit_rf_model}()} for predictive accuracy. All three return a
 #'     \code{spatial_fit} with common \code{predict()}, \code{fitted()},
-#'     \code{residuals()}, \code{coef()} and \code{plot()} methods; write your
-#'     own backend with \code{\link{new_spatial_fit}()}.
+#'     \code{residuals()}, \code{summary()} and \code{plot()} methods, and
+#'     \code{coef()} on the two that have coefficients (a forest has none, so
+#'     \code{coef()} on an \code{rf_fit} errors by design; use
+#'     \code{$info$importance}); write your own backend with
+#'     \code{\link{new_spatial_fit}()}.
 #'   \item \strong{Validate.} \code{\link{cv_gwr}()},
 #'     \code{\link{cv_bayes}()}, \code{\link{cv_rf}()} or the model-agnostic
 #'     \code{\link{cv_spatial}()} score a model on held-out blocks;

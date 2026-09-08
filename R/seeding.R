@@ -100,7 +100,7 @@ get_voronoi_seeds <- function(boundary = NULL,
           stop("get_voronoi_seeds(): k-means seeds require 'boundary' (or provide 'sample_points').",
                call. = FALSE)
         b <- boundary_union(boundary)
-        cloud_n <- max(2000L, 50L * as.integer(n))
+        cloud_n <- .kmeans_cloud_size(n)
         cloud_geom <- .robust_st_sample(b, cloud_n)
         cloud_sfc <- sf::st_sfc(cloud_geom, crs = sf::st_crs(boundary))
         cloud <- sf::st_sf(geometry = cloud_sfc)
@@ -341,4 +341,21 @@ voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
   out$seed_id <- seq_len(nrow(out))
   out$method  <- "random"
   out
+}
+
+
+#' Size of the point cloud k-means seeding draws inside the boundary
+#'
+#' Fifty candidate points per requested seed, and never fewer than 2,000.
+#' Computed in double precision: \code{50L * as.integer(n)} overflowed to
+#' \code{NA} (with a warning) for \code{n} above 42,949,672, and
+#' \code{max(2000L, NA)} is \code{NA}, which \code{st_sample()} then refused
+#' with an unrelated message.
+#'
+#' @param n Number of seeds requested.
+#' @return A single positive number.
+#' @keywords internal
+#' @noRd
+.kmeans_cloud_size <- function(n) {
+  max(2000, 50 * as.numeric(n))
 }

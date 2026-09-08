@@ -58,9 +58,9 @@ different number to check how sensitive the estimate is to the subsample.
 Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.}
 }
 \value{
-A single value of class \code{sac_range}, which behaves as an
-ordinary number.  There are three shapes, and they carry different
-attributes:
+A single number, of class \code{sac_range} in the first two of the
+three shapes below and a bare \code{NA} in the third; all three behave
+as an ordinary number.  The shapes carry different attributes:
 \describe{
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
@@ -87,11 +87,18 @@ carries \code{max_dist}, \code{cutoff_dist}, \code{variogram} and
 \code{rejected_reason}, plus \code{crs} — so the units the rejected
 number was in stay recoverable, which is what
 \code{plot(type = "variogram")} labels its axis from.  It does
-\strong{not} carry \code{directional} or \code{anisotropy}.}
+\strong{not} carry \code{directional} or \code{anisotropy}.  The
+same shape, with \code{rejected_range = NA} and
+\code{variogram_model = NULL}, is returned when no variogram model
+could be fitted at all (both the exponential and the spherical fit
+singular, which is what a flat, nugget-only variogram produces);
+\code{rejected_reason} says so and the empirical variogram is still
+attached.}
 \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
-could not be attempted or produced nothing at all (\pkg{gstat}
-missing, fewer than 30 finite values, a variable with no variance, a
-degenerate extent, or a singular variogram fit).}
+could not be attempted at all: \pkg{gstat} missing, fewer than 30
+finite values, a variable with no variance, or a degenerate extent.
+Without \pkg{gstat} nothing is fitted, so none of the attributes
+above exist either.}
 }
 Attributes and the class do not affect \code{is.na()} or
 \code{is.finite()}, so every downstream guard treats all three the same
@@ -99,8 +106,13 @@ way it always did.
 }
 \description{
 Fits exponential (or spherical) variogram models and returns the
-\emph{effective range} — the distance at which the semivariance reaches
-~95 \\% of the sill.
+\emph{effective range}: for the exponential model, three times the fitted
+range parameter, which is where the semivariance reaches ~95 \\% of the
+sill; for the spherical model -- fitted only when the exponential fit is
+singular -- the fitted range itself, which is where the spherical
+semivariance reaches its sill exactly.  Both are the distance beyond which
+two observations are (near) uncorrelated, which is what a block or a
+buffer has to exceed.
 }
 \details{
 The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
@@ -151,12 +163,28 @@ that CV blocks are at least as wide as the autocorrelation range.
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
-  set.seed(1)
-  n <- 80
+  # A Gaussian random field with an exponential covariance: range
+  # parameter 100, so the true effective range is 3 x 100 = 300, plus a
+  # small nugget.
+  set.seed(9)
+  n <- 150
   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
-  xy$z <- sin(xy$x / 200) + rnorm(n, sd = 0.2)
+  D  <- as.matrix(dist(xy))
+  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) \%*\% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  estimate_sac_range(pts, response_var = "z")
+  r <- estimate_sac_range(pts, response_var = "z")
+  r                              # the effective range, in metres
+  attr(r, "directional")         # the four directional ranges
+  attr(r, "variogram_model")     # the fitted gstat model behind it
+
+  # A field whose range the data cannot pin down: the variogram never
+  # reaches a sill within the lags fitted, so the answer is NA with the
+  # refused value attached rather than a long range asserted.
+  xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+  r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+                           response_var = "trend")
+  r2
+  attr(r2, "rejected_range")
 }
 }
 \seealso{

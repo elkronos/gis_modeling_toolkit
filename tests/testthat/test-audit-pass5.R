@@ -280,11 +280,21 @@ test_that("block_kfold refuses a grid it cannot build", {
   # and exhausted memory instead of being refused.  create_grid_polygons()
   # guards exactly this and names the CRS units.
   d <- .p5_pts(n = 60, extent = 40000)
-  expect_error(make_folds(d, k = 4, method = "block_kfold", block_size = 5),
-               "above the")
-  expect_error(make_folds(d, k = 4, method = "block_kfold", block_size = 5),
-               "metre", fixed = TRUE)
-  # A sane block size still works.
+  # Should the guard ever regress, the 8000 x 8000 grid it exists to refuse
+  # must not actually be attempted (it took >5 GB and was stopped by hand
+  # when the mutation-testing reviewer tried): the grid builder is stubbed
+  # out for the two refused calls, so a regression fails fast and by name.
+  local({
+    local_mocked_bindings(
+      st_make_grid = function(...)
+        stop("sf::st_make_grid() was reached: the cell-count guard did not fire"),
+      .package = "sf")
+    expect_error(make_folds(d, k = 4, method = "block_kfold", block_size = 5),
+                 "above the")
+    expect_error(make_folds(d, k = 4, method = "block_kfold", block_size = 5),
+                 "metre", fixed = TRUE)
+  })
+  # A sane block size still works, with the real builder.
   expect_type(suppressMessages(
     make_folds(d, k = 4, method = "block_kfold", block_size = 8000)), "list")
 })

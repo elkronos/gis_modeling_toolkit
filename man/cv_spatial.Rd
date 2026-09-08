@@ -38,9 +38,14 @@ variable sweep -- is already nested and leak-free.  The \code{subclass} it
 stamps must have a \code{predict.<subclass>()} method registered, because
 that is how each fold is scored.}
 
-\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
-value, or a bare list of \code{list(train =, test =)} pairs of
-\code{..row_id} values.  Train and test must be disjoint — a fold that
+\item{folds}{Optional fold definitions, in any of three shapes: a
+\code{\link{make_folds}()} return value; a bare list of
+\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
+of fold labels, one per row, which becomes leave-that-label-out splits.
+The label vector is how folds built by another package are used here --
+\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
+refused by name.  Train and test must be disjoint — a fold that
 trains on its own test rows is not a cross-validation split and is refused
 with an error — and IDs naming no row in the prepared data are dropped with
 a logged count.
@@ -88,7 +93,11 @@ run that happened to score \code{NA}, so compare them before trusting
 \code{predictions} carries the fold's index in the \code{folds} object
 that was supplied, so it lines up with
 \code{make_folds()$assignment$fold} even when some folds were unusable
-and dropped.
+and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
+out-of-sample predictions come from \code{k} separately fitted models and
+have no single parameter count to adjust for.  The per-fold
+\code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
+supplied, and is \code{NA} otherwise.
 }
 \description{
 Run K-fold CV for any model that returns a \code{spatial_fit} object.

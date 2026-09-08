@@ -883,6 +883,133 @@ touched, and the figures quoted are from those reproductions.
   unrelated objects. Cache keys now carry a `spatialkit_grid::` prefix and
   nothing else is touched.
 
+### Sixth audit pass: the Low list
+
+The reviewers' Low-severity notes, handled after the headline findings. Two
+change a number; the rest are guards, conveniences and documentation.
+
+* `summarize_by_cell(deff = "variogram")` now uses **every** structured
+  component of a nested variogram model, each weighted by its partial sill,
+  which is the correlation the model implies (`1 - gamma(h) / sill`). It read
+  the single largest component, so a user-built `Nug + Exp + Sph` model gave
+  a correlation of 0.108 at 200 m where `gstat::variogramLine()` implies
+  0.197, and the design effects and standard errors with it. Models from
+  `estimate_sac_range()` are single-component and are unaffected. A model of
+  a family the function does not implement (Matern, power, circular, ...)
+  was silently read as exponential; it now falls back to `deff = 1` with a
+  warning that names the family. Exponential, spherical and Gaussian are
+  supported.
+
+* `cv_bayes()$predictions$yhat_sd` is the posterior predictive standard
+  deviation of each held-out row, from the same draws that give the coverage
+  columns. It was an unconditional `NA` placeholder. It stays `NA` when
+  `compute_pred_intervals = FALSE` or the draws failed for a fold, and it is
+  documented.
+
+* `fit_gwr_model()` refuses `n <= p + 1` observations with one error, before
+  touching the backend. Such a fit cannot have a residual degree of freedom
+  in any window; `n = 2` used to warn three times ("only 2 observations",
+  "fallback bandwidth", "2 of 2 local regressions singular") and return a fit
+  whose fitted values were all `NA`.
+
+* `create_grid_polygons_cached()` gains `max_entries` (default 50): once the
+  cache holds that many grids, adding one evicts the earliest-added. It never
+  evicted, so a loop over a thousand boundaries held every grid (about 2 MB
+  per 2,500 cells) for the life of the session. Nothing but the grids is
+  written into a caller-supplied `cache_env`; the insertion order lives
+  inside the package. The cache key also hashes the package version, so a
+  cache that outlives an upgrade cannot serve a grid built by an older
+  `create_grid_polygons()`.
+
+* `spatialkit_quiet()` accepts a `logger` threshold as well as `TRUE`/`FALSE`,
+  and the value it returns can be passed back: `old <- spatialkit_quiet();
+  spatialkit_quiet(old)` restores exactly the level that was in force.
+  `spatialkit_quiet(FALSE)` put back the package default (WARN) whatever had
+  been set, and the returned value was refused as "must be TRUE or FALSE".
+
+* `.onUnload()` disarms both `logger` appenders, so the `spatialkit` logger
+  namespace no longer keeps pointing at the session's temp-file path after
+  `unloadNamespace("spatialkit")`. `.onLoad()` re-registers them.
+
+* `residual_morans_i()` documents the second reason `"residual"` (and
+  `"auto"`) falls back to the randomisation null: fewer than four residual
+  degrees of freedom, where the residual variance formula divides by
+  `(n - p)(n - p + 2)`. `"residual"` logs a warning when it does, `"auto"`
+  does not, and `df` is then `n - 1`.
+
+* `estimate_sac_range()` states what "effective range" is for each model --
+  three times the range parameter for the exponential fit (95% of the sill),
+  the range parameter itself for the spherical fallback (100%) -- and its
+  return-value documentation matches the code: the no-model case (both fits
+  singular) returns the classed `NA` with `rejected_reason` set, and only the
+  cannot-even-start cases (no `gstat`, too few values, no variance, a
+  degenerate extent) return a bare `NA`. Its example now demonstrates a
+  fitted range on a simulated field with a known one (3 x 100 = 300), and a
+  refusal on a field whose range the data cannot pin down.
+
+* `make_folds()` documents what `block_multiplier` does (the automatic grid
+  aims for `block_multiplier * k` blocks, so each fold holds out about that
+  many; 3 is a compromise, not a published constant), cites Roberts et al.
+  (2017) and `blockCV` (Valavi et al. 2019) for sizing blocks from the
+  autocorrelation range, and notes that `blockCV` takes the fitted variogram's
+  range *parameter* where `auto_range` takes the *effective* range -- three
+  times that parameter for an exponential fit, so larger blocks. `phi` for
+  `method = "nndm"` is explained as Mila et al. (2022) define it: the
+  autocorrelation range beyond which matching is unnecessary, which
+  `estimate_sac_range()` supplies.
+
+* `summarize_by_cell(deff = "kish")` says which ICC estimator it is (ANOVA
+  with Donner's `n0`, not REML) and how far the two can differ on an
+  unbalanced draw, so the difference is not read as a defect;
+  `area_of_applicability()`'s training-DI sentence now says what the code
+  does (each fold's actual training rows, not "everything outside the fold");
+  `?spatialkit` no longer lists `coef()` among the methods all three backends
+  share (a forest has none); the internal elbow helper no longer claims to
+  match Kneedle, which it does not on shouldered curves; the GP basis
+  diagnostic's code comment attributes its 10% posterior-mass trigger to this
+  package rather than to Riutort-Mayol et al. (2023).
+
+* `summary()` on a fit prints `R^2` and `Adj R^2` in ASCII with aligned
+  labels (the superscript two rendered as `R<U+00B2>` on non-UTF-8 consoles,
+  and `Adj R²=` had no space); `print()` on a random forest likewise; the six
+  console messages that carried an em dash use `--`. `coef()` on an `rf_fit`
+  prefixes its error `coef.rf_fit():` like its siblings.
+
+* `get_voronoi_seeds(method = "kmeans")` sizes its candidate cloud in double
+  precision; `50L * as.integer(n)` overflowed to `NA` above 42,949,672 seeds.
+
+* README: the opening leakage example says it needs `ranger`; the
+  no-viable-models example is assigned so that it does not print every fold
+  table on a machine that has the backends; the `auto_range` and `cv_bayes()`
+  failure examples show every line the console actually prints; the
+  installation table no longer suggests installing `loo` separately (`brms`
+  installs and calls it); the "logged note" from `determine_optimal_levels()`
+  is identified as an INFO-level line in the session log file, not console
+  output; the roxygen2 sentence no longer names a version or a `RoxygenNote`
+  field.
+
+* The memory-guard test for `make_folds(block_kfold)` stubs out
+  `sf::st_make_grid()` for the two refused calls, so a regression of the guard
+  fails fast by name instead of attempting an 8000 x 8000 grid.
+
+* Every `cv_*()` refuses a fold list whose splits carry no `train`/`test`
+  element, with an error that names the problem. It read `f$train` / `f$test`
+  straight, got `NULL` for both, and built empty folds -- so the row-coverage
+  warning fired and blamed folds "built on a different or subsetted layer",
+  which was not the cause, and the run returned an all-`NA` `overall` with
+  `n_folds_succeeded = 0`. `area_of_applicability()` had always refused the
+  same input by name; the two now agree. When the splits look positional (two
+  unnamed vectors each) the error says so and points at the fold label vector
+  instead.
+
+* The `folds` argument of every `cv_*()` documents all three shapes it has
+  accepted since the label vector was added earlier in this pass -- a
+  `make_folds()` result, a list of `list(train =, test =)` splits, or a vector
+  of fold labels -- where the help listed only the first two. The label vector
+  is what makes folds from another package usable directly:
+  `blockCV::cv_spatial()` returns one as `$folds_ids` (its `$folds_list` holds
+  two unnamed vectors per fold, which is the shape now refused by name).
+
 ## Bug fixes
 
 * Data carrying **no CRS** works again throughout. `ensure_projected()` now

@@ -368,9 +368,14 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
-#' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
-#'   value, or a bare list of \code{list(train =, test =)} pairs of
-#'   \code{..row_id} values.  Train and test must be disjoint — a fold that
+#' @param folds Optional fold definitions, in any of three shapes: a
+#'   \code{\link{make_folds}()} return value; a bare list of
+#'   \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
+#'   of fold labels, one per row, which becomes leave-that-label-out splits.
+#'   The label vector is how folds built by another package are used here --
+#'   \code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+#'   \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
+#'   refused by name.  Train and test must be disjoint — a fold that
 #'   trains on its own test rows is not a cross-validation split and is refused
 #'   with an error — and IDs naming no row in the prepared data are dropped with
 #'   a logged count.
@@ -617,7 +622,7 @@ residuals.rf_fit <- function(object, ...) {
 #' @return Never returns; always signals an error.
 #' @export
 coef.rf_fit <- function(object, ...) {
-  stop("coef(): a random forest has no coefficients. For per-predictor ",
+  stop("coef.rf_fit(): a random forest has no coefficients. For per-predictor ",
        "influence use `$info$importance` (", object$info$importance_type,
        " importance).", call. = FALSE)
 }
@@ -655,7 +660,7 @@ print.rf_fit <- function(x, ...) {
   # nothing at all.
   oob_rmse <- .num1(x$info$oob_rmse)
   if (is.finite(oob_rmse))
-    cat(sprintf("  OOB RMSE: %.4f   OOB R\u00b2: %.4f\n",
+    cat(sprintf("  OOB RMSE: %.4f   OOB R^2: %.4f\n",
                 oob_rmse, .num1(x$info$oob_r_squared)))
   imp <- x$info$importance
   if (!is.null(imp) && length(imp) > 0L) {

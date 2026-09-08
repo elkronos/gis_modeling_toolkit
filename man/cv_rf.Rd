@@ -26,9 +26,14 @@ cv_rf(
 
 \item{predictor_vars}{Predictor column names.}
 
-\item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
-value, or a bare list of \code{list(train =, test =)} pairs of
-\code{..row_id} values.  Train and test must be disjoint — a fold that
+\item{folds}{Optional fold definitions, in any of three shapes: a
+\code{\link{make_folds}()} return value; a bare list of
+\code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
+of fold labels, one per row, which becomes leave-that-label-out splits.
+The label vector is how folds built by another package are used here --
+\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
+refused by name.  Train and test must be disjoint — a fold that
 trains on its own test rows is not a cross-validation split and is refused
 with an error — and IDs naming no row in the prepared data are dropped with
 a logged count.}

@@ -9,7 +9,8 @@ create_grid_polygons_cached(
   target_cells,
   type = c("square", "hex"),
   ...,
-  cache_env = .gmt_cache
+  cache_env = .gmt_cache,
+  max_entries = 50L
 )
 }
 \arguments{
@@ -23,6 +24,12 @@ create_grid_polygons_cached(
 \item{...}{Additional arguments forwarded to create_grid_polygons().}
 
 \item{cache_env}{Environment for memoized grids. Default .gmt_cache.}
+
+\item{max_entries}{Maximum number of grids the cache holds.  Default 50.
+Once full, adding a grid evicts the one added earliest, so a loop over
+many boundaries holds at most this many grids (about 2 MB per 2,500-cell
+grid) rather than every grid it ever built for the life of the session.
+\code{\link{clear_grid_cache}} empties it outright.}
 }
 \value{
 An sf data frame with a stable poly_id column.  Note that the rows

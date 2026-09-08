@@ -19,10 +19,15 @@
 #' Heuristically selects the "elbow" from a vector of within-cluster sum of
 #' squares (WSS) values as a function of cluster count k.
 #'
-#' Replaced with the standard perpendicular-distance-to-line method: draw a
-#' line from (k_min, WSS_min) to (k_max, WSS_max), and pick the k whose
-#' WSS deviates most from that line. This is robust to smooth curves and
-#' matches the widely-used "kneedle" approach.
+#' The maximum-distance-to-chord rule: draw the chord from (k_min, WSS_min)
+#' to (k_max, WSS_max) and take the k whose WSS sags furthest below it (see
+#' \code{.below_chord()}).  This is the classical elbow construction.  It is
+#' \emph{not} Kneedle (Satopaa et al. 2011), which takes the first local
+#' maximum of the normalised difference curve that clears a sensitivity
+#' threshold: the two agree on smooth single-knee curves and can disagree on
+#' shouldered ones (for the 20-value curve 1000, 600, 560, 555, 552, 550,
+#' 300, 100, 60, 50, 45, 42, 40, 39, 38, 37, 36, 35, 34, 33 this rule answers
+#' k = 8 where Kneedle answers k = 2).
 #'
 #' @param wss Numeric vector of WSS indexed by k.
 #' @param max_k Integer upper bound on k.

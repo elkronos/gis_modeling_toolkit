@@ -460,9 +460,12 @@
 #' prediction point \eqn{p}, the DI is the distance to its nearest training
 #' point in that space, divided by the mean pairwise distance among training
 #' points. The same quantity is computed for the training data itself, using
-#' each point's nearest neighbour \emph{outside its own cross-validation fold},
-#' and the threshold is the largest training DI that is not an upper outlier.
-#' Prediction points at or below that threshold are inside the AOA.
+#' each point's nearest neighbour \emph{among the training rows of the fold
+#' that holds it out} -- everything outside its own fold for random and block
+#' folds, the smaller training set that buffered and NNDM folds actually leave
+#' (see the next section) -- and the threshold is the largest training DI that
+#' is not an upper outlier. Prediction points at or below that threshold are
+#' inside the AOA.
 #'
 #' The DI is invariant to the overall scale of \code{weights}: the numerator
 #' and the normaliser carry the same factor. Importance values can be passed
