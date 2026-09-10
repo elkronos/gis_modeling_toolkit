@@ -75,11 +75,24 @@ jobs:
           # development builds of both, and pak prefers the higher version --
           # which leaves CRAN's rstan compiling against headers that no longer
           # define boost::ecuyer1988.
+          #
+          # RcppEigen and BH are LinkingTo-only dependencies of rstan -- they
+          # appear in neither its Imports nor brms's -- so a BINARY rstan
+          # installs happily without them and nothing notices until the first
+          # Stan model is compiled, at which point rstan::stan_model() stops
+          # with "Eigen not found; call install.packages('RcppEigen')" (or the
+          # Boost equivalent) and every fit in test-bayes-smoke.R errors.  That
+          # is how run #8 failed, on a commit whose only change was roxygen
+          # comments: nothing in the package moved, the runner's resolved
+          # dependency set did.  Naming them here is what puts their headers
+          # on the runner.
           extra-packages: |
             any::rcmdcheck
             any::brms
             cran::StanHeaders
             cran::loo
+            cran::RcppEigen
+            cran::BH
             any::sp
             any::GWmodel
             any::gstat
@@ -87,11 +100,41 @@ jobs:
             any::Matrix
           needs: check
 
-      - name: Confirm brms is installed
+      - name: Confirm rstan can compile a Stan model
         run: |
-          if (!requireNamespace("brms", quietly = TRUE))
-            stop("brms not installed; this workflow has no purpose without it.")
-          cat("brms ", as.character(utils::packageVersion("brms")), "\n")
+          for (pkg in c("brms", "rstan"))
+            if (!requireNamespace(pkg, quietly = TRUE))
+              stop(pkg, " is not installed; this workflow has no purpose ",
+                   "without it.")
+          # rstan::stan_model() compiles the generated C++ against Boost and
+          # Eigen headers, and tests for them with file.exists() on the two
+          # paths below -- NOT with requireNamespace().  Both come from
+          # LinkingTo-only dependencies of rstan (BH, RcppEigen) that a BINARY
+          # rstan install does not pull in, and some slimmed binaries ship the
+          # package directory with its include/ tree deleted, so the package
+          # can be installed and its headers still absent.  Assert rstan's own
+          # condition here: otherwise it surfaces three minutes into R CMD
+          # check as seven unrelated-looking failures in test-bayes-smoke.R,
+          # which is how run #8 failed.
+          hdr <- c(boost_lib = "BH", eigen_lib = "RcppEigen")
+          for (opt in names(hdr)) {
+            path <- rstan::rstan_options(opt)
+            if (!nzchar(path) || !file.exists(path))
+              stop(sprintf(paste0(
+                "rstan's %s resolves to \"%s\", which does not exist, so no ",
+                "Stan model can be compiled. Install %s complete with its ",
+                "include/ tree -- name it in extra-packages above."),
+                opt, path, hdr[[opt]]))
+            cat(sprintf("%-10s %-12s %s\n", opt, hdr[[opt]], path))
+          }
+          sh <- system.file("include", package = "StanHeaders")
+          if (!nzchar(sh))
+            stop("StanHeaders has no include/ directory, so the generated ",
+                 "model code has no headers to compile against.")
+          cat(sprintf("%-10s %-12s %s\n", "stan", "StanHeaders", sh))
+          for (pkg in c("brms", "rstan", "StanHeaders", "BH", "RcppEigen"))
+            cat(sprintf("%-12s %s\n", pkg,
+                        as.character(utils::packageVersion(pkg))))
         shell: Rscript {0}
 
       - uses: r-lib/actions/check-r-package@v2
