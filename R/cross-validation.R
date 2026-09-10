@@ -2736,6 +2736,7 @@ make_folds <- function(points_sf, k,
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
 #'   \code{n_folds_succeeded}, \code{formula} and \code{adaptive}.  The two
@@ -2933,6 +2934,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
 #'   are the primary beneficiary of this option.
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
 #'   \code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
@@ -3214,6 +3216,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{FALSE} (sequential).
 #' @param .caller Internal. The name the messages carry, so a wrapper such as
 #'   \code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics}, \code{predictions},
 #'   \code{folds}, and the two fold counts \code{n_folds_attempted} and
 #'   \code{n_folds_succeeded}.  The counts are reported deliberately: a

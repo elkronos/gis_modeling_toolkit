@@ -38,3 +38,27 @@ Adjusted R-squared is suppressed: GWR's effective parameter count far
 exceeds the global predictor count, and a GP model has no simple \code{p}.
 }
 
+\section{Percentage errors on responses with zeros}{
+
+\code{MAPE} divides by the observed value and \code{SMAPE} by
+\eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
+Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+whose denominator is non-zero, and are \code{NA} when no row qualifies.
+\strong{The returned value does not record how many rows that was}, and the
+\code{n} column counts finite observation/prediction pairs, not the rows
+either percentage error actually used.
+
+This bites on any response taking exact zeros --- counts, rainfall,
+abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
+120, \code{MAPE} is an average over the 58 non-zero rows reported as though
+it covered all 120.  \code{SMAPE} fails differently and more subtly: it drops
+the rows where observation and prediction are both near zero --- which on a
+well-fitted zero-inflated model are the rows it got \emph{right} --- so it
+averages the harder rows only and reads worse than the fit deserves.
+
+\code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
+unaffected; prefer them whenever the response can be zero.  For a Bayesian
+fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
+coverage, which are proper scoring rules and have no such failure mode.
+}
+

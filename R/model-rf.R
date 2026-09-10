@@ -400,6 +400,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   passed here (every fold would fail with "matched by multiple actual
 #'   arguments").  A \code{seed} given here overrides the per-fold draw
 #'   described above.
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return The \code{\link{cv_spatial}} result.
 #' @family cross-validation
 #' @examples
