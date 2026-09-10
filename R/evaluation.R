@@ -931,6 +931,7 @@ residual_morans_i <- function(fit,
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A data.frame with one row per model and columns for
 #'   model name and all regression metrics.
 #' @family model evaluation
@@ -1014,6 +1015,7 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   unique; see \code{\link{evaluate_insample}}.
 #' @param newdata Optional sf for out-of-sample evaluation.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A data.frame comparing all models.  Alongside the metrics it carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 #'   \code{resid_morans_null} --- the last naming which null
@@ -1156,6 +1158,7 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
+#' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
 #'   Only the models that actually ran appear, so check which names are present

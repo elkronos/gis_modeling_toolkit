@@ -283,6 +283,17 @@
 #'   R-squared.
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2 and Adj_R2. `Adj_R2`
 #'   is always present, and is `NA` when `p` is NULL or `n <= p + 1`.
+#'
+#'   `n` counts the finite (y, yhat) pairs. It is **not** the number of rows
+#'   `MAPE` and `SMAPE` were averaged over: both have a denominator that can be
+#'   zero, and each silently drops the rows where its own denominator vanishes
+#'   (`MAPE` where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA`
+#'   only when no row qualifies. That subsetting is not reported anywhere in the
+#'   return value, which is why the user-facing help
+#'   (see `model_metrics()`'s "Percentage errors on responses with zeros")
+#'   tells callers to prefer RMSE/MAE/R2 on a response that can be zero.
+#'   Reporting the per-metric row count would change this frame's column set,
+#'   so it is deferred rather than done here --- see `dev/BACKLOG.md`.
 #' @keywords internal
 #' @noRd
 .compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL) {

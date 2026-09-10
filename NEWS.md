@@ -1010,6 +1010,24 @@ change a number; the rest are guards, conveniences and documentation.
   `blockCV::cv_spatial()` returns one as `$folds_ids` (its `$folds_list` holds
   two unnamed vectors per fold, which is the shape now refused by name).
 
+* `MAPE` and `SMAPE` are documented as what they are: averages over the rows
+  whose denominator is non-zero. Both have a denominator that can vanish --
+  `MAPE` where the observation is zero, `SMAPE` where observation and
+  prediction are both zero -- and each drops those rows rather than returning
+  `Inf`, which is the right arithmetic but was reported nowhere. On a response
+  taking exact zeros (counts, rainfall, abundance) the consequence is
+  material: with 62 zeros out of 120, `MAPE` is an average over 58 rows
+  presented as though it covered 120, and `SMAPE` drops precisely the rows a
+  well-fitted model got right, so it reads worse than the fit deserves. The
+  new "Percentage errors on responses with zeros" section on
+  `model_metrics()` -- inherited by `evaluate_insample()`, `compare_models()`,
+  `compare_models_cv()`, `summary()` and all four `cv_*()` -- says so, notes
+  that the `n` column is the finite-pair count and not the row count either
+  percentage error used, and points at RMSE/MAE/R-squared (and, for a Bayesian
+  fit, CRPS and interval coverage) as the metrics unaffected by it. No
+  computed value changes; returning the per-metric row count would alter the
+  metric frame's column set and is deferred.
+
 ## Bug fixes
 
 * Data carrying **no CRS** works again throughout. `ensure_projected()` now

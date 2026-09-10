@@ -366,15 +366,24 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
   `gstat`, `geometry` and `patchwork` present and `GWmodel` absent.
 
 * Exactly two examples are wrapped in `\dontrun{}`: `fit_bayesian_spatial_model()`
-  and `cv_bayes()`. Both cannot be executed as examples: they compile a Stan
-  model, which needs a C++ toolchain (or a CmdStan build) that neither the
-  package nor `brms` can supply, and then run minutes of MCMC. The block opens
-  with a comment saying so. `brms` itself wraps its fitting examples the same
-  way. No example uses `\donttest{}`: every other example runs unconditionally,
-  behind a `requireNamespace()` guard where it needs a Suggests package, and
-  the slowest of the 42 takes 1.8 s (7.2 s for all of them together, see the
-  timings below), so none is close to the 5 s threshold. `checking examples`
-  passes.
+  and `cv_bayes()`. These are the "missing additional software" case the CRAN
+  cookbook gives for `\dontrun{}`: both compile a Stan model, which needs a
+  working C++ toolchain (or a CmdStan build) that neither this package nor
+  `brms` can supply, and then run minutes of MCMC. Each block opens with a
+  comment saying so, and `brms` itself wraps its own fitting examples the same
+  way.
+
+  `\donttest{}` would be the wrong tag here rather than a more conservative
+  one: `--run-donttest` is exercised on several CRAN platforms, so tagging
+  these `\donttest{}` would have CRAN's own machines attempt a Stan
+  compilation -- minutes of C++ per example, on shared infrastructure -- which
+  is precisely the cost `\dontrun{}` exists to avoid. If the preference is
+  nonetheless for `\donttest{}`, say so and it will be changed.
+
+  No other example uses either tag. All 42 run unconditionally, behind a
+  `requireNamespace()` guard where they need a Suggests package; the slowest
+  takes 1.8 s and all of them together take 7.2 s (timings above), so none is
+  near the 5 s threshold. `checking examples` passes.
 
 * Logging writes INFO+ to a session `tempdir()` file and WARN+ to the console
   (see `.onLoad` in `R/zzz.R`), all within a package-specific `logger` namespace
