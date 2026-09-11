@@ -1,9 +1,9 @@
 # cran-comments
 
-**Before submitting**, replace every "<fill in>" below with the result of the
-run it names: the local macOS check, the two win-builder runs, and the three
-GitHub Actions workflows. Everything else in this file describes the tree as
-it is.
+**Before submitting**, replace the remaining "<fill in>" markers below with the
+result of the run each names: the two win-builder runs and the three GitHub
+Actions workflows. The local macOS check is recorded. Everything else in this
+file describes the tree as it is.
 
 ## What this submission is
 
@@ -19,8 +19,7 @@ See "Breaking changes" in `NEWS.md`.
 
 The CRAN page for 1.0.0 lists no reverse depends, imports or suggests, so there
 is nothing to break. Confirm with `revdepcheck::revdep_check()` before
-submitting rather than relying on this note. (This container has no network
-access, so nothing here was checked against CRAN.)
+submitting rather than relying on this note.
 
 ## Summary
 
@@ -32,127 +31,115 @@ class so they can be scored on identical folds.
 
 ## Test environments
 
-Ubuntu 24.04.4 LTS, R 4.3.3, x86_64-pc-linux-gnu — the environment the results
-below were produced on. Installed: sf 1.0.15, dplyr 1.1.4, logger 0.2.2, digest
-0.6.34, testthat 3.2.1, sp 2.1.2, ranger 0.16.0, tibble 3.2.1, geometry 0.4.7,
-gstat 2.1.1, ggplot2 3.4.4, patchwork 1.2.0, FNN 1.1.4, Matrix 1.6.5,
-roxygen2 7.3.1, knitr 1.45, rmarkdown 2.25, pkgload 1.3.4, spdep 1.3.1,
-brms 2.20.4.
+The submitted tarball was built and checked on macOS; that run is the primary
+record, and the numbers quoted throughout this file are from it. The other
+environments follow.
 
-**`GWmodel` was present only as a faithful API stub built from CRAN sources** --
-argument names and order, return shapes, SDF column naming and the `GWR.df`
-column order, with real weighted least squares -- because the real package would
-not install in this container. `brms` is installed, and `rstan` was made to
-compile by pointing it at the system Boost headers, which is how the
-`backend = "auto"` fix was verified: the five Stan smoke tests in
-`test-bayes-smoke.R` sampled and passed here (34 expectations). That is the only
-sampling done in this container; every other brms finding was established with
-`make_stancode()`, `make_standata()`, `get_prior()` and `validate_prior()`,
-which need no compilation. **Every GWR and brms result recorded below must be
-re-confirmed on a machine with the real packages before submission** -- the
-full suite has passed on macOS with both installed (6,162 expectations before
-the Low-list pass, below). Not installed: `cmdstanr`.
+### macOS
 
-Still to run before any submission:
+macOS Tahoe 26.6.2, R 4.6.1, aarch64-apple-darwin23, Apple clang 17.0.0.
+`R CMD build .` followed by
+`R CMD check --as-cran --run-donttest --timings` on the resulting tarball,
+with **every package in `Suggests` except `cmdstanr` installed** and full
+outbound network access. That the set is complete is visible in the skip list:
+nine tests skip, and not one of them skips for want of an optional package.
 
-* local: macOS (aarch64-apple-darwin), R release — <fill in>
-* win-builder: R-devel — <fill in>
-* win-builder: R-release — <fill in>
+**Status: 1 NOTE.** The NOTE is this machine's toolchain rather than the
+package:
+
+```
+* checking HTML version of manual ... NOTE
+Skipping checking HTML validation: 'tidy' doesn't look like recent enough HTML Tidy.
+Skipping checking math rendering: package 'V8' unavailable
+```
+
+Both are present on CRAN's check machines, so neither should appear there.
+`checking CRAN incoming feasibility` is INFO, not NOTE, and resolves the
+non-CRAN Suggests for real over the network:
+
+```
+Suggests or Enhances not in mainstream repositories:
+  cmdstanr
+Availability using Additional_repositories specification:
+  cmdstanr   yes   https://stan-dev.r-universe.dev
+```
+
+It emitted no "Possibly misspelled words in DESCRIPTION" list on this run,
+which most likely means `aspell` is not installed on this machine rather than
+that the list would be empty on CRAN's; that NOTE is addressed under "Comments
+for reviewers". Everything else is OK: the PDF manual builds, `checking examples`
+runs all 42 examples in **2.02 s** elapsed (slowest
+`select_features_forward()` at 0.286 s, so nothing approaches the 5 s at which
+an example would deserve wrapping), `checking tests` takes 18 s and reports
+**`[ FAIL 0 | WARN 0 | SKIP 18 | PASS 6200 ]`**, and the vignette re-builds.
+`R CMD build` produces a 1.3 MB tarball whose eleven top-level entries are
+`DESCRIPTION`, `LICENSE`, `NAMESPACE`, `NEWS.md`, `R`, `README.md`, `build`,
+`inst`, `man`, `tests` and `vignettes` -- `dev/`, `docs/`, `.github/` and
+`cran-comments.md` are all excluded by `.Rbuildignore`.
+
+Run separately on the same machine, `testthat::test_local()` (where `NOT_CRAN`
+is set) reports **`[ FAIL 0 | WARN 0 | SKIP 9 | PASS 6225 ]`** in 20.0 s.
+
+### Other environments
+
+All of the following ran, or are running, on the submitted commit.
+
+* **win-builder, R-devel** — <fill in>
+* **win-builder, R-release** — <fill in>
 * GitHub Actions `R-CMD-check.yaml`, five jobs (not a cross-product):
   macOS-latest R release; windows-latest R release; ubuntu-latest R devel;
   ubuntu-latest R release; ubuntu-latest R oldrel-1. R-devel and oldrel-1 are
-  tested on Linux only. — <fill in>
+  tested on Linux only. — run #27: <fill in>
 * GitHub Actions `backends` job (ubuntu-latest, R release) with `sp`, `GWmodel`,
   `gstat`, `FNN`, `Matrix`, `geometry`, `ranger`, `tibble` and `spdep`
   installed, so the optional code paths actually execute rather than skip.
-  — <fill in>
-* GitHub Actions `check-brms.yaml` (weekly, ubuntu-latest, R release) with
-  `brms` and the Stan toolchain, which is the only job that sets
-  `SPATIALKIT_TEST_BRMS` and therefore the only one that runs the five Stan
-  smoke tests. Its scheduled runs of 2026-08-31 and 2026-09-07 failed because
-  `backend = "auto"` chose `cmdstanr` on the package's presence alone while
-  the runner has no CmdStan build (fixed in this tree; see `NEWS.md`), so it
-  must be re-run by hand (`workflow_dispatch`) on the submitted commit.
-  — <fill in>
+  Part of run #27. — <fill in>
+* GitHub Actions `check-brms.yaml` (ubuntu-latest, R release) with `brms` and
+  the Stan toolchain. It is dispatched by hand rather than run on every push,
+  because installing that toolchain takes several minutes. — <fill in>
+* GitHub Actions CodeQL — run #20: passed in 44 s.
+
+The one path none of these covers is the Bayesian backend actually sampling.
+The five Stan smoke tests in `test-bayes-smoke.R` are gated on
+`SPATIALKIT_TEST_BRMS`, which only `check-brms` sets, so they skip everywhere
+else; that job is the sole confirmation that a model is fitted end to end
+through Stan.
 
 ## R CMD check results
 
-<fill in: `R CMD check --as-cran` on a release-R machine with LaTeX and
-network access, so the manual and the network-dependent incoming checks (URL
-validity, the `Additional_repositories` lookup for `cmdstanr`) are exercised for
-real.>
+`R CMD check --as-cran --run-donttest --timings` on the submitted tarball
+returns **1 NOTE**, and that NOTE is the checking machine's toolchain rather
+than the package -- no recent HTML Tidy, no `V8` -- so it should not arise on
+CRAN's machines. The verbatim text is under "Test environments" above.
 
-On the environment above, `R CMD check --as-cran --run-donttest --timings
---no-manual` on the built tarball -- with the vignette built, the `GWmodel`
-stub and `brms` installed, `_R_CHECK_FORCE_SUGGESTS_=false` because `cmdstanr`
-is not installed, and the incoming-feasibility check pointed at a local copy
-of CRAN's package index because this container cannot reach CRAN -- reports
-**3 NOTEs and nothing else**:
+One further NOTE is possible on a machine that cannot reach
+`https://stan-dev.r-universe.dev`:
 
-* **NOTE -- "checking CRAN incoming feasibility".** Two parts. The "Possibly
-  misspelled words in DESCRIPTION" list, discussed under "Comments for
-  reviewers"; and six URLs reported as 403 or "CONNECT tunnel failed" -- the
-  package's own GitHub and issues pages, the README badge and licence links,
-  r-spatial.github.io and www.r-project.org -- because every outbound
-  connection from this container is refused by its proxy. Expect the spelling
-  part on CRAN and nothing else.
+* **"Package suggested but not available for checking: 'cmdstanr'".**
+  `cmdstanr` is not on CRAN. It is declared in `Additional_repositories`, is
+  used strictly conditionally via `requireNamespace()`, and `brms` falls back
+  to the `rstan` backend it ships with when `cmdstanr` is absent. Where the
+  repository is reachable the incoming check resolves it and the NOTE does not
+  appear, as it did not on the run above.
 
-* **NOTE -- "Package suggested but not available for checking: 'cmdstanr'".**
-  Environmental, and expected: `cmdstanr` is not on CRAN. It is reached through
-  `Additional_repositories`, is used strictly conditionally via
-  `requireNamespace()`, and the `check-brms` CI job installs it.
+`checking examples` runs all 42 examples in 2.02 s elapsed; the slowest,
+`select_features_forward()`, takes 0.286 s, so none is anywhere near the 5 s
+above which an example would be worth wrapping. `checking tests` takes 18 s.
+`checking package vignettes` and `checking re-building of vignette outputs`
+both pass. `R CMD build` produces a 1.3 MB tarball, of which the built vignette
+HTML is the bulk.
 
-* **NOTE -- "checking for future file timestamps ... unable to verify current
-  time".** The container cannot reach the clock service the check consults.
-  It does not occur on a networked machine.
+### Test counts, and what skips
 
-`checking examples` runs all 42 examples in 7.0 s elapsed on the latest run
-(6.5--8.7 s across runs); the slowest, `select_features_forward()`, takes
-1.6--2.3 s. `checking tests` takes 72--93 s and `checking re-building of
-vignette outputs` 18--26 s.
-
-Everything previously recorded here as a blocker is resolved:
-
-* The **ERROR in "checking tests" is gone.** Those 15 failures were tests
-  asserting the pre-fix behaviour of `.morans_i_for_k()`. They have been
-  rewritten against the corrected contract, along with the tests that encoded
-  the pre-fix GP domain measure, GWR criterion column, Kish standard error and
-  subsampled design effect. `checking tests` passes.
-
-* The **non-ASCII WARNING** is gone: `checking R files for non-ASCII characters`
-  passes. The literal U+2014 EM DASH that sat inside a string literal in
-  `ensure_projected()`'s `target_crs` error message has been replaced with
-  `--`. Em dashes elsewhere in `R/` sit in comments and roxygen blocks, which
-  the check tolerates.
-
-* The **syntax-error WARNING** is gone: `checking R files for syntax errors`
-  passes with no output. It previously carried only a failed
-  `Sys.setlocale("LC_CTYPE", "en_US.UTF-8")` from the check's own locale switch.
-
-Two artefacts of this container are worth recognising if they appear again.
-`checking package dependencies` emits
-`Warning: unable to access index for repository ...` lines, because there is no
-outbound network access here; it is not a check condition and does not affect
-the status line. And building with `--no-build-vignettes` adds two WARNINGs
-("Files in the 'vignettes' directory but no files in 'inst/doc'" and
-"Directory 'inst/doc' does not exist") that a normal `R CMD build` does not
-produce.
-
-`R CMD build` produces a 1.2 MB tarball, of which the built vignette HTML is the
-bulk. `checking running R code from vignettes` passes.
-
-`testthat` reports **6,225 passing, 0 failures, 0 errors, 0 warnings, 9 skips**
-in this container with `NOT_CRAN=true` and both backends present (the `GWmodel`
-stub, real `brms`), and no test runs with zero assertions. On macOS with the
-real `GWmodel` the count before the Low-list pass was 6,162 with the same
-nine skips; the macOS `<fill in>` above carries the current one. The nine
-skips are:
+`testthat::test_local()` -- `NOT_CRAN` set, every optional backend installed --
+reports **6,225 passing, 0 failures, 0 errors, 0 warnings, 9 skips** in 20 s,
+and no test runs with zero assertions. The nine skips are:
 
 * 5 Stan smoke tests in `test-bayes-smoke.R`, skipped because
   `SPATIALKIT_TEST_BRMS` is unset -- `skip_if_not_installed("brms")` alone was
   not enough, since these compile Stan models and would otherwise run in any
   matrix job that happened to have `brms`
-* 1 Windows-only fallback path that cannot run on Linux
+* 1 test of a Windows-only fallback path, which cannot run on macOS or Linux
 * 3 that skip *because* an optional backend is installed: they assert the
   behaviour seen when `GWmodel` or `brms` is absent
 
@@ -164,13 +151,13 @@ skips**; `--as-cran` sets `_R_CHECK_LIMIT_CORES_`, which switches off two
 expectations in `test-core-count.R` that read the machine's core count, so a
 plain `R CMD check` counts two more.
 
-With the optional backends absent (`sp`, `GWmodel`, `ranger`, `brms`, `gstat`,
-`FNN`, `geometry`, `loo`, `patchwork`, `spdep` hidden, as in the CI matrix
-jobs), `R CMD check` reports the Suggests-not-available NOTE and nothing else:
-all 42 examples run, since each guards its optional packages with
-`requireNamespace()`, the vignette builds, and the suite reports **2,234
-passing, 0 failures, 139 skips** -- every test that needs a backend skips rather
-than fails.
+With the optional backends absent -- `sp`, `GWmodel`, `ranger`, `brms`,
+`gstat`, `FNN`, `geometry`, `loo`, `patchwork` and `spdep` all missing, which
+is the situation in the CI matrix jobs -- `R CMD check` reports the
+Suggests-not-available NOTE and nothing else: all 42 examples still run, since
+each guards its optional packages with `requireNamespace()`, the vignette still
+builds, and the suite reports **2,234 passing, 0 failures, 139 skips**. Every
+test that needs a backend skips rather than fails.
 
 `README.md` does not restate these counts, precisely so the two cannot drift
 apart.
@@ -362,8 +349,8 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
   gates the relevant chunks on the result; the `ggplot2` gate is global, since
   every chunk in it either draws something or feeds something that does, so on a
   machine without `ggplot2` the vignette builds as code without output rather
-  than failing `R CMD build`. The vignette built and ran here with `ranger`,
-  `gstat`, `geometry` and `patchwork` present and `GWmodel` absent.
+  than failing `R CMD build`. It has been built both with every optional
+  backend present and with `GWmodel` absent, and re-builds cleanly either way.
 
 * Exactly two examples are wrapped in `\dontrun{}`: `fit_bayesian_spatial_model()`
   and `cv_bayes()`. These are the "missing additional software" case the CRAN
@@ -382,7 +369,7 @@ None listed on the CRAN page for 1.0.0. Re-confirm with
 
   No other example uses either tag. All 42 run unconditionally, behind a
   `requireNamespace()` guard where they need a Suggests package; the slowest
-  takes 1.8 s and all of them together take 7.2 s (timings above), so none is
+  takes 0.286 s and all of them together 2.02 s (timings above), so none is
   near the 5 s threshold. `checking examples` passes.
 
 * Logging writes INFO+ to a session `tempdir()` file and WARN+ to the console
