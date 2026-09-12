@@ -1,3 +1,5 @@
+# spatialkit (development version)
+
 # spatialkit 2.0.0
 
 Everything below is relative to **1.0.0** (published on CRAN 2026-08-07).
