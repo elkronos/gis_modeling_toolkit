@@ -270,12 +270,25 @@ plot.sac_range <- function(x, ...) {
         paste0("No effective range: no variogram model could be fitted ",
                "(a flat, nugget-only variogram -- no spatial structure at ",
                "these lags).")
-      else
+      else if (identical(reason, "empirical variogram decreases with distance"))
+        # The shape of a periodic structure or of a variance that differs
+        # between a dense cluster and the rest -- not of a trend, which rises
+        # without a sill.
+        sprintf(paste0("No effective range: the semivariance falls with ",
+                       "distance over the shorter lags, so the fitted range ",
+                       "(%.0f) is not identified (periodic structure, or a ",
+                       "variance that differs across the layer)."),
+                attr(sac, "rejected_range"))
+      else if (identical(reason, "fitted range exceeds the largest lag fitted"))
         sprintf(paste0("No effective range: the fitted range (%.0f) ",
                        "exceeds the largest lag fitted (%.0f), so the ",
                        "variogram never reached a sill."),
                 attr(sac, "rejected_range"),
-                attr(sac, "cutoff_dist")))
+                attr(sac, "cutoff_dist"))
+      else
+        # A reason this method does not know by name: say it verbatim rather
+        # than caption it with another case's sentence.
+        sprintf("No effective range: %s.", as.character(reason)))
   }
   p
 }

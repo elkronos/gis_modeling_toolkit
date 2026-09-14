@@ -238,8 +238,9 @@ is identical.
 
 ```r
 # --- How big should a block be? Ask the data first --------------------------
-# estimate_sac_range() fits a variogram to the OLS residuals and reports the
-# distance at which spatial correlation dies out. It refuses to guess:
+# estimate_sac_range() removes the trend on the predictors, fits a variogram
+# to what is left and reports the distance at which spatial correlation dies
+# out. It refuses to guess:
 range <- estimate_sac_range(site, response_var = "price", predictor_vars = "elev")
 range
 #> NA
@@ -699,9 +700,15 @@ order worth trying:
    default `0.5`, so lags beyond half the study extent are never fitted. If the
    sill is genuinely further out, `cutoff = 0.8` lets the fit see it — at the
    cost of the noisiest, sparsest lags, which is why it is not the default.
-2. **Supply `predictor_vars`.** The variogram is fitted to OLS residuals. A
-   large-scale trend the predictors would absorb otherwise looks like
-   autocorrelation that never decays — detrending is frequently the whole fix.
+2. **Supply `predictor_vars`.** A large-scale trend the predictors would
+   absorb otherwise looks like autocorrelation that never decays — detrending
+   is frequently the whole fix. But a variogram of least-squares residuals
+   underestimates the range, by a few percent for ordinary covariates and by
+   about a quarter for a quadratic trend surface in the coordinates (Lark,
+   Cullis & Welham 2006; the measured numbers are in
+   `?estimate_sac_range`). When the trend terms are smooth in space, pass
+   `detrend = "reml"` as well, which fits trend and covariance together and
+   does not carry that bias.
 3. **Set `block_size` explicitly** and say in your write-up that you did. A
    defensible starting point is a fraction of the study extent — one fifth of
    the shorter bbox side gives roughly 5 x 5 blocks — sanity-checked with

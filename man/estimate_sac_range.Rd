@@ -11,7 +11,9 @@ estimate_sac_range(
   n_max = 5000L,
   cutoff = 0.5,
   range_frac = 1,
-  seed = 123L
+  seed = 123L,
+  detrend = c("ols", "reml"),
+  reml_max_n = 400L
 )
 }
 \arguments{
@@ -28,9 +30,12 @@ count or other response whose variance tracks its mean, see the section
 on non-Gaussian responses: the range is still estimated, but it is a
 less reliable number than for a Gaussian response.}
 
-\item{predictor_vars}{Optional character vector.  When supplied, an OLS
-residual variogram is fitted instead of a raw-response variogram, which
-better reflects the autocorrelation that the spatial model must handle.}
+\item{predictor_vars}{Optional character vector.  When supplied, the
+trend on these predictors is removed first and the variogram describes
+the residual autocorrelation -- the part a spatial model has to handle
+once the covariates have done their work.  How the trend is removed is
+set by \code{detrend}, and it matters: see "Detrending and the
+residual-variogram bias".}
 
 \item{n_max}{Maximum number of points to subsample before fitting.
 Variogram estimation is O(n²) so this keeps runtime bounded.}
@@ -58,7 +63,26 @@ leaving it unseeded made the returned range differ between runs on
 identical input (19531, 19589, 19605 on three calls) and silently advanced
 the caller's RNG.  Pass \code{NULL} for the old unseeded behaviour, or a
 different number to check how sensitive the estimate is to the subsample.
-Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.}
+Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.
+The \code{reml_max_n} subsample uses the same seed.}
+
+\item{detrend}{How the trend on \code{predictor_vars} is removed;
+ignored when there are none.  \code{"ols"} (default) fits it by ordinary
+least squares and fits the variogram to the residuals -- the
+long-standing behaviour, which underestimates the range (see the section
+below).  \code{"reml"} fits the trend and an exponential-plus-nugget
+covariance together by residual maximum likelihood with
+\code{nlme::gls()}, returns the REML range, and attaches the empirical
+variogram of the REML residuals for inspection.  It needs \pkg{nlme},
+costs \eqn{O(n^3)} (about 2 s at 300 points, 12 s at 500, 45 s at 800),
+and so runs on at most \code{reml_max_n} points; when it does not
+converge the \code{"ols"} path runs instead with an R warning saying so.}
+
+\item{reml_max_n}{Positive integer, at least 30.  With \code{detrend =
+  "reml"}, the trend and covariance are fitted on a seeded random subsample
+of this many points when the layer has more (exact duplicate locations
+are dropped first); the fitted trend is then removed from every point.
+Default 400.  Raise it for a better-determined fit at the cost above.}
 }
 \value{
 A single number, of class \code{sac_range} in the first two of the
@@ -71,30 +95,49 @@ with the fit attached as attributes \code{directional} (the 0°, 45°,
 over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
 the all-pairs fit was unusable and the directional maximum stands in
 for it), \code{detrended} (logical: whether the variogram is of the
-OLS residuals on \code{predictor_vars} rather than the raw response
+residuals on \code{predictor_vars} rather than the raw response
 -- a missing predictor is an error, and a failed detrending fit
 warns and falls back to the raw response with this set to
-\code{FALSE}),
+\code{FALSE}), \code{detrend_method} (\code{"ols"} or \code{"reml"}
+when detrended, \code{NA} otherwise), \code{reml} (with
+\code{detrend = "reml"}: a list with \code{n_used},
+\code{subsampled}, \code{nugget_prop} and \code{sigma2} from the
+REML fit; \code{NULL} otherwise),
 \code{crs} (the projected CRS the variogram was
 fitted in -- the unit of the range), \code{max_dist},
-\code{cutoff_dist}, \code{variogram} (the empirical variogram) and
-\code{variogram_model} (the fitted \code{gstat} model), so the fit can
-be inspected rather than trusted.}
-\item{Rejected range}{\code{NA_real_} when a range was fitted but exceeds
-\code{range_frac * cutoff * max_dist} and is therefore unidentified
-(see \code{range_frac}).  It is classed \code{sac_range} as well, so it
-prints as a bare \code{NA} rather than dumping its attributes, and it
-carries \code{max_dist}, \code{cutoff_dist}, \code{variogram} and
-\code{variogram_model} --- the evidence for the rejection --- plus
-\code{rejected_range} (the value that was refused) and
-\code{rejected_reason}, plus \code{crs} — so the units the rejected
-number was in stay recoverable, which is what
-\code{plot(type = "variogram")} labels its axis from.  It does
-\strong{not} carry \code{directional} or \code{anisotropy}.  The
-same shape, with \code{rejected_range = NA} and
-\code{variogram_model = NULL}, is returned when no variogram model
-could be fitted at all (both the exponential and the spherical fit
-singular, which is what a flat, nugget-only variogram produces);
+\code{cutoff_dist}, \code{variogram} (the empirical variogram),
+\code{variogram_model} (the fitted \code{gstat} model, or with
+\code{detrend = "reml"} a \code{gstat} model built from the REML
+parameters) and \code{nugget} (that model's nugget variance; see
+\code{\link{sac_nugget}}), so the fit can be inspected rather than
+trusted.}
+\item{Rejected range}{\code{NA_real_} when a range was fitted but is
+not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
+\code{range_frac}); or the model did not converge; or the empirical
+variogram \emph{decreases} with distance over its shorter lags (a
+net fall of more than 15 percent of the mean semivariance there,
+weighted by pairs), which is the shape of a periodic, hole-effect
+structure or of a variance that differs between a dense cluster and
+the rest of the layer -- not of an unremoved trend, which makes the
+variogram rise without a sill and is caught by the first test; or
+the fitted range is non-positive.  It is classed \code{sac_range} as
+well, so it prints as a bare \code{NA} rather than dumping its
+attributes, and it carries \code{max_dist}, \code{cutoff_dist},
+\code{variogram}, \code{variogram_model} and \code{nugget} --- the
+evidence for the rejection --- plus \code{rejected_range} (the value
+that was refused), \code{rejected_reason} (one of
+\code{"fitted range exceeds the largest lag fitted"},
+\code{"variogram model did not converge"},
+\code{"empirical variogram decreases with distance"},
+\code{"fitted range is non-positive or non-finite"}), \code{crs} —
+so the units the rejected number was in stay recoverable, which is
+what \code{plot()} labels its axis from --- and
+\code{detrend_method}.  It does \strong{not} carry
+\code{directional} or \code{anisotropy}.  The same shape, with
+\code{rejected_range = NA}, \code{variogram_model = NULL} and
+\code{nugget = NA}, is returned when no variogram model could be
+fitted at all (both the exponential and the spherical fit singular,
+which is what a flat, nugget-only variogram produces);
 \code{rejected_reason} says so and the empirical variogram is still
 attached.}
 \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
@@ -163,6 +206,39 @@ The returned range is in the coordinate units of the (projected) data and
 can be passed directly to \code{make_folds(block_size = ...)} to ensure
 that CV blocks are at least as wide as the autocorrelation range.
 }
+\section{Detrending and the residual-variogram bias}{
+
+Fitting a variogram to the residuals of a least-squares trend
+underestimates both the sill and the range, because the trend fit absorbs
+part of the long-wavelength spatial variation (Lark, Cullis and Welham
+2006).  Blocks sized from that range are then too small and a blocked
+validation is less conservative than it claims.  How large the effect is
+depends on how smooth the trend terms are in space, and on how many there
+are.  Measured for this estimator on simulated exponential fields (n =
+300, true effective range 300, nugget 0.2, 40--60 draws), as the median
+ratio of the estimate from the trend-removed data to the estimate from
+the true field:
+\itemize{
+\item a white-noise covariate: OLS 1.00, REML 0.99 -- no bias to speak of;
+\item a spatially smooth covariate (a random field with range 300 or
+1000): OLS 0.97, REML 0.95--0.98;
+\item a linear trend in the coordinates: OLS 0.92, REML 1.04;
+\item a quadratic trend in the coordinates (five terms): OLS 0.75,
+REML 1.06.
+}
+So for ordinary covariates the OLS bias is a few percent, and for trend
+surfaces in the coordinates it is large.  Iterating between a GLS trend
+fit and a variogram refit (Neuman and Jacobson 1984) recovers only part of
+it (0.80 in the quadratic case), because the variogram of GLS residuals
+is biased too; REML does not fit a variogram to residuals at all, which is
+why \code{detrend = "reml"} returns its own range estimate.  Its price is
+a single family (exponential with nugget), a cubic cost in \code{n}, and
+a somewhat wider sampling spread.  The default stays \code{"ols"} so that
+existing scripts return what they did; a script that detrends on smooth
+or coordinate-based terms should pass \code{detrend = "reml"}, or size its
+blocks with a margin.
+}
+
 \section{Count and other non-Gaussian responses}{
 
 The empirical variogram assumes second-order stationarity: a variance that
@@ -214,7 +290,21 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   attr(r2, "rejected_range")
 }
 }
+\references{
+Lark, R. M., Cullis, B. R. and Welham, S. J. (2006). On spatial prediction
+of soil properties in the presence of a spatial trend: the empirical best
+linear unbiased predictor (E-BLUP) with REML. \emph{European Journal of
+Soil Science}, 57(6), 787--799. \doi{10.1111/j.1365-2389.2005.00768.x}
+
+Neuman, S. P. and Jacobson, E. A. (1984). Analysis of nonintrinsic spatial
+variability by residual kriging with application to regional groundwater
+levels. \emph{Mathematical Geology}, 16(5), 499--521.
+\doi{10.1007/BF01886329}
+}
 \seealso{
+\code{\link{sac_nugget}} for the nugget behind the estimate,
+\code{\link{plot.sac_range}} to see the variogram the estimate rests on.
+
 Other cross-validation: 
 \code{\link{area_of_applicability}()},
 \code{\link{cv_bayes}()},

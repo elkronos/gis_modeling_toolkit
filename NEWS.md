@@ -68,6 +68,48 @@
   of hold-out.  An AOA built on `random_kfold` folds logs a caution saying
   it does not belong beside a blocked `cv_*()` result.
 
+* `estimate_sac_range()` gains `detrend = c("ols", "reml")` and
+  `reml_max_n`.  A variogram fitted to least-squares residuals
+  underestimates the range, because the trend fit absorbs part of the
+  long-wavelength variation (Lark, Cullis and Welham 2006).  Measured for
+  this estimator on simulated fields (n = 300, true effective range 300),
+  as the median ratio to the estimate from the true field: a white-noise
+  covariate 1.00; a spatially smooth covariate 0.97; a linear trend in the
+  coordinates 0.92; a quadratic one 0.75.  `detrend = "reml"` fits the trend
+  and an exponential-plus-nugget covariance together by REML with
+  `nlme::gls()` and returns the REML range --- 0.95 to 1.06 on the same
+  designs --- with the empirical variogram of the REML residuals attached
+  for inspection.  It is cubic in `n`, so it runs on at most `reml_max_n`
+  (400) points; a fit that does not converge falls back to OLS with a
+  warning.  The default stays `"ols"`, so nothing changes unless asked; the
+  help page's new section carries the numbers.  Iterating GLS trend fits
+  against variogram refits (Neuman and Jacobson 1984) was measured too and
+  recovers only part of the bias (0.80 in the quadratic case), so it was not
+  added.  `nlme` joins Suggests.
+* `sac_nugget()` returns the nugget variance behind an
+  `estimate_sac_range()` result, and every classed result --- identified or
+  rejected --- now carries it as a `nugget` attribute (`NA` when no model
+  could be fitted).  It was reachable before only by reading the `Nug` row
+  of the attached `gstat` model.  Results also record `detrend_method`
+  (`"ols"`, `"reml"` or `NA`), and with `detrend = "reml"` a `reml` list
+  (`n_used`, `subsampled`, `nugget_prop`, `sigma2`).
+* `estimate_sac_range()` refuses a range fitted through an empirical
+  variogram that *decreases* with distance over its shorter lags: a net fall
+  of more than 15% of the mean semivariance there, weighted by pairs.  A
+  model that rises to a sill has nothing to identify on such a curve, and
+  the result is `NA` with `rejected_reason = "empirical variogram decreases
+  with distance"`, the refused value in `rejected_range`, and the variogram
+  attached; `plot()` captions it.  The shape is what a periodic
+  (hole-effect) structure or a variance that differs between a dense cluster
+  and the rest of the layer produces --- measured on 60 draws each: 98% of
+  fields with a periodic component and 100% of the clustered case are
+  flagged, against 0% of an exponential field with a range of 100 or more
+  on a 1000-unit extent, 2--3% at very short ranges, 2% of white noise ---
+  and *not* what a trend produces, which is a variogram that rises without a
+  sill and is refused as before.  The one other path that returned a bare
+  `NA` from inside a completed fit (a non-positive fitted range) now returns
+  the classed, inspectable shape too.
+
 ## Bug fixes
 
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every

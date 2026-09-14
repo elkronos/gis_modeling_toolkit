@@ -835,6 +835,151 @@
 }
 
 
+#' Fit a spatial trend and an exponential-plus-nugget covariance by REML
+#'
+#' The detrending step of \code{estimate_sac_range(detrend = "reml")}.
+#' \code{nlme::gls()} estimates the trend coefficients and the covariance
+#' parameters (range, nugget proportion, variance) jointly by residual maximum
+#' likelihood, so the trend is fitted by generalised least squares under the
+#' fitted correlation and the range is the REML estimate rather than a
+#' variogram fitted to residuals -- which is what removes the residual-
+#' variogram bias (Lark, Cullis and Welham 2006).  The fit is
+#' \eqn{O(n^3)}, so it runs on at most \code{max_n} rows (a seeded random
+#' subsample when there are more; exact duplicate locations are dropped first,
+#' because a spatial correlation structure cannot take a zero distance between
+#' distinct observations) and the trend coefficients are then applied to every
+#' row.  Several starting ranges are tried; the first fit that converges is
+#' kept.
+#'
+#' @param mf A model frame (trend formula already applied, incomplete rows
+#'   excluded) with the projected coordinates in columns \code{.sac_x} and
+#'   \code{.sac_y}.
+#' @param fml The trend formula.
+#' @param extent A length scale of the layer, used to pick starting ranges.
+#' @return \code{NULL} when no fit converged, else a list with \code{beta}
+#'   (named trend coefficients), \code{range} (the exponential range
+#'   parameter), \code{nugget_prop}, \code{sigma2}, \code{n_used} and
+#'   \code{subsampled}.
+#' @keywords internal
+#' @noRd
+.reml_trend <- function(mf, fml, extent, max_n = 400L, seed = 123L) {
+  if (!requireNamespace("nlme", quietly = TRUE)) return(NULL)
+  d <- mf
+  # Duplicate locations: keep the first of each.
+  dup <- duplicated(d[, c(".sac_x", ".sac_y")])
+  if (any(dup)) d <- d[!dup, , drop = FALSE]
+  n <- nrow(d)
+  subsampled <- FALSE
+  if (n > max_n) {
+    cleanup <- .with_seed(seed)
+    on.exit(cleanup(), add = TRUE)
+    d <- d[sample.int(n, max_n), , drop = FALSE]
+    subsampled <- TRUE
+  }
+  if (nrow(d) < 30L) return(NULL)
+  starts <- unique(pmax(extent * c(1 / 10, 1 / 30, 1 / 3), sqrt(.Machine$double.eps)))
+  for (r0 in starts) {
+    fit <- tryCatch(
+      withCallingHandlers(
+        nlme::gls(fml, data = d,
+                  correlation = nlme::corExp(value = c(r0, 0.1),
+                                             form = ~ .sac_x + .sac_y,
+                                             nugget = TRUE),
+                  method = "REML"),
+        warning = function(w) {
+          .log_info("estimate_sac_range(): nlme::gls() warned during REML detrending: %s",
+                    conditionMessage(w))
+          invokeRestart("muffleWarning")
+        }),
+      error = function(e) NULL)
+    if (is.null(fit)) next
+    cs <- try(stats::coef(fit$modelStruct$corStruct, unconstrained = FALSE),
+              silent = TRUE)
+    if (inherits(cs, "try-error") || !all(is.finite(cs))) next
+    rng <- as.numeric(cs[["range"]]); nug <- as.numeric(cs[["nugget"]])
+    s2  <- as.numeric(fit$sigma)^2
+    if (!is.finite(rng) || rng <= 0 || !is.finite(s2) || s2 <= 0) next
+    return(list(beta = stats::coef(fit), range = rng, nugget_prop = nug,
+                sigma2 = s2, n_used = nrow(d), subsampled = subsampled))
+  }
+  NULL
+}
+
+
+#' Does the empirical variogram decrease with distance over its shorter lags?
+#'
+#' A semivariance that falls as distance grows leaves the range unidentified:
+#' a model with a monotone rise to a sill is being fitted to a curve that has
+#' none.  The net change in \code{gamma} across the bins in the shorter half
+#' of the lags, weighted by the pairs supporting each step, is compared with
+#' the mean semivariance over those bins; a net fall of more than \code{tol}
+#' of that mean is a decrease.  Measured on 60 draws each (n = 250, tol =
+#' 0.15): 0 of an exponential field, 2 percent of white noise, 98 percent of a
+#' field with a periodic (hole-effect) component, 100 percent of a layer whose
+#' variance differs between a dense cluster and the rest.  An unremoved trend
+#' is \emph{not} what produces this shape -- a trend makes the variogram rise
+#' without reaching a sill, which the over-cutoff rejection catches -- so the
+#' message aimed at this case must not say "trend".
+#'
+#' @param vg An empirical variogram from \code{gstat::variogram()}.
+#' @return \code{TRUE} for a net decrease, \code{FALSE} otherwise (including
+#'   when fewer than \code{min_bins} bins fall in the shorter half).
+#' @keywords internal
+#' @noRd
+.variogram_decreasing <- function(vg, frac = 0.5, min_bins = 4L, tol = 0.15) {
+  if (!is.data.frame(vg) || !all(c("dist", "gamma", "np") %in% names(vg)))
+    return(FALSE)
+  vg <- vg[is.finite(vg$gamma) & is.finite(vg$dist) & is.finite(vg$np) & vg$np > 0, ,
+           drop = FALSE]
+  if (nrow(vg) < min_bins) return(FALSE)
+  vg <- vg[order(vg$dist), , drop = FALSE]
+  short <- vg[vg$dist <= frac * max(vg$dist), , drop = FALSE]
+  if (nrow(short) < min_bins) return(FALSE)
+  w   <- pmin(utils::head(short$np, -1L), utils::tail(short$np, -1L))
+  if (!any(w > 0)) return(FALSE)
+  net <- sum(w * diff(short$gamma)) / sum(w) * (nrow(short) - 1L)
+  scale <- stats::weighted.mean(short$gamma, short$np)
+  is.finite(net) && is.finite(scale) && scale > 0 && net < -tol * scale
+}
+
+
+#' The nugget of an estimated autocorrelation range
+#'
+#' The nugget variance of the variogram model behind a
+#' \code{\link{estimate_sac_range}()} result: the semivariance at zero
+#' separation, i.e. measurement error plus variation at scales shorter than
+#' the closest pair.  It is carried as the \code{nugget} attribute of every
+#' classed result, identified or rejected, because it is the number a
+#' resolution criterion for a tessellation needs (the short-lag variance that
+#' no cell can average away).
+#'
+#' @param x A \code{sac_range} object, or anything else.
+#' @return A single number: the nugget in the units of the response's
+#'   variance; \code{NA_real_} when \code{x} carries no fitted model (a bare
+#'   \code{NA} from a run that could not fit anything, a rejected result whose
+#'   fits were all singular, or an object that is not a \code{sac_range}).
+#' @seealso \code{\link{estimate_sac_range}}, which produces the object.
+#' @examples
+#' if (requireNamespace("gstat", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(9)
+#'   n <- 150
+#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   D  <- as.matrix(dist(xy))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
+#'   r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
+#'   sac_nugget(r)
+#'   sac_nugget(NA)        # nothing fitted: NA
+#' }
+#' @export
+sac_nugget <- function(x) {
+  v <- attr(x, "nugget")
+  if (is.null(v)) return(NA_real_)
+  v <- suppressWarnings(as.numeric(v))
+  if (length(v) != 1L || !is.finite(v)) NA_real_ else v
+}
+
+
 #' Estimate the spatial autocorrelation range from data
 #'
 #' Fits exponential (or spherical) variogram models and returns the
@@ -902,9 +1047,12 @@
 #'   count or other response whose variance tracks its mean, see the section
 #'   on non-Gaussian responses: the range is still estimated, but it is a
 #'   less reliable number than for a Gaussian response.
-#' @param predictor_vars Optional character vector.  When supplied, an OLS
-#'   residual variogram is fitted instead of a raw-response variogram, which
-#'   better reflects the autocorrelation that the spatial model must handle.
+#' @param predictor_vars Optional character vector.  When supplied, the
+#'   trend on these predictors is removed first and the variogram describes
+#'   the residual autocorrelation -- the part a spatial model has to handle
+#'   once the covariates have done their work.  How the trend is removed is
+#'   set by \code{detrend}, and it matters: see "Detrending and the
+#'   residual-variogram bias".
 #' @param n_max Maximum number of points to subsample before fitting.
 #'   Variogram estimation is O(n²) so this keeps runtime bounded.
 #' @param cutoff Fraction of the maximum inter-point distance (the farthest
@@ -929,6 +1077,54 @@
 #'   the caller's RNG.  Pass \code{NULL} for the old unseeded behaviour, or a
 #'   different number to check how sensitive the estimate is to the subsample.
 #'   Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.
+#'   The \code{reml_max_n} subsample uses the same seed.
+#' @param detrend How the trend on \code{predictor_vars} is removed;
+#'   ignored when there are none.  \code{"ols"} (default) fits it by ordinary
+#'   least squares and fits the variogram to the residuals -- the
+#'   long-standing behaviour, which underestimates the range (see the section
+#'   below).  \code{"reml"} fits the trend and an exponential-plus-nugget
+#'   covariance together by residual maximum likelihood with
+#'   \code{nlme::gls()}, returns the REML range, and attaches the empirical
+#'   variogram of the REML residuals for inspection.  It needs \pkg{nlme},
+#'   costs \eqn{O(n^3)} (about 2 s at 300 points, 12 s at 500, 45 s at 800),
+#'   and so runs on at most \code{reml_max_n} points; when it does not
+#'   converge the \code{"ols"} path runs instead with an R warning saying so.
+#' @param reml_max_n Positive integer, at least 30.  With \code{detrend =
+#'   "reml"}, the trend and covariance are fitted on a seeded random subsample
+#'   of this many points when the layer has more (exact duplicate locations
+#'   are dropped first); the fitted trend is then removed from every point.
+#'   Default 400.  Raise it for a better-determined fit at the cost above.
+#' @section Detrending and the residual-variogram bias:
+#' Fitting a variogram to the residuals of a least-squares trend
+#' underestimates both the sill and the range, because the trend fit absorbs
+#' part of the long-wavelength spatial variation (Lark, Cullis and Welham
+#' 2006).  Blocks sized from that range are then too small and a blocked
+#' validation is less conservative than it claims.  How large the effect is
+#' depends on how smooth the trend terms are in space, and on how many there
+#' are.  Measured for this estimator on simulated exponential fields (n =
+#' 300, true effective range 300, nugget 0.2, 40--60 draws), as the median
+#' ratio of the estimate from the trend-removed data to the estimate from
+#' the true field:
+#' \itemize{
+#'   \item a white-noise covariate: OLS 1.00, REML 0.99 -- no bias to speak of;
+#'   \item a spatially smooth covariate (a random field with range 300 or
+#'     1000): OLS 0.97, REML 0.95--0.98;
+#'   \item a linear trend in the coordinates: OLS 0.92, REML 1.04;
+#'   \item a quadratic trend in the coordinates (five terms): OLS 0.75,
+#'     REML 1.06.
+#' }
+#' So for ordinary covariates the OLS bias is a few percent, and for trend
+#' surfaces in the coordinates it is large.  Iterating between a GLS trend
+#' fit and a variogram refit (Neuman and Jacobson 1984) recovers only part of
+#' it (0.80 in the quadratic case), because the variogram of GLS residuals
+#' is biased too; REML does not fit a variogram to residuals at all, which is
+#' why \code{detrend = "reml"} returns its own range estimate.  Its price is
+#' a single family (exponential with nugget), a cubic cost in \code{n}, and
+#' a somewhat wider sampling spread.  The default stays \code{"ols"} so that
+#' existing scripts return what they did; a script that detrends on smooth
+#' or coordinate-based terms should pass \code{detrend = "reml"}, or size its
+#' blocks with a margin.
+#'
 #' @section Count and other non-Gaussian responses:
 #' The empirical variogram assumes second-order stationarity: a variance that
 #' is the same everywhere, so that semivariance depends on separation alone.
@@ -961,30 +1157,49 @@
 #'       over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
 #'       the all-pairs fit was unusable and the directional maximum stands in
 #'       for it), \code{detrended} (logical: whether the variogram is of the
-#'       OLS residuals on \code{predictor_vars} rather than the raw response
+#'       residuals on \code{predictor_vars} rather than the raw response
 #'       -- a missing predictor is an error, and a failed detrending fit
 #'       warns and falls back to the raw response with this set to
-#'       \code{FALSE}),
+#'       \code{FALSE}), \code{detrend_method} (\code{"ols"} or \code{"reml"}
+#'       when detrended, \code{NA} otherwise), \code{reml} (with
+#'       \code{detrend = "reml"}: a list with \code{n_used},
+#'       \code{subsampled}, \code{nugget_prop} and \code{sigma2} from the
+#'       REML fit; \code{NULL} otherwise),
 #'       \code{crs} (the projected CRS the variogram was
 #'       fitted in -- the unit of the range), \code{max_dist},
-#'       \code{cutoff_dist}, \code{variogram} (the empirical variogram) and
-#'       \code{variogram_model} (the fitted \code{gstat} model), so the fit can
-#'       be inspected rather than trusted.}
-#'     \item{Rejected range}{\code{NA_real_} when a range was fitted but exceeds
-#'       \code{range_frac * cutoff * max_dist} and is therefore unidentified
-#'       (see \code{range_frac}).  It is classed \code{sac_range} as well, so it
-#'       prints as a bare \code{NA} rather than dumping its attributes, and it
-#'       carries \code{max_dist}, \code{cutoff_dist}, \code{variogram} and
-#'       \code{variogram_model} --- the evidence for the rejection --- plus
-#'       \code{rejected_range} (the value that was refused) and
-#'       \code{rejected_reason}, plus \code{crs} — so the units the rejected
-#'       number was in stay recoverable, which is what
-#'       \code{plot(type = "variogram")} labels its axis from.  It does
-#'       \strong{not} carry \code{directional} or \code{anisotropy}.  The
-#'       same shape, with \code{rejected_range = NA} and
-#'       \code{variogram_model = NULL}, is returned when no variogram model
-#'       could be fitted at all (both the exponential and the spherical fit
-#'       singular, which is what a flat, nugget-only variogram produces);
+#'       \code{cutoff_dist}, \code{variogram} (the empirical variogram),
+#'       \code{variogram_model} (the fitted \code{gstat} model, or with
+#'       \code{detrend = "reml"} a \code{gstat} model built from the REML
+#'       parameters) and \code{nugget} (that model's nugget variance; see
+#'       \code{\link{sac_nugget}}), so the fit can be inspected rather than
+#'       trusted.}
+#'     \item{Rejected range}{\code{NA_real_} when a range was fitted but is
+#'       not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
+#'       \code{range_frac}); or the model did not converge; or the empirical
+#'       variogram \emph{decreases} with distance over its shorter lags (a
+#'       net fall of more than 15 percent of the mean semivariance there,
+#'       weighted by pairs), which is the shape of a periodic, hole-effect
+#'       structure or of a variance that differs between a dense cluster and
+#'       the rest of the layer -- not of an unremoved trend, which makes the
+#'       variogram rise without a sill and is caught by the first test; or
+#'       the fitted range is non-positive.  It is classed \code{sac_range} as
+#'       well, so it prints as a bare \code{NA} rather than dumping its
+#'       attributes, and it carries \code{max_dist}, \code{cutoff_dist},
+#'       \code{variogram}, \code{variogram_model} and \code{nugget} --- the
+#'       evidence for the rejection --- plus \code{rejected_range} (the value
+#'       that was refused), \code{rejected_reason} (one of
+#'       \code{"fitted range exceeds the largest lag fitted"},
+#'       \code{"variogram model did not converge"},
+#'       \code{"empirical variogram decreases with distance"},
+#'       \code{"fitted range is non-positive or non-finite"}), \code{crs} —
+#'       so the units the rejected number was in stay recoverable, which is
+#'       what \code{plot()} labels its axis from --- and
+#'       \code{detrend_method}.  It does \strong{not} carry
+#'       \code{directional} or \code{anisotropy}.  The same shape, with
+#'       \code{rejected_range = NA}, \code{variogram_model = NULL} and
+#'       \code{nugget = NA}, is returned when no variogram model could be
+#'       fitted at all (both the exponential and the spherical fit singular,
+#'       which is what a flat, nugget-only variogram produces);
 #'       \code{rejected_reason} says so and the empirical variogram is still
 #'       attached.}
 #'     \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
@@ -996,6 +1211,18 @@
 #'   Attributes and the class do not affect \code{is.na()} or
 #'   \code{is.finite()}, so every downstream guard treats all three the same
 #'   way it always did.
+#' @references
+#' Lark, R. M., Cullis, B. R. and Welham, S. J. (2006). On spatial prediction
+#' of soil properties in the presence of a spatial trend: the empirical best
+#' linear unbiased predictor (E-BLUP) with REML. \emph{European Journal of
+#' Soil Science}, 57(6), 787--799. \doi{10.1111/j.1365-2389.2005.00768.x}
+#'
+#' Neuman, S. P. and Jacobson, E. A. (1984). Analysis of nonintrinsic spatial
+#' variability by residual kriging with application to regional groundwater
+#' levels. \emph{Mathematical Geology}, 16(5), 499--521.
+#' \doi{10.1007/BF01886329}
+#' @seealso \code{\link{sac_nugget}} for the nugget behind the estimate,
+#'   \code{\link{plot.sac_range}} to see the variogram the estimate rests on.
 #' @family cross-validation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
@@ -1027,7 +1254,14 @@
 estimate_sac_range <- function(points_sf, response_var,
                                predictor_vars = NULL,
                                n_max = 5000L, cutoff = 0.5,
-                               range_frac = 1.0, seed = 123L) {
+                               range_frac = 1.0, seed = 123L,
+                               detrend = c("ols", "reml"),
+                               reml_max_n = 400L) {
+  detrend <- match.arg(detrend)
+  if (!is.numeric(reml_max_n) || length(reml_max_n) != 1L ||
+      !is.finite(reml_max_n) || reml_max_n < 30)
+    stop("estimate_sac_range(): `reml_max_n` must be a single number of at ",
+         "least 30.", call. = FALSE)
   if (!requireNamespace("gstat", quietly = TRUE)) {
     .log_warn("estimate_sac_range(): package 'gstat' is required for variogram estimation; returning NA.")
     return(NA_real_)
@@ -1127,6 +1361,8 @@ estimate_sac_range <- function(points_sf, response_var,
     }
   }
   detrended <- FALSE
+  detrend_method <- NA_character_
+  reml_fit <- NULL
   if (!is.null(predictor_vars) && length(predictor_vars) > 0L) {
     df <- pts_df
     # A predictor that is not a column is an error, as it is everywhere else
@@ -1140,9 +1376,62 @@ estimate_sac_range <- function(points_sf, response_var,
            paste(sQuote(missing_preds), collapse = ", "),
            " not found in the data.", call. = FALSE)
     fml <- stats::reformulate(predictor_vars, response_var)
-    lm_fit <- try(stats::lm(fml, data = df, na.action = stats::na.exclude),
-                  silent = TRUE)
-    if (inherits(lm_fit, "try-error")) {
+    # REML: trend and covariance fitted together, so the trend is a GLS fit
+    # under the fitted correlation and the range is the REML estimate, not a
+    # variogram of residuals.  Measured on simulated fields (n = 300, true
+    # effective range 300, 40-60 draws): the OLS residual variogram returned
+    # a median 0.97 of the oracle range for a spatially smooth covariate, 0.92
+    # for a linear trend in the coordinates and 0.75 for a quadratic one; REML
+    # 0.95-1.06 throughout.  On failure the OLS path below runs instead.
+    if (identical(detrend, "reml")) {
+      xy_tr <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
+      df$.sac_x <- xy_tr[, 1]; df$.sac_y <- xy_tr[, 2]
+      # Complete rows only, chosen here rather than by na.action so the same
+      # row set can carry the coordinates alongside the model frame and the
+      # residuals can be put back at their positions afterwards.
+      keep <- stats::complete.cases(df[, c(response_var, predictor_vars), drop = FALSE]) &
+        is.finite(df$.sac_x) & is.finite(df$.sac_y)
+      mf <- df[keep, c(response_var, predictor_vars, ".sac_x", ".sac_y"), drop = FALSE]
+      if (sum(keep) >= 30L) {
+        extent <- max(diff(range(xy_tr[keep, 1])), diff(range(xy_tr[keep, 2])), 1)
+        reml_fit <- .reml_trend(mf, fml, extent = extent, max_n = reml_max_n,
+                                seed = seed)
+      }
+      if (is.null(reml_fit)) {
+        .warn_and_log(paste0("estimate_sac_range(): the REML detrending on %s ",
+                             "did not converge%s; falling back to OLS ",
+                             "detrending, whose residual variogram is biased ",
+                             "toward a shorter range (see ?estimate_sac_range)."),
+                      paste(predictor_vars, collapse = " + "),
+                      if (!requireNamespace("nlme", quietly = TRUE))
+                        " (package 'nlme' is not installed)" else "")
+      } else {
+        X <- try(stats::model.matrix(fml, mf), silent = TRUE)
+        b <- if (inherits(X, "try-error")) NA_real_ else reml_fit$beta[colnames(X)]
+        if (inherits(X, "try-error") || anyNA(b) || nrow(X) != sum(keep)) {
+          .warn_and_log("estimate_sac_range(): the REML trend coefficients do not match the design; falling back to OLS detrending.")
+          reml_fit <- NULL
+        } else {
+          r_all <- rep(NA_real_, nrow(df))
+          r_all[keep] <- as.numeric(mf[[response_var]] - X %*% b)
+          y <- r_all
+          detrended <- TRUE
+          detrend_method <- "reml"
+          .log_info(paste0("estimate_sac_range(): REML detrending on %s fitted ",
+                           "on %d point(s)%s: range parameter %.1f, nugget ",
+                           "proportion %.2f."),
+                    paste(predictor_vars, collapse = " + "), reml_fit$n_used,
+                    if (isTRUE(reml_fit$subsampled)) " (random subsample)" else "",
+                    reml_fit$range, reml_fit$nugget_prop)
+        }
+      }
+    }
+    lm_fit <- if (is.null(reml_fit))
+      try(stats::lm(fml, data = df, na.action = stats::na.exclude), silent = TRUE)
+    else NULL
+    if (is.null(lm_fit)) {
+      # REML handled the trend above; nothing to do here.
+    } else if (inherits(lm_fit, "try-error")) {
       # Falling through to the raw response is a different estimand, so it
       # is an R warning, not a log line.
       .warn_and_log(paste0("estimate_sac_range(): the OLS detrending on %s ",
@@ -1158,6 +1447,7 @@ estimate_sac_range <- function(points_sf, response_var,
       } else {
         y <- resid
         detrended <- TRUE
+        detrend_method <- "ols"
       }
     }
   }
@@ -1420,7 +1710,24 @@ estimate_sac_range <- function(points_sf, response_var,
             as.numeric(iso_fit_always) <= max_supported &&
             !identical(attr(iso_fit_always, "converged"), FALSE)
 
-  if (dir_success) {
+  if (!is.null(reml_fit)) {
+    # --- REML detrending: the range is the REML estimate ---------------------
+    # Not a variogram fitted to the REML residuals: a residual variogram is
+    # biased toward a shorter range whatever fitted the trend (measured 0.80
+    # of the oracle for GLS residuals under a quadratic trend), and the REML
+    # parameters are the estimate that does not carry that bias.  The
+    # empirical variogram of the residuals is attached for inspection -- the
+    # model line drawn through it is the REML model, and a curve sitting
+    # below that line at long lags is the bias made visible -- and the
+    # directional sweep on the residuals stays the diagnostic it always is.
+    effective_range <- 3 * reml_fit$range
+    vgm_used <- gstat::vgm(psill  = reml_fit$sigma2 * (1 - reml_fit$nugget_prop),
+                           model  = "Exp", range = reml_fit$range,
+                           nugget = reml_fit$sigma2 * reml_fit$nugget_prop)
+    vg_used  <- if (inherits(vg_iso_always, "data.frame")) vg_iso_always else NULL
+    if (dir_success)
+      anisotropy <- max(usable, na.rm = TRUE) / min(usable, na.rm = TRUE)
+  } else if (dir_success) {
     dir_max    <- max(usable, na.rm = TRUE)
     anisotropy <- dir_max / min(usable, na.rm = TRUE)
     winner     <- which.max(usable)
@@ -1522,20 +1829,43 @@ estimate_sac_range <- function(points_sf, response_var,
         NA_real_,
         class           = c("sac_range", "numeric"),
         detrended       = isTRUE(detrended),
+        detrend_method  = detrend_method,
         max_dist        = as.numeric(max_dist),
         cutoff_dist     = as.numeric(cutoff_dist),
         crs             = sf::st_crs(pts),
         variogram       = if (inherits(vg_iso, "data.frame")) vg_iso else NULL,
         variogram_model = NULL,
+        nugget          = NA_real_,
         rejected_range  = NA_real_,
         rejected_reason = "no variogram model could be fitted (singular fits)"
       ))
     }
   }
 
+  # The nugget of whatever model stands behind the answer, identified or not:
+  # the semivariance at zero separation, which a resolution criterion needs
+  # and which used to be reachable only by reading gstat's row layout.
+  nugget_val <- .vgm_nugget_of(vgm_used)
+
   if (!is.finite(effective_range) || effective_range <= 0) {
+    # Classed like every other refusal, so the evidence travels with the NA;
+    # this used to be the one path that returned a bare, attribute-less NA
+    # from inside a completed fit.
     .log_warn("estimate_sac_range(): estimated range is non-positive or non-finite; returning NA.")
-    return(NA_real_)
+    return(structure(
+      NA_real_,
+      class           = c("sac_range", "numeric"),
+      detrended       = isTRUE(detrended),
+      detrend_method  = detrend_method,
+      max_dist        = as.numeric(max_dist),
+      cutoff_dist     = as.numeric(cutoff_dist),
+      crs             = sf::st_crs(pts),
+      variogram       = vg_used,
+      variogram_model = vgm_used,
+      nugget          = nugget_val,
+      rejected_range  = as.numeric(effective_range),
+      rejected_reason = "fitted range is non-positive or non-finite"
+    ))
   }
 
   # --- Reject ranges the data cannot actually support -----------------------
@@ -1555,13 +1885,32 @@ estimate_sac_range <- function(points_sf, response_var,
   # spanning the data yields one block covering everything, which silently
   # defeats blocked cross-validation.
   over_cutoff   <- is.finite(max_supported) && effective_range > max_supported
+  # A semivariance that FALLS with distance over the shorter lags has no sill
+  # to reach, so the range fitted through it is not identified either.  This
+  # is not the trend signature -- a trend makes the curve rise without a sill,
+  # which `over_cutoff` catches -- but a periodic (hole-effect) structure, or
+  # a variance that differs between a dense cluster and the rest of the layer
+  # (see .variogram_decreasing() for the measured rates).
+  decreasing    <- .variogram_decreasing(vg_used)
   # Non-convergence is refused on the same terms and for the same reason: the
   # number is not a fitted parameter.  gstat signals it with a warning and
   # returns anyway, which is why it needs its own test rather than riding on
   # the cutoff bound -- a non-converged range can land inside the bound and
   # would otherwise have sized a block.
-  if (over_cutoff || !fit_converged) {
-    if (over_cutoff) {
+  if (over_cutoff || !fit_converged || decreasing) {
+    if (decreasing) {
+      .log_warn(
+        paste0("estimate_sac_range(): the empirical variogram decreases with ",
+               "distance over its shorter lags, so no range is identified ",
+               "from it (the fit reported %.0f). That shape is what a periodic ",
+               "(hole-effect) structure produces, or a variance that differs ",
+               "between a dense cluster and the rest of the layer; an ",
+               "unremoved trend makes a variogram rise without a sill, which ",
+               "is a different signal. Returning NA. Inspect it with plot() on ",
+               "the returned value, and set a block size explicitly."),
+        effective_range
+      )
+    } else if (over_cutoff) {
       .log_warn(
         paste0("estimate_sac_range(): fitted range (%.0f) exceeds the largest ",
                "lag the variogram was fitted over (%.4g = %s x cutoff %.0f); the ",
@@ -1598,13 +1947,17 @@ estimate_sac_range <- function(points_sf, response_var,
       NA_real_,
       class           = c("sac_range", "numeric"),
       detrended       = isTRUE(detrended),
+      detrend_method  = detrend_method,
       max_dist        = as.numeric(max_dist),
       cutoff_dist     = as.numeric(cutoff_dist),
       crs             = sf::st_crs(pts),
       variogram       = vg_used,
       variogram_model = vgm_used,
+      nugget          = nugget_val,
       rejected_range  = as.numeric(effective_range),
-      rejected_reason = if (over_cutoff)
+      rejected_reason = if (decreasing)
+        "empirical variogram decreases with distance"
+      else if (over_cutoff)
         "fitted range exceeds the largest lag fitted"
       else "variogram model did not converge"
     ))
@@ -1624,6 +1977,13 @@ estimate_sac_range <- function(points_sf, response_var,
     # of the raw response.  make_folds(auto_range = TRUE) and
     # summarize_by_cell(deff = "variogram") both need to know which.
     detrended       = isTRUE(detrended),
+    # "ols" or "reml" when detrended, NA otherwise; and the REML fit's own
+    # numbers when it was used, so the caller can see how much of the layer
+    # the trend was estimated on.
+    detrend_method  = detrend_method,
+    reml            = if (is.null(reml_fit)) NULL else
+      list(n_used = reml_fit$n_used, subsampled = isTRUE(reml_fit$subsampled),
+           nugget_prop = reml_fit$nugget_prop, sigma2 = reml_fit$sigma2),
     max_dist        = as.numeric(max_dist),
     cutoff_dist     = as.numeric(cutoff_dist),
     # The CRS the variogram was fitted in.  Its range is a length in these
@@ -1631,8 +1991,19 @@ estimate_sac_range <- function(points_sf, response_var,
     # before evaluating the correlation function at within-cell distances.
     crs             = sf::st_crs(pts),
     variogram       = vg_used,
-    variogram_model = vgm_used
+    variogram_model = vgm_used,
+    nugget          = nugget_val
   )
+}
+
+
+#' The nugget psill of a gstat variogram model, or NA
+#' @keywords internal
+#' @noRd
+.vgm_nugget_of <- function(vm) {
+  if (!is.data.frame(vm) || !all(c("model", "psill") %in% names(vm))) return(NA_real_)
+  v <- sum(as.numeric(vm$psill[as.character(vm$model) == "Nug"]))
+  if (length(v) != 1L || !is.finite(v)) NA_real_ else v
 }
 
 

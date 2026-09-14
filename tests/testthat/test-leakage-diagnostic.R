@@ -13,14 +13,20 @@
 # sizes nothing, so the folds are unchanged.
 # ---------------------------------------------------------------------------
 
-# A field with a short, well-identified range: a sum of sinusoids of period
-# ~250 units on a 1000-unit extent.  estimate_sac_range() returns ~209 on it,
-# which sits between the default block edge at k = 5 (1000 / 4 = 250, no
-# leakage) and at k = 10 (1000 / 6 ~ 167, leakage).
-leak_test_points <- function(n = 300, seed = 1) {
+# A field with a short, well-identified range: an exponential Gaussian random
+# field (range parameter 70, so an effective range of 210) on a 1000-unit
+# extent, with measurement noise.  On this draw estimate_sac_range() returns
+# ~202, which sits between the default block edge at k = 5 (1000 / 4 = 250,
+# no leakage) and at k = 10 (1000 / 6 ~ 167, leakage).  An earlier fixture
+# was a sum of sinusoids of period ~250; its variogram is a hole effect, which
+# estimate_sac_range() now refuses as "decreases with distance" rather than
+# reading an exponential range off it.
+leak_test_points <- function(n = 300, seed = 8) {
   set.seed(seed)
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
-  z <- sin(x / 40) + cos(y / 40) + rnorm(n, sd = 0.3)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 70) + diag(1e-8, n))) %*% rnorm(n)) +
+    rnorm(n, sd = 0.3)
   sf::st_as_sf(data.frame(x = x, y = y, z = z, w = rnorm(n)),
                coords = c("x", "y"), crs = 32632)
 }
