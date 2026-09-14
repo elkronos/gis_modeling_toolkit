@@ -40,9 +40,15 @@ baseline for asking how much of the surface is spatial structure rather
 than covariate effect (and the natural null model for comparing against a
 covariate model with \code{\link{compare_models}}).}
 
-\item{family}{A model family accepted by \code{brms::brm()} (a stats
-family function or a brms family object). Default NULL (resolved to
-\code{stats::gaussian()}).}
+\item{family}{A model family accepted by \code{brms::brm()}: a stats
+family function such as \code{poisson()}, or a brms family object such
+as \code{brms::zero_inflated_poisson()}, \code{brms::negbinomial()},
+\code{brms::hurdle_poisson()}, \code{brms::bernoulli()} or
+\code{brms::Beta()}.  Default \code{NULL}, resolved to
+\code{stats::gaussian()}.  The family reaches \code{brms::brm()}
+unchanged with the spatial GP term still in the formula, so any response
+type brms can fit, this function can fit; see the section on
+non-Gaussian responses and the count example below.}
 
 \item{gp_k}{Positive integer giving the number of GP basis functions
 \emph{per dimension}, or NULL (default) to derive it from the
@@ -219,6 +225,60 @@ tensor grid either way, so the model carries \code{gp_k^2} basis functions
 regardless.  The stored \code{$info$coord_scaling} list records the scaling
 strategy, and \code{$info$gp_iso} records which kernel was used.
 }
+\section{Non-Gaussian responses}{
+
+Nothing in this function is Gaussian-specific except its default.  The
+response check is family-aware: a non-numeric response is refused only when
+the family resolves to gaussian, so a count, binary or bounded response
+passes straight through to brms under the family you name.  Zero-inflated
+and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
+have all been verified to reach \code{brms::brm()} with the GP term intact.
+
+Two things follow.  First, the metrics that come back from
+\code{\link{model_metrics}()} and the \code{cv_*()} functions are not all
+meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+are Gaussian-shaped, and for this backend \code{\link{cv_bayes}()}'s CRPS
+and interval coverage are the proper scores to read.  See
+\code{\link{model_metrics}()}, section "Which metrics survive a
+non-Gaussian response".  Second, \code{\link{estimate_sac_range}()} fits
+a variogram to the raw response (or OLS residuals), whose variance tracks
+its mean for a count; the range it reports is then less trustworthy than
+for a Gaussian response, and its help page says how.
+
+One trap.  The response check reads the family's name through
+\code{brms}'s own accessor; a family object it cannot name is treated as
+"not gaussian" and the check is skipped entirely, rather than falling back
+to the gaussian rule.  A malformed \code{family} therefore buys less
+validation, not more, and a wrong response type will surface as a Stan
+error rather than as a message from this function.
+}
+
+\section{Spatial confounding}{
+
+A fixed-effect coefficient estimated alongside a spatial random effect is a
+different quantity from the same coefficient in a non-spatial fit.  When a
+covariate is itself spatially smooth, the GP term absorbs part of its
+effect and the two estimates can disagree sharply; when the response is
+smoother than the covariate, the estimate can shrink toward zero regardless
+of the true effect (Bolin and Wallin 2025).  Under a correctly specified
+spatial model this is not a bias but a change of estimand (Zimmerman and
+Ver Hoef 2022): the spatial coefficient is the effect \emph{net of} whatever
+the spatial field can explain, and the non-spatial one is not.  Which of the
+two a user wants depends on the question, so the honest diagnostic is to
+report both side by side --- fit the same formula with \code{stats::lm()} or
+\code{stats::glm()} and compare --- rather than to adjust one toward the
+other.
+
+The literature on remedies is unsettled and this function takes no side.
+Restricted spatial regression (Hughes and Haran 2013) projects the spatial
+effect off the covariate space; later work argues it does not deliver what
+it promises (Hanks et al. 2015; Khan and Calder 2022).  Within this backend,
+modelling the covariate and the spatial field as explicitly correlated
+(Marques, Kneib and Klein 2022) is expressible in a brms formula with no
+new code, and a spectral adjustment (Guan et al. 2023) is the principled
+route a Hilbert-space basis is well placed to support later.
+}
+
 \examples{
 \dontrun{
 # Not run: fits with Stan, which needs a working C++ toolchain and takes
@@ -237,6 +297,15 @@ if (requireNamespace("brms", quietly = TRUE)) {
                                     compute_loo = FALSE)
   summary(fit)
   head(predict(fit, newdata = dat))
+
+  # A zero-inflated count.  The family is the only thing that changes;
+  # score it with cv_bayes()'s CRPS and coverage, not with MAPE or R2.
+  dat$count <- rpois(n, exp(0.5 + 0.8 * dat$elev)) * rbinom(n, 1, 0.7)
+  fit_zip <- fit_bayesian_spatial_model(dat, "count", "elev",
+                                        family = brms::zero_inflated_poisson(),
+                                        chains = 2, iter = 500,
+                                        compute_loo = FALSE)
+  summary(fit_zip)
 }
 }
 }
@@ -246,6 +315,36 @@ Vehtari, A. (2023). Practical Hilbert space approximate Bayesian
 Gaussian processes for probabilistic programming.
 \emph{Statistics and Computing} \strong{33}, 17.
 \doi{10.1007/s11222-022-10167-2}
+
+Bolin, D. and Wallin, J. (2025). Spatial self-confounding: smoothness-related
+estimation bias in spatial regression models. \emph{Biometrika} \strong{113}.
+\doi{10.1093/biomet/asaf076}
+
+Guan, Y., Page, G. L., Reich, B. J., Ventrucci, M. and Yang, S. (2023).
+Spectral adjustment for spatial confounding. \emph{Biometrika}
+\strong{110}, 699--719. \doi{10.1093/biomet/asac069}
+
+Hanks, E. M., Schliep, E. M., Hooten, M. B. and Hoeting, J. A. (2015).
+Restricted spatial regression in practice: geostatistical models,
+confounding, and robustness under model misspecification.
+\emph{Environmetrics} \strong{26}, 243--254. \doi{10.1002/env.2331}
+
+Hughes, J. and Haran, M. (2013). Dimension reduction and alleviation of
+confounding for spatial generalized linear mixed models. \emph{Journal of
+the Royal Statistical Society: Series B} \strong{75}, 139--159.
+\doi{10.1111/j.1467-9868.2012.01041.x}
+
+Khan, K. and Calder, C. A. (2022). Restricted spatial regression methods:
+implications for inference. \emph{Journal of the American Statistical
+Association} \strong{117}, 482--494. \doi{10.1080/01621459.2020.1788949}
+
+Marques, I., Kneib, T. and Klein, N. (2022). Mitigating spatial confounding
+by explicitly correlating Gaussian random fields. \emph{Environmetrics}
+\strong{33}, e2727. \doi{10.1002/env.2727}
+
+Zimmerman, D. L. and Ver Hoef, J. M. (2022). On deconfounding spatial
+confounding in linear models. \emph{The American Statistician}
+\strong{76}, 159--167. \doi{10.1080/00031305.2021.1946149}
 }
 \seealso{
 Other model fitting: 

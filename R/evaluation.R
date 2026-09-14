@@ -1159,6 +1159,7 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
+#' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
 #'   Only the models that actually ran appear, so check which names are present

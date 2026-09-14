@@ -1,5 +1,41 @@
 # spatialkit (development version)
 
+## Documentation
+
+* `fit_bayesian_spatial_model()` documents that `family =` accepts any
+  `brms` family --- zero-inflated and hurdle counts, negative binomial,
+  Bernoulli, beta and ordinal responses all reach `brms::brm()` with the
+  spatial GP term intact --- and gains a worked zero-inflated Poisson example.
+  The same page now records a trap: a family object `brms` cannot name skips
+  the response-type check entirely rather than falling back to the gaussian
+  rule, so a malformed `family` buys less validation, not more.
+* `fit_bayesian_spatial_model()` gains a "Spatial confounding" section: a
+  coefficient estimated beside a spatial random effect is a different estimand
+  from the non-spatial one (Zimmerman and Ver Hoef 2022), can shrink toward
+  zero when the response is smoother than the covariate (Bolin and Wallin
+  2025), and the honest diagnostic is to report both side by side.  The
+  section names both sides of the restricted-spatial-regression dispute
+  (Hughes and Haran 2013; Hanks et al. 2015; Khan and Calder 2022) and the
+  remedies expressible in a `brms` formula (Marques, Kneib and Klein 2022;
+  Guan et al. 2023).
+* `model_metrics()` gains a "Which metrics survive a non-Gaussian response"
+  section, inherited by `cv_bayes()` and `compare_models_cv()`: RMSE and MAE
+  are defined for any numeric response; MAPE, SMAPE and R-squared are
+  Gaussian-shaped; CRPS and interval coverage from `cv_bayes()` are the proper
+  scores for a count or bounded response.  It also records that the
+  all-folds-failed `fold_metrics` frame omits the `coverage_*` columns.
+* `estimate_sac_range()` documents what a count or other mean-variance-linked
+  response does to the variogram, why detrending with `predictor_vars` helps
+  but does not fix it, and what to do instead.
+* `?spatialkit` now reads its nine-step pipeline as an argument --- steps 1
+  to 4 are the claim, steps 5, 7 and 9 the evidence that makes it checkable
+  --- and gains a "Defaults and their sources" section listing which defaults
+  rest on a citation and which were chosen, so the two are not mistaken for
+  each other.
+* `cv_spatial()` documents its name collision with `blockCV::cv_spatial()`,
+  which builds folds where this one runs them, and that `blockCV`'s
+  `$folds_ids` is accepted directly as `folds` everywhere.
+
 # spatialkit 2.0.0
 
 Everything below is relative to **1.0.0** (published on CRAN 2026-08-07).

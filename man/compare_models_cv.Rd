@@ -115,6 +115,27 @@ fit, \code{\link{cv_bayes}()} additionally reports CRPS and interval
 coverage, which are proper scoring rules and have no such failure mode.
 }
 
+\section{Which metrics survive a non-Gaussian response}{
+
+RMSE and MAE are defined for any numeric response and are what to read for
+a count, a rate or a bounded outcome.  MAPE and SMAPE assume a response
+that is rarely zero (see the previous section), and R-squared and adjusted
+R-squared compare residual variance to total variance, which is the right
+comparison for a Gaussian response and a loose one for anything whose
+variance tracks its mean.  None of the four is wrong to compute; each is
+Gaussian-shaped thinking, and on a Poisson or zero-inflated response should
+be read as a rough summary rather than a score.
+
+For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
+CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
+scoring rules computed from posterior draws, so they are meaningful for any
+\code{family} the backend accepts, and they are the numbers to compare when
+the response is not Gaussian.  Note that when every fold fails, the
+\code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
+but not the \code{coverage_*} columns, so code that reads those columns
+must tolerate their absence.
+}
+
 \examples{
 if (requireNamespace("ranger", quietly = TRUE)) {
   library(sf)

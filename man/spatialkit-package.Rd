@@ -13,6 +13,16 @@ Constructs analysis regions from the distribution of the data itself, as an alte
 The package is built around one workflow. Each step names the function that
 performs it; every step is optional except the ones your question needs.
 
+Read the order as an argument, not a menu.  Steps 1 to 4 are the claim:
+that regions drawn from the data's own spatial structure are a better basis
+for aggregation and modelling than boundaries drawn for other purposes.
+Step 6 is what you do with the regions.  Steps 5, 7 and 9 are the evidence
+layer: a claim that data-drawn regions beat borrowed ones is only meaningful
+if it can be checked, and random folds over autocorrelated data cannot
+check it.  Spatial cross-validation and the area of applicability are here
+because they are what stop the central claim from being unfalsifiable, not
+because the package is a cross-validation package.
+
 \enumerate{
 \item \strong{Choose a resolution.} \code{\link{determine_optimal_levels}()}
 reads a cell count out of the spatial structure of the observations,
@@ -62,6 +72,61 @@ Supporting these throughout, \code{\link{ensure_projected}()} and
 geometry coercion, and \code{\link{estimate_sac_range}()} estimates the
 distance over which observations remain correlated --- the number that
 should be setting your block size.
+}
+
+\section{Defaults and their sources}{
+
+A stated design principle of this package is that defaults follow current
+research rather than convention.  That is a claim with a maintenance cost,
+so this is the list it applies to, in two parts.
+
+Defaults that cite a reference, each traceable to the help page of the
+function named:
+\itemize{
+\item \code{fit_rf_model(include_coords = FALSE)}, and \code{fitted()} on a
+forest returning out-of-bag predictions --- Meyer et al. (2019).
+\item Permutation rather than impurity importance in
+\code{fit_rf_model()} --- Strobl et al. (2007).
+\item The Gaussian-process basis count and boundary factor derived from
+the length-scale-to-domain ratio in \code{fit_bayesian_spatial_model()}
+--- Riutort-Mayol et al. (2023).
+\item The nearest-neighbour distance-matching folds of
+\code{make_folds(method = "nndm")} and their \code{min_train = 0.5}
+--- Mila et al. (2022).
+\item The area-of-applicability threshold as the outlier-removed maximum
+of the training dissimilarity, with importance weights applied directly
+rather than square-rooted, matching the reference implementation ---
+Meyer and Pebesma (2021).
+\item The effective range of an exponential variogram as three times its
+range parameter, and the identifiability guard against ranges beyond
+half the maximum separation, in \code{estimate_sac_range()}.
+\item Cliff and Ord moments for the residual Moran's I in
+\code{residual_morans_i()}, with \code{null = "auto"}.
+\item The small-sample rescaling applied with every data-derived design
+effect in \code{summarize_by_cell()}, whose derivation and measured
+coverage are on that help page.
+}
+
+Defaults that were chosen, and are defensible, but do not rest on a
+citation.  They are listed so that they are not mistaken for the first kind:
+\itemize{
+\item \code{nstart = 5} in the k-means sweep of
+\code{determine_optimal_levels()}, which the clustering literature
+(Steinley 2003; Franti and Sieranoja 2019) argues is too few.
+\item \code{max_levels = 12} and the unit-step ladder of candidate
+levels in \code{determine_optimal_levels()}.
+\item The 3:1 fold-imbalance tolerance in
+\code{make_folds(method = "block_kfold")}.
+\item \code{deff_max_n = 500}, \code{sample_n = 1500} and
+\code{top_n = 3}, the subsampling and shortlist sizes.
+\item \code{coverage_levels = c(0.50, 0.80, 0.95)} in \code{cv_bayes()}.
+\item The condition-index cut of 30 in the collinearity checks of
+\code{fit_gwr_model()}, a conventional rule of thumb.
+\item The 10 percent posterior-mass warning threshold on the GP
+length-scale in \code{fit_bayesian_spatial_model()}, which is this
+package's own operationalisation of a check the reference recommends,
+not a figure from the paper.
+}
 }
 
 \section{Where to start}{

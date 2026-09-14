@@ -23,7 +23,10 @@ would otherwise return a range in 3-D while every consumer of it works in
 2-D map distance; and rows with empty or non-finite coordinates are dropped
 with a logged count.}
 
-\item{response_var}{Character(1) name of the response column.}
+\item{response_var}{Character(1) name of the response column.  For a
+count or other response whose variance tracks its mean, see the section
+on non-Gaussian responses: the range is still estimated, but it is a
+less reliable number than for a Gaussian response.}
 
 \item{predictor_vars}{Optional character vector.  When supplied, an OLS
 residual variogram is fitted instead of a raw-response variogram, which
@@ -160,6 +163,30 @@ The returned range is in the coordinate units of the (projected) data and
 can be passed directly to \code{make_folds(block_size = ...)} to ensure
 that CV blocks are at least as wide as the autocorrelation range.
 }
+\section{Count and other non-Gaussian responses}{
+
+The empirical variogram assumes second-order stationarity: a variance that
+is the same everywhere, so that semivariance depends on separation alone.
+A count response breaks that assumption by construction, because its
+variance tracks its mean, and so does any response with a mean-variance
+relationship (rates, proportions, skewed amounts).  On such data the
+variogram mixes distance-dependence with mean-dependence, and the fitted
+range is not the thing it claims to be: where the mean is high the
+semivariance is inflated whatever the distance, which flattens the curve
+and can lengthen or shorten the apparent range depending on where the
+high-mean regions sit.
+
+Supplying \code{predictor_vars} to detrend helps, because it removes the
+part of the mean the covariates explain, but it does not fix the variance
+structure: the residuals of an OLS fit to a count still have a variance
+that tracks the fitted mean.  The principled remedy is a variogram of
+Pearson residuals from a model in the right family, which this function
+does not compute.  Until it does, treat the range from a count response as
+an order of magnitude rather than an estimate, size blocks conservatively
+from it, and prefer \code{\link{make_folds}(method = "nndm")}, which does
+not depend on a fitted range at all.
+}
+
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)

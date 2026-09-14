@@ -104,6 +104,22 @@ Run K-fold CV for any model that returns a \code{spatial_fit} object.
 This is the extensibility point: to plug in a new model type, supply
 a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
 }
+\section{Name collision with blockCV}{
+
+The \pkg{blockCV} package exports a function of the same name that does
+the opposite job: \code{blockCV::cv_spatial()} \emph{builds} spatial
+folds, where this function \emph{runs} a cross-validation over folds it is
+given.  With both packages attached, whichever was attached last masks the
+other; \code{spatialkit::cv_spatial()} always resolves to this one.  The
+two cooperate rather than compete: \code{blockCV::cv_spatial()} returns
+its fold assignment as \code{$folds_ids}, a vector of fold labels, and
+that vector is accepted directly as the \code{folds} argument here and in
+every other \code{cv_*()} function.  Fold construction is
+\pkg{blockCV}'s home ground and this package does not try to match its
+breadth there; what this package adds is the path from irregular points
+through data-drawn regions to a cross-validated, compared model.
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
