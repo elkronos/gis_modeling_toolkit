@@ -15,7 +15,8 @@ resolution_profile(
   nstart = 25L,
   seed = 123L,
   sac = NULL,
-  quiet = TRUE
+  quiet = TRUE,
+  select_on = c("all", "split")
 )
 }
 \arguments{
@@ -57,6 +58,13 @@ with the same \code{predictor_vars}.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 Default \code{TRUE}.}
+
+\item{select_on}{\code{"all"} (default) profiles every point;
+\code{"split"} profiles one spatially blocked half and returns the other
+half as the set to estimate on, in the \code{"split"} attribute.  See
+the "Post-selection inference" section of
+\code{\link{determine_optimal_levels}}; the profile reads the response
+whenever \code{response_var} is given.}
 }
 \value{
 A data.frame of class \code{resolution_profile} with one row per
@@ -70,8 +78,10 @@ with \code{floor}, \code{ceiling}, \code{supported}, \code{area},
 \code{range}, \code{n}, \code{min_cell_n}), \code{variogram} (a list with
 \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 when none was usable), \code{variable} (\code{"response"},
-\code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart} and
-\code{sac} (the range object used).
+\code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
+\code{sac} (the range object used) and, with \code{select_on =
+  "split"}, \code{split} (a list with \code{selection} and
+\code{estimation}, integer row positions in \code{data_sf}).
 }
 \description{
 A tessellation's resolution is the number of cells the points are cut

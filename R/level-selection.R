@@ -412,7 +412,46 @@
 #'   \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
 #'   distance and that same quantity).  Falls back to \code{"geometric"} if
 #'   response/predictors are unavailable, and also when no candidate clears the
-#'   nine-cell resolution floor described in \strong{Details}.
+#'   nine-cell resolution floor described in \strong{Details}.  Note that
+#'   supplying both \code{response_var} and \code{predictor_vars} upgrades
+#'   \code{"geometric"} to \code{"combined"}: the selection then depends on
+#'   the response (see "Post-selection inference").
+#' @param select_on \code{"all"} (default) selects on every point;
+#'   \code{"split"} selects on one spatially blocked half of the points and
+#'   returns the other half as the set to estimate on, so that the standard
+#'   errors computed downstream on the chosen cells are not post-selection.
+#'   See "Post-selection inference".
+#' @section Post-selection inference:
+#' When the selection reads the response --- here, whenever both
+#' \code{response_var} and \code{predictor_vars} are supplied --- everything
+#' estimated afterwards on the chosen cells is estimated on data that already
+#' influenced the choice, and its standard errors are post-selection ones:
+#' descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen and
+#' Witten 2023 give the exact selective test for two k-means clusters, the
+#' first link of this chain).  The exposure is narrower than "the partition
+#' was chosen on the response": every partition here is k-means on the
+#' coordinates alone, and the response only decides which \emph{count} is
+#' ranked first.  It is not zero, because the count determines every cell the
+#' downstream standard errors are computed over.
+#'
+#' \code{select_on = "split"} is sample splitting: the layer is cut into two
+#' spatially blocked halves (\code{\link{make_folds}(k = 2, method =
+#' "block_kfold")}), the selection runs on the first half only, and the row
+#' positions of both halves come back in the \code{"split"} attribute
+#' (\code{selection} and \code{estimation}).  Build the tessellation on
+#' every point --- cells are geometry --- but aggregate and fit on
+#' \code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
+#' saw; that restores nominal coverage with no new theory.  The price is
+#' precision: half the points estimate, and García Rasines and Young (2023)
+#' show a \emph{contiguous} spatial half is less efficient than the
+#' exchangeable split the i.i.d. theory assumes, because the two halves are
+#' not interchangeable.  Two alternatives keep the whole sample --- data
+#' thinning for count responses (Neufeld et al. 2024) and data fission for
+#' Gaussian-like ones (Leiner et al. 2023) --- and are not implemented here;
+#' the split needs no distributional assumption, which is why it comes first.
+#' Selection on coordinates alone (\code{"geometric"} with no response) is
+#' not exposed in this way, and \code{"split"} then changes nothing but the
+#' attribute.
 #' @return An integer vector of candidate level counts, \strong{best first}:
 #'   under the geometric criterion the elbow, then its lower and upper
 #'   neighbours; under the model-aware criteria the candidates in rank order.
@@ -428,7 +467,10 @@
 #'   neighbourhood, or Moran's I could not be computed for any candidate), in
 #'   which case no diagnostics are available and the attribute is absent. Both
 #'   fallbacks are logged as warnings.  The geometric path returns a plain
-#'   integer vector; a rising WSS curve is still logged there.  For a full
+#'   integer vector; a rising WSS curve is still logged there.  With
+#'   \code{select_on = "split"} every path adds a \code{"split"} attribute:
+#'   a list with \code{selection} and \code{estimation} (integer row
+#'   positions in \code{data_sf}), \code{method} and \code{seed}.  For a full
 #'   per-level table --- criteria, cell support, restart spread, the flat
 #'   region --- see \code{\link{resolution_profile}()}.
 #' @references
@@ -443,6 +485,26 @@
 #' Steinley, D. (2003). Local optima in K-means clustering: what you don't
 #' know may hurt you. \emph{Psychological Methods}, 8(3), 294--304.
 #' \doi{10.1037/1082-989X.8.3.294}
+#'
+#' Gao, L. L., Bien, J. and Witten, D. (2022). Selective inference for
+#' hierarchical clustering. \emph{Journal of the American Statistical
+#' Association}, 119, 332--342. \doi{10.1080/01621459.2022.2116331}
+#'
+#' Chen, Y. T. and Witten, D. M. (2023). Selective inference for k-means
+#' clustering. \emph{Journal of Machine Learning Research}, 24(152), 1--41.
+#' \url{https://jmlr.org/papers/v24/22-0371.html}
+#'
+#' García Rasines, D. and Young, G. A. (2023). Splitting strategies for
+#' post-selection inference. \emph{Biometrika}, 110(3), 597--614.
+#' \doi{10.1093/biomet/asac070}
+#'
+#' Leiner, J., Duan, B., Wasserman, L. and Ramdas, A. (2023). Data fission:
+#' splitting a single data point. \emph{Journal of the American Statistical
+#' Association}, 120(549), 135--146. \doi{10.1080/01621459.2023.2270748}
+#'
+#' Neufeld, A., Dharamshi, A., Gao, L. L. and Witten, D. (2024). Data thinning
+#' for convolution-closed distributions. \emph{Journal of Machine Learning
+#' Research}, 25(57), 1--35. \url{https://jmlr.org/papers/v25/23-0446.html}
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -463,11 +525,13 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                      response_var = NULL,
                                      predictor_vars = NULL,
                                      criterion = c("geometric", "morans_i",
-                                                    "combined")) {
+                                                    "combined"),
+                                     select_on = c("all", "split")) {
   if (!inherits(data_sf, "sf"))
     stop("determine_optimal_levels(): `data_sf` must be an sf object.")
 
   criterion <- match.arg(criterion)
+  select_on <- match.arg(select_on)
   has_model_vars <- !is.null(response_var) && !is.null(predictor_vars) &&
     response_var %in% names(data_sf) &&
     all(predictor_vars %in% names(data_sf))
@@ -492,9 +556,23 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   }
   data_sf <- ensure_projected(data_sf)
 
+  # Sample splitting: select on one spatial half, hand the other back for
+  # estimation.  Done on the full layer, before the subsample, so the
+  # positions returned index `data_sf` as the caller passed it.
+  split <- NULL
+  if (identical(select_on, "split")) {
+    split <- .spatial_half_split(data_sf, seed = set_seed,
+                                 caller = "determine_optimal_levels")
+    data_sf <- data_sf[split$selection, , drop = FALSE]
+  }
+  .with_split <- function(out) {
+    if (!is.null(split)) attr(out, "split") <- split
+    out
+  }
+
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
   n  <- nrow(xy)
-  if (n < 3L) return(1L)
+  if (n < 3L) return(.with_split(1L))
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
@@ -556,7 +634,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   
   n_uniq <- nrow(unique(round(xy, 8)))
   k_max <- min(k_max, n_uniq - 1L)
-  if (k_max < 2L) return(1L)
+  if (k_max < 2L) return(.with_split(1L))
 
   # Say it BEFORE the sweep: the model-aware criteria carry no information at
   # nine cells or fewer (see the resolution floor in Details), so with
@@ -612,7 +690,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       }
       wss[fk] <- (wss[lo] + wss[hi]) / 2
     }
-    if (k_max < 2L) return(1L)
+    if (k_max < 2L) return(.with_split(1L))
   }
 
   elbow <- .elbow_from_wss(wss, max_k = k_max, min_k = 1L, return_neighbors = TRUE)
@@ -634,7 +712,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
     out[out < 1L]    <- 1L
     out[out > k_max] <- k_max
-    return(unique(out))
+    return(.with_split(unique(out)))
   }
 
   # --- Model-aware criteria: Moran's I only for elbow neighbourhood ---
@@ -652,7 +730,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     .log_warn("determine_optimal_levels(): no viable k values in elbow neighbourhood; falling back to geometric.")
     out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
     out[out < 1L] <- 1L; out[out > k_max] <- k_max
-    return(unique(out))
+    return(.with_split(unique(out)))
   }
 
   # Run k-means only for the candidate k values and compute Moran's I.
@@ -680,7 +758,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     .log_warn("determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.")
     out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
     out[out < 1L] <- 1L; out[out > k_max] <- k_max
-    return(unique(out))
+    return(.with_split(unique(out)))
   }
 
   if (criterion == "morans_i") {
@@ -699,7 +777,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                        "resolution floor); falling back to geometric."))
       out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
       out[out < 1L] <- 1L; out[out > k_max] <- k_max
-      return(unique(out))
+      return(.with_split(unique(out)))
     }
     ranked <- finite_ks[order(abs(moran_z[finite_ks]))]
     out <- as.integer(head(ranked, max(1L, as.integer(top_n))))
@@ -710,7 +788,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                       wss_spread = wss_spread[1:k_max],
                                       wss_bumps = wss_bumps, nstart = nstart,
                                       eval_ks = eval_ks)
-    return(out)
+    return(.with_split(out))
   }
 
   # --- Combined: rank-average of WSS elbow distance and |z| of Moran's I ---
@@ -753,5 +831,5 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     eval_ks = eval_ks,
     criterion = "combined"
   )
-  out
+  .with_split(out)
 }

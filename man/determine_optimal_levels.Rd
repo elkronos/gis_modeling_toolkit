@@ -12,7 +12,8 @@ determine_optimal_levels(
   set_seed = 123L,
   response_var = NULL,
   predictor_vars = NULL,
-  criterion = c("geometric", "morans_i", "combined")
+  criterion = c("geometric", "morans_i", "combined"),
+  select_on = c("all", "split")
 )
 }
 \arguments{
@@ -45,7 +46,16 @@ error.}
 \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
 distance and that same quantity).  Falls back to \code{"geometric"} if
 response/predictors are unavailable, and also when no candidate clears the
-nine-cell resolution floor described in \strong{Details}.}
+nine-cell resolution floor described in \strong{Details}.  Note that
+supplying both \code{response_var} and \code{predictor_vars} upgrades
+\code{"geometric"} to \code{"combined"}: the selection then depends on
+the response (see "Post-selection inference").}
+
+\item{select_on}{\code{"all"} (default) selects on every point;
+\code{"split"} selects on one spatially blocked half of the points and
+returns the other half as the set to estimate on, so that the standard
+errors computed downstream on the chosen cells are not post-selection.
+See "Post-selection inference".}
 }
 \value{
 An integer vector of candidate level counts, \strong{best first}:
@@ -63,7 +73,10 @@ itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), in
 which case no diagnostics are available and the attribute is absent. Both
 fallbacks are logged as warnings.  The geometric path returns a plain
-integer vector; a rising WSS curve is still logged there.  For a full
+integer vector; a rising WSS curve is still logged there.  With
+\code{select_on = "split"} every path adds a \code{"split"} attribute:
+a list with \code{selection} and \code{estimation} (integer row
+positions in \code{data_sf}), \code{method} and \code{seed}.  For a full
 per-level table --- criteria, cell support, restart spread, the flat
 region --- see \code{\link{resolution_profile}()}.
 }
@@ -143,6 +156,40 @@ contribute.  Under \code{criterion = "combined"}, a candidate below the
 floor that sits alongside candidates above it is ranked last on the Moran's
 I axis while still competing on the geometric axis.
 }
+\section{Post-selection inference}{
+
+When the selection reads the response --- here, whenever both
+\code{response_var} and \code{predictor_vars} are supplied --- everything
+estimated afterwards on the chosen cells is estimated on data that already
+influenced the choice, and its standard errors are post-selection ones:
+descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen and
+Witten 2023 give the exact selective test for two k-means clusters, the
+first link of this chain).  The exposure is narrower than "the partition
+was chosen on the response": every partition here is k-means on the
+coordinates alone, and the response only decides which \emph{count} is
+ranked first.  It is not zero, because the count determines every cell the
+downstream standard errors are computed over.
+
+\code{select_on = "split"} is sample splitting: the layer is cut into two
+spatially blocked halves (\code{\link{make_folds}(k = 2, method =
+"block_kfold")}), the selection runs on the first half only, and the row
+positions of both halves come back in the \code{"split"} attribute
+(\code{selection} and \code{estimation}).  Build the tessellation on
+every point --- cells are geometry --- but aggregate and fit on
+\code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
+saw; that restores nominal coverage with no new theory.  The price is
+precision: half the points estimate, and García Rasines and Young (2023)
+show a \emph{contiguous} spatial half is less efficient than the
+exchangeable split the i.i.d. theory assumes, because the two halves are
+not interchangeable.  Two alternatives keep the whole sample --- data
+thinning for count responses (Neufeld et al. 2024) and data fission for
+Gaussian-like ones (Leiner et al. 2023) --- and are not implemented here;
+the split needs no distributional assumption, which is why it comes first.
+Selection on coordinates alone (\code{"geometric"} with no response) is
+not exposed in this way, and \code{"split"} then changes nothing but the
+attribute.
+}
+
 \examples{
 library(sf)
 set.seed(1)
@@ -166,6 +213,26 @@ using better initialization and repeats? \emph{Pattern Recognition}, 93,
 Steinley, D. (2003). Local optima in K-means clustering: what you don't
 know may hurt you. \emph{Psychological Methods}, 8(3), 294--304.
 \doi{10.1037/1082-989X.8.3.294}
+
+Gao, L. L., Bien, J. and Witten, D. (2022). Selective inference for
+hierarchical clustering. \emph{Journal of the American Statistical
+Association}, 119, 332--342. \doi{10.1080/01621459.2022.2116331}
+
+Chen, Y. T. and Witten, D. M. (2023). Selective inference for k-means
+clustering. \emph{Journal of Machine Learning Research}, 24(152), 1--41.
+\url{https://jmlr.org/papers/v24/22-0371.html}
+
+García Rasines, D. and Young, G. A. (2023). Splitting strategies for
+post-selection inference. \emph{Biometrika}, 110(3), 597--614.
+\doi{10.1093/biomet/asac070}
+
+Leiner, J., Duan, B., Wasserman, L. and Ramdas, A. (2023). Data fission:
+splitting a single data point. \emph{Journal of the American Statistical
+Association}, 120(549), 135--146. \doi{10.1080/01621459.2023.2270748}
+
+Neufeld, A., Dharamshi, A., Gao, L. L. and Witten, D. (2024). Data thinning
+for convolution-closed distributions. \emph{Journal of Machine Learning
+Research}, 25(57), 1--35. \url{https://jmlr.org/papers/v25/23-0446.html}
 }
 \seealso{
 \code{\link[=build_tessellation]{build_tessellation()}}, which takes the chosen level count as

@@ -137,6 +137,29 @@
   `determine_optimal_levels()` is unchanged in shape and keeps its
   integer-vector interface.
 
+* `select_on = c("all", "split")` on `determine_optimal_levels()`,
+  `resolution_profile()` and `select_features_forward()`.  Whenever a
+  selection reads the response --- a level count chosen with
+  `response_var` and `predictor_vars`, or a predictor set chosen by a
+  forward sweep --- what is estimated afterwards on the result is
+  post-selection, and its standard errors are descriptive rather than at
+  nominal coverage (Gao, Bien and Witten 2022).  `select_on = "split"` is
+  sample splitting: the layer is cut into two spatially blocked halves
+  (`make_folds(k = 2, method = "block_kfold")`), the selection runs on the
+  first, and the row positions of both come back (as a `"split"` attribute
+  on the first two functions, as `$split` on the third) so the estimation
+  can be done on the half the selection never saw.
+  `select_features_forward()` also returns `score_holdout`: the selected set
+  fitted on the selection half and scored on the other, the honest number
+  its selection-internal `score` is not.  The cost is precision --- half the
+  points estimate, and a contiguous spatial half is less efficient than an
+  exchangeable one (García Rasines and Young 2023).  Data thinning (Neufeld
+  et al. 2024) and data fission (Leiner et al. 2023) keep the whole sample
+  and are noted on the help page, not implemented.  The help page also now
+  says plainly that supplying both `response_var` and `predictor_vars`
+  upgrades the level-selection criterion to `"combined"`, so the selection
+  depends on the response without that having been asked for.
+
 ## Bug fixes
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++

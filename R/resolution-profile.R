@@ -68,7 +68,6 @@
 #'
 #' @param L Number of cells.
 #' @param area Domain area in coordinate units squared.
-#' @param bbox Numeric \code{c(width, height)} of the domain.
 #' @param n_total Points in the layer.
 #' @param nugget,psill Nugget and total partial sill of the variogram model.
 #' @param cor_fn Correlation function of distance.
@@ -193,6 +192,12 @@
 #'   with the same \code{predictor_vars}.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   Default \code{TRUE}.
+#' @param select_on \code{"all"} (default) profiles every point;
+#'   \code{"split"} profiles one spatially blocked half and returns the other
+#'   half as the set to estimate on, in the \code{"split"} attribute.  See
+#'   the "Post-selection inference" section of
+#'   \code{\link{determine_optimal_levels}}; the profile reads the response
+#'   whenever \code{response_var} is given.
 #' @return A data.frame of class \code{resolution_profile} with one row per
 #'   level and columns \code{levels}, \code{wss}, \code{wss_spread} (relative
 #'   spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
@@ -204,8 +209,10 @@
 #'   \code{range}, \code{n}, \code{min_cell_n}), \code{variogram} (a list with
 #'   \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 #'   when none was usable), \code{variable} (\code{"response"},
-#'   \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart} and
-#'   \code{sac} (the range object used).
+#'   \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
+#'   \code{sac} (the range object used) and, with \code{select_on =
+#'   "split"}, \code{split} (a list with \code{selection} and
+#'   \code{estimation}, integer row positions in \code{data_sf}).
 #' @references
 #' Cressie, N. (1996). Change of support and the modifiable areal unit
 #' problem. \emph{Geographical Systems}, 3(2--3), 159--180.
@@ -239,8 +246,10 @@
 resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NULL,
                                levels = NULL, n_levels = 20L, min_cell_n = 9L,
                                sample_n = 1500L, nstart = 25L, seed = 123L,
-                               sac = NULL, quiet = TRUE) {
+                               sac = NULL, quiet = TRUE,
+                               select_on = c("all", "split")) {
   .msg <- function(...) if (!quiet) message(...)
+  select_on <- match.arg(select_on)
   if (!inherits(data_sf, "sf"))
     stop("resolution_profile(): `data_sf` must be an sf object.", call. = FALSE)
   if (!is.numeric(min_cell_n) || length(min_cell_n) != 1L || !is.finite(min_cell_n) ||
@@ -267,6 +276,22 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   }
   if (nrow(xy) < 3L)
     stop("resolution_profile(): fewer than three points.", call. = FALSE)
+
+  # Sample splitting, on the full layer before the subsample, so the
+  # positions index `data_sf` as passed (rows dropped above excepted).
+  split <- NULL
+  if (identical(select_on, "split")) {
+    split <- .spatial_half_split(data_sf, seed = seed, caller = "resolution_profile")
+    if (!all(ok_xy)) {
+      # Positions refer to the layer after the drop; map them back.
+      kept <- which(ok_xy)
+      split$selection  <- kept[split$selection]
+      split$estimation <- kept[split$estimation]
+      keep_sel <- match(split$selection, kept)
+    } else keep_sel <- split$selection
+    data_sf <- data_sf[keep_sel, , drop = FALSE]
+    xy <- xy[keep_sel, , drop = FALSE]
+  }
 
   resp <- NULL; pred <- NULL
   if (has_resp) {
@@ -460,7 +485,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
             variable   = variable,
             wss_bumps  = wss_bumps,
             nstart     = nstart,
-            sac        = sac)
+            sac        = sac,
+            split      = split)
 }
 
 
@@ -488,6 +514,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   cat(sprintf("  scored on   : %s; %d k-means++ restarts per level; WSS rises at %d step(s)\n",
               if (is.na(attr(x, "variable"))) "geometry only" else attr(x, "variable"),
               attr(x, "nstart"), attr(x, "wss_bumps")))
+  sp <- attr(x, "split")
+  if (!is.null(sp))
+    cat(sprintf("  split       : selected on %d points; estimate on the other %d (attr \"split\")\n",
+                length(sp$selection), length(sp$estimation)))
   cat("\n")
   tab <- as.data.frame(unclass(x))
   attributes(tab)[setdiff(names(attributes(tab)), c("names", "row.names", "class"))] <- NULL

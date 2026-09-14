@@ -35,9 +35,12 @@
 #' (2010) show the bias can exceed the genuine differences between the models
 #' being compared.  Quote it as the selection criterion, not as the
 #' performance of the selected model.  An honest performance estimate needs
-#' folds the selection never saw, which is what running this function inside
-#' the \code{fit_fn} of \code{\link{cv_spatial}()} gives: the outer folds
-#' score a model whose predictors were chosen on the inner ones alone.
+#' data the selection never saw.  Two ways to get one: run this function
+#' inside the \code{fit_fn} of \code{\link{cv_spatial}()}, so the outer
+#' folds score a model whose predictors were chosen on the inner ones alone;
+#' or pass \code{select_on = "split"}, which selects on one spatial half of
+#' \code{train_sf} and returns the selected set's score on the other as
+#' \code{score_holdout}.
 #'
 #' @param train_sf Training data (\code{sf}).
 #' @param response_var Character(1).
@@ -79,8 +82,18 @@
 #'   for predicting it, which is the same failure the \code{random_kfold}
 #'   caution above exists to prevent, so the leakage warning
 #'   \code{make_folds()} raises applies here with more force than usual.
+#' @param select_on \code{"all"} (default) runs the sweep on every row of
+#'   \code{train_sf}.  \code{"split"} runs it on one spatially blocked half,
+#'   then fits the selected set on that half and scores it on the other:
+#'   \code{score_holdout} is then an honest estimate of the selected model's
+#'   \code{metric} on data the selection never saw (the sweep's own
+#'   \code{score} is not; see "The score is not a performance estimate").
+#'   Both halves come back in \code{$split}.  See the "Post-selection
+#'   inference" section of \code{\link{determine_optimal_levels}} for the
+#'   trade: coverage for half the sample.
 #' @return A list with \code{selected} (the chosen predictors, in the order
-#'   they were added), \code{score}, \code{history} and \code{params}.
+#'   they were added), \code{score}, \code{score_holdout}, \code{history},
+#'   \code{params} and \code{split}.
 #'   \code{score} is the winning set's cross-validated \code{metric} at the
 #'   final step: the \strong{selection-internal} optimum, optimistically
 #'   biased because it was chosen as the best of many (see the section above),
@@ -89,9 +102,16 @@
 #'   candidate evaluated at every step; when the null model could be scored it
 #'   also carries a \code{step = 0} row named \code{"<none>"} giving that
 #'   baseline, so the first variable's gain can be read off directly.
+#'   \code{score_holdout} is \code{NA} unless \code{select_on = "split"}, and
+#'   then the selected set's \code{metric} when fitted on the selection half
+#'   and predicted on the estimation half (\eqn{R^2} against the selection
+#'   half's mean, the out-of-sample convention); \code{NA} when nothing was
+#'   selected or the prediction failed.  \code{split} is \code{NULL} or a
+#'   list with \code{selection} and \code{estimation}, integer row positions
+#'   in \code{train_sf} after the completeness filter above.
 #'   \code{params} records \code{metric}, \code{method}, \code{k},
-#'   \code{tol}, \code{seed}, \code{auto_range}, \code{n_candidates} and
-#'   \code{estimated_fits}.
+#'   \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
+#'   \code{n_candidates} and \code{estimated_fits}.
 #' @references
 #' Cawley, G. C. and Talbot, N. L. C. (2010). On over-fitting in model
 #' selection and subsequent selection bias in performance evaluation.
@@ -124,9 +144,11 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                                     metric = c("RMSE", "MAE", "R2"),
                                     tol = 0, max_vars = NULL,
                                     max_fits = 5000L, seed = 123,
-                                    quiet = FALSE, auto_range = FALSE) {
+                                    quiet = FALSE, auto_range = FALSE,
+                                    select_on = c("all", "split")) {
   method <- match.arg(method)
   metric <- match.arg(metric)
+  select_on <- match.arg(select_on)
   .msg <- function(...) if (!quiet) message(...)
 
   if (!inherits(train_sf, "sf"))
@@ -170,6 +192,22 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                      "observations."),
               sum(!keep), sum(keep))
     train_sf <- train_sf[keep, , drop = FALSE]
+  }
+
+  # Sample splitting: the sweep sees the selection half only; the estimation
+  # half scores the chosen set afterwards.  Positions index train_sf as it
+  # stands here, after the completeness filter.
+  split <- NULL
+  holdout_sf <- NULL
+  if (identical(select_on, "split")) {
+    if (!all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"))
+      train_sf <- coerce_to_points(train_sf, "auto")
+    split <- .spatial_half_split(train_sf, seed = seed,
+                                 caller = "select_features_forward")
+    holdout_sf <- train_sf[split$estimation, , drop = FALSE]
+    train_sf   <- train_sf[split$selection, , drop = FALSE]
+    .msg(sprintf("select_features_forward(): selecting on %d points, scoring the result on the other %d.",
+                 nrow(train_sf), nrow(holdout_sf)))
   }
 
   if (identical(method, "random_kfold"))
@@ -299,16 +337,41 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                  cand, metric, cand_score))
   }
 
+  # The honest score: the selected set fitted on the selection half and
+  # predicted on the estimation half, which the sweep never saw.
+  score_holdout <- NA_real_
+  if (!is.null(holdout_sf) && length(selected) > 0L) {
+    score_holdout <- tryCatch({
+      fit <- fit_fn(train_sf, selected)
+      yh  <- as.numeric(do.call(stats::predict, list(object = fit, newdata = holdout_sf)))
+      y   <- as.numeric(sf::st_drop_geometry(holdout_sf)[[response_var]])
+      if (length(yh) != length(y))
+        stop(sprintf("predict() returned %d values for %d rows", length(yh), length(y)))
+      y_tr <- as.numeric(sf::st_drop_geometry(train_sf)[[response_var]])
+      met <- .compute_reg_metrics(y, yh, p = NULL,
+                                  y_train_mean = mean(y_tr[is.finite(y_tr)]))
+      v <- met[[metric]]
+      if (is.null(v) || !is.finite(v)) NA_real_ else as.numeric(v)
+    }, error = function(e) {
+      .warn_and_log("select_features_forward(): the hold-out score could not be computed (%s); score_holdout is NA.",
+                    conditionMessage(e))
+      NA_real_
+    })
+  }
+
   list(
     selected = selected,
     # Never hand back the `worst` sentinel as if it were a score: when nothing
     # was selected there is no score, and Inf / -Inf reads as a real number to
     # any caller that compares it.
     score    = if (length(selected) == 0L) NA_real_ else best,
+    score_holdout = score_holdout,
     history  = if (length(history)) do.call(rbind, history) else
       data.frame(step = integer(0), variable = character(0), score = numeric(0)),
     params   = list(metric = metric, method = method, k = k, tol = tol,
                     seed = seed, auto_range = isTRUE(auto_range),
-                    n_candidates = p, estimated_fits = est_fits)
+                    select_on = select_on,
+                    n_candidates = p, estimated_fits = est_fits),
+    split    = split
   )
 }
