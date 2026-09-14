@@ -97,6 +97,102 @@
 }
 
 
+#' k-means++ seeding
+#'
+#' The first centre is a point drawn at random; each later centre is a point
+#' drawn with probability proportional to its squared distance from the
+#' nearest centre already chosen (Arthur and Vassilvitskii 2007).  Draws from
+#' the current RNG stream, so the caller seeds it.
+#'
+#' @param xy Numeric matrix of coordinates.
+#' @param k Number of centres, at most \code{nrow(xy)}.
+#' @return A \code{k x ncol(xy)} matrix of starting centres.
+#' @keywords internal
+#' @noRd
+.kmeanspp_centers <- function(xy, k) {
+  n <- nrow(xy)
+  idx <- integer(k)
+  idx[1L] <- sample.int(n, 1L)
+  if (k > 1L) {
+    d2 <- rowSums((xy - matrix(xy[idx[1L], ], n, ncol(xy), byrow = TRUE))^2)
+    for (j in 2:k) {
+      tot <- sum(d2)
+      # Every remaining point coincides with a centre: fall back to a uniform
+      # draw among the points not yet chosen.
+      idx[j] <- if (is.finite(tot) && tot > 0)
+        sample.int(n, 1L, prob = d2 / tot)
+      else sample(setdiff(seq_len(n), idx[seq_len(j - 1L)]), 1L)
+      d2 <- pmin(d2, rowSums((xy - matrix(xy[idx[j], ], n, ncol(xy), byrow = TRUE))^2))
+    }
+  }
+  xy[idx, , drop = FALSE]
+}
+
+
+#' The best of several k-means++ restarts, with their spread
+#'
+#' \code{stats::kmeans(nstart = )} restarts from uniform-random centres and
+#' returns only the best solution.  Every point on a WSS curve built that way
+#' is a local optimum, and with few restarts the curve mixes genuine level
+#' effects with optimisation noise: on clustered layouts a sweep over
+#' \code{k = 1..30} at \code{nstart = 5} had one or two \emph{increases} in
+#' WSS in three of five draws, and the elbow rule once selected such a bump
+#' (see \code{.elbow_from_wss()}).  Steinley (2003) shows far more restarts
+#' are needed than practitioners use; Fränti and Sieranoja (2019) show that
+#' k-means++ seeding cuts how many are needed and that the gain saturates,
+#' which is the basis for a fixed budget.  With 25 k-means++ restarts the same
+#' sweeps had no increase at all.
+#'
+#' Each restart is seeded by \code{.kmeanspp_centers()} and run as a single
+#' start, so the spread of \code{tot.withinss} across restarts is available:
+#' it says how rough the objective is at this \code{k}, which a profile can
+#' report so a flat region is honestly wide.
+#'
+#' @param xy Numeric matrix of coordinates.
+#' @param k Number of clusters (\code{>= 2}).
+#' @param nstart Number of restarts.
+#' @param iter.max Passed to \code{stats::kmeans()}.
+#' @return \code{NULL} when every restart failed; otherwise a list with
+#'   \code{km} (the best \code{kmeans} fit), \code{wss} (its
+#'   \code{tot.withinss}), \code{spread} (\code{(max - min) / min} of
+#'   \code{tot.withinss} across the restarts that ran) and \code{n_ok}.
+#' @keywords internal
+#' @noRd
+.kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L) {
+  best <- NULL; w <- rep(NA_real_, nstart)
+  for (r in seq_len(nstart)) {
+    km <- try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
+                                             iter.max = iter.max, nstart = 1L)),
+              silent = TRUE)
+    if (inherits(km, "try-error")) next
+    w[r] <- km$tot.withinss
+    if (is.null(best) || km$tot.withinss < best$tot.withinss) best <- km
+  }
+  if (is.null(best)) return(NULL)
+  ok <- w[is.finite(w)]
+  list(km = best, wss = best$tot.withinss,
+       spread = if (length(ok) > 1L && min(ok) > 0) (max(ok) - min(ok)) / min(ok) else 0,
+       n_ok = length(ok))
+}
+
+
+#' Count the increases in a WSS curve
+#'
+#' A k-means WSS curve over increasing \code{k} can only rise where some
+#' \code{k} landed in a worse local optimum than its neighbour, so
+#' \code{sum(diff(wss) > 0)} is a direct count of optimisation bumps: zero
+#' means the curve is at least monotone.  \code{.elbow_from_wss()} already
+#' computes the differences; this is the check nobody read off them.
+#'
+#' @keywords internal
+#' @noRd
+.wss_bumps <- function(wss) {
+  wss <- as.numeric(wss)
+  if (length(wss) < 2L) return(0L)
+  sum(diff(wss) > 0, na.rm = TRUE)
+}
+
+
 #' The "not computable" return of .morans_i_for_k()
 #'
 #' Kept as a named constant so every early exit has the same shape as the
@@ -240,6 +336,25 @@
 #' promising candidate k values incur the cost of the full Moran's I
 #' computation.
 #'
+#' \strong{The WSS curve is read for its shape, so it is fitted to be
+#' smooth.}  Every point on it is a k-means local optimum, and with a few
+#' random restarts the curve mixes level effects with optimisation noise:
+#' measured on clustered layouts, a sweep over \code{k = 1..30} at
+#' \code{stats::kmeans(nstart = 5)} \emph{rose} at one or two steps in three
+#' of five draws, and an earlier form of the elbow rule once selected such a
+#' bump.  Each \code{k} is therefore fitted as the best of 25 restarts seeded
+#' by k-means++ (Arthur and Vassilvitskii 2007), the budget at which the gain
+#' from further restarts saturates (Fränti and Sieranoja 2019; Steinley 2003
+#' on why the usual handful is not enough).  The same sweeps then had no
+#' increase at all.  A curve that still rises somewhere is reported --- a
+#' logged warning names the number of rising steps, and the model-aware
+#' paths return it as \code{wss_bumps} in the \code{"diagnostics"} attribute
+#' beside \code{wss_spread}, the relative spread of WSS across the restarts
+#' at each \code{k} --- but not refused: a bumpy curve is uncertain, not
+#' unidentified.  Because the optimiser changed, a selection made by an
+#' earlier version on a curve that had such a bump can differ from the one
+#' made now; where the earlier curve was clean, the answer is the same.
+#'
 #' \strong{The model-aware criteria rank on the standardised deviate, not on
 #' |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
 #' cells, so \eqn{|I|} falls as \code{k} grows whether or not the finer
@@ -305,11 +420,29 @@
 #'   \code{top_n = 1} returns it alone. When
 #'   \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
 #'   attached with per-k Moran's I values (\code{moran_i}) and their
-#'   standardised deviates (\code{moran_z}) — except when the model-aware path
+#'   standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
+#'   the relative between-restart spread at each \code{k} (\code{wss_spread}),
+#'   the number of rising steps on it (\code{wss_bumps}) and the restart
+#'   budget (\code{nstart}) — except when the model-aware path
 #'   itself falls back to the geometric result (no viable k in the elbow
 #'   neighbourhood, or Moran's I could not be computed for any candidate), in
 #'   which case no diagnostics are available and the attribute is absent. Both
-#'   fallbacks are logged as warnings.
+#'   fallbacks are logged as warnings.  The geometric path returns a plain
+#'   integer vector; a rising WSS curve is still logged there.  For a full
+#'   per-level table --- criteria, cell support, restart spread, the flat
+#'   region --- see \code{\link{resolution_profile}()}.
+#' @references
+#' Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of
+#' careful seeding. \emph{Proceedings of the 18th Annual ACM-SIAM Symposium
+#' on Discrete Algorithms}, 1027--1035.
+#'
+#' Fränti, P. and Sieranoja, S. (2019). How much can k-means be improved by
+#' using better initialization and repeats? \emph{Pattern Recognition}, 93,
+#' 95--112. \doi{10.1016/j.patcog.2019.04.014}
+#'
+#' Steinley, D. (2003). Local optima in K-means clustering: what you don't
+#' know may hurt you. \emph{Psychological Methods}, 8(3), 294--304.
+#' \doi{10.1037/1082-989X.8.3.294}
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -425,7 +558,27 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   k_max <- min(k_max, n_uniq - 1L)
   if (k_max < 2L) return(1L)
 
+  # Say it BEFORE the sweep: the model-aware criteria carry no information at
+  # nine cells or fewer (see the resolution floor in Details), so with
+  # k_max <= 9 no candidate can ever clear it and the call is going to fall
+  # back to the geometric ranking whatever the data say.  The sweep used to
+  # run first and the fallback was logged afterwards.
+  if (criterion != "geometric" && k_max <= 9L)
+    .log_warn(paste0("determine_optimal_levels(): max_levels leaves k_max = %d, ",
+                     "and the model-aware criteria carry no information at ",
+                     "nine cells or fewer; criterion = '%s' will fall back to ",
+                     "the geometric ranking. Raise max_levels above 9 (well ",
+                     "above, so the elbow neighbourhood reaches past the ",
+                     "floor) for the criteria to contribute."),
+              k_max, criterion)
+
+  # 25 k-means++ restarts per k rather than stats::kmeans(nstart = 5): the
+  # WSS curve is read for its shape, and optimisation noise on it is what
+  # produced the concave bump the elbow rule once selected.  See
+  # .kmeans_best() for the measured effect and the citations.
+  nstart <- 25L
   wss <- numeric(k_max)
+  wss_spread <- numeric(k_max)
   failed_k <- integer(0)
 
   for (k in seq_len(k_max)) {
@@ -433,12 +586,15 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       ctr <- colMeans(xy)
       wss[k] <- sum(rowSums((xy - matrix(ctr, nrow(xy), 2, byrow = TRUE))^2))
     } else {
-      km <- try(stats::kmeans(xy, centers = k, iter.max = 50, nstart = 5), silent = TRUE)
-      if (inherits(km, "try-error")) {
+      # Assignments are discarded on purpose: only the WSS is kept from this
+      # sweep, which bounds memory for large max_levels (see Details).
+      kb <- .kmeans_best(xy, k, nstart = nstart)
+      if (is.null(kb)) {
         wss[k] <- wss[k - 1L]
         failed_k <- c(failed_k, k)
       } else {
-        wss[k] <- km$tot.withinss
+        wss[k] <- kb$wss
+        wss_spread[k] <- kb$spread
       }
     }
   }
@@ -460,6 +616,19 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   }
 
   elbow <- .elbow_from_wss(wss, max_k = k_max, min_k = 1L, return_neighbors = TRUE)
+
+  # A WSS curve that rises anywhere is one where some k landed in a worse
+  # optimum than its neighbour, and the elbow read from it is partly noise.
+  # Reported, not refused: a bumpy curve is uncertain, not unidentified.
+  wss_bumps <- .wss_bumps(wss[seq_len(k_max)])
+  if (wss_bumps > 0L)
+    .log_warn(paste0("determine_optimal_levels(): the WSS curve rises at %d ",
+                     "step(s) between k = 1 and %d, so some k landed in a ",
+                     "worse local optimum than its neighbour even with %d ",
+                     "k-means++ restarts; the elbow read from it is partly ",
+                     "optimisation noise. Treat the neighbouring candidates ",
+                     "as equivalent."),
+              wss_bumps, k_max, nstart)
 
   if (criterion == "geometric") {
     out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
@@ -495,9 +664,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   moran_z    <- rep(NA_real_, k_max)   # standardised deviate, used for ranking
   wss_eval   <- wss
   for (k in eval_ks) {
-    km <- try(stats::kmeans(xy, centers = k, iter.max = 50, nstart = 5),
-              silent = TRUE)
-    if (inherits(km, "try-error")) next
+    kb <- .kmeans_best(xy, k, nstart = nstart)
+    if (is.null(kb)) next
+    km <- kb$km
     wss_eval[k]   <- km$tot.withinss
     mi            <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
     moran_vals[k] <- mi[["I"]]
@@ -537,7 +706,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     out[out < 1L] <- 1L; out[out > k_max] <- k_max
     out <- unique(out)
     attr(out, "diagnostics") <- list(moran_i = moran_vals, moran_z = moran_z,
-                                      wss = wss[1:k_max], eval_ks = eval_ks)
+                                      wss = wss[1:k_max],
+                                      wss_spread = wss_spread[1:k_max],
+                                      wss_bumps = wss_bumps, nstart = nstart,
+                                      eval_ks = eval_ks)
     return(out)
   }
 
@@ -575,6 +747,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   attr(out, "diagnostics") <- list(
     moran_i = moran_vals, moran_z = moran_z, wss = wss[1:k_max],
     wss_eval = wss_eval[1:k_max],
+    wss_spread = wss_spread[1:k_max],
+    wss_bumps = wss_bumps, nstart = nstart,
     combined_rank = stats::setNames(combined_rank, eval_ks),
     eval_ks = eval_ks,
     criterion = "combined"

@@ -55,11 +55,17 @@ neighbours; under the model-aware criteria the candidates in rank order.
 \code{top_n = 1} returns it alone. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
 attached with per-k Moran's I values (\code{moran_i}) and their
-standardised deviates (\code{moran_z}) — except when the model-aware path
+standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
+the relative between-restart spread at each \code{k} (\code{wss_spread}),
+the number of rising steps on it (\code{wss_bumps}) and the restart
+budget (\code{nstart}) — except when the model-aware path
 itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), in
 which case no diagnostics are available and the attribute is absent. Both
-fallbacks are logged as warnings.
+fallbacks are logged as warnings.  The geometric path returns a plain
+integer vector; a rising WSS curve is still logged there.  For a full
+per-level table --- criteria, cell support, restart spread, the flat
+region --- see \code{\link{resolution_profile}()}.
 }
 \description{
 Computes a WSS curve over k=1..K_max using k-means on projected feature
@@ -82,6 +88,25 @@ lazily: k-means is re-run only for a focused neighbourhood around the
 elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 promising candidate k values incur the cost of the full Moran's I
 computation.
+
+\strong{The WSS curve is read for its shape, so it is fitted to be
+smooth.}  Every point on it is a k-means local optimum, and with a few
+random restarts the curve mixes level effects with optimisation noise:
+measured on clustered layouts, a sweep over \code{k = 1..30} at
+\code{stats::kmeans(nstart = 5)} \emph{rose} at one or two steps in three
+of five draws, and an earlier form of the elbow rule once selected such a
+bump.  Each \code{k} is therefore fitted as the best of 25 restarts seeded
+by k-means++ (Arthur and Vassilvitskii 2007), the budget at which the gain
+from further restarts saturates (Fränti and Sieranoja 2019; Steinley 2003
+on why the usual handful is not enough).  The same sweeps then had no
+increase at all.  A curve that still rises somewhere is reported --- a
+logged warning names the number of rising steps, and the model-aware
+paths return it as \code{wss_bumps} in the \code{"diagnostics"} attribute
+beside \code{wss_spread}, the relative spread of WSS across the restarts
+at each \code{k} --- but not refused: a bumpy curve is uncertain, not
+unidentified.  Because the optimiser changed, a selection made by an
+earlier version on a curve that had such a bump can differ from the one
+made now; where the earlier curve was clean, the answer is the same.
 
 \strong{The model-aware criteria rank on the standardised deviate, not on
 |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
@@ -129,6 +154,19 @@ pts <- st_as_sf(
 )
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 }
+\references{
+Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of
+careful seeding. \emph{Proceedings of the 18th Annual ACM-SIAM Symposium
+on Discrete Algorithms}, 1027--1035.
+
+Fränti, P. and Sieranoja, S. (2019). How much can k-means be improved by
+using better initialization and repeats? \emph{Pattern Recognition}, 93,
+95--112. \doi{10.1016/j.patcog.2019.04.014}
+
+Steinley, D. (2003). Local optima in K-means clustering: what you don't
+know may hurt you. \emph{Psychological Methods}, 8(3), 294--304.
+\doi{10.1037/1082-989X.8.3.294}
+}
 \seealso{
 \code{\link[=build_tessellation]{build_tessellation()}}, which takes the chosen level count as
 \code{approx_n_cells}; \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and
@@ -136,6 +174,8 @@ determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},
+\code{\link{resolution_profile}()},
+\code{\link{select_resolution}()},
 \code{\link{summarize_by_cell}()}
 }
 \concept{aggregation}
