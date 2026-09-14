@@ -723,3 +723,68 @@ test_that("area_of_applicability reads a logical predictor as 0/1", {
                           predictor_vars = c("a", "flag")),
     "are not numeric or logical")
 })
+
+
+# ---------------------------------------------------------------------------
+# The fold TYPE behind the threshold.  Meyer & Pebesma define the threshold
+# from the cross-validated training DI, so an AOA built on random folds pairs
+# with a random-CV error and one built on blocked folds with a blocked one.
+# The object now says which it is.
+# ---------------------------------------------------------------------------
+
+test_that("the AOA records and prints the method of the folds it was built on", {
+  tr <- mk_aoa_pts(80)
+  tr$..row_id <- seq_len(nrow(tr))
+  nd <- mk_aoa_new(a = c(0, 1), b = c(0, 1))
+
+  none <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"))
+  expect_true(is.na(none$params$folds_method))
+
+  blk <- make_folds(tr, k = 4, method = "block_kfold", seed = 1)
+  res <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"),
+                               folds = blk)
+  expect_identical(res$params$folds_method, "block_kfold")
+  txt <- paste(utils::capture.output(print(res)), collapse = "\n")
+  expect_match(txt, "CV folds \\(block_kfold\\)")
+
+  # A bare label vector (blockCV's $folds_ids, say) cannot say how it was
+  # built, and neither can a list of splits; both are recorded as such.
+  lab <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"),
+                               folds = rep(1:4, length.out = nrow(tr)))
+  expect_identical(lab$params$folds_method, "labels")
+  expect_match(paste(utils::capture.output(print(lab)), collapse = "\n"),
+               "method unknown")
+  spl <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"),
+                               folds = blk$folds)
+  expect_identical(spl$params$folds_method, "splits")
+})
+
+test_that("an AOA built on random_kfold folds is logged as a caution", {
+  tr <- mk_aoa_pts(80)
+  tr$..row_id <- seq_len(nrow(tr))
+  nd <- mk_aoa_new(a = c(0, 1), b = c(0, 1))
+  rnd <- make_folds(tr, k = 4, method = "random_kfold", seed = 1)
+  lines <- capture_spatialkit_log(
+    res <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"),
+                                 folds = rnd))
+  expect_identical(res$params$folds_method, "random_kfold")
+  expect_true(log_has(lines, "random_kfold"))
+  expect_true(log_has(lines, "random-CV error estimate"))
+  # ... and blocked folds are not.
+  blk <- make_folds(tr, k = 4, method = "block_kfold", seed = 1)
+  quiet <- capture_spatialkit_log(
+    area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b"),
+                          folds = blk))
+  expect_false(log_has(quiet, "random_kfold"))
+})
+
+test_that(".aoa_folds_method reads only a well-formed method string", {
+  f <- spatialkit:::.aoa_folds_method
+  expect_true(is.na(f(NULL)))
+  expect_identical(f(c(1, 1, 2, 2)), "labels")
+  expect_identical(f(factor(c("a", "b"))), "labels")
+  expect_identical(f(list(list(train = 1, test = 2))), "splits")
+  expect_identical(f(list(method = "nndm", folds = list())), "nndm")
+  expect_identical(f(list(method = NA_character_, folds = list())), "splits")
+  expect_identical(f(list(method = c("a", "b"), folds = list())), "splits")
+})

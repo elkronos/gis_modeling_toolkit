@@ -13,6 +13,8 @@ fit_rf_model(
   min_node_size = NULL,
   importance = c("permutation", "impurity", "none"),
   include_coords = FALSE,
+  replace = TRUE,
+  sample_fraction = NULL,
   seed = 123L,
   num_threads = NULL,
   .already_prepped = FALSE,
@@ -40,6 +42,21 @@ is the default despite costing more.}
 \item{include_coords}{Add the coordinates as predictors. Default
 \code{FALSE}; see above.}
 
+\item{replace}{Logical; grow each tree on a bootstrap sample drawn
+\emph{with} replacement (\code{TRUE}, ranger's default and this one) or
+on a subsample drawn without replacement (\code{FALSE}).  Strobl et al.
+(2007) show that bootstrap sampling with replacement is itself a source
+of bias in variable importance toward predictors with many distinct
+values or categories, and recommend subsampling without replacement.
+The forest's predictions change slightly with the choice; the default is
+kept at ranger's so that an existing script fits the same forest, and
+the setting is recorded in \code{$info} and printed with the fit.}
+
+\item{sample_fraction}{Fraction of rows drawn for each tree.  \code{NULL}
+(default) uses ranger's rule: all rows when \code{replace = TRUE},
+0.632 --- the expected share of distinct rows in a bootstrap sample ---
+when \code{replace = FALSE}.  A single number in (0, 1] overrides it.}
+
 \item{seed}{Seed passed to ranger. Default 123.}
 
 \item{num_threads}{Threads for ranger. Default \code{NULL} means
@@ -57,7 +74,8 @@ caller has already projected and cleaned the data.}
 \item{...}{Passed to \code{ranger::ranger()}.  ranger's own spellings of
 the arguments this function already sets (\code{num.trees},
 \code{min.node.size}, \code{num.threads}, \code{mtry},
-\code{importance}, \code{seed}, \code{x}, \code{y}) are rejected with a
+\code{importance}, \code{seed}, \code{replace},
+\code{sample.fraction}, \code{x}, \code{y}) are rejected with a
 message naming the wrapper argument to use instead -- passing them here
 would reach \code{ranger()} twice and fail the call.}
 }
@@ -66,7 +84,9 @@ An \code{rf_fit} object (inherits from \code{spatial_fit}).
 \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
 \code{importance_type}, \code{importance} (a named numeric, or
 \code{NULL} when \code{importance = "none"}), \code{include_coords},
-\code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
+\code{replace} and \code{sample_fraction} (the sampling each tree was
+grown on, with \code{sample_fraction} resolved to the number ranger
+used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
 ranger did not compute it -- forwarding \code{oob.error = FALSE} through
 \code{...} is one way to get there), \code{fitted_are_oob} (always
 \code{TRUE}; \code{summary()} reads it to label its metrics) and

@@ -27,6 +27,18 @@
 #' that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 #' \code{max_fits} guards against that.
 #'
+#' @section The score is not a performance estimate:
+#' \code{$score} is the cross-validated \code{metric} of the winning set at
+#' the final step --- the best of every candidate set the sweep scored.  That
+#' is the number the selection optimised, and a number optimised over many
+#' candidates is optimistically biased by construction: Cawley and Talbot
+#' (2010) show the bias can exceed the genuine differences between the models
+#' being compared.  Quote it as the selection criterion, not as the
+#' performance of the selected model.  An honest performance estimate needs
+#' folds the selection never saw, which is what running this function inside
+#' the \code{fit_fn} of \code{\link{cv_spatial}()} gives: the outer folds
+#' score a model whose predictors were chosen on the inner ones alone.
+#'
 #' @param train_sf Training data (\code{sf}).
 #' @param response_var Character(1).
 #' @param candidate_vars Character vector of predictors to choose among.
@@ -57,13 +69,34 @@
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
+#' @param auto_range Logical.  If \code{TRUE} and \code{method} is
+#'   \code{"block_kfold"}, the autocorrelation range is estimated from the
+#'   response (detrended on the candidates) and used as the minimum block
+#'   size of the inner folds, exactly as in \code{\link{make_folds}()};
+#'   \code{block_size} still applies as a floor.  Default \code{FALSE}, which
+#'   keeps the geometric blocks.  Inner blocks smaller than the range let a
+#'   candidate be selected for spatial proximity to the response rather than
+#'   for predicting it, which is the same failure the \code{random_kfold}
+#'   caution above exists to prevent, so the leakage warning
+#'   \code{make_folds()} raises applies here with more force than usual.
 #' @return A list with \code{selected} (the chosen predictors, in the order
-#'   they were added), \code{score} (their cross-validated \code{metric}),
-#'   \code{history} and \code{params}. \code{history} is a data.frame with
-#'   \code{step}, \code{variable} and \code{score}, holding every candidate
-#'   evaluated at every step; when the null model could be scored it also
-#'   carries a \code{step = 0} row named \code{"<none>"} giving that
+#'   they were added), \code{score}, \code{history} and \code{params}.
+#'   \code{score} is the winning set's cross-validated \code{metric} at the
+#'   final step: the \strong{selection-internal} optimum, optimistically
+#'   biased because it was chosen as the best of many (see the section above),
+#'   and \code{NA} when nothing was selected.  \code{history} is a data.frame
+#'   with \code{step}, \code{variable} and \code{score}, holding every
+#'   candidate evaluated at every step; when the null model could be scored it
+#'   also carries a \code{step = 0} row named \code{"<none>"} giving that
 #'   baseline, so the first variable's gain can be read off directly.
+#'   \code{params} records \code{metric}, \code{method}, \code{k},
+#'   \code{tol}, \code{seed}, \code{auto_range}, \code{n_candidates} and
+#'   \code{estimated_fits}.
+#' @references
+#' Cawley, G. C. and Talbot, N. L. C. (2010). On over-fitting in model
+#' selection and subsequent selection bias in performance evaluation.
+#' \emph{Journal of Machine Learning Research}, 11, 2079--2107.
+#' \url{https://jmlr.org/papers/v11/cawley10a.html}
 #' @family cross-validation
 #' @examples
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
@@ -91,7 +124,7 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                                     metric = c("RMSE", "MAE", "R2"),
                                     tol = 0, max_vars = NULL,
                                     max_fits = 5000L, seed = 123,
-                                    quiet = FALSE) {
+                                    quiet = FALSE, auto_range = FALSE) {
   method <- match.arg(method)
   metric <- match.arg(metric)
   .msg <- function(...) if (!quiet) message(...)
@@ -166,17 +199,20 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   # Build the inner folds ONCE, before the sweep.
   #
   # Fold construction does not depend on the candidate set: make_folds() reads
-  # `predictor_vars` only when auto_range = TRUE, which this function never
-  # enables, and every other argument is fixed across the sweep.  Rebuilding
-  # them inside score_set() therefore produced the same splits p^2/2 times --
-  # repeating every block-size warning as many times -- and, worse, put
-  # make_folds() OUTSIDE the try() below, so a single fold-construction failure
-  # (block_kfold raising when the geometry collapses to one block, say) killed
-  # the whole sweep instead of the candidate being scored NA.  It cannot be a
-  # per-candidate NA in any case: if the folds cannot be built, no candidate is
-  # scorable, so this is one informative error instead of p^2/2 silent ones.
+  # `predictor_vars` only to detrend the range estimate (under auto_range, and
+  # for the leakage diagnostic), which uses the full candidate list whatever
+  # the sweep has selected so far, and every other argument is fixed across
+  # the sweep.  Rebuilding them inside score_set() therefore produced the same
+  # splits p^2/2 times -- repeating every block-size warning as many times --
+  # and, worse, put make_folds() OUTSIDE the try() below, so a single
+  # fold-construction failure (block_kfold raising when the geometry collapses
+  # to one block, say) killed the whole sweep instead of the candidate being
+  # scored NA.  It cannot be a per-candidate NA in any case: if the folds
+  # cannot be built, no candidate is scorable, so this is one informative
+  # error instead of p^2/2 silent ones.
   folds <- try(make_folds(train_sf, k = k, method = method, seed = seed,
-                          block_size = block_size, response_var = response_var,
+                          block_size = block_size, auto_range = auto_range,
+                          response_var = response_var,
                           predictor_vars = candidate_vars), silent = TRUE)
   if (inherits(folds, "try-error"))
     stop("select_features_forward(): could not build the inner CV folds, so no ",
@@ -272,6 +308,7 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     history  = if (length(history)) do.call(rbind, history) else
       data.frame(step = integer(0), variable = character(0), score = numeric(0)),
     params   = list(metric = metric, method = method, k = k, tol = tol,
-                    seed = seed, n_candidates = p, estimated_fits = est_fits)
+                    seed = seed, auto_range = isTRUE(auto_range),
+                    n_candidates = p, estimated_fits = est_fits)
   )
 }

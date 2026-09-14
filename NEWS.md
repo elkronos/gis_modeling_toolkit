@@ -36,6 +36,38 @@
   domain, against 0.931 and 0.918 with `n - 1`.  The help page's
   "Confidence intervals" section has the reasoning and the numbers.
 
+* `compare_models_cv()` gains `block_size` and `auto_range`, and now hands
+  `response_var` and `predictor_vars` to `make_folds()` when it builds the
+  shared fold set.  With the defaults the folds are the same geometric
+  blocks as before, so an existing comparison does not move; what changes is
+  that the fold-leakage diagnostic (above) can now fire for the one function
+  that compares models, which until now was the one whose folds could never
+  be checked against the range.  `select_features_forward()` gains
+  `auto_range` for its inner folds for the same reason, and records it in
+  `$params`.
+* `compare_models_cv()$overall` carries the Bayesian backend's calibration
+  when a Bayesian model ran: `coverage_50`, `coverage_80`, `coverage_95` and
+  `mean_CRPS`, the same fold-weighted summary `cv_bayes()` returns as
+  `predictive_coverage`, with `NA` on the GWR and RF rows.  A model that
+  predicts well on average and covers badly (Heaton et al. 2019) is now
+  visible in the table a user picks from, not only in `$bayes_cv`.  `model`
+  stays the last column.
+* `fit_rf_model()` gains `replace` and `sample_fraction`, which reach
+  `ranger::ranger()` as `replace` and `sample.fraction`; both were already
+  accepted through `...`, but are now recorded in `$info` and printed with
+  the fit ("Sampling: bootstrap, with replacement (100.0% of rows per
+  tree)").  The defaults are ranger's, so no forest changes.  The help page
+  carries Strobl et al.'s (2007) case for `replace = FALSE`.  Passing the
+  ranger spellings through `...` is now refused like the other arguments the
+  wrapper sets.
+* `area_of_applicability()` records the method of the folds its threshold
+  came from as `$params$folds_method` (`"block_kfold"`, `"random_kfold"`,
+  ... from a `make_folds()` result; `"labels"` or `"splits"` when the input
+  cannot say) and prints it, because the threshold is a statistic of a
+  cross-validated hold-out and pairs with the CV error from the same kind
+  of hold-out.  An AOA built on `random_kfold` folds logs a caution saying
+  it does not belong beside a blocked `cv_*()` result.
+
 ## Bug fixes
 
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
@@ -69,6 +101,12 @@
 
 ## Documentation
 
+* `select_features_forward()` now says what `$score` is: the cross-validated
+  metric of the winning set at the final step, which is the selection
+  criterion and is optimistically biased by the selection itself (Cawley
+  and Talbot 2010) --- not a performance estimate of the selected model.
+  The honest estimate comes from running the selection inside
+  `cv_spatial()`'s `fit_fn`, which the page now spells out.
 * `fit_bayesian_spatial_model()` documents that `family =` accepts any
   `brms` family --- zero-inflated and hurdle counts, negative binomial,
   Bernoulli, beta and ordinal responses all reach `brms::brm()` with the

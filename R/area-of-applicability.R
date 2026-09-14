@@ -566,9 +566,19 @@
 #'       \code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
 #'       \code{n_new} count the rows that survived the finite-value filter.
 #'     \item \code{params} -- a record of the call: \code{folds_supplied},
-#'       \code{n_folds}, \code{threshold_supplied}, \code{normalizer_max_n},
-#'       \code{normalizer_n_used}, \code{normalizer_subsampled},
-#'       \code{weights_supplied} and \code{seed}.
+#'       \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
+#'       \code{normalizer_max_n}, \code{normalizer_n_used},
+#'       \code{normalizer_subsampled}, \code{weights_supplied} and
+#'       \code{seed}.  \code{folds_method} is the \code{method} of a
+#'       \code{\link{make_folds}()} result (\code{"block_kfold"},
+#'       \code{"random_kfold"}, ...), \code{"labels"} for a vector of fold
+#'       labels, \code{"splits"} for a bare list of train/test splits, and
+#'       \code{NA} when no folds were supplied.  It is printed with the
+#'       object, because the threshold's meaning depends on it: the
+#'       cross-validated DI that sets it comes from the same kind of hold-out
+#'       as the CV error it should be quoted beside, so an AOA built on
+#'       \code{random_kfold} folds is logged as a caution and does not
+#'       belong next to a blocked \code{cv_*()} result.
 #'   }
 #'
 #' @references
@@ -729,6 +739,22 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
 
   splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids)
 
+  # What KIND of folds these are is part of what the threshold means: Meyer
+  # and Pebesma define it from the cross-validated training DI, so a threshold
+  # from random folds pairs with a random-CV error estimate and a threshold
+  # from blocked folds with a blocked one.  make_folds() records the method;
+  # a bare label vector or split list cannot say, and is recorded as such.
+  folds_method <- .aoa_folds_method(folds)
+  if (identical(folds_method, "random_kfold"))
+    .log_warn(paste0("area_of_applicability(): `folds` are random_kfold. The DI ",
+                     "threshold is then the largest dissimilarity a random ",
+                     "hold-out produced, which under spatial autocorrelation ",
+                     "is shorter than what a spatially blocked hold-out ",
+                     "produces; this AOA pairs with a random-CV error ",
+                     "estimate, not with a blocked one (Meyer & Pebesma ",
+                     "2021). Build the folds with make_folds(method = ",
+                     "\"block_kfold\") to match a blocked cv_*() result."))
+
   norm     <- .aoa_normalizer(Z_tr, max_n = normalizer_max_n, seed = seed)
   train_d  <- .aoa_train_dist(Z_tr, splits = splits, use_fnn = use_fnn,
                               chunk_size = chunk_size)
@@ -777,6 +803,7 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
       params = list(
         folds_supplied      = !is.null(splits),
         n_folds             = if (is.null(splits)) 0L else length(splits),
+        folds_method        = folds_method,
         threshold_supplied  = !is.null(threshold),
         normalizer_max_n    = normalizer_max_n,
         normalizer_n_used   = norm$n_used,
@@ -787,6 +814,37 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     ),
     class = "aoa"
   )
+}
+
+
+#' The fold method behind an AOA threshold
+#'
+#' \code{make_folds()} results carry \code{$method}; a vector of labels
+#' (\code{blockCV::cv_spatial()$folds_ids}, say) or a bare list of splits
+#' cannot say how they were built.
+#'
+#' @return Character(1): the method, \code{"labels"}, \code{"splits"}, or
+#'   \code{NA_character_} when \code{folds} is \code{NULL}.
+#' @keywords internal
+#' @noRd
+.aoa_folds_method <- function(folds) {
+  if (is.null(folds)) return(NA_character_)
+  if (is.atomic(folds) && !is.list(folds)) return("labels")
+  if (is.list(folds) && !is.null(folds$method) &&
+      is.character(folds$method) && length(folds$method) == 1L &&
+      !is.na(folds$method) && nzchar(folds$method))
+    return(folds$method)
+  "splits"
+}
+
+#' @keywords internal
+#' @noRd
+.aoa_folds_label <- function(m) {
+  if (is.null(m) || is.na(m)) return("method unknown")
+  switch(m,
+         labels = "from fold labels; method unknown",
+         splits = "from train/test splits; method unknown",
+         m)
 }
 
 
@@ -817,8 +875,9 @@ print.aoa <- function(x, ...) {
   cat(sprintf("  training    : %d points\n", x$n_train))
   cat(sprintf("  reference   : %s\n",
               if (isTRUE(x$params$folds_supplied))
-                sprintf("nearest point outside each of %d CV folds",
-                        x$params$n_folds)
+                sprintf("nearest point outside each of %d CV folds (%s)",
+                        x$params$n_folds,
+                        .aoa_folds_label(x$params$folds_method))
               else "nearest other training point (no folds supplied)"))
   cat(sprintf("  normaliser  : %.4f (mean pairwise distance%s)\n",
               x$normalizer,
