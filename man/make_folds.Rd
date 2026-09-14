@@ -23,7 +23,9 @@ make_folds(
   buffer = NULL,
   min_train = 0.5,
   phi = NULL,
-  drop_empty_blocks = TRUE
+  drop_empty_blocks = TRUE,
+  blocks = NULL,
+  balance_tol = 3
 )
 }
 \arguments{
@@ -149,6 +151,27 @@ a value.  Default \code{NULL} = the largest prediction-to-training
 distance, which matches everywhere (\code{CAST}'s \code{phi = "max"}).}
 
 \item{drop_empty_blocks}{Logical. Default TRUE.}
+
+\item{blocks}{Optional polygon layer (\code{sf} or \code{sfc}, POLYGON or
+MULTIPOLYGON, at least two features) to use as the blocks of
+\code{"block_kfold"} in place of the grid this function would otherwise
+build: the \code{$cells} of a \code{\link{build_tessellation}()} result,
+hexagons, watersheds, administrative units, the \code{$blocks} of
+\code{blockCV::cv_spatial()}.  Each point takes the block that contains
+it, and the blocks are then assigned to folds exactly as grid cells are.
+\code{block_size}, \code{block_nx}/\code{block_ny},
+\code{block_multiplier} and \code{boundary} have nothing to act on and
+are ignored (logged); \code{auto_range} only compares the estimated range
+against the blocks.  See \strong{Supplied blocks} below for the CRS,
+overlap and coverage rules.  An error for any other \code{method}.}
+
+\item{balance_tol}{A number of at least 1, default 3.  For \code{"block_kfold"}:
+the ratio of the largest fold's point count to the smallest's above
+which the folds are reported as imbalanced, with a warning (an R
+condition, also logged) that names both counts.  \code{Inf} disables the
+check.  The value is the tolerance of a check, not a target the packing
+aims for: see \strong{Fold balance} below for what the packing can and
+cannot do.  \code{params$balance_ratio} carries the ratio achieved.}
 }
 \value{
 A list with method, k, folds, assignment, params.  The
@@ -225,6 +248,65 @@ nearest training point within 50 m against a target of 9\\%), an
 the largest remaining excess; compare \code{params$target_median} with
 \code{params$realised_median} as well.
 }
+\section{Supplied blocks}{
+
+A polygon layer passed as \code{blocks} is aligned to the points the way
+\code{boundary} is: CRS-less points are aligned to blocks that carry a CRS
+(reprojected if they look like lon/lat, otherwise stamped, warning either
+way), and the blocks are then brought into the CRS the folds are built in.
+A point inside more than one block is given the first (lowest row) that
+contains it, as for a point on the shared edge of two grid cells; when the
+blocks that caught such a point share area rather than an edge -- the
+layer overlaps and is not a partition -- this is warned about.  A point
+inside no block is assigned to the nearest one, by distance to the polygon
+itself, and the count of such points is warned about, unless they sit
+within a millionth of the extent of a block, which is an edge that
+reprojection or clipping moved by a rounding error.  Blocks that hold no
+point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
+lowered to the number of blocks that hold points when that is smaller.
+\code{params$n_blocks} is the number of blocks before empties were dropped,
+\code{params$blocks_used} the number after, \code{params$grid_nx} and
+\code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
+median over blocks that hold points of the side of the square with the
+block's area -- the length compared against the autocorrelation range for
+the leakage warning, since a polygon has no single edge length.
+
+The connection to the rest of the package is
+\code{\link{build_tessellation}()}: every shape it builds can be a block
+design here, including Voronoi cells around
+\code{\link{get_voronoi_seeds}(method = "kmeans")} seeds, which adapt to the
+density of the points.
+}
+
+\section{Fold balance}{
+
+Only \code{"block_kfold"} balances the number of points per fold, and it
+does so by packing: blocks are taken largest first and each goes to the
+fold with the fewest points so far, ties broken at random.  This is the
+longest-processing-time rule for multiway partitioning.  Measured against
+the optimum by enumeration (two folds, up to ten blocks, heavy-tailed block
+sizes) it is optimal in 72 percent of cases and within two points of
+optimal on average; a local search with 30 random restarts moved the
+largest-to-smallest ratio by 0.004 on average and never brought a packing
+above the 3:1 tolerance below it.  An imbalance past the tolerance is
+therefore in the points per block, which no assignment of blocks to folds
+can even out, and this function offers no search over packings.  The
+remedy is the block design: smaller blocks, or blocks that adapt to the
+density of the points passed through \code{blocks}.  On clustered layouts
+where the geometric grid exceeded 3:1 in 22 percent of cases (median ratio
+1.8, worst 6.3), Voronoi cells around 15 k-means seeds never exceeded 1.3
+(median 1.09).  Density-adaptive blocks are smaller where points are
+dense, so check \code{params$block_scale} against the autocorrelation
+range as you would a grid.
+
+The other methods do not balance point counts.  \code{"random_kfold"} is
+balanced by construction (fold sizes differ by at most one);
+\code{"buffered_loo"} and \code{"nndm"} hold out one point per fold;
+\code{"leave_location_out"} gives each fold the same number of
+\emph{locations} (to within one), so folds differ by as much as the
+locations' sizes do.
+}
+
 \examples{
 library(sf)
 set.seed(1)

@@ -110,12 +110,14 @@ coverage are on that help page.
 Defaults that were chosen, and are defensible, but do not rest on a
 citation.  They are listed so that they are not mistaken for the first kind:
 \itemize{
-\item \code{nstart = 5} in the k-means sweep of
-\code{determine_optimal_levels()}, which the clustering literature
-(Steinley 2003; Franti and Sieranoja 2019) argues is too few.
+\item The 25 k-means++ restarts per candidate level in the sweep of
+\code{determine_optimal_levels()}: k-means++ seeding follows Arthur
+and Vassilvitskii (2007) and a fixed budget follows Franti and
+Sieranoja (2019), but 25 is the budget at which the measured WSS curve
+stopped rising between levels, not a published figure.
 \item \code{max_levels = 12} and the unit-step ladder of candidate
 levels in \code{determine_optimal_levels()}.
-\item The 3:1 fold-imbalance tolerance in
+\item The 3:1 fold-imbalance tolerance (\code{balance_tol = 3}) in
 \code{make_folds(method = "block_kfold")}.
 \item \code{deff_max_n = 500}, \code{sample_n = 1500} and
 \code{top_n = 3}, the subsampling and shortlist sizes.
