@@ -386,3 +386,206 @@ test_that("estimate_sac_range records the CRS its range is measured in", {
   rg  <- suppressWarnings(estimate_sac_range(geo, "z", seed = 1))
   expect_false(isTRUE(sf::st_is_longlat(attr(rg, "crs"))))
 })
+
+
+# ---------------------------------------------------------------------------
+# Detrending: OLS residual variograms are biased toward a shorter range (Lark,
+# Cullis & Welham 2006); detrend = "reml" fits trend and covariance together.
+# ---------------------------------------------------------------------------
+
+# A field with a quadratic trend surface in the coordinates -- the case where
+# the OLS bias is large (measured 0.75 of the oracle range; see
+# ?estimate_sac_range) -- with the trend terms as predictor columns.
+sac_trend_field <- function(n = 300, seed = 4001) {
+  set.seed(seed)
+  xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+  D  <- as.matrix(stats::dist(xy))
+  S  <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n))
+  X1 <- xy[, 1] / 1000; X2 <- xy[, 2] / 1000
+  d <- data.frame(x = xy[, 1], y = xy[, 2], X1 = X1, X2 = X2,
+                  X3 = X1^2, X4 = X2^2, X5 = X1 * X2)
+  d$z <- 1 + 2 * X1 + X2 + 1.5 * d$X3 - 1.5 * d$X4 + 2 * d$X5 + S +
+    rnorm(n, sd = sqrt(0.2))
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+}
+TREND_VARS <- c("X1", "X2", "X3", "X4", "X5")
+
+test_that("detrend defaults to OLS and records which method was used", {
+  skip_if_not_installed("gstat")
+  fld <- sac_trend_field()
+  raw <- estimate_sac_range(fld, "z")
+  expect_true(is.na(attr(raw, "detrend_method")))
+  expect_false(attr(raw, "detrended"))
+  ols <- estimate_sac_range(fld, "z", TREND_VARS)
+  expect_identical(attr(ols, "detrend_method"), "ols")
+  expect_true(attr(ols, "detrended"))
+  expect_null(attr(ols, "reml"))
+  expect_error(estimate_sac_range(fld, "z", TREND_VARS, detrend = "gls"),
+               "'arg' should be one of")
+  expect_error(estimate_sac_range(fld, "z", TREND_VARS, reml_max_n = 10),
+               "at least 30")
+})
+
+test_that("detrend = 'reml' returns the REML range with its fit attached", {
+  skip_if_not_installed("gstat")
+  skip_if_not_installed("nlme")
+  fld <- sac_trend_field()
+  r <- estimate_sac_range(fld, "z", TREND_VARS, detrend = "reml")
+  expect_s3_class(r, "sac_range")
+  expect_true(is.finite(r))
+  expect_identical(attr(r, "detrend_method"), "reml")
+  expect_true(attr(r, "detrended"))
+  info <- attr(r, "reml")
+  expect_type(info, "list")
+  expect_identical(info$n_used, nrow(fld))
+  expect_false(info$subsampled)
+  expect_true(info$nugget_prop >= 0 && info$nugget_prop <= 1)
+  expect_true(info$sigma2 > 0)
+  # The model behind the number is the REML model, in gstat's layout, so
+  # plot() and summarize_by_cell(deff = "variogram") read it as usual.
+  vm <- attr(r, "variogram_model")
+  expect_identical(as.character(vm$model), c("Nug", "Exp"))
+  expect_equal(sum(vm$psill), info$sigma2, tolerance = 1e-8)
+  expect_equal(as.numeric(r), 3 * vm$range[2], tolerance = 1e-8)
+  expect_equal(sac_nugget(r), vm$psill[1], tolerance = 1e-12)
+  # The empirical variogram of the REML residuals travels with it, and the
+  # directional sweep on those residuals is still reported.
+  expect_s3_class(attr(r, "variogram"), "data.frame")
+  expect_length(attr(r, "directional"), 4L)
+  expect_false(attr(r, "anisotropy_used"))
+  expect_s3_class(plot(r), "ggplot")
+})
+
+test_that("REML detrending lands closer to the oracle than OLS on a trend surface", {
+  # A pin of the direction on one draw, not a proof: over 40 draws the
+  # median ratios to the oracle were OLS 0.75 and REML 1.06 on this design
+  # (?estimate_sac_range).  This seed's draw is one where the ordering holds;
+  # a change that flips it here is worth looking at.
+  skip_if_not_installed("gstat")
+  skip_if_not_installed("nlme")
+  fld <- sac_trend_field(seed = 4001)
+  ols  <- as.numeric(estimate_sac_range(fld, "z", TREND_VARS))
+  reml <- as.numeric(estimate_sac_range(fld, "z", TREND_VARS, detrend = "reml"))
+  expect_true(is.finite(ols) && is.finite(reml))
+  expect_gt(reml, ols)
+})
+
+test_that("reml_max_n subsamples the REML fit reproducibly and applies the trend to every point", {
+  skip_if_not_installed("gstat")
+  skip_if_not_installed("nlme")
+  fld <- sac_trend_field()
+  r1 <- estimate_sac_range(fld, "z", TREND_VARS, detrend = "reml", reml_max_n = 100)
+  r2 <- estimate_sac_range(fld, "z", TREND_VARS, detrend = "reml", reml_max_n = 100)
+  expect_identical(attr(r1, "reml")$n_used, 100L)
+  expect_true(attr(r1, "reml")$subsampled)
+  expect_identical(as.numeric(r1), as.numeric(r2))       # seeded subsample
+  # The residual variogram still covers every point, not just the subsample.
+  expect_identical(sum(attr(r1, "variogram")$np),
+                   sum(attr(estimate_sac_range(fld, "z", TREND_VARS), "variogram")$np))
+  # Exact duplicate locations are dropped for the fit and do not break it.
+  dup <- rbind(fld[1:60, ], fld[1:20, ])
+  rd <- estimate_sac_range(dup, "z", TREND_VARS, detrend = "reml")
+  expect_identical(attr(rd, "detrend_method"), "reml")
+  expect_identical(attr(rd, "reml")$n_used, 60L)
+})
+
+test_that("a REML fit that does not converge falls back to OLS with a warning", {
+  skip_if_not_installed("gstat")
+  fld <- sac_trend_field()
+  local_mocked_bindings(.reml_trend = function(...) NULL, .package = "spatialkit")
+  expect_warning(
+    r <- estimate_sac_range(fld, "z", TREND_VARS, detrend = "reml"),
+    "did not converge.*falling back to OLS")
+  expect_identical(attr(r, "detrend_method"), "ols")
+  expect_null(attr(r, "reml"))
+  expect_equal(as.numeric(r), as.numeric(estimate_sac_range(fld, "z", TREND_VARS)))
+})
+
+
+# ---------------------------------------------------------------------------
+# The nugget, on every classed return path.
+# ---------------------------------------------------------------------------
+
+test_that("sac_nugget reads the fitted model's nugget and is NA where there is none", {
+  skip_if_not_installed("gstat")
+  r <- estimate_sac_range(sac_test_field(), "z")
+  expect_true(is.finite(r))
+  vm <- attr(r, "variogram_model")
+  expect_equal(sac_nugget(r), sum(vm$psill[vm$model == "Nug"]))
+  expect_identical(sac_nugget(r), attr(r, "nugget"))
+  expect_true(sac_nugget(r) >= 0)
+  # A rejected range still carries the nugget of the model that was refused.
+  rej <- suppressWarnings(estimate_sac_range(sac_test_field(), "z", range_frac = 1e-6))
+  expect_true(is.na(rej))
+  expect_true(is.finite(sac_nugget(rej)))
+  # Nothing fitted: NA, never an error.
+  expect_identical(sac_nugget(NA), NA_real_)
+  expect_identical(sac_nugget(NA_real_), NA_real_)
+  expect_identical(sac_nugget(NULL), NA_real_)
+  expect_identical(sac_nugget(42), NA_real_)
+  expect_identical(sac_nugget(structure(NA_real_, class = c("sac_range", "numeric"))),
+                   NA_real_)
+  expect_identical(spatialkit:::.vgm_nugget_of(NULL), NA_real_)
+  expect_identical(spatialkit:::.vgm_nugget_of(data.frame(model = "Exp", psill = 1)), 0)
+})
+
+
+# ---------------------------------------------------------------------------
+# A variogram that falls with distance identifies no range.
+# ---------------------------------------------------------------------------
+
+test_that(".variogram_decreasing flags a net fall over the shorter lags and nothing else", {
+  f <- spatialkit:::.variogram_decreasing
+  mk <- function(gamma, np = rep(100, length(gamma)))
+    data.frame(np = np, dist = seq(10, by = 10, length.out = length(gamma)), gamma = gamma)
+  expect_false(f(mk(c(1, 2, 3, 4, 5, 6, 7, 8))))            # rising
+  expect_false(f(mk(rep(5, 8))))                            # flat
+  expect_true(f(mk(c(8, 7, 6, 5, 4, 3, 2, 1))))             # falling
+  # Only the shorter half counts: a fall confined to the long lags is not it.
+  expect_false(f(mk(c(1, 2, 3, 4, 8, 6, 4, 2))))
+  # Tolerance: a fall of 10% of the mean is noise, 20% is not (tol = 0.15).
+  expect_false(f(mk(c(10, 10, 10, 9), np = c(100, 100, 100, 100)), frac = 1))
+  expect_true(f(mk(c(10, 10, 10, 8), np = c(100, 100, 100, 100)), frac = 1))
+  # Weighted by the pairs supporting each step: a fall carried by one bin
+  # with hardly any pairs does not count.
+  expect_false(f(mk(c(10, 10, 10, 2), np = c(100, 100, 100, 1)), frac = 1))
+  # Too few bins, and malformed input, are never "decreasing".
+  expect_false(f(mk(c(3, 2, 1))))
+  expect_false(f(NULL))
+  expect_false(f(data.frame(dist = 1:5, gamma = 5:1)))       # no np column
+  expect_false(f(mk(c(NA, NA, NA, NA, NA))))
+})
+
+test_that("a periodic field is refused as 'decreases with distance', with the evidence attached", {
+  skip_if_not_installed("gstat")
+  # A hole-effect variogram: the semivariance falls again past the first
+  # quarter-wavelength.  gstat still fits an exponential to it and reports a
+  # finite range; that number is not a correlation length.
+  set.seed(5001)
+  n <- 250
+  xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+  D  <- as.matrix(stats::dist(xy))
+  S  <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n))
+  per <- sf::st_as_sf(
+    data.frame(x = xy[, 1], y = xy[, 2],
+               z = 2 * sin(2 * pi * xy[, 1] / 250) + 0.3 * S + rnorm(n, sd = 0.3)),
+    coords = c("x", "y"), crs = 32632)
+  lines <- capture_spatialkit_log(r <- estimate_sac_range(per, "z"))
+  expect_true(is.na(r))
+  expect_s3_class(r, "sac_range")
+  expect_identical(attr(r, "rejected_reason"), "empirical variogram decreases with distance")
+  expect_true(is.finite(attr(r, "rejected_range")))
+  expect_s3_class(attr(r, "variogram"), "data.frame")
+  expect_true(spatialkit:::.variogram_decreasing(attr(r, "variogram")))
+  expect_true(log_has(lines, "decreases with distance"))
+  expect_true(log_has(lines, "periodic"))
+  expect_false(log_has(lines, "trend --"))
+  # It draws, and says why no range is marked.
+  skip_if_not_installed("ggplot2")
+  p <- plot(r)
+  expect_match(p$labels$subtitle, "^No effective range: the semivariance falls")
+  # And an ordinary field is not touched by the check.
+  ok <- estimate_sac_range(sac_test_field(), "z")
+  expect_true(is.finite(ok))
+  expect_false(spatialkit:::.variogram_decreasing(attr(ok, "variogram")))
+})
