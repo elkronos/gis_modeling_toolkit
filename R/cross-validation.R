@@ -1514,7 +1514,7 @@ estimate_sac_range <- function(points_sf, response_var,
                        "(the exponential and spherical fits are both singular, ",
                        "which is what a flat, nugget-only variogram produces); ",
                        "returning NA. The empirical variogram is attached for ",
-                       "inspection: plot(type = \"variogram\")."))
+                       "inspection: call plot() on the returned value."))
       return(structure(
         NA_real_,
         class           = c("sac_range", "numeric"),
@@ -1576,7 +1576,7 @@ estimate_sac_range <- function(points_sf, response_var,
                "fitted parameter. Returning NA. Raise `cutoff` to fit longer ",
                "lags, supply `predictor_vars` to detrend, or set a block size ",
                "explicitly. The empirical variogram is attached for ",
-               "inspection: plot(type = \"variogram\")."),
+               "inspection: call plot() on the returned value."),
         effective_range
       )
     }
@@ -1724,6 +1724,48 @@ print.sac_range <- function(x, ...) {
 # -----------------------------------------------------------------------------
 # Fold Construction
 # -----------------------------------------------------------------------------
+
+#' Estimate an autocorrelation range for a diagnostic, quietly
+#'
+#' \code{make_folds()} calls this when \code{auto_range} is off but a response
+#' column is available, so that the leakage warning on geometric blocks can
+#' fire.  The range returned here sizes nothing.
+#'
+#' Skips the estimate -- returning \code{NA} -- when \code{gstat} is not
+#' installed or there are fewer than 30 points (the estimator's own floor),
+#' logging why at INFO level.  Otherwise runs \code{estimate_sac_range()} with
+#' its console echo silenced and any R warning it raises muffled, because the
+#' caller did not ask for a range and an unidentified one only means the
+#' diagnostic cannot be given.  A failure of any other kind also yields
+#' \code{NA}.
+#'
+#' @return A single number (possibly \code{NA}), stripped of the
+#'   \code{sac_range} class so that nothing downstream mistakes it for a
+#'   user-requested estimate.
+#' @keywords internal
+#' @noRd
+.sac_range_for_diagnostic <- function(pts, response_var, predictor_vars,
+                                      range_frac, seed) {
+  if (!requireNamespace("gstat", quietly = TRUE)) {
+    .log_info("make_folds(block_kfold): leakage check skipped: package 'gstat' is not installed, so no autocorrelation range could be estimated to compare the blocks against.")
+    return(NA_real_)
+  }
+  if (nrow(pts) < 30L) {
+    .log_info("make_folds(block_kfold): leakage check skipped: fewer than 30 points, below the floor at which a variogram range is estimated.")
+    return(NA_real_)
+  }
+  r <- tryCatch(
+    logger::with_log_threshold(
+      withCallingHandlers(
+        estimate_sac_range(pts, response_var = response_var,
+                           predictor_vars = predictor_vars,
+                           range_frac = range_frac, seed = seed),
+        warning = function(w) invokeRestart("muffleWarning")),
+      threshold = logger::FATAL, namespace = "spatialkit", index = 2),
+    error = function(e) NA_real_)
+  r <- suppressWarnings(as.numeric(r))
+  if (length(r) != 1L || !is.finite(r) || r <= 0) NA_real_ else r
+}
 
 #' Create spatial cross-validation folds
 #'
@@ -2162,6 +2204,22 @@ make_folds <- function(points_sf, k,
     } else if (isTRUE(auto_range) && is.null(response_var)) {
       .log_warn("make_folds(block_kfold): auto_range = TRUE but response_var is NULL; cannot estimate range. Falling back to geometric blocks.")
       warning("make_folds(): auto_range requires response_var; ignoring.", call. = FALSE)
+    } else if (!is.null(response_var)) {
+      # auto_range is off, but a response is to hand -- which it always is when
+      # a cv_*() function built the folds -- so estimate the range for the
+      # LEAKAGE DIAGNOSTIC alone.  It sizes nothing: the blocks below are the
+      # same geometric blocks as before, and the folds do not change.  Before
+      # this branch existed, `sac_range` stayed NA on every default call, so
+      # the two "block smaller than the autocorrelation range" warnings below
+      # could fire only in the one configuration (auto_range = TRUE) that had
+      # already sized the blocks from the range and therefore never needed
+      # them.  The estimate's own log lines are silenced on the console
+      # (index 2): the caller did not ask for a range, and a variogram that
+      # never reached a sill simply means no diagnostic can be given here.
+      # The file trace (index 1) keeps them.
+      sac_range <- .sac_range_for_diagnostic(
+        pts, response_var, predictor_vars, range_frac,
+        seed = if (is.null(seed)) 123L else seed)
     }
 
     bb <- sf::st_bbox(reg)
@@ -2169,6 +2227,22 @@ make_folds <- function(points_sf, k,
     # Determine grid dimensions: block_size constrains nx/ny
     if (!is.null(block_size) && is.numeric(block_size) && block_size > 0) {
       size_dims <- .block_dims_from_size(bb, block_size)
+      # The auto_range branch above already compared a supplied block_size to
+      # the range it estimated.  When the range came from the diagnostic-only
+      # branch instead, make the same comparison here: a hand-set block_size
+      # below the range leaks exactly as a geometric one does.
+      if (!isTRUE(auto_range) && is.finite(sac_range) && sac_range > 0 &&
+          block_size < sac_range) {
+        .log_warn(
+          "make_folds(block_kfold): supplied block_size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Spatial CV may leak correlated information.",
+          block_size, sac_range
+        )
+        warning(
+          sprintf("make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Consider increasing block_size to reduce information leakage across folds.",
+                  block_size, sac_range),
+          call. = FALSE
+        )
+      }
       # If the caller also supplied explicit block_nx/block_ny, warn about override
       if (!is.null(block_nx) || !is.null(block_ny)) {
         .log_warn(

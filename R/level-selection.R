@@ -541,7 +541,9 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     return(out)
   }
 
-  # --- Combined: rank-average of WSS elbow distance and |Moran's I| ---
+  # --- Combined: rank-average of WSS elbow distance and |z| of Moran's I ---
+  # |z|, not |I|: I's attainable range is set by the eigenvalues of the weights
+  # matrix, which is rebuilt at every k, so |I| is not comparable across k.
   # Only rank over the evaluated neighbourhood to keep dimensions aligned;
   # use wss_eval so both criteria reflect the same clustering per k.
   k_norm   <- (eval_ks - min(eval_ks)) / max(1, max(eval_ks) - min(eval_ks))

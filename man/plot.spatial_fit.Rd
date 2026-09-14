@@ -59,6 +59,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 \seealso{
 Other plotting: 
+\code{\link{plot.sac_range}()},
 \code{\link{plot_folds}()}
 }
 \concept{plotting}

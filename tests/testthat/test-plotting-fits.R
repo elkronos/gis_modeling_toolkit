@@ -206,3 +206,84 @@ test_that("all-NA residuals error instead of painting a uniformly grey map", {
   for (ty in c("residuals", "observed_predicted", "variogram"))
     expect_error(plot(broken, type = ty), "no finite residuals")
 })
+
+# ---------------------------------------------------------------------------
+# plot.sac_range(): the method estimate_sac_range()'s own messages used to
+# point at without it existing ("plot(type = \"variogram\")" is
+# plot.spatial_fit, which needs a fit).
+# ---------------------------------------------------------------------------
+
+test_that("plot.sac_range draws an identified range with model line and marker", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  set.seed(5); n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(1e-4, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 3857)
+  r <- estimate_sac_range(pts, "z")
+  expect_true(is.finite(r))
+
+  p <- plot(r)
+  expect_s3_class(p, "ggplot")
+  expect_no_error(ggplot2::ggplot_build(p))
+  expect_identical(p$labels$title, "Empirical variogram")
+  expect_match(p$labels$subtitle, "^Effective range = ")
+  layers <- vapply(p$layers, function(l) class(l$geom)[1L], character(1))
+  expect_true("GeomLine" %in% layers)    # the fitted model
+  expect_true("GeomVline" %in% layers)   # the range marker
+})
+
+test_that("plot.sac_range draws a rejected range and says why", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  # The same white-noise residuals the residual-variogram test above pins as
+  # rejected ("no variogram model" or "did not converge"): the range is NA
+  # with the empirical variogram attached, and the picture is still worth
+  # drawing.  Not every white-noise draw is rejected -- a lucky one fits a
+  # finite range -- so the fixture is reused rather than re-rolled.
+  set.seed(5); n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(1e-4, n))) %*% rnorm(n))
+  flat <- sf::st_as_sf(data.frame(x = x, y = y, z = z, w = rnorm(n)),
+                       coords = c("x", "y"), crs = 3857)
+  set.seed(6); flat$z <- rnorm(n)
+  fit_flat <- lm_spatial_fit(flat, predictor_vars = "w")
+  r <- suppressWarnings(estimate_sac_range(
+    sf::st_sf(.resid = residuals(fit_flat), geometry = sf::st_geometry(flat)),
+    ".resid"))
+  expect_true(is.na(r))
+  expect_s3_class(attr(r, "variogram"), "data.frame")
+  p <- plot(r)
+  expect_s3_class(p, "ggplot")
+  expect_no_error(ggplot2::ggplot_build(p))
+  expect_identical(p$labels$title, "Empirical variogram")
+  expect_match(p$labels$subtitle, "^No effective range")
+})
+
+test_that("plot.sac_range refuses a bare NA and a non-sac_range object informatively", {
+  skip_if_not_installed("ggplot2")
+  bare <- structure(NA_real_, class = c("sac_range", "numeric"))
+  expect_error(plot(bare), "carries no empirical variogram")
+  expect_error(spatialkit:::plot.sac_range(1), "must be an object returned by")
+})
+
+test_that("plot.spatial_fit(type = 'variogram') and plot.sac_range share one drawer", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  set.seed(5); n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(1e-4, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z, w = rnorm(n)),
+                      coords = c("x", "y"), crs = 3857)
+  fit <- lm_spatial_fit(pts, predictor_vars = "w")
+  p_fit <- plot(fit, type = "variogram")
+  # Same residuals through the public estimator give the same subtitle.
+  pts$.resid <- as.numeric(residuals(fit))
+  p_sac <- plot(estimate_sac_range(pts, ".resid"))
+  expect_identical(p_fit$labels$title, "Residual variogram")
+  expect_identical(p_sac$labels$title, "Empirical variogram")
+  expect_identical(p_fit$labels$subtitle, p_sac$labels$subtitle)
+})

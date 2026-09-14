@@ -127,18 +127,90 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 
   dat$.resid <- as.numeric(res)
   sac <- estimate_sac_range(dat, ".resid")
-  vg  <- attr(sac, "variogram")
-  vm  <- attr(sac, "variogram_model")
-  if (is.null(vg))
+  if (is.null(attr(sac, "variogram")))
     stop("plot.spatial_fit(): the residual variogram could not be computed; ",
          "there may be too few finite residuals, or the fit's data_sf may ",
          "carry no usable geometry.", call. = FALSE)
+  .draw_sac_variogram(sac, what = "Residual variogram")
+}
+
+
+#' Plot an estimated spatial autocorrelation range
+#'
+#' Draws the empirical variogram that \code{\link{estimate_sac_range}()}
+#' attaches to its result, with the fitted model and the effective range
+#' overlaid where a range was identified, and a subtitle saying why not where
+#' it was not.  A variogram that never reaches a sill, or that has no spatial
+#' structure at the lags resolved, is the single most useful thing to
+#' \emph{see} when a range comes back \code{NA}, so those cases are drawn
+#' rather than refused.
+#'
+#' Nothing is recomputed: the plot reads the \code{variogram},
+#' \code{variogram_model}, \code{crs}, \code{directional} and
+#' \code{anisotropy_used} attributes the estimate already carries.  The
+#' distance axis is in the units of the CRS the variogram was actually fitted
+#' in, which \code{estimate_sac_range()} may have chosen itself for lon/lat
+#' input.
+#'
+#' @param x An object of class \code{sac_range}, as returned by
+#'   \code{\link{estimate_sac_range}()}.
+#' @param ... Ignored.
+#' @return A \code{ggplot} object.
+#' @seealso \code{\link{plot.spatial_fit}(type = "variogram")}, which draws
+#'   the same picture for a fitted model's residuals.
+#' @family plotting
+#' @examples
+#' if (requireNamespace("gstat", quietly = TRUE) &&
+#'     requireNamespace("ggplot2", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(3)
+#'   n <- 150
+#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   xy$z <- sin(xy$x / 150) + rnorm(n, sd = 0.3)
+#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#'   r <- estimate_sac_range(pts, response_var = "z")
+#'   plot(r)
+#' }
+#' @export
+plot.sac_range <- function(x, ...) {
+  .need_ggplot("plot.sac_range()")
+  if (!inherits(x, "sac_range"))
+    stop("plot.sac_range(): `x` must be an object returned by ",
+         "estimate_sac_range().", call. = FALSE)
+  if (is.null(attr(x, "variogram")))
+    stop("plot.sac_range(): this estimate carries no empirical variogram to ",
+         "draw. estimate_sac_range() returns a bare NA, with nothing attached, ",
+         "when the input has too few usable points or the variogram could not ",
+         "be computed at all.", call. = FALSE)
+  .draw_sac_variogram(x, what = "Empirical variogram")
+}
+
+
+#' Draw a sac_range object's variogram
+#'
+#' The one drawing routine behind \code{plot.sac_range()} and
+#' \code{plot.spatial_fit(type = "variogram")}.  \code{what} is the plain
+#' title used when the all-pairs variogram is drawn; when anisotropy was
+#' established and a single direction is being shown, the title says so and
+#' names the azimuth, because calling a quarter of the pairs by the plain
+#' name overstates the structure the plot exists to show.
+#'
+#' @param sac A \code{sac_range} with a non-\code{NULL} \code{variogram}
+#'   attribute.
+#' @param what Character(1) title stem.
+#' @return A \code{ggplot} object.
+#' @keywords internal
+#' @noRd
+.draw_sac_variogram <- function(sac, what = "Empirical variogram") {
+  vg  <- attr(sac, "variogram")
+  vm  <- attr(sac, "variogram_model")
 
   # The axis is in the units of the CRS the VARIOGRAM was fitted in, which
   # estimate_sac_range() chose with ensure_projected() -- not necessarily the
-  # fit's own CRS.  Labelling it "CRS units" for a lon/lat fit named degrees
-  # while the numbers were metres of an auto-chosen UTM zone that appeared
-  # nowhere on the plot.  estimate_sac_range() returns the CRS for exactly this.
+  # caller's own CRS.  Labelling it "CRS units" for a lon/lat input named
+  # degrees while the numbers were metres of an auto-chosen UTM zone that
+  # appeared nowhere on the plot.  estimate_sac_range() returns the CRS for
+  # exactly this.
   vg_units <- tryCatch({
     u <- sf::st_crs(attr(sac, "crs"))$units_gdal
     if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
@@ -146,16 +218,17 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 
   # Which variogram is this?  When anisotropy was established,
   # estimate_sac_range() returns the single azimuth with the widest range --
-  # about a quarter of the point pairs -- and calling that plainly "Residual
-  # variogram" overstates the leftover structure for the plot whose whole
-  # purpose is to show how much there is.
-  vg_title <- "Residual variogram"
+  # about a quarter of the point pairs -- and calling that plainly by `what`
+  # overstates the structure for the plot whose whole purpose is to show how
+  # much there is.
+  vg_title <- what
   if (isTRUE(attr(sac, "anisotropy_used"))) {
     dir_r <- attr(sac, "directional")
     az <- if (!is.null(dir_r) && length(dir_r))
       names(dir_r)[which.max(replace(dir_r, is.na(dir_r), -Inf))] else NA
-    vg_title <- if (is.na(az)) "Residual variogram (widest direction only)"
-      else sprintf("Residual variogram, %s\u00b0 \u00b1 22.5\u00b0 (the widest of four directions)", az)
+    vg_title <- if (is.na(az)) sprintf("%s (widest direction only)", what)
+      else sprintf("%s, %s\u00b0 \u00b1 22.5\u00b0 (the widest of four directions)",
+                   what, az)
   }
 
   p <- ggplot2::ggplot(vg, ggplot2::aes(x = .data$dist, y = .data$gamma)) +
