@@ -895,7 +895,10 @@
 #'   would otherwise return a range in 3-D while every consumer of it works in
 #'   2-D map distance; and rows with empty or non-finite coordinates are dropped
 #'   with a logged count.
-#' @param response_var Character(1) name of the response column.
+#' @param response_var Character(1) name of the response column.  For a
+#'   count or other response whose variance tracks its mean, see the section
+#'   on non-Gaussian responses: the range is still estimated, but it is a
+#'   less reliable number than for a Gaussian response.
 #' @param predictor_vars Optional character vector.  When supplied, an OLS
 #'   residual variogram is fitted instead of a raw-response variogram, which
 #'   better reflects the autocorrelation that the spatial model must handle.
@@ -923,6 +926,28 @@
 #'   the caller's RNG.  Pass \code{NULL} for the old unseeded behaviour, or a
 #'   different number to check how sensitive the estimate is to the subsample.
 #'   Ignored when \code{nrow(points_sf) <= n_max}, where nothing is sampled.
+#' @section Count and other non-Gaussian responses:
+#' The empirical variogram assumes second-order stationarity: a variance that
+#' is the same everywhere, so that semivariance depends on separation alone.
+#' A count response breaks that assumption by construction, because its
+#' variance tracks its mean, and so does any response with a mean-variance
+#' relationship (rates, proportions, skewed amounts).  On such data the
+#' variogram mixes distance-dependence with mean-dependence, and the fitted
+#' range is not the thing it claims to be: where the mean is high the
+#' semivariance is inflated whatever the distance, which flattens the curve
+#' and can lengthen or shorten the apparent range depending on where the
+#' high-mean regions sit.
+#'
+#' Supplying \code{predictor_vars} to detrend helps, because it removes the
+#' part of the mean the covariates explain, but it does not fix the variance
+#' structure: the residuals of an OLS fit to a count still have a variance
+#' that tracks the fitted mean.  The principled remedy is a variogram of
+#' Pearson residuals from a model in the right family, which this function
+#' does not compute.  Until it does, treat the range from a count response as
+#' an order of magnitude rather than an estimate, size blocks conservatively
+#' from it, and prefer \code{\link{make_folds}(method = "nndm")}, which does
+#' not depend on a fitted range at all.
+#'
 #' @return A single number, of class \code{sac_range} in the first two of the
 #'   three shapes below and a bare \code{NA} in the third; all three behave
 #'   as an ordinary number.  The shapes carry different attributes:
@@ -2935,6 +2960,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
 #'   are the primary beneficiary of this option.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
+#' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
 #'   \code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
@@ -3172,6 +3198,20 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' Run K-fold CV for any model that returns a \code{spatial_fit} object.
 #' This is the extensibility point: to plug in a new model type, supply
 #' a \code{fit_fn(train_sf)} that returns a \code{spatial_fit}.
+#'
+#' @section Name collision with blockCV:
+#' The \pkg{blockCV} package exports a function of the same name that does
+#' the opposite job: \code{blockCV::cv_spatial()} \emph{builds} spatial
+#' folds, where this function \emph{runs} a cross-validation over folds it is
+#' given.  With both packages attached, whichever was attached last masks the
+#' other; \code{spatialkit::cv_spatial()} always resolves to this one.  The
+#' two cooperate rather than compete: \code{blockCV::cv_spatial()} returns
+#' its fold assignment as \code{$folds_ids}, a vector of fold labels, and
+#' that vector is accepted directly as the \code{folds} argument here and in
+#' every other \code{cv_*()} function.  Fold construction is
+#' \pkg{blockCV}'s home ground and this package does not try to match its
+#' breadth there; what this package adds is the path from irregular points
+#' through data-drawn regions to a cross-validated, compared model.
 #'
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
