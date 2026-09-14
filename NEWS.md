@@ -160,6 +160,47 @@
   upgrades the level-selection criterion to `"combined"`, so the selection
   depends on the response without that having been asked for.
 
+* `make_folds()` gains `blocks`: a polygon layer (`sf` or `sfc`) to use as
+  the blocks of `method = "block_kfold"` in place of the grid it would
+  otherwise build --- the `$cells` of a `build_tessellation()` result,
+  hexagons, watersheds, administrative units, the `$blocks` of
+  `blockCV::cv_spatial()`.  Each point takes the block that contains it and
+  the blocks are assigned to folds exactly as grid cells are, so the fold
+  builder can now consume every shape the tessellation half of the package
+  produces.  The grid-sizing arguments and `boundary` are ignored with a
+  log line, `auto_range` compares the estimated range against the blocks
+  instead of resizing them, and the leakage warning uses the median over
+  blocks of the side of the square with the block's area
+  (`params$block_scale`).  Points inside no block are assigned to the
+  nearest one with a warning that counts them, except points within a
+  millionth of the extent of a block --- an edge that reprojection moved by
+  a rounding error; points inside more than one block take the first, with
+  a warning when the blocks concerned overlap in area rather than share an
+  edge.  `params` gains `n_blocks` (before empties were dropped),
+  `blocks_supplied` and `block_scale` on every `block_kfold` result;
+  `grid_nx`/`grid_ny` are `NA` for supplied blocks.
+
+* `make_folds()` gains `balance_tol`, the largest-to-smallest fold size
+  ratio above which `block_kfold` reports its folds as imbalanced.  The
+  check was always there at a hard-coded 3:1, and it was a log line only;
+  it is now an R warning (`Inf` disables it), the ratio achieved is
+  returned as `params$balance_ratio`, and the help page says which
+  methods balance what: only `block_kfold` balances point counts, by
+  packing blocks largest first into the fold with the fewest points so far.
+  No search over packings was added, because the packing is not where the
+  imbalance comes from.  Measured against the optimum by enumeration (two
+  folds, up to ten blocks, heavy-tailed sizes), the greedy packing is
+  optimal in 72 percent of cases and within two points of optimal on
+  average; a local search with 30 random restarts moved the ratio by 0.004
+  on average over 480 block-size vectors and never brought one of the 91
+  above 3:1 below it.  The remedy for an imbalance past the tolerance is
+  the block design --- the warning now says so --- and `blocks` is how to
+  supply one: on clustered layouts where the geometric grid exceeded 3:1
+  in 22 percent of draws (median 1.8, worst 6.3), Voronoi cells around 15
+  `get_voronoi_seeds(method = "kmeans")` seeds never exceeded 1.3 (median
+  1.09).  With the default tolerance the folds of every existing call are
+  unchanged.
+
 ## Bug fixes
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++
@@ -248,6 +289,10 @@
 * `cv_spatial()` documents its name collision with `blockCV::cv_spatial()`,
   which builds folds where this one runs them, and that `blockCV`'s
   `$folds_ids` is accepted directly as `folds` everywhere.
+* The "Defaults and their sources" list on `?spatialkit` named
+  `nstart = 5` in `determine_optimal_levels()`, which the k-means++ change
+  above replaced; it now names the 25-restart budget, and the fold-imbalance
+  tolerance by its new argument.
 
 # spatialkit 2.0.0
 
