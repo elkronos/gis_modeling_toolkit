@@ -36,6 +36,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 \seealso{
 Other plotting: 
+\code{\link{plot.sac_range}()},
 \code{\link{plot.spatial_fit}()}
 }
 \concept{plotting}

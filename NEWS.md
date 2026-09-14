@@ -1,5 +1,36 @@
 # spatialkit (development version)
 
+## New features
+
+* `estimate_sac_range()`'s result gains a `plot()` method.
+  `plot(estimate_sac_range(pts, "z"))` draws the empirical variogram, with
+  the fitted model and the effective range overlaid where a range was
+  identified, and a subtitle saying why not where it was not: the variogram
+  never reached a sill, both model fits were singular, or the optimiser
+  halted.  Nothing is recomputed --- the plot reads the attributes the
+  estimate already carries --- and the same drawing routine now serves
+  `plot.spatial_fit(type = "variogram")`, so the two pictures agree.  The
+  "attached for inspection" messages `estimate_sac_range()` logs when it
+  returns `NA` used to point at `plot(type = "variogram")`, which is the
+  method for a fitted model and could not take the estimate; they now point
+  at `plot()` on the returned value.
+
+## Bug fixes
+
+* `make_folds(method = "block_kfold")` can now raise its "block dimension <
+  autocorrelation range" warning.  The comparison was always there, but the
+  range it compared against was estimated only under `auto_range = TRUE`,
+  the one setting in which the blocks had already been sized from that range
+  and the warning could never fire; on every default call the diagnostic was
+  dead code.  With `auto_range = FALSE` (the default) and a `response_var`
+  to hand --- always the case when a `cv_*()` function builds the folds ---
+  a range is now estimated for the diagnostic alone.  It sizes nothing: the
+  blocks are the same geometric blocks as before and the folds do not
+  change.  A hand-set `block_size` below the range raises the same warning.
+  The estimate's own log lines stay off the console, and the check is
+  skipped (with an INFO log line saying so) when `gstat` is not installed or
+  there are fewer than 30 points.
+
 ## Documentation
 
 * `fit_bayesian_spatial_model()` documents that `family =` accepts any
