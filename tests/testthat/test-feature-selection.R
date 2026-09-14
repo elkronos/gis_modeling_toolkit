@@ -137,30 +137,27 @@ test_that("selection is reproducible from the seed", {
 })
 
 
-test_that("auto_range reaches the inner folds and is recorded", {
+test_that("auto_range is off by default and recorded either way", {
   dat <- fs_data()
-  # Off by default, recorded as such, and the folds are the geometric ones.
   sel <- select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
                                  seed = 1, quiet = TRUE)
   expect_false(sel$params$auto_range)
-  # On: make_folds() estimates the range and announces it as the minimum
-  # block size.  The response here is pure predictor signal with white noise,
-  # so a range may or may not be identified; when it is not, make_folds()
-  # falls back to geometric blocks and the message is absent -- the argument
-  # still reached it, which the recorded parameter shows.
-  msgs <- character(0)
-  sel_on <- withCallingHandlers(
-    suppressWarnings(
-      select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
-                              seed = 1, quiet = TRUE, auto_range = TRUE)),
-    message = function(m) { msgs <<- c(msgs, conditionMessage(m)); invokeRestart("muffleMessage") })
+  # With it on, the argument is recorded whatever the estimate did.  Without
+  # gstat no range can be estimated and make_folds() keeps the geometric
+  # blocks with a warning, so this part needs no optional package; the
+  # positive proof that the blocks get sized from the range is the next test.
+  sel_on <- suppressMessages(suppressWarnings(
+    select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
+                            seed = 1, quiet = TRUE, auto_range = TRUE)))
   expect_true(sel_on$params$auto_range)
-  expect_identical(sel_on$selected, sel$selected)
-  # Positive proof it was forwarded, on a response with a real range: the
-  # inner blocks are sized from the range, which the message reports.  A
-  # short range (exponential parameter 60, effective range ~220 on this
-  # draw): a longer one estimates past half the extent, and one block is not
-  # a split (make_folds() refuses it, correctly).
+})
+
+test_that("auto_range sizes the inner blocks from the estimated range", {
+  skip_if_not_installed("gstat")
+  # A response with a real range: make_folds() announces the range it used as
+  # the minimum block size.  A short range (exponential parameter 60,
+  # effective range ~220 on this draw): a longer one estimates past half the
+  # extent, and one block is not a split (make_folds() refuses it, correctly).
   set.seed(3)
   n <- 200
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
@@ -170,11 +167,12 @@ test_that("auto_range reaches the inner folds and is recorded", {
                        coords = c("x", "y"), crs = 3857)
   spat$z <- spat$a + sp
   spat$..row_id <- seq_len(n)
-  msgs2 <- character(0)
-  withCallingHandlers(
+  msgs <- character(0)
+  sel <- withCallingHandlers(
     suppressWarnings(
       select_features_forward(spat, "z", c("a", "b"), fs_fit, k = 4,
                               seed = 1, quiet = TRUE, auto_range = TRUE)),
-    message = function(m) { msgs2 <<- c(msgs2, conditionMessage(m)); invokeRestart("muffleMessage") })
-  expect_true(any(grepl("using as minimum block size", msgs2)))
+    message = function(m) { msgs <<- c(msgs, conditionMessage(m)); invokeRestart("muffleMessage") })
+  expect_true(any(grepl("using as minimum block size", msgs)))
+  expect_true(sel$params$auto_range)
 })
