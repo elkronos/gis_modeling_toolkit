@@ -508,7 +508,9 @@ test_that("an all-folds-failed CV warning names the first underlying error", {
 # overall table carries the Bayesian backend's calibration.
 # ---------------------------------------------------------------------------
 
-test_that("compare_models_cv forwards block_size and auto_range to the shared folds", {
+.fold_test_sets <- function(folds) lapply(folds, function(f) sort(f$test))
+
+test_that("compare_models_cv forwards block_size to the shared folds", {
   skip_if_not_installed("ranger")
   pts <- surf_test_points(90, seed = 4)
 
@@ -517,23 +519,26 @@ test_that("compare_models_cv forwards block_size and auto_range to the shared fo
   # Default: the same geometric folds as before the arguments existed, so the
   # comparison a script already made does not move.
   ref <- make_folds(pts, k = 3, method = "block_kfold", seed = 123)
-  test_sets <- function(folds) lapply(folds, function(f) sort(f$test))
-  expect_identical(test_sets(base$rf_cv$folds), test_sets(ref$folds))
+  expect_identical(.fold_test_sets(base$rf_cv$folds), .fold_test_sets(ref$folds))
 
   # A block_size reaches make_folds(): 400-unit blocks on a 1000-unit extent
   # give a 2 x 2 grid and a different split from the default 3 x 3 one.
   big <- suppressWarnings(
     compare_models_cv(pts, "z", "w", models = "RF", k = 3, block_size = 400,
                       rf_args = list(num_trees = 40), quiet = TRUE))
-  expect_false(identical(test_sets(big$rf_cv$folds), test_sets(ref$folds)))
+  expect_false(identical(.fold_test_sets(big$rf_cv$folds), .fold_test_sets(ref$folds)))
+})
 
-  # auto_range reaches it too: on a response with a real range (exponential
-  # parameter 60, effective range ~220 here -- short enough that the blocks
-  # it sizes still make a split) make_folds() announces the range it used as
-  # the minimum block size, and the shared folds differ from the geometric
-  # ones.  The message alone would not prove it: compare_models_cv() catches
-  # a fold-construction error and falls back to per-backend folds, so the
-  # fold sets are compared as well.
+test_that("compare_models_cv forwards auto_range to the shared folds", {
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("gstat")
+  # On a response with a real range (exponential parameter 60, effective
+  # range ~220 here -- short enough that the blocks it sizes still make a
+  # split) make_folds() announces the range it used as the minimum block
+  # size, and the shared folds differ from the geometric ones.  The message
+  # alone would not prove it: compare_models_cv() catches a fold-construction
+  # error and falls back to per-backend folds, so the fold sets are compared
+  # as well.
   set.seed(3)
   n <- 200
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
@@ -551,8 +556,8 @@ test_that("compare_models_cv forwards block_size and auto_range to the shared fo
   ranged <- suppressWarnings(suppressMessages(
     make_folds(spat, k = 3, method = "block_kfold", seed = 123,
                auto_range = TRUE, response_var = "z", predictor_vars = "w")))
-  expect_false(identical(test_sets(auto$rf_cv$folds), test_sets(geo$folds)))
-  expect_identical(test_sets(auto$rf_cv$folds), test_sets(ranged$folds))
+  expect_false(identical(.fold_test_sets(auto$rf_cv$folds), .fold_test_sets(geo$folds)))
+  expect_identical(.fold_test_sets(auto$rf_cv$folds), .fold_test_sets(ranged$folds))
 })
 
 test_that(".overall_with_coverage appends a predictive_coverage summary and nothing else", {
