@@ -18,7 +18,8 @@ select_features_forward(
   max_fits = 5000L,
   seed = 123,
   quiet = FALSE,
-  auto_range = FALSE
+  auto_range = FALSE,
+  select_on = c("all", "split")
 )
 }
 \arguments{
@@ -75,10 +76,21 @@ candidate be selected for spatial proximity to the response rather than
 for predicting it, which is the same failure the \code{random_kfold}
 caution above exists to prevent, so the leakage warning
 \code{make_folds()} raises applies here with more force than usual.}
+
+\item{select_on}{\code{"all"} (default) runs the sweep on every row of
+\code{train_sf}.  \code{"split"} runs it on one spatially blocked half,
+then fits the selected set on that half and scores it on the other:
+\code{score_holdout} is then an honest estimate of the selected model's
+\code{metric} on data the selection never saw (the sweep's own
+\code{score} is not; see "The score is not a performance estimate").
+Both halves come back in \code{$split}.  See the "Post-selection
+inference" section of \code{\link{determine_optimal_levels}} for the
+trade: coverage for half the sample.}
 }
 \value{
 A list with \code{selected} (the chosen predictors, in the order
-they were added), \code{score}, \code{history} and \code{params}.
+they were added), \code{score}, \code{score_holdout}, \code{history},
+\code{params} and \code{split}.
 \code{score} is the winning set's cross-validated \code{metric} at the
 final step: the \strong{selection-internal} optimum, optimistically
 biased because it was chosen as the best of many (see the section above),
@@ -87,9 +99,16 @@ with \code{step}, \code{variable} and \code{score}, holding every
 candidate evaluated at every step; when the null model could be scored it
 also carries a \code{step = 0} row named \code{"<none>"} giving that
 baseline, so the first variable's gain can be read off directly.
+\code{score_holdout} is \code{NA} unless \code{select_on = "split"}, and
+then the selected set's \code{metric} when fitted on the selection half
+and predicted on the estimation half (\eqn{R^2} against the selection
+half's mean, the out-of-sample convention); \code{NA} when nothing was
+selected or the prediction failed.  \code{split} is \code{NULL} or a
+list with \code{selection} and \code{estimation}, integer row positions
+in \code{train_sf} after the completeness filter above.
 \code{params} records \code{metric}, \code{method}, \code{k},
-\code{tol}, \code{seed}, \code{auto_range}, \code{n_candidates} and
-\code{estimated_fits}.
+\code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
+\code{n_candidates} and \code{estimated_fits}.
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a
@@ -125,9 +144,12 @@ candidates is optimistically biased by construction: Cawley and Talbot
 (2010) show the bias can exceed the genuine differences between the models
 being compared.  Quote it as the selection criterion, not as the
 performance of the selected model.  An honest performance estimate needs
-folds the selection never saw, which is what running this function inside
-the \code{fit_fn} of \code{\link{cv_spatial}()} gives: the outer folds
-score a model whose predictors were chosen on the inner ones alone.
+data the selection never saw.  Two ways to get one: run this function
+inside the \code{fit_fn} of \code{\link{cv_spatial}()}, so the outer
+folds score a model whose predictors were chosen on the inner ones alone;
+or pass \code{select_on = "split"}, which selects on one spatial half of
+\code{train_sf} and returns the selected set's score on the other as
+\code{score_holdout}.
 }
 
 \examples{
