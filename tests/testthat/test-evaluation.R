@@ -501,3 +501,124 @@ test_that("an all-folds-failed CV warning names the first underlying error", {
   expect_equal(res$n_folds_attempted, 2L)
   expect_equal(res$n_folds_succeeded, 0L)
 })
+
+
+# ---------------------------------------------------------------------------
+# compare_models_cv(): the shared folds can be sized from the range, and the
+# overall table carries the Bayesian backend's calibration.
+# ---------------------------------------------------------------------------
+
+test_that("compare_models_cv forwards block_size and auto_range to the shared folds", {
+  skip_if_not_installed("ranger")
+  pts <- surf_test_points(90, seed = 4)
+
+  base <- compare_models_cv(pts, "z", "w", models = "RF", k = 3,
+                            rf_args = list(num_trees = 40), quiet = TRUE)
+  # Default: the same geometric folds as before the arguments existed, so the
+  # comparison a script already made does not move.
+  ref <- make_folds(pts, k = 3, method = "block_kfold", seed = 123)
+  test_sets <- function(folds) lapply(folds, function(f) sort(f$test))
+  expect_identical(test_sets(base$rf_cv$folds), test_sets(ref$folds))
+
+  # A block_size reaches make_folds(): 400-unit blocks on a 1000-unit extent
+  # give a 2 x 2 grid and a different split from the default 3 x 3 one.
+  big <- suppressWarnings(
+    compare_models_cv(pts, "z", "w", models = "RF", k = 3, block_size = 400,
+                      rf_args = list(num_trees = 40), quiet = TRUE))
+  expect_false(identical(test_sets(big$rf_cv$folds), test_sets(ref$folds)))
+
+  # auto_range reaches it too: on a response with a real range (exponential
+  # parameter 60, effective range ~220 here -- short enough that the blocks
+  # it sizes still make a split) make_folds() announces the range it used as
+  # the minimum block size, and the shared folds differ from the geometric
+  # ones.  The message alone would not prove it: compare_models_cv() catches
+  # a fold-construction error and falls back to per-backend folds, so the
+  # fold sets are compared as well.
+  set.seed(3)
+  n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  sp <- as.numeric(t(chol(exp(-d / 60) + diag(1e-4, n))) %*% rnorm(n))
+  spat <- sf::st_as_sf(data.frame(x = x, y = y, w = rnorm(n)),
+                       coords = c("x", "y"), crs = 32632)
+  spat$z <- spat$w + sp
+  expect_message(
+    auto <- suppressWarnings(
+      compare_models_cv(spat, "z", "w", models = "RF", k = 3, auto_range = TRUE,
+                        rf_args = list(num_trees = 40), quiet = TRUE)),
+    "using as minimum block size")
+  geo <- make_folds(spat, k = 3, method = "block_kfold", seed = 123)
+  ranged <- suppressWarnings(suppressMessages(
+    make_folds(spat, k = 3, method = "block_kfold", seed = 123,
+               auto_range = TRUE, response_var = "z", predictor_vars = "w")))
+  expect_false(identical(test_sets(auto$rf_cv$folds), test_sets(geo$folds)))
+  expect_identical(test_sets(auto$rf_cv$folds), test_sets(ranged$folds))
+})
+
+test_that(".overall_with_coverage appends a predictive_coverage summary and nothing else", {
+  f  <- spatialkit:::.overall_with_coverage
+  ov <- data.frame(RMSE = 1, MAE = 0.8, n_pred = 10L)
+  expect_identical(f(ov, NULL), ov)
+  expect_identical(f(ov, list()), ov)
+  expect_identical(f(ov, list(1, 2)), ov)          # unnamed: nothing to name a column by
+  pc <- list(coverage_50 = 0.48, coverage_80 = 0.79, coverage_95 = 0.96,
+             mean_CRPS = 0.31)
+  out <- f(ov, pc)
+  expect_named(out, c("RMSE", "MAE", "n_pred", "coverage_50", "coverage_80",
+                      "coverage_95", "mean_CRPS"))
+  expect_identical(out$coverage_95, 0.96)
+  expect_identical(out$mean_CRPS, 0.31)
+  # A malformed entry becomes NA rather than an error or a list column.
+  odd <- f(ov, list(coverage_95 = c(0.9, 0.95), mean_CRPS = "x"))
+  expect_true(is.na(odd$coverage_95))
+  expect_true(is.na(odd$mean_CRPS))
+  expect_type(odd$mean_CRPS, "double")
+})
+
+test_that("compare_models_cv keeps `model` as the last overall column", {
+  skip_if_not_installed("ranger")
+  pts <- surf_test_points(60, seed = 4)
+  res <- compare_models_cv(pts, "z", "w", models = "RF", k = 3,
+                           rf_args = list(num_trees = 40), quiet = TRUE)
+  expect_identical(names(res$overall)[ncol(res$overall)], "model")
+  expect_false(any(c("coverage_95", "mean_CRPS") %in% names(res$overall)))
+})
+
+test_that("compare_models_cv carries coverage and CRPS into overall when a Bayesian model ran", {
+  # Full Stan runs are too slow for the suite; a stand-in cv_bayes() that
+  # returns the documented shape proves the plumbing from predictive_coverage
+  # to the overall table, and that the point-prediction rows get NA.
+  skip_if_not_installed("ranger")
+  pts <- surf_test_points(60, seed = 4)
+  fake_bayes <- function(data_sf, response_var, predictor_vars, folds = NULL, ...) {
+    fm <- data.frame(fold = 1:2, n_train = c(30L, 30L), n_test = c(30L, 30L),
+                     n_pred = c(30L, 30L), RMSE = c(1, 1.2), MAE = c(0.8, 0.9),
+                     MAPE = NA_real_, SMAPE = NA_real_, R2 = c(0.5, 0.4),
+                     Adj_R2 = NA_real_, n_MAPE = 0L, n_SMAPE = 0L,
+                     CRPS = c(0.3, 0.35), coverage_50 = c(0.5, 0.46),
+                     coverage_80 = c(0.8, 0.78), coverage_95 = c(0.97, 0.93))
+    list(overall = data.frame(RMSE = 1.1, MAE = 0.85, MAPE = NA_real_,
+                              SMAPE = NA_real_, R2 = 0.45, Adj_R2 = NA_real_,
+                              n_pred = 60L, n_MAPE = 0L, n_SMAPE = 0L),
+         fold_metrics = fm, predictions = NULL, folds = folds,
+         n_folds_attempted = 2L, n_folds_succeeded = 2L,
+         formula = "z ~ w",
+         predictive_coverage = list(coverage_50 = 0.48, coverage_80 = 0.79,
+                                    coverage_95 = 0.95, mean_CRPS = 0.325))
+  }
+  local_mocked_bindings(cv_bayes = fake_bayes,
+                        .model_available = function(model_name) TRUE,
+                        .package = "spatialkit")
+  res <- compare_models_cv(pts, "z", "w", models = c("RF", "Bayesian"), k = 3,
+                           rf_args = list(num_trees = 40), quiet = TRUE)
+  ov <- res$overall
+  # Backends run in a fixed order (GWR, Bayesian, RF) whatever `models` says.
+  expect_identical(ov$model, c("Bayesian", "RF"))
+  expect_true(all(c("coverage_50", "coverage_80", "coverage_95", "mean_CRPS") %in% names(ov)))
+  expect_identical(names(ov)[ncol(ov)], "model")
+  expect_true(is.na(ov$coverage_95[ov$model == "RF"]))
+  expect_identical(ov$coverage_95[ov$model == "Bayesian"], 0.95)
+  expect_identical(ov$mean_CRPS[ov$model == "Bayesian"], 0.325)
+  # The point metrics on the RF row are untouched by the extra columns.
+  expect_true(is.finite(ov$RMSE[ov$model == "RF"]))
+})

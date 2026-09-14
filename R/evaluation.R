@@ -1158,15 +1158,49 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
+#' @param block_size Optional minimum block edge length for the shared spatial
+#'   CV blocks (projected CRS units), passed to \code{\link{make_folds}()}
+#'   when \code{folds} is \code{NULL}.  Default \code{NULL}.
+#' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
+#'   the autocorrelation range of the response (detrended on
+#'   \code{predictor_vars}) is estimated and used as the minimum block size of
+#'   the shared folds, as in \code{\link{make_folds}()}.  Default
+#'   \code{FALSE}: geometric blocks, as before this argument existed.  Either
+#'   way the fold set is built once and every backend is scored on it.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
+#' @section Coverage and CRPS in the overall table:
+#' A model can predict well on average and still be badly calibrated ---
+#' Heaton et al. (2019) found good point prediction routinely alongside poor
+#' interval coverage --- so a comparison read from RMSE alone can prefer the
+#' model whose uncertainty is wrong.  When \code{"Bayesian"} is among the
+#' models that ran, \code{overall} therefore also carries the columns of
+#' \code{cv_bayes()$predictive_coverage}: \code{coverage_50},
+#' \code{coverage_80}, \code{coverage_95} (the share of held-out rows inside
+#' the posterior predictive interval at each level, averaged across folds
+#' weighted by each fold's \code{n_pred}) and \code{mean_CRPS} (the
+#' continuous ranked probability score, lower is better).  They are \code{NA}
+#' on the GWR and RF rows, which produce point predictions and no draws, and
+#' absent when no Bayesian model ran.  Read coverage against its nominal
+#' level: 0.95 at \code{coverage_95} is calibrated, well below it is
+#' overconfident, well above it is wider than it needs to be.
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
+#'   \code{overall} has one row per model with the pooled metrics, the
+#'   coverage and CRPS columns described above when a Bayesian model ran, and
+#'   \code{model} as its last column.
 #'   Only the models that actually ran appear, so check which names are present
 #'   rather than assuming one entry per requested model: a backend whose package
 #'   is missing is dropped with a message.  When \strong{no} requested backend
 #'   is available there is nothing to return and the function errors with
 #'   \code{"no viable models."} instead of returning an empty comparison.
+#' @references
+#' Heaton, M. J., Datta, A., Finley, A. O., Furrer, R., Guinness, J.,
+#' Guhaniyogi, R., Gerber, F., Gramacy, R. B., Hammerling, D., Katzfuss, M.,
+#' Lindgren, F., Nychka, D. W., Sun, F. and Zammit-Mangion, A. (2019). A case
+#' study competition among methods for analyzing large spatial data.
+#' \emph{Journal of Agricultural, Biological and Environmental Statistics},
+#' 24(3), 398--425. \doi{10.1007/s13253-018-00348-w}
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1189,7 +1223,7 @@ compare_models_cv <- function(
     k = 5, seed = 123, folds = NULL, boundary = NULL, pointize = "auto",
     gwr_args = list(), bayes_args = list(), rf_args = list(),
     summary = c("mean", "median"),
-    quiet = FALSE
+    quiet = FALSE, block_size = NULL, auto_range = FALSE
 ) {
   summary <- match.arg(summary)
   .msg <- function(...) if (!quiet) message(...)
@@ -1233,11 +1267,18 @@ compare_models_cv <- function(
   # 104 of 150 rows sat in different folds for GWR and RF under a per-model
   # block_size, and 99 of 150 under seed = NULL with no overrides at all.  The
   # comparison is only a comparison if the splits are identical.
+  # `response_var` and `predictor_vars` reach make_folds() for two things and
+  # size nothing by themselves: the auto_range block size when asked for, and
+  # the leakage diagnostic that compares the blocks to the estimated range.
+  # Before they were forwarded, this -- the one function that compares models
+  # -- was also the one whose folds could never be checked against the range.
   if (is.null(folds)) {
     folds <- tryCatch(
       make_folds(data_sf, k = k, method = "block_kfold",
                  seed = if (is.null(seed)) 123L else seed,
-                 boundary = boundary),
+                 boundary = boundary, block_size = block_size,
+                 auto_range = auto_range, response_var = response_var,
+                 predictor_vars = predictor_vars),
       error = function(e) {
         .log_warn(paste0("compare_models_cv(): could not build a shared fold ",
                          "set (%s); each backend will build its own, so the ",
@@ -1286,6 +1327,10 @@ compare_models_cv <- function(
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
                        R2 = NA_real_, Adj_R2 = NA_real_)
+    # The calibration of the one backend that has any: coverage at each level
+    # and mean CRPS, already pooled across folds by cv_bayes().  bind_rows()
+    # below leaves them NA on the point-prediction rows.
+    ov <- .overall_with_coverage(ov, bayes_cv$predictive_coverage)
     ov$model <- "Bayesian"
     comparison_rows[["Bayesian"]] <- ov
     bf <- try(as.data.frame(bayes_cv$fold_metrics), silent = TRUE)
@@ -1322,7 +1367,36 @@ compare_models_cv <- function(
     }
   }
 
-  c(list(overall = dplyr::bind_rows(comparison_rows),
+  overall <- as.data.frame(dplyr::bind_rows(comparison_rows))
+  # `model` last whatever order the backends ran in: a Bayesian row that came
+  # after a GWR row would otherwise put its coverage columns after `model`.
+  overall <- overall[, c(setdiff(names(overall), "model"), "model"), drop = FALSE]
+  c(list(overall = overall,
          by_fold = dplyr::bind_rows(by_fold_rows)),
     cv_results)
+}
+
+
+#' Append a cv_bayes() predictive_coverage summary to an overall row
+#'
+#' \code{cv_bayes()} returns \code{predictive_coverage} as a named list
+#' (\code{coverage_50}, \code{coverage_80}, \code{coverage_95},
+#' \code{mean_CRPS}), or \code{NULL} when no fold produced draws.  Each
+#' entry becomes a numeric column of \code{ov}; a \code{NULL} or empty
+#' summary adds nothing, so a comparison in which the Bayesian backend failed
+#' outright keeps the point-metric columns only.
+#'
+#' @param ov A one-row data.frame of pooled metrics.
+#' @param pc The \code{predictive_coverage} element, or \code{NULL}.
+#' @return \code{ov} with the coverage columns appended.
+#' @keywords internal
+#' @noRd
+.overall_with_coverage <- function(ov, pc) {
+  if (!is.list(pc) || length(pc) == 0L || is.null(names(pc))) return(ov)
+  for (nm in names(pc)) {
+    if (!nzchar(nm)) next
+    v <- suppressWarnings(as.numeric(pc[[nm]]))
+    ov[[nm]] <- if (length(v) == 1L) v else NA_real_
+  }
+  ov
 }

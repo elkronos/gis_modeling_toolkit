@@ -135,3 +135,46 @@ test_that("selection is reproducible from the seed", {
   expect_equal(a$selected, b$selected)
   expect_equal(a$score, b$score)
 })
+
+
+test_that("auto_range reaches the inner folds and is recorded", {
+  dat <- fs_data()
+  # Off by default, recorded as such, and the folds are the geometric ones.
+  sel <- select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
+                                 seed = 1, quiet = TRUE)
+  expect_false(sel$params$auto_range)
+  # On: make_folds() estimates the range and announces it as the minimum
+  # block size.  The response here is pure predictor signal with white noise,
+  # so a range may or may not be identified; when it is not, make_folds()
+  # falls back to geometric blocks and the message is absent -- the argument
+  # still reached it, which the recorded parameter shows.
+  msgs <- character(0)
+  sel_on <- withCallingHandlers(
+    suppressWarnings(
+      select_features_forward(dat, "z", c("a", "b"), fs_fit, k = 4,
+                              seed = 1, quiet = TRUE, auto_range = TRUE)),
+    message = function(m) { msgs <<- c(msgs, conditionMessage(m)); invokeRestart("muffleMessage") })
+  expect_true(sel_on$params$auto_range)
+  expect_identical(sel_on$selected, sel$selected)
+  # Positive proof it was forwarded, on a response with a real range: the
+  # inner blocks are sized from the range, which the message reports.  A
+  # short range (exponential parameter 60, effective range ~220 on this
+  # draw): a longer one estimates past half the extent, and one block is not
+  # a split (make_folds() refuses it, correctly).
+  set.seed(3)
+  n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  sp <- as.numeric(t(chol(exp(-d / 60) + diag(1e-4, n))) %*% rnorm(n))
+  spat <- sf::st_as_sf(data.frame(x = x, y = y, a = rnorm(n), b = rnorm(n)),
+                       coords = c("x", "y"), crs = 3857)
+  spat$z <- spat$a + sp
+  spat$..row_id <- seq_len(n)
+  msgs2 <- character(0)
+  withCallingHandlers(
+    suppressWarnings(
+      select_features_forward(spat, "z", c("a", "b"), fs_fit, k = 4,
+                              seed = 1, quiet = TRUE, auto_range = TRUE)),
+    message = function(m) { msgs2 <<- c(msgs2, conditionMessage(m)); invokeRestart("muffleMessage") })
+  expect_true(any(grepl("using as minimum block size", msgs2)))
+})

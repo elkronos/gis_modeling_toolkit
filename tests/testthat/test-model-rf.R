@@ -413,3 +413,48 @@ test_that("predict.rf_fit refuses a numeric-at-fit predictor supplied as text", 
   # The numeric frame still predicts, and logicals are accepted as 0/1.
   expect_length(predict(fit, newdata = d), n)
 })
+
+
+test_that("fit_rf_model records and prints how each tree was sampled", {
+  skip_if_not_installed("ranger")
+  dat <- mk_rf_pts(120)
+  fit <- fit_rf_model(dat, "z", c("a", "b"), num_trees = 100L)
+  # ranger's defaults, kept: bootstrap with replacement, every row.
+  expect_true(fit$info$replace)
+  expect_identical(fit$info$sample_fraction, 1)
+  txt <- paste(utils::capture.output(print(fit)), collapse = "\n")
+  expect_match(txt, "Sampling: bootstrap, with replacement \\(100.0% of rows per tree\\)")
+
+  # Subsampling without replacement (Strobl et al. 2007) resolves to ranger's
+  # 0.632 and grows a different forest.
+  sub <- fit_rf_model(dat, "z", c("a", "b"), num_trees = 100L, replace = FALSE)
+  expect_false(sub$info$replace)
+  expect_identical(sub$info$sample_fraction, 0.632)
+  expect_match(paste(utils::capture.output(print(sub)), collapse = "\n"),
+               "Sampling: subsample, without replacement \\(63.2% of rows per tree\\)")
+  expect_false(isTRUE(all.equal(fitted(sub), fitted(fit))))
+
+  # An explicit fraction is recorded as given.
+  half <- fit_rf_model(dat, "z", c("a", "b"), num_trees = 50L,
+                       replace = FALSE, sample_fraction = 0.5)
+  expect_identical(half$info$sample_fraction, 0.5)
+
+  # A fit from before these fields existed still prints.
+  old <- fit
+  old$info$replace <- NULL; old$info$sample_fraction <- NULL
+  expect_false(grepl("Sampling:", paste(utils::capture.output(print(old)), collapse = "\n")))
+})
+
+test_that("fit_rf_model validates the sampling arguments and refuses ranger's spellings", {
+  skip_if_not_installed("ranger")
+  dat <- mk_rf_pts(60)
+  expect_error(fit_rf_model(dat, "z", "a", replace = NA), "must be TRUE or FALSE")
+  expect_error(fit_rf_model(dat, "z", "a", replace = "yes"), "must be TRUE or FALSE")
+  expect_error(fit_rf_model(dat, "z", "a", sample_fraction = 0), "in \\(0, 1\\]")
+  expect_error(fit_rf_model(dat, "z", "a", sample_fraction = 1.5), "in \\(0, 1\\]")
+  expect_error(fit_rf_model(dat, "z", "a", sample_fraction = c(0.5, 0.6)), "in \\(0, 1\\]")
+  # The wrapper now sets both, so ranger's own names through `...` would reach
+  # it twice; the message names the wrapper argument.
+  expect_error(fit_rf_model(dat, "z", "a", replace = FALSE, sample.fraction = 0.5),
+               "`sample.fraction` is already set.*Use `sample_fraction`")
+})

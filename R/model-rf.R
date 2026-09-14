@@ -169,6 +169,19 @@
 #'   is the default despite costing more.
 #' @param include_coords Add the coordinates as predictors. Default
 #'   \code{FALSE}; see above.
+#' @param replace Logical; grow each tree on a bootstrap sample drawn
+#'   \emph{with} replacement (\code{TRUE}, ranger's default and this one) or
+#'   on a subsample drawn without replacement (\code{FALSE}).  Strobl et al.
+#'   (2007) show that bootstrap sampling with replacement is itself a source
+#'   of bias in variable importance toward predictors with many distinct
+#'   values or categories, and recommend subsampling without replacement.
+#'   The forest's predictions change slightly with the choice; the default is
+#'   kept at ranger's so that an existing script fits the same forest, and
+#'   the setting is recorded in \code{$info} and printed with the fit.
+#' @param sample_fraction Fraction of rows drawn for each tree.  \code{NULL}
+#'   (default) uses ranger's rule: all rows when \code{replace = TRUE},
+#'   0.632 --- the expected share of distinct rows in a bootstrap sample ---
+#'   when \code{replace = FALSE}.  A single number in (0, 1] overrides it.
 #' @param seed Seed passed to ranger. Default 123.
 #' @param num_threads Threads for ranger. Default \code{NULL} means
 #'   \code{getOption("mc.cores", 1L)}: one thread unless the session has
@@ -183,7 +196,8 @@
 #' @param ... Passed to \code{ranger::ranger()}.  ranger's own spellings of
 #'   the arguments this function already sets (\code{num.trees},
 #'   \code{min.node.size}, \code{num.threads}, \code{mtry},
-#'   \code{importance}, \code{seed}, \code{x}, \code{y}) are rejected with a
+#'   \code{importance}, \code{seed}, \code{replace},
+#'   \code{sample.fraction}, \code{x}, \code{y}) are rejected with a
 #'   message naming the wrapper argument to use instead -- passing them here
 #'   would reach \code{ranger()} twice and fail the call.
 #'
@@ -191,7 +205,9 @@
 #'   \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
 #'   \code{importance_type}, \code{importance} (a named numeric, or
 #'   \code{NULL} when \code{importance = "none"}), \code{include_coords},
-#'   \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
+#'   \code{replace} and \code{sample_fraction} (the sampling each tree was
+#'   grown on, with \code{sample_fraction} resolved to the number ranger
+#'   used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
 #'   ranger did not compute it -- forwarding \code{oob.error = FALSE} through
 #'   \code{...} is one way to get there), \code{fitted_are_oob} (always
 #'   \code{TRUE}; \code{summary()} reads it to label its metrics) and
@@ -230,10 +246,23 @@
 fit_rf_model <- function(data_sf, response_var, predictor_vars,
                          num_trees = 500L, mtry = NULL, min_node_size = NULL,
                          importance = c("permutation", "impurity", "none"),
-                         include_coords = FALSE, seed = 123L,
+                         include_coords = FALSE, replace = TRUE,
+                         sample_fraction = NULL, seed = 123L,
                          num_threads = NULL, .already_prepped = FALSE, ...) {
   if (!inherits(data_sf, "sf"))
     stop("fit_rf_model(): `data_sf` must be an sf object.", call. = FALSE)
+  if (!is.logical(replace) || length(replace) != 1L || is.na(replace))
+    stop("fit_rf_model(): `replace` must be TRUE or FALSE.", call. = FALSE)
+  # ranger's own default for sample.fraction is ifelse(replace, 1, 0.632);
+  # resolve it here so the number that reached the forest is recorded.
+  if (is.null(sample_fraction)) {
+    sample_fraction <- if (isTRUE(replace)) 1 else 0.632
+  } else if (!is.numeric(sample_fraction) || length(sample_fraction) != 1L ||
+             !is.finite(sample_fraction) || sample_fraction <= 0 ||
+             sample_fraction > 1) {
+    stop("fit_rf_model(): `sample_fraction` must be a single number in (0, 1], ",
+         "or NULL for ranger's default.", call. = FALSE)
+  }
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("fit_rf_model(): package 'ranger' is required. Install with ",
          "install.packages('ranger').", call. = FALSE)
@@ -295,6 +324,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   ranger_dupes <- c(num.trees = "num_trees", min.node.size = "min_node_size",
                     num.threads = "num_threads", mtry = "mtry",
                     importance = "importance", seed = "seed",
+                    replace = "replace", sample.fraction = "sample_fraction",
                     x = NA_character_, y = NA_character_)
   hit_dupes <- intersect(dot_names, names(ranger_dupes))
   if (length(hit_dupes)) {
@@ -318,6 +348,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
     ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
                    mtry = mtry, min.node.size = min_node_size,
                    importance = importance, seed = seed,
+                   replace = replace, sample.fraction = sample_fraction,
                    num.threads = num_threads, ...),
     error = function(e)
       stop(sprintf("fit_rf_model(): ranger() failed: %s", conditionMessage(e)),
@@ -349,6 +380,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       importance_type  = importance,
       importance       = imp,
       include_coords   = isTRUE(include_coords),
+      replace          = isTRUE(replace),
+      sample_fraction  = sample_fraction,
       oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
       oob_r_squared    = .num1(fit$r.squared),
       fitted_are_oob   = TRUE,
@@ -656,6 +689,16 @@ print.rf_fit <- function(x, ...) {
               format(x$info$mtry %||% NA), format(x$info$min_node_size %||% NA)))
   cat(sprintf("  Coords as predictors: %s\n",
               if (isTRUE(x$info$include_coords)) "YES - see ?fit_rf_model" else "no"))
+  # Only when the fit recorded it: an rf_fit built before these fields
+  # existed prints as it did.
+  if (!is.null(x$info$replace)) {
+    frac <- .num1(x$info$sample_fraction)
+    cat(sprintf("  Sampling: %s%s\n",
+                if (isTRUE(x$info$replace)) "bootstrap, with replacement"
+                else "subsample, without replacement",
+                if (is.finite(frac)) sprintf(" (%.1f%% of rows per tree)", 100 * frac)
+                else ""))
+  }
   # .num1() rather than %||%: an unset ranger field arrives as numeric(0),
   # which is not NULL, so is.finite() would error and sprintf() would print
   # nothing at all.

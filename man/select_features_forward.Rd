@@ -17,7 +17,8 @@ select_features_forward(
   max_vars = NULL,
   max_fits = 5000L,
   seed = 123,
-  quiet = FALSE
+  quiet = FALSE,
+  auto_range = FALSE
 )
 }
 \arguments{
@@ -63,15 +64,32 @@ reproducible from this one value.}
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
 (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
+
+\item{auto_range}{Logical.  If \code{TRUE} and \code{method} is
+\code{"block_kfold"}, the autocorrelation range is estimated from the
+response (detrended on the candidates) and used as the minimum block
+size of the inner folds, exactly as in \code{\link{make_folds}()};
+\code{block_size} still applies as a floor.  Default \code{FALSE}, which
+keeps the geometric blocks.  Inner blocks smaller than the range let a
+candidate be selected for spatial proximity to the response rather than
+for predicting it, which is the same failure the \code{random_kfold}
+caution above exists to prevent, so the leakage warning
+\code{make_folds()} raises applies here with more force than usual.}
 }
 \value{
 A list with \code{selected} (the chosen predictors, in the order
-they were added), \code{score} (their cross-validated \code{metric}),
-\code{history} and \code{params}. \code{history} is a data.frame with
-\code{step}, \code{variable} and \code{score}, holding every candidate
-evaluated at every step; when the null model could be scored it also
-carries a \code{step = 0} row named \code{"<none>"} giving that
+they were added), \code{score}, \code{history} and \code{params}.
+\code{score} is the winning set's cross-validated \code{metric} at the
+final step: the \strong{selection-internal} optimum, optimistically
+biased because it was chosen as the best of many (see the section above),
+and \code{NA} when nothing was selected.  \code{history} is a data.frame
+with \code{step}, \code{variable} and \code{score}, holding every
+candidate evaluated at every step; when the null model could be scored it
+also carries a \code{step = 0} row named \code{"<none>"} giving that
 baseline, so the first variable's gain can be read off directly.
+\code{params} records \code{metric}, \code{method}, \code{k},
+\code{tol}, \code{seed}, \code{auto_range}, \code{n_candidates} and
+\code{estimated_fits}.
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a
@@ -98,6 +116,20 @@ leak-free; no extra plumbing is needed.  Note the cost: a sweep over
 that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 \code{max_fits} guards against that.
 }
+\section{The score is not a performance estimate}{
+
+\code{$score} is the cross-validated \code{metric} of the winning set at
+the final step --- the best of every candidate set the sweep scored.  That
+is the number the selection optimised, and a number optimised over many
+candidates is optimistically biased by construction: Cawley and Talbot
+(2010) show the bias can exceed the genuine differences between the models
+being compared.  Quote it as the selection criterion, not as the
+performance of the selected model.  An honest performance estimate needs
+folds the selection never saw, which is what running this function inside
+the \code{fit_fn} of \code{\link{cv_spatial}()} gives: the outer folds
+score a model whose predictors were chosen on the inner ones alone.
+}
+
 \examples{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
     requireNamespace("sp", quietly = TRUE)) {
@@ -116,6 +148,12 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
                                  k = 3, quiet = TRUE)
   sel$selected
 }
+}
+\references{
+Cawley, G. C. and Talbot, N. L. C. (2010). On over-fitting in model
+selection and subsequent selection bias in performance evaluation.
+\emph{Journal of Machine Learning Research}, 11, 2079--2107.
+\url{https://jmlr.org/papers/v11/cawley10a.html}
 }
 \seealso{
 Other cross-validation: 

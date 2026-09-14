@@ -18,7 +18,9 @@ compare_models_cv(
   bayes_args = list(),
   rf_args = list(),
   summary = c("mean", "median"),
-  quiet = FALSE
+  quiet = FALSE,
+  block_size = NULL,
+  auto_range = FALSE
 )
 }
 \arguments{
@@ -75,10 +77,24 @@ to \code{ranger::ranger()}.}
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
 (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
+
+\item{block_size}{Optional minimum block edge length for the shared spatial
+CV blocks (projected CRS units), passed to \code{\link{make_folds}()}
+when \code{folds} is \code{NULL}.  Default \code{NULL}.}
+
+\item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
+the autocorrelation range of the response (detrended on
+\code{predictor_vars}) is estimated and used as the minimum block size of
+the shared folds, as in \code{\link{make_folds}()}.  Default
+\code{FALSE}: geometric blocks, as before this argument existed.  Either
+way the fold set is built once and every backend is scored on it.}
 }
 \value{
 A list with overall, by_fold, and per-model cv_results
 (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
+\code{overall} has one row per model with the pooled metrics, the
+coverage and CRPS columns described above when a Bayesian model ran, and
+\code{model} as its last column.
 Only the models that actually ran appear, so check which names are present
 rather than assuming one entry per requested model: a backend whose package
 is missing is dropped with a message.  When \strong{no} requested backend
@@ -91,6 +107,24 @@ comparison table.  Unlike \code{compare_models()}, this function does
 perform fitting (inside CV folds), because CV inherently requires
 repeated fitting.
 }
+\section{Coverage and CRPS in the overall table}{
+
+A model can predict well on average and still be badly calibrated ---
+Heaton et al. (2019) found good point prediction routinely alongside poor
+interval coverage --- so a comparison read from RMSE alone can prefer the
+model whose uncertainty is wrong.  When \code{"Bayesian"} is among the
+models that ran, \code{overall} therefore also carries the columns of
+\code{cv_bayes()$predictive_coverage}: \code{coverage_50},
+\code{coverage_80}, \code{coverage_95} (the share of held-out rows inside
+the posterior predictive interval at each level, averaged across folds
+weighted by each fold's \code{n_pred}) and \code{mean_CRPS} (the
+continuous ranked probability score, lower is better).  They are \code{NA}
+on the GWR and RF rows, which produce point predictions and no draws, and
+absent when no Bayesian model ran.  Read coverage against its nominal
+level: 0.95 at \code{coverage_95} is calibrated, well below it is
+overconfident, well above it is wider than it needs to be.
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -153,6 +187,14 @@ if (requireNamespace("ranger", quietly = TRUE)) {
                            rf_args = list(num_trees = 100))
   cmp$overall
 }
+}
+\references{
+Heaton, M. J., Datta, A., Finley, A. O., Furrer, R., Guinness, J.,
+Guhaniyogi, R., Gerber, F., Gramacy, R. B., Hammerling, D., Katzfuss, M.,
+Lindgren, F., Nychka, D. W., Sun, F. and Zammit-Mangion, A. (2019). A case
+study competition among methods for analyzing large spatial data.
+\emph{Journal of Agricultural, Biological and Environmental Statistics},
+24(3), 398--425. \doi{10.1007/s13253-018-00348-w}
 }
 \seealso{
 Other model evaluation: 

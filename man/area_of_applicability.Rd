@@ -84,9 +84,19 @@ variance.
 \code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
 \code{n_new} count the rows that survived the finite-value filter.
 \item \code{params} -- a record of the call: \code{folds_supplied},
-\code{n_folds}, \code{threshold_supplied}, \code{normalizer_max_n},
-\code{normalizer_n_used}, \code{normalizer_subsampled},
-\code{weights_supplied} and \code{seed}.
+\code{n_folds}, \code{folds_method}, \code{threshold_supplied},
+\code{normalizer_max_n}, \code{normalizer_n_used},
+\code{normalizer_subsampled}, \code{weights_supplied} and
+\code{seed}.  \code{folds_method} is the \code{method} of a
+\code{\link{make_folds}()} result (\code{"block_kfold"},
+\code{"random_kfold"}, ...), \code{"labels"} for a vector of fold
+labels, \code{"splits"} for a bare list of train/test splits, and
+\code{NA} when no folds were supplied.  It is printed with the
+object, because the threshold's meaning depends on it: the
+cross-validated DI that sets it comes from the same kind of hold-out
+as the CV error it should be quoted beside, so an AOA built on
+\code{random_kfold} folds is logged as a caution and does not
+belong next to a blocked \code{cv_*()} result.
 }
 }
 \description{
