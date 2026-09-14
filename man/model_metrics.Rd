@@ -19,7 +19,9 @@ fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
 see above).}
 }
 \value{
-A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2.
+A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
+n_SMAPE (the last two are the rows each percentage error was averaged
+over; see "Percentage errors on responses with zeros").
 \code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
 exceeds the global predictor count and a GP model has no simple \code{p},
 so it is deliberately suppressed.  A non-numeric response is an error -- a
@@ -60,17 +62,20 @@ same way.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
-\strong{The returned value does not record how many rows that was}, and the
-\code{n} column counts finite observation/prediction pairs, not the rows
-either percentage error actually used.
+The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
+the \code{n} column counts finite observation/prediction pairs.  Read a
+percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
+an average over a subset of the data, whatever its value.
 
 This bites on any response taking exact zeros --- counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
-120, \code{MAPE} is an average over the 58 non-zero rows reported as though
-it covered all 120.  \code{SMAPE} fails differently and more subtly: it drops
-the rows where observation and prediction are both near zero --- which on a
-well-fitted zero-inflated model are the rows it got \emph{right} --- so it
-averages the harder rows only and reads worse than the fit deserves.
+120, \code{MAPE} is an average over the 58 non-zero rows, which
+\code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
+subtly: it drops the rows where observation and prediction are both near
+zero --- which on a well-fitted zero-inflated model are the rows it got
+\emph{right} --- so it averages the harder rows only and reads worse than
+the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
+count is only a label, not a repair.
 
 \code{RMSE}, \code{MAE} and \eqn{R^2} use every finite row and are
 unaffected; prefer them whenever the response can be zero.  For a Bayesian

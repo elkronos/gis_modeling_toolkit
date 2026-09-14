@@ -240,3 +240,110 @@ test_that("a variogram family the function does not implement is refused, not re
   naive <- summarize_by_cell(pts, "z", deff = 1)
   expect_equal(out[["..se_resp_z"]], naive[["..se_resp_z"]])
 })
+
+
+# ---------------------------------------------------------------------------
+# Degrees of freedom of the within-cell variance under the fitted correlation,
+# which is what summarize_by_cell(conf_level = ) uses on this path.
+# ---------------------------------------------------------------------------
+
+test_that(".cor_stats_from_coords matches the matrix Satterthwaite df and keeps rbar", {
+  set.seed(1)
+  xy <- matrix(runif(60, 0, 100), ncol = 2)
+  f  <- cor_fn(vgm_df(nugget = 0, psill = 1, range = 40))
+  st <- spatialkit:::.cor_stats_from_coords(xy, f, max_n = 500L)
+  expect_named(st, c("rbar", "df_ratio"))
+  # The long way: eigen-free but explicit, tr(AR)^2 / tr(ARAR) with A = I - J/n.
+  R  <- f(as.matrix(stats::dist(xy))); diag(R) <- 1
+  m  <- nrow(R); A <- diag(m) - matrix(1 / m, m, m); AR <- A %*% R
+  expect_equal(st[["df_ratio"]] * (m - 1),
+               sum(diag(AR))^2 / sum(diag(AR %*% AR)), tolerance = 1e-10)
+  # Under a decaying correlation the variance has fewer than n - 1 df ...
+  expect_lt(st[["df_ratio"]], 1)
+  expect_gt(st[["df_ratio"]], 0)
+  # ... and rbar is the number .rbar_from_coords() always returned.
+  expect_identical(spatialkit:::.rbar_from_coords(xy, f), unname(st[["rbar"]]))
+  expect_equal(st[["rbar"]], (sum(R) - m) / (m * (m - 1)), tolerance = 1e-12)
+})
+
+test_that("exchangeable correlation keeps every one of the n - 1 df; total redundancy keeps none", {
+  set.seed(2)
+  xy <- matrix(runif(40, 0, 100), ncol = 2)
+  # Constant off-diagonal correlation: AR has n - 1 equal non-zero
+  # eigenvalues, so the Satterthwaite df is exactly n - 1 -- the reason the
+  # Kish path uses n - 1 without computing anything.
+  f_const <- function(h) ifelse(h > 0, 0.4, 1)
+  expect_equal(spatialkit:::.cor_stats_from_coords(xy, f_const)[["df_ratio"]], 1,
+               tolerance = 1e-12)
+  # Every pair perfectly correlated: deff = n, s^2 carries no information.
+  f_one <- function(h) rep(1, length(h))
+  expect_equal(spatialkit:::.cor_stats_from_coords(xy, f_one)[["df_ratio"]], 0)
+  # One point, or no correlation function: the neutral pair.
+  expect_equal(spatialkit:::.cor_stats_from_coords(xy[1, , drop = FALSE], f_const),
+               c(rbar = 0, df_ratio = 1))
+  expect_equal(spatialkit:::.cor_stats_from_coords(xy, NULL),
+               c(rbar = 0, df_ratio = 1))
+})
+
+test_that("summarize_by_cell(conf_level) on the variogram path uses the reduced df per cell", {
+  set.seed(5)
+  n <- 240
+  pts <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 600), y = runif(n, 0, 300), z = rnorm(n),
+               poly_id = rep(1:4, each = 60)),
+    coords = c("x", "y"), crs = 32632)
+  vm  <- vgm_df(nugget = 0, psill = 1, range = 120)
+  sac <- structure(360, class = c("sac_range", "numeric"),
+                   variogram_model = vm, crs = sf::st_crs(pts))
+  out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac,
+                           conf_level = 0.95)
+  expect_true(all(out[["..df_resp_z"]] > 0))
+  expect_true(all(out[["..df_resp_z"]] < out$n - 1))
+  # Reproducible from the same correlation function on the same points.
+  f <- cor_fn(vm)
+  xy <- sf::st_coordinates(pts)
+  for (i in seq_len(nrow(out))) {
+    idx <- which(pts$poly_id == out$poly_id[i])
+    st  <- spatialkit:::.cor_stats_from_coords(xy[idx, , drop = FALSE], f)
+    expect_equal(out[["..df_resp_z"]][i], st[["df_ratio"]] * (length(idx) - 1),
+                 tolerance = 1e-10)
+    expect_equal(out[["..neff_resp_z"]][i], out$cell_weight[i], tolerance = 1e-12)
+  }
+  half <- stats::qt(0.975, out[["..df_resp_z"]]) * out[["..se_resp_z"]]
+  expect_equal(out[["..ci_hi_resp_z"]] - out$resp_mean_z, half, tolerance = 1e-12)
+  expect_equal(out$resp_mean_z - out[["..ci_lo_resp_z"]], half, tolerance = 1e-12)
+})
+
+test_that("the variogram-path interval covers the grand mean where n - 1 df would not", {
+  # A Gaussian field with an exponential range of 400 on a 1000-unit domain,
+  # 16 cells of ~25 points, the TRUE model handed in as `sac`.  Measured over
+  # 200 replicates: 0.958 with the Satterthwaite df, 0.918 with n - 1, 0.19
+  # with the naive deff = 1 interval.  Fewer replicates here, wider bounds.
+  skip_on_cran()
+  skip_if_not_installed("gstat")
+  a <- 400; n <- 400; ncell <- 4
+  vg  <- gstat::vgm(psill = 1, model = "Exp", range = a)
+  sac <- structure(3 * a, class = c("sac_range", "numeric"),
+                   variogram_model = vg, crs = sf::st_crs(32632))
+  hit <- hit_m1 <- hit_naive <- logical(0)
+  for (r in 1:30) {
+    set.seed(7000 + r)
+    xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+    D  <- as.matrix(stats::dist(xy))
+    z  <- as.numeric(t(chol(exp(-D / a) + diag(1e-8, n))) %*% rnorm(n))
+    cid <- (floor(xy[, 1] / (1000 / ncell)) + 1) + ncell * floor(xy[, 2] / (1000 / ncell))
+    pts <- sf::st_sf(poly_id = cid, y = z,
+                     geometry = sf::st_sfc(lapply(seq_len(n), function(i) sf::st_point(xy[i, ])),
+                                           crs = 32632))
+    out <- summarize_by_cell(pts, "y", deff = "variogram", sac = sac, conf_level = 0.95)
+    hit <- c(hit, out[["..ci_lo_resp_y"]] <= 0 & 0 <= out[["..ci_hi_resp_y"]])
+    h1  <- stats::qt(0.975, out$n - 1) * out[["..se_resp_y"]]
+    hit_m1 <- c(hit_m1, abs(out$resp_mean_y) <= h1)
+    nv  <- summarize_by_cell(pts, "y", conf_level = 0.95)
+    hit_naive <- c(hit_naive, nv[["..ci_lo_resp_y"]] <= 0 & 0 <= nv[["..ci_hi_resp_y"]])
+  }
+  expect_gt(mean(hit, na.rm = TRUE), 0.92)
+  expect_lt(mean(hit, na.rm = TRUE), 0.99)
+  expect_lt(mean(hit_m1, na.rm = TRUE), mean(hit, na.rm = TRUE))
+  expect_lt(mean(hit_naive, na.rm = TRUE), 0.5)
+})

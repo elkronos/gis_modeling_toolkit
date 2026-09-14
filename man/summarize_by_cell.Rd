@@ -14,7 +14,8 @@ summarize_by_cell(
   deff = 1,
   sac = NULL,
   deff_max_n = 500L,
-  quiet = TRUE
+  quiet = TRUE,
+  conf_level = NULL
 )
 }
 \arguments{
@@ -102,13 +103,20 @@ before forming the \verb{n x n} correlation matrix used by
 It does not silence R warnings, nor the package's console log echo
 (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE} --
 unlike the tessellation functions, whose default is \code{FALSE}.}
+
+\item{conf_level}{Optional confidence level in (0, 1), such as \code{0.95}.
+When given, every numeric response and predictor column also gets
+\verb{..neff_*}, \verb{..df_*}, \verb{..ci_lo_*} and \verb{..ci_hi_*} (see "Confidence
+intervals"). Default \code{NULL}: no interval columns, and the frame is
+exactly what it was before this argument existed.}
 }
 \value{
 A tibble/data.frame (or sf if cells_sf given) with per-cell
 summaries: the ID column, \code{n} (rows in the cell --- an input column also
 called \code{n} is not allowed to shadow it), one column per \code{agg_funs} entry
 per variable, \verb{..sd_*} / \verb{..se_*} for every numeric response and predictor,
-and \code{cell_weight}.
+\verb{..neff_*} / \verb{..df_*} / \verb{..ci_lo_*} / \verb{..ci_hi_*} for the same columns
+when \code{conf_level} is given, and \code{cell_weight}.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} for \code{"kish"},
@@ -233,6 +241,47 @@ a residual one from \code{estimate_sac_range(..., predictor_vars = )}, say --
 and check \code{attr(sac, "detrended")} to know which you have.
 }
 
+\section{Confidence intervals}{
+
+With \code{conf_level} set, every numeric response and predictor column gains
+four more columns: \verb{..neff_*}, that column's effective sample size in the
+cell (its non-missing count over its design effect, the per-column version
+of \code{cell_weight}); \verb{..df_*}, the degrees of freedom the interval uses; and
+\verb{..ci_lo_*} / \verb{..ci_hi_*}, a t interval for the \strong{cell mean as an estimate
+of the grand mean} --- the same estimand as \verb{..se_*}, so everything in
+"What the standard error estimates" applies to it, including that it is not
+an interval for the cell's own block average. The interval is
+\verb{mean +/- qt((1 + conf_level) / 2, df) * se}, centred on the plain mean of
+the column's non-missing values whatever \code{agg_funs} computes, and is \code{NA}
+wherever the standard error is (a single observation; complete redundancy
+under \code{deff}).
+
+The degrees of freedom are \strong{not} \code{neff - 1}. The interval's spread comes
+from the within-cell sample variance, and under exchangeable correlation
+(\code{deff = "kish"}) that variance keeps its \code{n - 1} degrees of freedom
+whatever the design effect --- the design effect inflates the mean's
+variance and biases \code{s^2}, both of which the standard error already
+corrects, and the resulting pivot is exactly t on \code{n - 1} df. Measured 95\%
+coverage of the grand mean on the Kish path, 20 cells of 20 at an ICC of
+0.2 / 0.6 / 0.9: 0.954 / 0.953 / 0.952 with \code{n - 1}, against
+0.992 / 1.000 / 1.000 with \code{neff - 1}, which is not an interval so much as
+a refusal to say anything. The effective-sample-size degrees of freedom of
+Faes et al. (2009) belong to a mean estimated across many correlated units
+whose variance is estimated from the spread between them; they do not
+transfer to a single cell's mean with a variance estimated from inside it.
+\verb{..df_*} is therefore \code{n - 1} at \code{deff = 1}, for a numeric \code{deff} and for
+\code{"kish"}. Under \code{deff = "variogram"} correlation decays with distance and
+the within-cell variance loses degrees of freedom to it; \verb{..df_*} is then
+the Satterthwaite (1946) moment-matched df of \code{s^2} under the fitted
+correlation matrix, a fraction of \code{n - 1} that shrinks as the range grows.
+Measured on a Gaussian field with an exponential range of 150 and 400 on a
+1000-unit domain, 16 cells of about 25 points: 0.960 and 0.958 with that
+df, against 0.931 and 0.918 with \code{n - 1}, and 0.34 and 0.19 for the naive
+\code{deff = 1} interval. The interval is only as good as the design effect
+under it: a mis-specified variogram, or an ICC estimated from too few
+cells, moves the coverage with it.
+}
+
 \examples{
 library(sf)
 set.seed(1)
@@ -257,6 +306,23 @@ data.frame(n = naive$n,
            se_naive = naive$..se_resp_val,
            se_kish  = kish$..se_resp_val)
 attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
+
+# A 95\% interval for each cell mean as an estimate of the grand mean, on
+# the Kish-corrected standard error and n - 1 degrees of freedom.
+ci <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
+                        conf_level = 0.95)
+ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
+       "..ci_lo_resp_val", "..ci_hi_resp_val")]
+}
+\references{
+Faes, C., Molenberghs, G., Aerts, M., Verbeke, G. and Kenward, M. G. (2009).
+The effective sample size and an alternative small-sample
+degrees-of-freedom method. \emph{The American Statistician}, 63(4),
+389--399. \doi{10.1198/tast.2009.08196}
+
+Satterthwaite, F. E. (1946). An approximate distribution of estimates of
+variance components. \emph{Biometrics Bulletin}, 2(6), 110--114.
+\doi{10.2307/3002019}
 }
 \seealso{
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, which produces the input layer;

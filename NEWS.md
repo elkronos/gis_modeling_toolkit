@@ -15,8 +15,44 @@
   method for a fitted model and could not take the estimate; they now point
   at `plot()` on the returned value.
 
+* `summarize_by_cell()` gains `conf_level`.  With `conf_level = 0.95`, every
+  numeric response and predictor column gets four more columns beside its
+  `..sd_*` and `..se_*`: `..neff_*`, the column's effective sample size in
+  the cell (its non-missing count over its design effect --- the per-column
+  version of `cell_weight`); `..df_*`, the degrees of freedom the interval
+  uses; and `..ci_lo_*` / `..ci_hi_*`, a t interval for the cell mean as an
+  estimate of the grand mean, built on the design-effect-corrected standard
+  error.  The default `conf_level = NULL` returns exactly the frame it always
+  did.  The degrees of freedom are `n - 1` at `deff = 1`, for a numeric
+  `deff` and for `deff = "kish"`, because the interval's spread is estimated
+  from the within-cell variance, whose `n - 1` df survive exchangeable
+  correlation whatever the design effect (measured 95% coverage on the Kish
+  path at an ICC of 0.2 / 0.6 / 0.9: 0.954 / 0.953 / 0.952; an
+  effective-sample-size df of `neff - 1` gives 0.992 / 1.000 / 1.000 and is
+  not used).  Under `deff = "variogram"` the df are the Satterthwaite
+  (1946) moment-matched df of the within-cell variance under the fitted
+  correlation, a fraction of `n - 1` that shrinks with the range: 0.960 and
+  0.958 coverage at exponential ranges of 150 and 400 on a 1000-unit
+  domain, against 0.931 and 0.918 with `n - 1`.  The help page's
+  "Confidence intervals" section has the reasoning and the numbers.
+
 ## Bug fixes
 
+* `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
+  metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
+  `compare_models()`, and the `overall` and `fold_metrics` of `cv_gwr()`,
+  `cv_bayes()`, `cv_spatial()`, `cv_rf()` and `compare_models_cv()` --- gains
+  two trailing integer columns, `n_MAPE` and `n_SMAPE`: the rows each
+  percentage error actually used once those where its denominator is zero
+  were dropped (`y == 0` for MAPE; `|y| + |yhat| == 0` for SMAPE).  They equal
+  `n` (`n_pred` in the CV frames) when nothing was dropped, and are `0` in an
+  empty frame.  The values are unchanged: a MAPE over 58 of 120 rows is the
+  same number as before, but it now arrives labelled, where before nothing in
+  the frame recorded that it was a subset average.  `print(summary(fit))`
+  appends "(over k of n rows)" to its SMAPE line when the two differ.  The
+  columns sit after `Adj_R2` so code addressing the seven metric columns by
+  position is unaffected; code pinning the exact column set needs the two
+  names added.
 * `make_folds(method = "block_kfold")` can now raise its "block dimension <
   autocorrelation range" warning.  The comparison was always there, but the
   range it compared against was estimated only under `auto_range = TRUE`,

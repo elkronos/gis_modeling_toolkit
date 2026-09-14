@@ -210,7 +210,7 @@
   if (!any(ok))
     return(data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_,
                       SMAPE = NA_real_, R2 = NA_real_, Adj_R2 = NA_real_,
-                      n_pred = 0L))
+                      n_pred = 0L, n_MAPE = 0L, n_SMAPE = 0L))
 
   # Pass per-observation training-fold means when available so that
   # .compute_reg_metrics() uses the correct out-of-sample R² baseline.
@@ -227,6 +227,7 @@
   met <- .compute_reg_metrics(preds$y, preds$yhat, p = NULL, y_train_mean = ytm)
   data.frame(RMSE = met$RMSE, MAE = met$MAE, MAPE = met$MAPE, SMAPE = met$SMAPE,
              R2 = met$R2, Adj_R2 = met$Adj_R2, n_pred = met$n,
+             n_MAPE = met$n_MAPE, n_SMAPE = met$n_SMAPE,
              stringsAsFactors = FALSE)
 }
 
@@ -268,7 +269,8 @@
   base <- data.frame(fold = integer(), n_train = integer(), n_test = integer(),
                      n_pred = integer(),
                      RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
-                     SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric())
+                     SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
+                     n_MAPE = integer(), n_SMAPE = integer())
   for (e in extra) base[[e]] <- numeric()
   base
 }
@@ -552,7 +554,8 @@
     fold = fold_lab, n_train = length(tr_pos), n_test = length(y_true),
     n_pred = met$n,
     RMSE = met$RMSE, MAE = met$MAE, MAPE = met$MAPE, SMAPE = met$SMAPE,
-    R2 = met$R2, Adj_R2 = met$Adj_R2, stringsAsFactors = FALSE
+    R2 = met$R2, Adj_R2 = met$Adj_R2,
+    n_MAPE = met$n_MAPE, n_SMAPE = met$n_SMAPE, stringsAsFactors = FALSE
   )
 
   # Append model-specific per-fold info (bandwidth, gp_k, CRPS, coverage …).
@@ -3216,6 +3219,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                n_pred = integer(),
                RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
                SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
+               n_MAPE = integer(), n_SMAPE = integer(),
                CRPS = numeric(), gp_k = integer(),
                gp_n_basis = integer(), n_draws = integer())
 

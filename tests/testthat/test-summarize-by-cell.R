@@ -831,3 +831,179 @@ test_that("the pooled ICC groups by (variable, cell), not by cell alone", {
   expect_gt(icc, 0.35)                        # rho/4 = 0.125 would fail this
   expect_lt(icc, 0.65)
 })
+
+
+# ===========================================================================
+# conf_level: t intervals for the cell mean as an estimate of the grand mean.
+# The SE machinery above already corrects for within-cell correlation; these
+# tests pin what an interval built on it uses for degrees of freedom, and
+# that asking for one changes nothing else.
+# ===========================================================================
+
+.interval_cols <- function(out)
+  grep("^\\.\\.(neff|df|ci_lo|ci_hi)_", names(out), value = TRUE)
+
+test_that("conf_level = NULL leaves the frame exactly as it was", {
+  pts <- .make_test_points(rho = 0.3)
+  pts$e <- rnorm(nrow(pts))
+  for (dv in list(1, "kish", 2)) {
+    out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
+                             deff = dv)
+    expect_length(.interval_cols(out), 0L)
+    expect_named(out, c("poly_id", "n", "resp_mean_y", "..sd_resp_y",
+                        "..se_resp_y", "pred_mean_e", "..sd_pred_e",
+                        "..se_pred_e", "cell_weight"))
+  }
+})
+
+test_that("conf_level is validated before any work is done", {
+  pts <- .make_test_points()
+  for (bad in list(1.5, 0, 1, -0.1, "a", c(0.9, 0.95), NA_real_, Inf))
+    expect_error(summarize_by_cell(pts, response_var = "y", conf_level = bad),
+                 "must be a single number strictly between 0 and 1")
+})
+
+test_that("with conf_level the interval columns follow each variable's sd and se", {
+  pts <- .make_test_points(rho = 0.3)
+  pts$e <- rnorm(nrow(pts))
+  out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
+                           conf_level = 0.95)
+  expect_named(out, c("poly_id", "n",
+                      "resp_mean_y", "..sd_resp_y", "..se_resp_y",
+                      "..neff_resp_y", "..df_resp_y",
+                      "..ci_lo_resp_y", "..ci_hi_resp_y",
+                      "pred_mean_e", "..sd_pred_e", "..se_pred_e",
+                      "..neff_pred_e", "..df_pred_e",
+                      "..ci_lo_pred_e", "..ci_hi_pred_e",
+                      "cell_weight"))
+  # Asking for an interval moves none of the existing numbers.
+  base <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e")
+  for (col in names(base)) expect_identical(out[[col]], base[[col]], info = col)
+})
+
+test_that("at deff = 1 the interval is the classic t interval on n - 1 df", {
+  pts <- .make_test_points(rho = 0)
+  out <- summarize_by_cell(pts, response_var = "y", conf_level = 0.90)
+  expect_equal(out[["..neff_resp_y"]], out$n)
+  expect_equal(out[["..df_resp_y"]], out$n - 1)
+  half <- stats::qt(0.95, out$n - 1) * out[["..sd_resp_y"]] / sqrt(out$n)
+  expect_equal(out[["..ci_lo_resp_y"]], out$resp_mean_y - half, tolerance = 1e-12)
+  expect_equal(out[["..ci_hi_resp_y"]], out$resp_mean_y + half, tolerance = 1e-12)
+  # The centre is the mean of the column, whatever agg_funs computes.
+  med <- summarize_by_cell(pts, response_var = "y", conf_level = 0.90,
+                           agg_funs = list(median = function(x) median(x, na.rm = TRUE)))
+  expect_false("resp_mean_y" %in% names(med))
+  expect_equal((med[["..ci_lo_resp_y"]] + med[["..ci_hi_resp_y"]]) / 2,
+               out$resp_mean_y, tolerance = 1e-12)
+})
+
+test_that("on the Kish path the df stay at n - 1 while neff drops with the design effect", {
+  # The design effect inflates the mean's variance and biases s^2, both of
+  # which ..se_ already corrects; the pivot on the corrected SE is exactly t
+  # with the within-cell n - 1 df under exchangeable correlation.  neff - 1
+  # would be wrong here -- measured coverage 0.992-1.000 against 0.95 nominal
+  # (see the coverage test below for the property itself).
+  pts <- .make_test_points(n_cells = 6, pts_per_cell = 12, rho = 0.5)
+  out <- summarize_by_cell(pts, response_var = "y", deff = "kish",
+                           conf_level = 0.95)
+  rho <- attr(out, "deff_applied")$icc_resp
+  expect_gt(rho, 0)
+  deff <- pmax(1, 1 + (out$n - 1) * rho)
+  expect_equal(out[["..neff_resp_y"]], out$n / deff, tolerance = 1e-12)
+  expect_equal(out[["..neff_resp_y"]], out$cell_weight, tolerance = 1e-12)
+  expect_true(all(out[["..neff_resp_y"]] < out$n))
+  expect_equal(out[["..df_resp_y"]], out$n - 1)
+  half <- stats::qt(0.975, out$n - 1) * out[["..se_resp_y"]]
+  expect_equal(out[["..ci_lo_resp_y"]], out$resp_mean_y - half, tolerance = 1e-12)
+  expect_equal(out[["..ci_hi_resp_y"]], out$resp_mean_y + half, tolerance = 1e-12)
+  # ... and wider than the naive interval, by the same factor as the SE.
+  naive <- summarize_by_cell(pts, response_var = "y", conf_level = 0.95)
+  ratio_ci <- (out[["..ci_hi_resp_y"]] - out[["..ci_lo_resp_y"]]) /
+    (naive[["..ci_hi_resp_y"]] - naive[["..ci_lo_resp_y"]])
+  expect_equal(ratio_ci, out[["..se_resp_y"]] / naive[["..se_resp_y"]],
+               tolerance = 1e-12)
+})
+
+test_that("a numeric deff keeps n - 1 df and divides neff by deff", {
+  pts <- .make_test_points(rho = 0)
+  out <- summarize_by_cell(pts, response_var = "y", deff = 2, conf_level = 0.95)
+  expect_equal(out[["..neff_resp_y"]], out$n / 2)
+  expect_equal(out[["..df_resp_y"]], out$n - 1)
+  half <- stats::qt(0.975, out$n - 1) * out[["..se_resp_y"]]
+  expect_equal(out[["..ci_hi_resp_y"]] - out$resp_mean_y, half, tolerance = 1e-12)
+})
+
+test_that("each column's neff and interval use that column's own non-missing rows", {
+  pts <- .make_test_points(n_cells = 4, pts_per_cell = 10, rho = 0.4)
+  pts$e <- pts$y + rnorm(nrow(pts), sd = 0.1)
+  pts$e[pts$poly_id == 2][1:6] <- NA          # cell 2 keeps 4 of 10 for e
+  out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
+                           deff = "kish", conf_level = 0.95)
+  rho_e <- attr(out, "deff_applied")$icc_pred
+  n_e   <- c(10, 4, 10, 10)
+  expect_equal(out[["..neff_pred_e"]], n_e / pmax(1, 1 + (n_e - 1) * rho_e),
+               tolerance = 1e-12)
+  expect_equal(out[["..df_pred_e"]], n_e - 1)
+  # The response column, untouched, still counts all 10 rows in cell 2.
+  expect_equal(out[["..df_resp_y"]], rep(9, 4))
+  # The interval is centred on the mean of the rows the column HAS.
+  m_e <- tapply(pts$e, pts$poly_id, mean, na.rm = TRUE)
+  expect_equal((out[["..ci_lo_pred_e"]] + out[["..ci_hi_pred_e"]]) / 2,
+               as.numeric(m_e), tolerance = 1e-12)
+})
+
+test_that("the interval is NA exactly where the standard error is", {
+  set.seed(808)
+  n_per <- c(1L, 1L, 4L, 6L)
+  ids   <- rep(seq_along(n_per), times = n_per)
+  pts   <- sf::st_sf(poly_id = ids, y = rnorm(length(ids)),
+                     geometry = sf::st_sfc(lapply(seq_along(ids),
+                                                  function(i) sf::st_point(c(i, ids[i]))),
+                                           crs = 32632))
+  for (dv in list(1, "kish", 2)) {
+    out  <- summarize_by_cell(pts, response_var = "y", deff = dv, conf_level = 0.95)
+    lone <- out$n == 1L
+    for (col in c("..neff_resp_y", "..df_resp_y", "..ci_lo_resp_y", "..ci_hi_resp_y")) {
+      expect_true(all(is.na(out[[col]][lone])), info = paste(col, "deff =", dv))
+      expect_true(all(is.finite(out[[col]][!lone])), info = paste(col, "deff =", dv))
+    }
+    expect_identical(is.na(out[["..ci_lo_resp_y"]]), is.na(out[["..se_resp_y"]]))
+  }
+})
+
+test_that("the interval columns survive the cells_sf join", {
+  pts <- .make_test_points(n_cells = 3, pts_per_cell = 8)
+  cells <- sf::st_sf(poly_id = c(1L, 2L, 3L, 4L),   # cell 4 holds no points
+                     geometry = sf::st_sfc(lapply(1:4, function(i)
+                       sf::st_buffer(sf::st_point(c(i, i)), 0.5)), crs = 32632))
+  out <- summarize_by_cell(pts, response_var = "y", cells_sf = cells,
+                           conf_level = 0.95)
+  expect_s3_class(out, "sf")
+  expect_true(all(c("..ci_lo_resp_y", "..ci_hi_resp_y", "..df_resp_y") %in% names(out)))
+  expect_true(is.na(out[["..ci_lo_resp_y"]][out$poly_id == 4L]))
+  expect_true(all(is.finite(out[["..ci_lo_resp_y"]][out$poly_id != 4L])))
+})
+
+test_that("the Kish-path interval covers the grand mean at the nominal rate", {
+  # The property the df choice exists for.  Same design as the SE coverage
+  # test above (20 cells of 20, ICC 0.6), now through conf_level itself.
+  skip_on_cran()
+  n_cells <- 20L; n_per <- 20L; rho <- 0.6
+  hit <- logical(0)
+  for (r in 1:100) {
+    set.seed(9000 + r)
+    cid <- rep(seq_len(n_cells), each = n_per)
+    u   <- rnorm(n_cells)
+    v   <- sqrt(rho) * u[cid] + sqrt(1 - rho) * rnorm(n_cells * n_per)
+    pts <- sf::st_sf(
+      poly_id  = cid, y = v,
+      geometry = sf::st_sfc(lapply(seq_along(cid),
+                                   function(i) sf::st_point(c(i, cid[i]))),
+                            crs = 32632))
+    out <- summarize_by_cell(pts, response_var = "y", deff = "kish",
+                             conf_level = 0.95)
+    hit <- c(hit, out[["..ci_lo_resp_y"]] <= 0 & 0 <= out[["..ci_hi_resp_y"]])
+  }
+  expect_gt(mean(hit), 0.92)
+  expect_lt(mean(hit), 0.98)
+})
