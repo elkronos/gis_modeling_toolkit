@@ -110,8 +110,51 @@
   `NA` from inside a completed fit (a non-positive fitted range) now returns
   the classed, inspectable shape too.
 
+* `resolution_profile()` and `select_resolution()`: the number of cells,
+  scored on every criterion at once.  `resolution_profile()` runs a
+  log-spaced ladder of level counts from a floor the autocorrelation range
+  implies (`ceiling(area / range^2)`) to a ceiling the support implies
+  (`floor(n / min_cell_n)`), fits each level as the best of 25 k-means++
+  restarts, and returns a data.frame with the WSS elbow statistic, Mallows'
+  C_p of the piecewise-constant approximation of the response (or of
+  its residuals on the predictors, with the nugget from the fitted
+  variogram as the noise variance), the standardised residual Moran's
+  z of the cell means, and an analytic reliability of the cell means
+  --- the share of their spread that is between-cell signal rather than
+  sampling noise, from the variogram alone via Krige's additivity relation
+  (Cressie 1996), the shrinkage factor of Fay and Herriot (1979) --- plus
+  the cell-support and cell-diameter columns and the between-restart
+  spread.  A floor above the ceiling is reported as a finding rather than
+  resolved silently.  `select_resolution()` reads a level off one criterion
+  together with its flat region and says when a bound, not the criterion,
+  is choosing.  Two things measured before this shipped, both on the help
+  page: on smooth fields with a small nugget C_p descends to the
+  support ceiling (every replicate at effective ranges 90--900 with nugget
+  0.3 on a unit sill; interior only at nugget 2), and the reliability
+  optimum agrees with the empirical one from true block means on simulated
+  fields but is broad --- flat to within 2 percent over a factor of 3--6 in
+  the number of cells.  Read the flat region.
+  `determine_optimal_levels()` is unchanged in shape and keeps its
+  integer-vector interface.
+
 ## Bug fixes
 
+* `determine_optimal_levels()` fits each k as the best of 25 k-means++
+  restarts (Arthur and Vassilvitskii 2007; Fränti and Sieranoja 2019;
+  Steinley 2003) instead of `stats::kmeans(nstart = 5)`.  The WSS curve is
+  read for its shape, and with a handful of random restarts it carried
+  optimisation noise: on eight-cluster layouts a sweep over k = 1..30
+  rose at one or two steps in three of five draws, and an earlier form of
+  the elbow rule once selected such a bump.  With the new budget the same
+  sweeps rose at no step.  A curve that still rises is now logged as a
+  warning naming the number of rising steps, and the model-aware
+  diagnostics carry it as `wss_bumps` beside `wss_spread` (the relative
+  spread of WSS across restarts at each k) and `nstart`.  A selection
+  made on a curve that had a bump can differ from before --- those were the
+  cases that were wrong; a clean curve gives the same answer.  Under a
+  model-aware criterion the function also now warns *before* the sweep when
+  `max_levels` leaves no k above the nine-cell floor, rather than
+  fitting every k first and falling back afterwards.
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
   metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
   `compare_models()`, and the `overall` and `fold_metrics` of `cv_gwr()`,

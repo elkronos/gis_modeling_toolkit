@@ -80,6 +80,8 @@ table(assigned$poly_id)
 
 Other aggregation: 
 \code{\link{determine_optimal_levels}()},
+\code{\link{resolution_profile}()},
+\code{\link{select_resolution}()},
 \code{\link{summarize_by_cell}()}
 }
 \concept{aggregation}
