@@ -12,8 +12,12 @@ test_that(".compute_reg_metrics matches hand-computed values", {
   met  <- spatialkit:::.compute_reg_metrics(y, yhat)
 
   expect_s3_class(met, "data.frame")
-  expect_named(met, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2"))
+  expect_named(met, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2",
+                      "n_MAPE", "n_SMAPE"))
   expect_identical(met$n, 5L)
+  # No zeros anywhere, so both percentage errors used every row.
+  expect_identical(met$n_MAPE, 5L)
+  expect_identical(met$n_SMAPE, 5L)
 
   # Errors are -0.1, -0.2, +0.1, -0.1, +0.2, so:
   #   RSS = 0.01 + 0.04 + 0.01 + 0.01 + 0.04 = 0.11
@@ -62,18 +66,28 @@ test_that(".compute_reg_metrics returns an all-NA row for an empty comparison", 
   # fold results does not ragged out.
   empty <- spatialkit:::.compute_reg_metrics(numeric(0), numeric(0))
   expect_identical(empty$n, 0L)
-  expect_named(empty, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2"))
-  expect_true(all(is.na(unlist(empty[, -1L]))))
+  expect_named(empty, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2",
+                        "n_MAPE", "n_SMAPE"))
+  metric_cols <- c("RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2")
+  expect_true(all(is.na(unlist(empty[, metric_cols]))))
+  # The counts are counts, not metrics: 0, not NA, in the empty frame.
+  expect_identical(empty$n_MAPE, 0L)
+  expect_identical(empty$n_SMAPE, 0L)
 
   # Same when every row is non-finite rather than absent.
   allna <- spatialkit:::.compute_reg_metrics(c(NA, NaN, Inf), c(1, 2, 3))
   expect_identical(allna$n, 0L)
-  expect_true(all(is.na(unlist(allna[, -1L]))))
+  expect_true(all(is.na(unlist(allna[, metric_cols]))))
+  expect_identical(allna$n_MAPE, 0L)
 
   # A non-finite PREDICTION drops its row too, and the rest still score.
   partial <- spatialkit:::.compute_reg_metrics(c(1, 2, 3), c(1, NA, 3))
   expect_identical(partial$n, 2L)
   expect_equal(partial$RMSE, 0)
+  # A row dropped for being non-finite is not in `n`, so it is not in the
+  # percentage-error counts either: those count out of `n`, not the input.
+  expect_identical(partial$n_MAPE, 2L)
+  expect_identical(partial$n_SMAPE, 2L)
 })
 
 
@@ -83,11 +97,15 @@ test_that(".compute_reg_metrics degrades the ratio metrics rather than dividing 
   zeros <- spatialkit:::.compute_reg_metrics(c(0, 0, 0), c(0.1, -0.1, 0.2))
   expect_true(is.na(zeros$MAPE))
   expect_false(is.na(zeros$SMAPE))     # denominator is |y| + |yhat| > 0
+  expect_identical(zeros$n_MAPE, 0L)   # ... and the counts say which rows
+  expect_identical(zeros$n_SMAPE, 3L)
 
   both_zero <- spatialkit:::.compute_reg_metrics(c(0, 0), c(0, 0))
   expect_true(is.na(both_zero$MAPE))
   expect_true(is.na(both_zero$SMAPE))
   expect_equal(both_zero$RMSE, 0)
+  expect_identical(both_zero$n_MAPE, 0L)
+  expect_identical(both_zero$n_SMAPE, 0L)
 
   # A constant response has zero TSS, so R2 is undefined rather than -Inf.
   constant <- spatialkit:::.compute_reg_metrics(rep(5, 4), c(5, 5.1, 4.9, 5))
@@ -148,4 +166,55 @@ test_that(".compute_reg_metrics filters NA with per-observation y_train_mean", {
   tss <- sum((y[ok] - ytm_vec[ok])^2)
   expect_equal(met$n, 4L)
   expect_equal(met$R2, 1 - rss / tss)
+})
+
+
+test_that(".compute_reg_metrics reports how many rows MAPE and SMAPE were averaged over", {
+  # A zero-inflated response: MAPE is undefined at y = 0 and drops those rows;
+  # SMAPE drops only the rows where prediction and observation are BOTH zero.
+  # Before n_MAPE/n_SMAPE existed, a MAPE over 4 of 7 rows was returned as if
+  # it covered all 7, and nothing in the frame said otherwise.
+  y    <- c(0, 0, 0, 2, 4, 6, 8)
+  yhat <- c(0, 0, 0.5, 2.5, 3, 7, 8)
+  met  <- spatialkit:::.compute_reg_metrics(y, yhat)
+  expect_identical(met$n, 7L)
+  expect_identical(met$n_MAPE, 4L)     # the four non-zero observations
+  expect_identical(met$n_SMAPE, 5L)    # rows 1-2 have |y| + |yhat| == 0
+  # The values are the averages over exactly those rows.
+  expect_equal(met$MAPE,
+               mean(abs(y[4:7] - yhat[4:7]) / abs(y[4:7])) * 100)
+  expect_equal(met$SMAPE,
+               mean(2 * abs(y[3:7] - yhat[3:7]) / (abs(y[3:7]) + abs(yhat[3:7]))) * 100)
+  # The counts are integers, like `n`, so they can be summed over folds.
+  expect_type(met$n_MAPE, "integer")
+  expect_type(met$n_SMAPE, "integer")
+})
+
+
+test_that("n_MAPE and n_SMAPE travel through cv_spatial()'s fold and overall frames", {
+  # The per-fold frame and the pooled frame are both rebuilt column by column
+  # from .compute_reg_metrics(), so a column added there is silently dropped
+  # unless each of those sites carries it.  Pin that they do, and that the
+  # count is per fold (out of that fold's n_pred) and pooled (out of the
+  # overall n_pred).
+  pts <- surf_test_points(80, seed = 3)
+  set.seed(4)
+  pts$z[sample(nrow(pts), 20)] <- 0          # a quarter of the response is zero
+  cv <- suppressWarnings(cv_spatial(
+    pts, "z", "w", fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
+    k = 4, seed = 7))
+  fm <- cv$fold_metrics
+  expect_true(all(c("n_MAPE", "n_SMAPE") %in% names(fm)))
+  expect_true(all(fm$n_MAPE <= fm$n_pred))
+  expect_true(any(fm$n_MAPE < fm$n_pred))   # the zeros landed in some fold
+  # The metric block keeps its order; the counts follow Adj_R2.
+  expect_identical(match(c("Adj_R2", "n_MAPE", "n_SMAPE"), names(fm)),
+                   match("Adj_R2", names(fm)) + 0:2)
+  ov <- cv$overall
+  expect_identical(ov$n_MAPE, sum(fm$n_MAPE))
+  expect_identical(ov$n_SMAPE, sum(fm$n_SMAPE))
+  expect_identical(ov$n_MAPE, 60L)          # 80 rows, 20 of them zero
+  expect_true(ov$n_MAPE <= ov$n_pred)
+  # An empty fold frame has the columns too, so rbind() stays rectangular.
+  expect_true(all(c("n_MAPE", "n_SMAPE") %in% names(spatialkit:::.empty_fold_metrics())))
 })

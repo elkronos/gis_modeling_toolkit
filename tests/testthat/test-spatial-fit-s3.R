@@ -210,6 +210,24 @@ test_that("print.summary.spatial_fit prints optional metrics only when finite", 
 })
 
 
+test_that("print.summary.spatial_fit says when SMAPE covers a subset of the rows", {
+  pts <- surf_test_points(60)
+  s   <- summary(lm_spatial_fit(pts, predictor_vars = "w"))
+  # No zeros in this response: SMAPE used every row, so no qualifier.
+  expect_identical(s$in_sample$n_SMAPE, s$in_sample$n)
+  expect_false(grepl("of 60 rows", .s3_printed(s), fixed = TRUE))
+
+  # SMAPE skips rows where observation and prediction are both zero.  The
+  # printed line says so rather than presenting a subset average as the whole.
+  s$in_sample$n_SMAPE <- 45L
+  expect_match(.s3_printed(s), "SMAPE   = [0-9.]+%  \\(over 45 of 60 rows\\)")
+
+  # A frame without the count (a summary built before it existed) still prints.
+  s$in_sample$n_SMAPE <- NULL
+  expect_match(.s3_printed(s), "SMAPE   = [0-9.]+%$")
+})
+
+
 # ---------------------------------------------------------------------------
 # model_metrics.spatial_fit()
 # ---------------------------------------------------------------------------
@@ -221,7 +239,8 @@ test_that("model_metrics scores fitted values or newdata predictions", {
 
   ins <- model_metrics(fit)
   expect_s3_class(ins, "data.frame")
-  expect_named(ins, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2"))
+  expect_named(ins, c("n", "RMSE", "MAE", "MAPE", "SMAPE", "R2", "Adj_R2",
+                      "n_MAPE", "n_SMAPE"))
   expect_equal(ins$n, 90L)
 
   oos <- model_metrics(fit, newdata = test)

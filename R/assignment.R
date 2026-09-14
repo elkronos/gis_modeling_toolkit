@@ -364,17 +364,39 @@ assign_features_to_polygons <- function(
 #' @noRd
 .cell_rbar_variogram <- function(coords, cell_id, cor_fn, max_n = 500L,
                                  seed = 42L) {
+  .cell_cor_stats_variogram(coords, cell_id, cor_fn, max_n = max_n,
+                            seed = seed)$rbar
+}
+
+
+#' Per-cell correlation statistics from a fitted variogram
+#'
+#' One pass over the cells building each correlation matrix once, returning
+#' both quantities \code{summarize_by_cell()} takes from it: the mean
+#' off-diagonal correlation (\code{rbar}, see \code{.cell_rbar_variogram()})
+#' and the degrees-of-freedom ratio of the within-cell variance
+#' (\code{df_ratio}, see \code{.cor_stats_from_coords()}).
+#'
+#' @return A list of two named numeric vectors, \code{rbar} and
+#'   \code{df_ratio}, one entry per cell; both \code{NA} when \code{cor_fn}
+#'   is \code{NULL}.
+#' @keywords internal
+#' @noRd
+.cell_cor_stats_variogram <- function(coords, cell_id, cor_fn, max_n = 500L,
+                                      seed = 42L) {
   ids <- unique(cell_id)
   ids <- ids[!is.na(ids)]
-  out <- stats::setNames(rep(NA_real_, length(ids)), as.character(ids))
-  if (is.null(cor_fn)) return(out)
+  rbar <- stats::setNames(rep(NA_real_, length(ids)), as.character(ids))
+  dfr  <- rbar
+  if (is.null(cor_fn)) return(list(rbar = rbar, df_ratio = dfr))
   for (id in ids) {
     idx <- which(cell_id == id)
-    out[[as.character(id)]] <- .rbar_from_coords(coords[idx, , drop = FALSE],
-                                                 cor_fn, max_n = max_n,
-                                                 seed = seed)
+    st  <- .cor_stats_from_coords(coords[idx, , drop = FALSE], cor_fn,
+                                  max_n = max_n, seed = seed)
+    rbar[[as.character(id)]] <- st[["rbar"]]
+    dfr[[as.character(id)]]  <- st[["df_ratio"]]
   }
-  out
+  list(rbar = rbar, df_ratio = dfr)
 }
 
 
@@ -390,8 +412,40 @@ assign_features_to_polygons <- function(
 #' @keywords internal
 #' @noRd
 .rbar_from_coords <- function(xy, cor_fn, max_n = 500L, seed = 42L) {
+  unname(.cor_stats_from_coords(xy, cor_fn, max_n = max_n, seed = seed)[["rbar"]])
+}
+
+
+#' Mean off-diagonal correlation and variance degrees of freedom for one cell
+#'
+#' Builds the correlation matrix \eqn{R} of a set of locations once and takes
+#' two numbers from it.  \code{rbar} is the mean off-diagonal correlation that
+#' \code{.rbar_from_coords()} returns.  \code{df_ratio} is the Satterthwaite
+#' degrees of freedom of the within-cell sample variance \eqn{s^2} under
+#' \eqn{R}, divided by \eqn{n - 1}: with \eqn{A = I - J/n} the centring
+#' projection, \eqn{s^2 = y'Ay/(n-1)} is a weighted sum of chi-squares whose
+#' moment-matched df is \eqn{[\mathrm{tr}(AR)]^2 / \mathrm{tr}(ARAR)}.  Under
+#' exchangeable correlation the ratio is exactly 1 (\eqn{AR} has \eqn{n-1}
+#' equal non-zero eigenvalues), which is why a t interval on the Kish path
+#' keeps \eqn{n - 1} df; under correlation that decays with distance it is
+#' below 1, and a t interval that ignores that under-covers (measured 0.918 at
+#' a range of 400 on a 1000-unit domain against 0.958 with this df).
+#' \eqn{\mathrm{tr}(AR) = n - \mathrm{deff}}, so the same \eqn{R} gives the
+#' design effect and the df with no extra pass.
+#'
+#' The ratio rather than the df is returned so that a subsampled cell
+#' (\code{n > max_n}) can scale it back to its own \eqn{n - 1}: the subsample's
+#' pairwise-distance distribution is the cell's, so the ratio transfers where
+#' the raw df would not.
+#'
+#' @return Named numeric vector \code{c(rbar =, df_ratio =)}; \code{c(0, 1)}
+#'   when there is at most one point or no correlation function.
+#' @keywords internal
+#' @noRd
+.cor_stats_from_coords <- function(xy, cor_fn, max_n = 500L, seed = 42L) {
   n_i <- nrow(xy)
-  if (is.null(cor_fn) || is.null(n_i) || n_i <= 1L) return(0)
+  if (is.null(cor_fn) || is.null(n_i) || n_i <= 1L)
+    return(c(rbar = 0, df_ratio = 1))
   if (n_i > max_n) {
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
@@ -405,7 +459,13 @@ assign_features_to_polygons <- function(
   diag(R) <- 1
   n_used <- nrow(R)
   r_bar  <- (sum(R) - n_used) / (n_used * (n_used - 1))
-  min(max(r_bar, 0), 1)
+  # tr(AR) = n - sum(R)/n and, with c = colMeans(R) (R is symmetric, so row
+  # means are the same), tr(ARAR) = sum(R^2) - 2 n sum(c^2) + (sum(c))^2.
+  cm     <- colMeans(R)
+  tr_ar  <- n_used - sum(R) / n_used
+  tr_ar2 <- sum(R * R) - 2 * n_used * sum(cm^2) + sum(cm)^2
+  df_r   <- if (tr_ar2 > 0) (tr_ar^2 / tr_ar2) / (n_used - 1) else 0
+  c(rbar = min(max(r_bar, 0), 1), df_ratio = min(max(df_r, 0), 1))
 }
 
 
@@ -511,6 +571,45 @@ assign_features_to_polygons <- function(
 #' a residual one from `estimate_sac_range(..., predictor_vars = )`, say --
 #' and check `attr(sac, "detrended")` to know which you have.
 #'
+#' @section Confidence intervals:
+#' With `conf_level` set, every numeric response and predictor column gains
+#' four more columns: `..neff_*`, that column's effective sample size in the
+#' cell (its non-missing count over its design effect, the per-column version
+#' of `cell_weight`); `..df_*`, the degrees of freedom the interval uses; and
+#' `..ci_lo_*` / `..ci_hi_*`, a t interval for the **cell mean as an estimate
+#' of the grand mean** --- the same estimand as `..se_*`, so everything in
+#' "What the standard error estimates" applies to it, including that it is not
+#' an interval for the cell's own block average. The interval is
+#' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
+#' the column's non-missing values whatever `agg_funs` computes, and is `NA`
+#' wherever the standard error is (a single observation; complete redundancy
+#' under `deff`).
+#'
+#' The degrees of freedom are **not** `neff - 1`. The interval's spread comes
+#' from the within-cell sample variance, and under exchangeable correlation
+#' (`deff = "kish"`) that variance keeps its `n - 1` degrees of freedom
+#' whatever the design effect --- the design effect inflates the mean's
+#' variance and biases `s^2`, both of which the standard error already
+#' corrects, and the resulting pivot is exactly t on `n - 1` df. Measured 95%
+#' coverage of the grand mean on the Kish path, 20 cells of 20 at an ICC of
+#' 0.2 / 0.6 / 0.9: 0.954 / 0.953 / 0.952 with `n - 1`, against
+#' 0.992 / 1.000 / 1.000 with `neff - 1`, which is not an interval so much as
+#' a refusal to say anything. The effective-sample-size degrees of freedom of
+#' Faes et al. (2009) belong to a mean estimated across many correlated units
+#' whose variance is estimated from the spread between them; they do not
+#' transfer to a single cell's mean with a variance estimated from inside it.
+#' `..df_*` is therefore `n - 1` at `deff = 1`, for a numeric `deff` and for
+#' `"kish"`. Under `deff = "variogram"` correlation decays with distance and
+#' the within-cell variance loses degrees of freedom to it; `..df_*` is then
+#' the Satterthwaite (1946) moment-matched df of `s^2` under the fitted
+#' correlation matrix, a fraction of `n - 1` that shrinks as the range grows.
+#' Measured on a Gaussian field with an exponential range of 150 and 400 on a
+#' 1000-unit domain, 16 cells of about 25 points: 0.960 and 0.958 with that
+#' df, against 0.931 and 0.918 with `n - 1`, and 0.34 and 0.19 for the naive
+#' `deff = 1` interval. The interval is only as good as the design effect
+#' under it: a mis-specified variogram, or an ICC estimated from too few
+#' cells, moves the coverage with it.
+#'
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell aggregation.
 #' @param predictor_vars Optional predictor column names for per-cell aggregation.
@@ -586,11 +685,17 @@ assign_features_to_polygons <- function(
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE} --
 #'   unlike the tessellation functions, whose default is \code{FALSE}.
+#' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
+#'   When given, every numeric response and predictor column also gets
+#'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
+#'   intervals"). Default `NULL`: no interval columns, and the frame is
+#'   exactly what it was before this argument existed.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell --- an input column also
 #'   called `n` is not allowed to shadow it), one column per `agg_funs` entry
 #'   per variable, `..sd_*` / `..se_*` for every numeric response and predictor,
-#'   and `cell_weight`.
+#'   `..neff_*` / `..df_*` / `..ci_lo_*` / `..ci_hi_*` for the same columns
+#'   when `conf_level` is given, and `cell_weight`.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
@@ -630,6 +735,22 @@ assign_features_to_polygons <- function(
 #'            se_naive = naive$..se_resp_val,
 #'            se_kish  = kish$..se_resp_val)
 #' attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
+#'
+#' # A 95% interval for each cell mean as an estimate of the grand mean, on
+#' # the Kish-corrected standard error and n - 1 degrees of freedom.
+#' ci <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
+#'                         conf_level = 0.95)
+#' ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
+#'        "..ci_lo_resp_val", "..ci_hi_resp_val")]
+#' @references
+#' Faes, C., Molenberghs, G., Aerts, M., Verbeke, G. and Kenward, M. G. (2009).
+#' The effective sample size and an alternative small-sample
+#' degrees-of-freedom method. \emph{The American Statistician}, 63(4),
+#' 389--399. \doi{10.1198/tast.2009.08196}
+#'
+#' Satterthwaite, F. E. (1946). An approximate distribution of estimates of
+#' variance components. \emph{Biometrics Bulletin}, 2(6), 110--114.
+#' \doi{10.2307/3002019}
 #' @family aggregation
 #' @seealso [assign_features_to_polygons()], which produces the input layer;
 #'   [build_tessellation()] for the cells themselves.
@@ -643,8 +764,15 @@ summarize_by_cell <- function(assigned_points_sf,
                               deff           = 1,
                               sac            = NULL,
                               deff_max_n     = 500L,
-                              quiet          = TRUE) {
+                              quiet          = TRUE,
+                              conf_level     = NULL) {
   .msg <- function(...) if (!quiet) message(...)
+  if (!is.null(conf_level) &&
+      (!is.numeric(conf_level) || length(conf_level) != 1L ||
+       !is.finite(conf_level) || conf_level <= 0 || conf_level >= 1))
+    stop("summarize_by_cell(): `conf_level` must be a single number strictly ",
+         "between 0 and 1 (0.95 for a 95% interval), or NULL for no intervals.",
+         call. = FALSE)
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
@@ -836,19 +964,31 @@ summarize_by_cell <- function(assigned_points_sf,
     fns[[paste0("..sd_", prefix)]] <- function(x) {
       if (sum(!is.na(x)) > 1L) sd(x, na.rm = TRUE) else NA_real_
     }
-    # SE with design-effect adjustment
-    fns[[paste0("..se_", prefix)]] <- local({
+    # The per-column, per-cell quantities behind the SE and (when asked for)
+    # the interval: the column's own non-missing count, sd, design effect and
+    # the degrees of freedom of its variance.  One function so that every
+    # column built from these numbers is built from the SAME numbers.
+    .col_stats <- local({
       .deff <- deff
       .rho  <- rho
       .rbar <- rbar        # per-cell rbar over ALL rows (fast path, no NAs)
+      .dfr  <- vgm$df_ratio  # per-cell df ratio over ALL rows, same path
       .vgm  <- vgm         # list(coords, cor_fn, max_n): per-column exact path
       .kish <- use_kish
       .id   <- id_col
       function(x) {
         ok      <- !is.na(x)
         n_valid <- sum(ok)
-        if (n_valid <= 1L) return(NA_real_)
+        if (n_valid <= 1L)
+          return(list(n_valid = n_valid, s = NA_real_, deff = NA_real_,
+                      df = NA_real_))
         s <- sd(x, na.rm = TRUE)
+        # The df of s^2.  Exactly n_valid - 1 under independence, under a
+        # caller-supplied constant deff (a uniform inflation of the SE says
+        # nothing about the variance estimate) and under Kish's exchangeable
+        # correlation; only correlation that decays with distance changes it
+        # (see .cor_stats_from_coords()).
+        df_i <- n_valid - 1
         # Every path builds the design effect from n_valid -- the observations
         # THIS column has in THIS cell -- never from the cell's row count.  An
         # NA row contributes nothing to the mean, so it cannot contribute to
@@ -864,26 +1004,71 @@ summarize_by_cell <- function(assigned_points_sf,
           if (all(ok)) {
             g  <- as.character(dplyr::cur_group()[[.id]])
             rb <- if (g %in% names(.rbar)) .rbar[[g]] else NA_real_
+            dr <- if (!is.null(.dfr) && g %in% names(.dfr)) .dfr[[g]] else NA_real_
           } else {
             rows <- dplyr::cur_group_rows()[ok]
-            rb   <- .rbar_from_coords(.vgm$coords[rows, , drop = FALSE],
-                                      .vgm$cor_fn, max_n = .vgm$max_n)
+            st   <- .cor_stats_from_coords(.vgm$coords[rows, , drop = FALSE],
+                                           .vgm$cor_fn, max_n = .vgm$max_n)
+            rb <- st[["rbar"]]; dr <- st[["df_ratio"]]
           }
           deff_i <- if (is.finite(rb)) min(max(1, 1 + (n_valid - 1) * rb), n_valid)
                     else 1
+          if (is.finite(dr)) df_i <- dr * (n_valid - 1)
         } else {
           deff_i <- .deff
         }
+        list(n_valid = n_valid, s = s, deff = deff_i, df = df_i)
+      }
+    })
+    .se_of <- local({
+      .correct <- use_kish || !is.null(rbar)
+      function(st) {
+        if (st$n_valid <= 1L) return(NA_real_)
         # NOT s / sqrt(n_valid / deff_i): that corrects the mean's variance for
         # clustering but leaves s^2 biased low by the same clustering.  See
         # .se_with_deff() for the derivation and the measured coverage.  The
         # E[s^2] correction applies only to a design effect this function
         # DERIVED from the data's own clustering; a numeric `deff` supplied by
         # the caller is applied as the uniform inflation it is documented to be.
-        .se_with_deff(s, n_valid, deff_i,
-                      correct_s2 = .kish || !is.null(.rbar))
+        .se_with_deff(st$s, st$n_valid, st$deff, correct_s2 = .correct)
       }
     })
+    # SE with design-effect adjustment
+    fns[[paste0("..se_", prefix)]] <- function(x) .se_of(.col_stats(x))
+
+    if (!is.null(conf_level)) {
+      # Effective sample size of THIS column in this cell: its non-missing
+      # count over its design effect.  cell_weight is the same number for the
+      # primary variable only.
+      fns[[paste0("..neff_", prefix)]] <- function(x) {
+        st <- .col_stats(x)
+        if (st$n_valid <= 1L) return(NA_real_)
+        st$n_valid / st$deff
+      }
+      # The degrees of freedom the interval below uses.  Not neff - 1: the
+      # interval's spread is estimated from the within-cell s^2, whose df is
+      # n - 1 under exchangeable correlation whatever the design effect (the
+      # pivot is exactly t on n - 1 df there), and a Satterthwaite fraction
+      # of n - 1 under a distance-decaying correlation.  Measured 95% coverage
+      # on the Kish path at rho = 0.2 / 0.6 / 0.9: 0.954 / 0.953 / 0.952 with
+      # n - 1, against 0.992 / 1.000 / 1.000 with neff - 1.
+      fns[[paste0("..df_", prefix)]] <- function(x) {
+        st <- .col_stats(x)
+        if (st$n_valid <= 1L) return(NA_real_)
+        st$df
+      }
+      .ci_bound <- local({
+        .p <- 1 - (1 - conf_level) / 2
+        function(x, side) {
+          st <- .col_stats(x)
+          se <- .se_of(st)
+          if (!is.finite(se) || !is.finite(st$df) || st$df <= 0) return(NA_real_)
+          mean(x, na.rm = TRUE) + side * stats::qt(.p, df = st$df) * se
+        }
+      })
+      fns[[paste0("..ci_lo_", prefix)]] <- function(x) .ci_bound(x, -1)
+      fns[[paste0("..ci_hi_", prefix)]] <- function(x) .ci_bound(x, +1)
+    }
     fns
   }
 
@@ -997,11 +1182,13 @@ summarize_by_cell <- function(assigned_points_sf,
       # Per-cell mean off-diagonal correlation, NOT a per-cell deff: the design
       # effect each column needs is 1 + (n_valid - 1) * rbar for ITS non-missing
       # count, and that is formed inside the ..se_ closures.
-      vgm_rbar <- .cell_rbar_variogram(coords_mat, df[[id_col]], cor_fn,
-                                       max_n = deff_max_n)
+      vgm_stats <- .cell_cor_stats_variogram(coords_mat, df[[id_col]], cor_fn,
+                                             max_n = deff_max_n)
+      vgm_rbar <- vgm_stats$rbar
       vgm_deff <- .cell_deff_variogram(coords_mat, df[[id_col]], cor_fn,
                                        max_n = deff_max_n)
-      vgm_bits <- list(coords = coords_mat, cor_fn = cor_fn, max_n = deff_max_n)
+      vgm_bits <- list(coords = coords_mat, cor_fn = cor_fn, max_n = deff_max_n,
+                       df_ratio = vgm_stats$df_ratio)
       .msg(sprintf(
         "summarize_by_cell(): variogram deff across cells (at the cell row count): median %.3f, max %.3f",
         stats::median(vgm_deff, na.rm = TRUE), max(vgm_deff, na.rm = TRUE)

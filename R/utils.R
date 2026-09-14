@@ -281,19 +281,22 @@
 #'   is filtered in parallel with `y` and `yhat` to remove non-finite cases.
 #'   Any other length is an error — recycling it would silently produce a wrong
 #'   R-squared.
-#' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2 and Adj_R2. `Adj_R2`
-#'   is always present, and is `NA` when `p` is NULL or `n <= p + 1`.
+#' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
+#'   n_SMAPE. `Adj_R2` is always present, and is `NA` when `p` is NULL or
+#'   `n <= p + 1`.
 #'
 #'   `n` counts the finite (y, yhat) pairs. It is **not** the number of rows
 #'   `MAPE` and `SMAPE` were averaged over: both have a denominator that can be
-#'   zero, and each silently drops the rows where its own denominator vanishes
-#'   (`MAPE` where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA`
-#'   only when no row qualifies. That subsetting is not reported anywhere in the
-#'   return value, which is why the user-facing help
+#'   zero, and each drops the rows where its own denominator vanishes (`MAPE`
+#'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
+#'   when no row qualifies. `n_MAPE` and `n_SMAPE` are the row counts each was
+#'   actually averaged over, so that a percentage error over a subset is
+#'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
+#'   in the empty frame. They sit last so that code addressing the first seven
+#'   columns by position is unaffected. The user-facing help
 #'   (see `model_metrics()`'s "Percentage errors on responses with zeros")
-#'   tells callers to prefer RMSE/MAE/R2 on a response that can be zero.
-#'   Reporting the per-metric row count would change this frame's column set,
-#'   so it is deferred rather than done here --- see `dev/BACKLOG.md`.
+#'   still tells callers to prefer RMSE/MAE/R2 on a response that can be zero:
+#'   the count makes the subsetting visible, not harmless.
 #' @keywords internal
 #' @noRd
 .compute_reg_metrics <- function(y, yhat, p = NULL, y_train_mean = NULL) {
@@ -315,7 +318,8 @@
   n <- length(y)
   if (n == 0L) return(data.frame(n = 0L, RMSE = NA_real_, MAE = NA_real_,
                                  MAPE = NA_real_, SMAPE = NA_real_,
-                                 R2 = NA_real_, Adj_R2 = NA_real_))
+                                 R2 = NA_real_, Adj_R2 = NA_real_,
+                                 n_MAPE = 0L, n_SMAPE = 0L))
   rss  <- sum((y - yhat)^2)
 
   baseline <- if (!is.null(y_train_mean)) y_train_mean else mean(y)
@@ -339,8 +343,13 @@
     adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
   }
 
+  # The rows each percentage error was averaged over.  Appended after the
+  # seven original columns on purpose: the metric block's positions are
+  # stable, and every frame built from this one adds these two at the end of
+  # its own metric block (.cv_overall_metrics(), .cv_fit_one_fold()).
   data.frame(n = n, RMSE = rmse, MAE = mae, MAPE = mape, SMAPE = smape,
-             R2 = r2, Adj_R2 = adj_r2)
+             R2 = r2, Adj_R2 = adj_r2,
+             n_MAPE = sum(nz), n_SMAPE = sum(smape_ok))
 }
 
 
