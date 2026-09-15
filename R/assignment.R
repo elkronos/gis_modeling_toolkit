@@ -33,7 +33,15 @@
 #'   the old IDs rather than failing. If *no* feature falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
-#'   places --- a CRS that could only be stamped, not reprojected.
+#'   places --- a CRS that could only be stamped, not reprojected. The
+#'   attribute `"ties"` records how many features matched more than one
+#'   polygon and had the `tie_break` rule decide for them: a list with `n`,
+#'   `which` (their row positions in `features_sf`) and `rule`. A large `n`
+#'   means the polygon layer overlaps, and per-cell counts built from the
+#'   result depend on the rule. The record describes the rows this call
+#'   returned and does not survive subsetting: `joined[i, ]` is a plain layer
+#'   with no `"ties"` attribute, rather than one reporting the parent's
+#'   count against row positions that no longer resolve.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -128,6 +136,16 @@ assign_features_to_polygons <- function(
   # Deterministic tie-break for features matching multiple polygons.
   # The previous approach (keep first duplicate) was order-dependent.
   dup_mask <- duplicated(joined[["..pre_join_row_id"]])
+  # How many features the tie-break decided, and which: this used to be a
+  # branch condition and nothing else, yet a tie-break firing on a third of
+  # the features means the polygon layer overlaps and every cell count
+  # downstream is suspect.  Reported on the result as `ties`, and logged.
+  tie_rows <- sort(unique(joined[["..pre_join_row_id"]][dup_mask]))
+  if (length(tie_rows))
+    .log_info(paste0("assign_features_to_polygons(): %d of %d feature(s) fall ",
+                     "inside more than one polygon; the '%s' rule chose one for ",
+                     "each. A large share means the polygon layer overlaps."),
+              length(tie_rows), nrow(f), tie_break)
   if (any(dup_mask) && identical(tie_break, "smallest_area")) {
     # For each duplicated feature, keep the polygon with the smallest area
     # (the most specific / tightest-fitting polygon).
@@ -170,6 +188,12 @@ assign_features_to_polygons <- function(
   }
 
   if (!is.na(orig_crs)) joined <- sf::st_transform(joined, orig_crs)
+  # Stamped and classed: the record names row positions, so it must not
+  # survive a subset that renumbers or removes them.
+  joined <- .set_row_record(joined, "ties",
+                            list(n = length(tie_rows),
+                                 which = as.integer(tie_rows),
+                                 rule = tie_break))
   joined
 }
 
@@ -715,13 +739,20 @@ assign_features_to_polygons <- function(
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
-#'   `deff`/`rbar`/`crs`/`max_n` for `"variogram"`, and `deff` alone for a
-#'   fixed number. When `cells_sf` is supplied, *every* per-cell vector in that
-#'   attribute (`deff` and `rbar` alike) is realigned to the joined row order,
-#'   so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
+#'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
+#'   the design effect at the primary variable's non-missing count per cell,
+#'   `deff_rows` at the cell's row count --- the vector the log line
+#'   summarises as a median and a max), and `deff` alone for a fixed number.
+#'   When `cells_sf` is supplied, *every* per-cell vector in that attribute
+#'   (`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
+#'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
 #'   applied --- `deff = 1`, a `deff = "kish"` ICC of 0, or a `"variogram"`
-#'   request that could not be fitted.
+#'   request that could not be fitted. A `deff = "kish"` request always
+#'   records the ICCs it estimated on an attribute `"icc"` (`resp` and
+#'   `pred`, `NA` for a variable type with no numeric column), whether or not
+#'   they were positive enough to apply, so a result with no `"deff_applied"`
+#'   still says what the ICC came out as.
 #'
 #'   The ID column keeps its input type when `cells_sf`'s ID column and the
 #'   summarised IDs already have the same class. When the classes differ, both
@@ -1343,17 +1374,32 @@ summarize_by_cell <- function(assigned_points_sf,
     d_i <- pmin(pmax(1, 1 + (n_valid_primary - 1) * rb), pmax(n_valid_primary, 1))
 
     out$cell_weight <- n_valid_primary / d_i
+    # `deff_rows` is the design effect at the cell's ROW count -- the vector
+    # the log line above reduces to a median and a max -- beside `deff`,
+    # which is at the primary variable's non-missing count.  The two agree
+    # wherever that variable is complete.
+    deff_rows <- if (is.null(vgm_deff)) NULL else
+      unname(vgm_deff[as.character(out[[id_col]])])
     attr(out, "deff_applied") <- list(
-      method = "variogram",
-      deff   = d_i,
-      rbar   = rb,
-      crs    = if (isTRUE(vgm_crs_ok)) vgm_crs else sf::st_crs(pts_for_deff),
-      max_n  = deff_max_n
+      method    = "variogram",
+      deff      = d_i,
+      deff_rows = deff_rows,
+      rbar      = rb,
+      crs       = if (isTRUE(vgm_crs_ok)) vgm_crs else sf::st_crs(pts_for_deff),
+      max_n     = deff_max_n
     )
   } else if (!use_kish && is.numeric(deff) && deff > 1) {
     out$cell_weight <- n_valid_primary / deff
     attr(out, "deff_applied") <- list(method = "fixed", deff = deff)
   }
+  # The ICCs a Kish request estimated, whether or not either was positive
+  # enough to apply: `deff_applied` is absent exactly when nothing was
+  # applied, which is when a user most wants to see what the ICC came out
+  # as.  NA for a variable type that had no numeric column.
+  if (use_kish)
+    attr(out, "icc") <- list(
+      resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
+      pred = if (has_pred) as.numeric(pred_rho) else NA_real_)
   
   if (!is.null(cells_sf)) {
     if (!inherits(cells_sf, "sf")) {
@@ -1400,9 +1446,11 @@ summarize_by_cell <- function(assigned_points_sf,
         # the per-cell vector onto the joined row order (cells with no
         # observations get NA).
         deff_attr   <- attr(out, "deff_applied")
+        icc_attr    <- attr(out, "icc")
         pre_join_id <- as.character(out[[id_col]])
 
         out <- dplyr::left_join(cells_slim, out, by = id_col)
+        if (!is.null(icc_attr)) attr(out, "icc") <- icc_attr
 
         if (isTRUE(area)) {
           # Planar areas in the cells' own (verified equal-area) CRS, as
@@ -1422,7 +1470,7 @@ summarize_by_cell <- function(assigned_points_sf,
           # Realigning $deff alone left $rbar in pre-join order and pre-join
           # length, so deff[i] and rbar[i] described different cells and the
           # identity deff = 1 + (n-1) * rbar no longer held row-wise.
-          for (fld in c("deff", "rbar")) {
+          for (fld in c("deff", "deff_rows", "rbar")) {
             v <- deff_attr[[fld]]
             if (!is.null(v) && length(v) == length(pre_join_id)) {
               lookup <- stats::setNames(v, pre_join_id)

@@ -37,7 +37,19 @@ response is unknown).  Default TRUE.}
 }
 \value{
 An sf object with POINT geometry, cleaned of rows carrying missing
-or non-finite values in the modelling columns or in the coordinates.  The CRS is projected
+or non-finite values in the modelling columns or in the coordinates.  What
+was removed is recorded on the attribute \code{"dropped"}, a list with
+\code{n} (rows dropped), \code{n_geometry} (how many of them for an
+empty or non-finite geometry), \code{which} (their positions in
+\code{data_sf}), \code{row_id} (their \code{..row_id} values when the
+layer carries that column, else \code{NULL}) and \code{reason} (one per
+dropped row: \code{"geometry"}, \code{"missing"} or
+\code{"non_finite"}, in that order of precedence when several apply).
+Every fit stores \code{n} as \code{$info$n_dropped}.  The record
+describes the rows this call returned and does not survive subsetting:
+\code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
+and a fit given such a subset with \code{.already_prepped = TRUE} reports
+\code{n_dropped = 0} rather than the parent layer's count.  The CRS is projected
 whenever one can be established.  A CRS-less layer is decided by the
 lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
 box fits the lon/lat envelope \emph{and} it spans more than one unit on
@@ -77,7 +89,8 @@ dat <- st_as_sf(
              pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+clean <- prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+attr(clean, "dropped")
 }
 \seealso{
 Other model fitting: 

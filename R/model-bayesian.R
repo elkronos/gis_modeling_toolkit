@@ -288,8 +288,14 @@
 #'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
 #'   which is not necessarily the one this function requested (several entries,
 #'   semicolon-separated, if brms resolved the axes differently); loo, looic,
-#'   convergence_ok,
-#'   convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
+#'   convergence_ok, convergence_diagnostics -- \code{n_divergent},
+#'   \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
+#'   \code{neff_failed}, the parameters that failed each check by name with
+#'   their values (empty when none failed), which is what makes a failed
+#'   check actionable; and n_dropped -- the rows
+#'   \code{prep_model_data()} removed for missing or non-finite values or a
+#'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+#'   The raw brmsfit is in \code{$engine}.
 #' @family model fitting
 #' @section Non-Gaussian responses:
 #' Nothing in this function is Gaussian-specific except its default.  The
@@ -472,6 +478,11 @@ fit_bayesian_spatial_model <- function(
       predictor_vars = predictor_vars, boundary = boundary, pointize = pointize
     )
   }
+  # Rows prep_model_data() removed on the way in, read from the record it
+  # leaves -- which a layer prepared by the caller may still carry.  0 when
+  # there is none, and when the record no longer describes this layer: a
+  # fold's subset inside cv_*() has neither, and cv_*() reports its own.
+  n_dropped <- as.integer(.get_row_record(dat_sf, "dropped")$n %||% 0L)
 
   # Require plain POINT: st_coordinates() on a multi-vertex MULTIPOINT
   # returns one row per vertex, which would silently misalign coordinates
@@ -880,6 +891,10 @@ fit_bayesian_spatial_model <- function(
         max(rhat_vals[is.finite(rhat_vals)]) else NA_real_
       convergence_diagnostics$max_rhat <- max_rhat
       bad_rhat <- names(rhat_vals)[which(rhat_vals > 1.05)]
+      # Every failing parameter by name, with its value -- the log line
+      # names five, and "max R-hat 1.09" is not actionable where
+      # "sdgp_gp..x..y has R-hat 1.09" is.  An empty named numeric when none.
+      convergence_diagnostics$rhat_failed <- rhat_vals[bad_rhat]
       if (length(bad_rhat) > 0L) {
         convergence_ok <- FALSE
         .log_warn(
@@ -905,6 +920,7 @@ fit_bayesian_spatial_model <- function(
         min(neff_vals[is.finite(neff_vals)]) else NA_real_
       convergence_diagnostics$min_neff_ratio <- min_neff
       low_neff <- names(neff_vals)[which(neff_vals < 0.1)]
+      convergence_diagnostics$neff_failed <- neff_vals[low_neff]
       if (length(low_neff) > 0L) {
         convergence_ok <- FALSE
         .log_warn(
@@ -998,6 +1014,7 @@ fit_bayesian_spatial_model <- function(
       gp_S                     = gp_spec$S,
       gp_lengthscale_bounds    = ls_bounds,
       convergence_ok           = convergence_ok,
+      n_dropped                = n_dropped,
       convergence_diagnostics  = convergence_diagnostics,
       predictor_scaling        = predictor_scaling
     )

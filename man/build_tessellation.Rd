@@ -73,7 +73,10 @@ dragging genuinely-outside points in. A summary built from \code{index}
 therefore counts only the points the tessellation actually covers.}
 \item{\code{boundary}}{The boundary used (possibly derived and/or reprojected).}
 \item{\code{method}}{The method actually used.}
-\item{\code{params}}{The parameters the tessellation was built with.}
+\item{\code{params}}{The parameters the tessellation was built with, plus
+\code{snapped}, the record of that nearest-cell repair: a list with \code{n},
+\code{which} (row positions in \code{points_sf}) and \code{distance} (how far
+outside every cell each sat, in CRS units).}
 }
 }
 \description{

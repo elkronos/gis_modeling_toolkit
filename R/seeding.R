@@ -35,7 +35,13 @@
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100.
 #' @param set_seed Optional integer RNG seed.
-#' @return An sf POINT object with seed_id and method columns.
+#' @return An sf POINT object with seed_id and method columns. With
+#'   `method = "kmeans"` it also carries `attr(, "kmeans")`, the run behind
+#'   the seeds: `cluster` (the `seed_id` each clustered cloud point was
+#'   assigned to), `rows` (those points' positions in the cloud, since rows
+#'   with unusable coordinates are dropped first), `size` (points per seed),
+#'   `withinss` and `tot_withinss` (the within-cluster sums of squares),
+#'   `iter` and `nstart`.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -173,6 +179,18 @@ get_voronoi_seeds <- function(boundary = NULL,
       if (cloud_is_ll && !identical(sf::st_crs(s), sf::st_crs(cloud))) {
         s <- sf::st_transform(s, sf::st_crs(cloud))
       }
+      # Which cloud points fed which seed, and how tight each cluster is:
+      # `cluster` is one seed_id per clustered cloud row (`rows` gives those
+      # rows' positions in the cloud, since unusable rows were dropped).
+      km_record <- list(
+        cluster      = as.integer(km$cluster),
+        rows         = which(!bad_xy),
+        size         = as.integer(km$size),
+        withinss     = as.numeric(km$withinss),
+        tot_withinss = as.numeric(km$tot.withinss),
+        iter         = as.integer(km$iter),
+        nstart       = as.integer(kmeans_nstart)
+      )
       s
     }
   )
@@ -184,6 +202,8 @@ get_voronoi_seeds <- function(boundary = NULL,
   # Where `n` came from, when it was a level-selection result rather than a
   # number; the count itself is nrow(out) (or fewer, see `n`).
   if (!is.null(n_from)) attr(out, "n_from") <- n_from
+  # The k-means run behind the seeds, on the kmeans path only.
+  if (identical(method, "kmeans")) attr(out, "kmeans") <- km_record
   out
 }
 

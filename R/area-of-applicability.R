@@ -434,6 +434,21 @@
   max(inside)
 }
 
+#' How many training DI values the threshold's fence set aside
+#'
+#' The same \code{Q3 + 1.5 * IQR} fence as \code{.aoa_threshold()}; the count
+#' above it is what the "outlier-removed" in the threshold's name refers to,
+#' and it used to be discarded.
+#'
+#' @keywords internal
+#' @noRd
+.aoa_fence_outliers <- function(di) {
+  d <- di[is.finite(di)]
+  if (length(d) == 0L) return(NA_integer_)
+  fence <- stats::quantile(d, 0.75, names = FALSE) + 1.5 * stats::IQR(d)
+  as.integer(sum(d > fence))
+}
+
 
 # -----------------------------------------------------------------------------
 # Exported
@@ -562,6 +577,14 @@
 #'       excluding \code{dropped_vars}.
 #'     \item \code{dropped_vars} -- predictors dropped for negligible
 #'       variance.
+#'     \item \code{scaling} -- a list with \code{center} and \code{scale},
+#'       each named by \code{predictor_vars}: the training means and standard
+#'       deviations the index is computed in, so a location's DI can be
+#'       traced to the predictor that put it outside.
+#'     \item \code{n_outliers} -- the number of training DI values above the
+#'       \code{Q3 + 1.5 * IQR} fence, which the default threshold rule sets
+#'       aside (the "outlier-removed" in its name); computed whether or not
+#'       \code{threshold} was supplied.
 #'     \item \code{n_train}, \code{n_new}, \code{n_inside},
 #'       \code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
 #'       \code{n_new} count the rows that survived the finite-value filter.
@@ -795,6 +818,14 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
       weights        = w,
       predictor_vars = used_vars,
       dropped_vars   = dropped,
+      # The space the index is computed in: each predictor's training centre
+      # and SD.  Without them a location's DI cannot be traced to the
+      # predictor that put it outside.
+      scaling        = list(center = sc$center[used_vars],
+                            scale  = sc$scale[used_vars]),
+      # Training DI values above the Q3 + 1.5 IQR fence: the ones the
+      # default threshold rule sets aside as outliers.
+      n_outliers     = .aoa_fence_outliers(train_DI),
       n_train        = nrow(Z_tr),
       n_new          = nrow(Z_nw),
       n_inside       = sum(inside, na.rm = TRUE),

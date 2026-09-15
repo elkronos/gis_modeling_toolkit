@@ -9,7 +9,8 @@ residual_morans_i(
   alternative = c("two.sided", "greater", "less"),
   weights = NULL,
   k = 8L,
-  null = c("auto", "randomisation", "residual")
+  null = c("auto", "randomisation", "residual"),
+  keep_weights = FALSE
 )
 }
 \arguments{
@@ -62,6 +63,14 @@ Both \code{"auto"} and \code{"residual"} also fall back to
 and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
 the result rather than assuming.
 See \strong{Which null, and when it is approximate} above.}
+
+\item{keep_weights}{Logical. Return the \eqn{n \times n} weight matrix in
+the result? Defaults to \code{FALSE}: the matrix dominates the object's
+size --- 50.3 KB of a 52.0 KB result at \eqn{n = 500} in its sparse form,
+and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
+while most uses read only the statistic and its moments, and
+\code{weights_summary} says what it was. Set \code{TRUE} when you need
+the matrix itself.}
 }
 \value{
 A list with components:
@@ -81,7 +90,35 @@ normal approximation.}
 \item{df}{Residual degrees of freedom behind the moments:
 \eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
 design matrix), \eqn{n - 1} for \code{"randomisation"}.}
+\item{weights}{The \eqn{n \times n} weight matrix the statistic was
+computed with --- the row-standardised k-nearest-neighbour matrix
+built here (sparse when \pkg{Matrix} is installed), or the
+supplied \code{weights} after the diagonal was zeroed --- and
+\code{NULL} unless \code{keep_weights = TRUE}.}
+\item{kurtosis}{The residual kurtosis \eqn{m_4 / m_2^2}, which the
+randomisation variance conditions on and which says how far the
+residuals sit from the Gaussian case the residual moments assume
+(3 for a normal sample).}
+\item{p}{The rank of the rebuilt design matrix behind the
+\code{"residual"} moments; \code{NA} under
+\code{"randomisation"}.}
+\item{exact}{Logical: \code{TRUE} when the moments are exact for
+these residuals (the residual null on OLS residuals of the response
+on the rebuilt design), \code{FALSE} when they are an approximation
+-- the residual null forced onto a non-OLS backend, or the
+randomisation null, whose exchangeable moments model residuals do
+not satisfy.}
+\item{weights_summary}{What the weight matrix was, present whether or
+not the matrix itself was kept: \code{n}, \code{storage} (its class),
+\code{neighbours} (the smallest and largest number of neighbours any
+row has --- \code{NA} for a dense matrix, where counting them would
+allocate a second one), \code{kept} (whether \code{weights} holds
+the matrix) and \code{desc}, the one line \code{print()} shows.}
 }
+The list is classed \code{"morans_i"} and has a \code{print()} method,
+so the console shows the statistic and its null rather than the
+\eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
+\code{$}, \code{[[} and \code{unlist()} are unaffected.
 Returns \code{NULL} with a warning if computation fails (e.g. fewer
 than 4 valid residuals).
 }

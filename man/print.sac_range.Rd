@@ -16,5 +16,8 @@
 }
 \description{
 Prints the effective range as a plain number, with the directional fit
-summarised beneath it when one is available.
+summarised beneath it when one is available.  A direction whose fit was
+unusable is labelled with why (\code{directional_status}) and the range
+its fit reported (\code{directional_fitted}) when the object carries
+them, and \code{unidentified} otherwise.
 }

@@ -53,8 +53,17 @@ A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 Model-specific metadata lives in \code{$info} (bandwidth, adaptive,
-kernel, AICc, and \code{bandwidth_is_fallback} -- \code{TRUE} when
-automatic selection failed and the arbitrary fallback was used).  The raw GWmodel result is in \code{$engine}.
+kernel, AICc, \code{bandwidth_is_fallback} -- \code{TRUE} when
+automatic selection failed and the arbitrary fallback was used --
+\code{condition_index}, \code{local_collinearity},
+\code{n_local_collinear}, \code{n_local_singular},
+\code{nonfinite_coef} -- a logical matrix, one row per observation and
+one column per term (\code{Intercept} first), \code{TRUE} where the
+local coefficient came back non-finite, so the count in
+\code{n_local_singular} can be placed -- and \code{n_dropped}: the rows
+\code{prep_model_data()} removed for missing or non-finite values or a
+bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+The raw GWmodel result is in \code{$engine}.
 }
 \description{
 Fits a GWR using GWmodel on an sf dataset with either adaptive or fixed

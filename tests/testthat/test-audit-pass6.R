@@ -171,7 +171,7 @@ test_that("cv_rf() conditions name cv_rf(), and the fold remapper names no inter
     suppressMessages(suppressWarnings(
       cv_spatial(d, "z", "w", fit_fn = .p6_lm_fit, folds = f, seed = 1))),
     level = logger::INFO)
-  expect_true(log_has(lines, "cross-validation: 1 fold entr"))
+  expect_true(log_has(lines, "cross-validation: the folds name 1 row ID"))
   expect_false(log_has(lines, "\\.remap_folds\\(\\)"))
   expect_false(log_has(lines, "\\.cv_run_folds\\(\\)"))
 })

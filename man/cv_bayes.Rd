@@ -92,9 +92,16 @@ and \code{CRPS}, which this function computes itself.}
 \value{
 A list with \code{overall}, \code{fold_metrics},
 \code{predictions}, \code{folds}, \code{n_folds_attempted},
-\code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
+\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
+\code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
+\code{predictive_coverage}.
 The two fold counts make a run where every fold failed visible in the
-return value rather than only in a warning.  \code{predictions} carries,
+return value rather than only in a warning, and \code{fold_status} (one
+row per fold: \code{fold}, \code{status}, \code{message}) keeps the
+reason each missing fold is missing -- the error text of a fold whose
+sampler failed included -- where a long run's console output would not;
+see \code{\link{cv_spatial}} for the five statuses and for
+\code{orphan_rows}.  \code{predictions} carries,
 beyond the columns its siblings share, \code{yhat_sd}: the posterior
 predictive standard deviation of each held-out row, from the same draws
 that give the coverage below (\code{NA} when

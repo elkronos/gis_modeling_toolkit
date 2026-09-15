@@ -36,7 +36,20 @@ uses.  \code{\link[=summarize_by_cell]{summarize_by_cell()}} applies the same me
 computes a density.  Ignored when \code{target_crs} is given.}
 }
 \value{
-x, potentially with a new projected CRS.  CRS-less input
+x, potentially with a new projected CRS.  When a projection was
+chosen here (lon/lat input, no \code{target_crs}) the result carries
+\code{attr(x, "crs_choice")}: a data.frame with one row per projection
+considered -- \code{name}, \code{crs} (its definition), the measured
+worst-case \code{distance_error} (relative, over sampled pairs;
+\code{NA} where it could not be measured) and \code{chosen} -- so the
+figure the log line quotes for the winner is recoverable for every
+candidate, and is measured for the single candidate on the paths where
+no comparison runs (a UTM zone on a local extent, the equal-area
+projection chosen for a layer straddling the antimeridian).  It is
+\code{NULL} exactly when no local projection was chosen here: input
+that already carried a projected CRS, a \code{target_crs} you supplied,
+or an extent no local projection fits, which falls back to Web Mercator
+or Equal Earth.  CRS-less input
 additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
 the lon/lat heuristic fired, \code{"none"} when it declined.  That
 attribute is also read on the way IN — an object already carrying
@@ -97,8 +110,10 @@ pts_ll <- st_as_sf(
   data.frame(lon = c(9.1, 9.2), lat = c(48.7, 48.8)),
   coords = c("lon", "lat"), crs = 4326
 )
-# A local extent gets the containing UTM zone.
+# A local extent gets the containing UTM zone; the zone's measured
+# distance error over the extent travels with the result.
 st_crs(ensure_projected(pts_ll))$epsg  # 32632
+attr(ensure_projected(pts_ll), "crs_choice")
 
 # A continental extent is scored against the zone and may get an equal-area
 # projection instead; the choice and both error figures are LOGGED, not

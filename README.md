@@ -268,7 +268,11 @@ cv$fold_metrics   # per-fold breakdown
 
 # --- Residual spatial autocorrelation diagnostic ----------------------------
 residual_morans_i(fit)
-#> $observed [1] 0.7023314   $z [1] 36.3353   $p_value [1] 4.48e-289
+#> Residual Moran's I = 0.7023   (E[I] = -0.0017, sd = 0.0194)
+#>   z = 36.335, p = 4.485e-289
+#>   null: randomisation moments, approximate for these residuals; n = 600, df = 599
+#>   residual kurtosis 3.056 (3 = Gaussian)
+#>   weights: 600 x 600 dgCMatrix, 8 neighbour(s) per row
 ```
 
 A large positive residual Moran's I says the model has left spatial structure

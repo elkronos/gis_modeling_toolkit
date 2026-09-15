@@ -46,7 +46,15 @@ join (with a warning), so re-assigning an already-assigned layer replaces
 the old IDs rather than failing. If \emph{no} feature falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
-places --- a CRS that could only be stamped, not reprojected.
+places --- a CRS that could only be stamped, not reprojected. The
+attribute \code{"ties"} records how many features matched more than one
+polygon and had the \code{tie_break} rule decide for them: a list with \code{n},
+\code{which} (their row positions in \code{features_sf}) and \code{rule}. A large \code{n}
+means the polygon layer overlaps, and per-cell counts built from the
+result depend on the rule. The record describes the rows this call
+returned and does not survive subsetting: \code{joined[i, ]} is a plain layer
+with no \code{"ties"} attribute, rather than one reporting the parent's
+count against row positions that no longer resolve.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.

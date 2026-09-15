@@ -138,13 +138,20 @@ when \code{conf_level} is given, \code{cell_weight}, and \code{cell_area} /
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} for \code{"kish"},
-\code{deff}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"}, and \code{deff} alone for a
-fixed number. When \code{cells_sf} is supplied, \emph{every} per-cell vector in that
-attribute (\code{deff} and \code{rbar} alike) is realigned to the joined row order,
-so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
+\code{deff}/\code{deff_rows}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"} (\code{deff} is
+the design effect at the primary variable's non-missing count per cell,
+\code{deff_rows} at the cell's row count --- the vector the log line
+summarises as a median and a max), and \code{deff} alone for a fixed number.
+When \code{cells_sf} is supplied, \emph{every} per-cell vector in that attribute
+(\code{deff}, \code{deff_rows} and \code{rbar} alike) is realigned to the joined row
+order, so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
 observations carry \code{NA}. No attribute is attached when no correction was
 applied --- \code{deff = 1}, a \code{deff = "kish"} ICC of 0, or a \code{"variogram"}
-request that could not be fitted.
+request that could not be fitted. A \code{deff = "kish"} request always
+records the ICCs it estimated on an attribute \code{"icc"} (\code{resp} and
+\code{pred}, \code{NA} for a variable type with no numeric column), whether or not
+they were positive enough to apply, so a result with no \code{"deff_applied"}
+still says what the ICC came out as.
 
 The ID column keeps its input type when \code{cells_sf}'s ID column and the
 summarised IDs already have the same class. When the classes differ, both

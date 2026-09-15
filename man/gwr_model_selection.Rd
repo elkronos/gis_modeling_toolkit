@@ -70,6 +70,13 @@ An object of class \code{gwr_model_selection}, a list with:
 \code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
 \code{criterion} (label for the criterion actually read, noting when it
 had to be located positionally);
+\code{criterion_by_name} (logical: whether that column was found by
+its name rather than by the documented position),
+\code{criterion_column} (the column it was read from) and
+\code{criterion_verified} (logical: \code{FALSE} exactly when the
+column was read positionally from a table that did not have the four
+documented columns, which is the case the log calls unverified -- gate
+a script on this rather than on the label);
 \code{response_var} and \code{candidate_vars} (the response and the full
 candidate set the sweep ran over, both echoed by \code{print()});
 \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and

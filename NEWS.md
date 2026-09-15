@@ -2,6 +2,124 @@
 
 ## New features
 
+* Every `cv_*()` result now says what became of each fold.  `fold_status`
+  is a data.frame with one row per fold supplied --- `fold`, `status`,
+  `message` --- where `status` is `"ok"`, `"error"` (the fit or its
+  `predict()` threw; `message` is the error text), `"skipped"` (nothing
+  scorable: too few matched rows, a prediction of the wrong length, no
+  finite observed/predicted pair), `"dropped"` (an empty test set or fewer
+  than two training rows once incomplete rows were removed, so the fold
+  never reached the fitter) or `"worker_error"` (a parallel worker died).
+  The per-fold error text was already collected and thrown away except when
+  *every* fold failed, so a partial failure --- "3 of 5 folds produced
+  predictions" --- left its causes only in console scrollback, which a
+  script, a `callr` job or a knitted document does not keep.  This is worth
+  most where a run is expensive: a `cv_bayes()` fold whose sampler failed
+  now names the reason in the returned object.  Beside it, `orphan_rows`
+  holds the row IDs no fold names (they enter no training set and are never
+  scored --- non-empty only when the folds were built on a different or
+  subsetted layer), `n_unknown_ids` counts fold entries naming rows the data
+  does not have, and `n_dropped` the rows `prep_model_data()` removed before
+  any fold was fitted.  The four together account for every row and every
+  fold, so `n_folds_attempted - n_folds_succeeded` never has to be explained
+  from the log.
+
+* `prep_model_data()` records what it removed.  `attr(x, "dropped")` is a
+  list with `n`, `n_geometry`, `which` (positions in the input), `row_id`
+  (when the layer carries `..row_id`) and `reason`, one of `"geometry"`,
+  `"missing"` or `"non_finite"` per dropped row.  The three masks behind
+  that decision were already computed and collapsed into a log line; the row
+  identities reached nothing, and through the eight-plus internal call sites
+  even the count was invisible, so a fit's `$n` was the post-cleaning row
+  count with nothing saying how many rows were lost or why.  Every fit now
+  carries the count as `$info$n_dropped`, and every `cv_*()` result as
+  `n_dropped`.  Silently losing a third of the rows is a classic cause of a
+  suspiciously good score.
+
+* `make_folds(method = "block_kfold")` returns the block design it built the
+  folds from.  `assignment` gains a third column, `block_id`; `params` gains
+  `blocks` (an `sf` layer of the block polygons in the CRS the folds were
+  built in, numbered to match), `block_sizes` (points per block, indexed by
+  `block_id`, so a block kept empty by `drop_empty_blocks = FALSE` shows as
+  a zero) and `fold_blocks` (which blocks were packed into each fold).
+  `blocks$source_row` is the row each block came from in the layer it
+  originated in --- a cell's index in the full `grid_nx` by `grid_ny` grid,
+  or the row of the `blocks` argument --- because dropping the empty blocks
+  renumbers the rest: nine supplied blocks of which three are empty come
+  back as six rows numbered 1 to 6, and a join by row position would
+  mis-attribute every block after the first gap.
+  `blocks[params$blocks$source_row, ]` recovers them with their own columns
+  and in their own order.  The folds account for every block exactly once,
+  empty ones included, so a fold's territory on the map is all of its blocks
+  rather than only those holding points; and `blocks_used` is the number of
+  blocks the design has, which equals `nrow(params$blocks)` and
+  `length(params$block_sizes)`, with `sum(params$block_sizes > 0)` giving how
+  many of them hold points.  The
+  grid **is** the design of a blocked cross-validation: without it a user
+  could not draw the blocks over their data, see that 40 of 64 blocks were
+  empty, or tell whether a fold is one contiguous region or several.
+  `plot_folds()` now draws those outlines under the points when the folds
+  carry them, and takes `blocks = FALSE` to suppress them.
+
+* `estimate_sac_range()`'s returns are uniform.  The four directional
+  variograms and their fits run unconditionally on every call, and the
+  rejected-range paths used to discard them --- precisely where a user most
+  needs to know whether the field is anisotropic.  Every classed return now
+  carries `directional`, `anisotropy` and `anisotropy_used`, and three new
+  attributes report the sweep rather than collapsing it: `directional_status`
+  (per azimuth, why that direction is `NA` in `directional` ---
+  `"ok"`, `"over_cutoff"`, `"not_converged"` or `"no_fit"`, which were
+  indistinguishable before), `directional_fitted` (the range each direction's
+  fit reported whether or not it was usable, so a refused directional range
+  --- the most informative number in an anisotropic failure --- stays
+  recoverable) and `directional_fits` (each direction's empirical variogram
+  and fitted model).  `print()` names the reason and the refused value for a
+  direction it cannot use.
+
+* A roster of quantities the package already computed and dropped are now
+  returned.  `summarize_by_cell()` attaches the Kish ICCs it estimated as
+  `attr(, "icc")` whether or not either was large enough to apply --- the
+  case with no `"deff_applied"` is exactly the one where a user wants to
+  know what the ICC came out as --- and the `"variogram"` path adds
+  `deff_rows`, the per-cell design effect at the cell's row count that the
+  log line reduced to a median and a max.  `assign_features_to_polygons()`
+  reports the features that matched more than one polygon and had the
+  `tie_break` rule decide for them, as `attr(, "ties")` and a log line; a
+  tie-break firing on a third of the features means the polygon layer
+  overlaps and every cell count built from it is suspect.  `ensure_projected()`
+  attaches `crs_choice`, the projections it considered with each one's
+  measured worst-case distance error.  Every path that picks a local
+  projection reports what it picked, the two that compare nothing included:
+  a UTM zone on a local extent, and the equal-area projection chosen for a
+  layer straddling the antimeridian.
+  `residual_morans_i()` returns the weight matrix it used, the residual
+  `kurtosis` the randomisation variance conditions on, the design rank `p`
+  behind the residual moments, and `exact`, whether those moments are exact
+  for these residuals.  Because that weight matrix is \eqn{n \times n}, the
+  result is classed `"morans_i"` and prints through a `print()` method that
+  shows the statistic, its null and a one-line description of the weights;
+  `[` drops the class, and `$`, `[[` and `unlist()` read the result exactly
+  as for a plain list.  `fit_gwr_model()` keeps `info$nonfinite_coef`, the
+  per-row, per-term mask behind `n_local_singular`, and
+  `fit_bayesian_spatial_model()` keeps `rhat_failed` / `neff_failed`, the
+  parameters that failed each convergence check by name --- "max R-hat 1.09"
+  is not actionable where "`sdgp_gp..x..y` has R-hat 1.09" is.
+  `determine_optimal_levels()`'s model-aware diagnostics gain `knee_k` and
+  `failed_k` (whose interpolated WSS entries are not measurements).
+  `build_tessellation()` records the points whose cell assignment was
+  repaired by nearest-cell snapping, and how far outside each sat, as
+  `params$snapped` --- a comment had long said it should.
+  `area_of_applicability()` returns the `scaling` (per-predictor training
+  centre and SD) the dissimilarity index is computed in, without which a
+  location's DI cannot be traced to the predictor that put it outside, and
+  `n_outliers`, the training DI values the threshold's fence set aside.
+  `get_voronoi_seeds(method = "kmeans")` returns the clustering as
+  `attr(, "kmeans")` --- which cloud points fed which seed, the cluster
+  sizes and the within-cluster sums of squares.  `gwr_model_selection()`
+  reports `criterion_by_name`, `criterion_column` and `criterion_verified`,
+  so a script can gate on the case its log calls "unverified" instead of
+  reading the label.
+
 * `estimate_sac_range()`'s result gains a `plot()` method.
   `plot(estimate_sac_range(pts, "z"))` draws the empirical variogram, with
   the fitted model and the effective range overlaid where a range was
@@ -410,6 +528,58 @@
   The estimate's own log lines stay off the console, and the check is
   skipped (with an INFO log line saying so) when `gstat` is not installed or
   there are fewer than 30 points.
+* The records `prep_model_data()` and `assign_features_to_polygons()` leave on
+  a layer no longer outlive the rows they describe.  `[` on an `sf` object
+  copies attributes through unchanged, so a subset carried its parent's
+  numbers: after `prep_model_data()` dropped 3 of 40 rows,
+  `attr(pre[1:20, ], "dropped")$n` was still 3, with `which` naming rows the
+  subset does not contain, and a 300-row `assign_features_to_polygons()`
+  result subset to its first 10 rows still reported 81 ties against positions
+  running to 300.  A fit built on such a subset with `.already_prepped = TRUE`
+  --- which is what every per-fold fit inside `cv_gwr()`, `cv_bayes()` and
+  `cv_rf()` is --- reported `info$n_dropped = 3` for 20 rows nothing had been
+  dropped from.  A layer carrying a record now has class `spatialkit_rows`
+  ahead of `sf`, and its `[` method hands back a plain layer with the record
+  removed, so a record is read from the layer it was computed for or not at
+  all.  Each record also carries `n_rows`, the row count it was built against,
+  and everything that reads one refuses a record whose stamp no longer matches
+  the layer in front of it --- which covers the paths that reach `[` by
+  another route, such as a layer that has been through `sf::st_transform()`.
+  Fits and `cv_*()` results built from an unmodified prepared layer report the
+  same `n_dropped` as before; a fit handed a subset now reports `0`.
+* `residual_morans_i()` no longer carries the weight matrix by default.  The
+  matrix is n by n, and it dominated the result: 50.3 KB of a 52.4 KB object
+  at n = 500 in its sparse form, 112.7 KB at n = 120 when the dense fallback
+  is taken (it needs both **FNN** and **Matrix** to go sparse, so a
+  no-Suggests install always does), and 191 MB at the n = 5000 that fallback
+  is capped at --- against the 1.7 KB everything else occupies.  Scoring a
+  list of fits held one matrix per fit.  `weights` is now `NULL` unless
+  `keep_weights = TRUE`, and a new `weights_summary` component says what the
+  matrix was either way: `n`, `storage` (its class), `neighbours` (the
+  smallest and largest number of neighbours any row has, `NA` for a dense
+  matrix, where counting them would allocate a second one), `kept` and
+  `desc`, the line `print()` shows.  Every other component is unchanged, and
+  `print()` now says the matrix was not retained rather than leaving a `NULL`
+  unexplained.  Code that reads `mi$weights` needs `keep_weights = TRUE`.
+* `estimate_sac_range()` no longer carries the four directional variograms by
+  default.  The directional sweep fits one variogram per azimuth, and
+  attaching all four as `directional_fits` made up 42.1 KB of a 59.3 KB
+  estimate at n = 400 --- and, because `make_folds(auto_range = TRUE)` parks
+  the estimate in `params`, took a folds object from 52.4 KB to 94.6 KB.
+  Nothing in the package reads them: `plot()` draws the effective variogram
+  from the `variogram` attribute, and what the sweep found is in
+  `directional`, `directional_fitted`, `directional_status` and
+  `anisotropy`, all of which are attached either way.  `directional_fits` is
+  now `NULL` unless `keep_directional_fits = TRUE`; the estimate itself and
+  every other attribute are unchanged.
+* `n_unknown_ids` counts rows, not mentions of them.  A row the folds name but
+  the data does not have appears in every fold --- once as a test row, once in
+  each other fold's training set --- and the count summed those per-fold
+  hits, so five absent rows read as 15, 20 or 50 at k = 3, 4 or 10.  That is
+  not a number that can be compared with `n_dropped` or with the size of the
+  data, which is what it is there for.  It is now the number of distinct row
+  IDs the folds name that the data does not have, and it no longer moves with
+  `k`.  The accompanying log line says the same thing.
 
 ## Documentation
 
@@ -477,10 +647,11 @@ Throughout, *raises a warning* means a genuine R `warning()` — one
 
 ## Breaking changes
 
-### Statistical corrections that change results (third audit pass)
+### Corrections that change results
 
-Each item below was measured, and the measurement is quoted so you can judge
-whether it affects an analysis you have already run.
+Each item below was measured and independently reproduced before it was
+touched; the figures quoted are from those reproductions, so you can judge
+whether an item affects an analysis you have already run.
 
 * **`residual_morans_i()` no longer puts weight on a point's own residual.**
   `FNN::get.knn()` reports a point's OWN index among its neighbours whenever
@@ -660,13 +831,6 @@ whether it affects an analysis you have already run.
   simplified the length-1 result to a vector, making the neighbour index a
   1 x n matrix and every row after the first out of bounds.
 
-### Fourth audit pass (adversarial): corrections that change results
-
-Three reviewers were set the task of making the package fail or silently
-misbehave on valid input, with their own reproductions. Every finding below
-was reproduced here before it was touched; the figures quoted are from those
-reproductions.
-
 * **`summarize_by_cell(deff = "kish")` under-estimated the predictor ICC by
   about a factor of `m`.** The pooled one-way ANOVA grouped the `m` z-scored
   predictor columns under the same cell label, so independent per-column cell
@@ -754,13 +918,6 @@ reproductions.
   `assign_features_to_polygons()`. Three deliberate methodological cautions
   (`include_coords = TRUE`, `random_kfold` feature selection, non-standardised
   Moran weights) stay logged and their documentation now says so.
-
-### Fifth audit pass (adversarial): corrections that change results
-
-Seven reviewers were set the same task as the fourth pass, one per area of the
-package, each with their own reproductions. Every finding below was reproduced
-here before it was touched, and the figures quoted are from those
-reproductions.
 
 * **`predict()` on a Bayesian GP fit depended on which other rows shared the
   call.** brms 2.x stores `Xgp`, `dmax` and `cmeans` in a fit's GP basis but
@@ -917,14 +1074,6 @@ reproductions.
   was a length in 3-D (413.6 against 136.8 for the same stations) while the
   block grid, the buffered-LOO buffer, NNDM's neighbour distances and
   `summarize_by_cell()` all work in 2-D map distance.
-
-### Sixth audit pass (adversarial): corrections that change results
-
-Eight reviewers, each with a lens the first five passes had not used —
-differential testing against reference implementations, invariance under
-rotation, translation and row order, mutation testing of the suite, and a
-CRAN-policy read. Every finding below was reproduced here before it was
-touched, and the figures quoted are from those reproductions.
 
 * **`determine_optimal_levels()` returns the elbow first.** Under the
   geometric criterion — the default, and the fallback every model-aware call
@@ -1145,9 +1294,9 @@ touched, and the figures quoted are from those reproductions.
   offset triggers the switch, since `cos(lat)` shrinks the distance from the
   central meridian and a tall narrow north-south extent is UTM's design case.
   (Which equal-area projection is no longer decided by latitude band — see
-  *The projection for a wide extent is chosen by measurement* under the fifth
-  audit pass below, which also replaced the EPSG:3857 fallback for wide
-  bounding boxes with antimeridian detection.) Pass `target_crs` to
+  *The projection for a wide extent is chosen by measurement* below, which
+  also replaced the EPSG:3857 fallback for wide bounding boxes with
+  antimeridian detection.) Pass `target_crs` to
   override.
 
 * Core counts follow the session's `mc.cores` opt-in, and are capped.
@@ -1159,7 +1308,7 @@ touched, and the figures quoted are from those reproductions.
   option when it is set; and every worker count, explicit or not, is capped at
   the machine's core count (with a message) and at two under `R CMD check`.
 
-### Fifth audit pass: guards, messages and documentation
+### Guards, messages and stricter input handling
 
 * `prep_model_data()` now drops rows whose geometry is empty or whose
   coordinates are not finite, and counts them in its existing log line.
@@ -1259,8 +1408,8 @@ touched, and the figures quoted are from those reproductions.
   tessellation itself has none.
 
 * Documentation corrected where it did not match behaviour: `ensure_projected()`
-  states how it chooses a projection for a wide extent (by centroid latitude at
-  the time; by measured distortion since the fifth audit pass below) and that
+  states how it chooses a projection for a wide extent (by centroid latitude
+  when that entry was written, by measured distortion in this release) and that
   the choice is announced rather than silent;
   `.looks_like_lonlat()`'s two tests are a disjunction and the extent test
   decides first, so a small planar survey inside the lon/lat envelope IS taken
@@ -1270,8 +1419,6 @@ touched, and the figures quoted are from those reproductions.
   errors are for (the grand mean, where measured coverage is 0.95, not the
   cell's own mean, where the naive SE is the better estimate) and that the
   variogram path applies one correlation function to every column.
-
-### Sixth audit pass: guards, messages and documentation
 
 * **A misspelt `newdata` is an error, not an in-sample answer.**
   `model_metrics()`, `evaluate_insample()` and `compare_models()` forward `...`
@@ -1341,11 +1488,6 @@ touched, and the figures quoted are from those reproductions.
   "entries removed", so a user who passed a project environment lost
   unrelated objects. Cache keys now carry a `spatialkit_grid::` prefix and
   nothing else is touched.
-
-### Sixth audit pass: the Low list
-
-The reviewers' Low-severity notes, handled after the headline findings. Two
-change a number; the rest are guards, conveniences and documentation.
 
 * `summarize_by_cell(deff = "variogram")` now uses **every** structured
   component of a nested variogram model, each weighted by its partial sill,

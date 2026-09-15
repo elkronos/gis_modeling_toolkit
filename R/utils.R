@@ -554,3 +554,98 @@
   d[rep_len(lon1, n) == rep_len(lon2, n) & rep_len(lat1, n) == rep_len(lat2, n)] <- 0
   d
 }
+
+
+# ---------------------------------------------------------------------------
+# Row-indexed record attributes
+# ---------------------------------------------------------------------------
+
+# Two functions hand back a layer with a record of what happened to its rows:
+# prep_model_data() records the rows it dropped, assign_features_to_polygons()
+# records the features that matched more than one polygon and had the tie-break
+# rule decide for them.  Each record describes the rows the layer had when it
+# was built -- and `[.sf` copies attributes through verbatim, so a subset of
+# such a layer used to carry, and report, its parent's numbers: after
+# prep_model_data() dropped 3 of 40 rows, `attr(pre[1:20, ], "dropped")$n` was
+# still 3 with `which` pointing at rows the subset does not contain, and a fit
+# built on that subset with `.already_prepped = TRUE` reported
+# `info$n_dropped = 3` for 20 rows nothing had been dropped from.
+#
+# A layer carrying a record is therefore classed, and the `[` method below
+# removes the record rather than let a stale one be read as current.  The
+# record is stamped with the row count it was computed for as well, because a
+# few paths bypass `[`: sf::st_transform() rebuilds the class vector with "sf"
+# first, which takes dispatch away from the method.  Everything that reads a
+# record goes through .get_row_record(), which refuses one whose stamp no
+# longer matches the layer, so a number this package reports is never taken
+# from a record that has stopped describing the rows in front of it.
+
+# Registered with S4 so that a classed layer still satisfies dispatch written
+# for "sf": methods::as(x, "Spatial") -- which .to_sp() calls on its way into
+# GWmodel -- and terra::vect() and friends look the class up in the S4 table,
+# and an unregistered class ahead of "sf" fails them with "no method or
+# default for coercing". Registering only the chain up to "sf" is deliberate:
+# sf itself registers c("sf", "data.frame"), and naming "data.frame" here as
+# well is rejected as inconsistent with that.
+setOldClass(c("spatialkit_rows", "sf"))
+
+.row_record_attrs <- c("dropped", "ties")
+
+# Attach `value` as the `which` record of `x`, stamped and classed.
+.set_row_record <- function(x, which, value) {
+  value$n_rows <- as.integer(nrow(x))
+  attr(x, which) <- value
+  if (!inherits(x, "spatialkit_rows"))
+    class(x) <- c("spatialkit_rows", class(x))
+  x
+}
+
+# Read the `which` record of `x`, or NULL when there is none and when the one
+# there is describes a different set of rows.  An unstamped record is one a
+# caller built by hand or one from an object made by an older version; it is
+# returned as given rather than second-guessed.
+.get_row_record <- function(x, which) {
+  rec <- attr(x, which, exact = TRUE)
+  if (is.null(rec) || !is.list(rec)) return(NULL)
+  if (is.null(rec$n_rows)) return(rec)
+  if (!identical(as.integer(rec$n_rows), as.integer(nrow(x)))) return(NULL)
+  rec
+}
+
+
+#' Subset a layer that carries a row record
+#'
+#' \code{\link{prep_model_data}()} and
+#' \code{\link{assign_features_to_polygons}()} return a layer with an
+#' attribute recording what happened to its rows --- \code{"dropped"} and
+#' \code{"ties"} respectively.  Those records describe the rows the layer was
+#' built with, and \code{[} on an \code{sf} object copies attributes through
+#' unchanged, which would leave a subset reporting its parent's numbers with
+#' row positions that no longer resolve.  Subsetting therefore returns a plain
+#' layer with the record removed; read the record from the layer the function
+#' returned, before subsetting it.
+#'
+#' @param x A layer returned by \code{\link{prep_model_data}()} or
+#'   \code{\link{assign_features_to_polygons}()}.
+#' @param ... Passed to the underlying \code{sf} or data frame method.
+#' @return The subset, without the row records and without this class.  A
+#'   subset that is not a data frame (a single column taken with
+#'   \code{drop = TRUE}) is returned unchanged.
+#' @examples
+#' library(sf)
+#' dat <- st_as_sf(
+#'   data.frame(x = 1:5, y = 5:1,
+#'              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' clean <- prep_model_data(dat, "resp", "pred")
+#' attr(clean, "dropped")$n          # 2
+#' attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
+#' @export
+`[.spatialkit_rows` <- function(x, ...) {
+  y <- NextMethod()
+  if (!is.data.frame(y)) return(y)
+  for (nm in .row_record_attrs) attr(y, nm) <- NULL
+  class(y) <- setdiff(class(y), "spatialkit_rows")
+  y
+}

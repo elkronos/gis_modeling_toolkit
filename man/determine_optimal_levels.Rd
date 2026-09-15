@@ -67,8 +67,11 @@ neighbours; under the model-aware criteria the candidates in rank order.
 attached with per-k Moran's I values (\code{moran_i}) and their
 standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
 the relative between-restart spread at each \code{k} (\code{wss_spread}),
-the number of rising steps on it (\code{wss_bumps}) and the restart
-budget (\code{nstart}) — except when the model-aware path
+the number of rising steps on it (\code{wss_bumps}), the restart
+budget (\code{nstart}), the geometric elbow the evaluated
+neighbourhood was drawn around (\code{knee_k}) and the \code{k} at which
+k-means failed (\code{failed_k}; their \code{wss} entries are
+interpolated from the neighbours, not measured) — except when the model-aware path
 itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), in
 which case no diagnostics are available and the attribute is absent. Both

@@ -56,7 +56,13 @@ cloud is projected before clustering.}
 \item{set_seed}{Optional integer RNG seed.}
 }
 \value{
-An sf POINT object with seed_id and method columns.
+An sf POINT object with seed_id and method columns. With
+\code{method = "kmeans"} it also carries \code{attr(, "kmeans")}, the run behind
+the seeds: \code{cluster} (the \code{seed_id} each clustered cloud point was
+assigned to), \code{rows} (those points' positions in the cloud, since rows
+with unusable coordinates are dropped first), \code{size} (points per seed),
+\code{withinss} and \code{tot_withinss} (the within-cluster sums of squares),
+\code{iter} and \code{nstart}.
 }
 \description{
 Creates an sf POINT layer of "seed" locations. Multiple strategies are

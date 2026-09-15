@@ -96,15 +96,38 @@ own metrics} below.  Default \code{NULL}: the built-in metrics only.}
 }
 \value{
 A list with \code{overall}, \code{fold_metrics}, \code{predictions},
-\code{folds}, and the two fold counts \code{n_folds_attempted} and
-\code{n_folds_succeeded}.  The counts are reported deliberately: a
+\code{folds}, the two fold counts \code{n_folds_attempted} and
+\code{n_folds_succeeded}, and four elements that say what happened to
+the difference between them and to the rows: \code{fold_status},
+\code{orphan_rows}, \code{n_unknown_ids} and \code{n_dropped}.  The
+counts are reported deliberately: a
 \code{fit_fn} that fails on every fold otherwise looks like a successful
 run that happened to score \code{NA}, so compare them before trusting
-\code{overall}.  The \code{fold} column of \code{fold_metrics} and
-\code{predictions} carries the fold's index in the \code{folds} object
-that was supplied, so it lines up with
-\code{make_folds()$assignment$fold} even when some folds were unusable
-and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
+\code{overall}.  \code{fold_status} is a data.frame with one row per
+fold supplied -- \code{fold}, \code{status} and \code{message} -- where
+\code{status} is \code{"ok"}; \code{"error"} (the fit or its
+\code{predict()} threw; \code{message} is the error text);
+\code{"skipped"} (nothing scorable: too few matched rows, a prediction
+of the wrong length, or no finite observed/predicted pair);
+\code{"dropped"} (an empty test set, or fewer than two training rows,
+once incomplete rows were removed, so the fold never reached the fitter);
+or \code{"worker_error"} (a parallel worker died).  Every fold missing
+from \code{fold_metrics} has its reason there, which matters most when
+the console output of a long run is gone.  \code{orphan_rows} holds the
+\code{..row_id}s of rows in the data that no fold names (they enter no
+training set and are never scored; non-empty only when the folds were
+built on a different or subsetted layer), and \code{n_unknown_ids}
+counts the distinct row IDs the folds name that the data does not have
+--- each such row is named by every fold, once as a test row and once in
+each other fold's training set, and this counts the row, not the
+mentions (expected when
+rows were removed for missing values -- \code{n_dropped} is how many
+rows \code{prep_model_data()} removed for missing or non-finite values
+or a bad geometry before any fold was fitted).  The \code{fold} column of
+\code{fold_metrics}, \code{predictions} and \code{fold_status} carries
+the fold's index in the \code{folds} object that was supplied, so it
+lines up with \code{make_folds()$assignment$fold} even when some folds
+were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
 out-of-sample predictions come from \code{k} separately fitted models and
 have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
@@ -224,8 +247,10 @@ registerS3method("predict", "lm_fit", predict.lm_fit)
 
 cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 cv$overall
-# Compare these before trusting the metrics above.
+# Compare these before trusting the metrics above; fold_status says why
+# any fold is missing from fold_metrics.
 c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+cv$fold_status
 
 # 3. A metric of your own beside the built-in ones: per fold and pooled.
 med_ae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))

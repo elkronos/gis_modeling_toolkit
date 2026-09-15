@@ -461,8 +461,11 @@
 #'   attached with per-k Moran's I values (\code{moran_i}) and their
 #'   standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
 #'   the relative between-restart spread at each \code{k} (\code{wss_spread}),
-#'   the number of rising steps on it (\code{wss_bumps}) and the restart
-#'   budget (\code{nstart}) — except when the model-aware path
+#'   the number of rising steps on it (\code{wss_bumps}), the restart
+#'   budget (\code{nstart}), the geometric elbow the evaluated
+#'   neighbourhood was drawn around (\code{knee_k}) and the \code{k} at which
+#'   k-means failed (\code{failed_k}; their \code{wss} entries are
+#'   interpolated from the neighbours, not measured) — except when the model-aware path
 #'   itself falls back to the geometric result (no viable k in the elbow
 #'   neighbourhood, or Moran's I could not be computed for any candidate), in
 #'   which case no diagnostics are available and the attribute is absent. Both
@@ -789,6 +792,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                       wss = wss[1:k_max],
                                       wss_spread = wss_spread[1:k_max],
                                       wss_bumps = wss_bumps, nstart = nstart,
+                                      knee_k = knee_k, failed_k = failed_k,
                                       eval_ks = eval_ks)
     return(.with_split(out))
   }
@@ -829,6 +833,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     wss_eval = wss_eval[1:k_max],
     wss_spread = wss_spread[1:k_max],
     wss_bumps = wss_bumps, nstart = nstart,
+    # The geometric elbow the neighbourhood was drawn around, and the k at
+    # which k-means failed and whose WSS entries are interpolated -- those
+    # values on the curve are not measurements.
+    knee_k = knee_k, failed_k = failed_k,
     combined_rank = stats::setNames(combined_rank, eval_ks),
     eval_ks = eval_ks,
     criterion = "combined"

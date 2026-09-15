@@ -143,7 +143,7 @@
 
 #' @importFrom stats complete.cases dist fitted kmeans lm.fit median pnorm
 #' @importFrom stats predict quantile reformulate residuals sd setNames
-#' @importFrom methods as is
+#' @importFrom methods as is setOldClass
 #' @importFrom utils head modifyList
 #' @importFrom dplyr .data
 NULL
