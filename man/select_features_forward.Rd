@@ -88,9 +88,11 @@ inference" section of \code{\link{determine_optimal_levels}} for the
 trade: coverage for half the sample.}
 }
 \value{
-A list with \code{selected} (the chosen predictors, in the order
-they were added), \code{score}, \code{score_holdout}, \code{history},
-\code{params} and \code{split}.
+A list of class \code{"feature_selection"} (so that
+\code{\link{plot.feature_selection}()} draws the selection path) with
+\code{selected} (the chosen predictors, in the order they were added),
+\code{score}, \code{score_holdout}, \code{history}, \code{params} and
+\code{split}.
 \code{score} is the winning set's cross-validated \code{metric} at the
 final step: the \strong{selection-internal} optimum, optimistically
 biased because it was chosen as the best of many (see the section above),

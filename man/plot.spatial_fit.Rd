@@ -4,7 +4,12 @@
 \alias{plot.spatial_fit}
 \title{Plot a fitted spatial model}
 \usage{
-\method{plot}{spatial_fit}(x, type = c("residuals", "observed_predicted", "variogram"), ...)
+\method{plot}{spatial_fit}(
+  x,
+  type = c("residuals", "observed_predicted", "variogram"),
+  response = TRUE,
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{spatial_fit}.}
@@ -17,7 +22,18 @@ the autocorrelation.}
 \item{\code{"observed_predicted"}}{Observed against fitted, with a 1:1
 reference line.}
 \item{\code{"variogram"}}{Empirical variogram of the residuals with the
-fitted model overlaid, so the fit can be judged rather than trusted.
+fitted model overlaid, so the fit can be judged rather than trusted,
+and --- unless \code{response = FALSE} --- the variogram of the
+response itself on the same points and lags, drawn hollow with a
+dashed fit.  The gap between the two curves is the spatial structure
+the model absorbed: a residual sill well below the response sill
+means most of it, two curves that coincide mean none.  When both
+models were fitted the caption gives the residual sill as a share of
+the response sill, and the two effective ranges; the residual range
+is expected to come out shorter and the residual sill lower even
+when the model is right, because residuals of a fitted trend
+understate the variogram (see \code{\link{estimate_sac_range}()},
+"Detrending and the residual-variogram bias").
 The distance axis is labelled in the units of the CRS the variogram
 was actually fitted in, which is not necessarily the fit's own CRS
 (lon/lat data are projected first). A single-direction fit names its
@@ -25,6 +41,10 @@ azimuth in the subtitle; a fit that did not converge says so in the
 caption, since the overlaid model line is then not a fit to believe.
 Requires 'gstat'.}
 }}
+
+\item{response}{Logical, default \code{TRUE}: for \code{type =
+  "variogram"}, overlay the response's own variogram.  Ignored by the
+other types.}
 
 \item{...}{Ignored.}
 }
@@ -59,7 +79,13 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 \seealso{
 Other plotting: 
+\code{\link{plot.aoa}()},
+\code{\link{plot.feature_selection}()},
+\code{\link{plot.gwr_model_selection}()},
+\code{\link{plot.resolution_profile}()},
 \code{\link{plot.sac_range}()},
+\code{\link{plot_calibration}()},
+\code{\link{plot_cv_metrics}()},
 \code{\link{plot_folds}()}
 }
 \concept{plotting}

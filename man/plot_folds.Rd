@@ -36,7 +36,13 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 \seealso{
 Other plotting: 
+\code{\link{plot.aoa}()},
+\code{\link{plot.feature_selection}()},
+\code{\link{plot.gwr_model_selection}()},
+\code{\link{plot.resolution_profile}()},
 \code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()}
+\code{\link{plot.spatial_fit}()},
+\code{\link{plot_calibration}()},
+\code{\link{plot_cv_metrics}()}
 }
 \concept{plotting}

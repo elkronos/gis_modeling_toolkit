@@ -25,7 +25,18 @@
 #'     \item{\code{"observed_predicted"}}{Observed against fitted, with a 1:1
 #'       reference line.}
 #'     \item{\code{"variogram"}}{Empirical variogram of the residuals with the
-#'       fitted model overlaid, so the fit can be judged rather than trusted.
+#'       fitted model overlaid, so the fit can be judged rather than trusted,
+#'       and --- unless \code{response = FALSE} --- the variogram of the
+#'       response itself on the same points and lags, drawn hollow with a
+#'       dashed fit.  The gap between the two curves is the spatial structure
+#'       the model absorbed: a residual sill well below the response sill
+#'       means most of it, two curves that coincide mean none.  When both
+#'       models were fitted the caption gives the residual sill as a share of
+#'       the response sill, and the two effective ranges; the residual range
+#'       is expected to come out shorter and the residual sill lower even
+#'       when the model is right, because residuals of a fitted trend
+#'       understate the variogram (see \code{\link{estimate_sac_range}()},
+#'       "Detrending and the residual-variogram bias").
 #'       The distance axis is labelled in the units of the CRS the variogram
 #'       was actually fitted in, which is not necessarily the fit's own CRS
 #'       (lon/lat data are projected first). A single-direction fit names its
@@ -33,6 +44,9 @@
 #'       caption, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
 #'   }
+#' @param response Logical, default \code{TRUE}: for \code{type =
+#'   "variogram"}, overlay the response's own variogram.  Ignored by the
+#'   other types.
 #' @param ... Ignored.
 #' @return A \code{ggplot} object.
 #' @family plotting
@@ -57,7 +71,7 @@
 #' }
 #' @export
 plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
-                                         "variogram"), ...) {
+                                         "variogram"), response = TRUE, ...) {
   type <- match.arg(type)
   .need_ggplot("plot.spatial_fit()")
 
@@ -131,7 +145,20 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
     stop("plot.spatial_fit(): the residual variogram could not be computed; ",
          "there may be too few finite residuals, or the fit's data_sf may ",
          "carry no usable geometry.", call. = FALSE)
-  .draw_sac_variogram(sac, what = "Residual variogram")
+  # The response's own variogram, on the same points and lags: the gap
+  # between the two curves is the spatial structure the model absorbed.  Its
+  # estimate is diagnostic-only, so its log lines stay off the console.
+  resp <- NULL
+  if (isTRUE(response) && is.character(x$response_var) &&
+      x$response_var %in% names(dat)) {
+    resp <- try(logger::with_log_threshold(
+      estimate_sac_range(dat, x$response_var),
+      threshold = logger::FATAL, namespace = "spatialkit", index = 2),
+      silent = TRUE)
+    if (inherits(resp, "try-error") || is.null(attr(resp, "variogram"))) resp <- NULL
+  }
+  .draw_sac_variogram(sac, what = "Residual variogram", overlay = resp,
+                      overlay_label = sprintf("Response (%s)", x$response_var))
 }
 
 
@@ -198,12 +225,18 @@ plot.sac_range <- function(x, ...) {
 #' @param sac A \code{sac_range} with a non-\code{NULL} \code{variogram}
 #'   attribute.
 #' @param what Character(1) title stem.
+#' @param overlay Optional second \code{sac_range} (the response's, when
+#'   \code{sac} is the residuals') drawn hollow with a dashed model line, so
+#'   the structure the model absorbed is the gap between the two.
+#' @param overlay_label Legend label for the overlay.
 #' @return A \code{ggplot} object.
 #' @keywords internal
 #' @noRd
-.draw_sac_variogram <- function(sac, what = "Empirical variogram") {
+.draw_sac_variogram <- function(sac, what = "Empirical variogram",
+                                overlay = NULL, overlay_label = "Response") {
   vg  <- attr(sac, "variogram")
   vm  <- attr(sac, "variogram_model")
+  if (!is.null(overlay) && is.null(attr(overlay, "variogram"))) overlay <- NULL
 
   # The axis is in the units of the CRS the VARIOGRAM was fitted in, which
   # estimate_sac_range() chose with ensure_projected() -- not necessarily the
@@ -246,6 +279,51 @@ plot.sac_range <- function(x, ...) {
                                   ggplot2::aes(x = .data$dist, y = .data$gamma),
                                   colour = "#B2182B", linewidth = 0.8)
   }
+
+  # The overlay: hollow points and a dashed model line for the second
+  # variogram, sharing the axes.  Nothing about the main curve changes.
+  overlay_caption <- NULL
+  if (!is.null(overlay)) {
+    ovg <- attr(overlay, "variogram")
+    ovm <- attr(overlay, "variogram_model")
+    p <- p + ggplot2::geom_point(data = ovg,
+                                 ggplot2::aes(x = .data$dist, y = .data$gamma,
+                                              size = .data$np),
+                                 shape = 1, colour = "grey35", alpha = 0.8)
+    if (!is.null(ovm)) {
+      oline <- try(gstat::variogramLine(ovm, maxdist = max(vg$dist, ovg$dist, na.rm = TRUE),
+                                        n = 200), silent = TRUE)
+      if (!inherits(oline, "try-error"))
+        p <- p + ggplot2::geom_line(data = oline,
+                                    ggplot2::aes(x = .data$dist, y = .data$gamma),
+                                    colour = "grey35", linetype = "dashed",
+                                    linewidth = 0.8)
+    }
+    # The sills are compared only when BOTH ranges were identified: a model
+    # whose range ran past the lags fitted has a sill the data never reached,
+    # and a ratio of two such numbers reads as a finding while being noise.
+    sill_of <- function(m) if (is.data.frame(m) && "psill" %in% names(m))
+      sum(as.numeric(m$psill), na.rm = TRUE) else NA_real_
+    s_res <- sill_of(vm); s_resp <- sill_of(ovm)
+    both_ok <- is.finite(sac) && is.finite(overlay) &&
+      is.finite(s_res) && is.finite(s_resp) && s_resp > 0
+    overlay_caption <- paste(c(
+      sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
+              overlay_label, tolower(what)),
+      if (both_ok)
+        sprintf("Residual sill is %.0f%% of the response sill; effective ranges %.0f (residuals) and %.0f (response).",
+                100 * s_res / s_resp, as.numeric(sac), as.numeric(overlay))
+      else sprintf("Sills not compared: %s.",
+                   if (!is.finite(sac) && !is.finite(overlay))
+                     "neither variogram reached an identified sill"
+                   else if (!is.finite(sac))
+                     "the residual variogram reached no identified sill"
+                   else if (!is.finite(overlay))
+                     "the response variogram reached no identified sill"
+                   else "a variogram model could not be fitted")
+    ), collapse = "\n")
+    p <- p + ggplot2::labs(caption = overlay_caption)
+  }
   if (is.finite(sac)) {
     p <- p + ggplot2::geom_vline(xintercept = as.numeric(sac),
                                  linetype = "dotted", colour = "#B2182B") +
@@ -281,7 +359,7 @@ plot.sac_range <- function(x, ...) {
                 attr(sac, "rejected_range"))
       else if (identical(reason, "fitted range exceeds the largest lag fitted"))
         sprintf(paste0("No effective range: the fitted range (%.0f) ",
-                       "exceeds the largest lag fitted (%.0f), so the ",
+                       "exceeds the largest lag fitted (%.0f),\nso the ",
                        "variogram never reached a sill."),
                 attr(sac, "rejected_range"),
                 attr(sac, "cutoff_dist"))

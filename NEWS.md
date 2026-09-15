@@ -262,6 +262,51 @@
   pair are now connected: `get_voronoi_seeds(n = determine_optimal_levels(pts))`
   needs no number carried between the calls by hand.
 
+* Five diagnostic plots that show the curve behind a chosen point, the
+  folds behind a pooled number, or the distribution behind a count.  None
+  recomputes anything; each draws what the result already carries.
+
+  - `plot_cv_metrics(cv, metric)`: one point per fold, sized by the
+    held-out rows it contributed, with the pooled value from `overall` as
+    a dashed line; a `compare_models_cv()` result gets one panel per model
+    on a shared scale.  Any column of `fold_metrics` can be drawn,
+    including backend extras and columns a `metrics` function added; a
+    column that is `NA` in every fold is refused with the reason (`Adj_R2`
+    without `p`, coverage without draws) rather than drawn empty, and a
+    per-fold extra with no pooled counterpart draws without the line and
+    says so.
+  - `plot.aoa()`: the dissimilarity index of the prediction locations
+    against the cross-validated training DI (ECDFs, or a histogram with the
+    training curve), threshold marked, with the share outside and how close
+    the inside ones run to the edge in the subtitle, and whether the
+    threshold came from cross-validated folds in the caption.
+  - `plot.spatial_fit(type = "variogram")` overlays the response's own
+    variogram (hollow points, dashed fit) on the residual variogram, on the
+    same points and lags, so the structure the model absorbed is the gap
+    between the two curves.  The caption compares the sills only when both
+    ranges were identified; `response = FALSE` restores the residual curve
+    alone.  `plot.sac_range()` is unchanged.
+  - `plot_calibration(cv)`: observed against nominal coverage of
+    `cv_bayes()`'s posterior predictive intervals, pooled (blue) and per
+    fold (grey), with the diagonal and a one-line verdict.  The levels are
+    read off the `coverage_*` column names, so `coverage_levels =
+    seq(0.1, 0.9, by = 0.1)` gives a full curve; the default three levels
+    are unchanged.
+  - One sweep drawer behind three methods: `plot.resolution_profile()` (a
+    panel per criterion, the level each selects marked, its flat region
+    shaded, a note when a bound rather than the criterion is choosing);
+    `plot.feature_selection()` (the accepted variable's score at each step
+    as the path, every other candidate faint, the stop in red, the
+    hold-out score as a separate mark when `select_on = "split"` computed
+    one --- and a caption saying whether the intercept-only model was
+    scored, since for the RF and GWR backends it usually is not, so the
+    path starts at the first variable); `plot.gwr_model_selection()` (every
+    model's AICc against its size, the best of each size joined, the winner
+    marked, its lead over the runner-up in the subtitle).
+    `select_features_forward()`'s result now carries class
+    `"feature_selection"` so `plot()` finds the method; it is the same list
+    otherwise.
+
 ## Bug fixes
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++
