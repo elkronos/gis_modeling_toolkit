@@ -43,10 +43,31 @@
 #'       azimuth in the subtitle; a fit that did not converge says so in the
 #'       caption, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
+#'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
+#'       of one \code{term} mapped at the training locations, which is the
+#'       reason to fit GWR at all.  Locations where the local design is
+#'       collinear -- the kernel-weighted window's scaled condition index is
+#'       above 30, or the window is singular -- are drawn hollow and grey
+#'       (\code{mask = TRUE}), because the smooth surface a naive map draws
+#'       over them is the picture of an unstable estimate, not of a
+#'       relationship; the subtitle counts them.  The condition indices are
+#'       the fit's \code{info$local_collinearity}, computed for every
+#'       location when the model was fitted.  A diverging scale centred on
+#'       zero is used when the coefficient changes sign, otherwise a
+#'       sequential one.}
 #'   }
 #' @param response Logical, default \code{TRUE}: for \code{type =
 #'   "variogram"}, overlay the response's own variogram.  Ignored by the
 #'   other types.
+#' @param term For \code{type = "coefficients"}: which local coefficient to
+#'   map, one of the names \code{coef(x)} returns.  Default \code{NULL}: the
+#'   first predictor.  Ignored by the other types.
+#' @param mask For \code{type = "coefficients"}: whether to draw locations
+#'   whose local design is collinear (scaled condition index of the
+#'   kernel-weighted window above 30, or singular) as hollow grey points
+#'   rather than coloured by a coefficient that is not to be believed there.
+#'   Default \code{TRUE}.  Locations whose coefficient is non-finite are
+#'   masked either way.
 #' @param ... Ignored.
 #' @return A \code{ggplot} object.
 #' @family plotting
@@ -69,11 +90,15 @@
 #'   if (requireNamespace("gstat", quietly = TRUE))
 #'     plot(fit, type = "variogram")
 #' }
+#' @seealso \code{\link{coef.gwr_fit}()} for the coefficients themselves.
 #' @export
 plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
-                                         "variogram"), response = TRUE, ...) {
+                                         "variogram", "coefficients"),
+                             response = TRUE, term = NULL, mask = TRUE, ...) {
   type <- match.arg(type)
   .need_ggplot("plot.spatial_fit()")
+  if (type == "coefficients")
+    return(.plot_gwr_coefficients(x, term = term, mask = mask))
 
   res <- try(stats::residuals(x), silent = TRUE)
   if (inherits(res, "try-error") || !is.numeric(res))
@@ -159,6 +184,88 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   }
   .draw_sac_variogram(sac, what = "Residual variogram", overlay = resp,
                       overlay_label = sprintf("Response (%s)", x$response_var))
+}
+
+
+#' Map one local GWR coefficient, masking collinear windows
+#'
+#' @param x A \code{gwr_fit}.
+#' @param term Coefficient name, or \code{NULL} for the first predictor.
+#' @param mask Mask collinear windows.
+#' @return A \code{ggplot} object.
+#' @keywords internal
+#' @noRd
+.plot_gwr_coefficients <- function(x, term = NULL, mask = TRUE) {
+  if (!inherits(x, "gwr_fit"))
+    stop("plot.spatial_fit(type = \"coefficients\"): local coefficients exist ",
+         "for GWR fits only (class gwr_fit); this fit is a ",
+         paste(setdiff(class(x), "spatial_fit"), collapse = "/"), ".", call. = FALSE)
+  dat <- x$data_sf
+  if (!inherits(dat, "sf"))
+    stop("plot.spatial_fit(): the fit carries no training geometry.", call. = FALSE)
+  cf <- stats::coef(x)
+  if (!is.data.frame(cf) || !nrow(cf))
+    stop("plot.spatial_fit(type = \"coefficients\"): coef() returned no local ",
+         "coefficients.", call. = FALSE)
+  if (nrow(cf) != nrow(dat))
+    stop(sprintf(paste0("plot.spatial_fit(type = \"coefficients\"): %d rows of ",
+                        "local coefficients for %d training locations; the two ",
+                        "cannot be aligned."), nrow(cf), nrow(dat)), call. = FALSE)
+  if (is.null(term)) {
+    term <- intersect(x$predictor_vars, names(cf))[1L]
+    if (is.na(term)) term <- names(cf)[1L]
+  }
+  if (!is.character(term) || length(term) != 1L || !(term %in% names(cf)))
+    stop(sprintf("plot.spatial_fit(type = \"coefficients\"): `term` must be one of %s.",
+                 paste(sQuote(names(cf)), collapse = ", ")), call. = FALSE)
+  vals <- suppressWarnings(as.numeric(cf[[term]]))
+  lc <- x$info$local_collinearity
+  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat))
+    (!is.finite(lc$cn) | lc$cn > 30) else rep(FALSE, nrow(dat))
+  non_finite <- !is.finite(vals)
+  masked <- non_finite | (isTRUE(mask) & cn_bad)
+  if (all(masked))
+    stop("plot.spatial_fit(type = \"coefficients\"): every location is masked ",
+         "(non-finite coefficient, or a collinear local design at all of them); ",
+         "there is no surface to draw.", call. = FALSE)
+
+  dat$.coef   <- vals
+  dat$.masked <- masked
+  shown <- dat[!masked, , drop = FALSE]
+  hidden <- dat[masked, , drop = FALSE]
+  rng <- range(shown$.coef, na.rm = TRUE)
+  diverging <- rng[1] < 0 && rng[2] > 0
+
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_sf(data = shown, ggplot2::aes(colour = .data$.coef), size = 1.8)
+  if (nrow(hidden))
+    p <- p + ggplot2::geom_sf(data = hidden, shape = 1, colour = "grey55", size = 1.8)
+  p <- p + if (diverging) {
+    lim <- max(abs(rng))
+    ggplot2::scale_colour_gradient2(low = "#2166AC", mid = "grey92", high = "#B2182B",
+                                    midpoint = 0, limits = c(-lim, lim), name = term)
+  } else {
+    ggplot2::scale_colour_viridis_c(name = term)
+  }
+  n_cn <- sum(cn_bad & !non_finite); n_nf <- sum(non_finite)
+  subtitle <- if (any(masked))
+    sprintf("%d of %d locations masked (hollow):\n%s", sum(masked), nrow(dat),
+            paste(c(if (isTRUE(mask) && n_cn) sprintf("%d with a collinear local design (condition index > 30)", n_cn),
+                    if (n_nf) sprintf("%d with a non-finite coefficient", n_nf)),
+                  collapse = "; "))
+  else if (isTRUE(mask) && is.data.frame(lc))
+    "No location masked: every local design is well conditioned"
+  else if (!isTRUE(mask) && any(cn_bad))
+    sprintf("mask = FALSE: %d location(s) with a collinear local design are drawn as if reliable", sum(cn_bad))
+  else "Collinearity not surveyed (fewer than two numeric predictors)"
+  p + ggplot2::labs(
+    title = sprintf("Local coefficient of %s", term),
+    subtitle = subtitle,
+    caption = sprintf("%s bandwidth %s, %s kernel%s",
+                      if (isTRUE(x$info$adaptive)) "Adaptive" else "Fixed",
+                      format(signif(x$info$bandwidth, 4)), x$info$kernel,
+                      if (isTRUE(x$info$bandwidth_is_fallback)) " (fallback bandwidth)" else "")) +
+    ggplot2::theme_minimal()
 }
 
 

@@ -46,6 +46,7 @@ measures and how it behaved on simulated fields).
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},
 \code{\link{determine_optimal_levels}()},
+\code{\link{kriging_adequacy}()},
 \code{\link{resolution_profile}()},
 \code{\link{summarize_by_cell}()}
 }

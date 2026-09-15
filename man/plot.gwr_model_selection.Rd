@@ -37,6 +37,7 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 \seealso{
 Other plotting: 
 \code{\link{plot.aoa}()},
+\code{\link{plot.block_size_sweep}()},
 \code{\link{plot.feature_selection}()},
 \code{\link{plot.resolution_profile}()},
 \code{\link{plot.sac_range}()},

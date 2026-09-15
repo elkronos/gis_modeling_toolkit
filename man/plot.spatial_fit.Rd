@@ -6,8 +6,10 @@
 \usage{
 \method{plot}{spatial_fit}(
   x,
-  type = c("residuals", "observed_predicted", "variogram"),
+  type = c("residuals", "observed_predicted", "variogram", "coefficients"),
   response = TRUE,
+  term = NULL,
+  mask = TRUE,
   ...
 )
 }
@@ -40,11 +42,34 @@ was actually fitted in, which is not necessarily the fit's own CRS
 azimuth in the subtitle; a fit that did not converge says so in the
 caption, since the overlaid model line is then not a fit to believe.
 Requires 'gstat'.}
+\item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
+of one \code{term} mapped at the training locations, which is the
+reason to fit GWR at all.  Locations where the local design is
+collinear -- the kernel-weighted window's scaled condition index is
+above 30, or the window is singular -- are drawn hollow and grey
+(\code{mask = TRUE}), because the smooth surface a naive map draws
+over them is the picture of an unstable estimate, not of a
+relationship; the subtitle counts them.  The condition indices are
+the fit's \code{info$local_collinearity}, computed for every
+location when the model was fitted.  A diverging scale centred on
+zero is used when the coefficient changes sign, otherwise a
+sequential one.}
 }}
 
 \item{response}{Logical, default \code{TRUE}: for \code{type =
   "variogram"}, overlay the response's own variogram.  Ignored by the
 other types.}
+
+\item{term}{For \code{type = "coefficients"}: which local coefficient to
+map, one of the names \code{coef(x)} returns.  Default \code{NULL}: the
+first predictor.  Ignored by the other types.}
+
+\item{mask}{For \code{type = "coefficients"}: whether to draw locations
+whose local design is collinear (scaled condition index of the
+kernel-weighted window above 30, or singular) as hollow grey points
+rather than coloured by a coefficient that is not to be believed there.
+Default \code{TRUE}.  Locations whose coefficient is non-finite are
+masked either way.}
 
 \item{...}{Ignored.}
 }
@@ -78,8 +103,11 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 }
 \seealso{
+\code{\link{coef.gwr_fit}()} for the coefficients themselves.
+
 Other plotting: 
 \code{\link{plot.aoa}()},
+\code{\link{plot.block_size_sweep}()},
 \code{\link{plot.feature_selection}()},
 \code{\link{plot.gwr_model_selection}()},
 \code{\link{plot.resolution_profile}()},

@@ -349,6 +349,7 @@ variance components. \emph{Biometrics Bulletin}, 2(6), 110--114.
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},
 \code{\link{determine_optimal_levels}()},
+\code{\link{kriging_adequacy}()},
 \code{\link{resolution_profile}()},
 \code{\link{select_resolution}()}
 }
