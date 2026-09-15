@@ -80,6 +80,14 @@ are not all finite gets \code{NA} in both columns.
 excluding \code{dropped_vars}.
 \item \code{dropped_vars} -- predictors dropped for negligible
 variance.
+\item \code{scaling} -- a list with \code{center} and \code{scale},
+each named by \code{predictor_vars}: the training means and standard
+deviations the index is computed in, so a location's DI can be
+traced to the predictor that put it outside.
+\item \code{n_outliers} -- the number of training DI values above the
+\code{Q3 + 1.5 * IQR} fence, which the default threshold rule sets
+aside (the "outlier-removed" in its name); computed whether or not
+\code{threshold} was supplied.
 \item \code{n_train}, \code{n_new}, \code{n_inside},
 \code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
 \code{n_new} count the rows that survived the finite-value filter.

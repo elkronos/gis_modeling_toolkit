@@ -346,8 +346,17 @@
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 #'   Model-specific metadata lives in \code{$info} (bandwidth, adaptive,
-#'   kernel, AICc, and \code{bandwidth_is_fallback} -- \code{TRUE} when
-#'   automatic selection failed and the arbitrary fallback was used).  The raw GWmodel result is in \code{$engine}.
+#'   kernel, AICc, \code{bandwidth_is_fallback} -- \code{TRUE} when
+#'   automatic selection failed and the arbitrary fallback was used --
+#'   \code{condition_index}, \code{local_collinearity},
+#'   \code{n_local_collinear}, \code{n_local_singular},
+#'   \code{nonfinite_coef} -- a logical matrix, one row per observation and
+#'   one column per term (\code{Intercept} first), \code{TRUE} where the
+#'   local coefficient came back non-finite, so the count in
+#'   \code{n_local_singular} can be placed -- and \code{n_dropped}: the rows
+#'   \code{prep_model_data()} removed for missing or non-finite values or a
+#'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+#'   The raw GWmodel result is in \code{$engine}.
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
@@ -427,6 +436,11 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       predictor_vars = predictor_vars, pointize = "auto"
     )
   }
+  # Rows prep_model_data() removed on the way in, read from the record it
+  # leaves -- which a layer prepared by the caller may still carry.  0 when
+  # there is none, and when the record no longer describes this layer: a
+  # fold's subset inside cv_*() has neither, and cv_*() reports its own.
+  n_dropped <- as.integer(.get_row_record(dat, "dropped")$n %||% 0L)
 
   # Require plain POINT, mirroring fit_bayesian_spatial_model(), and for the
   # same reason: st_coordinates() on a multi-vertex MULTIPOINT or a POLYGON
@@ -730,21 +744,28 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # summary() and model_metrics() all drop the non-finite rows, so a fit in
   # which 182 of 200 local regressions failed reported n = 18 and R2 = 0.96 as
   # though that were the whole model.  Count them and say so.
-  n_bad_local <- tryCatch({
+  # The per-row, per-term mask of non-finite local coefficients is kept
+  # (`info$nonfinite_coef`), not only its row count: the count says how many
+  # windows are singular, the mask says which, and which term.  NULL when the
+  # coefficient table could not be read.
+  nonfinite_mask <- tryCatch({
     sdf <- fit$SDF
-    if (is.null(sdf)) 0L else {
+    if (is.null(sdf)) NULL else {
       b <- as.data.frame(sdf)
       cols <- intersect(c("Intercept", predictor_vars), names(b))
-      if (!length(cols)) 0L
+      if (!length(cols)) NULL
       else {
         ok <- vapply(b[cols],
                      function(z) is.finite(suppressWarnings(as.numeric(z))),
                      logical(nrow(b)))
-        if (!is.matrix(ok)) ok <- matrix(ok, nrow = nrow(b))
-        sum(!apply(ok, 1L, all))
+        if (!is.matrix(ok)) ok <- matrix(ok, nrow = nrow(b),
+                                         dimnames = list(NULL, cols))
+        !ok
       }
     }
-  }, error = function(e) 0L)
+  }, error = function(e) NULL)
+  n_bad_local <- if (is.null(nonfinite_mask)) 0L else
+    sum(apply(nonfinite_mask, 1L, any))
   if (n_bad_local > 0L)
     .warn_and_log(paste0("fit_gwr_model(): %d of %d local regression(s) ",
                          "returned non-finite coefficients -- their windows are ",
@@ -782,7 +803,11 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       local_collinearity    = local_cn_df,
       n_local_collinear     = if (is.null(local_cn_df)) NA_integer_ else
         sum(!is.finite(local_cn_df$cn) | local_cn_df$cn > 30),
-      n_local_singular      = n_bad_local
+      n_local_singular      = n_bad_local,
+      # One row per observation, one column per term (Intercept first):
+      # TRUE where GWmodel returned a non-finite local coefficient.
+      nonfinite_coef        = nonfinite_mask,
+      n_dropped             = n_dropped
     )
   )
 }

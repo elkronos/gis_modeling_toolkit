@@ -89,8 +89,11 @@ grown on, with \code{sample_fraction} resolved to the number ranger
 used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
 ranger did not compute it -- forwarding \code{oob.error = FALSE} through
 \code{...} is one way to get there), \code{fitted_are_oob} (always
-\code{TRUE}; \code{summary()} reads it to label its metrics) and
-\code{seed}. The raw forest is in \code{$engine}.
+\code{TRUE}; \code{summary()} reads it to label its metrics),
+\code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
+removed for missing or non-finite values or a bad geometry, so \code{$n}
+can be read against \code{nrow(data_sf)}). The raw forest is in
+\code{$engine}.
 }
 \description{
 Fits a regression random forest on an \code{sf} dataset and returns it as a

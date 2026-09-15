@@ -4,7 +4,7 @@
 \alias{plot_folds}
 \title{Map a cross-validation fold scheme}
 \usage{
-plot_folds(folds, points_sf, boundary = NULL)
+plot_folds(folds, points_sf, boundary = NULL, blocks = TRUE)
 }
 \arguments{
 \item{folds}{A list returned by \code{make_folds()}.}
@@ -12,6 +12,9 @@ plot_folds(folds, points_sf, boundary = NULL)
 \item{points_sf}{The \code{sf} layer the folds were built from.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc} to draw underneath.}
+
+\item{blocks}{Logical; draw the block polygons when \code{folds} carries
+them.  Default \code{TRUE}.}
 }
 \value{
 A \code{ggplot} object.
@@ -20,6 +23,9 @@ A \code{ggplot} object.
 Shows which fold each observation belongs to.  This is the fastest way to
 see whether spatial blocks are actually separating the data, or whether the
 blocks are smaller than the autocorrelation range and therefore leaking.
+For \code{"block_kfold"} folds the block outlines are drawn too, from
+\code{folds$params$blocks}, so a fold can be seen to be one region or
+several and an empty block can be seen to be empty.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {

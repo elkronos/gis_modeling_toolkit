@@ -140,8 +140,14 @@ was calibrated over; gp_lscale_prior -- the length-scale prior
 \code{brms::validate_prior()} reports the model will \emph{actually} use,
 which is not necessarily the one this function requested (several entries,
 semicolon-separated, if brms resolved the axes differently); loo, looic,
-convergence_ok,
-convergence_diagnostics).  The raw brmsfit is in \code{$engine}.
+convergence_ok, convergence_diagnostics -- \code{n_divergent},
+\code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
+\code{neff_failed}, the parameters that failed each check by name with
+their values (empty when none failed), which is what makes a failed
+check actionable; and n_dropped -- the rows
+\code{prep_model_data()} removed for missing or non-finite values or a
+bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
+The raw brmsfit is in \code{$engine}.
 }
 \description{
 Fits a regression whose residual spatial structure is modelled explicitly, as

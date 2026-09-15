@@ -28,19 +28,42 @@
 #' (EPSG:3857), which would otherwise SPLIT a wrapped layer.
 #'
 #' @param x An sf or sfc object.
-#' @return An sf::crs object.
+#' @return A list with \code{crs} (the chosen \code{sf::crs}) and
+#'   \code{candidates}, a data.frame with one row per projection considered
+#'   -- \code{name}, \code{crs} (its definition as a string),
+#'   \code{distance_error} (the measured worst-case relative distance error
+#'   over sampled pairs, \code{NA} where it could not be measured) and
+#'   \code{chosen}.  Where only one projection was in play -- a zone kept on
+#'   a local extent, the equal-area projection for a wrapped layer -- that
+#'   one is measured and reported alone.  \code{candidates} is \code{NULL}
+#'   only where no local projection was chosen: non-geographic input, no
+#'   finite centroid, or an extent that falls back to the global projection.
 #' @keywords internal
 #' @noRd
 .pick_local_projected_crs <- function(x, purpose = c("distance", "area")) {
   purpose <- match.arg(purpose)
-  if (!inherits(x, c("sf", "sfc"))) return(sf::NA_crs_)
+  if (!inherits(x, c("sf", "sfc"))) return(list(crs = sf::NA_crs_, candidates = NULL))
   crs <- sf::st_crs(x)
-  if (!is.na(crs) && !.is_longlat(x)) return(crs)
+  if (!is.na(crs) && !.is_longlat(x)) return(list(crs = crs, candidates = NULL))
+  # The measured candidates travel back with the choice.  On the comparison
+  # paths the warning quotes two of the figures and drops the rest; here
+  # every candidate's error is kept, since the number that propagates into
+  # ranges, block sizes, bandwidths and length-scales is worth having whether
+  # or not it was large enough to change the choice.
 
   x_ll <- tryCatch({
     if (is.na(crs)) stop("No CRS set.")
     sf::st_transform(x, 4326)
   }, error = function(e) x)
+
+  scored <- function(crs_obj, names, crs_list, err, best) {
+    list(crs = crs_obj, candidates = data.frame(
+      name = names,
+      crs = vapply(crs_list, function(cc) cc$input %||% NA_character_, character(1)),
+      distance_error = as.numeric(err),
+      chosen = seq_along(names) == best,
+      stringsAsFactors = FALSE))
+  }
 
   # The global fallback: Web Mercator when distances are what matter (and
   # nothing local fits), Equal Earth when areas are -- Mercator's area
@@ -54,10 +77,11 @@
     }
     sf::st_crs(3857)
   }
-  if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll)) return(global_crs())
+  if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
+    return(list(crs = global_crs(), candidates = NULL))
 
   ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(sf::st_geometry(x_ll))))
-  if (!is.numeric(ctr) || length(ctr) < 2) return(global_crs())
+  if (!is.numeric(ctr) || length(ctr) < 2) return(list(crs = global_crs(), candidates = NULL))
   lon <- ctr[1]; lat <- ctr[2]
 
   # st_centroid() on empty or degenerate geometry can return NA/NaN, which
@@ -69,7 +93,7 @@
       ".pick_local_projected_crs(): could not compute a finite centroid (lon = %s, lat = %s); falling back to %s.",
       format(lon), format(lat), if (purpose == "area") "Equal Earth" else "EPSG:3857"
     )
-    return(global_crs())
+    return(list(crs = global_crs(), candidates = NULL))
   }
 
   # ---- Reject extents too wide for a single UTM zone ----
@@ -138,9 +162,13 @@
                "on lon_0=%.1f. (EPSG:3857 would have split the layer in two.)"),
         span_lon, 360 - max(diff(lons)), lon_ctr
       )
-      return(sf::st_crs(sprintf(
+      wrap_crs <- sf::st_crs(sprintf(
         "+proj=laea +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs",
-        lat, lon_ctr)))
+        lat, lon_ctr))
+      return(scored(wrap_crs,
+                    sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)",
+                            lon_ctr, lat),
+                    list(wrap_crs), .crs_distance_error(x_ll, wrap_crs), 1L))
     }
 
     .log_warn(
@@ -151,7 +179,7 @@
              "projection suited to your extent."),
       span_lon, if (purpose == "area") "Equal Earth (equal-area)" else "EPSG:3857"
     )
-    return(global_crs())
+    return(list(crs = global_crs(), candidates = NULL))
   }
 
   # as.integer() is belt-and-braces: floor() already yields an integral double,
@@ -201,7 +229,8 @@
       if (is.finite(err[best])) sprintf("%.2f%%", 100 * err[best]) else "not measurable",
       cand_zone
     )
-    return(cands[[best]]$crs)
+    return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
+                  lapply(cands, `[[`, "crs"), err, best))
   }
 
   if (is.finite(lon_off) && lon_off > 5) {
@@ -270,7 +299,8 @@
                   100 * min(err[-1L]), 100 * err[1L])
         else " because the candidate projections could not be scored on this layer"
       )
-      return(sf::st_crs(utm_epsg))
+      return(scored(sf::st_crs(utm_epsg), vapply(cands, `[[`, character(1), "name"),
+                    lapply(cands, `[[`, "crs"), err, 1L))
     }
 
     .log_warn(
@@ -284,12 +314,17 @@
       lon_off, cand_zone, span_lon, cands[[best]]$name,
       100 * err[best], 100 * err[1L]
     )
-    return(cands[[best]]$crs)
+    return(scored(cands[[best]]$crs, vapply(cands, `[[`, character(1), "name"),
+                  lapply(cands, `[[`, "crs"), err, best))
   }
 
   # Reuse the candidate zone computed above so the zone named in the messages
-  # and the EPSG code returned here can never diverge.
-  sf::st_crs(utm_epsg)
+  # and the EPSG code returned here can never diverge.  The zone's own error
+  # is measured here as well -- about 20 ms, bounded by the 40-point sample --
+  # so the ordinary path reports the figure the comparison paths quote.
+  zone <- sf::st_crs(utm_epsg)
+  scored(zone, sprintf("UTM zone %d", cand_zone), list(zone),
+         .crs_distance_error(x_ll, zone), 1L)
 }
 
 
@@ -620,7 +655,20 @@
 #'   geodesic areas are computed on against the ellipsoid the projection
 #'   uses.  [summarize_by_cell()] applies the same measurement before it
 #'   computes a density.  Ignored when `target_crs` is given.
-#' @return x, potentially with a new projected CRS.  CRS-less input
+#' @return x, potentially with a new projected CRS.  When a projection was
+#'   chosen here (lon/lat input, no \code{target_crs}) the result carries
+#'   \code{attr(x, "crs_choice")}: a data.frame with one row per projection
+#'   considered -- \code{name}, \code{crs} (its definition), the measured
+#'   worst-case \code{distance_error} (relative, over sampled pairs;
+#'   \code{NA} where it could not be measured) and \code{chosen} -- so the
+#'   figure the log line quotes for the winner is recoverable for every
+#'   candidate, and is measured for the single candidate on the paths where
+#'   no comparison runs (a UTM zone on a local extent, the equal-area
+#'   projection chosen for a layer straddling the antimeridian).  It is
+#'   \code{NULL} exactly when no local projection was chosen here: input
+#'   that already carried a projected CRS, a \code{target_crs} you supplied,
+#'   or an extent no local projection fits, which falls back to Web Mercator
+#'   or Equal Earth.  CRS-less input
 #'   additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
 #'   the lon/lat heuristic fired, \code{"none"} when it declined.  That
 #'   attribute is also read on the way IN — an object already carrying
@@ -633,8 +681,10 @@
 #'   data.frame(lon = c(9.1, 9.2), lat = c(48.7, 48.8)),
 #'   coords = c("lon", "lat"), crs = 4326
 #' )
-#' # A local extent gets the containing UTM zone.
+#' # A local extent gets the containing UTM zone; the zone's measured
+#' # distance error over the extent travels with the result.
 #' st_crs(ensure_projected(pts_ll))$epsg  # 32632
+#' attr(ensure_projected(pts_ll), "crs_choice")
 #'
 #' # A continental extent is scored against the zone and may get an equal-area
 #' # projection instead; the choice and both error figures are LOGGED, not
@@ -716,7 +766,8 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       )
       sf::st_crs(x) <- sf::st_crs(4326)
       tr <- .pick_local_projected_crs(x, purpose = purpose)
-      x <- sf::st_transform(x, tr)
+      x <- sf::st_transform(x, tr$crs)
+      attr(x, "crs_choice") <- tr$candidates
       # Recorded so a predict() on CRS-less newdata can replay the same
       # interpretation (see .replay_crs_assumption()).
       attr(x, "crs_assumed") <- "EPSG:4326"
@@ -737,8 +788,13 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
   }
 
   if (.is_longlat(x)) {
+    # The projections considered and their measured distance errors ride on
+    # the result as `crs_choice`: the number the warning above quotes for
+    # the winner and the zone is kept for every candidate, and on the
+    # ordinary path -- a zone kept without a comparison -- for the zone.
     tr <- .pick_local_projected_crs(x, purpose = purpose)
-    x <- sf::st_transform(x, tr)
+    x <- sf::st_transform(x, tr$crs)
+    attr(x, "crs_choice") <- tr$candidates
   } else if (purpose == "area") {
     # Projected input is never reprojected, but when areas are what matter
     # the caller should know whether this CRS can deliver them.  Measured, as

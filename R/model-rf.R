@@ -210,8 +210,11 @@
 #'   used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
 #'   ranger did not compute it -- forwarding \code{oob.error = FALSE} through
 #'   \code{...} is one way to get there), \code{fitted_are_oob} (always
-#'   \code{TRUE}; \code{summary()} reads it to label its metrics) and
-#'   \code{seed}. The raw forest is in \code{$engine}.
+#'   \code{TRUE}; \code{summary()} reads it to label its metrics),
+#'   \code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
+#'   removed for missing or non-finite values or a bad geometry, so \code{$n}
+#'   can be read against \code{nrow(data_sf)}). The raw forest is in
+#'   \code{$engine}.
 #'
 #' @references
 #' Meyer, H., Reudenbach, C., Wöllauer, S. and Nauss, T. (2019). Importance of
@@ -287,6 +290,11 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   dat <- if (isTRUE(.already_prepped)) data_sf else
     prep_model_data(data_sf = data_sf, response_var = response_var,
                     predictor_vars = predictor_vars, pointize = "auto")
+  # Rows prep_model_data() removed on the way in, read from the record it
+  # leaves -- which a layer prepared by the caller may still carry.  0 when
+  # there is none, and when the record no longer describes this layer: a
+  # fold's subset inside cv_*() has neither, and cv_*() reports its own.
+  n_dropped <- as.integer(.get_row_record(dat, "dropped")$n %||% 0L)
 
   if (isTRUE(include_coords))
     .log_warn(paste0("fit_rf_model(): include_coords = TRUE. A forest given ",
@@ -385,7 +393,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
       oob_r_squared    = .num1(fit$r.squared),
       fitted_are_oob   = TRUE,
-      seed             = seed
+      seed             = seed,
+      n_dropped        = n_dropped
     )
   )
 }

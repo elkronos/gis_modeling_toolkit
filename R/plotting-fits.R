@@ -484,10 +484,15 @@ plot.sac_range <- function(x, ...) {
 #' Shows which fold each observation belongs to.  This is the fastest way to
 #' see whether spatial blocks are actually separating the data, or whether the
 #' blocks are smaller than the autocorrelation range and therefore leaking.
+#' For \code{"block_kfold"} folds the block outlines are drawn too, from
+#' \code{folds$params$blocks}, so a fold can be seen to be one region or
+#' several and an empty block can be seen to be empty.
 #'
 #' @param folds A list returned by \code{make_folds()}.
 #' @param points_sf The \code{sf} layer the folds were built from.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc} to draw underneath.
+#' @param blocks Logical; draw the block polygons when \code{folds} carries
+#'   them.  Default \code{TRUE}.
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
@@ -503,7 +508,7 @@ plot.sac_range <- function(x, ...) {
 #'   plot_folds(f, pts)
 #' }
 #' @export
-plot_folds <- function(folds, points_sf, boundary = NULL) {
+plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   .need_ggplot("plot_folds()")
   # `method` and `k` are read straight into the title; a folds list missing
   # either collapses sprintf() to character(0), which ggplot2 accepts and
@@ -533,6 +538,13 @@ plot_folds <- function(folds, points_sf, boundary = NULL) {
   if (!is.null(boundary))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(boundary),
                               fill = NA, colour = "grey60")
+  # The block design, when the folds carry it (block_kfold): outlines under
+  # the points, in the CRS the folds were built in -- coord_sf() brings the
+  # layers to one CRS.
+  blk <- folds$params$blocks
+  if (isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)
+    p <- p + ggplot2::geom_sf(data = sf::st_geometry(blk),
+                              fill = NA, colour = "grey45", linewidth = 0.25)
   p +
     ggplot2::geom_sf(data = dat, ggplot2::aes(colour = .data$.fold)) +
     ggplot2::scale_colour_viridis_d(name = "Fold", na.value = "grey80") +

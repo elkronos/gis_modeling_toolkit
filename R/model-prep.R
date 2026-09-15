@@ -35,7 +35,19 @@
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
 #' @return An sf object with POINT geometry, cleaned of rows carrying missing
-#'   or non-finite values in the modelling columns or in the coordinates.  The CRS is projected
+#'   or non-finite values in the modelling columns or in the coordinates.  What
+#'   was removed is recorded on the attribute \code{"dropped"}, a list with
+#'   \code{n} (rows dropped), \code{n_geometry} (how many of them for an
+#'   empty or non-finite geometry), \code{which} (their positions in
+#'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
+#'   layer carries that column, else \code{NULL}) and \code{reason} (one per
+#'   dropped row: \code{"geometry"}, \code{"missing"} or
+#'   \code{"non_finite"}, in that order of precedence when several apply).
+#'   Every fit stores \code{n} as \code{$info$n_dropped}.  The record
+#'   describes the rows this call returned and does not survive subsetting:
+#'   \code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
+#'   and a fit given such a subset with \code{.already_prepped = TRUE} reports
+#'   \code{n_dropped = 0} rather than the parent layer's count.  The CRS is projected
 #'   whenever one can be established.  A CRS-less layer is decided by the
 #'   lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
 #'   box fits the lon/lat envelope \emph{and} it spans more than one unit on
@@ -53,7 +65,8 @@
 #'              pred = c(1, 2, 3, 4, Inf)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+#' clean <- prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+#' attr(clean, "dropped")
 #' @export
 prep_model_data <- function(data_sf, response_var, predictor_vars,
                             boundary = NULL,
@@ -182,7 +195,28 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
                      "missing values (%d of them with an empty or non-finite ",
                      "geometry)."), dropped, dropped_geo)
 
-  data_sf[keep, , drop = FALSE]
+  out <- data_sf[keep, , drop = FALSE]
+  # What was dropped, with the rows' identities.  The three masks above used
+  # to be collapsed into the counts of that log line and nothing else, so a
+  # fit's $n was the post-cleaning row count with no trace of how many rows
+  # were lost or why -- and silently losing a third of the rows is a classic
+  # cause of a suspiciously good score.  Row positions are those of `data_sf`
+  # as passed (point coercion and projection keep the row order); the row IDs
+  # are given as well when the layer carries `..row_id`, which is what the
+  # cross-validation functions name rows by.
+  drop_idx <- unname(which(!keep))
+  # Stamped and classed, so that the record cannot outlive the rows it
+  # describes: `out[i, ]` returns a plain layer without it.
+  out <- .set_row_record(out, "dropped", list(
+    n          = as.integer(dropped),
+    n_geometry = as.integer(dropped_geo),
+    which      = drop_idx,
+    row_id     = if ("..row_id" %in% names(data_sf))
+      data_sf[["..row_id"]][drop_idx] else NULL,
+    reason     = as.character(ifelse(!ok_geom[drop_idx], "geometry",
+                              ifelse(!ok_cc[drop_idx], "missing", "non_finite")))
+  ))
+  out
 }
 
 

@@ -444,6 +444,13 @@
 #'   \code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
 #'   \code{criterion} (label for the criterion actually read, noting when it
 #'   had to be located positionally);
+#'   \code{criterion_by_name} (logical: whether that column was found by
+#'   its name rather than by the documented position),
+#'   \code{criterion_column} (the column it was read from) and
+#'   \code{criterion_verified} (logical: \code{FALSE} exactly when the
+#'   column was read positionally from a table that did not have the four
+#'   documented columns, which is the case the log calls unverified -- gate
+#'   a script on this rather than on the label);
 #'   \code{response_var} and \code{candidate_vars} (the response and the full
 #'   candidate set the sweep ran over, both echoed by \code{print()});
 #'   \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
@@ -627,6 +634,13 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
       best             = best_set,
       table            = tab,
       criterion        = crit$label,
+      # How the criterion column was found: by name, or by its documented
+      # position (`criterion_column`), and whether the table had the four
+      # columns that position is documented for.  A script can gate on
+      # `criterion_verified` where the log line above said "unverified".
+      criterion_by_name  = isTRUE(crit$by_name),
+      criterion_column   = crit$column,
+      criterion_verified = isTRUE(crit$by_name) || isTRUE(crit$shape_ok),
       response_var     = response_var,
       candidate_vars   = candidate_vars,
       bandwidth        = eng$bandwidth,

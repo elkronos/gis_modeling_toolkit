@@ -137,7 +137,7 @@ test_that("the residual variogram plot builds", {
 })
 
 
-test_that("plot_folds maps every point to a fold", {
+test_that("plot_folds maps every point to a fold and draws the block design", {
   skip_if_not_installed("ggplot2")
   pts <- surf_test_points(n = 100)
   f <- make_folds(pts, k = 4, method = "block_kfold", seed = 1)
@@ -145,9 +145,19 @@ test_that("plot_folds maps every point to a fold", {
   p <- plot_folds(f, pts)
   expect_s3_class(p, "ggplot")
   b <- ggplot2::ggplot_build(p)
-  expect_equal(nrow(b$data[[1]]), 100)
+  # Two sf layers: the block outlines first, one row per block, then the
+  # points, one row each.
+  expect_length(b$data, 2L)
+  expect_equal(nrow(b$data[[1]]), nrow(f$params$blocks))
+  expect_equal(nrow(b$data[[1]]), f$params$blocks_used)
+  expect_equal(nrow(b$data[[2]]), 100)
   # colour is discrete by fold, so no more distinct colours than folds
-  expect_lte(length(unique(b$data[[1]]$colour)), length(f$folds))
+  expect_lte(length(unique(b$data[[2]]$colour)), length(f$folds))
+  # blocks = FALSE leaves the points alone; folds without a design draw none.
+  p0 <- plot_folds(f, pts, blocks = FALSE)
+  expect_length(ggplot2::ggplot_build(p0)$data, 1L)
+  fr <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
+  expect_length(ggplot2::ggplot_build(plot_folds(fr, pts))$data, 1L)
 })
 
 test_that("plot_folds rejects mismatched inputs", {

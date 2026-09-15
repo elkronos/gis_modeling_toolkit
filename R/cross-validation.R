@@ -57,6 +57,10 @@
       out[[i]] <- list(train = keep_idx[assign_vec != i],
                        test  = keep_idx[assign_vec == i],
                        fold_id = i)
+    attr(out, "dropped") <- data.frame(fold = integer(0), reason = character(0),
+                                       stringsAsFactors = FALSE)
+    attr(out, "orphans") <- keep_idx[0]
+    attr(out, "n_unknown_ids") <- 0L
     return(out)
   }
 
@@ -108,7 +112,12 @@
   # typo'd or stale fold list looked like a clean run; those are counted and
   # reported, because prep_model_data() legitimately drops rows and the two
   # cases have to be told apart by the user, not by us.
-  unknown_total <- 0L
+  # Collected rather than counted: a row the folds name but the data does not
+  # have appears once in each fold's test set and once in every OTHER fold's
+  # training set, so summing per-fold counts reported it k times over -- five
+  # missing rows read as 15, 20 or 50 at k = 3, 4 or 10, which is not a
+  # number a user can compare with n_dropped or with the size of their data.
+  unknown_ids <- vector("list", length(folds))
   for (j in seq_along(folds)) {
     f <- folds[[j]]
     ov <- intersect(f$train, f$test)
@@ -121,12 +130,13 @@
                    j, length(ov),
                    paste(utils::head(format(ov), 3L), collapse = ", ")),
            call. = FALSE)
-    unknown_total <- unknown_total +
-      sum(is.na(match(c(f$train, f$test), keep_idx)))
+    ent <- c(f$train, f$test)
+    unknown_ids[[j]] <- ent[is.na(match(ent, keep_idx))]
   }
+  unknown_total <- length(unique(unlist(unknown_ids, use.names = FALSE)))
   if (unknown_total > 0L)
-    .log_info(paste0("cross-validation: %d fold entr(y/ies) name row IDs that are ",
-                     "not in the data and were dropped. This is expected when ",
+    .log_info(paste0("cross-validation: the folds name %d row ID(s) that are ",
+                     "not in the data, which were dropped. This is expected when ",
                      "rows were removed for missing values; if it is not, the ",
                      "folds were built on different data."),
               unknown_total)
@@ -183,7 +193,23 @@
                            "compare it with n_folds_succeeded."),
                     n_drop, length(remapped)), call. = FALSE)
 
-  remapped[!(no_test | no_train)]
+  # What was dropped, and which rows no fold named, travel with the result
+  # rather than only through the warnings above: the cv_*() functions return
+  # them as fold_status and orphan_rows.
+  out <- remapped[!(no_test | no_train)]
+  drop_idx <- which(no_test | no_train)
+  attr(out, "dropped") <- data.frame(
+    fold   = vapply(drop_idx, function(j) as.integer(remapped[[j]]$fold_id), integer(1)),
+    # as.character(): ifelse() on a zero-length logical returns logical(0),
+    # so with no fold dropped the column came back a different type from the
+    # one the populated frame has.
+    reason = as.character(ifelse(no_test[drop_idx],
+                                 "empty test set after remapping",
+                                 "fewer than 2 training rows after remapping")),
+    stringsAsFactors = FALSE)
+  attr(out, "orphans") <- orphan
+  attr(out, "n_unknown_ids") <- as.integer(unknown_total)
+  out
 }
 
 
@@ -609,9 +635,10 @@
 #' Fit-predict a single CV fold
 #'
 #' Encapsulates the per-fold work so it can be called sequentially or in
-#' parallel.  Returns \code{NULL} when the fold is unusable before any work
-#' starts, or \code{list(error = <message>)} when the fit or the prediction
-#' threw, so the caller can report the cause rather than only the count.
+#' parallel.  Returns \code{list(skip = <reason>)} when the fold is unusable
+#' before any work starts or produces nothing scorable, or
+#' \code{list(error = <message>)} when the fit or the prediction threw, so the
+#' caller can report the cause rather than only the count.
 #'
 #' @keywords internal
 #' @noRd
@@ -625,7 +652,11 @@
 
   tr_pos <- stats::na.omit(match(remapped_fold$train, keep_idx))
   te_pos <- stats::na.omit(match(remapped_fold$test, keep_idx))
-  if (length(tr_pos) < 2L || length(te_pos) < 1L) return(NULL)
+  # A fold with nothing to fit on or nothing to score is skipped, and the
+  # reason travels back with it so the caller's fold_status can say which.
+  if (length(tr_pos) < 2L || length(te_pos) < 1L)
+    return(list(skip = sprintf("%d training row(s) and %d test row(s) matched the data",
+                               length(tr_pos), length(te_pos))))
 
   train_sf <- dat_sf[tr_pos, , drop = FALSE]
   test_sf  <- dat_sf[te_pos, , drop = FALSE]
@@ -677,7 +708,8 @@
   if (length(y_hat) != length(y_true)) {
     .log_warn("cross-validation: fold %d predicted %d value(s) for %d test row(s); skipping.",
               fold_lab, length(y_hat), length(y_true))
-    return(NULL)
+    return(list(skip = sprintf("predict() returned %d value(s) for %d test row(s)",
+                               length(y_hat), length(y_true))))
   }
 
   # Training-set mean: the correct null-model baseline for out-of-sample
@@ -689,7 +721,8 @@
 
   met <- .compute_reg_metrics(y_true, y_hat, p = p,
                               y_train_mean = y_train_mean)
-  if (met$n == 0L) return(NULL)
+  if (met$n == 0L)
+    return(list(skip = "no finite (observed, predicted) pair among the test rows"))
 
   # Base fold stats
   fs <- data.frame(
@@ -935,34 +968,93 @@
     results <- lapply(seq_along(remapped_folds), fold_worker)
   }
 
-  # mclapply() hands back a try-error OBJECT (not NULL) when a child errors or
-  # is killed, and Negate(is.null) keeps it -- the subsequent [[ "pred_row" ]]
-  # then fails with "subscript out of bounds", destroying the real diagnosis.
-  failed <- vapply(results, function(z) inherits(z, "try-error"), logical(1))
-  worker_msgs <- character(0)
-  if (any(failed)) {
-    worker_msgs <- vapply(results[failed], .try_error_message, character(1))
-    .log_warn("cv: %d fold(s) failed in a parallel worker: %s",
-              sum(failed), paste(unique(worker_msgs), collapse = "; "))
+  # One status per fold, in the folds' own order, before anything is filtered:
+  # what each fold did is the diagnosis a caller needs when "3 of 5 folds
+  # produced predictions" is all the console kept.  mclapply() hands back a
+  # try-error OBJECT (not NULL) when a child errors or is killed; a fold that
+  # threw comes back as list(error = <message>); one skipped before fitting
+  # or after predicting as list(skip = <reason>); a successful one carries
+  # pred_row and fold_stat.  `$` (not `[[`) throughout, because a successful
+  # fold's list has no "error" element and `[[` would abort.
+  labels <- vapply(remapped_folds, function(f) as.integer(f$fold_id %||% NA), integer(1))
+  labels[is.na(labels)] <- seq_along(remapped_folds)[is.na(labels)]
+  status <- character(n_folds); msg <- character(n_folds)
+  for (i in seq_len(n_folds)) {
+    z <- results[[i]]
+    if (inherits(z, "try-error")) {
+      status[i] <- "worker_error"; msg[i] <- .try_error_message(z)
+    } else if (is.null(z)) {
+      status[i] <- "skipped"; msg[i] <- "no result returned"
+    } else if (!is.null(z$error)) {
+      status[i] <- "error"; msg[i] <- z$error
+    } else if (!is.null(z$skip)) {
+      status[i] <- "skipped"; msg[i] <- z$skip
+    } else {
+      status[i] <- "ok"; msg[i] <- ""
+    }
   }
-  results <- results[!failed]
-  results <- Filter(Negate(is.null), results)
-
-  # Folds that threw come back as list(error = <message>) rather than NULL, so
-  # the caller's "all N folds failed" warning can name the cause.  `$` (not
-  # `[[`) because a successful fold's list has no "error" element and `[[`
-  # would abort with "subscript out of bounds".
-  is_err <- vapply(results, function(z) !is.null(z$error), logical(1))
-  fit_errors <- c(worker_msgs,
-                  unlist(lapply(results[is_err], `[[`, "error"),
-                         use.names = FALSE))
-  results <- results[!is_err]
+  fold_status <- data.frame(fold = labels, status = status, message = msg,
+                            stringsAsFactors = FALSE)
+  if (any(status == "worker_error"))
+    .log_warn("cv: %d fold(s) failed in a parallel worker: %s",
+              sum(status == "worker_error"),
+              paste(unique(msg[status == "worker_error"]), collapse = "; "))
+  fit_errors <- msg[status %in% c("worker_error", "error")]
+  results <- results[status == "ok"]
 
   pred_rows  <- lapply(results, `[[`, "pred_row")
   fold_stats <- lapply(results, `[[`, "fold_stat")
 
   list(pred_rows = pred_rows, fold_stats = fold_stats,
-       fit_errors = as.character(fit_errors))
+       fit_errors = as.character(fit_errors), fold_status = fold_status)
+}
+
+
+#' The per-fold status of a cross-validation, dropped folds included
+#'
+#' \code{.remap_folds()} drops folds with an empty test set or fewer than two
+#' training rows before the runner sees them and records which on an
+#' attribute; the runner reports every fold it ran.  This merges the two into
+#' one frame in fold order, so \code{n_folds_attempted - n_folds_succeeded}
+#' always has names and reasons beside it.
+#'
+#' @param remapped_folds The list \code{.remap_folds()} returned.
+#' @param res The list \code{.cv_run_folds()} returned.
+#' @return A data.frame with \code{fold}, \code{status} (\code{"ok"},
+#'   \code{"error"}, \code{"skipped"}, \code{"worker_error"} or
+#'   \code{"dropped"}) and \code{message}.
+#' @keywords internal
+#' @noRd
+.cv_fold_status <- function(remapped_folds, res) {
+  ran <- res$fold_status
+  if (is.null(ran))
+    ran <- data.frame(fold = integer(0), status = character(0), message = character(0),
+                      stringsAsFactors = FALSE)
+  dropped <- attr(remapped_folds, "dropped")
+  if (is.data.frame(dropped) && nrow(dropped))
+    ran <- rbind(ran, data.frame(fold = as.integer(dropped$fold), status = "dropped",
+                                 message = as.character(dropped$reason),
+                                 stringsAsFactors = FALSE))
+  ran <- ran[order(ran$fold), , drop = FALSE]
+  rownames(ran) <- NULL
+  ran
+}
+
+
+#' The fold list without \code{.remap_folds()}'s bookkeeping attributes
+#'
+#' The dropped-fold frame, the orphan IDs and the unknown-ID count ride on the
+#' remapped list so the runner and \code{.cv_fold_status()} can read them; the
+#' \code{folds} element the cv_*() functions return carries them as their own
+#' elements instead, so the list itself is handed back plain.
+#'
+#' @keywords internal
+#' @noRd
+.bare_folds <- function(x) {
+  attr(x, "dropped") <- NULL
+  attr(x, "orphans") <- NULL
+  attr(x, "n_unknown_ids") <- NULL
+  x
 }
 
 
@@ -1247,6 +1339,15 @@ sac_nugget <- function(x) {
 #'   of this many points when the layer has more (exact duplicate locations
 #'   are dropped first); the fitted trend is then removed from every point.
 #'   Default 400.  Raise it for a better-determined fit at the cost above.
+#' @param keep_directional_fits Logical.  Attach each direction's empirical
+#'   variogram and fitted model as \code{directional_fits}?  Defaults to
+#'   \code{FALSE}: the four variograms are most of the object's size (42.1 KB
+#'   of 59.3 KB at \eqn{n = 400}, and the difference between a 52.4 KB and a
+#'   94.6 KB \code{make_folds(auto_range = TRUE)} result), while the numbers
+#'   read from them --- \code{directional}, \code{directional_fitted},
+#'   \code{directional_status}, \code{anisotropy} --- are attached either
+#'   way, and \code{plot()} draws the effective variogram from its own
+#'   attribute.  Set \code{TRUE} to inspect the directional curves.
 #' @section Detrending and the residual-variogram bias:
 #' Fitting a variogram to the residuals of a least-squares trend
 #' underestimates both the sill and the range, because the trend fit absorbs
@@ -1306,10 +1407,20 @@ sac_nugget <- function(x) {
 #'   \describe{
 #'     \item{Success}{A positive effective range in projected coordinate units,
 #'       with the fit attached as attributes \code{directional} (the 0°, 45°,
-#'       90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
+#'       90° and 135° ranges, named by azimuth; \code{NA} where that
+#'       direction's fit was unusable), \code{anisotropy} (largest
 #'       over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
 #'       the all-pairs fit was unusable and the directional maximum stands in
-#'       for it), \code{detrended} (logical: whether the variogram is of the
+#'       for it), \code{directional_status} (per azimuth, why a direction is
+#'       \code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
+#'       -- its range ran past the largest lag fitted -- \code{"not_converged"}
+#'       or \code{"no_fit"}), \code{directional_fitted} (the range each
+#'       direction's fit reported whether or not it was usable, so a refused
+#'       directional range stays recoverable) and \code{directional_fits} (a
+#'       list by azimuth of each direction's empirical \code{variogram} and
+#'       fitted \code{model}, \code{NULL} where there is none --- and
+#'       \code{NULL} altogether unless \code{keep_directional_fits = TRUE}),
+#'       \code{detrended} (logical: whether the variogram is of the
 #'       residuals on \code{predictor_vars} rather than the raw response
 #'       -- a missing predictor is an error, and a failed detrending fit
 #'       warns and falls back to the raw response with this set to
@@ -1347,8 +1458,14 @@ sac_nugget <- function(x) {
 #'       \code{"fitted range is non-positive or non-finite"}), \code{crs} —
 #'       so the units the rejected number was in stay recoverable, which is
 #'       what \code{plot()} labels its axis from --- and
-#'       \code{detrend_method}.  It does \strong{not} carry
-#'       \code{directional} or \code{anisotropy}.  The same shape, with
+#'       \code{detrend_method}.  It carries \code{directional},
+#'       \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
+#'       \code{directional_fitted} and, with
+#'       \code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
+#'       the directional sweep runs whatever becomes of the all-pairs fit, and
+#'       its per-azimuth outcome is what says whether any direction reached
+#'       a sill the pooled variogram did not, or whether every direction ran
+#'       past the fitted lags alike.  The same shape, with
 #'       \code{rejected_range = NA}, \code{variogram_model = NULL} and
 #'       \code{nugget = NA}, is returned when no variogram model could be
 #'       fitted at all (both the exponential and the spherical fit singular,
@@ -1409,7 +1526,8 @@ estimate_sac_range <- function(points_sf, response_var,
                                n_max = 5000L, cutoff = 0.5,
                                range_frac = 1.0, seed = 123L,
                                detrend = c("ols", "reml"),
-                               reml_max_n = 400L) {
+                               reml_max_n = 400L,
+                               keep_directional_fits = FALSE) {
   detrend <- match.arg(detrend)
   if (!is.numeric(reml_max_n) || length(reml_max_n) != 1L ||
       !is.finite(reml_max_n) || reml_max_n < 30)
@@ -1831,6 +1949,34 @@ estimate_sac_range <- function(points_sf, response_var,
   # the stable estimate -- is the honest fallback.
   dir_success <- sum(dir_ok) >= 2L
 
+  # The per-azimuth outcome, kept rather than collapsed: `usable` below holds
+  # NA for every direction that failed, but a fit that never converged, one
+  # whose range ran past the fitted lags and one that could not be fitted at
+  # all are three different findings, and the refused range itself -- the
+  # most informative number when a field is anisotropic and the sweep could
+  # not use it -- was unrecoverable.  All three ride on every classed return,
+  # the rejected ones included: the four fits ran regardless, and the
+  # rejected path is precisely where a user needs to know whether the field
+  # is anisotropic.  The empirical variogram and fitted model of each
+  # direction travel too, so the sweep can be drawn.
+  dir_status <- ifelse(!is.finite(dir_ranges), "no_fit",
+                ifelse(!dir_conv, "not_converged",
+                ifelse(dir_ranges > max_supported, "over_cutoff", "ok")))
+  dir_status <- stats::setNames(dir_status, as.character(dir_az))
+  dir_fitted <- stats::setNames(dir_ranges, as.character(dir_az))
+  dir_detail <- stats::setNames(lapply(dir_fits, function(f)
+    list(variogram = if (inherits(f$vg, "data.frame")) f$vg else NULL,
+         model     = attr(f$fit, "vgm_model"))), as.character(dir_az))
+  # Four empirical variograms, one per azimuth, are most of what this object
+  # weighs: at n = 400 they are 42.1 KB of a 59.3 KB estimate, and
+  # make_folds(auto_range = TRUE) parks one in `params`, which took that
+  # folds object from 52.4 KB to 94.6 KB -- for something nothing in the
+  # package reads.  plot() draws the effective variogram from the
+  # `variogram` attribute, and the per-direction ranges and outcomes are in
+  # `directional`, `directional_fitted` and `directional_status` either way.
+  # Kept on request, for looking at the directional curves themselves.
+  dir_detail_out <- if (isTRUE(keep_directional_fits)) dir_detail else NULL
+
   # Defined here, not inside the branch below: the success return reports it as
   # the `directional` attribute on BOTH paths, and the isotropic fallback never
   # enters that branch.
@@ -1981,6 +2127,12 @@ estimate_sac_range <- function(points_sf, response_var,
       return(structure(
         NA_real_,
         class           = c("sac_range", "numeric"),
+        directional     = stats::setNames(usable, as.character(dir_az)),
+        anisotropy      = anisotropy,
+        anisotropy_used = FALSE,
+        directional_status = dir_status,
+        directional_fitted = dir_fitted,
+        directional_fits   = dir_detail_out,
         detrended       = isTRUE(detrended),
         detrend_method  = detrend_method,
         max_dist        = as.numeric(max_dist),
@@ -2008,6 +2160,12 @@ estimate_sac_range <- function(points_sf, response_var,
     return(structure(
       NA_real_,
       class           = c("sac_range", "numeric"),
+      directional     = stats::setNames(usable, as.character(dir_az)),
+      anisotropy      = anisotropy,
+      anisotropy_used = isTRUE(aniso_used),
+      directional_status = dir_status,
+      directional_fitted = dir_fitted,
+      directional_fits   = dir_detail_out,
       detrended       = isTRUE(detrended),
       detrend_method  = detrend_method,
       max_dist        = as.numeric(max_dist),
@@ -2099,6 +2257,12 @@ estimate_sac_range <- function(points_sf, response_var,
     return(structure(
       NA_real_,
       class           = c("sac_range", "numeric"),
+      directional     = stats::setNames(usable, as.character(dir_az)),
+      anisotropy      = anisotropy,
+      anisotropy_used = isTRUE(aniso_used),
+      directional_status = dir_status,
+      directional_fitted = dir_fitted,
+      directional_fits   = dir_detail_out,
       detrended       = isTRUE(detrended),
       detrend_method  = detrend_method,
       max_dist        = as.numeric(max_dist),
@@ -2126,6 +2290,12 @@ estimate_sac_range <- function(points_sf, response_var,
     # attribute alone cannot tell a caller which of the two was used, and
     # plot(type = "variogram") needs to know whose variogram it is drawing.
     anisotropy_used = isTRUE(aniso_used),
+    # Per azimuth: why a direction is NA in `directional`, the range its fit
+    # reported whether or not it was usable, and the empirical variogram and
+    # model behind it.
+    directional_status = dir_status,
+    directional_fitted = dir_fitted,
+    directional_fits   = dir_detail_out,
     # Whether the variogram is of OLS residuals on `predictor_vars` (TRUE) or
     # of the raw response.  make_folds(auto_range = TRUE) and
     # summarize_by_cell(deff = "variogram") both need to know which.
@@ -2163,7 +2333,10 @@ estimate_sac_range <- function(points_sf, response_var,
 #' Print a spatial autocorrelation range
 #'
 #' Prints the effective range as a plain number, with the directional fit
-#' summarised beneath it when one is available.
+#' summarised beneath it when one is available.  A direction whose fit was
+#' unusable is labelled with why (\code{directional_status}) and the range
+#' its fit reported (\code{directional_fitted}) when the object carries
+#' them, and \code{unidentified} otherwise.
 #'
 #' @param x An object of class \code{sac_range}.
 #' @param ... Ignored.
@@ -2173,17 +2346,33 @@ print.sac_range <- function(x, ...) {
   cat(format(as.numeric(x)), "\n")
   d <- attr(x, "directional")
   a <- attr(x, "anisotropy")
+  st <- attr(x, "directional_status")
+  ft <- attr(x, "directional_fitted")
   # any(), not all(): a direction whose variogram never reached a sill is
   # recorded as NA and excluded from the maximum, and suppressing the whole
-  # line in that case hides exactly the diagnostic worth seeing.
-  if (!is.null(d) && length(d) > 0L && any(is.finite(d))) {
+  # line in that case hides exactly the diagnostic worth seeing.  With the
+  # per-azimuth status attached the line is worth printing even when no
+  # direction was usable: four ranges past the fitted lags say something.
+  if (!is.null(d) && length(d) > 0L &&
+      (any(is.finite(d)) || (!is.null(st) && length(st) == length(d)))) {
     # Names, not fixed positions: the azimuth sweep is c(0, 45, 90, 135) and
     # an older stored object may carry only c(0, 90).
     labs <- names(d)
     if (is.null(labs)) labs <- as.character(seq_along(d) - 1L)
+    failed <- vapply(seq_along(d), function(i) {
+      if (is.null(st) || length(st) != length(d) || is.null(ft) ||
+          length(ft) != length(d)) return("unidentified")
+      why <- switch(as.character(st[[i]]),
+                    over_cutoff   = "past the fitted lags",
+                    not_converged = "not converged",
+                    no_fit        = "no fit",
+                    "unidentified")
+      if (is.finite(ft[[i]])) sprintf("%s (%s)", format(unname(ft[[i]])), why)
+      else why
+    }, character(1))
     cat("  directional: ",
         paste(sprintf("%s deg = %s", labs,
-                      ifelse(is.finite(d), format(unname(d)), "unidentified")),
+                      ifelse(is.finite(d), format(unname(d)), failed)),
               collapse = ", "),
         sep = "")
     if (is.finite(a)) cat(sprintf("  (ratio %.2f)", a))
@@ -2505,7 +2694,10 @@ print.sac_range <- function(x, ...) {
 #' point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
 #' lowered to the number of blocks that hold points when that is smaller.
 #' \code{params$n_blocks} is the number of blocks before empties were dropped,
-#' \code{params$blocks_used} the number after, \code{params$grid_nx} and
+#' \code{params$blocks_used} the number after (so with
+#' \code{drop_empty_blocks = FALSE} the two are equal, and
+#' \code{sum(params$block_sizes > 0)} is how many of them hold points),
+#' \code{params$grid_nx} and
 #' \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
 #' median over blocks that hold points of the side of the square with the
 #' block's area -- the length compared against the autocorrelation range for
@@ -2552,8 +2744,44 @@ print.sac_range <- function(x, ...) {
 #'   always the \code{k} that was requested (see the \code{k} argument above),
 #'   and \code{length(folds)} always matches it.
 #'
+#'   For \code{"block_kfold"} the block design is returned with the folds.
+#'   \code{assignment} has a third column, \code{block_id}: the block each
+#'   point fell in, numbered as the rows of \code{params$blocks}, an
+#'   \code{sf} layer of the block polygons in the CRS the folds were built
+#'   in.  Those rows are \strong{not} the rows of the layer the blocks came
+#'   from: \code{drop_empty_blocks = TRUE} (the default) removes the blocks
+#'   that hold no point and renumbers the rest, so with supplied
+#'   \code{blocks} a nine-polygon layer of which three are empty comes back
+#'   as six rows numbered 1 to 6.  \code{params$blocks$source_row} is the
+#'   row each one came from in that original layer (a grid cell's index in
+#'   the full \code{grid_nx} by \code{grid_ny} grid, or the row of the
+#'   \code{blocks} argument), so
+#'   \code{blocks[params$blocks$source_row, ]} recovers them with their own
+#'   columns and in their own order.  It runs from 1 to
+#'   \code{params$n_blocks} and is the identity when nothing was dropped.
+#'   \code{params$block_sizes} is the number of points in each block, indexed
+#'   by \code{block_id} -- zeros are empty blocks that
+#'   \code{drop_empty_blocks = FALSE} kept -- and \code{params$fold_blocks}
+#'   is a list with one integer vector per fold naming the blocks packed into
+#'   it.  Between them the folds account for every block exactly once,
+#'   empty ones included, so a fold's territory on the map is all of its
+#'   blocks and not merely the ones that happen to hold points.  So
+#'   \code{table(assignment$fold)} can be traced back to the blocks
+#'   it is made of, a fold can be seen to be one contiguous region or
+#'   several, and the blocks can be drawn over the data
+#'   (\code{\link{plot_folds}()} does so).
+#'
 #'   For the methods that work in projected space — \code{"block_kfold"},
 #'   \code{"buffered_loo"} and \code{"nndm"} — \code{params} carries a
+#'   \code{params$blocks_supplied} says whether the blocks came from
+#'   \code{blocks} rather than from a grid built here, and
+#'   \code{params$boundary_supplied} whether a \code{boundary} was given;
+#'   \code{params$row_probe} is a small sample of row IDs and coordinates
+#'   that every \code{cv_*()} compares against the data it is handed, so
+#'   folds built from a different layer of the same size are refused rather
+#'   than applied silently.
+#'
+#'   For the methods that work in projected space, \code{params} also carries a
 #'   \code{crs} element naming the CRS the folds were built in (an
 #'   \code{"EPSG:code"} string where there is one, otherwise the CRS's input
 #'   definition).  Every length in \code{params} — \code{block_size},
@@ -2573,8 +2801,9 @@ print.sac_range <- function(x, ...) {
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
-#' folds$assignment          # fold membership per row
+#' folds$assignment          # fold and block membership per row
 #' lengths(folds$folds[[1]]) # train/test row-ID splits
+#' folds$params$block_sizes  # points per block; params$fold_blocks packs them
 #'
 #' # Buffered leave-one-out: neighbours within 100 units excluded from training
 #' loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
@@ -3059,10 +3288,17 @@ make_folds <- function(points_sf, k,
       }
     }
 
+    # Which row of the ORIGINAL block layer each surviving block came from.
+    # Dropping the empty ones renumbers `..block_id`, so without this the
+    # returned design cannot be tied back to the layer the caller supplied --
+    # and a join by row position silently mis-attributes every block after
+    # the first gap.
+    block_source_row <- seq_len(nrow(grid_sf))
     if (drop_empty_blocks) {
       used_blocks <- sort(unique(pts$..block_id[!is.na(pts$..block_id)]))
       grid_sf <- grid_sf[used_blocks, , drop = FALSE]
       pts$..block_id <- match(pts$..block_id, used_blocks)
+      block_source_row <- used_blocks
     }
     if (anyNA(pts$..block_id)) {
       cent <- suppressWarnings(sf::st_centroid(sf::st_geometry(grid_sf)))
@@ -3116,7 +3352,19 @@ make_folds <- function(points_sf, k,
     }
     if (B < k) { .log_warn("make_folds(block_kfold): blocks < k; reducing k."); k <- B }
 
-    blk_sizes <- as.integer(table(factor(pts$..block_id, levels = seq_len(B))))
+    # Counted over every block in the grid, not over 1..B.  B is the highest
+    # block id a point fell in, which under drop_empty_blocks = FALSE says
+    # nothing about how many blocks there are: on a layer whose points sit in
+    # one quadrant of an 8x8 grid, B was 27, so blocks 28-64 were packed into
+    # no fold at all while the 12 equally empty blocks below 27 were -- the
+    # same kind of block treated two ways depending on where it fell in an
+    # arbitrary numbering.  Counting over the grid makes `fold_blocks` cover
+    # every block `blocks` and `block_sizes` describe.  It cannot move a
+    # point: order() is stable, so the populated blocks are still placed
+    # first, in the same order, against the same fold loads; the extra
+    # zero-size blocks land at the tail and add no observations to any fold.
+    blk_sizes <- as.integer(table(factor(pts$..block_id,
+                                         levels = seq_len(nrow(grid_sf)))))
 
     # Leakage diagnostic for supplied blocks, the counterpart of the grid
     # branches above: the scale of a polygon is the side of the square with
@@ -3153,7 +3401,7 @@ make_folds <- function(points_sf, k,
     for (i in seq_along(order_blk)) {
       j <- which(fold_loads == min(fold_loads))
       if (length(j) > 1) j <- sample(j, 1L)
-      fold_blocks[[j]] <- c(fold_blocks[[j]], seq_len(B)[order_blk[i]])
+      fold_blocks[[j]] <- c(fold_blocks[[j]], order_blk[i])
       fold_loads[j] <- fold_loads[j] + blk_sizes[order_blk[i]]
     }
 
@@ -3180,12 +3428,33 @@ make_folds <- function(points_sf, k,
                           test  = row_ids[test_idx])
       assign_vec[test_idx] <- j
     }
+    # The block design itself travels with the folds: which block each point
+    # fell in (a third `assignment` column), the points per block indexed by
+    # block_id -- over every block still in the grid, so empties are counted
+    # when drop_empty_blocks = FALSE kept them -- which blocks each fold was
+    # packed from, and the block polygons in the CRS the folds were built in,
+    # so the design can be drawn over the data and a fold seen to be one
+    # region or several.
+    block_polys <- sf::st_sf(block_id = seq_len(nrow(grid_sf)),
+                             source_row = as.integer(block_source_row),
+                             geometry = sf::st_geometry(grid_sf))
     return(.ret(method, k, splits,
-                .safe_tibble(row_id = pts$..row_id, fold = assign_vec),
-                list(seed = seed, grid_nx = nx, grid_ny = ny, blocks_used = B,
+                .safe_tibble(row_id = pts$..row_id, fold = assign_vec,
+                             block_id = as.integer(pts$..block_id)),
+                # The blocks the design actually has, which is what `blocks`
+                # and `block_sizes` describe and what the folds partition.
+                # This was `B`, the highest block id a point fell in -- equal
+                # to the block count under the default, but an artifact of the
+                # numbering under drop_empty_blocks = FALSE, where it reported
+                # 27 for a 64-block grid that had dropped nothing.
+                list(seed = seed, grid_nx = nx, grid_ny = ny,
+                     blocks_used = nrow(grid_sf),
                      n_blocks = n_blocks,
                      blocks_supplied = blocks_supplied,
                      block_scale = block_scale,
+                     block_sizes = blk_sizes,
+                     fold_blocks = fold_blocks,
+                     blocks = block_polys,
                      block_multiplier = block_multiplier,
                      block_size = block_size,
                      sac_range = sac_range,
@@ -3604,10 +3873,15 @@ make_folds <- function(points_sf, k,
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
-#'   \code{n_folds_succeeded}, \code{formula} and \code{adaptive}.  The two
+#'   \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
+#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
+#'   \code{adaptive}.  The two
 #'   fold counts make a run where every fold failed visible in the return
 #'   value rather than only in a warning, since \code{overall} is a
-#'   well-formed all-\code{NA} row either way.  \code{Adj_R2} is \code{NA}
+#'   well-formed all-\code{NA} row either way, and \code{fold_status} (one
+#'   row per fold: \code{fold}, \code{status}, \code{message}) says why each
+#'   missing fold is missing -- see \code{\link{cv_spatial}} for the five
+#'   statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
 #'   in both \code{overall} and \code{fold_metrics}: the pooled predictions
 #'   have no single parameter count, and a GWR's effective parameter count is
 #'   not its predictor count (see \code{\link{cv_spatial}}).
@@ -3726,12 +4000,16 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   }
 
   list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
-       predictions = preds, folds = remapped_folds,
+       predictions = preds, folds = .bare_folds(remapped_folds),
        # Reported so that a run where every fold failed is visible in the
        # return value, not only in a warning: `overall` is a well-formed
        # all-NA row either way.  cv_spatial() and cv_rf() report the same two
        # fields, so all four CV entry points share one shape.
        n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded,
+       fold_status = .cv_fold_status(remapped_folds, res),
+       orphan_rows = attr(remapped_folds, "orphans"),
+       n_unknown_ids = attr(remapped_folds, "n_unknown_ids"),
+       n_dropped = as.integer(.get_row_record(dat_sf, "dropped")$n %||% 0L),
        formula = deparse(stats::reformulate(predictor_vars, response_var)),
        adaptive = adaptive)
 }
@@ -3812,9 +4090,16 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
-#'   \code{n_folds_succeeded}, \code{formula} and \code{predictive_coverage}.
+#'   \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
+#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
+#'   \code{predictive_coverage}.
 #'   The two fold counts make a run where every fold failed visible in the
-#'   return value rather than only in a warning.  \code{predictions} carries,
+#'   return value rather than only in a warning, and \code{fold_status} (one
+#'   row per fold: \code{fold}, \code{status}, \code{message}) keeps the
+#'   reason each missing fold is missing -- the error text of a fold whose
+#'   sampler failed included -- where a long run's console output would not;
+#'   see \code{\link{cv_spatial}} for the five statuses and for
+#'   \code{orphan_rows}.  \code{predictions} carries,
 #'   beyond the columns its siblings share, \code{yhat_sd}: the posterior
 #'   predictive standard deviation of each held-out row, from the same draws
 #'   that give the coverage below (\code{NA} when
@@ -4014,11 +4299,15 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   }
 
   list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
-       predictions = preds, folds = remapped_folds,
+       predictions = preds, folds = .bare_folds(remapped_folds),
        # Reported so that a run where every fold failed is visible in the
        # return value, not only in a warning -- which matters most here,
        # where a fold dies on Stan sampling rather than on bad input.
        n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded,
+       fold_status = .cv_fold_status(remapped_folds, res),
+       orphan_rows = attr(remapped_folds, "orphans"),
+       n_unknown_ids = attr(remapped_folds, "n_unknown_ids"),
+       n_dropped = as.integer(.get_row_record(dat_sf, "dropped")$n %||% 0L),
        formula = deparse(stats::reformulate(predictor_vars, response_var)),
        # Weighted by each fold's n_pred.  Per-fold coverage and CRPS are
        # themselves means over that fold's test rows, so an unweighted mean
@@ -4151,15 +4440,38 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' across the rows of its \code{overall}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics}, \code{predictions},
-#'   \code{folds}, and the two fold counts \code{n_folds_attempted} and
-#'   \code{n_folds_succeeded}.  The counts are reported deliberately: a
+#'   \code{folds}, the two fold counts \code{n_folds_attempted} and
+#'   \code{n_folds_succeeded}, and four elements that say what happened to
+#'   the difference between them and to the rows: \code{fold_status},
+#'   \code{orphan_rows}, \code{n_unknown_ids} and \code{n_dropped}.  The
+#'   counts are reported deliberately: a
 #'   \code{fit_fn} that fails on every fold otherwise looks like a successful
 #'   run that happened to score \code{NA}, so compare them before trusting
-#'   \code{overall}.  The \code{fold} column of \code{fold_metrics} and
-#'   \code{predictions} carries the fold's index in the \code{folds} object
-#'   that was supplied, so it lines up with
-#'   \code{make_folds()$assignment$fold} even when some folds were unusable
-#'   and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
+#'   \code{overall}.  \code{fold_status} is a data.frame with one row per
+#'   fold supplied -- \code{fold}, \code{status} and \code{message} -- where
+#'   \code{status} is \code{"ok"}; \code{"error"} (the fit or its
+#'   \code{predict()} threw; \code{message} is the error text);
+#'   \code{"skipped"} (nothing scorable: too few matched rows, a prediction
+#'   of the wrong length, or no finite observed/predicted pair);
+#'   \code{"dropped"} (an empty test set, or fewer than two training rows,
+#'   once incomplete rows were removed, so the fold never reached the fitter);
+#'   or \code{"worker_error"} (a parallel worker died).  Every fold missing
+#'   from \code{fold_metrics} has its reason there, which matters most when
+#'   the console output of a long run is gone.  \code{orphan_rows} holds the
+#'   \code{..row_id}s of rows in the data that no fold names (they enter no
+#'   training set and are never scored; non-empty only when the folds were
+#'   built on a different or subsetted layer), and \code{n_unknown_ids}
+#'   counts the distinct row IDs the folds name that the data does not have
+#'   --- each such row is named by every fold, once as a test row and once in
+#'   each other fold's training set, and this counts the row, not the
+#'   mentions (expected when
+#'   rows were removed for missing values -- \code{n_dropped} is how many
+#'   rows \code{prep_model_data()} removed for missing or non-finite values
+#'   or a bad geometry before any fold was fitted).  The \code{fold} column of
+#'   \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
+#'   the fold's index in the \code{folds} object that was supplied, so it
+#'   lines up with \code{make_folds()$assignment$fold} even when some folds
+#'   were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
 #'   out-of-sample predictions come from \code{k} separately fitted models and
 #'   have no single parameter count to adjust for.  The per-fold
 #'   \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
@@ -4201,8 +4513,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'
 #' cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 #' cv$overall
-#' # Compare these before trusting the metrics above.
+#' # Compare these before trusting the metrics above; fold_status says why
+#' # any fold is missing from fold_metrics.
 #' c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+#' cv$fold_status
 #'
 #' # 3. A metric of your own beside the built-in ones: per fold and pooled.
 #' med_ae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
@@ -4285,6 +4599,10 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
 
   list(overall = .cv_overall_metrics(preds, metrics),
        fold_metrics = folds_df, predictions = preds,
-       folds = remapped_folds,
-       n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded)
+       folds = .bare_folds(remapped_folds),
+       n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded,
+       fold_status = .cv_fold_status(remapped_folds, res),
+       orphan_rows = attr(remapped_folds, "orphans"),
+       n_unknown_ids = attr(remapped_folds, "n_unknown_ids"),
+       n_dropped = as.integer(.get_row_record(dat_sf, "dropped")$n %||% 0L))
 }

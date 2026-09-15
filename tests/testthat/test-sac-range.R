@@ -589,3 +589,140 @@ test_that("a periodic field is refused as 'decreases with distance', with the ev
   expect_true(is.finite(ok))
   expect_false(spatialkit:::.variogram_decreasing(attr(ok, "variogram")))
 })
+
+# ---------------------------------------------------------------------------
+# 10.3: the directional sweep is reported on every classed return, with the
+# per-azimuth outcome kept rather than collapsed into one NA.
+# ---------------------------------------------------------------------------
+
+sac_dir_attrs_consistent <- function(r) {
+  d  <- attr(r, "directional"); st <- attr(r, "directional_status")
+  ft <- attr(r, "directional_fitted"); fl <- attr(r, "directional_fits")
+  expect_identical(names(d), c("0", "45", "90", "135"))
+  expect_identical(names(st), names(d)); expect_identical(names(ft), names(d))
+  # The fits are attached only under keep_directional_fits = TRUE; everything
+  # else about the sweep is reported either way.
+  if (!is.null(fl)) expect_identical(names(fl), names(d))
+  expect_true(all(st %in% c("ok", "over_cutoff", "not_converged", "no_fit")))
+  # `directional` is the usable subset of `directional_fitted`, and a
+  # direction is NA there exactly when its status is not "ok".
+  expect_identical(is.na(d), st != "ok")
+  expect_equal(unname(d[st == "ok"]), unname(ft[st == "ok"]))
+  expect_true(all(is.finite(ft[st != "no_fit"])))
+  expect_true(all(is.na(ft[st == "no_fit"])))
+  expect_true(all(ft[st != "no_fit"] > 0))
+  for (az in names(fl)) {
+    expect_named(fl[[az]], c("variogram", "model"))
+    if (st[[az]] != "no_fit") {
+      expect_s3_class(fl[[az]]$variogram, "data.frame")
+      expect_s3_class(fl[[az]]$model, "data.frame")
+    }
+  }
+  invisible(TRUE)
+}
+
+test_that("a successful estimate carries the per-azimuth status, the fitted ranges and the fits", {
+  skip_if_not_installed("gstat")
+  r <- estimate_sac_range(sac_test_field(), "z", seed = 1,
+                          keep_directional_fits = TRUE)
+  expect_true(is.finite(r))
+  sac_dir_attrs_consistent(r)
+  # An "ok" direction's fitted range is what its model says, converted to the
+  # effective range exactly as the estimate itself is.
+  st <- attr(r, "directional_status"); fl <- attr(r, "directional_fits")
+  for (az in names(st)[st == "ok"]) {
+    m <- fl[[az]]$model
+    sp <- m[m$model != "Nug", , drop = FALSE]
+    eff <- if (identical(as.character(sp$model[1]), "Exp")) 3 * sp$range[1] else sp$range[1]
+    expect_equal(unname(attr(r, "directional_fitted")[az]), eff)
+  }
+  expect_output(print(r), "directional: 0 deg")
+})
+
+test_that("a rejected range keeps the directional sweep, and says why each direction was unusable", {
+  skip_if_not_installed("gstat")
+  pts <- sac_test_field()
+  # Every direction's range runs past a fitted-lag bound this tight, so all
+  # four are refused for the same reason -- and the refused numbers are the
+  # ranges the success run reports as usable.
+  r <- estimate_sac_range(pts, "z", range_frac = 1e-6, seed = 1)
+  ok <- estimate_sac_range(pts, "z", seed = 1)
+  expect_true(is.na(r))
+  sac_dir_attrs_consistent(r)
+  st <- attr(r, "directional_status")
+  expect_true(all(st[attr(ok, "directional_status") == "ok"] == "over_cutoff"))
+  expect_true(all(is.na(attr(r, "directional"))))
+  expect_equal(attr(r, "directional_fitted"), attr(ok, "directional_fitted"))
+  expect_false(is.null(attr(r, "anisotropy")))
+  expect_false(isTRUE(attr(r, "anisotropy_used")))
+  # The print names the refusal and the number, and still no variogram dump.
+  printed <- paste(utils::capture.output(print(r)), collapse = "\n")
+  expect_match(printed, "^NA")
+  expect_match(printed, "past the fitted lags")
+  expect_match(printed, format(unname(attr(r, "directional_fitted")[1])), fixed = TRUE)
+  expect_false(grepl("np|gamma|psill", printed))
+  # The same on the 'decreases with distance' and 'no model' refusals.
+  set.seed(5001)
+  n <- 250
+  xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+  D  <- as.matrix(stats::dist(xy))
+  S  <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n))
+  per <- sf::st_as_sf(
+    data.frame(x = xy[, 1], y = xy[, 2],
+               z = 2 * sin(2 * pi * xy[, 1] / 250) + 0.3 * S + rnorm(n, sd = 0.3)),
+    coords = c("x", "y"), crs = 32632)
+  rp <- suppressWarnings(estimate_sac_range(per, "z"))
+  expect_identical(attr(rp, "rejected_reason"), "empirical variogram decreases with distance")
+  sac_dir_attrs_consistent(rp)
+  set.seed(3)
+  pts$noise <- rnorm(nrow(pts))
+  rn <- suppressWarnings(estimate_sac_range(pts, "noise", seed = 1))
+  expect_true(is.na(rn))
+  expect_s3_class(rn, "sac_range")
+  sac_dir_attrs_consistent(rn)
+})
+
+test_that("a direction that could not be fitted is 'no_fit' with nothing behind it", {
+  skip_if_not_installed("gstat")
+  # 40 points on a narrow east-west strip: the 0-degree (N-S) window sees no
+  # pairs beyond the strip's width, and pairs at lags too few to fit.
+  set.seed(11)
+  strip <- sf::st_as_sf(data.frame(x = runif(40, 0, 2000), y = runif(40, 0, 5)),
+                        coords = c("x", "y"), crs = 32632)
+  strip$z <- as.numeric(t(chol(exp(-as.matrix(stats::dist(sf::st_coordinates(strip))) / 100) +
+                                 diag(1e-4, 40))) %*% rnorm(40)) + rnorm(40, 0, 0.2)
+  r <- suppressWarnings(estimate_sac_range(strip, "z", seed = 1,
+                                           keep_directional_fits = TRUE))
+  st <- attr(r, "directional_status")
+  expect_false(is.null(st))
+  expect_identical(unname(st[["0"]]), "no_fit")
+  expect_true(is.na(attr(r, "directional_fitted")[["0"]]))
+  expect_null(attr(r, "directional_fits")[["0"]]$model)
+  sac_dir_attrs_consistent(r)
+  expect_output(print(r), "0 deg = no fit")
+})
+
+
+test_that("the directional variograms are attached only on request", {
+  skip_if_not_installed("gstat")
+  fld <- sac_test_field()
+  lite <- estimate_sac_range(fld, "z", seed = 1)
+  full <- estimate_sac_range(fld, "z", seed = 1, keep_directional_fits = TRUE)
+  # Four empirical variograms are most of what the object weighs, and nothing
+  # in the package reads them: plot() draws the effective variogram from the
+  # `variogram` attribute, and the per-direction numbers are attached either
+  # way.
+  expect_null(attr(lite, "directional_fits"))
+  expect_length(attr(full, "directional_fits"), 4L)
+  expect_lt(as.numeric(object.size(lite)), as.numeric(object.size(full)) / 2)
+  # The estimate itself, and every other attribute, is untouched.
+  expect_identical(as.numeric(lite), as.numeric(full))
+  keep <- setdiff(names(attributes(full)), "directional_fits")
+  expect_equal(attributes(lite)[keep], attributes(full)[keep], tolerance = 0)
+  sac_dir_attrs_consistent(lite)
+  # And the folds that carry one shrink with it.
+  fo <- suppressWarnings(suppressMessages(
+    make_folds(fld, k = 3, method = "block_kfold", response_var = "z",
+               auto_range = TRUE, seed = 1)))
+  expect_null(attr(fo$params$sac_range, "directional_fits"))
+})

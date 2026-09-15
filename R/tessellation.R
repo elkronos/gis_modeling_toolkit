@@ -114,12 +114,16 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @param pts An sf POINT object.
 #' @param cells_sf An sf polygon object with a `cell_id` column.
 #' @return Integer vector of cell_id values, one per row of `pts`, with
-#'   \code{NA} for points that fall outside every cell.
+#'   \code{NA} for points that fall outside every cell, carrying the
+#'   nearest-cell repairs as \code{attr(, "snapped")} (\code{n}, \code{which},
+#'   \code{distance}); the callers move that record into \code{params}.
 #' @keywords internal
 #' @noRd
 .build_point_cell_index <- function(pts, cells_sf) {
   n <- nrow(pts)
-  if (n == 0L || nrow(cells_sf) == 0L) return(rep(NA_integer_, n))
+  if (n == 0L || nrow(cells_sf) == 0L)
+    return(structure(rep(NA_integer_, n),
+                     snapped = list(n = 0L, which = integer(0), distance = numeric(0))))
 
   cell_ids <- cells_sf$cell_id
   hits <- sf::st_intersects(pts, cells_sf)
@@ -142,6 +146,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   # clipped sliver), so keep it -- but bound it by the cell size and say how
   # many points were snapped, and leave the genuinely-outside ones NA.
   unmatched <- which(is.na(index))
+  snapped   <- list(n = 0L, which = integer(0), distance = numeric(0))
   if (length(unmatched) > 0L) {
     near  <- suppressWarnings(sf::st_nearest_feature(pts[unmatched, ], cells_sf))
     valid <- is.finite(near)
@@ -161,6 +166,16 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
       snap <- valid
       snap[valid] <- is.finite(d) & d <= tol
       index[unmatched[snap]] <- cell_ids[near[snap]]
+      # Which points were repaired, and how far outside each sat: the comment
+      # above promised to say how many, and nothing did.
+      d_all <- rep(NA_real_, length(unmatched)); d_all[valid] <- d
+      snapped <- list(n = sum(snap), which = as.integer(unmatched[snap]),
+                      distance = as.numeric(d_all[snap]))
+      if (snapped$n > 0L)
+        .log_info(paste0("build_tessellation(): %d point(s) sitting just outside ",
+                         "every cell (at most %.3g units, within a thousandth of ",
+                         "the median cell width) were assigned to the nearest cell."),
+                  snapped$n, max(snapped$distance))
     }
   }
   n_out <- sum(is.na(index))
@@ -169,6 +184,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
                      "cell and are recorded as NA in `index`."),
               n_out, length(index))
 
+  attr(index, "snapped") <- snapped
   index
 }
 
@@ -289,15 +305,19 @@ create_voronoi_polygons <- function(
     cells$cell_id <- integer(0)
   }
 
-  # Build point → cell index using cell_id values
-  index <- .build_point_cell_index(pts, cells)
+  # Build point → cell index using cell_id values.  The snapping record rides
+  # on `params`, not on `index`, so `index` stays a plain integer vector.
+  index   <- .build_point_cell_index(pts, cells)
+  snapped <- attr(index, "snapped")
+  attr(index, "snapped") <- NULL
 
   list(
     cells    = cells,
     index    = index,
     boundary = boundary,
     method   = "voronoi",
-    params   = list(clip = clip, expand = expand, keep_duplicates = keep_duplicates)
+    params   = list(clip = clip, expand = expand, keep_duplicates = keep_duplicates,
+                    snapped = snapped)
   )
 }
 
@@ -637,7 +657,10 @@ create_grid_polygons <- function(
 #'       therefore counts only the points the tessellation actually covers.}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or reprojected).}
 #'     \item{`method`}{The method actually used.}
-#'     \item{`params`}{The parameters the tessellation was built with.}
+#'     \item{`params`}{The parameters the tessellation was built with, plus
+#'       `snapped`, the record of that nearest-cell repair: a list with `n`,
+#'       `which` (row positions in `points_sf`) and `distance` (how far
+#'       outside every cell each sat, in CRS units).}
 #'   }
 #' @family tessellation
 #' @examples
@@ -744,7 +767,9 @@ build_tessellation <- function(
     if (id_col != "cell_id") {
       grid$cell_id <- grid[[id_col]]
     }
-    index <- .build_point_cell_index(points_sf, grid)
+    index   <- .build_point_cell_index(points_sf, grid)
+    snapped <- attr(index, "snapped")
+    attr(index, "snapped") <- NULL
 
     return(list(
       cells = grid, index = index, boundary = boundary, method = method,
@@ -752,7 +777,7 @@ build_tessellation <- function(
                     approx_n_cells_from = approx_n_cells_from,
                     cellsize = cellsize,
                     clip = clip, keep_duplicates = keep_duplicates,
-                    expand = expand)
+                    expand = expand, snapped = snapped)
     ))
   }
 
@@ -810,13 +835,16 @@ build_tessellation <- function(
     tri_sf$cell_id <- seq_len(nrow(tri_sf))
 
     # Build point-to-cell index for triangles
-    index <- .build_point_cell_index(points_sf, tri_sf)
+    index   <- .build_point_cell_index(points_sf, tri_sf)
+    snapped <- attr(index, "snapped")
+    attr(index, "snapped") <- NULL
 
     return(list(
       cells = tri_sf, index = index, boundary = boundary, method = "triangles",
       params = list(clip = clip, approx_n_cells = approx_n_cells,
                     approx_n_cells_from = approx_n_cells_from,
-                    keep_duplicates = keep_duplicates, expand = expand)
+                    keep_duplicates = keep_duplicates, expand = expand,
+                    snapped = snapped)
     ))
   }
 

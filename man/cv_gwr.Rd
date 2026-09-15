@@ -85,10 +85,15 @@ become columns of \code{fold_metrics} (per fold) and \code{overall}
 \value{
 A list with \code{overall}, \code{fold_metrics},
 \code{predictions}, \code{folds}, \code{n_folds_attempted},
-\code{n_folds_succeeded}, \code{formula} and \code{adaptive}.  The two
+\code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
+\code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
+\code{adaptive}.  The two
 fold counts make a run where every fold failed visible in the return
 value rather than only in a warning, since \code{overall} is a
-well-formed all-\code{NA} row either way.  \code{Adj_R2} is \code{NA}
+well-formed all-\code{NA} row either way, and \code{fold_status} (one
+row per fold: \code{fold}, \code{status}, \code{message}) says why each
+missing fold is missing -- see \code{\link{cv_spatial}} for the five
+statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
 in both \code{overall} and \code{fold_metrics}: the pooled predictions
 have no single parameter count, and a GWR's effective parameter count is
 not its predictor count (see \code{\link{cv_spatial}}).

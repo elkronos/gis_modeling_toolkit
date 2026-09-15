@@ -605,6 +605,13 @@
 #'   and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
 #'   the result rather than assuming.
 #'   See \strong{Which null, and when it is approximate} above.
+#' @param keep_weights Logical. Return the \eqn{n \times n} weight matrix in
+#'   the result? Defaults to \code{FALSE}: the matrix dominates the object's
+#'   size --- 50.3 KB of a 52.0 KB result at \eqn{n = 500} in its sparse form,
+#'   and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
+#'   while most uses read only the statistic and its moments, and
+#'   \code{weights_summary} says what it was. Set \code{TRUE} when you need
+#'   the matrix itself.
 #' @return A list with components:
 #'   \describe{
 #'     \item{observed}{Numeric scalar, Moran's I statistic.}
@@ -622,7 +629,35 @@
 #'     \item{df}{Residual degrees of freedom behind the moments:
 #'       \eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
 #'       design matrix), \eqn{n - 1} for \code{"randomisation"}.}
+#'     \item{weights}{The \eqn{n \times n} weight matrix the statistic was
+#'       computed with --- the row-standardised k-nearest-neighbour matrix
+#'       built here (sparse when \pkg{Matrix} is installed), or the
+#'       supplied \code{weights} after the diagonal was zeroed --- and
+#'       \code{NULL} unless \code{keep_weights = TRUE}.}
+#'     \item{kurtosis}{The residual kurtosis \eqn{m_4 / m_2^2}, which the
+#'       randomisation variance conditions on and which says how far the
+#'       residuals sit from the Gaussian case the residual moments assume
+#'       (3 for a normal sample).}
+#'     \item{p}{The rank of the rebuilt design matrix behind the
+#'       \code{"residual"} moments; \code{NA} under
+#'       \code{"randomisation"}.}
+#'     \item{exact}{Logical: \code{TRUE} when the moments are exact for
+#'       these residuals (the residual null on OLS residuals of the response
+#'       on the rebuilt design), \code{FALSE} when they are an approximation
+#'       -- the residual null forced onto a non-OLS backend, or the
+#'       randomisation null, whose exchangeable moments model residuals do
+#'       not satisfy.}
+#'     \item{weights_summary}{What the weight matrix was, present whether or
+#'       not the matrix itself was kept: \code{n}, \code{storage} (its class),
+#'       \code{neighbours} (the smallest and largest number of neighbours any
+#'       row has --- \code{NA} for a dense matrix, where counting them would
+#'       allocate a second one), \code{kept} (whether \code{weights} holds
+#'       the matrix) and \code{desc}, the one line \code{print()} shows.}
 #'   }
+#'   The list is classed \code{"morans_i"} and has a \code{print()} method,
+#'   so the console shows the statistic and its null rather than the
+#'   \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
+#'   \code{$}, \code{[[} and \code{unlist()} are unaffected.
 #'   Returns \code{NULL} with a warning if computation fails (e.g. fewer
 #'   than 4 valid residuals).
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
@@ -653,7 +688,8 @@ residual_morans_i <- function(fit,
                               alternative = c("two.sided", "greater", "less"),
                               weights = NULL,
                               k = 8L,
-                              null = c("auto", "randomisation", "residual")) {
+                              null = c("auto", "randomisation", "residual"),
+                              keep_weights = FALSE) {
   alternative <- match.arg(alternative)
   null        <- match.arg(null)
 
@@ -826,12 +862,20 @@ residual_morans_i <- function(fit,
                        "randomisation null instead."))
   }
 
+  # The residual kurtosis the randomisation variance conditions on: reported
+  # under both nulls, since it is what says how far the residuals are from
+  # the Gaussian case the residual moments assume.
+  m2 <- ss_c / n
+  m4 <- sum(resid_c^4) / n
+  b2 <- m4 / (m2^2)                            # kurtosis
+  p_rank <- NA_integer_
   if (!is.null(mom)) {
     # --- Cliff & Ord (1981) sec. 8.3 residual moments ---
     null_used <- "residual"
     EI   <- mom$EI
     VI   <- mom$VI
     df_I <- mom$df
+    p_rank <- as.integer(mom$p)
   } else {
     # --- Analytical expectation & variance (randomisation assumption) ---
     null_used <- "randomisation"
@@ -847,9 +891,6 @@ residual_morans_i <- function(fit,
     rs <- if (is_sparse) Matrix::rowSums(W) else rowSums(W)
     cs <- if (is_sparse) Matrix::colSums(W) else colSums(W)
     S2 <- sum((rs + cs)^2)
-    m2 <- ss_c / n
-    m4 <- sum(resid_c^4) / n
-    b2 <- m4 / (m2^2)                          # kurtosis
 
     A  <- n * ((n^2 - 3 * n + 3) * S1 - n * S2 + 3 * S0^2)
     D  <- (n - 1) * (n - 2) * (n - 3) * S0^2
@@ -872,8 +913,115 @@ residual_morans_i <- function(fit,
     NA_real_
   }
 
-  list(observed = I, expected = EI, sd = sd_I, z = z,
-       p_value = p, n = n, null = null_used, df = df_I)
+  # Whether the moments used are exact for these residuals: the residual
+  # moments are exact for OLS residuals on the rebuilt design and an
+  # approximation otherwise; the randomisation moments are exact for an
+  # exchangeable vector, which model residuals are not.
+  exact <- identical(null_used, "residual") && isTRUE(des$is_ols)
+  # Classed so that printing the result shows the diagnostics rather than the
+  # weight matrix.  `weights` is an n x n object, and a bare list autoprints
+  # every element: the documented example `residual_morans_i(fit)` emitted
+  # 1246 lines at n = 120.  `[` drops the class, so every existing way of
+  # reading the result -- $, [[, unlist(), subsetting a few names -- is
+  # unchanged.
+  # The weight matrix is the one large thing here, and by default it is
+  # described rather than carried: it is n x n, so at the n = 5000 the dense
+  # fallback is capped at it is 191 MB, and even the sparse form at n = 500 is
+  # 50.3 KB against the 1.7 KB everything else in this list occupies.  Most
+  # uses of the result read the statistic and its moments, and a list of fits
+  # scored one at a time used to pin one matrix per fit for as long as the
+  # results were held.  `keep_weights = TRUE` returns it for the uses that
+  # need the matrix itself -- recomputing I by hand, feeding the same
+  # neighbours to another statistic, inspecting who neighbours whom.
+  structure(
+    list(observed = I, expected = EI, sd = sd_I, z = z,
+         p_value = p, n = n, null = null_used, df = df_I,
+         # What the moments were built from, which used to be discarded: the
+         # weight matrix (row-standardised, k nearest neighbours by default),
+         # the residual kurtosis, the design rank behind the residual null,
+         # and whether the moments are exact for these residuals.
+         weights = if (isTRUE(keep_weights)) W else NULL,
+         kurtosis = as.numeric(b2), p = p_rank, exact = exact,
+         # Always present, so that a NULL `weights` still says what the
+         # statistic was computed with -- and why it is NULL.
+         weights_summary = .morans_weights_summary(W, keep_weights)),
+    class = c("morans_i", "list"))
+}
+
+
+#' Print a residual Moran's I result
+#'
+#' Shows the statistic, the null its moments come from and the evidence
+#' behind them.  The weight matrix the result carries is described in one
+#' line rather than printed: it is \eqn{n \times n}, and autoprinting it
+#' buried the statistic under a thousand lines of matrix.
+#'
+#' @param x An object of class \code{morans_i}, from
+#'   \code{\link{residual_morans_i}()}.
+#' @param ... Ignored.
+#' @return \code{x}, invisibly.
+#' @export
+print.morans_i <- function(x, ...) {
+  cat(sprintf("Residual Moran's I = %.4f   (E[I] = %.4f, sd = %.4f)\n",
+              x$observed, x$expected, x$sd))
+  cat(sprintf("  z = %.3f, p = %.4g\n", x$z, x$p_value))
+  cat(sprintf("  null: %s moments, %s for these residuals; n = %d, df = %d%s\n",
+              x$null, if (isTRUE(x$exact)) "exact" else "approximate",
+              x$n, x$df,
+              if (is.finite(x$p)) sprintf(", design rank %d", x$p) else ""))
+  cat(sprintf("  residual kurtosis %.3f (3 = Gaussian)\n", x$kurtosis))
+  wsum <- x$weights_summary
+  desc <- if (!is.null(wsum)) wsum$desc else .morans_weights_desc(x$weights)
+  if (!is.null(wsum) && !isTRUE(wsum$kept))
+    desc <- paste0(desc, "; not retained, keep_weights = TRUE to keep it")
+  cat(sprintf("  weights: %s\n", desc))
+  invisible(x)
+}
+
+
+#' One-line description of a Moran weight matrix
+#'
+#' Dimensions and storage always; the neighbours per row only for the sparse
+#' representation, where the count is a cheap \code{tabulate()} on the row
+#' indices.  Counting non-zeros on a DENSE n x n matrix would allocate
+#' another one (100 MB at the n = 5000 the dense fallback is capped at), which
+#' is not something a print method should do.
+#'
+#' @keywords internal
+#' @noRd
+.morans_weights_desc <- function(W) {
+  if (is.null(W) || length(dim(W)) != 2L) return("not available")
+  dims <- sprintf("%d x %d %s", nrow(W), ncol(W), class(W)[1L])
+  if (inherits(W, "dgCMatrix")) {
+    per <- tabulate(W@i + 1L, nrow(W))
+    rng <- range(per)
+    dims <- sprintf("%s, %s neighbour(s) per row", dims,
+                    if (rng[1L] == rng[2L]) format(rng[1L])
+                    else sprintf("%d-%d", rng[1L], rng[2L]))
+  }
+  dims
+}
+
+
+#' Structured description of a Moran weight matrix
+#'
+#' What \code{residual_morans_i()} keeps in place of the matrix itself when
+#' \code{keep_weights = FALSE}: enough to say what the statistic was computed
+#' with, at a fixed few hundred bytes rather than \eqn{n^2} doubles.  The
+#' neighbour range comes from the sparse row indices and is \code{NA} for a
+#' dense matrix, for the reason given above.
+#'
+#' @keywords internal
+#' @noRd
+.morans_weights_summary <- function(W, kept) {
+  if (is.null(W) || length(dim(W)) != 2L)
+    return(list(n = NA_integer_, storage = NA_character_,
+                neighbours = c(NA_integer_, NA_integer_),
+                kept = isTRUE(kept), desc = "not available"))
+  nb <- if (inherits(W, "dgCMatrix")) range(tabulate(W@i + 1L, nrow(W)))
+        else c(NA_integer_, NA_integer_)
+  list(n = nrow(W), storage = class(W)[1L], neighbours = as.integer(nb),
+       kept = isTRUE(kept), desc = .morans_weights_desc(W))
 }
 
 

@@ -13,7 +13,8 @@ estimate_sac_range(
   range_frac = 1,
   seed = 123L,
   detrend = c("ols", "reml"),
-  reml_max_n = 400L
+  reml_max_n = 400L,
+  keep_directional_fits = FALSE
 )
 }
 \arguments{
@@ -83,6 +84,16 @@ converge the \code{"ols"} path runs instead with an R warning saying so.}
 of this many points when the layer has more (exact duplicate locations
 are dropped first); the fitted trend is then removed from every point.
 Default 400.  Raise it for a better-determined fit at the cost above.}
+
+\item{keep_directional_fits}{Logical.  Attach each direction's empirical
+variogram and fitted model as \code{directional_fits}?  Defaults to
+\code{FALSE}: the four variograms are most of the object's size (42.1 KB
+of 59.3 KB at \eqn{n = 400}, and the difference between a 52.4 KB and a
+94.6 KB \code{make_folds(auto_range = TRUE)} result), while the numbers
+read from them --- \code{directional}, \code{directional_fitted},
+\code{directional_status}, \code{anisotropy} --- are attached either
+way, and \code{plot()} draws the effective variogram from its own
+attribute.  Set \code{TRUE} to inspect the directional curves.}
 }
 \value{
 A single number, of class \code{sac_range} in the first two of the
@@ -91,10 +102,20 @@ as an ordinary number.  The shapes carry different attributes:
 \describe{
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
-90° and 135° ranges, named by azimuth), \code{anisotropy} (largest
+90° and 135° ranges, named by azimuth; \code{NA} where that
+direction's fit was unusable), \code{anisotropy} (largest
 over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
 the all-pairs fit was unusable and the directional maximum stands in
-for it), \code{detrended} (logical: whether the variogram is of the
+for it), \code{directional_status} (per azimuth, why a direction is
+\code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
+-- its range ran past the largest lag fitted -- \code{"not_converged"}
+or \code{"no_fit"}), \code{directional_fitted} (the range each
+direction's fit reported whether or not it was usable, so a refused
+directional range stays recoverable) and \code{directional_fits} (a
+list by azimuth of each direction's empirical \code{variogram} and
+fitted \code{model}, \code{NULL} where there is none --- and
+\code{NULL} altogether unless \code{keep_directional_fits = TRUE}),
+\code{detrended} (logical: whether the variogram is of the
 residuals on \code{predictor_vars} rather than the raw response
 -- a missing predictor is an error, and a failed detrending fit
 warns and falls back to the raw response with this set to
@@ -132,8 +153,14 @@ that was refused), \code{rejected_reason} (one of
 \code{"fitted range is non-positive or non-finite"}), \code{crs} —
 so the units the rejected number was in stay recoverable, which is
 what \code{plot()} labels its axis from --- and
-\code{detrend_method}.  It does \strong{not} carry
-\code{directional} or \code{anisotropy}.  The same shape, with
+\code{detrend_method}.  It carries \code{directional},
+\code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
+\code{directional_fitted} and, with
+\code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
+the directional sweep runs whatever becomes of the all-pairs fit, and
+its per-azimuth outcome is what says whether any direction reached
+a sill the pooled variogram did not, or whether every direction ran
+past the fitted lags alike.  The same shape, with
 \code{rejected_range = NA}, \code{variogram_model = NULL} and
 \code{nugget = NA}, is returned when no variogram model could be
 fitted at all (both the exponential and the spherical fit singular,

@@ -182,8 +182,44 @@ The returned \code{k} is the number of folds actually built, which is not
 always the \code{k} that was requested (see the \code{k} argument above),
 and \code{length(folds)} always matches it.
 
+For \code{"block_kfold"} the block design is returned with the folds.
+\code{assignment} has a third column, \code{block_id}: the block each
+point fell in, numbered as the rows of \code{params$blocks}, an
+\code{sf} layer of the block polygons in the CRS the folds were built
+in.  Those rows are \strong{not} the rows of the layer the blocks came
+from: \code{drop_empty_blocks = TRUE} (the default) removes the blocks
+that hold no point and renumbers the rest, so with supplied
+\code{blocks} a nine-polygon layer of which three are empty comes back
+as six rows numbered 1 to 6.  \code{params$blocks$source_row} is the
+row each one came from in that original layer (a grid cell's index in
+the full \code{grid_nx} by \code{grid_ny} grid, or the row of the
+\code{blocks} argument), so
+\code{blocks[params$blocks$source_row, ]} recovers them with their own
+columns and in their own order.  It runs from 1 to
+\code{params$n_blocks} and is the identity when nothing was dropped.
+\code{params$block_sizes} is the number of points in each block, indexed
+by \code{block_id} -- zeros are empty blocks that
+\code{drop_empty_blocks = FALSE} kept -- and \code{params$fold_blocks}
+is a list with one integer vector per fold naming the blocks packed into
+it.  Between them the folds account for every block exactly once,
+empty ones included, so a fold's territory on the map is all of its
+blocks and not merely the ones that happen to hold points.  So
+\code{table(assignment$fold)} can be traced back to the blocks
+it is made of, a fold can be seen to be one contiguous region or
+several, and the blocks can be drawn over the data
+(\code{\link{plot_folds}()} does so).
+
 For the methods that work in projected space — \code{"block_kfold"},
 \code{"buffered_loo"} and \code{"nndm"} — \code{params} carries a
+\code{params$blocks_supplied} says whether the blocks came from
+\code{blocks} rather than from a grid built here, and
+\code{params$boundary_supplied} whether a \code{boundary} was given;
+\code{params$row_probe} is a small sample of row IDs and coordinates
+that every \code{cv_*()} compares against the data it is handed, so
+folds built from a different layer of the same size are refused rather
+than applied silently.
+
+For the methods that work in projected space, \code{params} also carries a
 \code{crs} element naming the CRS the folds were built in (an
 \code{"EPSG:code"} string where there is one, otherwise the CRS's input
 definition).  Every length in \code{params} — \code{block_size},
@@ -265,7 +301,10 @@ reprojection or clipping moved by a rounding error.  Blocks that hold no
 point are dropped when \code{drop_empty_blocks = TRUE}, and \code{k} is
 lowered to the number of blocks that hold points when that is smaller.
 \code{params$n_blocks} is the number of blocks before empties were dropped,
-\code{params$blocks_used} the number after, \code{params$grid_nx} and
+\code{params$blocks_used} the number after (so with
+\code{drop_empty_blocks = FALSE} the two are equal, and
+\code{sum(params$block_sizes > 0)} is how many of them hold points),
+\code{params$grid_nx} and
 \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
 median over blocks that hold points of the side of the square with the
 block's area -- the length compared against the autocorrelation range for
@@ -315,8 +354,9 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
-folds$assignment          # fold membership per row
+folds$assignment          # fold and block membership per row
 lengths(folds$folds[[1]]) # train/test row-ID splits
+folds$params$block_sizes  # points per block; params$fold_blocks packs them
 
 # Buffered leave-one-out: neighbours within 100 units excluded from training
 loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
