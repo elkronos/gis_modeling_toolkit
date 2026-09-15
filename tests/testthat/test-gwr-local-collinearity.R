@@ -17,17 +17,24 @@ lc_points <- function(n = 200, seed = 3) {
                coords = c("x", "y"), crs = 32632)
 }
 
-# Four clusters; `urban` is constant inside each, so a window inside one
-# cluster is singular with the intercept.
+# Four clusters; `soil` is a regional covariate that is all but constant inside
+# each cluster (0.5 in two of them, 1.5 in the other two, plus noise of SD
+# 0.01), so a window inside one cluster is near-collinear with the intercept:
+# scaled condition index 87-735 at 20 neighbours, against 4-8 for a window
+# spanning both levels.  It is deliberately NOT exactly constant: GWmodel
+# inverts X'WX with Armadillo's inv(), which throws "matrix is singular" on an
+# exactly singular window and aborts the whole fit, so an exactly-constant
+# covariate cannot exercise the survey on the real backend at all.  The
+# smallest rcond of X'WX here is 1e-6, comfortably invertible.
 lc_clusters <- function(seed = 5) {
   set.seed(seed)
   cl <- rep(1:4, each = 50)
   d <- sf::st_as_sf(data.frame(
     x = c(runif(50, 0, 100), runif(50, 400, 500), runif(50, 0, 100), runif(50, 400, 500)),
     y = c(runif(50, 0, 100), runif(50, 0, 100), runif(50, 400, 500), runif(50, 400, 500)),
-    a = rnorm(200), urban = as.numeric(cl %in% c(2, 4))),
+    a = rnorm(200), soil = c(0.5, 1.5, 0.5, 1.5)[cl] + rnorm(200, 0, 0.01)),
     coords = c("x", "y"), crs = 32632)
-  d$z <- 2 * d$a + 3 * d$urban + rnorm(200, 0, 0.2)
+  d$z <- 2 * d$a + 3 * d$soil + rnorm(200, 0, 0.2)
   d
 }
 
@@ -94,19 +101,23 @@ test_that("fit_gwr_model() keeps the survey and the global index on the fit", {
 test_that("the collinearity warning is the exact fraction, and quiet when there is nothing", {
   skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
   d <- lc_clusters()
+  # Every warning raised while evaluating `expr`, muffled; the value comes
+  # back beside them, so a fit that fails is a test failure rather than a
+  # missing object.
   .warns <- function(expr) {
     w <- character(0)
-    withCallingHandlers(suppressMessages(try(expr, silent = TRUE)),
-                        warning = function(cnd) { w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning") })
-    w
+    val <- withCallingHandlers(suppressMessages(expr),
+                               warning = function(cnd) { w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning") })
+    list(value = val, warnings = w)
   }
-  w20 <- .warns(fit20 <- fit_gwr_model(d, "z", c("a", "urban"), adaptive = TRUE, bandwidth = 20))
-  expect_true(any(grepl("100% of 200 locations have a collinear local design", w20)))
-  if (!inherits(fit20, "try-error"))
-    expect_equal(fit20$info$n_local_collinear, 200L)
-  w199 <- .warns(fit199 <- fit_gwr_model(d, "z", c("a", "urban"), adaptive = TRUE, bandwidth = 199))
-  expect_false(any(grepl("collinear local design", w199)))
-  expect_equal(fit199$info$n_local_collinear, 0L)
+  r20 <- .warns(fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 20))
+  expect_s3_class(r20$value, "gwr_fit")
+  expect_true(any(grepl("100% of 200 locations have a collinear local design", r20$warnings)))
+  expect_equal(r20$value$info$n_local_collinear, 200L)
+  r199 <- .warns(fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 199))
+  expect_s3_class(r199$value, "gwr_fit")
+  expect_false(any(grepl("collinear local design", r199$warnings)))
+  expect_equal(r199$value$info$n_local_collinear, 0L)
 })
 
 test_that("the coefficient map draws the local coefficient and masks collinear windows", {
@@ -130,10 +141,13 @@ test_that("the coefficient map draws the local coefficient and masks collinear w
   expect_equal(pb$labels$title, "Local coefficient of b")
   expect_error(plot(fit, type = "coefficients", term = "nope"), "`term` must be one of")
 
-  # Partly collinear: masked locations are drawn hollow and counted.
+  # Partly collinear: masked locations are drawn hollow and counted.  At 70
+  # neighbours a window reaches past its own cluster, and whether the
+  # neighbouring cluster carries the other `soil` level decides its index.
   d <- lc_clusters()
   fit70 <- suppressWarnings(suppressMessages(
-    fit_gwr_model(d, "z", c("a", "urban"), adaptive = TRUE, bandwidth = 70)))
+    fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 70)))
+  expect_s3_class(fit70, "gwr_fit")
   n_bad <- fit70$info$n_local_collinear
   expect_gt(n_bad, 0L); expect_lt(n_bad, 200L)
   pm <- plot(fit70, type = "coefficients", term = "a")
@@ -149,9 +163,9 @@ test_that("the coefficient map draws the local coefficient and masks collinear w
   else expect_match(pf$labels$subtitle, "mask = FALSE")
   # Everything masked: refused, not drawn.
   fit20 <- suppressWarnings(suppressMessages(
-    fit_gwr_model(d, "z", c("a", "urban"), adaptive = TRUE, bandwidth = 20)))
-  if (isTRUE(fit20$info$n_local_collinear == 200L))
-    expect_error(plot(fit20, type = "coefficients", term = "a"), "every location is masked")
+    fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 20)))
+  expect_equal(fit20$info$n_local_collinear, 200L)
+  expect_error(plot(fit20, type = "coefficients", term = "a"), "every location is masked")
 })
 
 test_that("the coefficient map is refused for a fit that has no local coefficients", {
