@@ -307,6 +307,63 @@
     `"feature_selection"` so `plot()` finds the method; it is the same list
     otherwise.
 
+* `cv_block_size_sweep()`: the same cross-validation at a ladder of block
+  sizes, with random folds as the leaky reference, returned as a table
+  with the fold-to-fold spread at each size and the estimated
+  autocorrelation range alongside; `plot()` draws the curve with the range
+  marked.  Blocks smaller than the range leak, so the curve rises from the
+  random-fold value towards the range and plateaus beyond it, and the
+  height of the rise is what the random-fold number overstated --- measured
+  on simulated fields with a 100--130-unit range and a random forest with
+  coordinates, the plateau begins at one to two times the estimated range.
+  Each size is a full `cv_spatial()`, so a fit budget (`max_fits`, default
+  60) refuses to start rather than run past it, and the ladder drops sizes
+  at which the grid holds fewer than `k` blocks so every point on the curve
+  is a `k`-fold cross-validation of the same shape.
+
+* `fit_gwr_model()` keeps its local collinearity survey.  Every fitting
+  window --- not a sample of 30 --- has its kernel-weighted local design's
+  scaled condition index computed, the way Wheeler and Tiefelsdorf diagnose
+  GWR collinearity, and the fit carries it as `info$local_collinearity`
+  (one row per observation: coordinates, window size, condition index),
+  with `info$n_local_collinear`, `info$n_local_singular` and the global
+  `info$condition_index` beside `AICc`.  The warning is now the exact
+  fraction of locations rather than a sampled one; its wording and its
+  thresholds (a quarter of the locations, or any) are unchanged.  The
+  weighted survey sees what the unweighted spot-check could not: a bisquare
+  window's edge points contribute almost nothing to the fit, so they
+  contribute almost nothing to its conditioning.
+
+* `plot(fit, type = "coefficients")` for a GWR fit maps one local
+  coefficient (`term`) at the training locations, which is the reason to
+  fit GWR at all --- and masks the locations where it is not to be
+  believed: a collinear local design (condition index above 30, or
+  singular) or a non-finite coefficient is drawn hollow and grey, counted
+  in the subtitle, because the smooth surface a naive map draws over them
+  is the picture of an unstable estimate.  `mask = FALSE` draws them
+  anyway and says how many it is drawing.
+
+* `kriging_adequacy()`: what a block-kriging aggregator would deliver on a
+  set of cells, computed beside the plain means and changing none of them.
+  Per cell, from a fitted variogram (`estimate_sac_range()`'s, or estimated
+  here): the block-kriging estimate and variance, that variance as a share
+  of the sill (`kr_ratio`, the coverage score --- near 1 the estimate is
+  the global mean), whether it exceeds the design-based `s^2/n` of the
+  plain mean (`kr_exceeds_design`), and the kriged-minus-plain shift in
+  standard errors (`kr_shift`); plus the variance of the standardised
+  errors from blocked cross-validation (`attr(, "cv")$zscore_var`), which
+  is about 1 when the kriging variance is right.  Measured on simulated
+  exponential fields: 0.93--1.07 with the true variogram, 0.85--1.01 with
+  the estimated one; under blocked folds it checks the sill and range
+  rather than the nugget (0.95--1.24 with the nugget understated tenfold),
+  and random folds are the instrument for the nugget.  The comparison the
+  function exists for: under uniform sampling kriged and plain means
+  differed by more than one standard error in 11--24 percent of cells; under
+  clustered sampling in 34--63 percent, with 3--27 of 16--64 cells empty
+  and kriged anyway.  This is the first kriging path in the package
+  (`gstat::krige()` and `gstat::krige.cv()`); its model families are the
+  ones the package interprets elsewhere, and any other is refused by name.
+
 ## Bug fixes
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++

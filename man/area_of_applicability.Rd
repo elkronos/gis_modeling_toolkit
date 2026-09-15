@@ -215,6 +215,7 @@ Ecology and Evolution} 12(9), 1620--1633. \doi{10.1111/2041-210X.13650}
 
 Other cross-validation: 
 \code{\link{cv_bayes}()},
+\code{\link{cv_block_size_sweep}()},
 \code{\link{cv_gwr}()},
 \code{\link{cv_rf}()},
 \code{\link{cv_spatial}()},

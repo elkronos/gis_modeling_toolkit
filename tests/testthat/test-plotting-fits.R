@@ -44,11 +44,12 @@ test_that("an unknown plot type is rejected", {
   fit <- lm_spatial_fit(surf_test_points())
   # A bare expect_error() passes on ANY error, including a typo in the test
   # itself.  match.arg() gives a stable message that names the valid values,
-  # so pin it -- and pin that the valid values are still the documented three.
+  # so pin it -- and pin that the valid values are still the documented four.
   expect_error(plot(fit, type = "nonsense"), "'arg' should be one of")
   expect_error(plot(fit, type = "nonsense"), "residuals")
   expect_error(plot(fit, type = "nonsense"), "observed_predicted")
   expect_error(plot(fit, type = "nonsense"), "variogram")
+  expect_error(plot(fit, type = "nonsense"), "coefficients")
 })
 
 test_that("a fit without geometry is rejected", {

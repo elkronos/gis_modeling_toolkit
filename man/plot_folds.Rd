@@ -37,6 +37,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 \seealso{
 Other plotting: 
 \code{\link{plot.aoa}()},
+\code{\link{plot.block_size_sweep}()},
 \code{\link{plot.feature_selection}()},
 \code{\link{plot.gwr_model_selection}()},
 \code{\link{plot.resolution_profile}()},

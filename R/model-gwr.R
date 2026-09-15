@@ -580,7 +580,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
         )
       }
       # The LOCAL collinearity spot-check is deferred until the bandwidth is
-      # known -- see .gwr_local_collinearity_check() below the bandwidth
+      # known -- see .gwr_local_collinearity() below the bandwidth
       # selection.  Running it here meant that on the default path
       # (bandwidth = NULL, which is most calls) it used a stand-in window --
       # min(50, n) neighbours when adaptive, the whole data set when fixed --
@@ -588,7 +588,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       # documented warning simply never fired: identical data warned when the
       # bandwidth was passed explicitly and stayed silent when the same value
       # was selected automatically.
-      local_collinearity <- list(xmat = xmat, num_preds = num_preds)
+      local_collinearity <- list(xmat = xmat, num_preds = num_preds, cn = cn)
     }
   }
   
@@ -702,12 +702,18 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     )
   }
 
-  # Now that the bandwidth is known, run the local collinearity spot-check on
-  # the window the model will actually be fitted with.
-  if (!is.null(local_collinearity))
-    .gwr_local_collinearity_check(sf::st_coordinates(dat),
-                                  local_collinearity$xmat,
-                                  adaptive, bw, n_obs)
+  # Now that the bandwidth is known, survey the local collinearity of every
+  # window the model will actually be fitted with, and keep the per-location
+  # values: the coefficient map masks on them, and the warning below is the
+  # exact fraction rather than a sampled one.
+  global_cn <- if (!is.null(local_collinearity)) local_collinearity$cn else NA_real_
+  local_cn_df <- NULL
+  if (!is.null(local_collinearity)) {
+    local_cn_df <- .gwr_local_collinearity(sf::st_coordinates(dat),
+                                           local_collinearity$xmat,
+                                           adaptive, bw, kernel)
+    .gwr_local_collinearity_warn(local_cn_df)
+  }
 
   # --- Fit GWR ---
   fit <- tryCatch(
@@ -765,76 +771,129 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       adaptive              = adaptive,
       kernel                = kernel,
       AICc                  = AICc_val,
-      bandwidth_is_fallback = bandwidth_is_fallback
+      bandwidth_is_fallback = bandwidth_is_fallback,
+      # The global scaled condition index of the design (intercept +
+      # numeric predictors), NA with fewer than two numeric predictors; the
+      # number to compare across candidate predictor sets.
+      condition_index       = global_cn,
+      # One row per observation: the scaled condition index of the
+      # kernel-weighted local design at that location, NULL when there is
+      # nothing to be collinear (fewer than two numeric predictors).
+      local_collinearity    = local_cn_df,
+      n_local_collinear     = if (is.null(local_cn_df)) NA_integer_ else
+        sum(!is.finite(local_cn_df$cn) | local_cn_df$cn > 30),
+      n_local_singular      = n_bad_local
     )
   )
 }
 
 
-#' Spot-check local collinearity inside the fitting window
+#' Kernel weights of GWmodel's five kernels
 #'
-#' Samples locations, forms the LOCAL design matrix each of them will be fitted
-#' with, and counts how many are numerically singular or nearly so.
+#' The same definitions \code{GWmodel::gw.weight()} uses, so the weighted
+#' local design surveyed below is the one \code{gwr.basic()} inverts.
+#' For an adaptive bandwidth \code{bw} is a neighbour count and the kernel's
+#' distance parameter is the distance to the \code{bw}-th nearest point.
 #'
-#' Two things this deliberately does differently from the global check:
+#' @param d Numeric vector of distances from the regression point.
+#' @param bw Bandwidth: a distance, or a neighbour count when adaptive.
+#' @param kernel One of the validated kernel names.
+#' @param adaptive Logical.
+#' @return Numeric weights, one per element of \code{d}.
+#' @keywords internal
+#' @noRd
+.gw_kernel_weights <- function(d, bw, kernel, adaptive) {
+  h <- if (isTRUE(adaptive)) {
+    k <- min(max(1L, as.integer(round(bw))), length(d))
+    sort(d, partial = k)[k]
+  } else as.numeric(bw)
+  if (!is.finite(h) || h <= 0) return(as.numeric(d == 0))
+  u <- d / h
+  switch(kernel,
+         gaussian    = exp(-0.5 * u^2),
+         exponential = exp(-u),
+         bisquare    = ifelse(u < 1, (1 - u^2)^2, 0),
+         tricube     = ifelse(u < 1, (1 - u^3)^3, 0),
+         boxcar      = as.numeric(u < 1),
+         ifelse(u < 1, (1 - u^2)^2, 0))
+}
+
+
+#' Survey the local collinearity of every fitting window
+#'
+#' At each observation, forms the kernel-weighted local design
+#' \eqn{W^{1/2} X} -- intercept included -- that the local regression there
+#' inverts, and computes its scaled condition index.  Two things this
+#' deliberately does differently from the global check:
 #' \itemize{
 #'   \item The intercept column is included (\code{cbind(1, xmat)}).  GWmodel
-#'     fits an intercept, and the case this check exists for -- an indicator
+#'     fits an intercept, and the case this survey exists for -- an indicator
 #'     that is constant inside a window -- is collinear with the INTERCEPT and
 #'     with nothing else, so a check on the predictors alone cannot see it.
 #'   \item A non-finite condition number counts as extreme.  \code{kappa()}
 #'     returns \code{Inf} for an exactly singular matrix, and
 #'     \code{is.finite(cn) && cn > 1e6} discarded precisely the worst case.
 #' }
+#' The weights are the kernel's own (Wheeler and Tiefelsdorf 2005 diagnose
+#' GWR collinearity on the weighted design), so a bisquare window's edge
+#' points, which contribute almost nothing to the fit, contribute almost
+#' nothing here either; rows with negligible weight are dropped before the
+#' SVD.  Every location is surveyed, not a sample: the map of coefficients
+#' needs a value at each, and the survey's cost is the same order as the fit's.
 #'
 #' @param coords Matrix of coordinates, one row per observation.
 #' @param xmat Numeric matrix of the numeric predictors.
 #' @param adaptive Logical; TRUE when the bandwidth counts neighbours.
-#' @param bw The bandwidth the model will actually be fitted with.
-#' @param n_obs Number of observations.
-#' @return Invisibly \code{NULL}; called for the warning.
+#' @param bw The bandwidth the model is fitted with.
+#' @param kernel The kernel name.
+#' @return A data.frame with one row per observation: \code{row}, \code{x},
+#'   \code{y}, \code{n_window} (points with non-negligible weight) and
+#'   \code{cn} (the scaled condition index, \code{Inf} when singular).
 #' @keywords internal
 #' @noRd
-.gwr_local_collinearity_check <- function(coords, xmat, adaptive, bw, n_obs) {
-  if (!is.matrix(xmat) || ncol(xmat) < 2L || n_obs < 1L) return(invisible(NULL))
-  if (is.null(bw) || !is.finite(bw)) return(invisible(NULL))
-  n_spot <- min(30L, n_obs)
-  spot_idx <- if (n_obs <= 30L) {
-    seq_len(n_obs)
-  } else {
-    # Evenly spaced ranks along the x-then-y ordering: spreads the spot-check
-    # over the extent, draws no random numbers (nothing to seed, nothing to
-    # restore -- a constant seed inside a function is what a reviewer reads
-    # as hidden state), and is invariant to the row order of the input.
-    o <- order(coords[, 1], coords[, 2])
-    o[unique(round(seq(1, n_obs, length.out = n_spot)))]
+.gwr_local_collinearity <- function(coords, xmat, adaptive, bw, kernel) {
+  n_obs <- nrow(coords)
+  out <- data.frame(row = seq_len(n_obs), x = coords[, 1], y = coords[, 2],
+                    n_window = NA_integer_, cn = NA_real_)
+  if (!is.matrix(xmat) || ncol(xmat) < 2L || n_obs < 1L) return(out)
+  if (is.null(bw) || !is.finite(bw)) return(out)
+  X <- cbind(1, xmat)
+  for (i in seq_len(n_obs)) {
+    d <- sqrt((coords[, 1] - coords[i, 1])^2 + (coords[, 2] - coords[i, 2])^2)
+    w <- .gw_kernel_weights(d, bw, kernel, adaptive)
+    keep <- which(is.finite(w) & w > 1e-8)
+    out$n_window[i] <- length(keep)
+    out$cn[i] <- if (length(keep) < ncol(X)) Inf else
+      .condition_index(sqrt(w[keep]) * X[keep, , drop = FALSE])
   }
-  n_extreme <- 0L
-  for (si in spot_idx) {
-    dists <- sqrt((coords[, 1] - coords[si, 1])^2 +
-                    (coords[, 2] - coords[si, 2])^2)
-    if (adaptive) {
-      nn_idx <- order(dists)[seq_len(min(max(1L, as.integer(bw)), n_obs))]
-    } else {
-      nn_idx <- which(dists <= as.numeric(bw))
-      if (length(nn_idx) < ncol(xmat) + 1L)
-        nn_idx <- order(dists)[seq_len(min(ncol(xmat) + 1L, n_obs))]
-    }
-    local_xmat <- cbind(1, xmat[nn_idx, , drop = FALSE])
-    local_cn <- .condition_index(local_xmat)
-    if (!is.finite(local_cn) || local_cn > 30) n_extreme <- n_extreme + 1L
-  }
-  frac <- n_extreme / n_spot
+  out
+}
+
+
+#' Warn about the local collinearity survey's findings
+#'
+#' The two messages the sampled spot-check used to raise, now on the exact
+#' fraction of locations.
+#' @keywords internal
+#' @noRd
+.gwr_local_collinearity_warn <- function(local_cn_df) {
+  if (is.null(local_cn_df) || !nrow(local_cn_df) || all(is.na(local_cn_df$cn)))
+    return(invisible(NULL))
+  n <- nrow(local_cn_df)
+  n_extreme <- sum(!is.finite(local_cn_df$cn) | local_cn_df$cn > 30)
+  frac <- n_extreme / n
   if (frac > 0.25) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity spot-check: %.0f%% of %d sampled locations have a collinear local design (scaled condition index > 30, or singular) at the bandwidth in use. Local regressions there are unstable and their coefficients may come back non-finite or implausibly large.",
-      frac * 100, n_spot
+      "fit_gwr_model(): local collinearity: %.0f%% of %d locations have a collinear local design (scaled condition index of the kernel-weighted window > 30, or singular) at the bandwidth in use. Local regressions there are unstable and their coefficients may come back non-finite or implausibly large; plot(fit, type = \"coefficients\") masks them.",
+      frac * 100, n
     )
   } else if (n_extreme > 0L) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity spot-check: %d of %d sampled locations have a collinear local design (scaled condition index > 30, or singular) at the bandwidth in use.",
-      n_extreme, n_spot
+      "fit_gwr_model(): local collinearity: %d of %d locations have a collinear local design (scaled condition index of the kernel-weighted window > 30, or singular) at the bandwidth in use.",
+      n_extreme, n
     )
   }
   invisible(NULL)
 }
+
+

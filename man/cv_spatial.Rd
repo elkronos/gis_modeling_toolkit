@@ -243,6 +243,7 @@ over this function.
 Other cross-validation: 
 \code{\link{area_of_applicability}()},
 \code{\link{cv_bayes}()},
+\code{\link{cv_block_size_sweep}()},
 \code{\link{cv_gwr}()},
 \code{\link{cv_rf}()},
 \code{\link{estimate_sac_range}()},

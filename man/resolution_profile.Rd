@@ -199,6 +199,7 @@ and \code{n}.
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},
 \code{\link{determine_optimal_levels}()},
+\code{\link{kriging_adequacy}()},
 \code{\link{select_resolution}()},
 \code{\link{summarize_by_cell}()}
 }

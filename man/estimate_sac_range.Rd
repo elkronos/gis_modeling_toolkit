@@ -308,6 +308,7 @@ levels. \emph{Mathematical Geology}, 16(5), 499--521.
 Other cross-validation: 
 \code{\link{area_of_applicability}()},
 \code{\link{cv_bayes}()},
+\code{\link{cv_block_size_sweep}()},
 \code{\link{cv_gwr}()},
 \code{\link{cv_rf}()},
 \code{\link{cv_spatial}()},
