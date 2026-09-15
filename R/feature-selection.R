@@ -91,9 +91,11 @@
 #'   Both halves come back in \code{$split}.  See the "Post-selection
 #'   inference" section of \code{\link{determine_optimal_levels}} for the
 #'   trade: coverage for half the sample.
-#' @return A list with \code{selected} (the chosen predictors, in the order
-#'   they were added), \code{score}, \code{score_holdout}, \code{history},
-#'   \code{params} and \code{split}.
+#' @return A list of class \code{"feature_selection"} (so that
+#'   \code{\link{plot.feature_selection}()} draws the selection path) with
+#'   \code{selected} (the chosen predictors, in the order they were added),
+#'   \code{score}, \code{score_holdout}, \code{history}, \code{params} and
+#'   \code{split}.
 #'   \code{score} is the winning set's cross-validated \code{metric} at the
 #'   final step: the \strong{selection-internal} optimum, optimistically
 #'   biased because it was chosen as the best of many (see the section above),
@@ -359,7 +361,9 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     })
   }
 
-  list(
+  # Classed so that plot() finds plot.feature_selection(); the object is still
+  # the same list, and `$`, `[[`, names() and printing all behave as before.
+  structure(list(
     selected = selected,
     # Never hand back the `worst` sentinel as if it were a score: when nothing
     # was selected there is no score, and Inf / -Inf reads as a real number to
@@ -373,5 +377,5 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                     select_on = select_on,
                     n_candidates = p, estimated_fits = est_fits),
     split    = split
-  )
+  ), class = c("feature_selection", "list"))
 }

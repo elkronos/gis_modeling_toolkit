@@ -50,7 +50,13 @@ if (requireNamespace("gstat", quietly = TRUE) &&
 the same picture for a fitted model's residuals.
 
 Other plotting: 
+\code{\link{plot.aoa}()},
+\code{\link{plot.feature_selection}()},
+\code{\link{plot.gwr_model_selection}()},
+\code{\link{plot.resolution_profile}()},
 \code{\link{plot.spatial_fit}()},
+\code{\link{plot_calibration}()},
+\code{\link{plot_cv_metrics}()},
 \code{\link{plot_folds}()}
 }
 \concept{plotting}

@@ -98,7 +98,10 @@ test_that("the residual variogram plot builds", {
   expect_s3_class(attr(sac_flat, "variogram"), "data.frame")
   expect_match(attr(sac_flat, "rejected_reason"),
                "no variogram model|did not converge")
-  p2 <- plot(fit_flat, type = "variogram")
+  # response = FALSE: the layer assertions below are about the RESIDUAL
+  # curve alone; the response overlay has its own test file
+  # (test-plotting-diagnostics.R).
+  p2 <- plot(fit_flat, type = "variogram", response = FALSE)
   expect_s3_class(p2, "ggplot")
   expect_no_error(ggplot2::ggplot_build(p2))
   layers2 <- vapply(p2$layers, function(l) class(l$geom)[1L], character(1))
@@ -124,7 +127,7 @@ test_that("the residual variogram plot builds", {
   expect_s3_class(attr(sac_sing, "variogram"), "data.frame")
   expect_null(attr(sac_sing, "variogram_model"))
   expect_match(attr(sac_sing, "rejected_reason"), "^no variogram model could be fitted")
-  p3 <- plot(fit_flat, type = "variogram")
+  p3 <- plot(fit_flat, type = "variogram", response = FALSE)
   expect_no_error(ggplot2::ggplot_build(p3))
   layers3 <- vapply(p3$layers, function(l) class(l$geom)[1L], character(1))
   expect_true("GeomPoint" %in% layers3)
