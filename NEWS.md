@@ -201,6 +201,67 @@
   1.09).  With the default tolerance the folds of every existing call are
   unchanged.
 
+* `metrics` on `cv_spatial()`, `cv_gwr()`, `cv_bayes()`, `cv_rf()` and
+  `compare_models_cv()`: a scoring function of your own, `function(y,
+  yhat)` returning a named numeric vector (a named list of scalars or a
+  one-row data frame also serve), applied the way the built-in metrics are
+  --- once per fold, so each name becomes a column of `fold_metrics`, and
+  once to the pooled out-of-sample predictions, so each name becomes a
+  column of `overall` --- on the same finite pairs `RMSE` uses.  This is
+  the way to score what the Gaussian set cannot: a Poisson deviance, a log
+  score on a probability, a weighted loss.  The contract is strict where it
+  should be (every element named, names unique and not a built-in column,
+  one number per name --- anything else is an error, because a scoring
+  function of the wrong shape is a mistake to surface) and forgiving where
+  it should be (a function that throws on a fold is logged and its columns
+  are `NA` there; a fold is never dropped for it).  The empty frames of a
+  run where every fold failed carry the columns, typed, when the function
+  can be called on zero-length input.  `compare_models_cv()` hands one
+  function to every backend and protects it like the fold arguments, so the
+  columns of its `overall` are comparable across rows.  `fold_info_fn` is
+  documented as the per-fold half of the same mechanism, with access to the
+  fitted object and the held-out layer.
+
+* `ensure_projected()` gains `purpose = c("distance", "area")`.  The
+  default is what it always did: for lon/lat input, the candidate that
+  distorts distances least.  With `"area"` --- densities or rates per cell
+  are going to be computed --- the choice is made among equal-area
+  projections only (a Lambert azimuthal centred on the data, or an Albers
+  conic where its parallels do not degenerate, whichever distorts distances
+  less), which a UTM zone never enters, and global coverage gets Equal
+  Earth rather than Web Mercator.  Already-projected input is still
+  returned untouched, but its area distortion over the extent is now
+  measured --- the spread of planar-to-geodesic area ratios over probe
+  polygons --- and logged as a warning above 1 percent.  Measured: a UTM
+  zone edge to edge 0.25 percent, a 2.5-degree extent inside one 0.04
+  percent, the conterminous United States forced into one zone 14 percent,
+  Web Mercator over 2.5 degrees of latitude at 48N 4 percent, an
+  equal-area projection a few tenths of a percent (the sphere the geodesic
+  areas are computed on against the ellipsoid).
+
+* `summarize_by_cell()` gains `area = TRUE`: with `cells_sf`, the result
+  carries `cell_area` (planar, in the squared units of the cells' CRS) and
+  `n_per_area`, a point density; a rate of anything else is its `agg_funs`
+  sum over `cell_area`.  The request is refused with an error --- not
+  answered with a number --- when the cells' CRS distorts areas across them
+  by more than 1 percent by the measurement above, because a density is a
+  comparison between cells and means nothing where the map scale differs
+  from one cell to the next; the message names the CRS, the figure and the
+  remedy.  A cell with no observations gets `NA`, not zero.  The measured
+  spread is attached as `attr(, "area_error")`.
+
+* `build_tessellation(approx_n_cells = )` and `get_voronoi_seeds(n = )`
+  accept what the level-selection step returned: the integer vector of
+  ranked candidates from `determine_optimal_levels()` (its first element is
+  used), a `select_resolution()` result (its `$best`), or a
+  `resolution_profile()` (read with `select_resolution()` at its default
+  criterion).  Both were hard errors before, so nothing that worked
+  changes; the count used and where it came from are recorded as
+  `params$approx_n_cells` / `params$approx_n_cells_from` and as
+  `attr(seeds, "n_from")`.  The two functions the pipeline documents as a
+  pair are now connected: `get_voronoi_seeds(n = determine_optimal_levels(pts))`
+  needs no number carried between the calls by hand.
+
 ## Bug fixes
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++

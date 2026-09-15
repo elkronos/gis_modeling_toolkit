@@ -16,6 +16,7 @@ cv_rf(
   auto_range = FALSE,
   boundary = NULL,
   pointize = "auto",
+  metrics = NULL,
   ...
 )
 }
@@ -56,6 +57,9 @@ four threads in total rather than four times the session's
 
 \item{pointize}{How non-POINT geometry is reduced to a point before
 fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
+
+\item{metrics}{Optional scoring function of your own, passed to
+\code{\link{cv_spatial}}; see \strong{Your own metrics} there.}
 
 \item{...}{Passed to \code{\link{fit_rf_model}} on every fold —
 \code{num_trees}, \code{mtry}, \code{importance}, \code{include_coords}

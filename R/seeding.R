@@ -18,6 +18,13 @@
 #'   actually used — `n = nrow(sample_points)` is the common case, and yields
 #'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result rather than
 #'   assuming `n`.
+#'
+#'   Besides a number, `n` accepts what the level-selection step returned:
+#'   the integer vector of ranked candidates from [determine_optimal_levels()]
+#'   (its first element is used), a [select_resolution()] result (its
+#'   `$best`), or a [resolution_profile()] (read with `select_resolution()` at
+#'   its default criterion). The result then carries `attr(, "n_from")`
+#'   saying which.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
@@ -49,6 +56,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 
   # --- validation ---
   if (!is.null(boundary)) .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
+  # The level-selection step's own answer is accepted as `n`.
+  n_res  <- .resolve_cell_count(n, "n", "get_voronoi_seeds")
+  n      <- if (is.null(n_res)) NULL else n_res$n
+  n_from <- if (is.null(n_res)) NULL else n_res$from
   if (method %in% c("random", "kmeans") && is.null(n))
     stop("get_voronoi_seeds(): argument 'n' is required for method = '", method,
          "'.", call. = FALSE)
@@ -169,7 +180,11 @@ get_voronoi_seeds <- function(boundary = NULL,
   # Single alignment point for every branch: the seeds are returned in the
   # boundary's CRS whenever one is available.  (The branches above no longer
   # align individually, which made this block unreachable.)
-  .align_crs(out, boundary)
+  out <- .align_crs(out, boundary)
+  # Where `n` came from, when it was a level-selection result rather than a
+  # number; the count itself is nrow(out) (or fewer, see `n`).
+  if (!is.null(n_from)) attr(out, "n_from") <- n_from
+  out
 }
 
 

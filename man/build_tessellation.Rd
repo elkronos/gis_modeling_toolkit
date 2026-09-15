@@ -32,7 +32,14 @@ from the points themselves and use \code{boundary} only to clip the result when
 
 \item{approx_n_cells}{Approximate number of cells (grid methods). For hex
 grids the target is adjusted for packing density; the actual count after
-clipping to an irregular boundary may differ noticeably.}
+clipping to an irregular boundary may differ noticeably.  Besides a
+number, this accepts what the level-selection step returned: the integer
+vector of ranked candidates from \code{\link{determine_optimal_levels}()}
+(its first element is used), a \code{\link{select_resolution}()} result
+(its \code{$best}), or a \code{\link{resolution_profile}()} (read with
+\code{select_resolution()} at its default criterion).  The count used
+is returned as \code{params$approx_n_cells} and where it came from as
+\code{params$approx_n_cells_from} (\code{NULL} for a plain number).}
 
 \item{cellsize}{Numeric cell size (grid methods).}
 

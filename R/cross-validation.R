@@ -203,14 +203,20 @@
 #' effective degrees of freedom).  Adj_R² is only meaningful for models
 #' with a fixed, global number of coefficients.
 #'
+#' @param preds The stacked prediction rows.
+#' @param metrics Optional user scoring function (see \code{cv_spatial()}),
+#'   applied to the pooled finite pairs; its values are appended as columns.
 #' @keywords internal
 #' @noRd
-.cv_overall_metrics <- function(preds) {
+.cv_overall_metrics <- function(preds, metrics = NULL) {
   ok <- is.finite(preds$y) & is.finite(preds$yhat)
-  if (!any(ok))
-    return(data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_,
+  if (!any(ok)) {
+    out <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_,
                       SMAPE = NA_real_, R2 = NA_real_, Adj_R2 = NA_real_,
-                      n_pred = 0L, n_MAPE = 0L, n_SMAPE = 0L))
+                      n_pred = 0L, n_MAPE = 0L, n_SMAPE = 0L)
+    for (cn in .user_metric_names(metrics)) out[[cn]] <- NA_real_
+    return(out)
+  }
 
   # Pass per-observation training-fold means when available so that
   # .compute_reg_metrics() uses the correct out-of-sample R² baseline.
@@ -225,10 +231,146 @@
   # clean statistical interpretation.  Per-fold Adj_R² (computed in
   # .cv_run_folds()) is valid and should be used instead.
   met <- .compute_reg_metrics(preds$y, preds$yhat, p = NULL, y_train_mean = ytm)
-  data.frame(RMSE = met$RMSE, MAE = met$MAE, MAPE = met$MAPE, SMAPE = met$SMAPE,
-             R2 = met$R2, Adj_R2 = met$Adj_R2, n_pred = met$n,
-             n_MAPE = met$n_MAPE, n_SMAPE = met$n_SMAPE,
-             stringsAsFactors = FALSE)
+  out <- data.frame(RMSE = met$RMSE, MAE = met$MAE, MAPE = met$MAPE, SMAPE = met$SMAPE,
+                    R2 = met$R2, Adj_R2 = met$Adj_R2, n_pred = met$n,
+                    n_MAPE = met$n_MAPE, n_SMAPE = met$n_SMAPE,
+                    stringsAsFactors = FALSE)
+  if (!is.null(metrics)) {
+    um <- .apply_user_metrics(metrics, preds$y, preds$yhat,
+                              where = "the pooled predictions")
+    if (is.null(um)) um <- .na_user_metrics(metrics)
+    for (cn in names(um)) out[[cn]] <- um[[cn]]
+  }
+  out
+}
+
+
+# -----------------------------------------------------------------------------
+# User-supplied scoring functions (the `metrics` argument of the cv_*())
+# -----------------------------------------------------------------------------
+
+#' The columns every fold-metrics and overall frame already has
+#'
+#' A user metric may not reuse one of these names: it would silently
+#' overwrite the built-in value, and \code{compare_models_cv()} reads several
+#' of them by name.
+#' @keywords internal
+#' @noRd
+.cv_reserved_metric_cols <- c("fold", "n_train", "n_test", "n_pred", "RMSE",
+                              "MAE", "MAPE", "SMAPE", "R2", "Adj_R2", "n_MAPE",
+                              "n_SMAPE", "model")
+
+#' Validate the `metrics` argument of the cv_*() functions
+#'
+#' @param metrics \code{NULL}, or a function of at least two arguments.
+#' @param caller Name for the error message.
+#' @return \code{metrics}, invisibly validated.
+#' @keywords internal
+#' @noRd
+.check_metrics_fn <- function(metrics, caller) {
+  if (is.null(metrics)) return(NULL)
+  if (!is.function(metrics) || length(formals(metrics)) < 2L)
+    stop(sprintf(paste0("%s(): `metrics` must be a function of two arguments, ",
+                        "(y, yhat), returning a named numeric vector; got %s."),
+                 caller,
+                 if (is.function(metrics)) "a function of fewer than two arguments"
+                 else paste0("an object of class ", class(metrics)[1L])),
+         call. = FALSE)
+  metrics
+}
+
+#' Coerce what a user metric returned into a named list of scalars
+#'
+#' Accepts a named numeric vector, a named list of length-one numerics, or a
+#' one-row data frame.  Anything else, a missing or duplicated name, a
+#' non-scalar element, or a name that collides with a built-in column is an
+#' error: a scoring function that returns the wrong shape is a programming
+#' mistake to surface, not a fold to skip.
+#'
+#' @param out The value returned by the user's function.
+#' @return Named list of length-one numerics (\code{NA} where not finite).
+#' @keywords internal
+#' @noRd
+.as_user_metric_list <- function(out) {
+  if (is.data.frame(out)) {
+    if (nrow(out) != 1L)
+      stop("`metrics` returned a data frame with ", nrow(out),
+           " rows; one row of named scalars is required.", call. = FALSE)
+    out <- as.list(out)
+  }
+  if (is.atomic(out)) out <- as.list(out)
+  if (!is.list(out) || length(out) == 0L)
+    stop("`metrics` must return a named numeric vector (or a named list of ",
+         "scalars); got an object of class ", class(out)[1L], ".", call. = FALSE)
+  nm <- names(out)
+  if (is.null(nm) || any(is.na(nm)) || any(!nzchar(nm)))
+    stop("`metrics` must return a vector whose every element is named.",
+         call. = FALSE)
+  if (anyDuplicated(nm))
+    stop("`metrics` returned duplicated names: ",
+         paste(unique(nm[duplicated(nm)]), collapse = ", "), ".", call. = FALSE)
+  clash <- intersect(nm, .cv_reserved_metric_cols)
+  if (length(clash))
+    stop("`metrics` returned names that are already columns of the metrics ",
+         "frames: ", paste(clash, collapse = ", "), ". Use other names.",
+         call. = FALSE)
+  vals <- vector("list", length(out))
+  for (i in seq_along(out)) {
+    v <- out[[i]]
+    if (length(v) != 1L || !(is.numeric(v) || is.logical(v)))
+      stop("`metrics` must return one number per name; element '", nm[i],
+           "' is not a single numeric value.", call. = FALSE)
+    v <- as.numeric(v)
+    vals[[i]] <- if (is.finite(v)) v else NA_real_
+  }
+  names(vals) <- nm
+  vals
+}
+
+#' Apply the user's scoring function to one set of (y, yhat) pairs
+#'
+#' Only the pairs the built-in metrics use -- both finite -- reach the
+#' function, so its columns are averages over the same rows as \code{RMSE}.
+#' A function that throws is logged and contributes nothing there (the
+#' column is then \code{NA} in that frame); one that returns the wrong shape
+#' is an error, see \code{.as_user_metric_list()}.
+#'
+#' @param metrics The validated function.
+#' @param y,yhat Observed and predicted values.
+#' @param where Text for the log line ("fold 3", "the pooled predictions").
+#' @return Named list of scalars, or \code{NULL} when the function threw.
+#' @keywords internal
+#' @noRd
+.apply_user_metrics <- function(metrics, y, yhat, where) {
+  ok  <- is.finite(y) & is.finite(yhat)
+  out <- try(metrics(as.numeric(y[ok]), as.numeric(yhat[ok])), silent = TRUE)
+  if (inherits(out, "try-error")) {
+    .log_warn("cross-validation: `metrics` failed on %s: %s. Its columns are NA there.",
+              where, .try_error_message(out))
+    return(NULL)
+  }
+  .as_user_metric_list(out)
+}
+
+#' The names a user metric will produce, for typing an empty frame
+#'
+#' Asks the function on zero-length input; a function that cannot answer that
+#' (throws, or returns the wrong shape) contributes no columns to an empty
+#' frame, which is the one place its columns can be absent.
+#' @keywords internal
+#' @noRd
+.user_metric_names <- function(metrics) {
+  if (is.null(metrics)) return(character(0))
+  out <- try(.as_user_metric_list(metrics(numeric(0), numeric(0))), silent = TRUE)
+  if (inherits(out, "try-error")) character(0) else names(out)
+}
+
+#' An all-NA stand-in for a user metric that threw
+#' @keywords internal
+#' @noRd
+.na_user_metrics <- function(metrics) {
+  nm <- .user_metric_names(metrics)
+  stats::setNames(as.list(rep(NA_real_, length(nm))), nm)
 }
 
 
@@ -265,13 +407,13 @@
 #'
 #' @keywords internal
 #' @noRd
-.empty_fold_metrics <- function(extra = character(0)) {
+.empty_fold_metrics <- function(extra = character(0), metrics = NULL) {
   base <- data.frame(fold = integer(), n_train = integer(), n_test = integer(),
                      n_pred = integer(),
                      RMSE = numeric(), MAE = numeric(), MAPE = numeric(),
                      SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
                      n_MAPE = integer(), n_SMAPE = integer())
-  for (e in extra) base[[e]] <- numeric()
+  for (e in c(extra, .user_metric_names(metrics))) base[[e]] <- numeric()
   base
 }
 
@@ -475,7 +617,7 @@
 #' @noRd
 .cv_fit_one_fold <- function(i, dat_sf, response_var, remapped_fold,
                              keep_idx, fit_one, fold_info_fn, predict_args,
-                             p) {
+                             p, metrics = NULL) {
   # The label to report: the fold's index in the ORIGINAL fold object, so that
   # dropping an unusable fold in .remap_folds() does not renumber the rest.
   # Falls back to the loop position for hand-built folds carrying no fold_id.
@@ -572,6 +714,15 @@
       extra$..per_row <- NULL
       for (cn in names(extra)) fs[[cn]] <- extra[[cn]]
     }
+  }
+
+  # The user's scoring function, on the same finite pairs the built-in
+  # metrics used.  Its pooled counterpart is applied in .cv_overall_metrics().
+  if (!is.null(metrics)) {
+    um <- .apply_user_metrics(metrics, y_true, y_hat,
+                              where = sprintf("fold %s", format(fold_lab)))
+    if (is.null(um)) um <- .na_user_metrics(metrics)
+    for (cn in names(um)) fs[[cn]] <- um[[cn]]
   }
 
   # Prediction rows — include the training-fold mean so that
@@ -703,6 +854,8 @@
 #'   on (seed, fold index) alone and \code{parallel = TRUE} reproduces
 #'   \code{parallel = FALSE} exactly; with \code{NULL}, a \code{set.seed()}
 #'   before the call makes both reproducible.
+#' @param metrics Optional user scoring function, already validated by
+#'   \code{.check_metrics_fn()}; applied per fold here.
 #' @return List with pred_rows and fold_stats.
 #' @keywords internal
 #' @noRd
@@ -710,7 +863,7 @@
                           remapped_folds, keep_idx, fit_one,
                           fold_info_fn = NULL, predict_args = list(),
                           p = NULL, parallel = FALSE, n_cores = NULL,
-                          seed = NULL) {
+                          seed = NULL, metrics = NULL) {
   cores   <- .resolve_n_cores(parallel, n_cores)
   n_folds <- length(remapped_folds)
 
@@ -747,7 +900,7 @@
       i = i, dat_sf = dat_sf, response_var = response_var,
       remapped_fold = remapped_folds[[i]], keep_idx = keep_idx,
       fit_one = fit_one, fold_info_fn = fold_info_fn,
-      predict_args = predict_args, p = p
+      predict_args = predict_args, p = p, metrics = metrics
     )
   }
 
@@ -3443,6 +3596,11 @@ make_folds <- function(points_sf, k,
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).
+#' @param metrics Optional scoring function of your own, a
+#'   \code{function(y, yhat)} returning a named numeric vector; its names
+#'   become columns of \code{fold_metrics} (per fold) and \code{overall}
+#'   (pooled) beside the built-in ones.  See \strong{Your own metrics} on
+#'   \code{\link{cv_spatial}()} for the contract.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
@@ -3477,8 +3635,9 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
                               "boxcar", "exponential"),
                    boundary = NULL, pointize = "auto",
                    block_size = NULL, auto_range = FALSE,
-                   parallel = FALSE) {
+                   parallel = FALSE, metrics = NULL) {
   if (!inherits(data_sf, "sf")) stop("cv_gwr(): `data_sf` must be an sf object.")
+  metrics <- .check_metrics_fn(metrics, "cv_gwr")
   if (!requireNamespace("GWmodel", quietly = TRUE))
     stop("cv_gwr(): package 'GWmodel' is required.", call. = FALSE)
   if (!requireNamespace("sp", quietly = TRUE))
@@ -3542,14 +3701,14 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
     predictor_vars = predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_one, fold_info_fn = fold_info_fn,
-    p = NULL, parallel = parallel, seed = seed
+    p = NULL, parallel = parallel, seed = seed, metrics = metrics
   )
 
   preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
     data.frame(`..row_id` = integer(), fold = integer(),
                y = numeric(), yhat = numeric(), y_train_mean = numeric())
   folds_df <- if (length(res$fold_stats)) as.data.frame(dplyr::bind_rows(res$fold_stats)) else
-    .empty_fold_metrics("bandwidth")
+    .empty_fold_metrics("bandwidth", metrics)
 
   # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
   # a fold dropped there is exactly the kind of thing this count exists to
@@ -3566,7 +3725,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
     .log_warn("cv_gwr(): %d of %d folds produced predictions.", n_succeeded, n_attempted)
   }
 
-  list(overall = .cv_overall_metrics(preds), fold_metrics = folds_df,
+  list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
        predictions = preds, folds = remapped_folds,
        # Reported so that a run where every fold failed is visible in the
        # return value, not only in a warning: `overall` is a well-formed
@@ -3641,6 +3800,14 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
 #'   are the primary beneficiary of this option.
+#' @param metrics Optional scoring function of your own, a
+#'   \code{function(y, yhat)} returning a named numeric vector; its names
+#'   become columns of \code{fold_metrics} (per fold) and \code{overall}
+#'   (pooled) beside the built-in ones.  See \strong{Your own metrics} on
+#'   \code{\link{cv_spatial}()} for the contract.  \code{yhat} is the
+#'   posterior predictive \code{summary} (mean or median) of each held-out
+#'   row; a score that needs the draws belongs in \code{predictive_coverage}
+#'   and \code{CRPS}, which this function computes itself.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @return A list with \code{overall}, \code{fold_metrics},
@@ -3688,9 +3855,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                      compute_pred_intervals = TRUE,
                      coverage_levels = c(0.50, 0.80, 0.95),
                      block_size = NULL, auto_range = FALSE,
-                     parallel = FALSE) {
+                     parallel = FALSE, metrics = NULL) {
   summary <- match.arg(summary)
   if (!inherits(data_sf, "sf")) stop("cv_bayes(): `data_sf` must be an sf object.")
+  metrics <- .check_metrics_fn(metrics, "cv_bayes")
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_bayes")
@@ -3802,7 +3970,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_one, fold_info_fn = fold_info_fn,
     predict_args = list(summary = summary),
-    p = NULL, parallel = parallel, seed = seed
+    p = NULL, parallel = parallel, seed = seed, metrics = metrics
   )
 
   # Every fold carries a yhat_sd column: the posterior predictive SD where
@@ -3827,6 +3995,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                n_MAPE = integer(), n_SMAPE = integer(),
                CRPS = numeric(), gp_k = integer(),
                gp_n_basis = integer(), n_draws = integer())
+  if (!nrow(folds_df))
+    for (cn in .user_metric_names(metrics)) folds_df[[cn]] <- numeric()
 
   # The folds SUPPLIED (or built), not the ones that survived .remap_folds():
   # a fold dropped there is exactly the kind of thing this count exists to
@@ -3843,7 +4013,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
     .log_warn("cv_bayes(): %d of %d folds produced predictions.", n_succeeded, n_attempted)
   }
 
-  list(overall = .cv_overall_metrics(preds), fold_metrics = folds_df,
+  list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
        predictions = preds, folds = remapped_folds,
        # Reported so that a run where every fold failed is visible in the
        # return value, not only in a warning -- which matters most here,
@@ -3923,7 +4093,14 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' @param boundary Optional boundary for fold construction.
 #' @param pointize Geometry coercion strategy.
 #' @param predict_args Extra arguments for predict().
-#' @param fold_info_fn Optional function for per-fold extras.
+#' @param fold_info_fn Optional \code{function(fit, test_sf, y, yhat)}
+#'   returning a named list of per-fold extras (a bandwidth, a tuning value,
+#'   anything read off the fitted object), added as columns of
+#'   \code{fold_metrics}.  It sees the fit and the held-out layer, which
+#'   \code{metrics} does not; it is applied per fold only, and its values
+#'   are not pooled.  An element \code{..per_row} that is a data frame with
+#'   one row per held-out observation is spliced into \code{predictions}
+#'   instead.
 #' @param p Number of predictors for Adj R² (NULL to skip).  Only meaningful
 #'   for models with a fixed global parameter count; pass NULL for models
 #'   with spatially varying coefficients (e.g. GWR).
@@ -3937,8 +4114,41 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).
+#' @param metrics Optional scoring function of your own; see \strong{Your
+#'   own metrics} below.  Default \code{NULL}: the built-in metrics only.
 #' @param .caller Internal. The name the messages carry, so a wrapper such as
 #'   \code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.
+#' @section Your own metrics:
+#' The built-in columns -- \code{RMSE}, \code{MAE}, \code{MAPE},
+#' \code{SMAPE}, \code{R2}, \code{Adj_R2} -- are the Gaussian regression
+#' set, and the section below says which of them survive a count or a
+#' bounded response.  \code{metrics} is the way to score what they cannot: a
+#' \code{function(y, yhat)} that returns a named numeric vector (a named
+#' list of scalars, or a one-row data frame, also serve), for example a
+#' Poisson deviance, a log score on a probability, or a loss with your own
+#' weights.  It is applied twice, in the same way the built-in metrics are:
+#' once per fold, to that fold's held-out rows, so each name becomes a column
+#' of \code{fold_metrics}; and once to the pooled out-of-sample predictions
+#' of every fold, so each name becomes a column of \code{overall}.  Only the
+#' pairs the built-in metrics use reach the function -- both \code{y} and
+#' \code{yhat} finite -- so its columns describe the same rows as
+#' \code{RMSE}, and \code{n_pred} counts them.
+#'
+#' The contract: every element named, names unique and not one of the
+#' built-in column names, one number per name.  Anything else is an error,
+#' because a scoring function that returns the wrong shape is a mistake to
+#' surface rather than a fold to skip.  A function that \emph{throws} on a
+#' fold is logged and its columns are \code{NA} for that fold (and for
+#' \code{overall}, if it throws on the pooled predictions); a fold is never
+#' dropped for it.  When no fold produced a prediction the empty
+#' \code{fold_metrics} frame still carries the function's columns, typed,
+#' provided the function can be called on zero-length input.
+#'
+#' \code{fold_info_fn} is the per-fold half of the same mechanism, with
+#' access to the fitted object and the held-out layer; \code{metrics} sees
+#' only the two vectors but is also pooled.  \code{compare_models_cv()}
+#' hands one \code{metrics} to every backend, so the columns are comparable
+#' across the rows of its \code{overall}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A list with \code{overall}, \code{fold_metrics}, \code{predictions},
 #'   \code{folds}, and the two fold counts \code{n_folds_attempted} and
@@ -3993,6 +4203,13 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' cv$overall
 #' # Compare these before trusting the metrics above.
 #' c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+#'
+#' # 3. A metric of your own beside the built-in ones: per fold and pooled.
+#' med_ae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
+#' cv2 <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1,
+#'                   metrics = med_ae)
+#' cv2$overall$MedAE
+#' cv2$fold_metrics[, c("fold", "RMSE", "MedAE")]
 #' @export
 cv_spatial <- function(data_sf, response_var, predictor_vars,
                        fit_fn, folds = NULL, k = 5, seed = 123,
@@ -4000,9 +4217,10 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
                        predict_args = list(), fold_info_fn = NULL,
                        p = NULL, block_size = NULL,
                        auto_range = FALSE, parallel = FALSE,
-                       .caller = "cv_spatial") {
+                       metrics = NULL, .caller = "cv_spatial") {
   if (!inherits(data_sf, "sf")) stop(.caller, "(): `data_sf` must be an sf object.", call. = FALSE)
   if (!is.function(fit_fn)) stop(.caller, "(): `fit_fn` must be a function.", call. = FALSE)
+  metrics <- .check_metrics_fn(metrics, .caller)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, .caller)
@@ -4033,7 +4251,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
     remapped_folds = remapped_folds, keep_idx = keep_idx,
     fit_one = fit_fn, fold_info_fn = fold_info_fn,
     predict_args = predict_args, p = p,
-    parallel = parallel, seed = seed
+    parallel = parallel, seed = seed, metrics = metrics
   )
 
   preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
@@ -4043,7 +4261,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   # the metric columns, and a bare data.frame() here made
   # subset(fold_metrics, RMSE < 5) error for two of the four cv_*().
   folds_df <- if (length(res$fold_stats)) as.data.frame(dplyr::bind_rows(res$fold_stats)) else
-    .empty_fold_metrics()
+    .empty_fold_metrics(metrics = metrics)
 
   # cv_gwr() and cv_bayes() both raise a real condition here; cv_spatial() used
   # to return an all-NA `overall` and an empty data.frame with nothing at R
@@ -4065,7 +4283,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
               .caller, n_succeeded, n_attempted)
   }
 
-  list(overall = .cv_overall_metrics(preds),
+  list(overall = .cv_overall_metrics(preds, metrics),
        fold_metrics = folds_df, predictions = preds,
        folds = remapped_folds,
        n_folds_attempted = n_attempted, n_folds_succeeded = n_succeeded)

@@ -19,7 +19,8 @@ cv_bayes(
   coverage_levels = c(0.5, 0.8, 0.95),
   block_size = NULL,
   auto_range = FALSE,
-  parallel = FALSE
+  parallel = FALSE,
+  metrics = NULL
 )
 }
 \arguments{
@@ -78,6 +79,15 @@ auto-detect the number of cores and fit folds in parallel via
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
 are the primary beneficiary of this option.}
+
+\item{metrics}{Optional scoring function of your own, a
+\code{function(y, yhat)} returning a named numeric vector; its names
+become columns of \code{fold_metrics} (per fold) and \code{overall}
+(pooled) beside the built-in ones.  See \strong{Your own metrics} on
+\code{\link{cv_spatial}()} for the contract.  \code{yhat} is the
+posterior predictive \code{summary} (mean or median) of each held-out
+row; a score that needs the draws belongs in \code{predictive_coverage}
+and \code{CRPS}, which this function computes itself.}
 }
 \value{
 A list with \code{overall}, \code{fold_metrics},

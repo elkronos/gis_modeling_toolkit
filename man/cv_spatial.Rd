@@ -20,6 +20,7 @@ cv_spatial(
   block_size = NULL,
   auto_range = FALSE,
   parallel = FALSE,
+  metrics = NULL,
   .caller = "cv_spatial"
 )
 }
@@ -61,7 +62,14 @@ Built via \code{block_kfold} when \code{NULL}.}
 
 \item{predict_args}{Extra arguments for predict().}
 
-\item{fold_info_fn}{Optional function for per-fold extras.}
+\item{fold_info_fn}{Optional \code{function(fit, test_sf, y, yhat)}
+returning a named list of per-fold extras (a bandwidth, a tuning value,
+anything read off the fitted object), added as columns of
+\code{fold_metrics}.  It sees the fit and the held-out layer, which
+\code{metrics} does not; it is applied per fold only, and its values
+are not pooled.  An element \code{..per_row} that is a data frame with
+one row per held-out observation is spliced into \code{predictions}
+instead.}
 
 \item{p}{Number of predictors for Adj R² (NULL to skip).  Only meaningful
 for models with a fixed global parameter count; pass NULL for models
@@ -79,6 +87,9 @@ auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).}
+
+\item{metrics}{Optional scoring function of your own; see \strong{Your
+own metrics} below.  Default \code{NULL}: the built-in metrics only.}
 
 \item{.caller}{Internal. The name the messages carry, so a wrapper such as
 \code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.}
@@ -118,6 +129,40 @@ every other \code{cv_*()} function.  Fold construction is
 \pkg{blockCV}'s home ground and this package does not try to match its
 breadth there; what this package adds is the path from irregular points
 through data-drawn regions to a cross-validated, compared model.
+}
+
+\section{Your own metrics}{
+
+The built-in columns -- \code{RMSE}, \code{MAE}, \code{MAPE},
+\code{SMAPE}, \code{R2}, \code{Adj_R2} -- are the Gaussian regression
+set, and the section below says which of them survive a count or a
+bounded response.  \code{metrics} is the way to score what they cannot: a
+\code{function(y, yhat)} that returns a named numeric vector (a named
+list of scalars, or a one-row data frame, also serve), for example a
+Poisson deviance, a log score on a probability, or a loss with your own
+weights.  It is applied twice, in the same way the built-in metrics are:
+once per fold, to that fold's held-out rows, so each name becomes a column
+of \code{fold_metrics}; and once to the pooled out-of-sample predictions
+of every fold, so each name becomes a column of \code{overall}.  Only the
+pairs the built-in metrics use reach the function -- both \code{y} and
+\code{yhat} finite -- so its columns describe the same rows as
+\code{RMSE}, and \code{n_pred} counts them.
+
+The contract: every element named, names unique and not one of the
+built-in column names, one number per name.  Anything else is an error,
+because a scoring function that returns the wrong shape is a mistake to
+surface rather than a fold to skip.  A function that \emph{throws} on a
+fold is logged and its columns are \code{NA} for that fold (and for
+\code{overall}, if it throws on the pooled predictions); a fold is never
+dropped for it.  When no fold produced a prediction the empty
+\code{fold_metrics} frame still carries the function's columns, typed,
+provided the function can be called on zero-length input.
+
+\code{fold_info_fn} is the per-fold half of the same mechanism, with
+access to the fitted object and the held-out layer; \code{metrics} sees
+only the two vectors but is also pooled.  \code{compare_models_cv()}
+hands one \code{metrics} to every backend, so the columns are comparable
+across the rows of its \code{overall}.
 }
 
 \section{Percentage errors on responses with zeros}{
@@ -181,6 +226,13 @@ cv <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1)
 cv$overall
 # Compare these before trusting the metrics above.
 c(attempted = cv$n_folds_attempted, succeeded = cv$n_folds_succeeded)
+
+# 3. A metric of your own beside the built-in ones: per fold and pooled.
+med_ae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
+cv2 <- cv_spatial(site, "price", "elev", fit_fn = lm_fit, k = 3, seed = 1,
+                  metrics = med_ae)
+cv2$overall$MedAE
+cv2$fold_metrics[, c("fold", "RMSE", "MedAE")]
 }
 \seealso{
 \code{\link{new_spatial_fit}()} for the constructor a \code{fit_fn}

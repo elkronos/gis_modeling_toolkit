@@ -31,7 +31,8 @@
 #' @return An sf::crs object.
 #' @keywords internal
 #' @noRd
-.pick_local_projected_crs <- function(x) {
+.pick_local_projected_crs <- function(x, purpose = c("distance", "area")) {
+  purpose <- match.arg(purpose)
   if (!inherits(x, c("sf", "sfc"))) return(sf::NA_crs_)
   crs <- sf::st_crs(x)
   if (!is.na(crs) && !.is_longlat(x)) return(crs)
@@ -41,10 +42,22 @@
     sf::st_transform(x, 4326)
   }, error = function(e) x)
 
-  if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll)) return(sf::st_crs(3857))
+  # The global fallback: Web Mercator when distances are what matter (and
+  # nothing local fits), Equal Earth when areas are -- Mercator's area
+  # distortion is unbounded, while Equal Earth is equal-area by construction.
+  global_crs <- function() {
+    if (purpose == "area") {
+      ee <- tryCatch(sf::st_crs("+proj=eqearth +datum=WGS84 +units=m +no_defs"),
+                     error = function(e) sf::NA_crs_)
+      if (!is.na(ee)) return(ee)
+      return(sf::st_crs("+proj=moll +datum=WGS84 +units=m +no_defs"))
+    }
+    sf::st_crs(3857)
+  }
+  if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll)) return(global_crs())
 
   ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(sf::st_geometry(x_ll))))
-  if (!is.numeric(ctr) || length(ctr) < 2) return(sf::st_crs(3857))
+  if (!is.numeric(ctr) || length(ctr) < 2) return(global_crs())
   lon <- ctr[1]; lat <- ctr[2]
 
   # st_centroid() on empty or degenerate geometry can return NA/NaN, which
@@ -53,10 +66,10 @@
   # rather than letting NA propagate into the comparisons below.
   if (!is.finite(lon) || !is.finite(lat)) {
     .log_warn(
-      ".pick_local_projected_crs(): could not compute a finite centroid (lon = %s, lat = %s); falling back to EPSG:3857.",
-      format(lon), format(lat)
+      ".pick_local_projected_crs(): could not compute a finite centroid (lon = %s, lat = %s); falling back to %s.",
+      format(lon), format(lat), if (purpose == "area") "Equal Earth" else "EPSG:3857"
     )
-    return(sf::st_crs(3857))
+    return(global_crs())
   }
 
   # ---- Reject extents too wide for a single UTM zone ----
@@ -134,11 +147,11 @@
       paste0(".pick_local_projected_crs(): longitude extent spans %.1f deg and ",
              "the coordinates do not straddle the antimeridian, so this is ",
              "global coverage; no local projection fits it. Falling back to ",
-             "EPSG:3857. Pass target_crs to ensure_projected() to choose a ",
+             "%s. Pass target_crs to ensure_projected() to choose a ",
              "projection suited to your extent."),
-      span_lon
+      span_lon, if (purpose == "area") "Equal Earth (equal-area)" else "EPSG:3857"
     )
-    return(sf::st_crs(3857))
+    return(global_crs())
   }
 
   # as.integer() is belt-and-braces: floor() already yields an integral double,
@@ -149,6 +162,47 @@
   lon_off   <- max(abs(lon_min - cand_cm), abs(lon_max - cand_cm))
 
   utm_epsg <- if (!is.na(lat) && lat < 0) 32700 + cand_zone else 32600 + cand_zone
+
+  if (purpose == "area") {
+    # Areas are what matter, so the zone -- conformal, not equal-area -- is
+    # not a candidate at any extent: a UTM zone's area scale runs from 0.9992
+    # at the central meridian to about 1.002 at the zone edge, and far worse
+    # beyond it.  Both equal-area candidates preserve area exactly; the one
+    # kept is the one that distorts distances least, because everything else
+    # in the package -- ranges, block sizes, bandwidths -- still reads
+    # distances off the same coordinates.
+    lat1 <- as.numeric(bb["ymin"]) + span_lat / 6
+    lat2 <- as.numeric(bb["ymax"]) - span_lat / 6
+    if (!is.finite(lat1) || !is.finite(lat2) || isTRUE(all.equal(lat1, lat2))) {
+      lat1 <- lat - 5; lat2 <- lat + 5
+    }
+    cone_n <- (sin(lat1 * pi / 180) + sin(lat2 * pi / 180)) / 2
+    cands <- list(list(
+      name = sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)", lon, lat),
+      crs = sf::st_crs(sprintf(
+        "+proj=laea +lat_0=%f +lon_0=%f +datum=WGS84 +units=m +no_defs", lat, lon))))
+    if (is.finite(cone_n) && abs(cone_n) >= 0.05) {
+      cands <- c(cands, list(list(
+        name = sprintf("Albers equal-area (lat_1=%.1f, lat_2=%.1f, lon_0=%.1f)",
+                       lat1, lat2, lon),
+        crs = sf::st_crs(sprintf(
+          paste0("+proj=aea +lat_1=%f +lat_2=%f +lat_0=%f +lon_0=%f ",
+                 "+datum=WGS84 +units=m +no_defs"),
+          lat1, lat2, lat, lon)))))
+    }
+    err  <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs), numeric(1))
+    best <- which.min(ifelse(is.finite(err), err, Inf))
+    if (!length(best) || !is.finite(err[best])) best <- 1L
+    .log_info(
+      paste0(".pick_local_projected_crs(): purpose = \"area\": using %s ",
+             "(equal-area; worst-case distance error %s over sampled pairs) ",
+             "rather than UTM zone %d."),
+      cands[[best]]$name,
+      if (is.finite(err[best])) sprintf("%.2f%%", 100 * err[best]) else "not measurable",
+      cand_zone
+    )
+    return(cands[[best]]$crs)
+  }
 
   if (is.finite(lon_off) && lon_off > 5) {
     # Which projection is actually best is not something a rule of thumb gets
@@ -288,6 +342,66 @@
     max(abs(d_prj[keep] / d_geo[keep] - 1))
   }, error = function(e) NA_real_)
 }
+
+
+#' Worst-case relative area distortion of a projection over a layer
+#'
+#' The counterpart of \code{.crs_distance_error()} for the property a density
+#' or a rate depends on.  Probe polygons -- the layer's own polygons when it
+#' has them (up to \code{max_n}, by evenly spaced index), otherwise an
+#' \code{n x n} grid over its bounding box -- are measured twice: their planar
+#' area in \code{crs} and their geodesic area on the globe.  An equal-area
+#' projection makes the ratio of the two the same for every probe (up to the
+#' sphere-versus-ellipsoid factor of the s2 areas, which drifts slowly with
+#' latitude and stays within a few tenths of a percent), so the figure
+#' returned is the spread of that ratio: the largest relative departure from
+#' its median.  A conformal projection such as a UTM zone gives a ratio that
+#' varies as the square of its scale factor -- 0.25 percent across a zone,
+#' 14 percent when the conterminous United States is forced into one.
+#'
+#' @param x An sf/sfc object with a CRS.
+#' @param crs The projection to score; default the CRS of \code{x}.
+#' @param n Probe grid size when \code{x} has no polygons.
+#' @param max_n Largest number of the layer's own polygons to measure.
+#' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
+#'   \code{NA} when it cannot be computed (no CRS, no area, geodesic areas
+#'   unavailable).
+#' @keywords internal
+#' @noRd
+.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L) {
+  tryCatch({
+    if (is.null(crs)) crs <- sf::st_crs(x)
+    if (is.na(crs) || is.na(sf::st_crs(x))) return(NA_real_)
+    g <- sf::st_geometry(x)
+    g <- g[!sf::st_is_empty(g)]
+    if (!length(g)) return(NA_real_)
+    types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+    probe <- if (all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
+      if (length(g) > max_n) g[unique(round(seq(1, length(g), length.out = max_n)))] else g
+    } else {
+      bb <- sf::st_bbox(sf::st_transform(g, crs))
+      sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
+    }
+    probe  <- sf::st_transform(probe, crs)
+    planar <- as.numeric(sf::st_area(probe))
+    geod   <- as.numeric(sf::st_area(sf::st_transform(probe, 4326)))
+    ratio  <- planar / geod
+    ok <- is.finite(ratio) & is.finite(geod) & geod > 0
+    if (sum(ok) < 2L) return(NA_real_)
+    max(abs(ratio[ok] / stats::median(ratio[ok]) - 1))
+  }, error = function(e) NA_real_)
+}
+
+#' The area-distortion tolerance below which a CRS is taken as equal-area
+#'
+#' One percent.  Measured with .crs_area_error(): a UTM zone edge to edge
+#' 0.25%, a 2.5-degree extent inside one 0.04%, an equal-area projection a
+#' few tenths of a percent (the s2 sphere against the WGS84 ellipsoid), the
+#' conterminous US in one zone 13.9%, Web Mercator over 2.5 degrees of
+#' latitude at 48N 4.1%.  The tolerance sits in the gap.
+#' @keywords internal
+#' @noRd
+.area_error_tol <- 0.01
 
 # -----------------------------------------------------------------------------
 # Projection Enforcement
@@ -486,6 +600,26 @@
 #'   Must resolve to a usable CRS via [sf::st_crs()]; an unusable value (one
 #'   that resolves to `NA_crs_`) raises an error rather than silently leaving
 #'   `x` unprojected.
+#' @param purpose Which property the projection is for.  `"distance"` (the
+#'   default, and everything above): the candidate that distorts pairwise
+#'   distances least, which is what ranges, block sizes, bandwidths and
+#'   length-scales read off the coordinates.  `"area"`: densities or rates
+#'   per cell are going to be computed, so the CRS must be equal-area.  For
+#'   lon/lat input the choice is then made among equal-area projections only
+#'   --- a Lambert azimuthal centred on the data, or an Albers conic where
+#'   its parallels do not degenerate, whichever distorts distances less,
+#'   which a UTM zone (conformal, not equal-area) never enters; global
+#'   coverage gets Equal Earth rather than Web Mercator.  Already-projected
+#'   input is still returned untouched, but its area distortion over the
+#'   extent is measured (the spread of planar-to-geodesic area ratios over
+#'   probe polygons) and logged as a warning when it exceeds 1 percent.
+#'   Measured: a zone's own width edge to edge, 0.25 percent; the
+#'   conterminous United States forced into one zone, 14 percent; Web
+#'   Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
+#'   projection, a few tenths of a percent, which is the sphere the
+#'   geodesic areas are computed on against the ellipsoid the projection
+#'   uses.  [summarize_by_cell()] applies the same measurement before it
+#'   computes a density.  Ignored when `target_crs` is given.
 #' @return x, potentially with a new projected CRS.  CRS-less input
 #'   additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
 #'   the lon/lat heuristic fired, \code{"none"} when it declined.  That
@@ -513,8 +647,13 @@
 #'
 #' # target_crs overrides the choice entirely.
 #' st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
+#'
+#' # For densities per cell the CRS has to be equal-area: a Lambert azimuthal
+#' # centred on the data rather than the UTM zone.
+#' st_crs(ensure_projected(pts_ll, purpose = "area"))$proj4string
 #' @export
-ensure_projected <- function(x, target_crs = NULL) {
+ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area")) {
+  purpose <- match.arg(purpose)
   if (!(inherits(x, "sf") || inherits(x, "sfc"))) return(x)
 
   if (!is.null(target_crs)) {
@@ -576,7 +715,7 @@ ensure_projected <- function(x, target_crs = NULL) {
         ll$bb["xmin"], ll$bb["xmax"], ll$bb["ymin"], ll$bb["ymax"]
       )
       sf::st_crs(x) <- sf::st_crs(4326)
-      tr <- .pick_local_projected_crs(x)
+      tr <- .pick_local_projected_crs(x, purpose = purpose)
       x <- sf::st_transform(x, tr)
       # Recorded so a predict() on CRS-less newdata can replay the same
       # interpretation (see .replay_crs_assumption()).
@@ -598,8 +737,23 @@ ensure_projected <- function(x, target_crs = NULL) {
   }
 
   if (.is_longlat(x)) {
-    tr <- .pick_local_projected_crs(x)
+    tr <- .pick_local_projected_crs(x, purpose = purpose)
     x <- sf::st_transform(x, tr)
+  } else if (purpose == "area") {
+    # Projected input is never reprojected, but when areas are what matter
+    # the caller should know whether this CRS can deliver them.  Measured, as
+    # the distance choice is: the spread of planar-to-geodesic area ratios
+    # over probe polygons on the extent.
+    err <- .crs_area_error(x)
+    if (is.finite(err) && err > .area_error_tol)
+      .log_warn(
+        paste0("ensure_projected(purpose = \"area\"): the input's CRS (%s) ",
+               "distorts areas across this extent by up to %.1f%% (planar ",
+               "against geodesic, spread over probe polygons); densities and ",
+               "rates computed in it are not comparable between cells. It is ",
+               "returned as it is. Pass an equal-area target_crs, or start ",
+               "from lon/lat input and let purpose = \"area\" choose one."),
+        .fold_crs_label(x), 100 * err)
   }
   x
 }

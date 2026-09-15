@@ -20,7 +20,8 @@ compare_models_cv(
   summary = c("mean", "median"),
   quiet = FALSE,
   block_size = NULL,
-  auto_range = FALSE
+  auto_range = FALSE,
+  metrics = NULL
 )
 }
 \arguments{
@@ -88,6 +89,15 @@ the autocorrelation range of the response (detrended on
 the shared folds, as in \code{\link{make_folds}()}.  Default
 \code{FALSE}: geometric blocks, as before this argument existed.  Either
 way the fold set is built once and every backend is scored on it.}
+
+\item{metrics}{Optional scoring function of your own, handed to every
+backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
+numeric vector, applied per fold and to each backend's pooled
+predictions, whose names become columns of \code{by_fold} and
+\code{overall} beside the built-in ones.  See \strong{Your own metrics}
+on \code{\link{cv_spatial}()} for the contract.  Because the three
+backends are scored on the same folds, the columns are comparable across
+rows of \code{overall}.}
 }
 \value{
 A list with overall, by_fold, and per-model cv_results

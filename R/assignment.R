@@ -685,6 +685,21 @@ assign_features_to_polygons <- function(
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE} --
 #'   unlike the tessellation functions, whose default is \code{FALSE}.
+#' @param area Logical, default `FALSE`.  With `TRUE`, and `cells_sf`
+#'   supplied, the result gains `cell_area` (each cell's planar area in the
+#'   squared units of `cells_sf`'s CRS) and `n_per_area` (the count of rows
+#'   in the cell over that area --- a point density; a rate of anything else
+#'   is that thing's `agg_funs` sum over `cell_area`).  The request is
+#'   **refused** with an error, not answered with a number, when the cells'
+#'   CRS distorts areas across them by more than 1 percent, measured as the
+#'   spread of planar-to-geodesic area ratios over the cells: a density is a
+#'   comparison between cells and is meaningless where the map scale differs
+#'   from one cell to the next.  Inside a UTM zone the spread is under 0.3
+#'   percent and the request goes through; the conterminous United States
+#'   forced into one zone (14 percent), or a few degrees of latitude in Web
+#'   Mercator (4 percent at 48N), does not.  [ensure_projected()] with
+#'   `purpose = "area"` chooses an equal-area CRS for lon/lat input; build the
+#'   cells in it.  The measured spread is attached as `attr(, "area_error")`.
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
@@ -695,7 +710,8 @@ assign_features_to_polygons <- function(
 #'   called `n` is not allowed to shadow it), one column per `agg_funs` entry
 #'   per variable, `..sd_*` / `..se_*` for every numeric response and predictor,
 #'   `..neff_*` / `..df_*` / `..ci_lo_*` / `..ci_hi_*` for the same columns
-#'   when `conf_level` is given, and `cell_weight`.
+#'   when `conf_level` is given, `cell_weight`, and `cell_area` /
+#'   `n_per_area` when `area = TRUE`.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
@@ -765,7 +781,8 @@ summarize_by_cell <- function(assigned_points_sf,
                               sac            = NULL,
                               deff_max_n     = 500L,
                               quiet          = TRUE,
-                              conf_level     = NULL) {
+                              conf_level     = NULL,
+                              area           = FALSE) {
   .msg <- function(...) if (!quiet) message(...)
   if (!is.null(conf_level) &&
       (!is.numeric(conf_level) || length(conf_level) != 1L ||
@@ -773,6 +790,35 @@ summarize_by_cell <- function(assigned_points_sf,
     stop("summarize_by_cell(): `conf_level` must be a single number strictly ",
          "between 0 and 1 (0.95 for a 95% interval), or NULL for no intervals.",
          call. = FALSE)
+  if (!is.logical(area) || length(area) != 1L || is.na(area))
+    stop("summarize_by_cell(): `area` must be TRUE or FALSE.", call. = FALSE)
+  # A density needs the cells, and it needs them in a CRS whose areas are
+  # comparable.  Both are checked before any summary is computed, so a
+  # request that cannot be honoured fails at once rather than after the
+  # aggregation.
+  if (isTRUE(area)) {
+    if (!inherits(cells_sf, "sf"))
+      stop("summarize_by_cell(): `area = TRUE` needs `cells_sf`, the polygon layer ",
+           "the cells' areas are read from.", call. = FALSE)
+    if (is.na(sf::st_crs(cells_sf)))
+      stop("summarize_by_cell(): `area = TRUE` needs `cells_sf` to carry a CRS: ",
+           "without one there is no way to tell whether its areas are ",
+           "comparable between cells. Set it with sf::st_crs().", call. = FALSE)
+    area_err <- .crs_area_error(cells_sf)
+    if (!is.finite(area_err))
+      stop("summarize_by_cell(): `area = TRUE`: the area distortion of `cells_sf`'s ",
+           "CRS could not be measured (no polygon areas, or geodesic areas ",
+           "unavailable), so a density cannot be vouched for.", call. = FALSE)
+    if (area_err > .area_error_tol)
+      stop(sprintf(paste0("summarize_by_cell(): `area = TRUE` refused: the CRS of ",
+                          "`cells_sf` (%s) distorts areas across the cells by up ",
+                          "to %.1f%% (planar against geodesic), so a density or ",
+                          "rate computed in it would not be comparable between ",
+                          "cells. Build the cells in an equal-area CRS -- ",
+                          "ensure_projected(purpose = \"area\") picks one for ",
+                          "lon/lat input -- and pass those."),
+                   .fold_crs_label(cells_sf), 100 * area_err), call. = FALSE)
+  }
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
@@ -1357,6 +1403,19 @@ summarize_by_cell <- function(assigned_points_sf,
         pre_join_id <- as.character(out[[id_col]])
 
         out <- dplyr::left_join(cells_slim, out, by = id_col)
+
+        if (isTRUE(area)) {
+          # Planar areas in the cells' own (verified equal-area) CRS, as
+          # plain numbers in its squared units; the density is points per
+          # unit area.  Cells with no observations have n = NA after the
+          # join and get a density of NA, not 0: no point was counted there
+          # because the layer had none, which is not the same finding.
+          cell_area <- suppressWarnings(as.numeric(sf::st_area(sf::st_geometry(out))))
+          cell_area[!is.finite(cell_area) | cell_area <= 0] <- NA_real_
+          out$cell_area  <- cell_area
+          out$n_per_area <- as.numeric(out$n) / cell_area
+          attr(out, "area_error") <- area_err
+        }
 
         if (!is.null(deff_attr)) {
           # EVERY per-cell vector has to follow the join, not just $deff.

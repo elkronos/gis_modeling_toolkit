@@ -426,6 +426,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @param block_size,auto_range,boundary Passed to \code{\link{cv_spatial}}.
 #' @param pointize How non-POINT geometry is reduced to a point before
 #'   fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.
+#' @param metrics Optional scoring function of your own, passed to
+#'   \code{\link{cv_spatial}}; see \strong{Your own metrics} there.
 #' @param ... Passed to \code{\link{fit_rf_model}} on every fold —
 #'   \code{num_trees}, \code{mtry}, \code{importance}, \code{include_coords}
 #'   and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
@@ -451,7 +453,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
                   seed = 123, parallel = FALSE, block_size = NULL,
-                  auto_range = FALSE, boundary = NULL, pointize = "auto", ...) {
+                  auto_range = FALSE, boundary = NULL, pointize = "auto",
+                  metrics = NULL, ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("cv_rf(): package 'ranger' is required.", call. = FALSE)
   # `seed` has to reach the FOREST, not just the fold construction.
@@ -480,12 +483,14 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
               dots))
   # `pointize` is named here rather than left to `...`: it belongs to
   # cv_spatial(), and through `...` it reached ranger() as an unused argument.
+  # `metrics` is named for the same reason as `pointize`: it belongs to
+  # cv_spatial(), and through `...` it would reach ranger().
   cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
              .caller = "cv_rf",
              folds = folds, k = k, seed = seed, boundary = boundary,
              pointize = pointize,
              block_size = block_size, auto_range = auto_range,
-             parallel = parallel)
+             parallel = parallel, metrics = metrics)
 }
 
 

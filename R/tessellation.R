@@ -604,7 +604,14 @@ create_grid_polygons <- function(
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells (grid methods). For hex
 #'   grids the target is adjusted for packing density; the actual count after
-#'   clipping to an irregular boundary may differ noticeably.
+#'   clipping to an irregular boundary may differ noticeably.  Besides a
+#'   number, this accepts what the level-selection step returned: the integer
+#'   vector of ranked candidates from \code{\link{determine_optimal_levels}()}
+#'   (its first element is used), a \code{\link{select_resolution}()} result
+#'   (its \code{$best}), or a \code{\link{resolution_profile}()} (read with
+#'   \code{select_resolution()} at its default criterion).  The count used
+#'   is returned as \code{params$approx_n_cells} and where it came from as
+#'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
 #' @param cellsize Numeric cell size (grid methods).
 #' @param expand Buffer distance for the Voronoi envelope. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
@@ -652,6 +659,12 @@ build_tessellation <- function(
   .msg <- function(...) if (!quiet) message(...)
   method <- match.arg(method)
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
+
+  # The level-selection step's own answer is accepted here, so the count
+  # need not be carried between the two calls by hand.
+  n_cells <- .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation")
+  approx_n_cells      <- if (is.null(n_cells)) NULL else n_cells$n
+  approx_n_cells_from <- if (is.null(n_cells)) NULL else n_cells$from
 
   # --- CRS handling ---
   if (!is.null(crs)) {
@@ -735,7 +748,9 @@ build_tessellation <- function(
 
     return(list(
       cells = grid, index = index, boundary = boundary, method = method,
-      params = list(approx_n_cells = approx_n_cells, cellsize = cellsize,
+      params = list(approx_n_cells = approx_n_cells,
+                    approx_n_cells_from = approx_n_cells_from,
+                    cellsize = cellsize,
                     clip = clip, keep_duplicates = keep_duplicates,
                     expand = expand)
     ))
@@ -800,6 +815,7 @@ build_tessellation <- function(
     return(list(
       cells = tri_sf, index = index, boundary = boundary, method = "triangles",
       params = list(clip = clip, approx_n_cells = approx_n_cells,
+                    approx_n_cells_from = approx_n_cells_from,
                     keep_duplicates = keep_duplicates, expand = expand)
     ))
   }
