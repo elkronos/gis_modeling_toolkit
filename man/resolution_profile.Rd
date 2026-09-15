@@ -191,8 +191,10 @@ Mallows, C. L. (1973). Some comments on \eqn{C_p}. \emph{Technometrics},
 \seealso{
 \code{\link{select_resolution}()} to read a level and its flat
 region off the profile; \code{\link{determine_optimal_levels}()} for the
-integer-vector interface; \code{\link{build_tessellation}()}, which takes
-the chosen count as \code{approx_n_cells}.
+integer-vector interface; \code{\link{build_tessellation}()} and
+\code{\link{get_voronoi_seeds}()}, which accept the profile or a
+\code{select_resolution()} result directly as \code{approx_n_cells}
+and \code{n}.
 
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},

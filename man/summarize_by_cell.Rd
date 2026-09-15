@@ -15,7 +15,8 @@ summarize_by_cell(
   sac = NULL,
   deff_max_n = 500L,
   quiet = TRUE,
-  conf_level = NULL
+  conf_level = NULL,
+  area = FALSE
 )
 }
 \arguments{
@@ -109,6 +110,22 @@ When given, every numeric response and predictor column also gets
 \verb{..neff_*}, \verb{..df_*}, \verb{..ci_lo_*} and \verb{..ci_hi_*} (see "Confidence
 intervals"). Default \code{NULL}: no interval columns, and the frame is
 exactly what it was before this argument existed.}
+
+\item{area}{Logical, default \code{FALSE}.  With \code{TRUE}, and \code{cells_sf}
+supplied, the result gains \code{cell_area} (each cell's planar area in the
+squared units of \code{cells_sf}'s CRS) and \code{n_per_area} (the count of rows
+in the cell over that area --- a point density; a rate of anything else
+is that thing's \code{agg_funs} sum over \code{cell_area}).  The request is
+\strong{refused} with an error, not answered with a number, when the cells'
+CRS distorts areas across them by more than 1 percent, measured as the
+spread of planar-to-geodesic area ratios over the cells: a density is a
+comparison between cells and is meaningless where the map scale differs
+from one cell to the next.  Inside a UTM zone the spread is under 0.3
+percent and the request goes through; the conterminous United States
+forced into one zone (14 percent), or a few degrees of latitude in Web
+Mercator (4 percent at 48N), does not.  \code{\link[=ensure_projected]{ensure_projected()}} with
+\code{purpose = "area"} chooses an equal-area CRS for lon/lat input; build the
+cells in it.  The measured spread is attached as \code{attr(, "area_error")}.}
 }
 \value{
 A tibble/data.frame (or sf if cells_sf given) with per-cell
@@ -116,7 +133,8 @@ summaries: the ID column, \code{n} (rows in the cell --- an input column also
 called \code{n} is not allowed to shadow it), one column per \code{agg_funs} entry
 per variable, \verb{..sd_*} / \verb{..se_*} for every numeric response and predictor,
 \verb{..neff_*} / \verb{..df_*} / \verb{..ci_lo_*} / \verb{..ci_hi_*} for the same columns
-when \code{conf_level} is given, and \code{cell_weight}.
+when \code{conf_level} is given, \code{cell_weight}, and \code{cell_area} /
+\code{n_per_area} when \code{area = TRUE}.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} for \code{"kish"},

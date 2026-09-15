@@ -119,6 +119,11 @@ stopped rising between levels, not a published figure.
 levels in \code{determine_optimal_levels()}.
 \item The 3:1 fold-imbalance tolerance (\code{balance_tol = 3}) in
 \code{make_folds(method = "block_kfold")}.
+\item The 1 percent area-distortion tolerance below which a CRS is
+taken as equal-area by \code{ensure_projected(purpose = "area")} and
+\code{summarize_by_cell(area = TRUE)}: measured, a UTM zone edge to
+edge is 0.25 percent and a continent forced into one zone 14 percent,
+and the figure sits in the gap.
 \item \code{deff_max_n = 500}, \code{sample_n = 1500} and
 \code{top_n = 3}, the subsampling and shortlist sizes.
 \item \code{coverage_levels = c(0.50, 0.80, 0.95)} in \code{cv_bayes()}.

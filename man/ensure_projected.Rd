@@ -4,7 +4,7 @@
 \alias{ensure_projected}
 \title{Ensure an object has a projected CRS (with sensible defaults)}
 \usage{
-ensure_projected(x, target_crs = NULL)
+ensure_projected(x, target_crs = NULL, purpose = c("distance", "area"))
 }
 \arguments{
 \item{x}{An sf or sfc object (other objects returned unchanged).}
@@ -13,6 +13,27 @@ ensure_projected(x, target_crs = NULL)
 Must resolve to a usable CRS via \code{\link[sf:st_crs]{sf::st_crs()}}; an unusable value (one
 that resolves to \code{NA_crs_}) raises an error rather than silently leaving
 \code{x} unprojected.}
+
+\item{purpose}{Which property the projection is for.  \code{"distance"} (the
+default, and everything above): the candidate that distorts pairwise
+distances least, which is what ranges, block sizes, bandwidths and
+length-scales read off the coordinates.  \code{"area"}: densities or rates
+per cell are going to be computed, so the CRS must be equal-area.  For
+lon/lat input the choice is then made among equal-area projections only
+--- a Lambert azimuthal centred on the data, or an Albers conic where
+its parallels do not degenerate, whichever distorts distances less,
+which a UTM zone (conformal, not equal-area) never enters; global
+coverage gets Equal Earth rather than Web Mercator.  Already-projected
+input is still returned untouched, but its area distortion over the
+extent is measured (the spread of planar-to-geodesic area ratios over
+probe polygons) and logged as a warning when it exceeds 1 percent.
+Measured: a zone's own width edge to edge, 0.25 percent; the
+conterminous United States forced into one zone, 14 percent; Web
+Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
+projection, a few tenths of a percent, which is the sphere the
+geodesic areas are computed on against the ellipsoid the projection
+uses.  \code{\link[=summarize_by_cell]{summarize_by_cell()}} applies the same measurement before it
+computes a density.  Ignored when \code{target_crs} is given.}
 }
 \value{
 x, potentially with a new projected CRS.  CRS-less input
@@ -90,4 +111,8 @@ st_crs(ensure_projected(wide))$proj4string
 
 # target_crs overrides the choice entirely.
 st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
+
+# For densities per cell the CRS has to be equal-area: a Lambert azimuthal
+# centred on the data rather than the UTM zone.
+st_crs(ensure_projected(pts_ll, purpose = "area"))$proj4string
 }

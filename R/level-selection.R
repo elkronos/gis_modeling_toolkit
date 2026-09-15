@@ -516,9 +516,11 @@
 #' )
 #' determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
 #' @family aggregation
-#' @seealso [build_tessellation()], which takes the chosen level count as
-#'   `approx_n_cells`; [assign_features_to_polygons()] and
-#'   [summarize_by_cell()] for the steps that follow.
+#' @seealso [build_tessellation()] and [get_voronoi_seeds()], which accept
+#'   this function's result directly as `approx_n_cells` and `n` (the first
+#'   candidate is used, and the output records that it came from here);
+#'   [assign_features_to_polygons()] and [summarize_by_cell()] for the steps
+#'   that follow.
 #' @export
 determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                      sample_n = 1500L, set_seed = 123L,

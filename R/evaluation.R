@@ -46,9 +46,11 @@
   # then ranked models scored on different data.  (compare_models_cv() now
   # builds one fold set up front when folds = NULL, so these would be ignored
   # in any case; saying so is better than ignoring them quietly.)
+  # `metrics` too: a per-model scoring function would put numbers computed
+  # differently into the same column of `overall`.
   protected <- c("data_sf", "response_var", "predictor_vars", "folds",
                  "k", "seed", "block_size", "auto_range", "boundary",
-                 "pointize")
+                 "pointize", "metrics")
   clash <- intersect(names(extra), protected)
   if (length(clash) > 0L) {
     warning(sprintf(
@@ -1167,6 +1169,14 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   the shared folds, as in \code{\link{make_folds}()}.  Default
 #'   \code{FALSE}: geometric blocks, as before this argument existed.  Either
 #'   way the fold set is built once and every backend is scored on it.
+#' @param metrics Optional scoring function of your own, handed to every
+#'   backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
+#'   numeric vector, applied per fold and to each backend's pooled
+#'   predictions, whose names become columns of \code{by_fold} and
+#'   \code{overall} beside the built-in ones.  See \strong{Your own metrics}
+#'   on \code{\link{cv_spatial}()} for the contract.  Because the three
+#'   backends are scored on the same folds, the columns are comparable across
+#'   rows of \code{overall}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @section Coverage and CRPS in the overall table:
@@ -1223,13 +1233,14 @@ compare_models_cv <- function(
     k = 5, seed = 123, folds = NULL, boundary = NULL, pointize = "auto",
     gwr_args = list(), bayes_args = list(), rf_args = list(),
     summary = c("mean", "median"),
-    quiet = FALSE, block_size = NULL, auto_range = FALSE
+    quiet = FALSE, block_size = NULL, auto_range = FALSE, metrics = NULL
 ) {
   summary <- match.arg(summary)
   .msg <- function(...) if (!quiet) message(...)
 
   if (!inherits(data_sf, "sf"))
     stop("compare_models_cv(): `data_sf` must be an sf object.")
+  metrics <- .check_metrics_fn(metrics, "compare_models_cv")
 
   # Unrecognised model names used to be dropped by a bare intersect(), so
   # models = "RF" silently ran GWR instead of what was asked for -- a wrong
@@ -1297,7 +1308,8 @@ compare_models_cv <- function(
     base <- .merge_args(
       list(data_sf = data_sf, response_var = response_var,
            predictor_vars = predictor_vars, folds = folds,
-           k = k, seed = seed, boundary = boundary, pointize = pointize),
+           k = k, seed = seed, boundary = boundary, pointize = pointize,
+           metrics = metrics),
       gwr_args, "gwr_args"
     )
     gwr_cv <- do.call(cv_gwr, .filter_args(cv_gwr, base))
@@ -1320,7 +1332,7 @@ compare_models_cv <- function(
                  predictor_vars = predictor_vars, folds = folds,
                  k = k, seed = seed, boundary = boundary,
                  pointize = pointize, summary = summary,
-                 fit_args = bayes_args)
+                 fit_args = bayes_args, metrics = metrics)
     bayes_cv <- do.call(cv_bayes, .filter_args(cv_bayes, base))
     cv_results$bayes_cv <- bayes_cv
     ov <- try(as.data.frame(bayes_cv$overall), silent = TRUE)
@@ -1350,7 +1362,8 @@ compare_models_cv <- function(
     base <- .merge_args(
       list(data_sf = data_sf, response_var = response_var,
            predictor_vars = predictor_vars, folds = folds,
-           k = k, seed = seed, boundary = boundary, pointize = pointize),
+           k = k, seed = seed, boundary = boundary, pointize = pointize,
+           metrics = metrics),
       rf_args, "rf_args"
     )
     rf_cv <- do.call(cv_rf, base)

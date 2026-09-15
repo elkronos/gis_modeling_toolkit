@@ -227,8 +227,10 @@
 #' @family aggregation
 #' @seealso \code{\link{select_resolution}()} to read a level and its flat
 #'   region off the profile; \code{\link{determine_optimal_levels}()} for the
-#'   integer-vector interface; \code{\link{build_tessellation}()}, which takes
-#'   the chosen count as \code{approx_n_cells}.
+#'   integer-vector interface; \code{\link{build_tessellation}()} and
+#'   \code{\link{get_voronoi_seeds}()}, which accept the profile or a
+#'   \code{select_resolution()} result directly as \code{approx_n_cells}
+#'   and \code{n}.
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
 #'   library(sf)
@@ -611,4 +613,63 @@ print.resolution_selection <- function(x, ...) {
     cat("  note        : the optimum is the first level of the ladder; the floor\n",
         "               is choosing, not the criterion.\n", sep = "")
   invisible(x)
+}
+
+
+#' Resolve a cell count from a number or from a level-selection result
+#'
+#' The functions that need a cell count -- \code{build_tessellation()}'s
+#' \code{approx_n_cells}, \code{get_voronoi_seeds()}'s \code{n} -- accept,
+#' besides a number, the object the level-selection step produced:
+#' \code{determine_optimal_levels()}'s integer vector of ranked candidates
+#' (the first is used), a \code{resolution_selection} (its \code{$best}), or a
+#' \code{resolution_profile} (read with \code{select_resolution()} at its
+#' default criterion).  The count and where it came from are returned so the
+#' caller can record both on its output.
+#'
+#' @param x \code{NULL}, a number, a numeric vector, a
+#'   \code{resolution_selection} or a \code{resolution_profile}.
+#' @param arg,caller Names for the messages.
+#' @return \code{NULL} when \code{x} is \code{NULL}; otherwise a list with
+#'   \code{n} (a single number) and \code{from} (a character description, or
+#'   \code{NULL} when \code{x} was a plain number).
+#' @keywords internal
+#' @noRd
+.resolve_cell_count <- function(x, arg, caller) {
+  if (is.null(x)) return(NULL)
+  from <- NULL
+  if (inherits(x, "resolution_selection")) {
+    n <- x$best
+    from <- sprintf("select_resolution(criterion = \"%s\")%s", x$criterion,
+                    if (isTRUE(x$at_ceiling)) ", an optimum at the support ceiling"
+                    else if (isTRUE(x$at_floor)) ", an optimum at the range floor"
+                    else "")
+  } else if (inherits(x, "resolution_profile")) {
+    sel <- select_resolution(x)
+    n <- sel$best
+    from <- sprintf("resolution_profile() read with select_resolution(criterion = \"%s\")%s",
+                    sel$criterion,
+                    if (isTRUE(sel$at_ceiling)) ", an optimum at the support ceiling"
+                    else if (isTRUE(sel$at_floor)) ", an optimum at the range floor"
+                    else "")
+    .log_info("%s(): `%s` is a resolution profile; read with select_resolution()'s default criterion (%s): %d cells.",
+              caller, arg, sel$criterion, n)
+  } else if (is.numeric(x) && length(x) >= 1L && !is.list(x)) {
+    n <- x[[1L]]
+    if (length(x) > 1L) {
+      from <- sprintf("the first of %d ranked candidates (%s)", length(x),
+                      paste(format(x, trim = TRUE), collapse = ", "))
+      .log_info("%s(): `%s` holds %d candidates, as determine_optimal_levels() returns them; using the first (%s).",
+                caller, arg, length(x), format(n))
+    }
+  } else {
+    stop(sprintf(paste0("%s(): `%s` must be a number, the integer vector ",
+                        "determine_optimal_levels() returns, a select_resolution() ",
+                        "result or a resolution_profile(); got an object of class %s."),
+                 caller, arg, paste(class(x), collapse = "/")), call. = FALSE)
+  }
+  if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1)
+    stop(sprintf("%s(): `%s` must resolve to a positive number of cells; got %s.",
+                 caller, arg, paste(format(n), collapse = ", ")), call. = FALSE)
+  list(n = as.numeric(n), from = from)
 }

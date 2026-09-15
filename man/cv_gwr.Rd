@@ -18,7 +18,8 @@ cv_gwr(
   pointize = "auto",
   block_size = NULL,
   auto_range = FALSE,
-  parallel = FALSE
+  parallel = FALSE,
+  metrics = NULL
 )
 }
 \arguments{
@@ -74,6 +75,12 @@ auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).}
+
+\item{metrics}{Optional scoring function of your own, a
+\code{function(y, yhat)} returning a named numeric vector; its names
+become columns of \code{fold_metrics} (per fold) and \code{overall}
+(pooled) beside the built-in ones.  See \strong{Your own metrics} on
+\code{\link{cv_spatial}()} for the contract.}
 }
 \value{
 A list with \code{overall}, \code{fold_metrics},

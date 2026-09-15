@@ -235,9 +235,11 @@ for convolution-closed distributions. \emph{Journal of Machine Learning
 Research}, 25(57), 1--35. \url{https://jmlr.org/papers/v25/23-0446.html}
 }
 \seealso{
-\code{\link[=build_tessellation]{build_tessellation()}}, which takes the chosen level count as
-\code{approx_n_cells}; \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps that follow.
+\code{\link[=build_tessellation]{build_tessellation()}} and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, which accept
+this function's result directly as \code{approx_n_cells} and \code{n} (the first
+candidate is used, and the output records that it came from here);
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps
+that follow.
 
 Other aggregation: 
 \code{\link{assign_features_to_polygons}()},
