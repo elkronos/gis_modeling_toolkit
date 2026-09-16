@@ -607,7 +607,7 @@
 #'   See \strong{Which null, and when it is approximate} above.
 #' @param keep_weights Logical. Return the \eqn{n \times n} weight matrix in
 #'   the result? Defaults to \code{FALSE}: the matrix dominates the object's
-#'   size --- 50.3 KB of a 52.0 KB result at \eqn{n = 500} in its sparse form,
+#'   size --- 50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
 #'   and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
 #'   while most uses read only the statistic and its moments, and
 #'   \code{weights_summary} says what it was. Set \code{TRUE} when you need
@@ -927,7 +927,7 @@ residual_morans_i <- function(fit,
   # The weight matrix is the one large thing here, and by default it is
   # described rather than carried: it is n x n, so at the n = 5000 the dense
   # fallback is capped at it is 191 MB, and even the sparse form at n = 500 is
-  # 50.3 KB against the 1.7 KB everything else in this list occupies.  Most
+  # 50.3 KB against the 3.2 KB everything else in this list occupies.  Most
   # uses of the result read the statistic and its moments, and a list of fits
   # scored one at a time used to pin one matrix per fit for as long as the
   # results were held.  `keep_weights = TRUE` returns it for the uses that

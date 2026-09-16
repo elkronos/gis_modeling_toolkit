@@ -458,3 +458,66 @@ test_that("fit_rf_model validates the sampling arguments and refuses ranger's sp
   expect_error(fit_rf_model(dat, "z", "a", replace = FALSE, sample.fraction = 0.5),
                "`sample.fraction` is already set.*Use `sample_fraction`")
 })
+
+
+test_that("a failure ranger diagnoses in C++ is reported, not printed past the caller", {
+  skip_if_not_installed("ranger")
+  dat <- mk_rf_pts(60)
+  # ranger writes "mtry can not be larger than number of variables in data.
+  # Ranger will EXIT now." to stderr from C++ and then throws "User interrupt
+  # or internal error.", which names neither the argument nor the problem.
+  # That line is not an R condition, so it used to escape every handler to the
+  # console while the error the package raised said nothing actionable.
+  err <- tryCatch(fit_rf_model(dat, "z", "a", num_trees = 20, mtry = 99),
+                  error = function(e) conditionMessage(e))
+  expect_match(err, "^fit_rf_model\\(\\): ranger\\(\\) failed: ")
+  expect_match(err, "mtry can not be larger than number of variables")
+  expect_false(grepl("User interrupt or internal error", err, fixed = TRUE))
+  # Nothing reaches the console behind the caller's back.
+  expect_silent(try(suppressWarnings(
+    fit_rf_model(dat, "z", "a", num_trees = 20, mtry = 99)), silent = TRUE))
+  # The message stream is handed back exactly as it was found, so a diverted
+  # session is not left writing its warnings into a deleted temp file.
+  expect_identical(as.integer(sink.number(type = "message")), 2L)
+
+  # A successful fit is unaffected, and anything the backend writes to stderr
+  # on a call that succeeds is passed through rather than swallowed.
+  ok <- fit_rf_model(dat, "z", "a", num_trees = 20)
+  expect_s3_class(ok, "rf_fit")
+  expect_true(is.finite(ok$info$oob_rmse))
+
+  # And the reason now travels: a cv_*() run records it per fold instead of
+  # recording the placeholder.
+  fo <- make_folds(dat, k = 3, method = "random_kfold", seed = 1)
+  cv <- suppressWarnings(suppressMessages(
+    cv_rf(dat, "z", "a", folds = fo, num_trees = 20, mtry = 99)))
+  expect_identical(unique(cv$fold_status$status), "error")
+  expect_true(all(grepl("mtry can not be larger", cv$fold_status$message)))
+
+  # With the message stream already diverted -- under testthat's own capture,
+  # or knitr -- only one sink is permitted, so the call runs unchanged and
+  # falls back to R's message rather than failing.
+  tf <- tempfile(); con <- file(tf, "wt"); sink(con, type = "message")
+  fallback <- tryCatch(fit_rf_model(dat, "z", "a", num_trees = 20, mtry = 99),
+                       error = function(e) conditionMessage(e))
+  sink(type = "message"); close(con); unlink(tf)
+  expect_match(fallback, "^fit_rf_model\\(\\): ranger\\(\\) failed: ")
+  expect_identical(as.integer(sink.number(type = "message")), 2L)
+})
+
+test_that(".stderr_reason folds the compiled diagnosis into the R message", {
+  f <- spatialkit:::.stderr_reason
+  e_generic <- simpleError("User interrupt or internal error.")
+  e_own     <- simpleError("something R itself diagnosed")
+  # The placeholder is replaced outright; a real R message keeps its own text
+  # and gains the backend's in parentheses.
+  expect_identical(f(e_generic, "Error: mtry can not be larger. Ranger will EXIT now."),
+                   "mtry can not be larger.")
+  expect_identical(f(e_own, "Error: disk full"),
+                   "something R itself diagnosed (disk full)")
+  # Nothing on stderr, or nothing usable there: the R message stands alone.
+  expect_identical(f(e_generic, character(0)), "User interrupt or internal error.")
+  expect_identical(f(e_generic, c("", "   ")), "User interrupt or internal error.")
+  # A duplicate is not repeated.
+  expect_identical(f(simpleError("boom"), "boom"), "boom")
+})

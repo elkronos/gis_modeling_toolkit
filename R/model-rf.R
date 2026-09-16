@@ -352,16 +352,20 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   num_threads <- .sanitize_core_count(
     if (is.null(num_threads)) getOption("mc.cores", 1L) else num_threads)
 
-  fit <- tryCatch(
+  # .call_capturing_stderr(): ranger diagnoses a bad argument on stderr from
+  # C++ and then throws "User interrupt or internal error.", so the message
+  # this reported named nothing a caller could act on while the real reason
+  # printed itself to the console past every handler.
+  rr <- .call_capturing_stderr(function()
     ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
                    mtry = mtry, min.node.size = min_node_size,
                    importance = importance, seed = seed,
                    replace = replace, sample.fraction = sample_fraction,
-                   num.threads = num_threads, ...),
-    error = function(e)
-      stop(sprintf("fit_rf_model(): ranger() failed: %s", conditionMessage(e)),
-           call. = FALSE)
-  )
+                   num.threads = num_threads, ...))
+  if (!is.null(rr$error))
+    stop(sprintf("fit_rf_model(): ranger() failed: %s",
+                 .stderr_reason(rr$error, rr$stderr)), call. = FALSE)
+  fit <- rr$value
 
   imp <- if (identical(importance, "none")) NULL else fit$variable.importance
   # .num1() collapses an unset ranger field to NA_real_ rather than the

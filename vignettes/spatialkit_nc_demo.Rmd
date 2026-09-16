@@ -1,7 +1,7 @@
 ---
 title: "spatialkit: Tessellations, Spatial Cross-Validation and Models"
 author: "Justin Chase"
-date: "2026-08-26"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   rmarkdown::html_vignette:
     toc: true

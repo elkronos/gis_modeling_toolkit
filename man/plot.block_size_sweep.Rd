@@ -22,6 +22,30 @@ vertical marker.  Blocks smaller than the range leak, so the curve rises
 from the reference towards the range and plateaus beyond it; the height
 of the rise is what the random-fold number overstated.
 }
+\examples{
+if (requireNamespace("ranger", quietly = TRUE) &&
+    requireNamespace("gstat", quietly = TRUE) &&
+    requireNamespace("ggplot2", quietly = TRUE)) {
+  library(sf)
+  set.seed(1)
+  n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(dist(cbind(x, y)))
+  field <- as.numeric(t(chol(exp(-d / 100) + diag(1e-6, n))) \%*\% rnorm(n))
+  dat <- st_as_sf(data.frame(x = x, y = y, a = rnorm(n)), coords = c("x", "y"),
+                  crs = 32632)
+  dat$z <- field + 0.5 * dat$a + rnorm(n, 0, 0.2)
+  rf_fn <- function(train_sf)
+    fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100,
+                 seed = 1)
+  sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
+                            quiet = TRUE)
+  # Error rises from the random-fold reference (dashed) towards the estimated
+  # autocorrelation range (vertical marker) and plateaus past it.  The height
+  # of that rise is what random folds were hiding.
+  plot(sw)
+}
+}
 \seealso{
 Other plotting: 
 \code{\link{plot.aoa}()},

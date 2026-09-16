@@ -66,7 +66,7 @@ See \strong{Which null, and when it is approximate} above.}
 
 \item{keep_weights}{Logical. Return the \eqn{n \times n} weight matrix in
 the result? Defaults to \code{FALSE}: the matrix dominates the object's
-size --- 50.3 KB of a 52.0 KB result at \eqn{n = 500} in its sparse form,
+size --- 50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
 and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
 while most uses read only the statistic and its moments, and
 \code{weights_summary} says what it was. Set \code{TRUE} when you need
