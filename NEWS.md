@@ -534,9 +534,10 @@
   numbers: after `prep_model_data()` dropped 3 of 40 rows,
   `attr(pre[1:20, ], "dropped")$n` was still 3, with `which` naming rows the
   subset does not contain, and a 300-row `assign_features_to_polygons()`
-  result subset to its first 10 rows still reported 81 ties against positions
-  running to 300.  A fit built on such a subset with `.already_prepped = TRUE`
-  --- which is what every per-fold fit inside `cv_gwr()`, `cv_bayes()` and
+  result whose tie-break had decided 68 features, subset to its first 10 rows,
+  still reported all 68 of them against row positions running to 292.  A fit
+  built on such a subset with `.already_prepped = TRUE` --- which is what
+  every per-fold fit inside `cv_gwr()`, `cv_bayes()` and
   `cv_rf()` is --- reported `info$n_dropped = 3` for 20 rows nothing had been
   dropped from.  A layer carrying a record now has class `spatialkit_rows`
   ahead of `sf`, and its `[` method hands back a plain layer with the record
@@ -548,11 +549,11 @@
   Fits and `cv_*()` results built from an unmodified prepared layer report the
   same `n_dropped` as before; a fit handed a subset now reports `0`.
 * `residual_morans_i()` no longer carries the weight matrix by default.  The
-  matrix is n by n, and it dominated the result: 50.3 KB of a 52.4 KB object
+  matrix is n by n, and it dominated the result: 50.3 KB of a 53.5 KB object
   at n = 500 in its sparse form, 112.7 KB at n = 120 when the dense fallback
   is taken (it needs both **FNN** and **Matrix** to go sparse, so a
   no-Suggests install always does), and 191 MB at the n = 5000 that fallback
-  is capped at --- against the 1.7 KB everything else occupies.  Scoring a
+  is capped at --- against the 3.2 KB everything else occupies.  Scoring a
   list of fits held one matrix per fit.  `weights` is now `NULL` unless
   `keep_weights = TRUE`, and a new `weights_summary` component says what the
   matrix was either way: `n`, `storage` (its class), `neighbours` (the
@@ -580,6 +581,22 @@
   data, which is what it is there for.  It is now the number of distinct row
   IDs the folds name that the data does not have, and it no longer moves with
   `k`.  The accompanying log line says the same thing.
+* `fit_rf_model()` reports what ranger actually objected to.  ranger diagnoses
+  a bad argument in its C++ layer, writes the diagnosis straight to stderr and
+  then throws "User interrupt or internal error." --- so `mtry = 99` on a
+  two-predictor forest printed "mtry can not be larger than number of
+  variables in data. Ranger will EXIT now." to the console and raised an error
+  naming neither the argument nor the problem.  That line is not an R
+  condition, so `suppressMessages()`, `withCallingHandlers()` and `tryCatch()`
+  all missed it: it escaped every handler to the console (and into CI logs,
+  where it reads as an error from a test that is passing), while `cv_*()`
+  recorded the placeholder as the fold's cause.  The message stream is now
+  diverted for the duration of the call, so the diagnosis becomes the reported
+  reason --- `fold_status$message` included --- and nothing is printed behind
+  the caller's back.  Output from a call that succeeds is passed through
+  unchanged, and when the stream is already diverted (under testthat, knitr or
+  `capture.output(type = "message")`, where only one sink is permitted) the
+  call runs exactly as before.
 
 ## Documentation
 
@@ -899,14 +916,15 @@ whether an item affects an analysis you have already run.
   the column literally named `prediction` *is* the prediction; `predict()`
   returned all `NA`.
 
-* Smaller: a logical response meets the same binary-response guard as `0/1`; `model_metrics()` errors on a non-numeric response instead of
-  returning `n = 0`; `fitted.bayesian_fit()` errors when the posterior cannot
-  be drawn instead of returning silent `NA`; `create_grid_polygons()` refuses
-  a grid above `max_cells` (default 1e6) up front; `make_folds(method =
-  "buffered_loo")` states its guard in bytes (splits are ~4n² bytes; the old
-  n = 20000 cap admitted 1.6 GB); `-0` and `0` are the same coordinate in the
-  duplicate-aware k-NN; `.morans_i_for_k()` returns the `NA` pair whenever
-  the moments are unavailable.
+* Smaller: a logical response meets the same binary-response guard as `0/1`;
+  `model_metrics()` errors on a non-numeric response instead of returning
+  `n = 0`; `fitted.bayesian_fit()` errors when the posterior cannot be drawn
+  instead of returning silent `NA`; `create_grid_polygons()` refuses a grid
+  above `max_cells` (default 1e6) up front;
+  `make_folds(method = "buffered_loo")` states its guard in bytes (splits are
+  ~4n² bytes; the old n = 20000 cap admitted 1.6 GB); `-0` and `0` are the same
+  coordinate in the duplicate-aware k-NN; `.morans_i_for_k()` returns the `NA`
+  pair whenever the moments are unavailable.
 
 * **Documented warnings are now R warnings.** Eight paths the manual
   described as warning only wrote a logger line, invisible to
@@ -1688,10 +1706,10 @@ whether an item affects an analysis you have already run.
 
 * `assign_features_to_polygons()` drops columns of `features_sf` that would
   collide with the polygon ID column, with a logged warning. `sf::st_join()`
-  suffixed them (`poly_id.x` / `poly_id.y`), which defeated the rename afterwards
-  and left the result with **no rows** — reachable simply by re-assigning
-  already-assigned points. A join that still fails to produce the ID column now
-  errors and names the columns it did produce.
+  suffixed them (`poly_id.x` / `poly_id.y`), which defeated the rename
+  afterwards and left the result with **no rows** — reachable simply by
+  re-assigning already-assigned points. A join that still fails to produce the
+  ID column now errors and names the columns it did produce.
 
 * `summarize_by_cell()` keeps the `"deff_applied"` attribute when `cells_sf` is
   supplied; `dplyr::left_join()` rebuilds attributes from its `x` template and
@@ -1727,7 +1745,8 @@ whether an item affects an analysis you have already run.
   folds from a list, shifting every later fold's index, so `fold_metrics$fold`
   and `predictions$fold` stopped lining up with `make_folds()$assignment$fold`.
   The original index is carried through. Folds left with fewer than two training
-  rows are detected there and logged, instead of failing one at a time deeper in.
+  rows are detected there and logged, instead of failing one at a time deeper
+  in.
 
 * `cv_spatial()` rejects a `fit_fn` whose `predict()` returns the wrong number
   of values. Both the metric computation and the prediction frame recycled
@@ -2174,12 +2193,12 @@ whether an item affects an analysis you have already run.
   0.51 with the residual one on a field with a smooth predictor). Pass a
   residual variogram through `sac` if that is the field you want. Large cells
   are subsampled at `deff_max_n` (default 500), with the correlation scaled
-  back to the cell's own size. A `sac_range` whose fit was *rejected* carries no usable
-  correlation function, so both the supplied and the internally estimated path
-  fall back to `deff = 1` and say so rather than saturating the correlation at
-  every within-cell distance. One correlation function is fitted and applied to
-  every numeric column, response and predictors alike, because a variogram is a
-  property of the field rather than of a variable type.
+  back to the cell's own size. A `sac_range` whose fit was *rejected* carries no
+  usable correlation function, so both the supplied and the internally estimated
+  path fall back to `deff = 1` and say so rather than saturating the correlation
+  at every within-cell distance. One correlation function is fitted and applied
+  to every numeric column, response and predictors alike, because a variogram is
+  a property of the field rather than of a variable type.
 
 * `fit_bayesian_spatial_model()` supports intercept-only models
   (`predictor_vars = character(0)`): the response is explained by the intercept
@@ -2188,12 +2207,12 @@ whether an item affects an analysis you have already run.
 
 * `fit_bayesian_spatial_model()` checks the posterior length-scale against the
   smallest scale the chosen basis can resolve and logs a warning when more than
-  10% of the posterior mass falls below it — the adequacy diagnostic recommended by
-  Riutort-Mayol et al. (2023, <doi:10.1007/s11222-022-10167-2>), and what makes
-  the smaller default `gp_k` safe rather than merely cheaper. `$info` gains
-  `gp_c`, `gp_n_basis`, `gp_ell_min` and `gp_lengthscale_bounds`, and `print()`
-  on a `bayesian_fit` and `cv_bayes()`'s `fold_metrics` report the total basis
-  count alongside the per-dimension rank.
+  10% of the posterior mass falls below it — the adequacy diagnostic recommended
+  by Riutort-Mayol et al. (2023, <doi:10.1007/s11222-022-10167-2>), and what
+  makes the smaller default `gp_k` safe rather than merely cheaper. `$info`
+  gains `gp_c`, `gp_n_basis`, `gp_ell_min` and `gp_lengthscale_bounds`, and
+  `print()` on a `bayesian_fit` and `cv_bayes()`'s `fold_metrics` report the
+  total basis count alongside the per-dimension rank.
 
 * `cv_spatial()` raises a condition when folds fail, matching `cv_gwr()` and
   `cv_bayes()`; an all-failing `fit_fn` previously returned an all-`NA`

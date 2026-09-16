@@ -558,6 +558,26 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   ladder), \code{n_levels} and \code{values} (the criterion at every
 #'   level).
 #' @family aggregation
+#' @examples
+#' if (requireNamespace("gstat", quietly = TRUE)) {
+#'   library(sf)
+#'   set.seed(2)
+#'   n <- 400
+#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   D  <- as.matrix(dist(xy))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+#'
+#'   sel <- select_resolution(prof, criterion = "reliability")
+#'   sel                      # the level, and the flat region around it
+#'   sel$flat                 # every level within `tol` of the optimum
+#'   sel$at_ceiling           # TRUE would mean the ladder, not the criterion, chose
+#'
+#'   # A different criterion can prefer a different level while agreeing on the
+#'   # region: the flat region is the answer, the argmin a point in it.
+#'   select_resolution(prof, criterion = "cp")$flat
+#' }
 #' @export
 select_resolution <- function(profile,
                               criterion = c("cp", "reliability", "elbow", "moran_z"),

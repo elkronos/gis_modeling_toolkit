@@ -60,11 +60,12 @@ Redrawing boundaries is easy; knowing whether the result means anything is not.
 So the second half of the package exists to keep you honest: three model
 backends — geographically weighted regression (`GWmodel`), a Bayesian spatial
 Gaussian process (`brms`), and random forests (`ranger`) — behind one
-`spatial_fit` S3 class so they can be scored on identical folds; cross-validation
-that holds out whole regions sized to the data's own autocorrelation range; and
-an area-of-applicability estimate that marks where the resulting score actually
-applies. All of it is built on [`sf`](https://r-spatial.github.io/sf/), with CRS
-management that will not silently hand metres to a function expecting degrees.
+`spatial_fit` S3 class so they can be scored on identical folds;
+cross-validation that holds out whole regions sized to the data's own
+autocorrelation range; and an area-of-applicability estimate that marks where
+the resulting score actually applies. All of it is built on
+[`sf`](https://r-spatial.github.io/sf/), with CRS management that will not
+silently hand metres to a function expecting degrees.
 
 That validation half matters more than it sounds. Fit something flexible,
 cross-validate it, get an R² of 0.8, predict onto a grid — and the map is wrong
@@ -272,7 +273,8 @@ residual_morans_i(fit)
 #>   z = 36.335, p = 4.485e-289
 #>   null: randomisation moments, approximate for these residuals; n = 600, df = 599
 #>   residual kurtosis 3.056 (3 = Gaussian)
-#>   weights: 600 x 600 dgCMatrix, 8 neighbour(s) per row
+#>   weights: 600 x 600 dgCMatrix, 8 neighbour(s) per row; not retained,
+#>            keep_weights = TRUE to keep it
 ```
 
 A large positive residual Moran's I says the model has left spatial structure
@@ -400,9 +402,9 @@ Two consequences worth internalising:
 
 - **Project before you choose a number.** `make_folds(nc_pts_ll, k = 5,
   block_size = 2000)` succeeds on lon/lat input, and the 2000 is in metres of a
-  CRS you never chose. Call `ensure_projected()` yourself, look at `st_bbox()`, and
-  pick `block_size` against that. `folds$params$crs` records the CRS the folds
-  were actually built in, which is the one `block_size` was in.
+  CRS you never chose. Call `ensure_projected()` yourself, look at `st_bbox()`,
+  and pick `block_size` against that. `folds$params$crs` records the CRS the
+  folds were actually built in, which is the one `block_size` was in.
 - **Pin the CRS when it matters.** `ensure_projected(x, target_crs = 2264)`
   or `build_tessellation(..., crs = 2264)` forces a specific one, which is
   what you want when results have to line up with an existing analysis, a

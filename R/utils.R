@@ -649,3 +649,82 @@ setOldClass(c("spatialkit_rows", "sf"))
   class(y) <- setdiff(class(y), "spatialkit_rows")
   y
 }
+
+
+# ---------------------------------------------------------------------------
+# Diagnoses written to stderr by compiled code
+# ---------------------------------------------------------------------------
+
+# ranger's C++ layer writes its real diagnosis straight to stderr and then
+# throws a generic condition.  `ranger(mtry = 99)` prints
+#   Error: mtry can not be larger than number of variables in data.
+#          Ranger will EXIT now.
+# while the R error a caller can catch reads "User interrupt or internal
+# error." -- which names neither the argument nor the problem.  That line is
+# not an R condition, so suppressMessages(), withCallingHandlers() and
+# tryCatch() all miss it: it escapes every handler to the console, and into a
+# CI log where it reads as an error from a test that is passing, while the
+# error the package reports says nothing actionable and fold_status records
+# the same nothing.  Diverting the message stream for the duration of the call
+# gets both right: the useful text becomes the reported reason, and nothing is
+# printed behind the caller's back.
+#
+# Only one message sink may be active at a time, and testthat, knitr and
+# capture.output(type = "message") all use it, so the diversion happens only
+# when the stream is undiverted (sink number 2 is stderr itself).  Otherwise
+# the call runs exactly as it did before and the caller falls back to R's own
+# message.
+
+# Run `fun()`, returning its value or the error it threw, plus whatever it
+# wrote to stderr.  Anything written by a call that SUCCEEDED is passed
+# straight through to stderr afterwards, so ordinary progress and warning
+# output from compiled code is not swallowed.
+.call_capturing_stderr <- function(fun) {
+  err <- NULL
+  if (!identical(as.integer(sink.number(type = "message")), 2L)) {
+    val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
+    return(list(value = val, error = err, stderr = character(0)))
+  }
+  path <- tempfile("spatialkit-stderr-")
+  con  <- file(path, open = "wt")
+  open <- TRUE
+  # Restore the stream whatever happens, an interrupt included: leaving a
+  # session with its messages diverted to a deleted temp file would silence
+  # every warning from here on.
+  on.exit({
+    if (!identical(as.integer(sink.number(type = "message")), 2L))
+      sink(type = "message")
+    if (open) close(con)
+    unlink(path)
+  }, add = TRUE)
+  sink(con, type = "message")
+  val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
+  sink(type = "message")
+  close(con); open <- FALSE
+  txt <- tryCatch(readLines(path, warn = FALSE), error = function(e) character(0))
+  unlink(path)
+  if (is.null(err) && length(txt))
+    cat(txt, file = stderr(), sep = "\n", fill = TRUE)
+  list(value = val, error = err, stderr = txt)
+}
+
+# The reason to report for a failed call: what the compiled code wrote, when
+# R's own message is the placeholder it throws alongside it, and both when the
+# R message says something of its own.
+.stderr_reason <- function(e, stderr_lines) {
+  msg <- conditionMessage(e)
+  lines <- trimws(stderr_lines)
+  lines <- lines[nzchar(lines)]
+  if (!length(lines)) return(msg)
+  hit <- grep("^Error", lines)
+  diag <- lines[if (length(hit)) hit[1L] else length(lines)]
+  diag <- sub("^Error\\s*:?\\s*", "", diag)
+  diag <- sub("\\s*Ranger will EXIT now\\.?$", "", diag)
+  diag <- trimws(diag)
+  if (!nzchar(diag)) return(msg)
+  # "User interrupt or internal error." is what ranger throws for every
+  # failure its C++ layer diagnoses, so it carries no information of its own.
+  if (grepl("User interrupt or internal error", msg, fixed = TRUE)) diag
+  else if (identical(msg, diag)) msg
+  else paste0(msg, " (", diag, ")")
+}
