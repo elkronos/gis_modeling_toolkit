@@ -19,6 +19,7 @@ vignette: >
 # and R CMD build succeeds on a machine that has neither.
 has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+runs <- has_gstat && has_ggplot
 
 knitr::opts_chunk$set(
   echo      = TRUE,
@@ -26,11 +27,11 @@ knitr::opts_chunk$set(
   warning   = FALSE,
   fig.align = "center",
   out.width = "100%",
-  eval      = has_gstat && has_ggplot
+  eval      = runs
 )
 ```
 
-```{r missing-deps, echo=FALSE, eval=!(has_gstat && has_ggplot), results='asis'}
+```{r missing-deps, echo=FALSE, eval=!runs, results='asis'}
 cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
     "run.** Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
     "and rebuild.\n")
@@ -147,9 +148,9 @@ nug <- round(vg$nugget, 2); psl <- round(vg$psill, 2)
 piecewise-constant approximation keeps improving as cells shrink, the penalty is
 too small to stop it, and the minimum lands wherever `min_cell_n` stops the
 ladder. The support floor is then doing the choosing, and
-`select_resolution()` flags it. This fixture has a fitted nugget of `r nug`
-against a partial sill of `r psl`, which is why `cp` turns around inside the
-ladder here.
+`select_resolution()` flags it. This fixture has a fitted nugget of
+`r if (runs) nug else NA` against a partial sill of `r if (runs) psl else NA`,
+which is why `cp` turns around inside the ladder here.
 
 **`reliability` rises as cells get larger**, because bigger cells hold more
 points and average away more noise. Its optimum can therefore sit on the coarse
