@@ -141,6 +141,18 @@ not a figure from the paper.
 If you are reading a single page, read
 \code{vignette("spatialkit_nc_demo", package = "spatialkit")}: it runs the
 whole pipeline above on North Carolina data, with maps at each step.
+
+If you would rather run something, ten numbered scripts are installed with
+the package.  Each prints what it is doing and says what to look for in a
+figure before drawing it:
+\preformatted{
+dir <- system.file("scripts", package = "spatialkit")
+list.files(dir)
+source(file.path(dir, "03-folds.R"))    # one topic
+source(file.path(dir, "00-run-all.R"))  # all ten
+}
+Set \code{SPATIALKIT_TOUR_OUTPUT} to a folder to write the figures there
+instead of drawing them.
 }
 
 \seealso{

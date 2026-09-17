@@ -327,3 +327,19 @@ test_that("select_resolution refuses a criterion that is NA everywhere, and bad 
   expect_error(select_resolution(geo, "elbow", tol = -1), "non-negative")
   expect_error(select_resolution(data.frame(levels = 1:3), "elbow"), "must come from")
 })
+
+
+test_that("print() survives a subset that no longer carries the ladder", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 250), response_var = "z", n_levels = 8)))
+
+  expect_output(print(prof), "^Resolution profile: ")
+  # A row subset keeps the bounds attribute and still summarises.  A column
+  # subset loses the attribute and the `levels` column both, and used to abort
+  # on is.finite(NULL) in the ladder line.
+  expect_output(print(prof[1:3, ]), "^Resolution profile: 3 levels")
+  expect_error(utils::capture.output(print(prof[, 1:3])), NA)
+  expect_output(print(prof[, 1:3]), "subset")
+})
+

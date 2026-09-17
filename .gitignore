@@ -32,4 +32,7 @@ inst/doc
 CODE_REVIEW.md
 
 # Internal planning notes (not for distribution)
-dev/BACKLOG.md
+dev/BACKLOG*.md
+
+# Scratch output from assistant sessions (not for distribution)
+Claude outputs/

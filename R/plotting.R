@@ -7,16 +7,23 @@
 #' @param boundary Optional sf/sfc polygon outline layer.
 #' @param seeds_sf Optional sf/sfc point layer of seed locations.
 #' @param features_sf Optional sf/sfc layer of additional features.
-#' @param fill_col Column name in tessellation_sf to map to fill. NULL = no fill.
+#' @param fill_col Name of the COLUMN in \code{tessellation_sf} to map to fill;
+#'   \code{NULL} for no fill.  Note that \code{fill_col} and \code{label_col}
+#'   name columns, while \code{outline_col}, \code{features_col},
+#'   \code{seeds_col} and \code{boundary_col} are colours.
 #' @param palette Viridis palette name. Default "viridis".
 #' @param na_fill Fill for NA values. Default "grey90".
 #' @param tile_alpha Alpha for filled polygons. Default 0.9.
-#' @param outline_col,outline_size Tessellation outline aesthetics.
-#' @param features_col,features_size Feature overlay aesthetics.
-#' @param seeds_col,seeds_size Seed point aesthetics.
-#' @param boundary_col,boundary_size Boundary outline aesthetics.
+#' @param outline_col,outline_size Colour and line width of the tessellation
+#'   outline.
+#' @param features_col,features_size Colour and point size of the feature
+#'   overlay.
+#' @param seeds_col,seeds_size Colour and point size of the seed overlay.
+#' @param boundary_col,boundary_size Colour and line width of the boundary
+#'   outline.
 #' @param labels Logical; draw per-cell labels. Default FALSE.
-#' @param label_col Column for label text. Default "grid_id".
+#' @param label_col Name of the COLUMN holding the label text. Default
+#'   \code{"grid_id"}.
 #' @param label_size Label text size. Default 2.7.
 #' @param legend Logical; show fill legend. Default TRUE.
 #' @param legend_title Optional legend title.

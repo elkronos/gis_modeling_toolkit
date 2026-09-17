@@ -30,7 +30,12 @@ from the points themselves and use \code{boundary} only to clip the result when
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
-\item{approx_n_cells}{Approximate number of cells (grid methods). For hex
+\item{approx_n_cells}{Approximate number of cells.  Read by
+\code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
+one cell per input point and \code{"triangles"} one triangle per
+neighbouring triple, so neither has a count to set, and both warn that the
+argument was ignored.  For a Voronoi cell count, place the seeds with
+\code{\link{get_voronoi_seeds}()} and tessellate those.  For hex
 grids the target is adjusted for packing density; the actual count after
 clipping to an irregular boundary may differ noticeably.  Besides a
 number, this accepts what the level-selection step returned: the integer
@@ -41,7 +46,9 @@ vector of ranked candidates from \code{\link{determine_optimal_levels}()}
 is returned as \code{params$approx_n_cells} and where it came from as
 \code{params$approx_n_cells_from} (\code{NULL} for a plain number).}
 
-\item{cellsize}{Numeric cell size (grid methods).}
+\item{cellsize}{Numeric cell size, in the units of the working CRS.  Read by
+\code{method = "hex"} and \code{"square"} only; the other two methods warn
+that it was ignored.}
 
 \item{expand}{Buffer distance for the Voronoi envelope. Applied by
 \code{method = "voronoi"} only; the \code{"hex"}, \code{"square"} and \code{"triangles"}

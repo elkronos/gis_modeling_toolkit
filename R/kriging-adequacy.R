@@ -299,6 +299,20 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 
 #' @export
 print.kriging_adequacy <- function(x, ...) {
+  # `[` on a data frame keeps the class and drops the attributes, so a column
+  # or row subset of this object arrives here with no variogram, no `cv` and no
+  # point count, and the summary below cannot be built from it.  Subsetting a
+  # table is an ordinary thing to do, and knitr reaches print() through
+  # knit_print.data.frame() without being asked, so the subset prints as what it
+  # now is instead of failing on the first missing piece.
+  if (is.null(attr(x, "variogram")) || is.null(attr(x, "n_points"))) {
+    y <- x
+    class(y) <- setdiff(class(y), "kriging_adequacy")
+    cat("Block-kriging adequacy (subset; the fitted summary is not carried",
+        "by a subset)\n")
+    print(y)
+    return(invisible(x))
+  }
   df <- sf::st_drop_geometry(x)
   cv <- attr(x, "cv")
   cat(sprintf("Block-kriging adequacy over %d cells (%d points, nmax %d)\n",
@@ -324,7 +338,7 @@ print.kriging_adequacy <- function(x, ...) {
                 sum(abs(sh) > 1), length(sh), sum(abs(sh) > 2)))
   cat(sprintf("  empty cells: %d (kriged estimate and variance available for each)\n",
               sum(df$n == 0L)))
-  if (is.finite(cv$zscore_var))
+  if (is.finite(cv$zscore_var %||% NA_real_))
     cat(sprintf(paste0("  blocked CV (%s, %d folds, %d points): var of standardised ",
                        "error %.2f (1 = kriging variance correct; above 1 = ",
                        "understated), mean %.2f, RMSE %.3g\n"),

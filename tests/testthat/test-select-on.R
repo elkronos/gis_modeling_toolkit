@@ -15,6 +15,19 @@ so_field <- function(n = 400, seed = 2) {
 }
 so_fit <- function(tr, vars) lm_spatial_fit(tr, "z", vars)
 
+# This fixture's fitted autocorrelation range comes out around 500-600 CRS
+# units, wider than any block a 1000-unit extent can carry at k = 3, so
+# make_folds() warns about leakage on every call below.  The warning is correct
+# and cannot be designed away here; it is also not what these tests are about,
+# which is the select_on = "split" plumbing rather than the fold geometry.
+# Muffle that one warning by name and let every other warning through.
+so_quiet <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    if (grepl("block dimension", conditionMessage(w), fixed = TRUE))
+      invokeRestart("muffleWarning")
+  })
+}
+
 test_that(".spatial_half_split makes two disjoint, exhaustive, spatially blocked halves", {
   pts <- so_field(300)
   sp  <- spatialkit:::.spatial_half_split(pts, seed = 5, caller = "test")
@@ -80,8 +93,9 @@ test_that("resolution_profile(select_on = 'split') profiles the selection half",
 
 test_that("select_features_forward(select_on = 'split') scores the selected set on the hold-out half", {
   pts <- so_field(400)
-  sel <- select_features_forward(pts, "z", c("w", "noise"), so_fit, k = 3,
-                                 seed = 1, quiet = TRUE, select_on = "split")
+  sel <- so_quiet(select_features_forward(pts, "z", c("w", "noise"), so_fit,
+                                          k = 3, seed = 1, quiet = TRUE,
+                                          select_on = "split"))
   expect_identical(sel$params$select_on, "split")
   sp <- sel$split
   expect_s3_class(sp, "spatialkit_split")
@@ -98,13 +112,14 @@ test_that("select_features_forward(select_on = 'split') scores the selected set 
   expect_equal(sel$score_holdout, met$RMSE)
   # The sweep itself ran on the selection half: same result as calling it on
   # that half directly.
-  direct <- select_features_forward(pts[sp$selection, ], "z", c("w", "noise"), so_fit,
-                                    k = 3, seed = 1, quiet = TRUE)
+  direct <- so_quiet(select_features_forward(pts[sp$selection, ], "z",
+                                             c("w", "noise"), so_fit, k = 3,
+                                             seed = 1, quiet = TRUE))
   expect_identical(sel$selected, direct$selected)
   expect_equal(sel$score, direct$score)
   # Default: no split, no hold-out score.
-  all_sel <- select_features_forward(pts, "z", c("w", "noise"), so_fit, k = 3,
-                                     seed = 1, quiet = TRUE)
+  all_sel <- so_quiet(select_features_forward(pts, "z", c("w", "noise"), so_fit,
+                                              k = 3, seed = 1, quiet = TRUE))
   expect_null(all_sel$split)
   expect_true(is.na(all_sel$score_holdout))
   expect_identical(all_sel$params$select_on, "all")
@@ -126,8 +141,9 @@ test_that("a hold-out score that cannot be computed is NA with a warning, not an
                      predict.lmsurf_fit(object, newdata = newdata, ...)
                    })
   expect_warning(
-    sel <- select_features_forward(pts, "z", c("w", "noise"), bad_fit, k = 3,
-                                   seed = 1, quiet = TRUE, select_on = "split"),
+    sel <- so_quiet(select_features_forward(pts, "z", c("w", "noise"), bad_fit,
+                                            k = 3, seed = 1, quiet = TRUE,
+                                            select_on = "split")),
     "hold-out score could not be computed")
   expect_true(is.na(sel$score_holdout))
   expect_true(length(sel$selected) >= 1L)

@@ -484,6 +484,26 @@
 
 ## Bug fixes
 
+* `build_tessellation()` warns when `approx_n_cells` or `cellsize` is supplied
+  with `method = "voronoi"` or `"triangles"`.  Both arguments size the hex and
+  square lattices and nothing else --- Voronoi grows one cell per input point
+  and Delaunay one triangle per neighbouring triple --- and both used to be
+  dropped in silence, with the returned `params` recording neither.  So
+  `build_tessellation(pts, method = "voronoi", approx_n_cells = 25)` returned
+  one cell per observation: the degenerate nearest-neighbour case, where every
+  cell holds a single point, there is no within-cell variation and every
+  standard error is `NA`.  Nothing anywhere recorded that 25 had been asked
+  for, so the run could not be audited afterwards either.  The warning names
+  the argument and points at `get_voronoi_seeds()`, which is where a Voronoi
+  cell count is actually set.  It fires under `quiet = TRUE`, which gates this
+  function's `message()`s and is documented not to silence R warnings.
+* `vignette("resolution")` handed the chosen cell count to
+  `build_tessellation(method = "voronoi", approx_n_cells = )` in its closing
+  section --- the call above, which does nothing.  The chunk was
+  `eval = FALSE`, so it never ran and never showed the result.  It now seeds
+  with `get_voronoi_seeds()` and tessellates the seeds, shows the lattice route
+  beside it, and both chunks execute.
+
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++
   restarts (Arthur and Vassilvitskii 2007; Fränti and Sieranoja 2019;
   Steinley 2003) instead of `stats::kmeans(nstart = 5)`.  The WSS curve is
@@ -597,8 +617,45 @@
   unchanged, and when the stream is already diverted (under testthat, knitr or
   `capture.output(type = "message")`, where only one sink is permitted) the
   call runs exactly as before.
+* `print()` on a subset of a `kriging_adequacy()` or `resolution_profile()`
+  result no longer errors.  `[` on a data frame keeps the class and drops the
+  attributes, so `ka[1:3, ]` or `prof[, 1:3]` arrived at the print method with
+  no variogram, no bounds and no cross-validation summary, and the first
+  `is.finite()` on one of them aborted with "argument is of length zero".  The
+  path is easy to reach without meaning to: knitr calls `print()` through
+  `knit_print.data.frame()`, so a column subset of either result inside an R
+  Markdown document killed the render.  Both methods now print the subset as
+  the plain table it has become, and `print()` on a `kriging_adequacy()` result
+  whose cross-validation was not computed reports that instead of failing.
 
 ## Documentation
+
+* Ten numbered scripts are installed with the package, in
+  `system.file("scripts", package = "spatialkit")`.  `00-run-all.R` runs them
+  in order; each of `01-` to `10-` is self-contained and covers one topic:
+  tessellations, resolution, fold schemes, block sizing, fitting and
+  diagnosing, model comparison, prediction surfaces and the area of
+  applicability, feature selection, GWR and the Bayesian GP.  They run on a
+  simulated field with known structure, print what they are doing, and state
+  what to look for in a figure before drawing it.  No script asserts a number
+  it did not compute, so a run that finishes is one whose claims held on the
+  machine that ran it.  `SPATIALKIT_TOUR_OUTPUT` writes the figures to a folder
+  instead of the device; `SPATIALKIT_TOUR_PAUSE = "no"` skips the per-figure
+  pause.  Scripts 09 and 10 skip themselves cleanly when GWmodel or brms is
+  absent.
+* Four vignettes join `spatialkit_nc_demo`: `getting-started` (installing, what
+  the coordinates are in, the six-call pipeline), `resolution` (the ladder, the
+  four criteria and why they disagree), `spatial-cross-validation` (the five
+  fold schemes, block sizing, and reading a CV result down to the last row) and
+  `diagnostics` (residual autocorrelation, aggregation standard errors, kriging
+  adequacy, area of applicability, and two ways to leak).  Each is executed at
+  build time and gates itself on the optional packages it needs.
+* The README is generated from `README.Rmd`, so its figures and every number in
+  it are computed when it is built rather than pasted in.  It is about half its
+  previous length: the material that had accumulated in it moved to the
+  vignettes above, and what remains is what the package is for, a quick start
+  that shows a real cross-validation gap, the troubleshooting list, and pointers
+  to the rest.
 
 * `select_features_forward()` now says what `$score` is: the cross-validated
   metric of the winning set at the final step, which is the selection
