@@ -17,8 +17,13 @@ vignette: >
 # gstat estimates the autocorrelation range that sizes the blocks, and ggplot2
 # draws the folds and the sweep. Both are Suggests, so the vignette is gated on
 # them and R CMD build succeeds without either.
+# `eval` below gates CHUNKS only: knitr does not apply it to inline `r ...`
+# code, which runs regardless. Any inline reference to something a chunk
+# defines has to guard itself -- `r if (runs) x else NA` -- or the vignette
+# fails to build on a machine without these packages instead of skipping.
 has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+runs <- has_gstat && has_ggplot
 
 knitr::opts_chunk$set(
   echo      = TRUE,
@@ -26,11 +31,11 @@ knitr::opts_chunk$set(
   warning   = FALSE,
   fig.align = "center",
   out.width = "100%",
-  eval      = has_gstat && has_ggplot
+  eval      = runs
 )
 ```
 
-```{r missing-deps, echo=FALSE, eval=!(has_gstat && has_ggplot), results='asis'}
+```{r missing-deps, echo=FALSE, eval=!runs, results='asis'}
 cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
     "run.** Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
     "and rebuild.\n")
