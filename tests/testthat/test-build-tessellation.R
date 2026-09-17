@@ -31,8 +31,11 @@ test_that("every method returns the documented shape and indexes every point", {
   bnd <- .bt_boundary()
 
   for (m in .bt_all_methods) {
-    res <- suppressMessages(build_tessellation(pts, boundary = bnd, method = m,
-                                               approx_n_cells = 9, quiet = TRUE))
+    # approx_n_cells is a grid-only argument and warns on the other two.
+    res <- suppressMessages(build_tessellation(
+      pts, boundary = bnd, method = m,
+      approx_n_cells = if (m %in% c("hex", "square")) 9 else NULL,
+      quiet = TRUE))
 
     expect_named(res, c("cells", "index", "boundary", "method", "params"),
                  info = m)
@@ -228,9 +231,10 @@ test_that("params echoes the arguments the tessellation was built with", {
   # methods, so a caller could not tell what had actually been asked for.
   for (m in .bt_all_methods) {
     if (m == "triangles") skip_if_not_installed("geometry")
-    res <- suppressMessages(build_tessellation(pts, boundary = bnd, method = m,
-                                               approx_n_cells = 9, expand = 25,
-                                               quiet = TRUE))
+    res <- suppressMessages(build_tessellation(
+      pts, boundary = bnd, method = m,
+      approx_n_cells = if (m %in% c("hex", "square")) 9 else NULL,
+      expand = 25, quiet = TRUE))
     expect_equal(res$params$expand, 25, info = m)
     expect_equal(res$params$clip, TRUE, info = m)
     expect_equal(res$params$keep_duplicates, FALSE, info = m)
@@ -371,4 +375,77 @@ test_that("create_grid_polygons still honours a package-derived cell size", {
     expect_equal(sum(as.numeric(sf::st_area(g))), side^2, tolerance = 1e-8,
                  info = paste("target_cells =", tc))
   }
+})
+
+
+# ---------------------------------------------------------------------------
+# Grid-sizing arguments on a method that has no grid
+# ---------------------------------------------------------------------------
+# `approx_n_cells` and `cellsize` used to be dropped in silence by the voronoi
+# and triangle branches, and `params` did not record them either, so a call
+# asking for 25 cells could return one per observation with no trace of the
+# request anywhere.
+
+test_that("build_tessellation() warns when a grid-sizing argument is ignored", {
+  pts <- .bt_points()
+  bnd <- .bt_boundary()
+
+  expect_warning(
+    v <- suppressMessages(build_tessellation(pts, boundary = bnd,
+                                             method = "voronoi",
+                                             approx_n_cells = 9, quiet = TRUE)),
+    "ignores the grid-sizing argument `approx_n_cells`")
+  # The call still returns a valid tessellation -- one cell per input point.
+  expect_equal(nrow(v$cells), nrow(pts))
+
+  expect_warning(
+    suppressMessages(build_tessellation(pts, boundary = bnd,
+                                        method = "voronoi",
+                                        cellsize = 5, quiet = TRUE)),
+    "ignores the grid-sizing argument `cellsize`")
+
+  # Both at once are named in one warning, not two.
+  w <- testthat::capture_warnings(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "voronoi",
+                                        approx_n_cells = 9, cellsize = 5,
+                                        quiet = TRUE)))
+  expect_length(w, 1L)
+  expect_match(w, "arguments `approx_n_cells` and `cellsize`")
+
+  # The advice differs by method.
+  expect_warning(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "voronoi",
+                                        approx_n_cells = 9, quiet = TRUE)),
+    "get_voronoi_seeds\\(\\)")
+  skip_if_not_installed("geometry")
+  expect_warning(
+    suppressMessages(build_tessellation(pts, boundary = bnd,
+                                        method = "triangles",
+                                        approx_n_cells = 9, quiet = TRUE)),
+    "one triangle per neighbouring triple")
+})
+
+test_that("build_tessellation() stays silent when the argument is used or absent", {
+  pts <- .bt_points()
+  bnd <- .bt_boundary()
+
+  for (m in c("hex", "square"))
+    expect_no_warning(
+      suppressMessages(build_tessellation(pts, boundary = bnd, method = m,
+                                          approx_n_cells = 9, quiet = TRUE)))
+
+  expect_no_warning(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "voronoi",
+                                        quiet = TRUE)))
+})
+
+test_that("the warning fires under quiet = TRUE", {
+  # `quiet` gates this function's message()s; it is documented not to silence
+  # R warnings, and a silently ignored argument is a warning, not progress.
+  pts <- .bt_points()
+  bnd <- .bt_boundary()
+  expect_warning(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "voronoi",
+                                        approx_n_cells = 9, quiet = TRUE)),
+    "ignores the grid-sizing")
 })

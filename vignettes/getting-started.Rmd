@@ -1,0 +1,225 @@
+---
+title: "Getting started"
+author: "Justin Chase"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+vignette: >
+  %\VignetteIndexEntry{Getting started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+# Everything here runs on the hard dependencies and sf's own nc.shp, with one
+# exception: the map at the end needs ggplot2, which is a Suggests.
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center",
+  out.width = "100%"
+)
+```
+
+## What this package is for
+
+You have observations at points and you want values for regions. The usual move
+is to aggregate onto whatever boundaries exist, and administrative boundaries
+were drawn for other purposes: a census tract follows a road, a postcode follows
+a delivery route. Neither follows the field you measured.
+
+This package builds the regions from the distribution of the data, aggregates
+onto them with standard errors that account for spatial dependence, and scores
+models on folds that hold out whole regions. The last part matters because a
+random fold on autocorrelated data returns a number that looks good and means
+little.
+
+## Installing
+
+```{r install, eval=FALSE}
+# install.packages("remotes")
+remotes::install_github("elkronos/gis_modeling_toolkit")
+
+# with the vignettes (needs pandoc)
+remotes::install_github("elkronos/gis_modeling_toolkit", build_vignettes = TRUE)
+```
+
+`sf`, `dplyr`, `logger` and `digest` install with it. Everything else is
+optional and is needed only for the feature that uses it:
+
+```{r suggests-table, echo=FALSE, results='asis'}
+cat(
+"| install | for |\n",
+"|---|---|\n",
+"| `gstat` | variogram fitting: `estimate_sac_range()`, design effects, kriging checks |\n",
+"| `ranger` | `fit_rf_model()` and `cv_rf()` |\n",
+"| `sp`, `GWmodel` | `fit_gwr_model()` and `cv_gwr()` |\n",
+"| `brms` (plus a Stan toolchain) | `fit_bayesian_spatial_model()` and `cv_bayes()` |\n",
+"| `geometry` | Delaunay triangle tessellations |\n",
+"| `ggplot2`, `patchwork` | every `plot_*()` function and every `plot()` method |\n",
+"| `FNN`, `Matrix` | sparse k-nearest-neighbour weights for Moran's I on large layers |\n",
+sep = "")
+```
+
+A missing package produces a message naming it, so nothing fails obscurely.
+
+## Getting your data in
+
+Your data arrives through one of two doors, and both end in the same place: an
+`sf` object of POINTs in a projected CRS.
+
+### A spatial file
+
+```{r door-1}
+library(sf)
+library(spatialkit)
+
+nc <- st_read(system.file("shape/nc.shp", package = "sf"), quiet = TRUE)
+c(features = nrow(nc), geometry = as.character(unique(st_geometry_type(nc))))
+```
+
+Those are polygons, and every model here takes points, so reduce them.
+`coerce_to_points()` maps a polygon to a point guaranteed to fall inside it,
+using `st_point_on_surface()`, a line to its midpoint, and a MULTIPOINT to its
+centroid. Attribute columns come along.
+
+```{r door-1b}
+counties <- ensure_projected(nc[, c("BIR74", "SID74")])
+obs      <- coerce_to_points(counties)
+obs$rate <- 1000 * obs$SID74 / pmax(obs$BIR74, 1)
+
+c(points = nrow(obs), geometry = as.character(unique(st_geometry_type(obs))))
+```
+
+Hex and square grids need a study area. Dissolving the source polygons is the
+usual way to get one, and `st_read()` a separate outline if you have it.
+
+```{r boundary}
+boundary <- st_as_sf(st_union(counties))
+```
+
+### A table with coordinate columns
+
+```{r door-2}
+tab <- data.frame(
+  lon    = st_coordinates(st_transform(obs, 4326))[, 1],
+  lat    = st_coordinates(st_transform(obs, 4326))[, 2],
+  births = obs$BIR74,
+  sids   = obs$SID74
+)
+head(tab, 2)
+
+pts_ll <- st_as_sf(tab, coords = c("lon", "lat"), crs = 4326)
+pts    <- ensure_projected(pts_ll)
+```
+
+`crs =` is required and cannot be guessed. Lon/lat from a GPS, a web API or a
+geocoder is almost always EPSG:4326. If the file came from a municipal or
+national dataset, its metadata names the CRS, and it is frequently something
+else.
+
+## What the numbers are in
+
+Every distance in this package is in the units of the CRS the analysis runs in.
+A block size, a GWR bandwidth, a variogram range and a Gaussian process
+length-scale are all distances. Hand any of them a number in degrees when the
+data are in metres and the result is quietly wrong by a factor of about 100,000.
+
+`ensure_projected()` is what prevents that. Watch what it did to the counties
+above:
+
+```{r crs}
+st_crs(counties)$input
+st_crs(counties)$units_gdal
+```
+
+`nc.shp` arrives in NAD27, a geographic CRS in degrees.
+`ensure_projected()` chose a local Albers equal-area projection and logged why:
+across this extent the UTM zone distorts distances by 0.20 percent at worst and
+the Albers projection by 0.01 percent. Pass `target_crs` to override the choice.
+
+A layer with no CRS at all is decided by a documented heuristic. If the bounding
+box fits the lon/lat envelope and the coordinates look like degrees, the layer
+is read as EPSG:4326 and projected, with a warning saying so. Set the CRS
+yourself if your data are planar and happen to fall in that envelope.
+
+```{r crs-missing}
+raw <- st_as_sf(data.frame(lon = c(-81.5, -81.1), lat = c(36.4, 36.5)),
+                coords = c("lon", "lat"))
+st_crs(ensure_projected(raw))$input
+```
+
+Two layers that must line up go through `harmonize_crs()`, which returns both in
+a common CRS:
+
+```{r harmonize}
+pair <- harmonize_crs(obs[1:5, ], st_transform(boundary, 4326))
+st_crs(pair$a) == st_crs(pair$b)
+```
+
+## The pipeline, end to end
+
+Six calls, each covered in depth by one of the other vignettes.
+
+```{r pipeline}
+# 1. How many cells can these data support?
+lv <- determine_optimal_levels(obs, max_levels = 40)
+
+# 2. Draw them.
+tess <- build_tessellation(obs, boundary = boundary, method = "hex",
+                           approx_n_cells = 25, quiet = TRUE)
+
+# 3. Put every observation in a cell.
+asg <- assign_features_to_polygons(obs, tess$cells)
+
+# 4. Aggregate, with standard errors corrected for within-cell correlation.
+cells <- summarize_by_cell(asg, "rate", cells_sf = tess$cells, deff = "kish")
+
+# 5. Build folds that hold out whole regions.
+folds <- make_folds(obs, k = 4, method = "block_kfold", seed = 1)
+
+c(candidate_levels = lv[1], cells = nrow(tess$cells),
+  folds = folds$k, blocks = folds$params$blocks_used)
+```
+
+```{r summary-cols}
+names(cells)
+head(st_drop_geometry(cells)[, c("poly_id", "n", "resp_mean_rate",
+                                 "..se_resp_rate")], 4)
+```
+
+Every aggregate comes with a count and a standard error. The `..sd_` and `..se_`
+columns are prefixed so they cannot collide with a column of your own.
+
+```{r map, eval=has_ggplot, fig.height=4.5}
+plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate")
+```
+
+```{r no-ggplot, echo=FALSE, eval=!has_ggplot, results='asis'}
+cat("*(The map needs ggplot2, which is not installed here.)*\n")
+```
+
+Cross-validating a model over those folds is `cv_spatial()` with your own
+learner, or `cv_rf()`, `cv_gwr()` and `cv_bayes()` for the three backends the
+package ships.
+
+## Where to go next
+
+```{r next-table, echo=FALSE, results='asis'}
+cat(
+"| vignette | covers |\n",
+"|---|---|\n",
+"| `vignette(\"resolution\")` | choosing the cell count, and the criteria that disagree about it |\n",
+"| `vignette(\"spatial-cross-validation\")` | fold schemes, block sizing, and reading a CV result |\n",
+"| `vignette(\"diagnostics\")` | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability |\n",
+"| `vignette(\"spatialkit_nc_demo\")` | the whole pipeline end to end, with maps |\n",
+sep = "")
+```
+
+`?spatialkit` walks the pipeline and names the function for each step.

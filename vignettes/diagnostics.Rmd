@@ -1,0 +1,283 @@
+---
+title: "Diagnostics"
+author: "Justin Chase"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+vignette: >
+  %\VignetteIndexEntry{Diagnostics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+# gstat fits the variograms behind the design effect and the kriging check, and
+# ggplot2 draws the area of applicability. Both are Suggests, so the vignette is
+# gated on them and R CMD build succeeds without either.
+has_gstat  <- requireNamespace("gstat",   quietly = TRUE)
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center",
+  out.width = "100%",
+  eval      = has_gstat && has_ggplot
+)
+```
+
+```{r missing-deps, echo=FALSE, eval=!(has_gstat && has_ggplot), results='asis'}
+cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
+    "run.** Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
+    "and rebuild.\n")
+```
+
+## Four questions a score does not answer
+
+A cross-validated RMSE tells you how far the predictions fell from the held-out
+values. It is silent on four things that decide whether the analysis holds up:
+whether the model left spatial structure in its residuals, whether the standard
+errors on aggregated values are the width they claim, whether a cell mean is the
+best estimate of that cell available, and where on the map the score applies at
+all.
+
+## A fixture and a model that is wrong in a known way
+
+The response is driven by one real predictor and by a spatial field the model
+never sees. `b` is noise. A linear model on `a` and `b` therefore leaves the
+field in its residuals, which is what the first diagnostic should detect.
+
+```{r fixture}
+library(sf)
+library(spatialkit)
+
+set.seed(11)
+n  <- 350
+xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+D  <- as.matrix(dist(xy))
+field <- as.numeric(t(chol(exp(-D / 70) + diag(1e-8, n))) %*% rnorm(n))
+xy$a  <- rnorm(n)
+xy$b  <- rnorm(n)
+xy$z  <- 1.5 * xy$a + field + rnorm(n, sd = 0.3)
+pts   <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+```
+
+```{r learner}
+lm_fit <- function(train_sf, response_var = "z", predictor_vars = c("a", "b")) {
+  d   <- st_drop_geometry(train_sf)
+  fml <- as.formula(paste(response_var, "~",
+                          paste(predictor_vars, collapse = " + ")))
+  new_spatial_fit(
+    subclass       = "lmsurf_fit",
+    engine         = lm(fml, data = d),
+    formula        = fml,
+    response_var   = response_var,
+    predictor_vars = predictor_vars,
+    data_sf        = train_sf
+  )
+}
+predict.lmsurf_fit <- function(object, newdata = NULL, ...) {
+  if (is.null(newdata)) return(fitted(object$engine))
+  as.numeric(predict(object$engine, newdata = st_drop_geometry(newdata)))
+}
+residuals.lmsurf_fit <- function(object, ...) residuals(object$engine)
+fitted.lmsurf_fit    <- function(object, ...) fitted(object$engine)
+for (g in c("predict", "residuals", "fitted"))
+  registerS3method(g, "lmsurf_fit", get(paste0(g, ".lmsurf_fit")))
+
+fit <- lm_fit(pts)
+```
+
+## 1. Structure left in the residuals
+
+```{r moran}
+mi <- residual_morans_i(fit)
+mi
+```
+
+A large positive Moran's I says nearby residuals resemble each other, so the
+model is missing something that varies smoothly across the map. Here that is the
+simulated field, by construction.
+
+Three parts of the print earn attention. The **null** says which moments the
+p-value came from: `residual` moments condition on the design matrix and are
+exact for OLS residuals, `randomisation` moments treat the residuals as
+exchangeable and are an approximation for any model. `null = "auto"` chooses per
+fit, so read what it chose. The **design rank** is the rank of the rebuilt model
+matrix, which is where the residual degrees of freedom come from. The
+**kurtosis** says how far the residuals sit from the Gaussian case the moments
+assume, with 3 as the reference.
+
+The weight matrix is \(n \times n\) and is described instead of returned. Ask
+for it when you want to reuse the same neighbours:
+
+```{r keep-weights}
+mi_w <- residual_morans_i(fit, keep_weights = TRUE)
+dim(mi_w$weights)
+mi$weights_summary[c("n", "storage", "neighbours", "kept")]
+```
+
+`weights_summary` is present either way, so a `NULL` in `weights` is always
+explained.
+
+## 2. Standard errors on aggregated values
+
+Aggregate the points into cells and the naive standard error of each cell mean
+is \(s/\sqrt{n}\), which assumes the points in a cell are independent. On an
+autocorrelated field they are not, and the effective sample size is smaller than
+the count.
+
+```{r cells}
+hull <- clip_target_for(pts, expand = 0.02, quiet = TRUE)
+tess <- build_tessellation(pts, boundary = hull, method = "square",
+                           approx_n_cells = 24, quiet = TRUE)
+asg  <- assign_features_to_polygons(pts, tess$cells)
+
+c(cells = nrow(tess$cells), points = nrow(asg),
+  median_per_cell = median(table(asg$poly_id)))
+```
+
+`summarize_by_cell()` takes a design effect, and three settings are worth
+comparing on the same cells.
+
+```{r deff}
+sac  <- estimate_sac_range(pts, "z")
+iid  <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = 1)
+kish <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = "kish")
+vgm  <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = "variogram",
+                          sac = sac)
+
+data.frame(n         = iid$n,
+           iid       = round(iid$..se_resp_z, 3),
+           kish      = round(kish$..se_resp_z, 3),
+           variogram = round(vgm$..se_resp_z, 3))[1:5, ]
+```
+
+```{r deff-inflation, echo=FALSE, results='asis'}
+ik <- median(kish$..se_resp_z / iid$..se_resp_z, na.rm = TRUE)
+iv <- median(vgm$..se_resp_z  / iid$..se_resp_z, na.rm = TRUE)
+cat(sprintf(paste("The median cell's standard error is %.2f times wider under",
+                  "`kish` and %.2f times wider under `variogram` than the",
+                  "independent-sampling one. A confidence interval built on the",
+                  "naive number is about half the width it should be on this",
+                  "field.\n"), ik, iv))
+```
+
+`deff = "kish"` estimates an intra-class correlation from the within-cell and
+between-cell variance and applies Kish's factor. `deff = "variogram"` takes the
+correlation from the fitted variogram model, so it uses the spatial structure
+rather than the cell labels. The choice is recorded:
+
+```{r deff-attrs}
+str(attr(vgm, "deff_applied"))
+attr(kish, "icc")$resp
+```
+
+A cell whose design effect reaches its point count carries no information about
+the variance at all, and its standard error is `NA`. That is a statement about
+the cell, so the fix is bigger cells or more points, not a different setting.
+
+## 3. Is the cell mean the best estimate of the cell?
+
+The plain mean weights every point in a cell equally and ignores everything
+outside it. Block kriging uses the fitted variogram, borrows from neighbouring
+cells, and reports a variance derived from the spatial model.
+`kriging_adequacy()` runs both and compares them.
+
+```{r kriging}
+ka <- kriging_adequacy(asg, "z", tess$cells, k = 4, seed = 1)
+ka
+```
+
+Three readings. `kr_var` against the naive `se^2` says whether the naive
+standard error was optimistic. `kr_shift` is how far the kriged estimate moved
+from the plain mean, in units of the naive standard error, and a shift beyond
+one or two of those says the mean and the spatial model disagree about that
+cell. The blocked cross-validation at the end standardises each held-out error
+by its kriging variance: a variance of 1 means the kriging variance is right,
+and above 1 means it is understated.
+
+```{r kriging-cols}
+head(st_drop_geometry(ka)[, c("n", "mean", "se", "kr_pred", "kr_var", "kr_shift")], 4)
+```
+
+An empty cell still gets a kriged estimate and variance, which is the practical
+reason to run this: a tessellation fine enough to be useful usually has cells
+with no observation in them.
+
+## 4. Where the score applies
+
+A cross-validated number describes the region the training data covers. For
+predictions made anywhere else, it describes nothing.
+`area_of_applicability()` marks the difference, following Meyer and Pebesma
+(2021).
+
+```{r aoa}
+grid <- create_grid_polygons(hull, target_cells = 200, type = "square")
+gp   <- suppressWarnings(st_centroid(grid))
+set.seed(2)
+gp$a <- rnorm(nrow(gp))
+gp$b <- rnorm(nrow(gp), mean = 3)     # shifted well outside the training range
+
+aoa <- area_of_applicability(gp, model = fit)
+aoa
+```
+
+```{r aoa-plot, fig.height=4.5}
+plot(aoa)
+```
+
+Shifting one predictor three standard deviations moves most of the grid outside
+the domain the model was trained on. The dissimilarity index `DI` is on
+`aoa$aoa`, alongside the logical `AOA`, and `threshold` is the cutoff derived
+from the training data.
+
+One trap worth stating plainly. `AOA` is `NA` wherever a predictor was missing
+or non-finite, `!NA` is `NA`, and R skips `NA` positions in a subscripted
+assignment. Test for `TRUE`:
+
+```{r aoa-na}
+inside <- !is.na(aoa$aoa$AOA) & aoa$aoa$AOA
+c(inside = sum(inside), outside_or_unknown = sum(!inside))
+```
+
+## 5. Two ways to leak
+
+**Coordinates as predictors.** A model given `x` and `y` can reproduce the
+training surface by memorising location, and random folds will not detect it.
+`fit_rf_model(include_coords = TRUE)` warns for this reason. Score any such
+model with blocked folds, and read `vignette("spatial-cross-validation")` for
+what the blocking has to be wide enough to do.
+
+**Selection outside the fold.** Choosing predictors on the whole data set and
+then cross-validating the chosen set gives the selection a look at every test
+row. `select_features_forward()` does the selection inside the resampling, and
+it takes the fold scheme as an argument for the same reason the outer loop does:
+
+```{r selection}
+# select_features_forward() calls fit_fn(train_sf, vars), so the learner above
+# needs an adapter that puts `vars` in the predictor slot.
+sel_fn <- function(train_sf, vars) lm_fit(train_sf, "z", vars)
+
+sel <- select_features_forward(pts, "z", c("a", "b"), fit_fn = sel_fn,
+                               k = 4, method = "block_kfold", seed = 1)
+sel$selected
+```
+
+Its inner folds default to the scheme you pass. Passing `random_kfold` there
+produces a warning, because a leaky inner loop can select a variable for being
+spatially close to the response and an honest outer loop will then report a
+respectable number for a dishonestly chosen feature set.
+
+## Next
+
+`vignette("spatial-cross-validation")` covers fold schemes and block sizing.
+`vignette("resolution")` covers choosing the cell count these diagnostics are
+computed over. `?residual_morans_i` documents the two nulls and when each is
+exact, `?summarize_by_cell` derives the design-effect correction and reports its
+measured coverage, and `?area_of_applicability` covers the weighting and the
+threshold.

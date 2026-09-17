@@ -127,3 +127,29 @@ test_that("supplied folds are honoured and inputs are validated", {
   expect_equal(sum(sf::st_drop_geometry(ka2)$n), nrow(asg) - 5L)
   expect_equal(attr(ka2, "n_points"), nrow(asg) - 5L)
 })
+
+
+test_that("print() survives a subset that no longer carries the fitted summary", {
+  skip_if_not_installed("gstat")
+  pts   <- ka_field(n = 200)
+  cells <- create_grid_polygons(ka_bnd, target_cells = 12, type = "square")
+  asg   <- assign_features_to_polygons(pts, cells)
+  ka    <- kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), k = 3, seed = 1)
+
+  expect_output(print(ka), "^Block-kriging adequacy over")
+  # `[` on a data frame keeps the class and drops the attributes, and knitr
+  # reaches print() through knit_print.data.frame() without being asked, so a
+  # subset in a knitted document used to abort it with "argument is of length
+  # zero" from is.finite(NULL).
+  for (sub in list(ka[1:3, ],
+                   sf::st_drop_geometry(ka)[, 1:4],
+                   sf::st_drop_geometry(ka)[, c("n", "mean")])) {
+    expect_error(utils::capture.output(print(sub)), NA)
+  }
+  expect_output(print(sf::st_drop_geometry(ka)[, 1:4]), "subset")
+  # A result whose cross-validation was not computed prints everything else.
+  bare <- ka
+  attr(bare, "cv") <- list()
+  expect_output(print(bare), "blocked CV: not computed")
+})
+

@@ -45,7 +45,10 @@ plot_tessellation_map(
 
 \item{features_sf}{Optional sf/sfc layer of additional features.}
 
-\item{fill_col}{Column name in tessellation_sf to map to fill. NULL = no fill.}
+\item{fill_col}{Name of the COLUMN in \code{tessellation_sf} to map to fill;
+\code{NULL} for no fill.  Note that \code{fill_col} and \code{label_col}
+name columns, while \code{outline_col}, \code{features_col},
+\code{seeds_col} and \code{boundary_col} are colours.}
 
 \item{palette}{Viridis palette name. Default "viridis".}
 
@@ -53,17 +56,21 @@ plot_tessellation_map(
 
 \item{tile_alpha}{Alpha for filled polygons. Default 0.9.}
 
-\item{outline_col, outline_size}{Tessellation outline aesthetics.}
+\item{outline_col, outline_size}{Colour and line width of the tessellation
+outline.}
 
-\item{features_col, features_size}{Feature overlay aesthetics.}
+\item{features_col, features_size}{Colour and point size of the feature
+overlay.}
 
-\item{seeds_col, seeds_size}{Seed point aesthetics.}
+\item{seeds_col, seeds_size}{Colour and point size of the seed overlay.}
 
-\item{boundary_col, boundary_size}{Boundary outline aesthetics.}
+\item{boundary_col, boundary_size}{Colour and line width of the boundary
+outline.}
 
 \item{labels}{Logical; draw per-cell labels. Default FALSE.}
 
-\item{label_col}{Column for label text. Default "grid_id".}
+\item{label_col}{Name of the COLUMN holding the label text. Default
+\code{"grid_id"}.}
 
 \item{label_size}{Label text size. Default 2.7.}
 

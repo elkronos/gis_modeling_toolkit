@@ -13,3 +13,4 @@
 # Rplots.pdf into the working directory, and R CMD build will happily ship it.
 ^Rplots\.pdf$
 \.DS_Store$
+^Claude outputs$

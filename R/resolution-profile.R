@@ -501,6 +501,17 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 #' @export
 print.resolution_profile <- function(x, digits = 3L, ...) {
   b <- attr(x, "bounds")
+  # A subset keeps the class and loses the attributes, and `x[, 1:3]` also
+  # loses the `levels` column the ladder line is built from.  Print the table
+  # as what it now is instead of erroring on the missing pieces; knitr calls
+  # print() on a data frame without being asked, so this path is reachable
+  # from a document as well as from the console.
+  if (is.null(b) || !("levels" %in% names(x))) {
+    cat("Resolution profile (subset; the ladder summary is not carried by a",
+        "subset)\n\n")
+    print(as.data.frame(unclass(x)), row.names = FALSE)
+    return(invisible(x))
+  }
   cat("Resolution profile:", nrow(x), "levels on", b$n, "points\n")
   cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d at min_cell_n = %d)%s\n",
               min(x$levels), max(x$levels),

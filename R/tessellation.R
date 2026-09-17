@@ -622,7 +622,12 @@ create_grid_polygons <- function(
 #'   from the points themselves and use `boundary` only to clip the result when
 #'   `clip = TRUE`.
 #' @param method One of "voronoi", "triangles", "hex", "square".
-#' @param approx_n_cells Approximate number of cells (grid methods). For hex
+#' @param approx_n_cells Approximate number of cells.  Read by
+#'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
+#'   one cell per input point and \code{"triangles"} one triangle per
+#'   neighbouring triple, so neither has a count to set, and both warn that the
+#'   argument was ignored.  For a Voronoi cell count, place the seeds with
+#'   \code{\link{get_voronoi_seeds}()} and tessellate those.  For hex
 #'   grids the target is adjusted for packing density; the actual count after
 #'   clipping to an irregular boundary may differ noticeably.  Besides a
 #'   number, this accepts what the level-selection step returned: the integer
@@ -632,7 +637,9 @@ create_grid_polygons <- function(
 #'   \code{select_resolution()} at its default criterion).  The count used
 #'   is returned as \code{params$approx_n_cells} and where it came from as
 #'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
-#' @param cellsize Numeric cell size (grid methods).
+#' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
+#'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
+#'   that it was ignored.
 #' @param expand Buffer distance for the Voronoi envelope. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
 #'   methods ignore it (the value you passed is still echoed back in
@@ -688,6 +695,34 @@ build_tessellation <- function(
   n_cells <- .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation")
   approx_n_cells      <- if (is.null(n_cells)) NULL else n_cells$n
   approx_n_cells_from <- if (is.null(n_cells)) NULL else n_cells$from
+
+  # `approx_n_cells` and `cellsize` size the hex and square lattices and
+  # nothing else: Voronoi grows one cell per input point and Delaunay one
+  # triangle per neighbouring triple, so neither has a count to set.  Both used
+  # to be dropped in silence, and the returned `params` did not record them
+  # either, so `build_tessellation(pts, method = "voronoi", approx_n_cells =
+  # 25)` returned one cell per observation -- the degenerate case -- and left
+  # no trace anywhere that 25 had ever been asked for.  Warn rather than stop:
+  # the call still produces a valid tessellation, just not the one intended.
+  if (!method %in% c("hex", "square")) {
+    ignored <- c(if (!is.null(approx_n_cells)) "approx_n_cells",
+                 if (!is.null(cellsize)) "cellsize")
+    if (length(ignored) > 0L)
+      .warn_and_log(
+        paste0("build_tessellation(method = \"%s\") ignores the grid-sizing ",
+               "%s %s, and does not record the request in `params`. %s"),
+        method,
+        if (length(ignored) > 1L) "arguments" else "argument",
+        paste(sprintf("`%s`", ignored), collapse = " and "),
+        if (identical(method, "voronoi"))
+          paste("Voronoi grows one cell per input point: to control the cell",
+                "count, place seeds with get_voronoi_seeds() and tessellate",
+                "those, or use method = \"hex\" or \"square\".")
+        else
+          paste("Delaunay produces one triangle per neighbouring triple, so",
+                "the count follows from the points; use method = \"hex\" or",
+                "\"square\" to set it."))
+  }
 
   # --- CRS handling ---
   if (!is.null(crs)) {
