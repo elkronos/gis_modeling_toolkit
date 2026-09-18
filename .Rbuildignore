@@ -5,6 +5,8 @@
 ^\.github$
 ^dev$
 ^docs$
+^_pkgdown\.yml$
+^pkgdown$
 ^man/figures$
 ^cran-comments\.md$
 ^\.Rhistory$

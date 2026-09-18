@@ -27,7 +27,7 @@ Description: Constructs analysis regions from the distribution of the data
     applicability of Meyer and Pebesma (2021) <doi:10.1111/2041-210X.13650>
     to flag where a fitted model extrapolates beyond its training data.
 License: MIT + file LICENSE
-URL: https://github.com/elkronos/gis_modeling_toolkit
+URL: https://elkronos.github.io/gis_modeling_toolkit/, https://github.com/elkronos/gis_modeling_toolkit
 BugReports: https://github.com/elkronos/gis_modeling_toolkit/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
