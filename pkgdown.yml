@@ -1,0 +1,13 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  diagnostics: diagnostics.html
+  getting-started: getting-started.html
+  resolution: resolution.html
+  spatial-cross-validation: spatial-cross-validation.html
+  spatialkit_nc_demo: spatialkit_nc_demo.html
+last_built: 2026-09-18T04:51Z
+urls:
+  reference: https://elkronos.github.io/gis_modeling_toolkit/reference
+  article: https://elkronos.github.io/gis_modeling_toolkit/articles
