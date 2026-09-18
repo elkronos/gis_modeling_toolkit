@@ -232,6 +232,19 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
 #' @export
 print.block_size_sweep <- function(x, ...) {
   metric <- attr(x, "metric"); r <- attr(x, "sac_range")
+  # `[` keeps the class.  A column subset such as `x[, 1:3]` loses the
+  # attributes this header is built from and the columns the table below
+  # selects, so it used to fail on `is.finite(NULL)`.  Print what is left as a
+  # plain table instead; knitr calls print() on a data frame unasked, so this
+  # path is reachable from a document.  (A row subset keeps everything and
+  # prints normally.)
+  needed <- c("block_size", "method", "blocks_used", "k", "n_folds_succeeded",
+              "value", "fold_min", "fold_max")
+  if (is.null(metric) || !all(needed %in% names(x))) {
+    cat("Block-size sweep (subset; the run summary is not carried by a subset)\n\n")
+    print(as.data.frame(unclass(x)), row.names = FALSE)
+    return(invisible(x))
+  }
   cat(sprintf("Cross-validation %s against block size (%d fits, k = %d, sizes in %s)\n",
               metric, attr(x, "n_fits"), attr(x, "k"), attr(x, "crs") %||% "CRS units"))
   if (is.finite(r)) cat(sprintf("  estimated autocorrelation range: %.1f\n", r))

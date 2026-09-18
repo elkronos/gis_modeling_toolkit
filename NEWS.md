@@ -522,6 +522,25 @@
 
 ## Bug fixes
 
+* `select_features_forward()` now says when `fit_fn` is ignoring the
+  variables it is handed.  The learner it takes is a function of
+  `(train_sf, predictor_vars)`, but the one `cv_spatial()` takes is a function
+  of `train_sf` alone, and a learner written for that --- `function(train_sf,
+  ...)` --- swallows the second argument and fits the same model every time.
+  Nothing errored, because the training layer still carries every column: each
+  candidate scored exactly what the intercept-only model scored, no candidate
+  improved on it, and the result was an empty `selected` and an `NA` `score`
+  with no word about why.  Two different predictor sets do not produce the
+  same cross-validated metric to the last digit, so that pattern is now
+  recognised at the first step and reported as a warning naming the fix.  The
+  result is still returned.
+* `create_grid_polygons()` warns when both `cellsize` and `target_cells` are
+  supplied.  It already did for `cellsize` and `n`, and the documentation says
+  to supply exactly one of the three, but `target_cells` was dropped in
+  silence when `cellsize` was present.  Through `build_tessellation()` that
+  meant `method = "hex", approx_n_cells = 25, cellsize = 10` returned
+  however many cells a 10-unit lattice holds and said nothing about the 25.
+  `cellsize` still wins; the override is now logged like its sibling.
 * `build_tessellation()` warns when `approx_n_cells` or `cellsize` is supplied
   with `method = "voronoi"` or `"triangles"`.  Both arguments size the hex and
   square lattices and nothing else --- Voronoi grows one cell per input point

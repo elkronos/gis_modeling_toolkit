@@ -461,6 +461,17 @@ create_grid_polygons <- function(
                 paste(n, collapse = " x "), n[1L], n[2L])
       n <- NULL
     }
+    # Same rule for `target_cells`, which reaches here as build_tessellation()'s
+    # `approx_n_cells`.  Without this, build_tessellation(method = "hex",
+    # approx_n_cells = 25, cellsize = 10) returned however many cells a
+    # 10-unit lattice holds and said nothing about the 25.
+    if (!is.null(target_cells)) {
+      .log_warn(paste0("create_grid_polygons(): both `cellsize` and ",
+                       "`target_cells` were supplied; `cellsize` wins and ",
+                       "`target_cells` (%s) is ignored. Pass one or the other."),
+                format(target_cells))
+      target_cells <- NULL
+    }
   } else if (!is.null(n)) {
     cellsize <- c(w / n[1], h / n[2])
   } else {
@@ -639,7 +650,9 @@ create_grid_polygons <- function(
 #'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
 #' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
 #'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
-#'   that it was ignored.
+#'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
+#'   are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
+#'   a logged warning; supply one or the other.
 #' @param expand Buffer distance for the Voronoi envelope. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
 #'   methods ignore it (the value you passed is still echoed back in

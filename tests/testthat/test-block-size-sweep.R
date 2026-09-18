@@ -118,3 +118,20 @@ test_that("the estimated range comes from the response detrended on the predicto
                                              predictor_vars = "a", seed = 123L))
   expect_equal(r, as.numeric(ref))
 })
+
+
+test_that("print() survives a column subset that no longer carries the run summary", {
+  # `[` keeps the class.  A column subset loses the attributes the header is
+  # built from and the columns the table selects, and used to fail on
+  # is.finite(NULL).  knitr prints data frames unasked, so a document that
+  # showed `sw[, 1:3]` failed to render.
+  pts <- sweep_points()
+  sw  <- suppressWarnings(suppressMessages(
+    cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, n_sizes = 3, k = 3,
+                        seed = 1, quiet = TRUE)))
+  expect_output(print(sw), "^Cross-validation RMSE")
+  expect_output(print(sw[1:2, ]), "^Cross-validation RMSE")
+  expect_error(utils::capture.output(print(sw[, 1:3])), NA)
+  expect_output(print(sw[, 1:3]), "subset")
+  expect_error(utils::capture.output(print(sw[0, ])), NA)
+})

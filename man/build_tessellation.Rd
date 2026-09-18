@@ -48,7 +48,9 @@ is returned as \code{params$approx_n_cells} and where it came from as
 
 \item{cellsize}{Numeric cell size, in the units of the working CRS.  Read by
 \code{method = "hex"} and \code{"square"} only; the other two methods warn
-that it was ignored.}
+that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
+are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
+a logged warning; supply one or the other.}
 
 \item{expand}{Buffer distance for the Voronoi envelope. Applied by
 \code{method = "voronoi"} only; the \code{"hex"}, \code{"square"} and \code{"triangles"}

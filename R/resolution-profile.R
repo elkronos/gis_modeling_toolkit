@@ -501,11 +501,17 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 #' @export
 print.resolution_profile <- function(x, digits = 3L, ...) {
   b <- attr(x, "bounds")
-  # A subset keeps the class and loses the attributes, and `x[, 1:3]` also
-  # loses the `levels` column the ladder line is built from.  Print the table
-  # as what it now is instead of erroring on the missing pieces; knitr calls
-  # print() on a data frame without being asked, so this path is reachable
-  # from a document as well as from the console.
+  # `[` keeps the class here.  A column subset such as `x[, 1:3]` loses the
+  # attributes and can lose the `levels` column the ladder line is built from;
+  # a row subset keeps both, and prints honestly below (its ladder line is the
+  # rows it has, its floor and ceiling are the run's).  The one row subset that
+  # cannot print is the empty one: min() and max() of no levels are Inf and
+  # -Inf, and `%d` refuses those.  knitr calls print() on a data frame without
+  # being asked, so every one of these paths is reachable from a document.
+  if (nrow(x) == 0L) {
+    cat("Resolution profile: 0 levels (an empty subset)\n")
+    return(invisible(x))
+  }
   if (is.null(b) || !("levels" %in% names(x))) {
     cat("Resolution profile (subset; the ladder summary is not carried by a",
         "subset)\n\n")
@@ -599,6 +605,21 @@ select_resolution <- function(profile,
   criterion <- match.arg(criterion)
   if (!is.numeric(tol) || length(tol) != 1L || !is.finite(tol) || tol < 0)
     stop("select_resolution(): `tol` must be a single non-negative number.", call. = FALSE)
+  # `[` keeps the class, so a subset arrives here looking like a profile.  An
+  # empty one or a column subset missing the criterion used to fall through to
+  # the "NA at every level" error below, which sends the user off to add a
+  # response or fix a variogram when the real problem is the object.
+  if (nrow(profile) == 0L)
+    stop("select_resolution(): `profile` has no levels; it is an empty subset ",
+         "of a resolution profile.", call. = FALSE)
+  if (!criterion %in% names(profile) || !"levels" %in% names(profile))
+    stop(sprintf(paste0("select_resolution(): `profile` has no `%s` column%s; ",
+                        "it is a column subset of a resolution profile. Pass ",
+                        "the profile resolution_profile() returned."),
+                 if (criterion %in% names(profile)) "levels" else criterion,
+                 if (!criterion %in% names(profile) && !"levels" %in% names(profile))
+                   " (nor `levels`)" else ""),
+         call. = FALSE)
   v <- as.numeric(profile[[criterion]])
   if (criterion == "moran_z") v <- abs(v)
   ok <- is.finite(v)

@@ -351,6 +351,31 @@ test_that("create_grid_polygons ignores `n` when the caller fixes `cellsize`", {
   expect_false(log_has(quiet_n, "both `cellsize` and `n`"))
 })
 
+test_that("create_grid_polygons ignores `target_cells` when the caller fixes `cellsize`, loudly", {
+  # The sibling case above was warned about; this one was not.  Through
+  # build_tessellation() that meant `approx_n_cells = 25, cellsize = 10`
+  # returned however many cells a 10-unit lattice holds and said nothing
+  # about the 25 -- the same silent-override trap, one argument over.
+  bnd <- .bt_boundary()
+  lines <- capture_spatialkit_log(
+    g <- create_grid_polygons(bnd, cellsize = 25, target_cells = 9,
+                              type = "square"))
+  expect_true(log_has(lines, "both `cellsize` and `target_cells` were supplied"))
+  expect_true(log_has(lines, "`cellsize` wins and `target_cells` \\(9\\) is ignored"))
+  # cellsize decided the grid: 100 / 25 = 4 x 4, not ~9.
+  expect_equal(nrow(g), 16L)
+
+  # And the same through build_tessellation(), where the user spells it
+  # approx_n_cells.
+  pts <- .bt_points()
+  lines2 <- capture_spatialkit_log(
+    t2 <- suppressMessages(build_tessellation(pts, boundary = bnd, method = "square",
+                                              approx_n_cells = 9, cellsize = 25,
+                                              quiet = TRUE)))
+  expect_true(log_has(lines2, "`target_cells` \\(9\\) is ignored"))
+  expect_equal(nrow(t2$cells), 16L)
+})
+
 test_that("create_grid_polygons still honours a package-derived cell size", {
   # The `n` argument is forwarded to st_make_grid() when the PACKAGE derived
   # cellsize from it, because ceiling(w / (w / n)) floating-point-rounds one

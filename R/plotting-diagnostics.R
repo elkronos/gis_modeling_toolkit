@@ -499,6 +499,12 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   if (!inherits(x, "resolution_profile"))
     stop("plot.resolution_profile(): `x` must come from resolution_profile().",
          call. = FALSE)
+  # `[` keeps the class; an empty row subset used to reach data.frame() below
+  # and fail with "arguments imply differing number of rows".
+  if (nrow(x) == 0L || !"levels" %in% names(x))
+    stop("plot.resolution_profile(): `x` has no levels to draw; it is an ",
+         if (nrow(x) == 0L) "empty" else "incomplete",
+         " subset of a resolution profile.", call. = FALSE)
   selectable <- c("cp", "reliability", "elbow", "moran_z")
   allowed <- c(selectable, "wss")
   if (is.null(criteria)) {
