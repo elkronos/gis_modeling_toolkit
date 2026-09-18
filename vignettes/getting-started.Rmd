@@ -165,7 +165,7 @@ st_crs(pair$a) == st_crs(pair$b)
 
 ## The pipeline, end to end
 
-Six calls, each covered in depth by one of the other vignettes.
+Five calls, each covered in depth by one of the other vignettes.
 
 ```{r pipeline}
 # 1. How many cells can these data support?

@@ -482,27 +482,61 @@
   (`gstat::krige()` and `gstat::krige.cv()`); its model families are the
   ones the package interprets elsewhere, and any other is refused by name.
 
+* `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
+  metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
+  `compare_models()`, and the `overall` and `fold_metrics` of `cv_gwr()`,
+  `cv_bayes()`, `cv_spatial()`, `cv_rf()` and `compare_models_cv()` --- gains
+  two trailing integer columns, `n_MAPE` and `n_SMAPE`: the rows each
+  percentage error actually used once those where its denominator is zero
+  were dropped (`y == 0` for MAPE; `|y| + |yhat| == 0` for SMAPE).  They equal
+  `n` (`n_pred` in the CV frames) when nothing was dropped, and are `0` in an
+  empty frame.  The values themselves are unchanged: a MAPE over 58 of 120
+  rows is the same number 2.0.0 reported, but it now arrives labelled, where
+  before nothing in the frame recorded that it was a subset average.
+  `print(summary(fit))` appends "(over k of n rows)" to its SMAPE line when
+  the two differ.  The columns sit after `Adj_R2` so code addressing the seven
+  metric columns by position is unaffected; code pinning the exact column set
+  needs the two names added.
+
+* `residual_morans_i()` gains `keep_weights` and a `weights_summary`.  The
+  result now describes its weight matrix instead of carrying it: `weights` is
+  `NULL` unless `keep_weights = TRUE`, and `weights_summary` reports `n`,
+  `storage` (the matrix class), `neighbours` (the smallest and largest number
+  of neighbours any row has, `NA` for a dense matrix, where counting them
+  would allocate a second one), `kept` and `desc`, the line `print()` shows.
+  Carrying it is expensive enough to be worth the option: the matrix is n by
+  n, and at n = 500 it is 50.3 KB of a 53.5 KB object in its sparse form,
+  112.7 KB at n = 120 when the dense fallback is taken (going sparse needs
+  both **FNN** and **Matrix**, so a no-Suggests install always falls back),
+  and 191 MB at the n = 5000 that fallback is capped at --- against the 3.2 KB
+  everything else occupies.  Scoring a list of fits held one matrix per fit.
+
+* `estimate_sac_range()` gains `keep_directional_fits`.  The directional sweep
+  behind the anisotropy check has always reported its per-azimuth ranges and
+  the ratio, and `print()` has always shown them; the four fitted variogram
+  objects behind those numbers can now be kept as well, under
+  `keep_directional_fits = TRUE`.  They are off by default because they
+  dominate the result when present: 42.2 KB of a 58.8 KB object at n = 400,
+  against 16.6 KB without them.  `make_folds(auto_range = TRUE)` calls this on
+  every build, so the default matters.
+
 ## Bug fixes
 
 * `build_tessellation()` warns when `approx_n_cells` or `cellsize` is supplied
   with `method = "voronoi"` or `"triangles"`.  Both arguments size the hex and
   square lattices and nothing else --- Voronoi grows one cell per input point
   and Delaunay one triangle per neighbouring triple --- and both used to be
-  dropped in silence, with the returned `params` recording neither.  So
-  `build_tessellation(pts, method = "voronoi", approx_n_cells = 25)` returned
-  one cell per observation: the degenerate nearest-neighbour case, where every
-  cell holds a single point, there is no within-cell variation and every
-  standard error is `NA`.  Nothing anywhere recorded that 25 had been asked
-  for, so the run could not be audited afterwards either.  The warning names
+  dropped in silence.  So `build_tessellation(pts, method = "voronoi",
+  approx_n_cells = 25)` returned one cell per observation: the degenerate
+  nearest-neighbour case, where every cell holds a single point, there is no
+  within-cell variation and every standard error is `NA`.  The warning names
   the argument and points at `get_voronoi_seeds()`, which is where a Voronoi
-  cell count is actually set.  It fires under `quiet = TRUE`, which gates this
-  function's `message()`s and is documented not to silence R warnings.
-* `vignette("resolution")` handed the chosen cell count to
-  `build_tessellation(method = "voronoi", approx_n_cells = )` in its closing
-  section --- the call above, which does nothing.  The chunk was
-  `eval = FALSE`, so it never ran and never showed the result.  It now seeds
-  with `get_voronoi_seeds()` and tessellates the seeds, shows the lattice route
-  beside it, and both chunks execute.
+  cell count is actually set.  Under `method = "voronoi"` it adds that
+  `params` does not record the request either, so a saved result carries no
+  sign of it; that branch returns `create_voronoi_polygons()`'s own list,
+  which has no slot for the argument, whereas the triangles branch does echo
+  `approx_n_cells` back.  The warning fires under `quiet = TRUE`, which gates
+  this function's `message()`s and is documented not to silence R warnings.
 
 * `determine_optimal_levels()` fits each k as the best of 25 k-means++
   restarts (Arthur and Vassilvitskii 2007; Fränti and Sieranoja 2019;
@@ -520,21 +554,7 @@
   model-aware criterion the function also now warns *before* the sweep when
   `max_levels` leaves no k above the nine-cell floor, rather than
   fitting every k first and falling back afterwards.
-* `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
-  metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
-  `compare_models()`, and the `overall` and `fold_metrics` of `cv_gwr()`,
-  `cv_bayes()`, `cv_spatial()`, `cv_rf()` and `compare_models_cv()` --- gains
-  two trailing integer columns, `n_MAPE` and `n_SMAPE`: the rows each
-  percentage error actually used once those where its denominator is zero
-  were dropped (`y == 0` for MAPE; `|y| + |yhat| == 0` for SMAPE).  They equal
-  `n` (`n_pred` in the CV frames) when nothing was dropped, and are `0` in an
-  empty frame.  The values are unchanged: a MAPE over 58 of 120 rows is the
-  same number as before, but it now arrives labelled, where before nothing in
-  the frame recorded that it was a subset average.  `print(summary(fit))`
-  appends "(over k of n rows)" to its SMAPE line when the two differ.  The
-  columns sit after `Adj_R2` so code addressing the seven metric columns by
-  position is unaffected; code pinning the exact column set needs the two
-  names added.
+
 * `make_folds(method = "block_kfold")` can now raise its "block dimension <
   autocorrelation range" warning.  The comparison was always there, but the
   range it compared against was estimated only under `auto_range = TRUE`,
@@ -548,59 +568,7 @@
   The estimate's own log lines stay off the console, and the check is
   skipped (with an INFO log line saying so) when `gstat` is not installed or
   there are fewer than 30 points.
-* The records `prep_model_data()` and `assign_features_to_polygons()` leave on
-  a layer no longer outlive the rows they describe.  `[` on an `sf` object
-  copies attributes through unchanged, so a subset carried its parent's
-  numbers: after `prep_model_data()` dropped 3 of 40 rows,
-  `attr(pre[1:20, ], "dropped")$n` was still 3, with `which` naming rows the
-  subset does not contain, and a 300-row `assign_features_to_polygons()`
-  result whose tie-break had decided 68 features, subset to its first 10 rows,
-  still reported all 68 of them against row positions running to 292.  A fit
-  built on such a subset with `.already_prepped = TRUE` --- which is what
-  every per-fold fit inside `cv_gwr()`, `cv_bayes()` and
-  `cv_rf()` is --- reported `info$n_dropped = 3` for 20 rows nothing had been
-  dropped from.  A layer carrying a record now has class `spatialkit_rows`
-  ahead of `sf`, and its `[` method hands back a plain layer with the record
-  removed, so a record is read from the layer it was computed for or not at
-  all.  Each record also carries `n_rows`, the row count it was built against,
-  and everything that reads one refuses a record whose stamp no longer matches
-  the layer in front of it --- which covers the paths that reach `[` by
-  another route, such as a layer that has been through `sf::st_transform()`.
-  Fits and `cv_*()` results built from an unmodified prepared layer report the
-  same `n_dropped` as before; a fit handed a subset now reports `0`.
-* `residual_morans_i()` no longer carries the weight matrix by default.  The
-  matrix is n by n, and it dominated the result: 50.3 KB of a 53.5 KB object
-  at n = 500 in its sparse form, 112.7 KB at n = 120 when the dense fallback
-  is taken (it needs both **FNN** and **Matrix** to go sparse, so a
-  no-Suggests install always does), and 191 MB at the n = 5000 that fallback
-  is capped at --- against the 3.2 KB everything else occupies.  Scoring a
-  list of fits held one matrix per fit.  `weights` is now `NULL` unless
-  `keep_weights = TRUE`, and a new `weights_summary` component says what the
-  matrix was either way: `n`, `storage` (its class), `neighbours` (the
-  smallest and largest number of neighbours any row has, `NA` for a dense
-  matrix, where counting them would allocate a second one), `kept` and
-  `desc`, the line `print()` shows.  Every other component is unchanged, and
-  `print()` now says the matrix was not retained rather than leaving a `NULL`
-  unexplained.  Code that reads `mi$weights` needs `keep_weights = TRUE`.
-* `estimate_sac_range()` no longer carries the four directional variograms by
-  default.  The directional sweep fits one variogram per azimuth, and
-  attaching all four as `directional_fits` made up 42.1 KB of a 59.3 KB
-  estimate at n = 400 --- and, because `make_folds(auto_range = TRUE)` parks
-  the estimate in `params`, took a folds object from 52.4 KB to 94.6 KB.
-  Nothing in the package reads them: `plot()` draws the effective variogram
-  from the `variogram` attribute, and what the sweep found is in
-  `directional`, `directional_fitted`, `directional_status` and
-  `anisotropy`, all of which are attached either way.  `directional_fits` is
-  now `NULL` unless `keep_directional_fits = TRUE`; the estimate itself and
-  every other attribute are unchanged.
-* `n_unknown_ids` counts rows, not mentions of them.  A row the folds name but
-  the data does not have appears in every fold --- once as a test row, once in
-  each other fold's training set --- and the count summed those per-fold
-  hits, so five absent rows read as 15, 20 or 50 at k = 3, 4 or 10.  That is
-  not a number that can be compared with `n_dropped` or with the size of the
-  data, which is what it is there for.  It is now the number of distinct row
-  IDs the folds name that the data does not have, and it no longer moves with
-  `k`.  The accompanying log line says the same thing.
+
 * `fit_rf_model()` reports what ranger actually objected to.  ranger diagnoses
   a bad argument in its C++ layer, writes the diagnosis straight to stderr and
   then throws "User interrupt or internal error." --- so `mtry = 99` on a
@@ -617,16 +585,6 @@
   unchanged, and when the stream is already diverted (under testthat, knitr or
   `capture.output(type = "message")`, where only one sink is permitted) the
   call runs exactly as before.
-* `print()` on a subset of a `kriging_adequacy()` or `resolution_profile()`
-  result no longer errors.  `[` on a data frame keeps the class and drops the
-  attributes, so `ka[1:3, ]` or `prof[, 1:3]` arrived at the print method with
-  no variogram, no bounds and no cross-validation summary, and the first
-  `is.finite()` on one of them aborted with "argument is of length zero".  The
-  path is easy to reach without meaning to: knitr calls `print()` through
-  `knit_print.data.frame()`, so a column subset of either result inside an R
-  Markdown document killed the render.  Both methods now print the subset as
-  the plain table it has become, and `print()` on a `kriging_adequacy()` result
-  whose cross-validation was not computed reports that instead of failing.
 
 ## Documentation
 

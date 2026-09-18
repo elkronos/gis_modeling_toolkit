@@ -87,8 +87,11 @@ cat(sprintf("        the folds reproduce that at %.0f units\n",
 cat("  Hand it the SAME points you will predict on, or it matches the wrong task.\n")
 
 step("03.5", "Read k off the folds, do not assume it")
-# When fewer than k blocks contain data, k is quietly reduced to match, and the
-# CV you write up as 5-fold is not one. This already happened in 03.2.
+# When fewer than k blocks contain data, k is reduced to match, and the CV you
+# write up as 5-fold is not one. This already happened in 03.2. It arrives as a
+# log line and nothing else: make_folds() raises no R condition for it, so
+# tryCatch(warning =) will not catch it and suppressWarnings() will not hide
+# it. Reading `$k` off the folds is the only reliable check.
 cat(sprintf("  03.1 asked for k = 5 and got k = %d\n", f_block$k))
 cat(sprintf("  03.2 asked for k = 5 and got k = %d\n", f_auto$k))
 

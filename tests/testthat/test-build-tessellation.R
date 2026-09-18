@@ -419,10 +419,24 @@ test_that("build_tessellation() warns when a grid-sizing argument is ignored", {
     "get_voronoi_seeds\\(\\)")
   skip_if_not_installed("geometry")
   expect_warning(
-    suppressMessages(build_tessellation(pts, boundary = bnd,
-                                        method = "triangles",
-                                        approx_n_cells = 9, quiet = TRUE)),
+    tri <- suppressMessages(build_tessellation(pts, boundary = bnd,
+                                               method = "triangles",
+                                               approx_n_cells = 9, quiet = TRUE)),
     "one triangle per neighbouring triple")
+
+  # The "`params` does not record it" clause belongs to voronoi alone: that
+  # branch returns create_voronoi_polygons()'s list, which has no slot for the
+  # argument, while the triangles branch echoes `approx_n_cells` back.  An
+  # earlier form of this warning said it for both and was false for triangles.
+  expect_equal(tri$params$approx_n_cells, 9)
+  w_tri <- testthat::capture_warnings(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "triangles",
+                                        approx_n_cells = 9, quiet = TRUE)))
+  expect_false(any(grepl("params", w_tri, fixed = TRUE)))
+  w_vor <- testthat::capture_warnings(
+    suppressMessages(build_tessellation(pts, boundary = bnd, method = "voronoi",
+                                        approx_n_cells = 9, quiet = TRUE)))
+  expect_match(w_vor, "`params` does not record the request")
 })
 
 test_that("build_tessellation() stays silent when the argument is used or absent", {

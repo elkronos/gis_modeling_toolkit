@@ -30,7 +30,8 @@ cat("  A search cannot tell that apart from a real effect, and neither can you.\
 
 # select_features_forward() calls fit_fn(train_sf, predictor_vars) -- TWO
 # arguments. A learner written for cv_spatial() takes one, so it needs this
-# wrapper. Getting this wrong returns an empty selection with no error.
+# wrapper. Getting it wrong is silent: a one-argument fit_fn returns an empty
+# `selected` and a `score` of NA, with no error and no warning.
 lm_on <- function(train_sf, vars) {
   d <- sf::st_drop_geometry(train_sf)
   f <- stats::as.formula(paste("z ~",
@@ -93,8 +94,11 @@ if (length(decoys)) {
 }
 
 step("08.4", "Tighten it with tol")
-# `tol` is the minimum relative improvement a candidate must deliver to be
-# admitted. It is the cheapest guard there is against the gaps in 08.2.
+# `tol` is the smallest improvement a candidate must deliver to be admitted,
+# in the metric's own units -- RMSE here, so units of `z`, not a percentage.
+# That is what makes it usable: set it to the smallest improvement that would
+# change a decision you actually make. It is the cheapest guard there is
+# against the hairline gaps in 08.2.
 for (tl in c(0, 0.01, 0.05, 0.2)) {
   s <- select_features_forward(pts, "z", cands, fit_fn = lm_on, k = 5,
                                method = "block_kfold", block_size = BS,

@@ -56,9 +56,11 @@ Everything is self-contained — the boundary comes from the `nc.shp` demo
 shapefile bundled with `sf`, so no external files are needed.
 
 Optional backends are checked at the top and every section that needs one is
-guarded, so this document renders with whatever you happen to have installed:
+guarded, so this document renders with whatever you happen to have installed.
+This table always runs, even when the gate below it is shut -- it is what says
+which backend is missing when the code stops producing output:
 
-```{r backend-report, echo=FALSE}
+```{r backend-report, echo=FALSE, eval=TRUE}
 data.frame(
   package   = c("ggplot2", "geometry", "ranger", "gstat", "GWmodel + sp"),
   available = c(has_ggplot, has_geom, has_ranger, has_gstat, has_gwmodel),
@@ -579,6 +581,22 @@ The choropleths show how each tessellation aggregates the response. Section 5
 shows the thing that matters most: on the same data and the same fitted model,
 the fold scheme moves the reported score substantially, and only the blocked
 number describes the task you actually have.
+
+### Where to go next
+
+This page is the wide view. Each step has a vignette that stops and argues
+about it:
+
+| for | read |
+|:---|:---|
+| getting your own data in, and what the coordinates are in | `vignette("getting-started")` |
+| how many cells, and the four criteria that disagree | `vignette("resolution")` |
+| the five fold schemes, and sizing a block by measurement | `vignette("spatial-cross-validation")` |
+| residual autocorrelation, aggregation standard errors, and two ways to leak | `vignette("diagnostics")` |
+
+Ten numbered scripts in `system.file("scripts", package = "spatialkit")` run the
+same ground at the console, printing what to look for in each figure before
+drawing it.
 
 ```{r session-info, echo=FALSE, eval=TRUE}
 sessionInfo()

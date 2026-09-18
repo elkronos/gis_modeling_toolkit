@@ -315,7 +315,7 @@ in them is computed on the spot.
 
 | vignette                               | covers                                                                                                               |
 |----------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the six-call pipeline                             |
+| `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the five-call pipeline                            |
 | `vignette("resolution")`               | choosing a cell count, the four criteria, and why they disagree                                                      |
 | `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                    |
 | `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
@@ -344,7 +344,7 @@ source(file.path(dir, "00-run-all.R"))  # all ten, seven minutes or so
 |-----------------------|----------------------------------------------------------------------------|
 | `01-tessellations.R`  | Voronoi, hex, square and Delaunay cells, and what seeding changes          |
 | `02-resolution.R`     | the range, the ladder, four criteria that disagree, and the leak           |
-| `03-folds.R`          | random against blocked folds, and the other three schemes                  |
+| `03-folds.R`          | random against blocked folds, plus buffered leave-one-out and NNDM         |
 | `04-block-size.R`     | sweeping the block size, and the two shapes the curve takes                |
 | `05-fit-diagnose.R`   | wrapping your own model, residual autocorrelation, cell means              |
 | `06-cv-compare.R`     | comparing models fold by fold on one set of folds                          |
@@ -429,9 +429,11 @@ produces a plausible-looking score computed from fewer folds than you
 asked for.
 
 **`estimate_sac_range()` returned `NA`.** The range was not identified,
-so nothing is reported. `plot()` on the returned object draws the
-variogram behind the refusal, and `vignette("spatial-cross-validation")`
-covers the four reasons and what each one means for your block size.
+so nothing is reported. `attr(x, "rejected_reason")` names which of the
+four refusals it was, `?estimate_sac_range` says what each one means,
+and `plot()` on the returned object draws the variogram behind it.
+`vignette("spatial-cross-validation")` covers what an `NA` there leaves
+you to decide about the block size.
 
 **`determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.`**
 Every candidate resolution sat below the nine-cell floor where Moran’s I
