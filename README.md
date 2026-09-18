@@ -324,6 +324,10 @@ in them is computed on the spot.
 `?spatialkit` walks the pipeline in order and names the function for
 each step. Every exported function has its own page.
 
+All of it is also online at
+<https://elkronos.github.io/gis_modeling_toolkit/>, built from `main`,
+so the site describes the development version.
+
 ### Scripts you can run
 
 Ten numbered scripts ship with the package. Each prints what it is doing

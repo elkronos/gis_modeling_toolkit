@@ -621,7 +621,7 @@
   pause.  Scripts 09 and 10 skip themselves cleanly when GWmodel or brms is
   absent.
 * Four vignettes join `spatialkit_nc_demo`: `getting-started` (installing, what
-  the coordinates are in, the six-call pipeline), `resolution` (the ladder, the
+  the coordinates are in, the five-call pipeline), `resolution` (the ladder, the
   four criteria and why they disagree), `spatial-cross-validation` (the five
   fold schemes, block sizing, and reading a CV result down to the last row) and
   `diagnostics` (residual autocorrelation, aggregation standard errors, kriging
@@ -633,6 +633,12 @@
   vignettes above, and what remains is what the package is for, a quick start
   that shows a real cross-validation gap, the troubleshooting list, and pointers
   to the rest.
+* The documentation is published as a website at
+  <https://elkronos.github.io/gis_modeling_toolkit/>: the README, every help
+  page grouped by pipeline step, the five vignettes as articles, and this
+  changelog.  It is rebuilt from `main` on every push, so it describes the
+  development version; the "development version" heading at the top of this
+  file lists what the CRAN release does not have yet.
 
 * `select_features_forward()` now says what `$score` is: the cross-validated
   metric of the winning set at the final step, which is the selection
@@ -2073,12 +2079,12 @@ whether an item affects an analysis you have already run.
   `predict_surface()`, `area_of_applicability()` and `plot()` like any other
   model. Three defaults are opinionated: `include_coords = FALSE` (a forest
   given the coordinates memorises location and fails wherever it has not been —
-  Meyer et al. 2019, <doi:10.1016/j.ecolmodel.2019.108815> — and random CV does
+  Meyer et al. 2019, <https://doi.org/10.1016/j.ecolmodel.2019.108815> — and random CV does
   not catch it); `fitted()` returns **out-of-bag** predictions, so `summary()`
   on an `rf_fit` is not comparable with the other backends and says so
   (`$info$fitted_are_oob`); and importance defaults to permutation rather than
   impurity, which is biased toward continuous and high-cardinality predictors
-  (Strobl et al. 2007, <doi:10.1186/1471-2105-8-25>). Compare backends with
+  (Strobl et al. 2007, <https://doi.org/10.1186/1471-2105-8-25>). Compare backends with
   `compare_models_cv()`, which now has an RF branch.
 
   `predict()` on an `rf_fit` refuses the type confusions `ranger` would
@@ -2110,7 +2116,7 @@ whether an item affects an analysis you have already run.
   atomic vectors".
 
 * New `area_of_applicability()`, implementing the dissimilarity index of Meyer &
-  Pebesma (2021, <doi:10.1111/2041-210X.13650>). Predictors are centred and
+  Pebesma (2021, <https://doi.org/10.1111/2041-210X.13650>). Predictors are centred and
   scaled on the training data's own statistics, optionally weighted by variable
   importance — by the importance itself, not its square root, matching `CAST`.
   A prediction point's DI is its distance to the nearest training point in that
@@ -2154,7 +2160,7 @@ whether an item affects an analysis you have already run.
   lines a genuinely failed run prints.
 
 * New `gwr_model_selection()`: wraps `GWmodel::gwr.model.selection()` (Lu et al.
-  2014, <doi:10.1080/10095020.2014.917453>) and returns a ranked table instead
+  2014, <https://doi.org/10.1080/10095020.2014.917453>) and returns a ranked table instead
   of two loosely-coupled lists. It is the fast, in-sample counterpart to
   `select_features_forward()` — the same forward search scored by **AICc**,
   read from the documented `c(bandwidth, AIC, AICc, RSS)` layout of GWmodel's
@@ -2190,7 +2196,7 @@ whether an item affects an analysis you have already run.
   trained on.
 
 * `make_folds()` gains `method = "nndm"`, implementing the distance-matching
-  principle of Milà et al. (2022, <doi:10.1111/2041-210X.13851>), as in
+  principle of Milà et al. (2022, <https://doi.org/10.1111/2041-210X.13851>), as in
   `CAST::nndm()`. Rather than choosing a `buffer` with nothing to justify it,
   the exclusion around each held-out point is sized so the training-to-test
   distance distribution reproduces the distances from your actual prediction
@@ -2242,7 +2248,7 @@ whether an item affects an analysis you have already run.
 * `fit_bayesian_spatial_model()` checks the posterior length-scale against the
   smallest scale the chosen basis can resolve and logs a warning when more than
   10% of the posterior mass falls below it — the adequacy diagnostic recommended
-  by Riutort-Mayol et al. (2023, <doi:10.1007/s11222-022-10167-2>), and what
+  by Riutort-Mayol et al. (2023, <https://doi.org/10.1007/s11222-022-10167-2>), and what
   makes the smaller default `gp_k` safe rather than merely cheaper. `$info`
   gains `gp_c`, `gp_n_basis`, `gp_ell_min` and `gp_lengthscale_bounds`, and
   `print()` on a `bayesian_fit` and `cv_bayes()`'s `fold_metrics` report the

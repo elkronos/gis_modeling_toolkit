@@ -36,3 +36,8 @@ dev/BACKLOG*.md
 
 # Scratch output from assistant sessions (not for distribution)
 Claude outputs/
+
+# pkgdown output. The site is built by .github/workflows/pkgdown.yaml and
+# served from the gh-pages branch; a local pkgdown::build_site() or
+# dev/render_vignette.R writes here and nothing in docs/ is committed.
+docs/
