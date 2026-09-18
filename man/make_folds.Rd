@@ -40,15 +40,15 @@ warning either way.}
 \item{k}{Integer; number of folds.  Must be a single whole number >= 1 —
 a fraction, \code{NA} or a vector is an error, because a non-integer used
 to truncate silently and leave the last rows in no test set at all.
-Required for \code{"random_kfold"}, \code{"block_kfold"} and
-\code{"leave_location_out"}; \code{"buffered_loo"} and \code{"nndm"} are
-leave-one-out schemes and ignore it.  Not every method honours it: \code{"buffered_loo"} and \code{"nndm"} are
+Not every method honours it.  \code{"buffered_loo"} and \code{"nndm"} are
 leave-one-out schemes and always return \code{k = n} regardless of what
-was asked for, while \code{"block_kfold"} lowers it when the grid yields
-fewer than \code{k} non-empty blocks and \code{"leave_location_out"}
-lowers it when there are fewer than \code{k} distinct groups.  Read the
-\code{k} element of the returned list rather than assuming the requested
-value; a reduction is logged.}
+was asked for; \code{"block_kfold"} lowers it when the grid yields fewer
+than \code{k} non-empty blocks, and \code{"leave_location_out"} lowers it
+when there are fewer than \code{k} distinct groups.  Read the \code{k}
+element of the returned list rather than assuming the requested value.  A
+reduction is written to the package log and raises no R warning, so
+\code{tryCatch(warning = )} will not see it and \code{suppressWarnings()}
+will not hide it.}
 
 \item{method}{One of \code{"random_kfold"}, \code{"block_kfold"},
 \code{"buffered_loo"}, \code{"leave_location_out"} or \code{"nndm"}.  See

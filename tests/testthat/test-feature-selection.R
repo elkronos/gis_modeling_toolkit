@@ -176,3 +176,34 @@ test_that("auto_range sizes the inner blocks from the estimated range", {
   expect_true(any(grepl("using as minimum block size", msgs)))
   expect_true(sel$params$auto_range)
 })
+
+
+test_that("a fit_fn that ignores its second argument is called out, not returned as an empty selection", {
+  # A learner written for cv_spatial() takes one argument; `function(train_sf,
+  # ...)` swallows `vars` and fits the same model every time.  The training
+  # layer still carries every column, so nothing errors: every candidate
+  # scores exactly what the null model scored, nothing improves on it, and the
+  # result was an empty `selected` and an NA `score` with no word about why.
+  pts <- fs_data(200)
+  one_arg <- function(train_sf, ...) lm_spatial_fit(train_sf, "z", "a")
+  expect_warning(
+    res <- select_features_forward(pts, "z", c("a", "b", "c1"), fit_fn = one_arg,
+                                   k = 3, method = "random_kfold", seed = 1,
+                                   quiet = TRUE),
+    "ignoring its second argument")
+  # The result is still returned -- the warning is the diagnosis, not a stop.
+  expect_length(res$selected, 0L)
+  expect_true(is.na(res$score))
+  # Every step-1 score equals the null score to the last digit: the signature.
+  h <- res$history
+  expect_equal(unique(h$score[h$step == 1L]), h$score[h$step == 0L])
+
+  # A learner that honours `vars` produces different scores per candidate and
+  # must not trip it.
+  two_arg <- function(tr, vars) lm_spatial_fit(tr, "z", vars)
+  expect_no_warning(
+    res2 <- select_features_forward(pts, "z", c("a", "b", "c1"), fit_fn = two_arg,
+                                    k = 3, method = "random_kfold", seed = 1,
+                                    quiet = TRUE))
+  expect_true("a" %in% res2$selected)
+})

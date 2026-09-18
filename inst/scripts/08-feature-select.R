@@ -30,8 +30,10 @@ cat("  A search cannot tell that apart from a real effect, and neither can you.\
 
 # select_features_forward() calls fit_fn(train_sf, predictor_vars) -- TWO
 # arguments. A learner written for cv_spatial() takes one, so it needs this
-# wrapper. Getting it wrong is silent: a one-argument fit_fn returns an empty
-# `selected` and a `score` of NA, with no error and no warning.
+# wrapper. Get it wrong and every candidate scores exactly what the null model
+# scored, so nothing is selected; the function warns that fit_fn appears to be
+# ignoring its second argument, which is the only way to tell that apart from
+# a data set in which nothing predicts anything.
 lm_on <- function(train_sf, vars) {
   d <- sf::st_drop_geometry(train_sf)
   f <- stats::as.formula(paste("z ~",

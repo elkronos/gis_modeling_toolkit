@@ -341,5 +341,21 @@ test_that("print() survives a subset that no longer carries the ladder", {
   expect_output(print(prof[1:3, ]), "^Resolution profile: 3 levels")
   expect_error(utils::capture.output(print(prof[, 1:3])), NA)
   expect_output(print(prof[, 1:3]), "subset")
+
+  # The empty row subset keeps class, attributes AND the levels column, so it
+  # passed every guard above and reached min()/max() of nothing -- Inf, which
+  # sprintf("%d") refuses.  It is what `prof[prof$cp < threshold, ]` returns
+  # when nothing qualifies, so it is not an exotic object.
+  expect_error(utils::capture.output(print(prof[0, ])), NA)
+  expect_output(print(prof[0, ]), "0 levels")
+
+  # select_resolution() and plot() on the same objects said something true
+  # about the wrong thing: "cp is NA at every level (it needs a response and a
+  # usable variogram)" for a profile with no levels, or no cp column at all.
+  expect_error(select_resolution(prof[0, ]), "no levels")
+  expect_error(select_resolution(prof[, 1:3]), "no `cp` column")
+  expect_error(select_resolution(prof[, 1:3], criterion = "elbow"), "no `elbow` column")
+  skip_if_not_installed("ggplot2")
+  expect_error(plot(prof[0, ]), "no levels to draw")
 })
 

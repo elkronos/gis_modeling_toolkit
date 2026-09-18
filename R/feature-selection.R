@@ -321,6 +321,27 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
       break
     }
 
+    # The commonest way to call this wrongly is with a learner written for
+    # cv_spatial(), which takes ONE argument: `function(train_sf, ...)` swallows
+    # `vars` into the dots and fits the same model whatever it is handed.  The
+    # training layer still carries every column, so nothing errors; every
+    # candidate simply scores bit-identically to the null model, nothing
+    # improves on it, and the function returns an empty selection and an NA
+    # score with -- until this -- no word about why.  Two different predictor
+    # sets do not produce the same cross-validated metric to the last digit,
+    # so the signature is unambiguous.
+    if (length(selected) == 0L && length(step_scores) >= 2L &&
+        is.finite(null_score) && all(is.finite(step_scores)) &&
+        isTRUE(all.equal(unname(step_scores), rep(null_score, length(step_scores)),
+                         tolerance = 1e-12)))
+      .warn_and_log(paste0(
+        "select_features_forward(): every candidate scored exactly what the ",
+        "intercept-only model scored (%s = %.6g), so `fit_fn` appears to be ",
+        "ignoring its second argument. It must be a function of ",
+        "(train_sf, predictor_vars) that fits only the variables it is given; ",
+        "a learner written for cv_spatial() takes one argument and needs a ",
+        "wrapper."), metric, null_score)
+
     idx  <- if (metric == "R2") which.max(step_scores) else which.min(step_scores)
     cand <- remaining[idx]
     cand_score <- step_scores[[idx]]
