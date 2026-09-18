@@ -699,25 +699,29 @@ build_tessellation <- function(
   # `approx_n_cells` and `cellsize` size the hex and square lattices and
   # nothing else: Voronoi grows one cell per input point and Delaunay one
   # triangle per neighbouring triple, so neither has a count to set.  Both used
-  # to be dropped in silence, and the returned `params` did not record them
-  # either, so `build_tessellation(pts, method = "voronoi", approx_n_cells =
-  # 25)` returned one cell per observation -- the degenerate case -- and left
-  # no trace anywhere that 25 had ever been asked for.  Warn rather than stop:
+  # to be dropped in silence, so `build_tessellation(pts, method = "voronoi",
+  # approx_n_cells = 25)` returned one cell per observation -- the degenerate
+  # case -- with nothing to say 25 had been asked for.  Warn rather than stop:
   # the call still produces a valid tessellation, just not the one intended.
+  #
+  # The `params` clause is voronoi-only on purpose.  That branch returns
+  # create_voronoi_polygons()'s own list, which has no slot for either
+  # argument; the triangles branch does echo `approx_n_cells` back (but not
+  # `cellsize`), so claiming otherwise for it would be false.
   if (!method %in% c("hex", "square")) {
     ignored <- c(if (!is.null(approx_n_cells)) "approx_n_cells",
                  if (!is.null(cellsize)) "cellsize")
     if (length(ignored) > 0L)
       .warn_and_log(
-        paste0("build_tessellation(method = \"%s\") ignores the grid-sizing ",
-               "%s %s, and does not record the request in `params`. %s"),
+        "build_tessellation(method = \"%s\") ignores the grid-sizing %s %s. %s",
         method,
         if (length(ignored) > 1L) "arguments" else "argument",
         paste(sprintf("`%s`", ignored), collapse = " and "),
         if (identical(method, "voronoi"))
-          paste("Voronoi grows one cell per input point: to control the cell",
-                "count, place seeds with get_voronoi_seeds() and tessellate",
-                "those, or use method = \"hex\" or \"square\".")
+          paste("`params` does not record the request either. Voronoi grows",
+                "one cell per input point: to control the cell count, place",
+                "seeds with get_voronoi_seeds() and tessellate those, or use",
+                "method = \"hex\" or \"square\".")
         else
           paste("Delaunay produces one triangle per neighbouring triple, so",
                 "the count follows from the points; use method = \"hex\" or",

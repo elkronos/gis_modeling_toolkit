@@ -69,8 +69,15 @@ skip_without <- function(pkgs, what) {
 # --- The fixture the whole tour runs on --------------------------------------
 # A simulated exponential field on a 1000-unit square. The structure is known,
 # so every diagnostic has something true to find: the covariance is exp(-d/80),
-# an effective range of 240 units. A fitted variogram recovers more than that,
-# because the nugget flattens the start of the curve.
+# which puts the true effective range at 240 units.
+#
+# Do not expect a fitted variogram to recover that number. Scripts 02 and 04
+# report about 357 on `z`; the field on its own, with no nugget at all, still
+# fits at about 315. Most of the gap is what fitting a single realisation over
+# a limited span of lags does, and the nugget that `elev` and the measurement
+# noise contribute widens it further. A fitted range is a working number here,
+# not a measurement of the 240 -- which is worth knowing before anyone "fixes"
+# the fixture to make the two agree.
 #
 # The columns: `z` is the response, built from `elev` plus the field. `noise` is
 # a decoy. `slope` is a west-to-east gradient that does NOT enter `z` at all --

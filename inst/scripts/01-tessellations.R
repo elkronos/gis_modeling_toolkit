@@ -73,7 +73,10 @@ cel1 <- summarize_by_cell(asg1, "z", cells_sf = trap$cells, deff = 1)
 cat(sprintf("  asked for 25 cells, got %d; %d hold one point or none, %d SEs are NA\n",
             nrow(cel1), sum(cel1$n <= 1, na.rm = TRUE),
             sum(is.na(cel1$..se_resp_z))))
-cat(sprintf("  and the request leaves no trace: params$approx_n_cells is %s\n",
+# The warning goes to the console and nowhere else: params$approx_n_cells is
+# still NULL, so a result saved now and reopened next month carries no sign
+# that 25 was ever asked for.
+cat(sprintf("  the console warning is the only record: params$approx_n_cells is %s\n",
             if (is.null(trap$params$approx_n_cells)) "NULL" else
               trap$params$approx_n_cells))
 cat("  Seed first (01.1), or use a grid method, which is what approx_n_cells sizes.\n")
