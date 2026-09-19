@@ -198,8 +198,8 @@ library(sf)
 set.seed(1)
 # Two clearly separated clusters: the elbow should sit near k = 2
 pts <- st_as_sf(
-  data.frame(x = c(runif(25, 0, 10), runif(25, 90, 100)),
-             y = c(runif(25, 0, 10), runif(25, 90, 100))),
+  data.frame(x = 5e5 + c(runif(25, 0, 10), runif(25, 90, 100)),
+             y = 5e6 + c(runif(25, 0, 10), runif(25, 90, 100))),
   coords = c("x", "y"), crs = 32632
 )
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first

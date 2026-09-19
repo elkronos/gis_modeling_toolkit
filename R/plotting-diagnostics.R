@@ -46,10 +46,12 @@
 #'   set.seed(1)
 #'   n <- 150
 #'   dat <- st_as_sf(
-#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), a = rnorm(n)),
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                a = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
-#'   dat$z <- 2 * dat$a + 0.003 * st_coordinates(dat)[, 1] + rnorm(n, 0, 0.5)
+#'   dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
+#'     rnorm(n, 0, 0.5)
 #'   cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
 #'   plot_cv_metrics(cv, "RMSE")
 #' }
@@ -202,13 +204,13 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #'   set.seed(2)
 #'   n <- 200
 #'   train <- st_as_sf(
-#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
 #'                a = rnorm(n), b = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632)
 #'   train$z <- train$a - train$b + rnorm(n, 0, 0.3)
 #'   # Prediction locations whose predictor `a` drifts beyond the training range.
 #'   new <- st_as_sf(
-#'     data.frame(x = runif(100, 0, 1000), y = runif(100, 0, 1000),
+#'     data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
 #'                a = rnorm(100, mean = 2), b = rnorm(100)),
 #'     coords = c("x", "y"), crs = 32632)
 #'   aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
@@ -498,7 +500,7 @@ plot_calibration <- function(cv, ...) {
 #'   library(sf)
 #'   set.seed(3)
 #'   n <- 400
-#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   xy$z <- sin(xy$x / 200) + cos(xy$y / 250) + rnorm(n, sd = 0.3)
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   prof <- resolution_profile(pts, response_var = "z", n_levels = 10)
@@ -603,7 +605,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #'   set.seed(4)
 #'   n <- 150
 #'   dat <- st_as_sf(
-#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
 #'                a = rnorm(n), b = rnorm(n), c = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632)
 #'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)

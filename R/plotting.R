@@ -50,7 +50,7 @@
 #'   library(sf)
 #'   set.seed(1)
 #'   pts <- st_as_sf(
-#'     data.frame(x = runif(20, 0, 100), y = runif(20, 0, 100)),
+#'     data.frame(x = 5e5 + runif(20, 0, 100), y = 5e6 + runif(20, 0, 100)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
 #'   tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)

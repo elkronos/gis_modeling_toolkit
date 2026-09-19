@@ -87,10 +87,12 @@ library(sf)
 set.seed(1)
 n <- 80
 site <- st_as_sf(
-  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             elev = rnorm(n)),
   coords = c("x", "y"), crs = 32632
 )
-site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+site$price <- 10 + 0.01 * (st_coordinates(site)[, 1] - 5e5) +
+  2 * site$elev + rnorm(n)
 
 # A custom backend: an ordinary linear model behind the spatial_fit interface.
 lm_fit <- function(train_sf) {

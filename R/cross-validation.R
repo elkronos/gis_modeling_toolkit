@@ -1209,7 +1209,7 @@
 #'   library(sf)
 #'   set.seed(9)
 #'   n <- 150
-#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
 #'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
 #'   r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
@@ -1502,7 +1502,7 @@ sac_nugget <- function(x) {
 #'   # small nugget.
 #'   set.seed(9)
 #'   n <- 150
-#'   xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
 #'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
@@ -2798,7 +2798,7 @@ print.sac_range <- function(x, ...) {
 #' library(sf)
 #' set.seed(1)
 #' pts <- st_as_sf(
-#'   data.frame(x = runif(30, 0, 1000), y = runif(30, 0, 1000)),
+#'   data.frame(x = 5e5 + runif(30, 0, 1000), y = 5e6 + runif(30, 0, 1000)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)
@@ -3894,10 +3894,12 @@ make_folds <- function(points_sf, k,
 #'   set.seed(1)
 #'   n <- 60
 #'   dat <- st_as_sf(
-#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                elev = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
-#'   dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+#'     2 * dat$elev + rnorm(n)
 #'   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
 #'   cv$overall
 #'   cv$fold_metrics
@@ -4123,10 +4125,12 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   set.seed(1)
 #'   n <- 60
 #'   dat <- st_as_sf(
-#'     data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                elev = rnorm(n)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
-#'   dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+#'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+#'     2 * dat$elev + rnorm(n)
 #'   cv <- cv_bayes(dat, "price", "elev", k = 2,
 #'                  fit_args = list(chains = 2, iter = 500))
 #'   cv$overall
@@ -4487,10 +4491,12 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' set.seed(1)
 #' n <- 80
 #' site <- st_as_sf(
-#'   data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+#' site$price <- 10 + 0.01 * (st_coordinates(site)[, 1] - 5e5) +
+#'   2 * site$elev + rnorm(n)
 #'
 #' # 1. A fit_fn returning a spatial_fit of your own subclass.
 #' lm_fit <- function(train_sf) {

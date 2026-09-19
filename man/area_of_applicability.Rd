@@ -194,7 +194,7 @@ library(sf)
 set.seed(1)
 n <- 120
 train <- st_as_sf(
-  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
              a = rnorm(n), b = rnorm(n)),
   coords = c("x", "y"), crs = 32632
 )
@@ -202,7 +202,7 @@ train$z <- 2 * train$a - train$b + rnorm(n, 0, 0.3)
 
 # Prediction points, some of them well outside the training predictor range
 newpts <- st_as_sf(
-  data.frame(x = runif(50, 0, 1000), y = runif(50, 0, 1000),
+  data.frame(x = 5e5 + runif(50, 0, 1000), y = 5e6 + runif(50, 0, 1000),
              a = c(rnorm(40), rnorm(10, 8)), b = rnorm(50)),
   coords = c("x", "y"), crs = 32632
 )
