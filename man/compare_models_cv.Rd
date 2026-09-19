@@ -212,6 +212,7 @@ study competition among methods for analyzing large spatial data.
 Other model evaluation: 
 \code{\link{compare_models}()},
 \code{\link{evaluate_insample}()},
+\code{\link{model_metrics}()},
 \code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

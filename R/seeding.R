@@ -265,6 +265,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()].
+#' @family tessellation
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -353,6 +354,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #'   inside an awkward geometry can fall short of `k`, which is warned about),
 #'   with `seed_id` and `method = "random"` columns matching
 #'   [get_voronoi_seeds()].
+#' @family tessellation
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(

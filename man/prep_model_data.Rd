@@ -97,6 +97,14 @@ Other model fitting:
 \code{\link{fit_bayesian_spatial_model}()},
 \code{\link{fit_gwr_model}()},
 \code{\link{fit_rf_model}()},
+\code{\link{gp_lengthscale_bounds}()},
 \code{\link{new_spatial_fit}()}
+
+Other spatial data preparation: 
+\code{\link{clip_target_for}()},
+\code{\link{coerce_to_points}()},
+\code{\link{ensure_projected}()},
+\code{\link{harmonize_crs}()}
 }
 \concept{model fitting}
+\concept{spatial data preparation}

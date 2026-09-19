@@ -57,6 +57,7 @@
 #'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
 #'   data are planar.
 #' @family model fitting
+#' @family spatial data preparation
 #' @examples
 #' library(sf)
 #' dat <- st_as_sf(
@@ -246,6 +247,7 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #' @return Named numeric vector \code{c(lower, upper)} on the length-scale;
 #'   \code{c(lower = 0.001, upper = 1)} when fewer than two distinct locations
 #'   or no positive distances remain.
+#' @family model fitting
 #' @examples
 #' set.seed(1)
 #' xy <- cbind(runif(50), runif(50))

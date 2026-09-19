@@ -189,6 +189,7 @@ Other cross-validation:
 \code{\link{cv_spatial}()},
 \code{\link{estimate_sac_range}()},
 \code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()}
+\code{\link{make_folds}()},
+\code{\link{sac_nugget}()}
 }
 \concept{cross-validation}

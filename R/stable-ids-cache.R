@@ -36,6 +36,7 @@
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
 #'   raised.
+#' @family tessellation
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -273,6 +274,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   builders produced it.  Use one builder throughout an analysis; joining a
 #'   summary keyed on IDs from one onto geometries from the other draws the
 #'   values on the wrong polygons.
+#' @family tessellation
+#' @family package options and caches
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -337,6 +340,7 @@ create_grid_polygons_cached <- function(boundary,
 #'
 #' @param cache_env Environment to clear. Default .gmt_cache.
 #' @return Invisibly, the number of entries removed.
+#' @family package options and caches
 #' @examples
 #' library(sf)
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(

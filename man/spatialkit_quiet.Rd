@@ -36,4 +36,10 @@ old <- spatialkit_quiet()      # console echo off
 spatialkit_quiet(old)          # back to whatever it was
 spatialkit_quiet(FALSE)        # or back to the WARN+ default
 }
-\concept{utilities}
+\seealso{
+Other package options and caches: 
+\code{\link{clear_fitted_cache}()},
+\code{\link{clear_grid_cache}()},
+\code{\link{create_grid_polygons_cached}()}
+}
+\concept{package options and caches}

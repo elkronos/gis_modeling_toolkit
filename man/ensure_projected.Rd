@@ -132,3 +132,11 @@ st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
 # centred on the data rather than the UTM zone.
 st_crs(ensure_projected(pts_ll, purpose = "area"))$proj4string
 }
+\seealso{
+Other spatial data preparation: 
+\code{\link{clip_target_for}()},
+\code{\link{coerce_to_points}()},
+\code{\link{harmonize_crs}()},
+\code{\link{prep_model_data}()}
+}
+\concept{spatial data preparation}

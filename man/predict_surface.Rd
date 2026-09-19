@@ -106,4 +106,8 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   area_of_applicability(surf, model = fit)
 }
 }
+\seealso{
+Other prediction: 
+\code{\link{area_of_applicability}()}
+}
 \concept{prediction}

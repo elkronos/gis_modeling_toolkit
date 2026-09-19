@@ -24,3 +24,11 @@ means the ranking is not well identified and the choice of predictors should
 not be treated as settled.  Check the gap before reporting one model as the
 selected one.
 }
+\seealso{
+Other print methods: 
+\code{\link{print.aoa}()},
+\code{\link{print.morans_i}()},
+\code{\link{print.resolution_profile}()},
+\code{\link{print.sac_range}()}
+}
+\concept{print methods}

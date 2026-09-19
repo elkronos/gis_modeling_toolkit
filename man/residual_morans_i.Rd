@@ -236,6 +236,7 @@ Models and Applications}. Pion, London. Section 8.3.
 Other model evaluation: 
 \code{\link{compare_models}()},
 \code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()}
+\code{\link{evaluate_insample}()},
+\code{\link{model_metrics}()}
 }
 \concept{model evaluation}

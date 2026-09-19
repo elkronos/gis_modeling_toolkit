@@ -75,6 +75,7 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 Other model evaluation: 
 \code{\link{compare_models_cv}()},
 \code{\link{evaluate_insample}()},
+\code{\link{model_metrics}()},
 \code{\link{residual_morans_i}()}
 }
 \concept{model evaluation}

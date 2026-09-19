@@ -70,7 +70,11 @@ res$index   # cell_id assignment for each input point
 Other tessellation: 
 \code{\link{build_tessellation}()},
 \code{\link{create_grid_polygons}()},
+\code{\link{create_grid_polygons_cached}()},
+\code{\link{ensure_stable_poly_id}()},
 \code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()}
+\code{\link{plot_tessellation_map}()},
+\code{\link{voronoi_seeds_kmeans}()},
+\code{\link{voronoi_seeds_random}()}
 }
 \concept{tessellation}

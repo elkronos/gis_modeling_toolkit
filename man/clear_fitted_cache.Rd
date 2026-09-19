@@ -40,3 +40,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   clear_fitted_cache(fit)
 }
 }
+\seealso{
+Other package options and caches: 
+\code{\link{clear_grid_cache}()},
+\code{\link{create_grid_polygons_cached}()},
+\code{\link{spatialkit_quiet}()}
+}
+\concept{package options and caches}

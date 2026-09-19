@@ -26,3 +26,22 @@ a coefficient table), remembering that the Gaussian-process term has
 already absorbed the spatially structured part of the signal, so these are
 effects net of location.
 }
+\seealso{
+Other methods on a fitted model: 
+\code{\link{coef.gwr_fit}()},
+\code{\link{coef.rf_fit}()},
+\code{\link{fitted.bayesian_fit}()},
+\code{\link{fitted.gwr_fit}()},
+\code{\link{fitted.rf_fit}()},
+\code{\link{model_metrics}()},
+\code{\link{predict.bayesian_fit}()},
+\code{\link{predict.gwr_fit}()},
+\code{\link{predict.rf_fit}()},
+\code{\link{print.rf_fit}()},
+\code{\link{print.spatial_fit}()},
+\code{\link{residuals.bayesian_fit}()},
+\code{\link{residuals.gwr_fit}()},
+\code{\link{residuals.rf_fit}()},
+\code{\link{summary.spatial_fit}()}
+}
+\concept{methods on a fitted model}

@@ -356,6 +356,7 @@ confounding in linear models. \emph{The American Statistician}
 Other model fitting: 
 \code{\link{fit_gwr_model}()},
 \code{\link{fit_rf_model}()},
+\code{\link{gp_lengthscale_bounds}()},
 \code{\link{new_spatial_fit}()},
 \code{\link{prep_model_data}()}
 }

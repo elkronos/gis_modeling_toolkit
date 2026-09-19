@@ -612,6 +612,7 @@
 #' @seealso \code{\link{predict_surface}} to build the grid,
 #'   \code{\link{make_folds}} for the fold scheme.
 #' @family cross-validation
+#' @family prediction
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -892,6 +893,7 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
 #' @param x An \code{aoa} object.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family print methods
 #' @export
 print.aoa <- function(x, ...) {
   cat("Area of applicability (Meyer & Pebesma 2021)\n\n")

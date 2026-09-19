@@ -124,7 +124,11 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 Other tessellation: 
 \code{\link{build_tessellation}()},
 \code{\link{create_grid_polygons}()},
+\code{\link{create_grid_polygons_cached}()},
 \code{\link{create_voronoi_polygons}()},
-\code{\link{get_voronoi_seeds}()}
+\code{\link{ensure_stable_poly_id}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{voronoi_seeds_kmeans}()},
+\code{\link{voronoi_seeds_random}()}
 }
 \concept{tessellation}

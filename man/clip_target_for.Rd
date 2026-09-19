@@ -49,3 +49,11 @@ pts <- st_as_sf(
 hull <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
 st_area(hull)
 }
+\seealso{
+Other spatial data preparation: 
+\code{\link{coerce_to_points}()},
+\code{\link{ensure_projected}()},
+\code{\link{harmonize_crs}()},
+\code{\link{prep_model_data}()}
+}
+\concept{spatial data preparation}
