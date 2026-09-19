@@ -9,6 +9,28 @@
 }
 
 
+# ggplot2 clips a title, subtitle or caption that is wider than the figure
+# instead of wrapping it, and the loss is silent: on a help page a sentence
+# ending "exceeds the largest lag fitted (682)" was drawn as "exceeds the
+# largest lag fit".  These labels are built from numbers whose width is not
+# known until the fit is in hand, so the break has to be found at draw time.
+# The widths passed in were set from the six-inch figure the reference pages
+# and the articles are drawn at, measuring the drawn text rather than
+# counting characters: the subtitle face runs about 0.085 inches a character
+# there, so 68 fill the width, and the caption face about 0.058, against a
+# width the panel sets rather than the figure, so a right-hand legend takes
+# from it.  Both callers pass a count short of that, which is the room a run
+# of wide characters needs.  Breaks already in the string are kept.
+.wrap_label <- function(x, width) {
+  if (is.null(x) || length(x) != 1L || is.na(x) || !nzchar(x)) return(x)
+  parts <- strsplit(as.character(x), "\n", fixed = TRUE)[[1]]
+  wrapped <- vapply(parts,
+                    function(s) paste(strwrap(s, width = width), collapse = "\n"),
+                    character(1), USE.NAMES = FALSE)
+  paste(wrapped, collapse = "\n")
+}
+
+
 #' Plot a fitted spatial model
 #'
 #' Diagnostic plots for a \code{spatial_fit}.  The package previously shipped
@@ -431,7 +453,7 @@ plot.sac_range <- function(x, ...) {
                      "the response variogram reached no identified sill"
                    else "a variogram model could not be fitted")
     ), collapse = "\n")
-    p <- p + ggplot2::labs(caption = overlay_caption)
+    p <- p + ggplot2::labs(caption = .wrap_label(overlay_caption, 72))
   }
   if (is.finite(sac)) {
     p <- p + ggplot2::geom_vline(xintercept = as.numeric(sac),
@@ -446,36 +468,38 @@ plot.sac_range <- function(x, ...) {
     # its own two numbers refute (range 11 "exceeds" a cutoff of 682).
     reason <- attr(sac, "rejected_reason")
     p <- p + ggplot2::labs(
-      subtitle = if (identical(reason, "variogram model did not converge"))
-        sprintf(paste0("No effective range: the fit stopped at gstat's ",
-                       "iteration limit, so the range it reports (%.0f) is ",
-                       "where the optimiser halted, not a fitted parameter."),
-                attr(sac, "rejected_range"))
-      else if (isTRUE(grepl("^no variogram model", reason)))
-        # Both model fits singular: the picture of residuals with no spatial
-        # structure at the lags resolved.  There is no model line to draw.
-        paste0("No effective range: no variogram model could be fitted ",
-               "(a flat, nugget-only variogram -- no spatial structure at ",
-               "these lags).")
-      else if (identical(reason, "empirical variogram decreases with distance"))
-        # The shape of a periodic structure or of a variance that differs
-        # between a dense cluster and the rest -- not of a trend, which rises
-        # without a sill.
-        sprintf(paste0("No effective range: the semivariance falls with ",
-                       "distance over the shorter lags, so the fitted range ",
-                       "(%.0f) is not identified (periodic structure, or a ",
-                       "variance that differs across the layer)."),
-                attr(sac, "rejected_range"))
-      else if (identical(reason, "fitted range exceeds the largest lag fitted"))
-        sprintf(paste0("No effective range: the fitted range (%.0f) ",
-                       "exceeds the largest lag fitted (%.0f),\nso the ",
-                       "variogram never reached a sill."),
-                attr(sac, "rejected_range"),
-                attr(sac, "cutoff_dist"))
-      else
-        # A reason this method does not know by name: say it verbatim rather
-        # than caption it with another case's sentence.
-        sprintf("No effective range: %s.", as.character(reason)))
+      subtitle = .wrap_label(
+        if (identical(reason, "variogram model did not converge"))
+          sprintf(paste0("No effective range: the fit stopped at gstat's ",
+                         "iteration limit, so the range it reports (%.0f) is ",
+                         "where the optimiser halted, not a fitted parameter."),
+                  attr(sac, "rejected_range"))
+        else if (isTRUE(grepl("^no variogram model", reason)))
+          # Both model fits singular: the picture of residuals with no spatial
+          # structure at the lags resolved.  There is no model line to draw.
+          paste0("No effective range: no variogram model could be fitted ",
+                 "(a flat, nugget-only variogram -- no spatial structure at ",
+                 "these lags).")
+        else if (identical(reason, "empirical variogram decreases with distance"))
+          # The shape of a periodic structure or of a variance that differs
+          # between a dense cluster and the rest -- not of a trend, which rises
+          # without a sill.
+          sprintf(paste0("No effective range: the semivariance falls with ",
+                         "distance over the shorter lags, so the fitted range ",
+                         "(%.0f) is not identified (periodic structure, or a ",
+                         "variance that differs across the layer)."),
+                  attr(sac, "rejected_range"))
+        else if (identical(reason, "fitted range exceeds the largest lag fitted"))
+          sprintf(paste0("No effective range: the fitted range (%.0f) ",
+                         "exceeds the largest lag fitted (%.0f), so the ",
+                         "variogram never reached a sill."),
+                  attr(sac, "rejected_range"),
+                  attr(sac, "cutoff_dist"))
+        else
+          # A reason this method does not know by name: say it verbatim rather
+          # than caption it with another case's sentence.
+          sprintf("No effective range: %s.", as.character(reason)),
+      65))
   }
   p
 }

@@ -245,18 +245,21 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   # Where the prediction set sits relative to the threshold: the fraction
   # inside, and how close the inside ones run to the edge.
   q_in <- if (any(di_new <= thr)) stats::quantile(di_new[di_new <= thr], 0.9) / thr else NA_real_
+  # Both of these ran past the right edge of the figure at the width a help
+  # page and a vignette draw it, so each is broken where it reads naturally.
   subtitle <- sprintf(
     "%d of %d prediction locations outside (DI > %.3g)%s",
     x$n_outside %||% sum(di_new > thr), n_all, thr,
     if (is.finite(q_in))
-      sprintf("; 90%% of those inside sit below %.0f%% of the threshold", 100 * q_in)
+      sprintf("\n90%% of those inside sit below %.0f%% of the threshold", 100 * q_in)
     else "")
-  caption <- sprintf("Threshold %s: %s",
+  caption <- sprintf("Threshold %s\n%s",
                      if (isTRUE(x$params$threshold_supplied)) "supplied" else "from the training DI",
                      if (isTRUE(x$params$folds_supplied))
-                       sprintf("training DI is cross-validated over %s folds",
+                       sprintf("Training DI cross-validated over %s folds",
                                .aoa_folds_label(x$params$folds_method))
-                     else "training DI is not cross-validated (no folds), so the threshold is optimistic")
+                     else paste("Training DI not cross-validated (no folds),",
+                                "so the threshold is optimistic"))
 
   if (type == "ecdf") {
     p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$DI, colour = .data$set)) +
@@ -265,7 +268,8 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
       ggplot2::scale_colour_manual(values = c("Training (cross-validated)" = "grey45",
                                               "Prediction locations" = "#2166AC"),
                                    name = NULL) +
-      ggplot2::labs(title = "Dissimilarity index: prediction locations against training",
+      ggplot2::labs(title = paste("Dissimilarity index: prediction locations",
+                                  "against training", sep = "\n"),
                     subtitle = subtitle, caption = caption,
                     x = "Dissimilarity index (DI)", y = "Cumulative share") +
       ggplot2::theme_minimal() +
@@ -284,7 +288,8 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
                                     ggplot2::aes(x = .data$DI, y = ggplot2::after_stat(.data$density)),
                                     bins = 30, colour = "grey30", linewidth = 0.7)
   p + ggplot2::geom_vline(xintercept = thr, linetype = "dashed", colour = "#B2182B") +
-    ggplot2::labs(title = "Dissimilarity index: prediction locations (bars) against training (line)",
+    ggplot2::labs(title = paste("Dissimilarity index: prediction locations (bars)",
+                                "against training (line)", sep = "\n"),
                   subtitle = subtitle, caption = caption,
                   x = "Dissimilarity index (DI)", y = "Density") +
     ggplot2::theme_minimal()
