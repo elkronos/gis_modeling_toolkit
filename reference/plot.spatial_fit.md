@@ -132,10 +132,12 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   set.seed(1)
   n <- 120
   pts <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               elev = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
-  pts$price <- 10 + 0.01 * st_coordinates(pts)[, 1] + 2 * pts$elev + rnorm(n)
+  pts$price <- 10 + 0.01 * (st_coordinates(pts)[, 1] - 5e5) +
+    2 * pts$elev + rnorm(n)
   fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
   plot(fit, type = "residuals")
   plot(fit, type = "observed_predicted")

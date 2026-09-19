@@ -221,7 +221,7 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   set.seed(1)
   n <- 120
   pts <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )

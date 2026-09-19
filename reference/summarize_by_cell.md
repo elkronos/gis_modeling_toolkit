@@ -385,15 +385,17 @@ Other aggregation:
 library(sf)
 set.seed(1)
 n <- 200
-x <- runif(n, 0, 100)
-y <- runif(n, 0, 100)
+east  <- runif(n, 0, 100)
+north <- runif(n, 0, 100)
 # A response with spatial structure, so the within-cell ICC is not zero.
 pts <- st_as_sf(
-  data.frame(x = x, y = y, val = 0.05 * x + 0.05 * y + rnorm(n, sd = 0.5)),
+  data.frame(x = 5e5 + east, y = 5e6 + north,
+             val = 0.05 * east + 0.05 * north + rnorm(n, sd = 0.5)),
   coords = c("x", "y"), crs = 32632
 )
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
-  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+  c(5e5, 5e6), c(5e5 + 100, 5e6), c(5e5 + 100, 5e6 + 100),
+  c(5e5, 5e6 + 100), c(5e5, 5e6)
 ))), crs = 32632))
 grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)

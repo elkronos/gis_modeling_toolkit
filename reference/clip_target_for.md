@@ -61,7 +61,7 @@ the input CRS; a message reports this unless `quiet = TRUE`.
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(30, 0, 100), y = runif(30, 0, 100)),
+  data.frame(x = 5e5 + runif(30, 0, 100), y = 5e6 + runif(30, 0, 100)),
   coords = c("x", "y"), crs = 32632
 )
 # No boundary: the convex hull, expanded by 10% of the extent

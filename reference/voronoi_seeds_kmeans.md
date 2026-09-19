@@ -58,7 +58,7 @@ a warning, and `k` is clamped to the number of distinct positions.
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(100, 0, 1000), y = runif(100, 0, 1000)),
+  data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000)),
   coords = c("x", "y"), crs = 32632
 )
 seeds <- voronoi_seeds_kmeans(pts, k = 8)

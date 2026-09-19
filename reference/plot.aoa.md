@@ -59,13 +59,13 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   set.seed(2)
   n <- 200
   train <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                a = rnorm(n), b = rnorm(n)),
     coords = c("x", "y"), crs = 32632)
   train$z <- train$a - train$b + rnorm(n, 0, 0.3)
   # Prediction locations whose predictor `a` drifts beyond the training range.
   new <- st_as_sf(
-    data.frame(x = runif(100, 0, 1000), y = runif(100, 0, 1000),
+    data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
                a = rnorm(100, mean = 2), b = rnorm(100)),
     coords = c("x", "y"), crs = 32632)
   aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))

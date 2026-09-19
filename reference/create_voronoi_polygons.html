@@ -149,7 +149,7 @@ stable <code>cell_id</code> values.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">15</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">15</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">15</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">15</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">res</span> <span class="op">&lt;-</span> <span class="fu">create_voronoi_polygons</span><span class="op">(</span><span class="va">pts</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
@@ -157,20 +157,20 @@ stable <code>cell_id</code> values.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 15 features and 1 field</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Geometry type: POLYGON</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Dimension:     XY</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 3.542734 ymin: -1.296593 xmax: 97.10325 ymax: 101.8263</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 500003.5 ymin: 4999999 xmax: 500097.1 ymax: 5000102</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Projected CRS: WGS 84 / UTM zone 32N</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> First 10 features:</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                          geometry cell_id</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1  POLYGON ((24.18211 19.5762,...       1</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2  POLYGON ((30.51111 79.94056...       2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3  POLYGON ((7.149734 40.23226...       3</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4  POLYGON ((24.18211 19.5762,...       4</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5  POLYGON ((48.09213 52.90715...       5</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6  POLYGON ((24.95868 64.12208...       6</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 7  POLYGON ((55.8777 80.67853,...       7</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 8  POLYGON ((37.41231 18.53199...       8</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 9  POLYGON ((71.52246 84.72244...       9</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 10 POLYGON ((44.60761 32.96868...      10</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1  POLYGON ((500024.2 5000020,...       1</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2  POLYGON ((500030.5 5000080,...       2</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3  POLYGON ((500007.1 5000040,...       3</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4  POLYGON ((500024.2 5000020,...       4</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5  POLYGON ((500048.1 5000053,...       5</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6  POLYGON ((500025 5000064, 5...       6</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7  POLYGON ((500055.9 5000081,...       7</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8  POLYGON ((500037.4 5000019,...       8</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9  POLYGON ((500071.5 5000085,...       9</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 10 POLYGON ((500044.6 5000033,...      10</span>
 <span class="r-in"><span><span class="va">res</span><span class="op">$</span><span class="va">index</span>   <span class="co"># cell_id assignment for each input point</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>  [1]  5  6  9 15  2 13 14 11  8  1  3  4 10  7 12</span>
 </code></pre></div>

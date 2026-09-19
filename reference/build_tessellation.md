@@ -171,7 +171,7 @@ Other tessellation:
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(20, 0, 100), y = runif(20, 0, 100)),
+  data.frame(x = 5e5 + runif(20, 0, 100), y = 5e6 + runif(20, 0, 100)),
   coords = c("x", "y"), crs = 32632
 )
 tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
@@ -179,18 +179,18 @@ tess$cells
 #> Simple feature collection with 20 features and 1 field
 #> Geometry type: POLYGON
 #> Dimension:     XY
-#> Bounding box:  xmin: 3.56056 ymin: -1.279081 xmax: 101.8089 ymax: 96.08838
+#> Bounding box:  xmin: 500003.6 ymin: 4999999 xmax: 500101.8 ymax: 5000096
 #> Projected CRS: WGS 84 / UTM zone 32N
 #> First 10 features:
 #>                          geometry cell_id
-#> 1  POLYGON ((16.91403 37.53434...       1
-#> 2  POLYGON ((21.25583 76.93848...       2
-#> 3  POLYGON ((16.91403 37.53434...       3
-#> 4  POLYGON ((7.791328 46.8152,...       4
-#> 5  POLYGON ((44.62439 89.6228,...       5
-#> 6  POLYGON ((21.25583 76.93848...       6
-#> 7  POLYGON ((43.43283 43.6532,...       7
-#> 8  POLYGON ((43.58998 44.37017...       8
-#> 9  POLYGON ((53.22902 27.04245...       9
-#> 10 POLYGON ((70.60107 87.02574...      10
+#> 1  POLYGON ((500016.9 5000038,...       1
+#> 2  POLYGON ((500021.3 5000077,...       2
+#> 3  POLYGON ((500016.9 5000038,...       3
+#> 4  POLYGON ((500007.8 5000047,...       4
+#> 5  POLYGON ((500044.6 5000090,...       5
+#> 6  POLYGON ((500021.3 5000077,...       6
+#> 7  POLYGON ((500043.4 5000044,...       7
+#> 8  POLYGON ((500043.6 5000044,...       8
+#> 9  POLYGON ((500053.2 5000027,...       9
+#> 10 POLYGON ((500070.6 5000087,...      10
 ```

@@ -90,7 +90,7 @@ Other tessellation:
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(15, 0, 100), y = runif(15, 0, 100)),
+  data.frame(x = 5e5 + runif(15, 0, 100), y = 5e6 + runif(15, 0, 100)),
   coords = c("x", "y"), crs = 32632
 )
 res <- create_voronoi_polygons(pts, quiet = TRUE)
@@ -98,20 +98,20 @@ res$cells   # one polygon per unique point, with stable cell_id
 #> Simple feature collection with 15 features and 1 field
 #> Geometry type: POLYGON
 #> Dimension:     XY
-#> Bounding box:  xmin: 3.542734 ymin: -1.296593 xmax: 97.10325 ymax: 101.8263
+#> Bounding box:  xmin: 500003.5 ymin: 4999999 xmax: 500097.1 ymax: 5000102
 #> Projected CRS: WGS 84 / UTM zone 32N
 #> First 10 features:
 #>                          geometry cell_id
-#> 1  POLYGON ((24.18211 19.5762,...       1
-#> 2  POLYGON ((30.51111 79.94056...       2
-#> 3  POLYGON ((7.149734 40.23226...       3
-#> 4  POLYGON ((24.18211 19.5762,...       4
-#> 5  POLYGON ((48.09213 52.90715...       5
-#> 6  POLYGON ((24.95868 64.12208...       6
-#> 7  POLYGON ((55.8777 80.67853,...       7
-#> 8  POLYGON ((37.41231 18.53199...       8
-#> 9  POLYGON ((71.52246 84.72244...       9
-#> 10 POLYGON ((44.60761 32.96868...      10
+#> 1  POLYGON ((500024.2 5000020,...       1
+#> 2  POLYGON ((500030.5 5000080,...       2
+#> 3  POLYGON ((500007.1 5000040,...       3
+#> 4  POLYGON ((500024.2 5000020,...       4
+#> 5  POLYGON ((500048.1 5000053,...       5
+#> 6  POLYGON ((500025 5000064, 5...       6
+#> 7  POLYGON ((500055.9 5000081,...       7
+#> 8  POLYGON ((500037.4 5000019,...       8
+#> 9  POLYGON ((500071.5 5000085,...       9
+#> 10 POLYGON ((500044.6 5000033,...      10
 res$index   # cell_id assignment for each input point
 #>  [1]  5  6  9 15  2 13 14 11  8  1  3  4 10  7 12
 ```

@@ -261,10 +261,12 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   set.seed(1)
   n <- 120
   dat <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               elev = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
-  dat$price <- 10 + 0.01 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+  dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
+    2 * dat$elev + rnorm(n)
   cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
                            rf_args = list(num_trees = 100))
   cmp$overall

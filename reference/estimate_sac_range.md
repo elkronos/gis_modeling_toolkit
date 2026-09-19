@@ -358,7 +358,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # small nugget.
   set.seed(9)
   n <- 150
-  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
@@ -376,5 +376,5 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   r2
   attr(r2, "rejected_range")
 }
-#> [1] 174793.7
+#> [1] 47261.27
 ```

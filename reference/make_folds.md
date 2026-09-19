@@ -425,7 +425,7 @@ Other cross-validation:
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(30, 0, 1000), y = runif(30, 0, 1000)),
+  data.frame(x = 5e5 + runif(30, 0, 1000), y = 5e6 + runif(30, 0, 1000)),
   coords = c("x", "y"), crs = 32632
 )
 folds <- make_folds(pts, k = 3, method = "block_kfold", seed = 42)

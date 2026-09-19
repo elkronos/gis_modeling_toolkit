@@ -56,7 +56,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   set.seed(4)
   n <- 150
   dat <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                a = rnorm(n), b = rnorm(n), c = rnorm(n)),
     coords = c("x", "y"), crs = 32632)
   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
