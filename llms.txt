@@ -3,6 +3,7 @@
 > Spatial tessellation, modeling, and cross-validation toolkit for R
 
 [![R-CMD-check](https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/R-CMD-check.yaml)
+[![pkgdown](https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/pkgdown.yaml/badge.svg)](https://github.com/elkronos/gis_modeling_toolkit/actions/workflows/pkgdown.yaml)
 [![R \>=
 4.1](https://img.shields.io/badge/R-%3E%3D%204.1-blue)](https://www.r-project.org/)
 [![License:

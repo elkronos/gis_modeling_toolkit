@@ -87,4 +87,5 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   plot_cv_metrics(cv, "RMSE")
 }
 #> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=5).
+#> Warning: make_folds(): block dimension (238.4) < autocorrelation range (494.0). Spatial CV may leak correlated information across folds. Pass block_size = 494 or auto_range = TRUE.
 ```
