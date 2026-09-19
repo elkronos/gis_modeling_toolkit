@@ -24,3 +24,10 @@ g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
 clear_grid_cache()                                          # entries removed
 }
+\seealso{
+Other package options and caches: 
+\code{\link{clear_fitted_cache}()},
+\code{\link{create_grid_polygons_cached}()},
+\code{\link{spatialkit_quiet}()}
+}
+\concept{package options and caches}

@@ -81,7 +81,7 @@
 #'   spatialkit_quiet(old)}.
 #' @return Invisibly, the threshold that was in force before the change, a
 #'   \pkg{logger} level that can be passed back as \code{quiet}.
-#' @family utilities
+#' @family package options and caches
 #' @examples
 #' old <- spatialkit_quiet()      # console echo off
 #' spatialkit_quiet(old)          # back to whatever it was

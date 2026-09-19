@@ -642,6 +642,9 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' clean <- prep_model_data(dat, "resp", "pred")
 #' attr(clean, "dropped")$n          # 2
 #' attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
+#' @seealso \code{\link{prep_model_data}()} and
+#'   \code{\link{assign_features_to_polygons}()}, the two functions that
+#'   attach the records this method removes.
 #' @export
 `[.spatialkit_rows` <- function(x, ...) {
   y <- NextMethod()

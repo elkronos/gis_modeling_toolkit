@@ -21,3 +21,11 @@ unusable is labelled with why (\code{directional_status}) and the range
 its fit reported (\code{directional_fitted}) when the object carries
 them, and \code{unidentified} otherwise.
 }
+\seealso{
+Other print methods: 
+\code{\link{print.aoa}()},
+\code{\link{print.gwr_model_selection}()},
+\code{\link{print.morans_i}()},
+\code{\link{print.resolution_profile}()}
+}
+\concept{print methods}

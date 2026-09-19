@@ -23,3 +23,11 @@ proportion outside is the headline number. A map that extrapolates over
 much of its extent is reporting predictions its training data cannot
 support, whatever the cross-validation score said.
 }
+\seealso{
+Other print methods: 
+\code{\link{print.gwr_model_selection}()},
+\code{\link{print.morans_i}()},
+\code{\link{print.resolution_profile}()},
+\code{\link{print.sac_range}()}
+}
+\concept{print methods}

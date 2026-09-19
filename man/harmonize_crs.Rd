@@ -49,3 +49,11 @@ b <- st_transform(a, 4326)                 # same points, lon/lat
 h <- harmonize_crs(a, b)                    # b is brought into a's CRS
 st_crs(h$a) == st_crs(h$b)
 }
+\seealso{
+Other spatial data preparation: 
+\code{\link{clip_target_for}()},
+\code{\link{coerce_to_points}()},
+\code{\link{ensure_projected}()},
+\code{\link{prep_model_data}()}
+}
+\concept{spatial data preparation}

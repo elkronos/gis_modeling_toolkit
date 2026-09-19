@@ -119,3 +119,29 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   model_metrics(fit, newdata = pts[1:20, ])   # on held-out rows
 }
 }
+\seealso{
+Other model evaluation: 
+\code{\link{compare_models}()},
+\code{\link{compare_models_cv}()},
+\code{\link{evaluate_insample}()},
+\code{\link{residual_morans_i}()}
+
+Other methods on a fitted model: 
+\code{\link{coef.bayesian_fit}()},
+\code{\link{coef.gwr_fit}()},
+\code{\link{coef.rf_fit}()},
+\code{\link{fitted.bayesian_fit}()},
+\code{\link{fitted.gwr_fit}()},
+\code{\link{fitted.rf_fit}()},
+\code{\link{predict.bayesian_fit}()},
+\code{\link{predict.gwr_fit}()},
+\code{\link{predict.rf_fit}()},
+\code{\link{print.rf_fit}()},
+\code{\link{print.spatial_fit}()},
+\code{\link{residuals.bayesian_fit}()},
+\code{\link{residuals.gwr_fit}()},
+\code{\link{residuals.rf_fit}()},
+\code{\link{summary.spatial_fit}()}
+}
+\concept{methods on a fitted model}
+\concept{model evaluation}

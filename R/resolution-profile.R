@@ -498,6 +498,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 #' @param digits Significant digits for the table.  Default 3.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family print methods
 #' @export
 print.resolution_profile <- function(x, digits = 3L, ...) {
   b <- attr(x, "bounds")

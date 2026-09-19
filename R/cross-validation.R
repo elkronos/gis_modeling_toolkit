@@ -1204,6 +1204,7 @@
 #'   \code{NA} from a run that could not fit anything, a rejected result whose
 #'   fits were all singular, or an object that is not a \code{sac_range}).
 #' @seealso \code{\link{estimate_sac_range}}, which produces the object.
+#' @family cross-validation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
 #'   library(sf)
@@ -2341,6 +2342,7 @@ estimate_sac_range <- function(points_sf, response_var,
 #' @param x An object of class \code{sac_range}.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family print methods
 #' @export
 print.sac_range <- function(x, ...) {
   cat(format(as.numeric(x)), "\n")

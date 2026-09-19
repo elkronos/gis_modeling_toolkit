@@ -670,6 +670,7 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 #' @param n Number of top-ranked models to show. Default 10.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family print methods
 #' @export
 print.gwr_model_selection <- function(x, n = 10L, ...) {
   cat("Geographically weighted regression - forward model selection\n\n")

@@ -54,3 +54,15 @@ ids_fwd <- ensure_stable_poly_id(g)$poly_id
 ids_rev <- ensure_stable_poly_id(g[nrow(g):1, ])$poly_id
 identical(sort(ids_fwd), sort(ids_rev))
 }
+\seealso{
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{create_grid_polygons_cached}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()},
+\code{\link{voronoi_seeds_kmeans}()},
+\code{\link{voronoi_seeds_random}()}
+}
+\concept{tessellation}

@@ -391,6 +391,7 @@ Other cross-validation:
 \code{\link{cv_spatial}()},
 \code{\link{estimate_sac_range}()},
 \code{\link{gwr_model_selection}()},
+\code{\link{sac_nugget}()},
 \code{\link{select_features_forward}()}
 }
 \concept{cross-validation}

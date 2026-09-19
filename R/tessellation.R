@@ -28,6 +28,7 @@
 #' @return An sf polygon layer representing the clip target. For lon/lat input
 #'   the layer is returned in the automatically selected local projected CRS,
 #'   not the input CRS; a message reports this unless `quiet = TRUE`.
+#' @family spatial data preparation
 #' @examples
 #' library(sf)
 #' set.seed(1)

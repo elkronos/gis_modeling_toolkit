@@ -618,6 +618,24 @@
 
 ## Documentation
 
+* Every one of the 77 help pages now ends with a "See also" that leads
+  somewhere.  Thirty-six had none, `predict_surface()`, `model_metrics()` and
+  every S3 method among them, and two more carried a family of one, which
+  roxygen renders as nothing at all.  Four families are new: **spatial data
+  preparation** (`ensure_projected()`, `harmonize_crs()`,
+  `coerce_to_points()`, `clip_target_for()`, `prep_model_data()`), **package
+  options and caches** (`spatialkit_quiet()`, the two cache clearers,
+  `create_grid_polygons_cached()`), **methods on a fitted model** (the
+  `predict()`, `fitted()`, `residuals()`, `coef()`, `print()` and `summary()`
+  methods of the three backends, which document one contract between them) and
+  **print methods** for the other result objects.  The seed generators, the
+  cached grid constructor and `ensure_stable_poly_id()` join **tessellation**,
+  `model_metrics()` joins **model evaluation**, `sac_nugget()` joins
+  **cross-validation**, `gp_lengthscale_bounds()` joins **model fitting**, and
+  `area_of_applicability()` is now in **prediction** as well as
+  cross-validation.  The website's reference index moves the two cache
+  clearers into the same group, so it and the help pages agree.
+
 * Ten numbered scripts are installed with the package, in
   `system.file("scripts", package = "spatialkit")`.  `00-run-all.R` runs them
   in order; each of `01-` to `10-` is self-contained and covers one topic:

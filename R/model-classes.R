@@ -172,6 +172,7 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #' @param x A \code{spatial_fit} object.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly (called for its side effect).
+#' @family methods on a fitted model
 #' @export
 print.spatial_fit <- function(x, ...) {
   subclass <- class(x)[1L]
@@ -263,6 +264,7 @@ print.spatial_fit <- function(x, ...) {
 #'   \code{class}, \code{formula}, \code{n}, \code{response_var},
 #'   \code{predictor_vars}, \code{info} and \code{in_sample} (the metric
 #'   data.frame, out-of-bag for an \code{rf_fit}).
+#' @family methods on a fitted model
 #' @export
 summary.spatial_fit <- function(object, ...) {
   fit_vals <- .fitted_checked(object, .caller = "summary")
@@ -410,6 +412,7 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   character or factor response cannot be scored, and used to come back as
 #'   \code{n = 0} with every metric \code{NA}; a logical response is treated
 #'   as 0/1.
+#' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
 #'   library(sf)
@@ -428,6 +431,7 @@ print.summary.spatial_fit <- function(x, ...) {
 model_metrics <- function(object, ...) UseMethod("model_metrics")
 
 
+#' @family methods on a fitted model
 #' @rdname model_metrics
 #' @export
 model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
@@ -511,6 +515,7 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   fails, every value is \code{NA} and a warning says why.  CRS-less
 #'   \code{newdata} first receives the interpretation the training data got, so
 #'   the same rows land where they did at fit time.
+#' @family methods on a fitted model
 #' @export
 predict.gwr_fit <- function(object, newdata = NULL, ...) {
   .check_dots(list(...), "predict.gwr_fit")
@@ -764,6 +769,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #'   \code{draws = FALSE} combination; any other combination is recomputed
 #'   against the training data, because the cache holds epred column means and
 #'   nothing else.
+#' @family methods on a fitted model
 #' @export
 predict.bayesian_fit <- function(object, newdata = NULL,
                                  summary = c("mean", "median"),
@@ -879,6 +885,7 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n} (\code{NA} where extraction
 #'   failed).
+#' @family methods on a fitted model
 #' @export
 fitted.gwr_fit <- function(object, ...) {
   .extract_gwr_values(
@@ -926,6 +933,7 @@ fitted.gwr_fit <- function(object, ...) {
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n} (all \code{NA} if the
 #'   posterior draw failed).
+#' @family methods on a fitted model
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
   # --- Lazy cache: posterior_epred() is O(draws × n) and expensive.
@@ -1026,6 +1034,7 @@ fitted.bayesian_fit <- function(object, ...) {
 #'
 #' @param object A \code{bayesian_fit} object.
 #' @return \code{object}, invisibly (called for side effect).
+#' @family package options and caches
 #' @examples
 #' # Only a bayesian_fit carries the cache; on any other fit this is a no-op.
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1062,6 +1071,7 @@ clear_fitted_cache <- function(object) {
 #' @param object A \code{gwr_fit}.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n}.
+#' @family methods on a fitted model
 #' @export
 residuals.gwr_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -1077,6 +1087,7 @@ residuals.gwr_fit <- function(object, ...) {
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n}.
+#' @family methods on a fitted model
 #' @export
 residuals.bayesian_fit <- function(object, ...) {
   y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -1121,6 +1132,7 @@ residuals.bayesian_fit <- function(object, ...) {
 #'   Never \code{NULL}: when the engine carries no \code{SDF} component this
 #'   errors, following the \code{coef()} contract described in
 #'   \code{\link{new_spatial_fit}}.
+#' @family methods on a fitted model
 #' @export
 coef.gwr_fit <- function(object, ...) {
   sdf <- tryCatch(object$engine$SDF, error = function(e) NULL)
@@ -1181,6 +1193,7 @@ coef.gwr_fit <- function(object, ...) {
 #'   \code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
+#' @family methods on a fitted model
 #' @export
 coef.bayesian_fit <- function(object, ...) {
   # A NULL return would be indistinguishable from "this model has no fixed

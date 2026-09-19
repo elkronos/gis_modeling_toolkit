@@ -45,3 +45,22 @@ a warning saying so.  The call neither errors nor returns a silently short
 table.
 }
 
+\seealso{
+Other methods on a fitted model: 
+\code{\link{coef.bayesian_fit}()},
+\code{\link{coef.rf_fit}()},
+\code{\link{fitted.bayesian_fit}()},
+\code{\link{fitted.gwr_fit}()},
+\code{\link{fitted.rf_fit}()},
+\code{\link{model_metrics}()},
+\code{\link{predict.bayesian_fit}()},
+\code{\link{predict.gwr_fit}()},
+\code{\link{predict.rf_fit}()},
+\code{\link{print.rf_fit}()},
+\code{\link{print.spatial_fit}()},
+\code{\link{residuals.bayesian_fit}()},
+\code{\link{residuals.gwr_fit}()},
+\code{\link{residuals.rf_fit}()},
+\code{\link{summary.spatial_fit}()}
+}
+\concept{methods on a fitted model}

@@ -963,6 +963,7 @@ residual_morans_i <- function(fit,
 #'   \code{\link{residual_morans_i}()}.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family print methods
 #' @export
 print.morans_i <- function(x, ...) {
   cat(sprintf("Residual Moran's I = %.4f   (E[I] = %.4f, sd = %.4f)\n",

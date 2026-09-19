@@ -87,7 +87,6 @@ reference:
   - create_voronoi_polygons
   - create_grid_polygons
   - create_grid_polygons_cached
-  - clear_grid_cache
   - ensure_stable_poly_id
   - plot_tessellation_map
 
@@ -120,7 +119,6 @@ reference:
   - gwr_model_selection
   - fit_bayesian_spatial_model
   - gp_lengthscale_bounds
-  - clear_fitted_cache
 
 - title: Methods on a fit
   contents:
@@ -168,6 +166,11 @@ reference:
   - print.aoa
   - plot.aoa
 
-- title: Package options
+- title: Package options and caches
+  desc: >
+    The console log, and the two in-session caches.  Both caches are keyed on
+    the inputs, so they only need clearing when memory is the constraint.
   contents:
   - spatialkit_quiet
+  - clear_grid_cache
+  - clear_fitted_cache

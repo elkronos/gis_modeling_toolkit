@@ -127,6 +127,7 @@ Other model fitting:
 \code{\link{fit_bayesian_spatial_model}()},
 \code{\link{fit_gwr_model}()},
 \code{\link{fit_rf_model}()},
+\code{\link{gp_lengthscale_bounds}()},
 \code{\link{prep_model_data}()}
 }
 \concept{model fitting}

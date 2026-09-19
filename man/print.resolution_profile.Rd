@@ -19,3 +19,11 @@
 \description{
 Print a resolution profile
 }
+\seealso{
+Other print methods: 
+\code{\link{print.aoa}()},
+\code{\link{print.gwr_model_selection}()},
+\code{\link{print.morans_i}()},
+\code{\link{print.sac_range}()}
+}
+\concept{print methods}

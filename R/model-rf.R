@@ -544,6 +544,7 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   predictions; pass your own if you need one.
 #' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
 #'   rows dropped as incomplete.
+#' @family methods on a fitted model
 #' @export
 predict.rf_fit <- function(object, newdata = NULL, ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
@@ -630,6 +631,7 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n}.
+#' @family methods on a fitted model
 #' @export
 fitted.rf_fit <- function(object, ...) {
   p <- object$engine$predictions
@@ -655,6 +657,7 @@ fitted.rf_fit <- function(object, ...) {
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{object$n}.
+#' @family methods on a fitted model
 #' @export
 residuals.rf_fit <- function(object, ...) {
   y <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
@@ -672,6 +675,7 @@ residuals.rf_fit <- function(object, ...) {
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return Never returns; always signals an error.
+#' @family methods on a fitted model
 #' @export
 coef.rf_fit <- function(object, ...) {
   stop("coef.rf_fit(): a random forest has no coefficients. For per-predictor ",
@@ -691,6 +695,7 @@ coef.rf_fit <- function(object, ...) {
 #' @param x An \code{rf_fit}.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @family methods on a fitted model
 #' @export
 print.rf_fit <- function(x, ...) {
   cat("<Random Forest (ranger)> spatial model fit\n")

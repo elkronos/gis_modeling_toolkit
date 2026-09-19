@@ -42,3 +42,15 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 seeds <- voronoi_seeds_random(bnd, k = 10)
 nrow(seeds)   # at most 10
 }
+\seealso{
+Other tessellation: 
+\code{\link{build_tessellation}()},
+\code{\link{create_grid_polygons}()},
+\code{\link{create_grid_polygons_cached}()},
+\code{\link{create_voronoi_polygons}()},
+\code{\link{ensure_stable_poly_id}()},
+\code{\link{get_voronoi_seeds}()},
+\code{\link{plot_tessellation_map}()},
+\code{\link{voronoi_seeds_kmeans}()}
+}
+\concept{tessellation}

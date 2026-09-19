@@ -676,6 +676,7 @@
 #'   \code{"none"} is returned untouched, with the heuristic skipped, which is
 #'   how a \code{predict()} method replays a fit's negative decision so that a
 #'   subset of the training rows is not judged differently from the whole.
+#' @family spatial data preparation
 #' @examples
 #' library(sf)
 #' pts_ll <- st_as_sf(
@@ -841,6 +842,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'   option exists only for rare edge cases where you are certain the
 #'   coordinates already match the target CRS definition.
 #' @return A named list with components a and b.
+#' @family spatial data preparation
 #' @examples
 #' library(sf)
 #' a <- st_as_sf(data.frame(x = c(500000, 500100), y = c(4000000, 4000100)),
@@ -990,6 +992,7 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #'   input's numbers, not planar midpoints.  Set the CRS, or pass
 #'   \code{tmp_project = FALSE}, for planar data.
 #' @return An sf object with geometry coerced to POINTs.
+#' @family spatial data preparation
 #' @examples
 #' library(sf)
 #' poly <- st_sf(

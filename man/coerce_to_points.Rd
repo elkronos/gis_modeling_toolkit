@@ -47,3 +47,11 @@ poly <- st_sf(
 )
 coerce_to_points(poly, "auto")  # interior representative point
 }
+\seealso{
+Other spatial data preparation: 
+\code{\link{clip_target_for}()},
+\code{\link{ensure_projected}()},
+\code{\link{harmonize_crs}()},
+\code{\link{prep_model_data}()}
+}
+\concept{spatial data preparation}
