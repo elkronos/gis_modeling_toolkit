@@ -38,7 +38,7 @@ if (requireNamespace("gstat", quietly = TRUE) &&
   library(sf)
   set.seed(3)
   n <- 150
-  xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   xy$z <- sin(xy$x / 150) + rnorm(n, sd = 0.3)
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   r <- estimate_sac_range(pts, response_var = "z")

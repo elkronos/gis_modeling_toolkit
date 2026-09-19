@@ -111,7 +111,8 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   set.seed(1)
   n <- 200
   dat <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), a = rnorm(n)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               a = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)

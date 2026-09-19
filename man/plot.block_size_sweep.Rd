@@ -29,7 +29,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   library(sf)
   set.seed(1)
   n <- 200
-  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
   d <- as.matrix(dist(cbind(x, y)))
   field <- as.numeric(t(chol(exp(-d / 100) + diag(1e-6, n))) \%*\% rnorm(n))
   dat <- st_as_sf(data.frame(x = x, y = y, a = rnorm(n)), coords = c("x", "y"),

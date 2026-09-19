@@ -213,12 +213,14 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   set.seed(1)
   n <- 120
   dat <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               elev = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
   # A strong east-west trend the predictor cannot explain: the residuals
   # should still carry spatial structure, and this is what detects it.
-  dat$price <- 10 + 0.02 * st_coordinates(dat)[, 1] + 2 * dat$elev + rnorm(n)
+  dat$price <- 10 + 0.02 * (st_coordinates(dat)[, 1] - 5e5) +
+    2 * dat$elev + rnorm(n)
   fit <- fit_rf_model(dat, "price", "elev", num_trees = 100, seed = 1)
   # I = 0.64, z = 15.5: strong positive residual autocorrelation, exactly
   # as constructed.  A z near 0 with a large p-value would be the opposite

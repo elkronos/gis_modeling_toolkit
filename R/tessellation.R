@@ -32,7 +32,7 @@
 #' library(sf)
 #' set.seed(1)
 #' pts <- st_as_sf(
-#'   data.frame(x = runif(30, 0, 100), y = runif(30, 0, 100)),
+#'   data.frame(x = 5e5 + runif(30, 0, 100), y = 5e6 + runif(30, 0, 100)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' # No boundary: the convex hull, expanded by 10% of the extent
@@ -228,7 +228,7 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' library(sf)
 #' set.seed(1)
 #' pts <- st_as_sf(
-#'   data.frame(x = runif(15, 0, 100), y = runif(15, 0, 100)),
+#'   data.frame(x = 5e5 + runif(15, 0, 100), y = 5e6 + runif(15, 0, 100)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' res <- create_voronoi_polygons(pts, quiet = TRUE)
@@ -688,7 +688,7 @@ create_grid_polygons <- function(
 #' library(sf)
 #' set.seed(1)
 #' pts <- st_as_sf(
-#'   data.frame(x = runif(20, 0, 100), y = runif(20, 0, 100)),
+#'   data.frame(x = 5e5 + runif(20, 0, 100), y = 5e6 + runif(20, 0, 100)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)

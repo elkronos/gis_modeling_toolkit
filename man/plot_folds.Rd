@@ -37,7 +37,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   set.seed(1)
   n <- 80
   pts <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
     coords = c("x", "y"), crs = 32632
   )
   f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300)

@@ -66,10 +66,12 @@
 #' set.seed(1)
 #' n <- 80
 #' site <- st_as_sf(
-#'   data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), elev = rnorm(n)),
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              elev = rnorm(n)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' site$price <- 10 + 0.01 * st_coordinates(site)[, 1] + 2 * site$elev + rnorm(n)
+#' site$price <- 10 + 0.01 * (st_coordinates(site)[, 1] - 5e5) +
+#'   2 * site$elev + rnorm(n)
 #'
 #' # A custom backend: an ordinary linear model behind the spatial_fit interface.
 #' lm_fit <- function(train_sf) {
@@ -413,7 +415,8 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   library(sf)
 #'   set.seed(1)
 #'   pts <- st_as_sf(
-#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'                a = rnorm(60)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
 #'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
@@ -1029,7 +1032,8 @@ fitted.bayesian_fit <- function(object, ...) {
 #'   library(sf)
 #'   set.seed(1)
 #'   pts <- st_as_sf(
-#'     data.frame(x = runif(60, 0, 1000), y = runif(60, 0, 1000), a = rnorm(60)),
+#'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
+#'                a = rnorm(60)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
 #'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)

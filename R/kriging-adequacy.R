@@ -115,7 +115,7 @@
 #'   library(sf)
 #'   set.seed(1)
 #'   n <- 200
-#'   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+#'   x <- 5e5 + runif(n, 0, 1000); y <- 5e6 + runif(n, 0, 1000)
 #'   d <- as.matrix(dist(cbind(x, y)))
 #'   z <- as.numeric(t(chol(0.8 * exp(-d / 100) + diag(0.2, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)

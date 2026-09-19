@@ -49,10 +49,12 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   set.seed(1)
   n <- 150
   dat <- st_as_sf(
-    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000), a = rnorm(n)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               a = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
-  dat$z <- 2 * dat$a + 0.003 * st_coordinates(dat)[, 1] + rnorm(n, 0, 0.5)
+  dat$z <- 2 * dat$a + 0.003 * (st_coordinates(dat)[, 1] - 5e5) +
+    rnorm(n, 0, 0.5)
   cv <- cv_rf(dat, "z", "a", k = 5, num_trees = 100)
   plot_cv_metrics(cv, "RMSE")
 }

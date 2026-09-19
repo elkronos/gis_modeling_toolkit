@@ -72,11 +72,13 @@ and cell-level counts mean what they say.
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(20, 0, 100), y = runif(20, 0, 100), val = rnorm(20)),
+  data.frame(x = 5e5 + runif(20, 0, 100), y = 5e6 + runif(20, 0, 100),
+             val = rnorm(20)),
   coords = c("x", "y"), crs = 32632
 )
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
-  c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
+  c(5e5, 5e6), c(5e5 + 100, 5e6), c(5e5 + 100, 5e6 + 100),
+  c(5e5, 5e6 + 100), c(5e5, 5e6)
 ))), crs = 32632))
 grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)

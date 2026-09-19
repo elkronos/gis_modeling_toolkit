@@ -59,7 +59,7 @@ stable \code{cell_id} values.
 library(sf)
 set.seed(1)
 pts <- st_as_sf(
-  data.frame(x = runif(15, 0, 100), y = runif(15, 0, 100)),
+  data.frame(x = 5e5 + runif(15, 0, 100), y = 5e6 + runif(15, 0, 100)),
   coords = c("x", "y"), crs = 32632
 )
 res <- create_voronoi_polygons(pts, quiet = TRUE)
