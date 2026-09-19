@@ -148,7 +148,13 @@ the cells are still leaving spatial pattern on the table.
 plot(prof)
 ```
 
-![](resolution_files/figure-html/plot-profile-1.png)
+![Four stacked panels, one per criterion, against the number of cells on
+a shared axis. Mallows' Cp falls then flattens, reliability declines
+steadily, the elbow statistic peaks around twenty cells, and the
+absolute Moran's z is lowest below twenty-five. A red dotted line marks
+each criterion's choice and a shaded band the region within tolerance of
+it: the four disagree, and each flat region is
+wide.](resolution_files/figure-html/plot-profile-1.png)
 
 Two behaviours are worth knowing before reading the numbers.
 

@@ -112,7 +112,10 @@ ggplot() +
   theme_void()
 ```
 
-![](reporting_files/figure-html/map-1.png)
+![The North Carolina counties grouped into eighteen hexagonal regions,
+each shaded by the mean 1974 SIDS rate of the counties inside it. County
+outlines show underneath. Six regions along the edges hold no county and
+are grey.](reporting_files/figure-html/map-1.png)
 
 ### Is this location inside?
 

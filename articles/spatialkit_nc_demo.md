@@ -118,7 +118,10 @@ ggplot() +
   ggtitle("Raw observation points, North Carolina")
 ```
 
-![](spatialkit_nc_demo_files/figure-html/quick-peek-1.png)
+![Three hundred simulated observation points scattered across North
+Carolina, coloured by response value. Lower values cluster in the west
+and higher values along the eastern
+coast.](spatialkit_nc_demo_files/figure-html/quick-peek-1.png)
 
 ------------------------------------------------------------------------
 
@@ -316,8 +319,10 @@ make_choropleth <- function(tess, boundary, points, title = NULL) {
 make_choropleth(tess_voronoi, nc_boundary, points_sf, "Voronoi tessellation")
 ```
 
-![Voronoi
-choropleth](spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png)
+![The same response aggregated into forty Voronoi cells over North
+Carolina. Cell sizes follow the density of the observations, and the
+west-to-east gradient from low to high values is
+visible.](spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png)
 
 Voronoi choropleth
 
@@ -326,8 +331,10 @@ Voronoi choropleth
 make_choropleth(tess_hex, nc_boundary, points_sf, "Hexagonal grid")
 ```
 
-![Hex grid
-choropleth](spatialkit_nc_demo_files/figure-html/choro-hex-1.png)
+![The same response aggregated into a regular hexagonal grid of about
+fifty equal-area cells, showing the same west-to-east gradient on a
+fixed geometry rather than one drawn from the
+data.](spatialkit_nc_demo_files/figure-html/choro-hex-1.png)
 
 Hex grid choropleth
 
@@ -336,8 +343,10 @@ Hex grid choropleth
 make_choropleth(tess_square, nc_boundary, points_sf, "Square grid")
 ```
 
-![Square grid
-choropleth](spatialkit_nc_demo_files/figure-html/choro-square-1.png)
+![The same response aggregated into a regular square grid of about
+forty-five cells, showing the same gradient with the axis-aligned
+artefacts a square grid
+introduces.](spatialkit_nc_demo_files/figure-html/choro-square-1.png)
 
 Square grid choropleth
 
@@ -346,8 +355,10 @@ Square grid choropleth
 make_choropleth(tess_tri, nc_boundary, points_sf, "Delaunay triangulation")
 ```
 
-![Delaunay
-choropleth](spatialkit_nc_demo_files/figure-html/choro-tri-1.png)
+![The same response aggregated onto the Delaunay triangulation of the
+observation points, which produces many small irregular triangles rather
+than compact
+cells.](spatialkit_nc_demo_files/figure-html/choro-tri-1.png)
 
 Delaunay choropleth
 
@@ -386,8 +397,10 @@ bare <- function(tess, label) {
   plot_annotation(title = "Tessellation comparison, cell-level mean response")
 ```
 
-![All three at a
-glance](spatialkit_nc_demo_files/figure-html/comparison-panel-1.png)
+![The Voronoi, hexagonal and square maps stacked on one shared colour
+scale, so the cell values can be compared down the page. All three show
+the same west-to-east gradient; they differ in how the cell boundaries
+fall.](spatialkit_nc_demo_files/figure-html/comparison-panel-1.png)
 
 All three at a glance
 
@@ -471,7 +484,11 @@ library(patchwork)
   plot_layout(guides = "collect")
 ```
 
-![](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
+![Two maps of the same points, random folds above and blocked folds
+below, sharing one fold legend. In the random map the five colours are
+interleaved everywhere; in the blocked map each fold occupies a
+contiguous part of the state, with the block grid drawn
+behind.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
 
 ### 5c. The number the fold scheme changes
 
@@ -595,7 +612,11 @@ puts a number on it.
 plot(rf_fit, type = "residuals")
 ```
 
-![](spatialkit_nc_demo_files/figure-html/rf-resid-1.png)
+![Residuals of the random forest mapped over North Carolina on a
+red-to-blue scale. Positive residuals cluster in the west and negative
+ones through the centre, which is the visible spatial structure the
+model has not
+captured.](spatialkit_nc_demo_files/figure-html/rf-resid-1.png)
 
 ``` r
 
@@ -671,7 +692,10 @@ ggplot() +
   ggtitle("Predicted surface")
 ```
 
-![](spatialkit_nc_demo_files/figure-html/surface-1.png)
+![The fitted random forest predicted onto a regular grid over North
+Carolina and clipped to the state boundary, with predictions lowest in
+the far west and highest along the eastern
+coast.](spatialkit_nc_demo_files/figure-html/surface-1.png)
 
 A fitted model returns a number for any location you hand it, including
 locations whose predictor values look nothing like the training data.
@@ -705,7 +729,11 @@ ggplot() +
   ggtitle("Predicted surface, extrapolations blanked out")
 ```
 
-![](spatialkit_nc_demo_files/figure-html/aoa-1.png)
+![The same predicted surface with cells outside the area of
+applicability blanked out. Nothing is blanked, because the grid took its
+covariates from the nearest observation and so holds no combination the
+model had not already
+seen.](spatialkit_nc_demo_files/figure-html/aoa-1.png)
 
 Nothing is masked here, and the reason is worth understanding rather
 than taking as reassurance: `predict_surface(covariates = points_sf)`

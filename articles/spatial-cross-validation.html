@@ -218,7 +218,7 @@ it</td>
 behind it when the scheme has any:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">fb</span>, <span class="va">pts</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-folds-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-folds-1.png" class="r-plt" alt="A square study area divided into a grid of blocks, with the points coloured by fold. Each fold occupies whole blocks rather than being scattered, so held-out points sit away from the points used to train." width="100%" style="display: block; margin: auto;"></p>
 <p>Look at whether any fold is a thin sliver or a single corner. Fold
 geometry that looks wrong on the map produces a score that is wrong in a
 way no summary statistic will tell you about.</p>
@@ -288,7 +288,7 @@ reference.</p>
 <span><span class="co">##    1.4184</span></span></code></pre>
 <div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.85 at the smallest to about 1.12 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range." width="100%" style="display: block; margin: auto;"></p>
 <p>Error climbs away from the random-fold reference as blocks widen, and
 the estimated range is marked. The height of the climb is what random
 folds were hiding.</p>
@@ -309,7 +309,7 @@ pooled RMSE built from one catastrophic fold and four good ones
 describes neither.</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_cv_metrics.html">plot_cv_metrics</a></span><span class="op">(</span><span class="va">cv_blocked</span>, metric <span class="op">=</span> <span class="st">"RMSE"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-metrics-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-metrics-1.png" class="r-plt" alt="RMSE for each of five folds, with point size showing how many rows each held out. The values run from about 0.94 to 1.12 around a dashed pooled line near 1.01, so the pooled number hides a spread of nearly twenty percent." width="100%" style="display: block; margin: auto;"></p>
 <div class="section level3">
 <h3 id="every-row-and-every-fold-is-accounted-for">Every row and every fold is accounted for<a class="anchor" aria-label="anchor" href="#every-row-and-every-fold-is-accounted-for"></a>
 </h3>

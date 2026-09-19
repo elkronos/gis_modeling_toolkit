@@ -234,7 +234,11 @@ your own.
 plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate")
 ```
 
-![](getting-started_files/figure-html/map-1.png)
+![Choropleth of North Carolina divided into about twenty hexagonal
+cells, each shaded by its mean response rate. The values run from near
+zero in one western cell to about four in a southern coastal cell, with
+no obvious regional
+pattern.](getting-started_files/figure-html/map-1.png)
 
 Cross-validating a model over those folds is
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)

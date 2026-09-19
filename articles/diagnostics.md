@@ -289,7 +289,11 @@ aoa
 plot(aoa)
 ```
 
-![](diagnostics_files/figure-html/aoa-plot-1.png)
+![Cumulative distribution of the dissimilarity index. The prediction
+locations rise far more slowly than the cross-validated training points,
+and most of them sit beyond the dashed threshold, so the cross-validated
+score does not apply to most of the
+grid.](diagnostics_files/figure-html/aoa-plot-1.png)
 
 Shifting one predictor three standard deviations moves most of the grid
 outside the domain the model was trained on. The dissimilarity index

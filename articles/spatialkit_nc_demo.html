@@ -194,7 +194,7 @@ cross-validation optimistic, and it is what section 5 measures.</li>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Response (y)"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Raw observation points, North Carolina"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/quick-peek-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/quick-peek-1.png" class="r-plt" alt="Three hundred simulated observation points scattered across North Carolina, coloured by response value. Lower values cluster in the west and higher values along the eastern coast." width="100%" style="display: block; margin: auto;"></p>
 <hr>
 </div>
 <div class="section level2">
@@ -358,28 +358,28 @@ an estimated intra-class correlation, and
 <div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Voronoi tessellation"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png" class="r-plt" alt="Voronoi choropleth" width="100%"><p class="caption">
+<img src="spatialkit_nc_demo_files/figure-html/choro-voronoi-1.png" class="r-plt" alt="The same response aggregated into forty Voronoi cells over North Carolina. Cell sizes follow the density of the observations, and the west-to-east gradient from low to high values is visible." width="100%"><p class="caption">
 Voronoi choropleth
 </p>
 </div>
 <div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_hex</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Hexagonal grid"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-hex-1.png" class="r-plt" alt="Hex grid choropleth" width="100%"><p class="caption">
+<img src="spatialkit_nc_demo_files/figure-html/choro-hex-1.png" class="r-plt" alt="The same response aggregated into a regular hexagonal grid of about fifty equal-area cells, showing the same west-to-east gradient on a fixed geometry rather than one drawn from the data." width="100%"><p class="caption">
 Hex grid choropleth
 </p>
 </div>
 <div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_square</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Square grid"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-square-1.png" class="r-plt" alt="Square grid choropleth" width="100%"><p class="caption">
+<img src="spatialkit_nc_demo_files/figure-html/choro-square-1.png" class="r-plt" alt="The same response aggregated into a regular square grid of about forty-five cells, showing the same gradient with the axis-aligned artefacts a square grid introduces." width="100%"><p class="caption">
 Square grid choropleth
 </p>
 </div>
 <div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_tri</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Delaunay triangulation"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/choro-tri-1.png" class="r-plt" alt="Delaunay choropleth" width="100%"><p class="caption">
+<img src="spatialkit_nc_demo_files/figure-html/choro-tri-1.png" class="r-plt" alt="The same response aggregated onto the Delaunay triangulation of the observation points, which produces many small irregular triangles rather than compact cells." width="100%"><p class="caption">
 Delaunay choropleth
 </p>
 </div>
@@ -415,7 +415,7 @@ makes reading down the page legitimate.</p>
 <span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_annotation.html" class="external-link">plot_annotation</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Tessellation comparison, cell-level mean response"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
-<img src="spatialkit_nc_demo_files/figure-html/comparison-panel-1.png" class="r-plt" alt="All three at a glance" width="100%"><p class="caption">
+<img src="spatialkit_nc_demo_files/figure-html/comparison-panel-1.png" class="r-plt" alt="The Voronoi, hexagonal and square maps stacked on one shared colour scale, so the cell values can be compared down the page. All three show the same west-to-east gradient; they differ in how the cell boundaries fall." width="100%"><p class="caption">
 All three at a glance
 </p>
 </div>
@@ -486,7 +486,7 @@ autocorrelation range and therefore leaking:</p>
 <span><span class="op">(</span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">/</span></span>
 <span> <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map each fold occupies a contiguous part of the state, with the block grid drawn behind." width="100%" style="display: block; margin: auto;"></p>
 </div>
 <div class="section level3">
 <h3 id="c--the-number-the-fold-scheme-changes">5c. The number the fold scheme changes<a class="anchor" aria-label="anchor" href="#c--the-number-the-fold-scheme-changes"></a>
@@ -583,7 +583,7 @@ residuals; visible structure means unmodelled spatial autocorrelation.
 <code><a href="../reference/residual_morans_i.html">residual_morans_i()</a></code> puts a number on it.</p>
 <div class="sourceCode" id="cb41"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">rf_fit</span>, type <span class="op">=</span> <span class="st">"residuals"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/rf-resid-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/rf-resid-1.png" class="r-plt" alt="Residuals of the random forest mapped over North Carolina on a red-to-blue scale. Positive residuals cluster in the west and negative ones through the centre, which is the visible spatial structure the model has not captured." width="100%" style="display: block; margin: auto;"></p>
 <div class="sourceCode" id="cb42"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">mi</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/residual_morans_i.html">residual_morans_i</a></span><span class="op">(</span><span class="va">rf_fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"Moran's I = %.4f (z = %.2f, p = %.3g)\n"</span>,</span>
@@ -647,7 +647,7 @@ the boundary and predicts:</p>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Predicted y"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Predicted surface"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/surface-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/surface-1.png" class="r-plt" alt="The fitted random forest predicted onto a regular grid over North Carolina and clipped to the state boundary, with predictions lowest in the far west and highest along the eastern coast." width="100%" style="display: block; margin: auto;"></p>
 <p>A fitted model returns a number for any location you hand it,
 including locations whose predictor values look nothing like the
 training data. <code><a href="../reference/area_of_applicability.html">area_of_applicability()</a></code> marks where the
@@ -672,7 +672,7 @@ with:</p>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Predicted y"</span>, na.value <span class="op">=</span> <span class="st">"grey85"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Predicted surface, extrapolations blanked out"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/aoa-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/aoa-1.png" class="r-plt" alt="The same predicted surface with cells outside the area of applicability blanked out. Nothing is blanked, because the grid took its covariates from the nearest observation and so holds no combination the model had not already seen." width="100%" style="display: block; margin: auto;"></p>
 <p>Nothing is masked here, and the reason is worth understanding rather
 than taking as reassurance:
 <code>predict_surface(covariates = points_sf)</code> copies predictor

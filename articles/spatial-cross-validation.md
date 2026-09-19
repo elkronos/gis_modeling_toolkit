@@ -122,7 +122,10 @@ draws the assignment, with the blocks behind it when the scheme has any:
 plot_folds(fb, pts)
 ```
 
-![](spatial-cross-validation_files/figure-html/plot-folds-1.png)
+![A square study area divided into a grid of blocks, with the points
+coloured by fold. Each fold occupies whole blocks rather than being
+scattered, so held-out points sit away from the points used to
+train.](spatial-cross-validation_files/figure-html/plot-folds-1.png)
 
 Look at whether any fold is a thin sliver or a single corner. Fold
 geometry that looks wrong on the map produces a score that is wrong in a
@@ -213,7 +216,11 @@ sw
 plot(sw)
 ```
 
-![](spatial-cross-validation_files/figure-html/plot-sweep-1.png)
+![Cross-validated RMSE against block edge length on a log scale. The
+error rises steadily as the blocks grow, from about 0.85 at the smallest
+to about 1.12 at the largest, staying above the dashed random-fold
+reference throughout. A dotted line marks the estimated autocorrelation
+range.](spatial-cross-validation_files/figure-html/plot-sweep-1.png)
 
 Error climbs away from the random-fold reference as blocks widen, and
 the estimated range is marked. The height of the climb is what random
@@ -237,7 +244,11 @@ catastrophic fold and four good ones describes neither.
 plot_cv_metrics(cv_blocked, metric = "RMSE")
 ```
 
-![](spatial-cross-validation_files/figure-html/plot-metrics-1.png)
+![RMSE for each of five folds, with point size showing how many rows
+each held out. The values run from about 0.94 to 1.12 around a dashed
+pooled line near 1.01, so the pooled number hides a spread of nearly
+twenty
+percent.](spatial-cross-validation_files/figure-html/plot-metrics-1.png)
 
 ### Every row and every fold is accounted for
 
