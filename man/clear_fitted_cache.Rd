@@ -15,7 +15,7 @@ clear_fitted_cache(object)
 \description{
 Removes the lazily-cached \code{fitted()} result so that the next call
 recomputes from the posterior.  This is only necessary if the underlying
-\code{brmsfit} engine has been manually mutated after fitting -- a change to
+\code{brmsfit} engine has been manually mutated after fitting.  A change to
 \code{data_sf} invalidates the entry on its own, because the cached value
 carries a digest of the data it was computed from (see
 \code{\link{fitted.bayesian_fit}}).  Normal usage never requires it.

@@ -11,13 +11,13 @@
 #'   `method = "provided"`, where every row of `seeds` is returned; a mismatch
 #'   between `n` and `nrow(seeds)` is reported as a warning.
 #'
-#'   For `method = "kmeans"` it is an upper bound rather than a guarantee:
+#'   For `method = "kmeans"` it is an upper bound only:
 #'   k-means cannot produce more centres than there are distinct positions in
 #'   the sampling cloud, nor as many centres as there are rows. When `n`
 #'   exceeds either ceiling it is clamped, with a warning naming the count
-#'   actually used — `n = nrow(sample_points)` is the common case, and yields
-#'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result rather than
-#'   assuming `n`.
+#'   actually used. `n = nrow(sample_points)` is the common case, and yields
+#'   `nrow(sample_points) - 1` seeds. Check `nrow()` on the result; do not
+#'   assume `n`.
 #'
 #'   Besides a number, `n` accepts what the level-selection step returned:
 #'   the integer vector of ranked candidates from [determine_optimal_levels()]
@@ -29,7 +29,7 @@
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
 #'   not join the distance calculation and dominate it; rows with empty or
-#'   non-finite coordinates are dropped with a warning rather than reaching
+#'   non-finite coordinates are dropped with a warning, so they never reach
 #'   `stats::kmeans()`, which fails on them without naming a cause. A lon/lat
 #'   cloud is projected before clustering.
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
@@ -208,7 +208,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 }
 
 
-#' Robust wrapper around sf::st_sample that handles exact= failures
+#' Sample points inside a geometry, retrying when exact sampling fails
 #'
 #' Tries exact sampling first, then falls back to iterative padding to
 #' reach the desired count.
@@ -243,7 +243,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' K-means seed generation from point coordinates
 #'
 #' Places `k` seed points at k-means cluster centres of the observed
-#' coordinates, so seeds — and the Voronoi cells built from them — follow the
+#' coordinates, so seeds (and the Voronoi cells built from them) follow the
 #' sampling density: clusters of observations attract seeds, empty ground gets
 #' none. Reach for this when you want cells that each carry a comparable number
 #' of observations, which is what makes per-cell aggregates in
@@ -251,16 +251,16 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' instead when you want coverage of the study area rather than of the data,
 #' and [get_voronoi_seeds()] to pick between them by name.
 #'
-#' Lon/lat input is projected first so the k-means distances are metric rather
-#' than degrees. Rows with empty or non-finite coordinates are dropped with a
+#' Lon/lat input is projected first so the k-means distances are metric and not
+#' degrees. Rows with empty or non-finite coordinates are dropped with a
 #' warning, and `k` is clamped to the number of distinct positions.
 #'
 #' @param points_sf An sf object with POINT geometries.
-#' @param k Integer; requested number of clusters, and an upper bound rather
-#'   than a guarantee. It is clamped, with a warning, to whichever is smaller
-#'   of the number of distinct point positions and `nrow(points_sf) - 1` —
-#'   k-means can produce neither more centres than there are distinct points
-#'   nor as many centres as there are rows. Check `nrow()` on the result.
+#' @param k Integer; requested number of clusters, treated as an upper bound
+#'   only. It is clamped, with a warning, to whichever is smaller of the number
+#'   of distinct point positions and `nrow(points_sf) - 1`, because k-means can
+#'   produce neither more centres than there are distinct points nor as many
+#'   centres as there are rows. Check `nrow()` on the result.
 #' @param set_seed Optional integer RNG seed. Default 456.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
@@ -335,8 +335,8 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #'
 #' Draws `k` seed points uniformly at random inside `boundary`, ignoring where
 #' the observations are. Reach for this when the cells should cover the study
-#' area evenly — so that sparsely sampled ground still gets its own cells and
-#' is visibly under-sampled in the results — rather than concentrating
+#' area evenly (so that sparsely sampled ground still gets its own cells and
+#' is visibly under-sampled in the results) instead of concentrating
 #' resolution where the data already are, which is what
 #' [voronoi_seeds_kmeans()] does. It is also the honest choice for a null or
 #' sensitivity comparison: re-running an analysis over several random seedings

@@ -11,8 +11,8 @@
 #' Beyond about 5 degrees from the central meridian of the candidate zone, the
 #' zone, a Lambert azimuthal equal-area centred on the data and (unless its
 #' cone constant degenerates) an Albers conic are each scored by
-#' \code{.crs_distance_error()} -- projecting representative points of the data
-#' and comparing planar with geodesic pairwise distances -- and the least
+#' \code{.crs_distance_error()}, which projects representative points of the
+#' data and compares planar with geodesic pairwise distances.  The least
 #' distorting is returned, which may still be the zone.  Forcing continental
 #' data into one UTM zone produces percent-scale distance errors that propagate
 #' silently into variogram ranges, block sizes, GWR bandwidth and GP
@@ -24,17 +24,17 @@
 #'
 #' Data straddling the antimeridian are detected from the one very large gap in
 #' the sorted longitudes and given an equal-area projection centred on the true
-#' extent; only genuinely global coverage falls back to Web Mercator
+#' extent; only truly global coverage falls back to Web Mercator
 #' (EPSG:3857), which would otherwise SPLIT a wrapped layer.
 #'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
-#'   \code{candidates}, a data.frame with one row per projection considered
-#'   -- \code{name}, \code{crs} (its definition as a string),
+#'   \code{candidates}, a data.frame with one row per projection considered:
+#'   \code{name}, \code{crs} (its definition as a string),
 #'   \code{distance_error} (the measured worst-case relative distance error
 #'   over sampled pairs, \code{NA} where it could not be measured) and
-#'   \code{chosen}.  Where only one projection was in play -- a zone kept on
-#'   a local extent, the equal-area projection for a wrapped layer -- that
+#'   \code{chosen}.  Where only one projection was in play (a zone kept on
+#'   a local extent, the equal-area projection for a wrapped layer), that
 #'   one is measured and reported alone.  \code{candidates} is \code{NULL}
 #'   only where no local projection was chosen: non-geographic input, no
 #'   finite centroid, or an extent that falls back to the global projection.
@@ -336,7 +336,7 @@
 #' choose between candidate projections by measurement rather than by rule of
 #' thumb.
 #'
-#' The sample is taken by evenly spaced index (no RNG), so the answer is
+#' The sample is taken by evenly spaced index (no RNG), so the result is
 #' reproducible; \code{max_n} keeps the pairwise work bounded.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
@@ -382,16 +382,16 @@
 #' Worst-case relative area distortion of a projection over a layer
 #'
 #' The counterpart of \code{.crs_distance_error()} for the property a density
-#' or a rate depends on.  Probe polygons -- the layer's own polygons when it
-#' has them (up to \code{max_n}, by evenly spaced index), otherwise an
-#' \code{n x n} grid over its bounding box -- are measured twice: their planar
-#' area in \code{crs} and their geodesic area on the globe.  An equal-area
+#' or a rate depends on.  Probe polygons are measured twice: their planar
+#' area in \code{crs} and their geodesic area on the globe.  The probes are the
+#' layer's own polygons when it has them (up to \code{max_n}, by evenly spaced
+#' index), otherwise an \code{n x n} grid over its bounding box.  An equal-area
 #' projection makes the ratio of the two the same for every probe (up to the
 #' sphere-versus-ellipsoid factor of the s2 areas, which drifts slowly with
 #' latitude and stays within a few tenths of a percent), so the figure
 #' returned is the spread of that ratio: the largest relative departure from
 #' its median.  A conformal projection such as a UTM zone gives a ratio that
-#' varies as the square of its scale factor -- 0.25 percent across a zone,
+#' varies as the square of its scale factor: 0.25 percent across a zone,
 #' 14 percent when the conterminous United States is forced into one.
 #'
 #' @param x An sf/sfc object with a CRS.
@@ -447,8 +447,8 @@
 #' The line-midpoint branches project temporarily so that "halfway along the
 #' line" is measured in a length unit, then bring the midpoints back.  When
 #' the input had NO CRS and \code{ensure_projected()} interpreted it as
-#' lon/lat, "back" is EPSG:4326 -- the space the input's numbers were in --
-#' with the CRS then stripped again so the output matches the input.
+#' lon/lat, "back" is EPSG:4326 (the space the input's numbers were in), with
+#' the CRS then stripped again so the output matches the input.
 #' \code{sf::st_transform(x, NA_crs_)} is an error ("crs not found"), which
 #' is what every CRS-less LINESTRING layer inside the lon/lat envelope used
 #' to die with.
@@ -478,8 +478,8 @@
 #' The single heuristic behind every "assume EPSG:4326" decision in the
 #' package, so that the decision is the SAME wherever it is taken.  It used
 #' to live only in the no-target branch of \code{ensure_projected()}: fitting
-#' assumed lon/lat and projected, while every \code{predict()} method -- which
-#' passes a target -- stamped the fit's projected CRS onto the raw numbers.
+#' assumed lon/lat and projected, while every \code{predict()} method (which
+#' passes a target) stamped the fit's projected CRS onto the raw numbers.
 #' The same CRS-less rows then sat in two different places at fit and at
 #' predict time, and \code{predict(fit, newdata = training_rows)} disagreed
 #' with \code{fitted(fit)} by up to the response's standard deviation.
@@ -491,7 +491,7 @@
 #'
 #' The two tests are a disjunction, and the extent test is evaluated first, so
 #' any CRS-less planar layer that fits inside the envelope and is more than one
-#' unit across is treated as lon/lat -- a 50 m site survey included.  That is a
+#' unit across is treated as lon/lat, a 50 m site survey included.  That is a
 #' deliberate trade: a CRS-less layer is ambiguous by construction, and the
 #' failure modes are not symmetric.  Reading true degrees as planar metres
 #' makes every distance in the package meaningless with no way to notice;
@@ -499,7 +499,7 @@
 #' obviously wrong and a warning that names the assumption.  Requiring BOTH
 #' tests would not help: a genuine study area 0.01 degrees across passes only
 #' the precision test, and a [0, 1]-normalised planar layer passes it too.
-#' Set the CRS explicitly -- the warning says so -- when the data are planar.
+#' When the data are planar, set the CRS explicitly, as the warning says.
 #'
 #' @param x An sf/sfc object with no CRS.
 #' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
@@ -534,8 +534,8 @@
 #' \code{ensure_projected()} records \code{attr(, "crs_assumed")} on data it
 #' interpreted as lon/lat.  A prediction frame with no CRS is given that same
 #' interpretation before being aligned to the fit, so that newdata drawn from
-#' the training rows -- even a subset whose own bounding box would not have
-#' triggered the heuristic -- lands where the training rows did.
+#' the training rows (even a subset whose own bounding box would not have
+#' triggered the heuristic) lands where the training rows did.
 #'
 #' @param newdata sf, possibly CRS-less.
 #' @param training_sf The fit's \code{data_sf}.
@@ -590,7 +590,7 @@
 #' @details
 #' An object that already has a projected CRS is returned untouched. Only
 #' geographic (lon/lat) input is transformed, and the CRS chosen depends on the
-#' extent of the data — it is **not** always UTM:
+#' extent of the data. It is **not** always UTM:
 #'
 #' \describe{
 #'   \item{Local extents}{The UTM zone containing the data's centre
@@ -599,13 +599,13 @@
 #'     this package is usually in.}
 #'   \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 #'     a UTM zone is designed for, a single zone can distort distances by
-#'     several percent — and that error propagates straight into variogram
+#'     several percent, and that error propagates straight into variogram
 #'     ranges, block sizes, GWR bandwidths and GP length-scales. Which
 #'     projection is actually best is then **measured, not assumed**: the zone,
 #'     a Lambert azimuthal equal-area centred on the data and (where its
 #'     standard parallels do not degenerate) an Albers conic are each scored by
-#'     projecting representative points of the data — a non-POINT layer is
-#'     reduced to points first — and comparing planar with geodesic pairwise
+#'     projecting representative points of the data (a non-POINT layer is
+#'     reduced to points first) and comparing planar with geodesic pairwise
 #'     distances, and the one that distorts least is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
@@ -613,7 +613,7 @@
 #'   \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 #'     hemisphere. The wrap is detected from the coordinates (one very large
 #'     gap in the sorted longitudes) and an equal-area projection centred on
-#'     the true extent is used. Only genuinely global coverage falls back to
+#'     the true extent is used. Only truly global coverage falls back to
 #'     EPSG:3857.}
 #'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
 #'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
@@ -622,29 +622,30 @@
 #'     from, so the same heuristic decides between two outcomes: lon/lat-looking
 #'     coordinates are read as EPSG:4326 and reprojected to the target (a real
 #'     warning), and anything else has the target **stamped on without
-#'     reprojection** — a relabel, logged only, so verify the coordinates really
-#'     are in that CRS. Set the CRS explicitly to suppress either.}
+#'     reprojection**. That is a relabel, logged only, so verify the
+#'     coordinates really are in that CRS. Set the CRS explicitly to suppress
+#'     either.}
 #' }
 #'
-#' `target_crs` overrides all of this: pass it whenever you need a specific,
-#' reproducible projection — comparing runs, matching an existing layer, or
+#' `target_crs` overrides all of this. Pass it whenever you need a specific,
+#' reproducible projection: comparing runs, matching an existing layer, or
 #' fixing the units that [make_folds()]'s `block_size` will be interpreted in.
 #'
 #' @param x An sf or sfc object (other objects returned unchanged).
 #' @param target_crs Optional target CRS (sf object, integer EPSG, or crs).
 #'   Must resolve to a usable CRS via [sf::st_crs()]; an unusable value (one
-#'   that resolves to `NA_crs_`) raises an error rather than silently leaving
-#'   `x` unprojected.
+#'   that resolves to `NA_crs_`) raises an error, so `x` is never left
+#'   silently unprojected.
 #' @param purpose Which property the projection is for.  `"distance"` (the
 #'   default, and everything above): the candidate that distorts pairwise
 #'   distances least, which is what ranges, block sizes, bandwidths and
 #'   length-scales read off the coordinates.  `"area"`: densities or rates
 #'   per cell are going to be computed, so the CRS must be equal-area.  For
-#'   lon/lat input the choice is then made among equal-area projections only
-#'   --- a Lambert azimuthal centred on the data, or an Albers conic where
-#'   its parallels do not degenerate, whichever distorts distances less,
-#'   which a UTM zone (conformal, not equal-area) never enters; global
-#'   coverage gets Equal Earth rather than Web Mercator.  Already-projected
+#'   lon/lat input the choice is then made among equal-area projections only:
+#'   a Lambert azimuthal centred on the data, or an Albers conic where its
+#'   parallels do not degenerate, whichever distorts distances less.  A UTM
+#'   zone (conformal, not equal-area) never enters that comparison, and global
+#'   coverage gets Equal Earth in place of Web Mercator.  Already-projected
 #'   input is still returned untouched, but its area distortion over the
 #'   extent is measured (the spread of planar-to-geodesic area ratios over
 #'   probe polygons) and logged as a warning when it exceeds 1 percent.
@@ -658,12 +659,12 @@
 #' @return x, potentially with a new projected CRS.  When a projection was
 #'   chosen here (lon/lat input, no \code{target_crs}) the result carries
 #'   \code{attr(x, "crs_choice")}: a data.frame with one row per projection
-#'   considered -- \code{name}, \code{crs} (its definition), the measured
+#'   considered, holding \code{name}, \code{crs} (its definition), the measured
 #'   worst-case \code{distance_error} (relative, over sampled pairs;
-#'   \code{NA} where it could not be measured) and \code{chosen} -- so the
-#'   figure the log line quotes for the winner is recoverable for every
-#'   candidate, and is measured for the single candidate on the paths where
-#'   no comparison runs (a UTM zone on a local extent, the equal-area
+#'   \code{NA} where it could not be measured) and \code{chosen}.  The
+#'   figure the log line quotes for the winner is therefore recoverable for
+#'   every candidate, and is measured for the single candidate on the paths
+#'   where no comparison runs (a UTM zone on a local extent, the equal-area
 #'   projection chosen for a layer straddling the antimeridian).  It is
 #'   \code{NULL} exactly when no local projection was chosen here: input
 #'   that already carried a projected CRS, a \code{target_crs} you supplied,
@@ -671,7 +672,7 @@
 #'   or Equal Earth.  CRS-less input
 #'   additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
 #'   the lon/lat heuristic fired, \code{"none"} when it declined.  That
-#'   attribute is also read on the way IN — an object already carrying
+#'   attribute is also read on the way IN.  An object already carrying
 #'   \code{"none"} is returned untouched, with the heuristic skipped, which is
 #'   how a \code{predict()} method replays a fit's negative decision so that a
 #'   subset of the training rows is not judged differently from the whole.
@@ -835,7 +836,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #' @param target_crs Optional target CRS to apply to both.
 #' @param on_transform_error What to do when st_transform() fails:
 #'   \code{"stop"} (default) raises an error immediately;
-#'   \code{"set_crs"} falls back to st_set_crs() (UNSAFE — coordinates are
+#'   \code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
 #'   NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
 #'   option exists only for rare edge cases where you are certain the
 #'   coordinates already match the target CRS definition.

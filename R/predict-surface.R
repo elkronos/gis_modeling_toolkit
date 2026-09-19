@@ -98,8 +98,8 @@
 #' grid you supply), predicts in chunks, and returns an \code{sf} layer.
 #'
 #' \code{predict()} on a \code{spatial_fit} requires \code{newdata} to be
-#' constructed by hand, which makes the most common downstream task -- produce
-#' a map -- more work than it should be.  This wraps the grid construction,
+#' constructed by hand, which makes the most common downstream task (produce
+#' a map) more work than it should be.  This wraps the grid construction,
 #' covariate join, chunking and CRS handling.
 #'
 #' Prediction over a grid is embarrassingly parallel in the sense that rows do
@@ -113,18 +113,18 @@
 #'   \code{NULL}, a regular grid is built over the training extent.  Must have
 #'   at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 #'   is given the interpretation the training data got (the assumption recorded
-#'   on the fit), with a warning, and then reprojected -- otherwise a CRS-less
+#'   on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 #'   grid can land thousands of kilometres from the covariates and every cell
 #'   takes the same nearest feature.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
-#'   count and the CRS units -- the usual cause is a value in the wrong unit.  A
+#'   count and the CRS units.  The usual cause is a value in the wrong unit.  A
 #'   \code{cell_size} wider than the extent yields a single centred cell.
 #' @param n_cells Approximate cell count used to derive \code{cell_size}.
 #'   Default 10000.  Must be a single positive finite number and at most
-#'   5,000,000; anything else is an error.  Also ignored when \code{grid} is supplied -- the grid you
-#'   pass is used verbatim.
+#'   5,000,000; anything else is an error.  Also ignored when \code{grid} is
+#'   supplied.  The grid you pass is used verbatim.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc}; grid points outside
 #'   it are dropped.  Put through the same CRS replay and reprojection as
 #'   \code{grid}.
@@ -134,7 +134,7 @@
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob for the GWR and random-forest backends, whose rows do not
 #'   interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
-#'   grid stays inside the training extent -- beyond it the GP boundary has to
+#'   grid stays inside the training extent.  Beyond it the GP boundary has to
 #'   grow and predictions depend on which rows share the call; see
 #'   \code{\link{predict.bayesian_fit}}.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
@@ -144,7 +144,7 @@
 #'   \code{.pred_se} when \code{se = TRUE} and available).  For an
 #'   auto-generated grid the resolution is attached as attribute
 #'   \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
-#'   \code{"cell_size"} attribute that object already carried -- usually
+#'   \code{"cell_size"} attribute that object already carried.  That is usually
 #'   \code{NULL}, and \code{NULL} for certain if the grid had to be
 #'   re-projected, since \code{st_transform()} does not preserve custom
 #'   attributes.  The resolution of a grid you built is not this function's to

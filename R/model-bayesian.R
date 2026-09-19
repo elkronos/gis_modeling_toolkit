@@ -3,7 +3,7 @@
 #' Returns shape and rate for an inverse-gamma placing \code{tail} probability
 #' below \code{lower} and \code{tail} above \code{upper}.
 #'
-#' A half-normal \code{normal(0, sd)} -- the previous choice -- puts its mode at
+#' A half-normal \code{normal(0, sd)} (the previous choice) puts its mode at
 #' zero, so most of its mass sits at length-scales shorter than the data can
 #' identify.  That is precisely where the Hilbert-space GP degenerates: as the
 #' length-scale shrinks below what the basis resolves, the marginal-variance /
@@ -119,10 +119,10 @@
 #' Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 #'
 #' Fits a regression whose residual spatial structure is modelled explicitly, as
-#' a Gaussian process over the coordinates, rather than left in the errors.  Two
+#' a Gaussian process over the coordinates, and so kept out of the errors.  Two
 #' things follow, and they are the reasons to reach for this backend.  First,
 #' every quantity comes with a posterior, so predictions carry calibrated
-#' intervals instead of point estimates -- score them with
+#' intervals instead of point estimates.  Score them with
 #' \code{\link{cv_bayes}()}, which reports held-out interval coverage and CRPS.
 #' Second, the fitted length-scale is itself an estimate of how far the spatial
 #' dependence reaches, a number you can read and report.
@@ -142,8 +142,8 @@
 #' @param predictor_vars Predictor column names.  May be \code{character(0)}
 #'   for an intercept-only model: the response is then explained by the
 #'   intercept and the spatial Gaussian process alone, which is the right
-#'   baseline for asking how much of the surface is spatial structure rather
-#'   than covariate effect (and the natural null model for comparing against a
+#'   baseline for asking how much of the surface is spatial structure and how
+#'   much covariate effect (and the natural null model for comparing against a
 #'   covariate model with \code{\link{compare_models}}).
 #' @param family A model family accepted by \code{brms::brm()}: a stats
 #'   family function such as \code{poisson()}, or a brms family object such
@@ -156,15 +156,14 @@
 #'   non-Gaussian responses and the count example below.
 #' @param gp_k Positive integer giving the number of GP basis functions
 #'   \emph{per dimension}, or NULL (default) to derive it from the
-#'   length-scale/domain ratio.  Note that the fitted model carries
+#'   length-scale/domain ratio.  The fitted model carries
 #'   \code{gp_k^2} basis functions, not \code{gp_k} (see Details).
 #' @param gp_iso Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
 #'   (the default) fits a separate length-scale per coordinate axis, letting the
 #'   model learn any directional structure from the data.  \code{TRUE} fits a
-#'   single shared length-scale, which -- because the coordinates are
-#'   standardised per axis beforehand -- makes the kernel anisotropic in the
-#'   original CRS by whatever ratio \code{sd(X)/sd(Y)} happens to take.  See
-#'   Details.
+#'   single shared length-scale, which makes the kernel anisotropic in the
+#'   original CRS by whatever ratio \code{sd(X)/sd(Y)} happens to take, because
+#'   the coordinates are standardised per axis beforehand.  See Details.
 #' @param gp_c Positive numeric boundary factor for the approximate GP, or
 #'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
 #'   wide enough to contain the longest plausible correlation range; a value
@@ -180,24 +179,24 @@
 #' @param iter Total iterations per chain. Default 2000.
 #' @param warmup Warmup iterations. Default floor(iter/2).
 #' @param cores Number of cores for the sampler, one chain per core. Default
-#'   \code{getOption("mc.cores", 1L)} -- the same convention \pkg{brms} uses
+#'   \code{getOption("mc.cores", 1L)}, the same convention \pkg{brms} uses
 #'   itself, so \code{options(mc.cores = 4)} once per session runs the four
 #'   default chains in parallel everywhere. The previous default of
 #'   \code{detectCores() - 1} took every core but one on any machine, which
 #'   is not what a shared server or a check farm wants.
 #' @param seed Integer seed. Default 123.
 #' @param backend "auto" (default), "cmdstanr", or "rstan". "auto" uses
-#'   \pkg{cmdstanr} only when a CmdStan build is actually available -- the
-#'   \pkg{cmdstanr} package is a thin interface and can be installed without
-#'   one (\code{cmdstanr::install_cmdstan()} builds it) -- and \pkg{rstan}
-#'   otherwise, which \pkg{brms} always brings. An explicit "cmdstanr" with no
-#'   usable CmdStan is an error that says how to install it, rather than a
-#'   failure from inside the sampler.
+#'   \pkg{cmdstanr} only when a CmdStan build is actually available, and
+#'   \pkg{rstan} otherwise, which \pkg{brms} always brings. The \pkg{cmdstanr}
+#'   package is a thin interface and can be installed without a CmdStan build
+#'   (\code{cmdstanr::install_cmdstan()} builds one). An explicit "cmdstanr"
+#'   with no usable CmdStan raises an error that says how to install it, so the
+#'   failure does not come from inside the sampler.
 #' @param control Named list of sampler controls, \emph{merged} over the
-#'   package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)} rather
-#'   than replacing them.  Passing \code{list(max_treedepth = 15)} therefore
-#'   keeps \code{adapt_delta = 0.9} -- which matters, because that is exactly
-#'   the setting the divergence warning tells you to raise.
+#'   package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)}
+#'   instead of replacing them.  Passing \code{list(max_treedepth = 15)}
+#'   therefore keeps \code{adapt_delta = 0.9}, which matters, because that is
+#'   exactly the setting the divergence warning tells you to raise.
 #' @param compute_loo Logical; compute PSIS-LOO. Default TRUE.
 #' @param standardize_predictors Logical; center and scale numeric predictors
 #'   before fitting. Default FALSE. When TRUE, the scaling parameters are
@@ -215,20 +214,20 @@
 #' @details
 #' \strong{GP basis count and boundary factor.}
 #' \code{brms::gp()} builds a full tensor grid over its covariates, so a term
-#' \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions -- the
+#' \code{gp(..x, ..y, k = gp_k)} carries \code{gp_k^2} basis functions: the
 #' \code{gp_k} argument is the count \emph{per dimension}, not the total rank.
 #' Both \code{gp_k} and \code{gp_c} are therefore chosen from the ratio of the
 #' estimated length-scale to the domain extent, following
-#' Riutort-Mayol et al. (2023), rather than from the number of observations:
-#' \code{gp_c} is set large enough to contain the upper length-scale bound,
-#' and \code{gp_k} large enough to resolve the lower one.  The derived value is
-#' typically 21-25 per dimension and is largely independent of \code{n}.
+#' Riutort-Mayol et al. (2023): \code{gp_c} is set large enough to contain the
+#' upper length-scale bound, and \code{gp_k} large enough to resolve the lower
+#' one.  The derived value is typically 21-25 per dimension and is largely
+#' independent of \code{n}.
 #'
 #' The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
 #' the full pooled range of the column-centred coordinates
 #' (\code{brms:::choose_L()}, taken over the \strong{unique} coordinate rows,
 #' because \code{brms:::.data_gp()} reduces the covariates to unique rows first
-#' under the default \code{gr = TRUE} -- so repeat visits to one location do not
+#' under the default \code{gr = TRUE}, so repeat visits to one location do not
 #' widen the domain), not the per-axis half-range in which
 #' Riutort-Mayol et al. state their inequalities.  Both constraints are really
 #' constraints on the boundary \eqn{L = c \times S}, so expressing them in
@@ -269,7 +268,7 @@
 #' of inheriting it from the standardisation.  Set \code{gp_iso = TRUE} to
 #' recover the previous single-length-scale behaviour.
 #'
-#' Note that \code{gp_iso} does not affect cost: \code{brms::gp()} builds a
+#' \code{gp_iso} does not affect cost: \code{brms::gp()} builds a
 #' tensor grid either way, so the model carries \code{gp_k^2} basis functions
 #' regardless.  The stored \code{$info$coord_scaling} list records the scaling
 #' strategy, and \code{$info$gp_iso} records which kernel was used.
@@ -277,22 +276,22 @@
 #' @return A \code{bayesian_fit} object (inherits from \code{spatial_fit}).
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
-#'   Model-specific metadata lives in \code{$info} (coords -- the names of the
+#'   Model-specific metadata lives in \code{$info} (coords: the names of the
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
-#'   gp_S -- the pooled centred range \code{brms::gp(c = )} multiplies;
-#'   gp_xy_range -- the training extrema of the scaled coordinates, which
+#'   gp_S: the pooled centred range \code{brms::gp(c = )} multiplies;
+#'   gp_xy_range: the training extrema of the scaled coordinates, which
 #'   \code{predict()} uses to pin the GP boundary;
-#'   gp_lengthscale_bounds -- the \code{c(lower, upper)} the length-scale prior
-#'   was calibrated over; gp_lscale_prior -- the length-scale prior
+#'   gp_lengthscale_bounds: the \code{c(lower, upper)} the length-scale prior
+#'   was calibrated over; gp_lscale_prior: the length-scale prior
 #'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
 #'   which is not necessarily the one this function requested (several entries,
 #'   semicolon-separated, if brms resolved the axes differently); loo, looic,
-#'   convergence_ok, convergence_diagnostics -- \code{n_divergent},
+#'   convergence_ok, convergence_diagnostics: \code{n_divergent},
 #'   \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
 #'   \code{neff_failed}, the parameters that failed each check by name with
 #'   their values (empty when none failed), which is what makes a failed
-#'   check actionable; and n_dropped -- the rows
+#'   check actionable; and n_dropped: the rows
 #'   \code{prep_model_data()} removed for missing or non-finite values or a
 #'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
 #'   The raw brmsfit is in \code{$engine}.
@@ -318,10 +317,10 @@
 #'
 #' One trap.  The response check reads the family's name through
 #' \code{brms}'s own accessor; a family object it cannot name is treated as
-#' "not gaussian" and the check is skipped entirely, rather than falling back
+#' "not gaussian" and the check is skipped entirely, without falling back
 #' to the gaussian rule.  A malformed \code{family} therefore buys less
 #' validation, not more, and a wrong response type will surface as a Stan
-#' error rather than as a message from this function.
+#' error, with no message from this function.
 #'
 #' @section Spatial confounding:
 #' A fixed-effect coefficient estimated alongside a spatial random effect is a
@@ -334,9 +333,8 @@
 #' Ver Hoef 2022): the spatial coefficient is the effect \emph{net of} whatever
 #' the spatial field can explain, and the non-spatial one is not.  Which of the
 #' two a user wants depends on the question, so the honest diagnostic is to
-#' report both side by side --- fit the same formula with \code{stats::lm()} or
-#' \code{stats::glm()} and compare --- rather than to adjust one toward the
-#' other.
+#' report both side by side and leave them unadjusted: fit the same formula
+#' with \code{stats::lm()} or \code{stats::glm()} and compare.
 #'
 #' The literature on remedies is unsettled and this function takes no side.
 #' Restricted spatial regression (Hughes and Haran 2013) projects the spatial
@@ -1026,7 +1024,7 @@ fit_bayesian_spatial_model <- function(
 #'
 #' The \pkg{cmdstanr} package is an interface; the CmdStan toolchain it drives
 #' is installed separately (\code{cmdstanr::install_cmdstan()}) and is absent
-#' on many machines that have the package -- a runner that installed it to
+#' on many machines that have the package: a runner that installed it to
 #' satisfy Suggests, a laptop where only the package was installed.  Choosing
 #' the backend on \code{requireNamespace("cmdstanr")} alone therefore sent
 #' every fit into "CmdStan path has not been set yet. See ?set_cmdstan_path",

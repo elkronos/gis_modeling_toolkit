@@ -23,9 +23,9 @@
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
-#'   Default 4326. This is the whole mechanism by which the IDs are stable ---
-#'   sorting in one common CRS is what makes the same layer get the same IDs
-#'   whichever projection it arrives in --- so if the transform fails the
+#'   Default 4326. This is the whole mechanism by which the IDs are stable
+#'   (sorting in one common CRS is what makes the same layer get the same IDs
+#'   whichever projection it arrives in), so if the transform fails the
 #'   function says so rather than quietly sorting in the input's own CRS. The
 #'   sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 #'   the floating-point noise of a round trip through a different projection
@@ -100,6 +100,17 @@ ensure_stable_poly_id <- function(polygons_sf,
         sort_sf
       })
 
+  # Validity is a property of the geometry in the CRS it is being measured
+  # in, so the make_valid above (in the layer's own CRS) does not carry over.
+  # Two vertices a centimetre apart in a projected CRS can land on the same
+  # longitude and latitude, and s2 rejects the ring as degenerate: on a
+  # clipped hex tessellation of North Carolina, 2 of 18 cells that are valid
+  # projected are invalid once transformed, and st_centroid() on one of them
+  # aborted this function rather than returning IDs.  Only the sort copy is
+  # repaired; the geometry that comes back is the caller's own.
+  if (isTRUE(make_valid))
+    sort_sf <- .safe_make_valid(sort_sf)
+
   # Representative points — all paths produce an sfc_POINT vector
   rep_sfc <- switch(method,
     centroid      = suppressWarnings(sf::st_geometry(sf::st_centroid(sort_sf))),
@@ -151,8 +162,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 
 #' Build a deterministic cache key from geometry, CRS, and parameters
 #'
-#' Uses digest on the binary WKB representation of geometry rather than WKT
-#' text for much better performance on complex geometries.
+#' Uses digest on the binary WKB representation of geometry, which is much
+#' faster on complex geometries than hashing WKT text.
 #'
 #' @param boundary An sf or sfc object.
 #' @param type Character grid/tessellation type.
@@ -255,8 +266,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 #'   many boundaries holds at most this many grids (about 2 MB per 2,500-cell
 #'   grid) rather than every grid it ever built for the life of the session.
 #'   \code{\link{clear_grid_cache}} empties it outright.
-#' @return An sf data frame with a stable poly_id column.  Note that the rows
-#'   are re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
+#' @return An sf data frame with a stable poly_id column.  The rows are
+#'   re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
 #'   which \code{\link{create_grid_polygons}} does not do: the same cell
 #'   therefore carries a different \code{poly_id} depending on which of the two
 #'   builders produced it.  Use one builder throughout an analysis; joining a

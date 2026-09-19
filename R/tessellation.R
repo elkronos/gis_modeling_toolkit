@@ -8,7 +8,7 @@
 #' With a `boundary` it is that boundary (optionally buffered by `expand`);
 #' without one it is the convex hull of `points_sf`, again optionally buffered.
 #' Reach for it when you want to see or reuse the exact clip target
-#' [build_tessellation()] will apply — for instance to check that a study-area
+#' [build_tessellation()] will apply, for instance to check that a study-area
 #' polygon actually contains the observations before tessellating, or to pass
 #' the same envelope to [create_voronoi_polygons()] and
 #' [create_grid_polygons()] so that two tessellations of one dataset cover
@@ -192,19 +192,19 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 # Voronoi Tessellation
 # -----------------------------------------------------------------------------
 
-#' Create Voronoi polygons from points with robust CRS and optional clipping
+#' Create Voronoi polygons from points with CRS handling and optional clipping
 #'
 #' Assigns every location in the study area to its nearest input point, giving
 #' one cell per point. This is the tessellation to reach for when the
-#' observations themselves define the regions of interest — sampling sites,
-#' monitoring stations, service points — because cell size then adapts to
+#' observations themselves define the regions of interest (sampling sites,
+#' monitoring stations, service points), because cell size then adapts to
 #' sampling density instead of being imposed by a fixed grid: dense areas get
 #' small cells and sparse areas large ones. Prefer [create_grid_polygons()]
 #' instead when you need equal-area cells or a resolution independent of where
 #' the data happen to be.
 #'
-#' The heavy lifting is [sf::st_voronoi()]; what this adds is the surrounding
-#' bookkeeping — projecting lon/lat input, building and buffering an envelope
+#' The heavy lifting is [sf::st_voronoi()].  What this adds is the surrounding
+#' bookkeeping: projecting lon/lat input, building and buffering an envelope
 #' so edge cells are bounded, clipping to `boundary`, restoring the
 #' point-to-cell correspondence that `st_voronoi()` scrambles, and stamping
 #' stable `cell_id` values.
@@ -221,8 +221,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @return A list with \code{cells}, \code{index}, \code{boundary},
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
-#'   every cell -- outside the study area, in other words -- so a summary built
-#'   from it counts only the points the tessellation actually covers.
+#'   every cell, which means outside the study area, so a summary built from it
+#'   counts only the points the tessellation actually covers.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -329,12 +329,12 @@ create_voronoi_polygons <- function(
 #'
 #' Lays a regular grid of equal-area cells over `boundary` and clips it to that
 #' boundary. Reach for this rather than [create_voronoi_polygons()] when cell
-#' size should be a decision you make — because you need per-cell rates
+#' size should be a decision you make, instead of one dictated by where the
+#' observations happen to be. That is the case when you need per-cell rates
 #' comparable across the map, or a resolution that stays fixed as the sample
-#' grows — instead of one dictated by where the observations happen to be.
-#' Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of squares and
-#' give every cell the same distance to all six neighbours, which matters for
-#' anything that reads neighbourhoods.
+#' grows. Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of squares
+#' and give every cell the same distance to all six neighbours, which matters
+#' for anything that reads neighbourhoods.
 #'
 #' Size the grid with exactly one of `target_cells` (roughly how many cells you
 #' want, the package derives the rest), `cellsize` (a fixed edge length in CRS
@@ -344,10 +344,10 @@ create_voronoi_polygons <- function(
 #' @param boundary Polygonal sf or sfc object.
 #' @param target_cells Optional approximate desired number of cells.  The cell
 #'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
-#'   square grids get genuinely square cells; for hex grids the count is
-#'   adjusted for hexagonal packing density.  The word "approximate" is load
-#'   bearing: a grid of square cells over an elongated bounding box needs more
-#'   of them than a grid of rectangles would (a 1000 x 1 strip at
+#'   square grids get square cells; for hex grids the count is adjusted for
+#'   hexagonal packing density.  The word "approximate" is load bearing: a
+#'   grid of square cells over an elongated bounding box needs more of them
+#'   than a grid of rectangles would (a 1000 x 1 strip at
 #'   \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
 #'   and clipping to an irregular boundary moves the count again.  Pass
 #'   \code{cellsize} when the count matters more than the shape.
@@ -362,9 +362,9 @@ create_voronoi_polygons <- function(
 #'   of columns and rows to divide the boundary's bounding box into; the cell
 #'   size is derived from it. [sf::st_make_grid()] derives hexagon placement
 #'   from `cellsize` alone, so for `type = "hex"` `n` does not set the number of
-#'   cells -- but it does change the grid, because the `cellsize` derived from
-#'   it is what the hexagons are built with. Ignored (with a logged
-#'   warning) when `cellsize` is also supplied — passing both would otherwise
+#'   cells, although it does change the grid, because the `cellsize` derived
+#'   from it is what the hexagons are built with. Ignored (with a logged
+#'   warning) when `cellsize` is also supplied. Passing both would otherwise
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
 #' @param clip Logical; clip grid to boundary.
@@ -376,9 +376,9 @@ create_voronoi_polygons <- function(
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @param max_cells Upper bound on the number of cells the grid may have,
 #'   estimated from the boundary's bounding box before anything is built.
-#'   Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
-#'   boundary in kilometres, say -- asks for a grid that cannot be built, and
-#'   this refuses it with a message rather than exhausting memory. Set to
+#'   Default \code{1e6}. A \code{cellsize} in the wrong units (metres on a
+#'   boundary in kilometres, say) asks for a grid that cannot be built, and
+#'   this refuses it with a message before memory is exhausted. Set to
 #'   \code{Inf} to disable.
 #' @return An sf polygon layer with poly_id column.
 #' @family tessellation
@@ -609,20 +609,21 @@ create_grid_polygons <- function(
 #' methods behind one interface that handles CRS projection, clipping and stable
 #' cell identifiers consistently, and returns the cell layer together with the
 #' point-to-cell index that \code{\link{assign_features_to_polygons}()} and
-#' \code{\link{summarize_by_cell}()} consume.  Use it rather than the
-#' individual constructors whenever you might want to compare methods: the
-#' return shape does not change with \code{method}, so swapping
-#' \code{"voronoi"} for \code{"hex"} costs one argument.
+#' \code{\link{summarize_by_cell}()} consume.  Prefer it to the individual
+#' constructors whenever you might want to compare methods: the return shape
+#' does not change with \code{method}, so swapping \code{"voronoi"} for
+#' \code{"hex"} costs one argument.
 #'
 #' Which method to reach for.  \code{"voronoi"} gives one cell per point, so
-#' resolution follows sampling density -- the choice when the observations
-#' themselves define the regions.  \code{"hex"} and \code{"square"} give
-#' equal-area cells on a fixed grid, so cell size is a decision you make rather
-#' than one the data makes for you; hexagons avoid the axis-aligned artefacts of
-#' squares and have uniform neighbour distances.  \code{"triangles"} returns
-#' the Delaunay triangulation, useful for interpolation and adjacency work
-#' rather than as an aggregation unit.  \code{\link{determine_optimal_levels}()}
-#' will suggest a cell count from the spatial structure of the data.
+#' resolution follows sampling density.  That is the choice when the
+#' observations themselves define the regions.  \code{"hex"} and
+#' \code{"square"} give equal-area cells on a fixed grid, so cell size is a
+#' decision you make, and the data does not make it for you; hexagons avoid the
+#' axis-aligned artefacts of squares and have uniform neighbour distances.
+#' \code{"triangles"} returns the Delaunay triangulation, useful for
+#' interpolation and adjacency work; it is not meant as an aggregation unit.
+#' \code{\link{determine_optimal_levels}()} will suggest a cell count from the
+#' spatial structure of the data.
 #'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
 #' @param boundary Polygonal sf/sfc study area. **Required** for
@@ -669,12 +670,12 @@ create_grid_polygons <- function(
 #'       a `cell_id` column; the `"hex"` and `"square"` methods additionally
 #'       carry `poly_id`, which holds the same values.}
 #'     \item{`index`}{Integer vector of `cell_id` values, one per row of
-#'       `points_sf`, and `NA` for a point that falls inside no cell --- one
-#'       outside the study area, in other words. Only a point within a
-#'       thousandth of the median cell width of a cell is snapped to it, which
-#'       covers points sitting exactly on a shared edge without quietly
-#'       dragging genuinely-outside points in. A summary built from `index`
-#'       therefore counts only the points the tessellation actually covers.}
+#'       `points_sf`, and `NA` for a point that falls inside no cell, that is,
+#'       one outside the study area. Only a point within a thousandth of the
+#'       median cell width of a cell is snapped to it. That covers points
+#'       sitting exactly on a shared edge, and leaves points outside the study
+#'       area as `NA`. A summary built from `index` therefore counts only the
+#'       points the tessellation actually covers.}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or reprojected).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with, plus

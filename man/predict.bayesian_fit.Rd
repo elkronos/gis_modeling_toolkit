@@ -52,7 +52,7 @@ standardisation stored at fit time are then applied before delegating to
 
 brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
 basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
-\code{predict()} is handed -- which moved every eigenfunction of the
+\code{predict()} is handed, which moved every eigenfunction of the
 approximation with the newdata bounding box while the fitted basis
 coefficients stayed put.  Two synthetic rows at the training coordinate
 extrema are therefore appended before the posterior draw and dropped from the
@@ -62,7 +62,7 @@ fold-wise and single-call predictions agree.
 That is exact only for \code{newdata} \strong{inside} the training
 coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
 predictions there are extrapolation from a basis that was not built for them
-\emph{and} depend on which other rows share the call -- including on
+\emph{and} depend on which other rows share the call, including on
 \code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
 the log (not raised as a warning) when it happens.
 }

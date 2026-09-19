@@ -9,11 +9,11 @@ voronoi_seeds_kmeans(points_sf, k, set_seed = 456)
 \arguments{
 \item{points_sf}{An sf object with POINT geometries.}
 
-\item{k}{Integer; requested number of clusters, and an upper bound rather
-than a guarantee. It is clamped, with a warning, to whichever is smaller
-of the number of distinct point positions and \code{nrow(points_sf) - 1} —
-k-means can produce neither more centres than there are distinct points
-nor as many centres as there are rows. Check \code{nrow()} on the result.}
+\item{k}{Integer; requested number of clusters, treated as an upper bound
+only. It is clamped, with a warning, to whichever is smaller of the number
+of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
+produce neither more centres than there are distinct points nor as many
+centres as there are rows. Check \code{nrow()} on the result.}
 
 \item{set_seed}{Optional integer RNG seed. Default 456.}
 }
@@ -24,7 +24,7 @@ An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
 }
 \description{
 Places \code{k} seed points at k-means cluster centres of the observed
-coordinates, so seeds — and the Voronoi cells built from them — follow the
+coordinates, so seeds (and the Voronoi cells built from them) follow the
 sampling density: clusters of observations attract seeds, empty ground gets
 none. Reach for this when you want cells that each carry a comparable number
 of observations, which is what makes per-cell aggregates in
@@ -33,8 +33,8 @@ instead when you want coverage of the study area rather than of the data,
 and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} to pick between them by name.
 }
 \details{
-Lon/lat input is projected first so the k-means distances are metric rather
-than degrees. Rows with empty or non-finite coordinates are dropped with a
+Lon/lat input is projected first so the k-means distances are metric and not
+degrees. Rows with empty or non-finite coordinates are dropped with a
 warning, and \code{k} is clamped to the number of distinct positions.
 }
 \examples{

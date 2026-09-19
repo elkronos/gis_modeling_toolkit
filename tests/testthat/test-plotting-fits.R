@@ -301,3 +301,32 @@ test_that("plot.spatial_fit(type = 'variogram') and plot.sac_range share one dra
   expect_identical(p_sac$labels$title, "Empirical variogram")
   expect_identical(p_fit$labels$subtitle, p_sac$labels$subtitle)
 })
+
+test_that("plot_folds' subtitle describes the scheme that was built", {
+  skip_if_not_installed("ggplot2")
+  # It used to be one fixed line about block size, printed under random folds
+  # too, where there are no blocks.
+  pts <- surf_test_points(n = 100)
+  sub <- function(f) plot_folds(f, pts)$labels$subtitle
+  fr <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
+  expect_match(sub(fr), "Random folds")
+  expect_false(grepl("[Bb]lock", sub(fr)))
+  fb <- make_folds(pts, k = 4, method = "block_kfold", block_size = 300, seed = 1)
+  expect_match(sub(fb), "Block size 300")
+  expect_match(sub(fb), as.character(fb$params$crs), fixed = TRUE)
+  # Two lines: one long one is clipped at the width these are drawn at, and
+  # neither line is long enough to clip on its own.
+  lines <- strsplit(sub(fb), "\n", fixed = TRUE)[[1]]
+  expect_length(lines, 2L)
+  expect_true(all(nchar(lines) <= 55L))
+  fg <- make_folds(pts, k = 4, method = "block_kfold", block_nx = 3, block_ny = 3,
+                   seed = 1)
+  expect_match(sub(fg), "3 x 3 block grid")
+  fl <- suppressWarnings(make_folds(pts, k = nrow(pts), method = "buffered_loo",
+                                    buffer = 150))
+  expect_match(sub(fl), "150 buffer")
+  pts$g <- rep(c("a", "b", "c"), length.out = nrow(pts))
+  fo <- make_folds(pts, k = 3, method = "leave_location_out", group_var = "g",
+                   seed = 1)
+  expect_match(sub(fo), "3 groups of `g`")
+})

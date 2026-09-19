@@ -19,9 +19,9 @@ errors, following the \code{coef()} contract described in
 \code{\link{new_spatial_fit}}.
 }
 \description{
-Returns the whole surface of coefficients -- one row per observation, one
-column per term -- rather than the single global vector \code{coef()}
-returns for an \code{lm}.  That table is the point of fitting a GWR at all:
+Returns the whole surface of coefficients, one row per observation and one
+column per term, against the single global vector \code{coef()} returns
+for an \code{lm}.  That table is the point of fitting a GWR at all:
 inspect the spread of a predictor's column to see where, and by how much,
 its relationship with the response changes across the study area, and join
 it back to \code{object$data_sf} to map it.  Use
@@ -29,7 +29,7 @@ it back to \code{object$data_sf} to map it.  Use
 }
 \section{What is and is not returned}{
 
-Only the model terms -- the intercept and one column per predictor.
+Only the model terms: the intercept and one column per predictor.
 GWmodel's \code{SDF} data slot carries a good deal more alongside them
 (standard errors, t-values, the observed response, the fitted values, the
 residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
@@ -39,8 +39,9 @@ and \code{ncol(coef(fit))} a meaningless number.  Reach for
 \code{object$engine$SDF} when you want the rest; it is the unmodified
 GWmodel object.
 
-If the model terms cannot be located in the \code{SDF} -- a GWmodel that
-names its coefficient columns differently -- the whole slot is returned with
-a warning saying so, rather than an error or a silently short table.
+If the model terms cannot be located in the \code{SDF} (a GWmodel that
+names its coefficient columns differently), the whole slot is returned with
+a warning saying so.  The call neither errors nor returns a silently short
+table.
 }
 

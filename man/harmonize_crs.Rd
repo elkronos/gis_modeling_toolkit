@@ -21,7 +21,7 @@ harmonize_crs(
 
 \item{on_transform_error}{What to do when st_transform() fails:
 \code{"stop"} (default) raises an error immediately;
-\code{"set_crs"} falls back to st_set_crs() (UNSAFE — coordinates are
+\code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
 NOT reprojected, only the CRS label is overwritten). The \code{"set_crs"}
 option exists only for rare edge cases where you are certain the
 coordinates already match the target CRS definition.}

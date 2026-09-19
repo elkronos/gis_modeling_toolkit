@@ -20,12 +20,12 @@ residual_morans_i(
 \item{alternative}{Character: \code{"two.sided"} (default),
 \code{"greater"} (positive autocorrelation), or \code{"less"}.}
 
-\item{weights}{Optional user-supplied n x n weight matrix — a base
+\item{weights}{Optional user-supplied n x n weight matrix: a base
 matrix or a \pkg{Matrix}-package matrix (e.g. a sparse dgCMatrix).
 When \code{NULL} (the default), a row-standardised k-nearest-neighbour
 weight matrix (k = 8) is built from the observation coordinates.  Ties
-at the k-th distance -- every regular grid, every site with repeat
-visits -- share that slot's weight equally rather than being broken by
+at the k-th distance (every regular grid, every site with repeat
+visits) share that slot's weight equally, with no tie-break by
 row order or by which backend found them, so the matrix is a function
 of the geometry alone; on distinct, untied coordinates it equals
 \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
@@ -39,8 +39,8 @@ argument that is not an n x n matrix is an error.}
 
 \item{k}{Integer number of nearest neighbours used when building the
 default weight matrix (ignored when \code{weights} is supplied).
-Default 8.  \code{k >= n - 1} is a complete graph -- \eqn{n(n-1)}
-weights however they are stored -- and is refused above 20 million of
+Default 8.  \code{k >= n - 1} is a complete graph (\eqn{n(n-1)}
+weights however they are stored) and is refused above 20 million of
 them.}
 
 \item{null}{Which null distribution the expectation, variance and p-value
@@ -61,13 +61,13 @@ Both \code{"auto"} and \code{"residual"} also fall back to
 \eqn{(n-p)(n-p+2)} and the normal approximation means nothing there);
 \code{"residual"} logs a warning when it does, \code{"auto"} does not,
 and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
-the result rather than assuming.
+the result to see which it was.
 See \strong{Which null, and when it is approximate} above.}
 
 \item{keep_weights}{Logical. Return the \eqn{n \times n} weight matrix in
 the result? Defaults to \code{FALSE}: the matrix dominates the object's
-size --- 50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
-and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
+size (50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
+and 191 MB at the \eqn{n = 5000} the dense fallback is capped at)
 while most uses read only the statistic and its moments, and
 \code{weights_summary} says what it was. Set \code{TRUE} when you need
 the matrix itself.}
@@ -85,15 +85,15 @@ A list with components:
 normal approximation.}
 \item{n}{Number of observations used.}
 \item{null}{The null actually used, \code{"randomisation"} or
-\code{"residual"} — check this rather than assuming, since
-\code{"auto"} chooses per fit and \code{"residual"} can fall back.}
+\code{"residual"}.  Check it, since \code{"auto"} chooses per fit
+and \code{"residual"} can fall back.}
 \item{df}{Residual degrees of freedom behind the moments:
 \eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
 design matrix), \eqn{n - 1} for \code{"randomisation"}.}
 \item{weights}{The \eqn{n \times n} weight matrix the statistic was
-computed with --- the row-standardised k-nearest-neighbour matrix
-built here (sparse when \pkg{Matrix} is installed), or the
-supplied \code{weights} after the diagonal was zeroed --- and
+computed with, either the row-standardised k-nearest-neighbour
+matrix built here (sparse when \pkg{Matrix} is installed) or the
+supplied \code{weights} after the diagonal was zeroed.  It is
 \code{NULL} unless \code{keep_weights = TRUE}.}
 \item{kurtosis}{The residual kurtosis \eqn{m_4 / m_2^2}, which the
 randomisation variance conditions on and which says how far the
@@ -105,18 +105,18 @@ residuals sit from the Gaussian case the residual moments assume
 \item{exact}{Logical: \code{TRUE} when the moments are exact for
 these residuals (the residual null on OLS residuals of the response
 on the rebuilt design), \code{FALSE} when they are an approximation
--- the residual null forced onto a non-OLS backend, or the
+(the residual null forced onto a non-OLS backend, or the
 randomisation null, whose exchangeable moments model residuals do
-not satisfy.}
+not satisfy).}
 \item{weights_summary}{What the weight matrix was, present whether or
 not the matrix itself was kept: \code{n}, \code{storage} (its class),
 \code{neighbours} (the smallest and largest number of neighbours any
-row has --- \code{NA} for a dense matrix, where counting them would
+row has, and \code{NA} for a dense matrix, where counting them would
 allocate a second one), \code{kept} (whether \code{weights} holds
 the matrix) and \code{desc}, the one line \code{print()} shows.}
 }
 The list is classed \code{"morans_i"} and has a \code{print()} method,
-so the console shows the statistic and its null rather than the
+so the console shows the statistic and its null without printing the
 \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 \code{$}, \code{[[} and \code{unlist()} are unaffected.
 Returns \code{NULL} with a warning if computation fails (e.g. fewer
@@ -147,7 +147,7 @@ vector whose elements are equally likely in any order.
 
 \strong{Model residuals are not exchangeable.}  They are orthogonal to the
 design matrix, which pushes \eqn{E[I]} materially below \eqn{-1/(n-1)}
-whenever the covariates are spatially smooth — and pushes it further the
+whenever the covariates are spatially smooth, and pushes it further the
 more covariates there are.  In a simulation with \eqn{n = 120}, six smooth
 covariates and \emph{independent} errors (so the truth is "no residual
 autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
@@ -162,7 +162,7 @@ regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
 \deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
 \deqn{Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
-These assume normal errors rather than conditioning on the observed
+These assume normal errors and do not condition on the observed
 kurtosis.  On the simulation above they restored the z-score to mean
 \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\\% against a
 nominal 5\\%.  They agree with \code{spdep::lm.morantest()} to machine
@@ -188,8 +188,8 @@ GWR              \tab 0.000 \tab 0.000
 }
 The random forest is anticonservative under both.  Its residuals here are
 the \strong{out-of-bag} ones (\code{residuals.rf_fit()}), not in-sample
-fits -- they are inflated rather than shrunk (measured sd 1.08 against a
-true 1.00) -- but they are not a linear projection of the response and
+fits.  They are inflated instead of shrunk (measured sd 1.08 against a
+true 1.00), but they are not a linear projection of the response and
 they are spatially heteroscedastic, so neither set of moments describes
 their null distribution and the variance is understated whichever is used
 (\eqn{sd(z) \approx 1.3}).  GWR is conservative under both, because it
@@ -202,7 +202,7 @@ A permutation null was considered and rejected: permuting the residual
 vector destroys exactly the orthogonality that causes the bias, so its mean
 is the exchangeable \eqn{-1/(n-1)} by construction (measured:
 \eqn{-0.00840} against \eqn{-1/(n-1) = -0.00840}) and it reproduces the
-randomisation null rather than correcting it.
+randomisation null without correcting it.
 }
 
 \examples{

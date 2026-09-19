@@ -33,12 +33,12 @@ cv_gwr(
 \code{\link{make_folds}()} return value; a bare list of
 \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here --
-\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+The label vector is how folds built by another package are used here
+(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
 \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+refused by name.  Train and test must be disjoint: a fold that trains on
+its own test rows is not a cross-validation split and is refused with an
+error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).}
 
@@ -63,7 +63,7 @@ bandwidth per fold with \code{GWmodel::bw.gwr()}, which is reported in
 \item{pointize}{Geometry coercion strategy.}
 
 \item{block_size}{Optional minimum block edge length for spatial CV blocks
-(projected CRS units).  Ensures blocks are at least as large as the
+(projected CRS units).  Blocks are then at least as large as the
 spatial autocorrelation range.}
 
 \item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
@@ -89,10 +89,10 @@ A list with \code{overall}, \code{fold_metrics},
 \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
 \code{adaptive}.  The two
 fold counts make a run where every fold failed visible in the return
-value rather than only in a warning, since \code{overall} is a
+value itself, beyond the warning, since \code{overall} is a
 well-formed all-\code{NA} row either way, and \code{fold_status} (one
 row per fold: \code{fold}, \code{status}, \code{message}) says why each
-missing fold is missing -- see \code{\link{cv_spatial}} for the five
+missing fold is missing.  See \code{\link{cv_spatial}} for the five
 statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
 in both \code{overall} and \code{fold_metrics}: the pooled predictions
 have no single parameter count, and a GWR's effective parameter count is
@@ -107,13 +107,13 @@ a defensible accuracy figure for a GWR: the in-sample \eqn{R^2} that
 meaningless, because a local regression with a small bandwidth can track the
 training points almost exactly.  Bandwidth is re-selected per fold unless you
 fix it with \code{bandwidth}, which keeps the selection itself inside the
-cross-validation rather than tuning on the full data first.
+cross-validation, with no tuning on the full data first.
 }
 \details{
 Folds default to spatial blocks (\code{\link{make_folds}(method =
-"block_kfold")}), not random ones -- with autocorrelated data a random
-split leaves a held-out point's neighbours in the training set and the score
-comes back flattering.  Use \code{\link{cv_bayes}()} for the same treatment
+"block_kfold")}), not random ones.  With autocorrelated data a random split
+leaves a held-out point's neighbours in the training set and the score comes
+back flattering.  Use \code{\link{cv_bayes}()} for the same treatment
 of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
 \code{\link{compare_models_cv}()} to score several backends on one set of
 folds.
@@ -122,20 +122,20 @@ folds.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 

@@ -137,7 +137,7 @@ the field, and whether the cell values can be told apart from noise. `moran_z`
 is the diagnostic, and a large deviate says the cells are still leaving spatial
 pattern on the table.
 
-```{r plot-profile, fig.height=5}
+```{r plot-profile, fig.height=8}
 plot(prof)
 ```
 

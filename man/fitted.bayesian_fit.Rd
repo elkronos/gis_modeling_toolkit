@@ -27,7 +27,7 @@ call \code{fitted()} independently, so the value is memoised in an
 environment carried in \code{object$info$.cache} (reference semantics, so it
 survives R's copy-on-modify).  The cache holds epred column means only,
 which is why \code{predict(object, summary = "median")} and
-\code{predict(object, type = "predict")} recompute rather than reuse it.
+\code{predict(object, type = "predict")} recompute it from scratch.
 Call \code{\link{clear_fitted_cache}} if the engine has been mutated by hand
 after fitting.
 }
@@ -35,7 +35,7 @@ after fitting.
 \section{The cache is shared by copies, and validated}{
 
 An environment has reference semantics, which is what makes the memo survive
-R's copy-on-modify -- but it also means \code{fit2 <- fit} gives the two
+R's copy-on-modify.  But it also means \code{fit2 <- fit} gives the two
 objects \emph{the same} cache.  Assigning a different \code{data_sf} to the
 copy would then have returned the original's cached values, at the original's
 length, which \code{residuals()} silently recycled against the copy's shorter
@@ -46,7 +46,7 @@ original's answer.
 
 Two consequences of the shared environment remain and cannot be removed from
 here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
-share (harmless -- the other simply recomputes), and \code{identical()}
+share (harmless, since the other simply recomputes), and \code{identical()}
 cannot distinguish two fits by their caches.  The digest covers
 \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
 what \code{\link{clear_fitted_cache}} is for.

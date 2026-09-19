@@ -6,16 +6,16 @@
 #'
 #' The constructor for the \code{spatial_fit} class, and the public entry point
 #' for plugging your own model backend into this package.  The three built-in
-#' fitters -- \code{\link{fit_gwr_model}()},
-#' \code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()}
-#' -- all end by calling it, and so should a custom \code{fit_fn} written for
+#' fitters (\code{\link{fit_gwr_model}()},
+#' \code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()})
+#' all end by calling it, and so should a custom \code{fit_fn} written for
 #' \code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
 #' what lets it use the package's folds, metrics, comparison and
 #' area-of-applicability machinery unchanged.
 #'
 #' There are two obligations.  Return an object built here from your
 #' \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
-#' you chose -- \code{\link{cv_spatial}()} scores folds by calling the
+#' you chose.  \code{\link{cv_spatial}()} scores folds by calling the
 #' \code{predict()} generic on the fit, so without a matching
 #' \code{predict.<subclass>()} every fold fails.  A
 #' \code{fitted.<subclass>()} method returning one value per row of the fit's
@@ -26,7 +26,7 @@
 #'
 #' @section The coef() contract:
 #' \code{coef()} on one of the three built-in backends either returns the
-#' coefficients or signals an error -- it never returns \code{NULL}.  A custom
+#' coefficients or signals an error.  It never returns \code{NULL}.  A custom
 #' subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
 #' so define a \code{coef.<subclass>()} that errors when your backend has no
 #' coefficients; otherwise the hazard described below applies to your own fits.
@@ -34,8 +34,8 @@
 #' always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
 #' and \code{coef.bayesian_fit()} error when the backend cannot supply them
 #' (a missing package, an engine without the expected component).  A
-#' \code{NULL} return would be indistinguishable from "this model genuinely
-#' has no fixed effects", so \code{lapply(fits, coef)} would quietly produce a
+#' \code{NULL} return would be indistinguishable from "this model has no
+#' fixed effects", so \code{lapply(fits, coef)} would quietly produce a
 #' shorter answer than the caller expected.  Wrap in \code{try()} or
 #' \code{tryCatch()} when sweeping over a heterogeneous list of fits.
 #'
@@ -55,8 +55,8 @@
 #' @param predictor_vars Character vector.
 #' @param data_sf  An sf object used for fitting.
 #' @param info     Named list of model-specific extras.  Set
-#'   \code{fitted_are_oob = TRUE} if your \code{fitted()} values are held out
-#'   rather than in-sample, so \code{summary()} labels them honestly.
+#'   \code{fitted_are_oob = TRUE} when your \code{fitted()} values are held
+#'   out instead of in-sample, so \code{summary()} labels them correctly.
 #' @return An object of class \code{c(subclass, "spatial_fit")}.
 #' @seealso \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
 #'   \code{\link{fit_rf_model}()} for a worked built-in fitter.
@@ -120,12 +120,12 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #'
 #' \code{new_spatial_fit()} is the documented extension point, so a subclass
 #' whose \code{fitted()} method is missing or returns the wrong length is
-#' user-reachable -- and nothing downstream notices.  With no method at all,
+#' user-reachable, and nothing downstream notices.  With no method at all,
 #' \code{stats::fitted()} finds \code{object$fitted} (absent) and returns
 #' \code{NULL}, so \code{.compute_reg_metrics()} reports \code{n = 0} and
 #' all-\code{NA}; with a method returning 60 values for 120 rows, the metric
 #' code drops the pairs it cannot align and reports the fit's \code{n = 120}
-#' against all-\code{NA} numbers -- a plausible row count over a silently
+#' against all-\code{NA} numbers, a plausible row count over a silently
 #' mis-indexed comparison.  \code{.cv_run_folds()} guards exactly this on the
 #' prediction side; these two paths did not.
 #'
@@ -160,13 +160,12 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
 #' Shows the one-screen summary of a \code{gwr_fit}, a \code{bayesian_fit} or a
 #' custom subclass: backend, formula, number of observations, CRS, and the few
 #' backend-specific numbers worth seeing immediately (GWR bandwidth, GP basis
-#' size).  An \code{rf_fit} has its own method -- see
-#' \code{\link{print.rf_fit}} -- which shows the same header plus the forest
-#' settings.  It is
-#' what you get by typing the object's name, and the quickest way to confirm a
-#' fit used the data, predictors and CRS you meant.  For fit quality use
-#' \code{\link{model_metrics}()} or \code{\link{summary}()} instead --
-#' nothing printed here is an out-of-sample score.
+#' size).  An \code{rf_fit} has its own method (see
+#' \code{\link{print.rf_fit}}), which shows the same header plus the forest
+#' settings.  It is what you get by typing the object's name, and the quickest
+#' way to confirm a fit used the data, predictors and CRS you meant.  For fit
+#' quality use \code{\link{model_metrics}()} or \code{\link{summary}()}
+#' instead.  Nothing printed here is an out-of-sample score.
 #'
 #' @param x A \code{spatial_fit} object.
 #' @param ... Ignored.
@@ -238,7 +237,7 @@ print.spatial_fit <- function(x, ...) {
 #' Summarise a fitted spatial model
 #'
 #' Computes goodness-of-fit metrics from \code{fitted(object)} against the
-#' observed response.  A non-numeric response is an error -- a character or
+#' observed response.  A non-numeric response is an error: a character or
 #' factor response cannot be scored, and used to come back as \code{n = 0} with
 #' every metric \code{NA}; a logical response is treated as 0/1.
 #'
@@ -247,7 +246,7 @@ print.spatial_fit <- function(x, ...) {
 #' metrics: \code{fitted()} returns values computed at the training locations
 #' from the model that saw them.  For an \code{rf_fit} they are
 #' \strong{out-of-bag}, because \code{fitted.rf_fit()} returns out-of-bag
-#' predictions rather than in-sample ones (see \code{\link{fit_rf_model}}).
+#' predictions in place of in-sample ones (see \code{\link{fit_rf_model}}).
 #' The two are not comparable, and \code{print()} on the result labels which
 #' one it is holding, driven by \code{$info$fitted_are_oob}.  Use
 #' \code{\link{compare_models_cv}} to compare backends.
@@ -335,7 +334,7 @@ print.summary.spatial_fit <- function(x, ...) {
 #' reading of how closely a fit tracks its training data.
 #'
 #' It is not a substitute for cross-validation.  With \code{newdata = NULL} the
-#' numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit} -- and a
+#' numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit}, and a
 #' GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
 #' without predicting anything.  For a figure you can report, use
 #' \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
@@ -347,27 +346,27 @@ print.summary.spatial_fit <- function(x, ...) {
 #' but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
 #' returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
 #' returned data.frame carries no label distinguishing the two, so check
-#' \code{object$info$fitted_are_oob} before comparing numbers across backends
-#' -- or use \code{\link{compare_models_cv}}, which scores every backend the
+#' \code{object$info$fitted_are_oob} before comparing numbers across backends,
+#' or use \code{\link{compare_models_cv}}, which scores every backend the
 #' same way.
 #'
 #' @section Percentage errors on responses with zeros:
 #' \code{MAPE} divides by the observed value and \code{SMAPE} by
 #' \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-#' Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+#' Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 #' whose denominator is non-zero, and are \code{NA} when no row qualifies.
 #' The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 #' the \code{n} column counts finite observation/prediction pairs.  Read a
 #' percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 #' an average over a subset of the data, whatever its value.
 #'
-#' This bites on any response taking exact zeros --- counts, rainfall,
+#' This bites on any response taking exact zeros: counts, rainfall,
 #' abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 #' 120, \code{MAPE} is an average over the 58 non-zero rows, which
 #' \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 #' subtly: it drops the rows where observation and prediction are both near
-#' zero --- which on a well-fitted zero-inflated model are the rows it got
-#' \emph{right} --- so it averages the harder rows only and reads worse than
+#' zero (which on a well-fitted zero-inflated model are the rows it got
+#' \emph{right}), so it averages the harder rows only and reads worse than
 #' the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 #' count is only a label, not a repair.
 #'
@@ -395,7 +394,7 @@ print.summary.spatial_fit <- function(x, ...) {
 #' CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 #' scoring rules computed from posterior draws, so they are meaningful for any
 #' \code{family} the backend accepts, and they are the numbers to compare when
-#' the response is not Gaussian.  Note that when every fold fails, the
+#' the response is not Gaussian.  When every fold fails, the
 #' \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 #' but not the \code{coverage_*} columns, so code that reads those columns
 #' must tolerate their absence.
@@ -405,7 +404,7 @@ print.summary.spatial_fit <- function(x, ...) {
 #'   over; see "Percentage errors on responses with zeros").
 #'   \code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
 #'   exceeds the global predictor count and a GP model has no simple \code{p},
-#'   so it is deliberately suppressed.  A non-numeric response is an error -- a
+#'   so it is deliberately suppressed.  A non-numeric response is an error: a
 #'   character or factor response cannot be scored, and used to come back as
 #'   \code{n = 0} with every metric \code{NA}; a logical response is treated
 #'   as 0/1.
@@ -722,7 +721,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #' @section The GP boundary is pinned:
 #' brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
 #' basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
-#' \code{predict()} is handed -- which moved every eigenfunction of the
+#' \code{predict()} is handed, which moved every eigenfunction of the
 #' approximation with the newdata bounding box while the fitted basis
 #' coefficients stayed put.  Two synthetic rows at the training coordinate
 #' extrema are therefore appended before the posterior draw and dropped from the
@@ -732,7 +731,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #' That is exact only for \code{newdata} \strong{inside} the training
 #' coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
 #' predictions there are extrapolation from a basis that was not built for them
-#' \emph{and} depend on which other rows share the call -- including on
+#' \emph{and} depend on which other rows share the call, including on
 #' \code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
 #' the log (not raised as a warning) when it happens.
 #'
@@ -868,8 +867,8 @@ predict.bayesian_fit <- function(object, newdata = NULL,
 #' Reads the fitted values out of the GWmodel result, which stores them under
 #' one of several names depending on version and entry point; the extraction
 #' falls back through the local coefficients and the residuals when no direct
-#' column is present.  These are \strong{in-sample} values -- each observation
-#' was inside its own bandwidth window -- so \code{summary()} on a
+#' column is present.  These are \strong{in-sample} values (each observation
+#' was inside its own bandwidth window), so \code{summary()} on a
 #' \code{gwr_fit} reports an optimistic fit.  Use \code{\link{cv_gwr}} for a
 #' spatially blocked estimate.
 #'
@@ -898,13 +897,13 @@ fitted.gwr_fit <- function(object, ...) {
 #' environment carried in \code{object$info$.cache} (reference semantics, so it
 #' survives R's copy-on-modify).  The cache holds epred column means only,
 #' which is why \code{predict(object, summary = "median")} and
-#' \code{predict(object, type = "predict")} recompute rather than reuse it.
+#' \code{predict(object, type = "predict")} recompute it from scratch.
 #' Call \code{\link{clear_fitted_cache}} if the engine has been mutated by hand
 #' after fitting.
 #'
 #' @section The cache is shared by copies, and validated:
 #' An environment has reference semantics, which is what makes the memo survive
-#' R's copy-on-modify -- but it also means \code{fit2 <- fit} gives the two
+#' R's copy-on-modify.  But it also means \code{fit2 <- fit} gives the two
 #' objects \emph{the same} cache.  Assigning a different \code{data_sf} to the
 #' copy would then have returned the original's cached values, at the original's
 #' length, which \code{residuals()} silently recycled against the copy's shorter
@@ -915,7 +914,7 @@ fitted.gwr_fit <- function(object, ...) {
 #'
 #' Two consequences of the shared environment remain and cannot be removed from
 #' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
-#' share (harmless -- the other simply recomputes), and \code{identical()}
+#' share (harmless, since the other simply recomputes), and \code{identical()}
 #' cannot distinguish two fits by their caches.  The digest covers
 #' \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
 #' what \code{\link{clear_fitted_cache}} is for.
@@ -985,7 +984,7 @@ fitted.bayesian_fit <- function(object, ...) {
 #' Cheap fingerprint of the training data a cached fitted() was computed from
 #'
 #' Covers exactly what \code{.prepare_brms_pred_df()} reads: the attribute
-#' columns and the coordinates.  \code{$engine} is deliberately excluded --
+#' columns and the coordinates.  \code{$engine} is deliberately excluded:
 #' digesting a \code{brmsfit} with all its draws would cost more than the
 #' posterior pass the cache exists to avoid, and a hand-mutated engine is what
 #' \code{\link{clear_fitted_cache}} is for.  Returns \code{NA_character_} if a
@@ -1013,7 +1012,7 @@ fitted.bayesian_fit <- function(object, ...) {
 #'
 #' Removes the lazily-cached \code{fitted()} result so that the next call
 #' recomputes from the posterior.  This is only necessary if the underlying
-#' \code{brmsfit} engine has been manually mutated after fitting -- a change to
+#' \code{brmsfit} engine has been manually mutated after fitting.  A change to
 #' \code{data_sf} invalidates the entry on its own, because the cached value
 #' carries a digest of the data it was computed from (see
 #' \code{\link{fitted.bayesian_fit}}).  Normal usage never requires it.
@@ -1087,16 +1086,16 @@ residuals.bayesian_fit <- function(object, ...) {
 
 #' Extract GWR local coefficients
 #'
-#' Returns the whole surface of coefficients -- one row per observation, one
-#' column per term -- rather than the single global vector \code{coef()}
-#' returns for an \code{lm}.  That table is the point of fitting a GWR at all:
+#' Returns the whole surface of coefficients, one row per observation and one
+#' column per term, against the single global vector \code{coef()} returns
+#' for an \code{lm}.  That table is the point of fitting a GWR at all:
 #' inspect the spread of a predictor's column to see where, and by how much,
 #' its relationship with the response changes across the study area, and join
 #' it back to \code{object$data_sf} to map it.  Use
 #' \code{\link{plot.spatial_fit}()} for a quick look at that map.
 #'
 #' @section What is and is not returned:
-#' Only the model terms -- the intercept and one column per predictor.
+#' Only the model terms: the intercept and one column per predictor.
 #' GWmodel's \code{SDF} data slot carries a good deal more alongside them
 #' (standard errors, t-values, the observed response, the fitted values, the
 #' residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
@@ -1106,9 +1105,10 @@ residuals.bayesian_fit <- function(object, ...) {
 #' \code{object$engine$SDF} when you want the rest; it is the unmodified
 #' GWmodel object.
 #'
-#' If the model terms cannot be located in the \code{SDF} -- a GWmodel that
-#' names its coefficient columns differently -- the whole slot is returned with
-#' a warning saying so, rather than an error or a silently short table.
+#' If the model terms cannot be located in the \code{SDF} (a GWmodel that
+#' names its coefficient columns differently), the whole slot is returned with
+#' a warning saying so.  The call neither errors nor returns a silently short
+#' table.
 #'
 #' @param object A \code{gwr_fit} object.
 #' @param ... Ignored.
@@ -1166,8 +1166,8 @@ coef.gwr_fit <- function(object, ...) {
 #' Returns the posterior summary of the global (non-spatial) regression terms:
 #' estimate, error and credible interval per predictor, as
 #' \code{brms::fixef()} reports them.  Reach for it to read the average effect
-#' of a predictor with its uncertainty attached -- the Bayesian counterpart to
-#' a coefficient table -- remembering that the Gaussian-process term has
+#' of a predictor with its uncertainty attached (the Bayesian counterpart to
+#' a coefficient table), remembering that the Gaussian-process term has
 #' already absorbed the spatially structured part of the signal, so these are
 #' effects net of location.
 #'

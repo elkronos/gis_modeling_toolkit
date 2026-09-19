@@ -17,14 +17,14 @@
 #'
 #' \code{GWmodel::gwr.model.selection()} documents its diagnostic table
 #' (\code{GWR.df}) as "a data frame consited of four columns: bandwidth, AIC,
-#' AICc, RSS" -- so \strong{AICc is column 3}, and column 2 is the uncorrected
+#' AICc, RSS".  So \strong{AICc is column 3}, and column 2 is the uncorrected
 #' AIC.  GWmodel builds the table with \code{rbind()} over unnamed vectors
 #' (\code{c(bw, aic.rss[2], aic.rss[3], aic.rss[1])} in \code{Model.selection.r}),
 #' so it never carries column names: the by-name branch below cannot fire on a
 #' real GWmodel return, and the positional fallback is the path every real call
-#' takes.  Getting it wrong is not a fallback-only risk, it is the normal case
-#' -- reading column 2 ranks on AIC while labelling the result AICc, which
-#' selects larger models than AICc would and can carry a pure-noise predictor.
+#' takes.  Getting it wrong is not a fallback-only risk, it is the normal case.
+#' Reading column 2 ranks on AIC while labelling the result AICc, which selects
+#' larger models than AICc would and can carry a pure-noise predictor.
 #'
 #' The by-name branch is kept for a future GWmodel that labels the table, and
 #' for injected test engines.
@@ -101,10 +101,10 @@
 #' Normalise GWmodel's model list into character vectors of predictors
 #'
 #' Handles the three shapes the element can take: a two-element list of the
-#' model's formula \emph{string} and its predictor vector -- which is what
-#' GWmodel returns, \code{list(Generate.formula(DeVar, vars), vars)}, i.e.
-#' \code{list("z ~ a + b", c("a", "b"))} -- a formula object, or a bare
-#' character vector.
+#' model's formula \emph{string} and its predictor vector, a formula object, or
+#' a bare character vector.  The two-element list is what GWmodel returns,
+#' \code{list(Generate.formula(DeVar, vars), vars)}, i.e.
+#' \code{list("z ~ a + b", c("a", "b"))}.
 #'
 #' @param model_list The first element of the \code{gwr.model.selection()}
 #'   return.
@@ -182,8 +182,8 @@
 #'
 #' GWmodel reports progress with bare \code{cat()}, so neither
 #' \code{suppressMessages()} nor \code{suppressWarnings()} touches it. A sweep
-#' prints one "Now calibrating the model" block per candidate -- 190 of them at
-#' 19 candidates -- plus the full golden-section bandwidth trace.
+#' prints one "Now calibrating the model" block per candidate (190 of them at
+#' 19 candidates), plus the full golden-section bandwidth trace.
 #'
 #' @param expr Expression to evaluate (forced exactly once).
 #' @param quiet Logical; discard output written to stdout.
@@ -209,7 +209,7 @@
 #'   \code{bandwidth_source}, \code{used_dmat} and \code{raw} (GWmodel's
 #'   unmodified return, which the caller passes straight through to the public
 #'   result).  \code{.engine} is a documented injection point, so this list is
-#'   the contract an injected engine has to satisfy -- \code{raw} included.
+#'   the contract an injected engine has to satisfy, \code{raw} included.
 #' @keywords internal
 #' @noRd
 .gwr_ms_engine <- function(dat, response_var, candidate_vars, bandwidth,
@@ -369,8 +369,8 @@
 #'
 #' Wraps \code{GWmodel::gwr.model.selection()}, which grows a GWR model one
 #' predictor at a time and scores every intermediate model with a corrected
-#' Akaike information criterion, and returns the results as a ranked table
-#' rather than the two loosely-coupled lists GWmodel produces.
+#' Akaike information criterion.  GWmodel returns two loosely-coupled lists;
+#' this function returns a ranked table.
 #'
 #' @section What this optimises, and what it does not:
 #' The criterion is \strong{in-sample}. AICc penalises the effective number of
@@ -381,10 +381,10 @@
 #' \code{\link{select_features_forward}} performs the same forward search
 #' against a spatially blocked cross-validated score; it costs far more and is
 #' the one to trust when the answer matters. When the two disagree, the
-#' disagreement is itself informative -- it usually means a candidate is
+#' disagreement is itself informative. It usually means a candidate is
 #' predictive only locally.
 #'
-#' Two further limitations are structural rather than incidental:
+#' Two further limitations follow from the method itself:
 #'
 #' \itemize{
 #'   \item \strong{One bandwidth for every model.} Comparing criteria across
@@ -400,9 +400,9 @@
 #' }
 #'
 #' @section Cost:
-#' The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates --
-#' 55 at p = 10, 210 at p = 20 -- each over all \code{n} locations.
-#' \code{max_models} stops the call rather than letting it run for hours.
+#' The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates
+#' (55 at p = 10, 210 at p = 20), each over all \code{n} locations.
+#' \code{max_models} stops the call before it runs for hours.
 #'
 #' @param data_sf An \code{sf} object with response, predictors and geometry.
 #' @param response_var Response column name.
@@ -410,14 +410,14 @@
 #'   predictors to choose among.  Factor, character and logical candidates are
 #'   refused: GWmodel fits a factor as several model-matrix columns while this
 #'   sweep counts it as one variable, so the criteria would not be comparable,
-#'   and \code{\link{fit_gwr_model}()} -- the documented next step -- takes only
+#'   and \code{\link{fit_gwr_model}()}, the documented next step, takes only
 #'   numerics.  Encode them as numeric indicators first.
 #' @param bandwidth Bandwidth held fixed across all candidate models. If
 #'   \code{NULL} (default) it is selected with \code{GWmodel::bw.gwr()} on the
 #'   model containing every candidate. Integer neighbour count when
 #'   \code{adaptive = TRUE}; otherwise a distance in the units of the
 #'   **projected** CRS the sweep runs in, which \code{prep_model_data()} may
-#'   have chosen for you -- geographic input is projected before the bandwidth
+#'   have chosen for you.  Geographic input is projected before the bandwidth
 #'   is used, so a value in degrees would be read as metres.
 #' @param adaptive Logical; adaptive (nearest-neighbour) bandwidth. Default
 #'   \code{TRUE}.
@@ -432,10 +432,10 @@
 #'   matrix when \code{n} is at most this. Default 2000 (about 32 MB). Set to 0
 #'   to disable.
 #' @param quiet Discard GWmodel's progress output. Default \code{TRUE}, because
-#'   GWmodel writes it with bare \code{cat()} -- which no
-#'   \code{suppressMessages()} can silence -- and emits one block per candidate
-#'   model, so it scales with the square of the candidate count. Set
-#'   \code{FALSE} to watch a long sweep progress.
+#'   GWmodel writes it with bare \code{cat()} that no \code{suppressMessages()}
+#'   can silence, and emits one block per candidate model, so it scales with the
+#'   square of the candidate count. Set \code{FALSE} to watch a long sweep
+#'   progress.
 #' @param .engine Internal; injectable backend used for testing.
 #'
 #' @return An object of class \code{gwr_model_selection}, a list with:
@@ -449,8 +449,8 @@
 #'   \code{criterion_column} (the column it was read from) and
 #'   \code{criterion_verified} (logical: \code{FALSE} exactly when the
 #'   column was read positionally from a table that did not have the four
-#'   documented columns, which is the case the log calls unverified -- gate
-#'   a script on this rather than on the label);
+#'   documented columns, which is the case the log calls unverified.  Gate
+#'   a script on this field instead of on the label);
 #'   \code{response_var} and \code{candidate_vars} (the response and the full
 #'   candidate set the sweep ran over, both echoed by \code{print()});
 #'   \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
@@ -468,7 +468,7 @@
 #' \preformatted{
 #'   GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
 #' }
-#' -- \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
+#' Pass \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
 #' \code{sel$raw[[2]]}, an unlabelled numeric matrix whose columns are
 #' \code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order; the
 #' \code{criterion} column of \code{$table} is its third column.
@@ -663,8 +663,8 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 #' and the top-ranked models with their criterion values, so you can see both
 #' which model won and by how much.  A shallow gap between the first few rows
 #' means the ranking is not well identified and the choice of predictors should
-#' not be treated as settled -- worth checking before reporting one model as
-#' the selected one.
+#' not be treated as settled.  Check the gap before reporting one model as the
+#' selected one.
 #'
 #' @param x A \code{gwr_model_selection} object.
 #' @param n Number of top-ranked models to show. Default 10.

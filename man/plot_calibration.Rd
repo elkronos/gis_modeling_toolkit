@@ -26,7 +26,7 @@ with the diagonal, one point per level for the fold-weighted pooled value
 systematic over-confidence (points below the line) or intervals wider than
 they need to be (above it) are read at a glance.  Three levels is a thin
 curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
-\code{cv_bayes()} for a full one --- the levels are read off the column
+\code{cv_bayes()} for a full one.  The levels are read off the column
 names, so whatever was computed is drawn.
 }
 \examples{

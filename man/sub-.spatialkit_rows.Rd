@@ -20,8 +20,8 @@ subset that is not a data frame (a single column taken with
 \description{
 \code{\link{prep_model_data}()} and
 \code{\link{assign_features_to_polygons}()} return a layer with an
-attribute recording what happened to its rows --- \code{"dropped"} and
-\code{"ties"} respectively.  Those records describe the rows the layer was
+attribute recording what happened to its rows (\code{"dropped"} and
+\code{"ties"} respectively).  Those records describe the rows the layer was
 built with, and \code{[} on an \code{sf} object copies attributes through
 unchanged, which would leave a subset reporting its parent's numbers with
 row positions that no longer resolve.  Subsetting therefore returns a plain

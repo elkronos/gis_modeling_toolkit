@@ -119,9 +119,9 @@
 #' observations as \code{(i, j, w)} triples whose weights already sum to one
 #' per row.  The point of returning weights rather than a bare index set is
 #' TIES.  A k-nearest-neighbour set is only well defined when the k-th and
-#' (k+1)-th distances differ; when they do not -- every regular sampling grid
+#' (k+1)-th distances differ; when they do not (every regular sampling grid
 #' at most \code{k}, every site with repeat visits, every pair of co-located
-#' points -- "the k nearest" is a choice, and any rule that makes it
+#' points), "the k nearest" is a choice, and any rule that makes it
 #' (row index, kd-tree order, \code{order()}'s stability) makes Moran's I a
 #' function of something other than the data.  Measured before this change:
 #' shuffling the rows of 40 sites x 5 repeats moved I from -0.079 to -0.009
@@ -141,15 +141,15 @@
 #' The kd-tree path asks \pkg{FNN} for more than \code{k} neighbours, drops
 #' any self-match (FNN returns a point's own index among exact duplicates),
 #' and then checks whether the tie group at the k-th distance could extend
-#' past what was returned; the few rows where it might -- a site with more
-#' repeats than the query width -- are answered from a dense row instead.
+#' past what was returned; the few rows where it might (a site with more
+#' repeats than the query width) are answered from a dense row instead.
 #' The dense path applies the same rule to a full distance row, so the two
 #' backends produce identical weights, ties included.
 #'
 #' @param coords Numeric matrix (n x 2) of projected coordinates.
 #' @param k Integer neighbour count, already clamped to \code{n - 1}.
-#' @param use_fnn Logical; use \pkg{FNN}'s kd-tree rather than a dense
-#'   \code{dist()} scan.
+#' @param use_fnn Logical; whether the neighbour lookup uses \pkg{FNN}'s
+#'   kd-tree or a dense \code{dist()} scan.
 #' @return A list with integer vectors \code{i}, \code{j} and a numeric
 #'   vector \code{w} of equal length; \code{tapply(w, i, sum)} is 1 for every
 #'   row.
@@ -281,14 +281,14 @@
 #' For each observation the \code{k} closest \emph{other} observations receive
 #' weight 1; all other pairs, and the diagonal, receive weight 0.
 #' The resulting matrix is then row-standardised so that each row sums to 1.
-#' This is the standard default in spatial statistics (Anselin, 1988) and is
-#' far more robust to irregularly-spaced or clustered data than an
+#' This is the standard default in spatial statistics (Anselin, 1988) and
+#' copes far better with irregularly-spaced or clustered data than an
 #' inverse-distance scheme, which gives enormous weight to very close pairs
 #' and can inflate Moran's I significance.
 #'
 #' The neighbour lookup itself is \code{.knn_pairs()}, which is where the
-#' zero-diagonal guarantee lives — see the note there on duplicate
-#' coordinates.
+#' zero-diagonal guarantee lives (see the note there on duplicate
+#' coordinates).
 #'
 #' Uses \pkg{FNN} for O(n·k) kd-tree nearest-neighbour lookup when available,
 #' avoiding the O(n²) full distance matrix.  Returns a
@@ -301,11 +301,12 @@
 #' @param use_fnn Logical; use \pkg{FNN}'s kd-tree for the neighbour lookup.
 #'   Defaults to whether \pkg{FNN} is installed.  Exposed so the dense
 #'   brute-force fallback is reachable on a machine that has FNN.
-#' @param use_matrix Logical; return a \pkg{Matrix} sparse matrix rather than a
-#'   dense base matrix.  Defaults to whether \pkg{Matrix} is installed.
+#' @param use_matrix Logical; whether the return value is a \pkg{Matrix}
+#'   sparse matrix or a dense base matrix.  Defaults to whether
+#'   \pkg{Matrix} is installed.
 #'   Exposed for the same reason as \code{use_fnn}.  The fast sparse path
 #'   requires both backends; with either disabled the dense path runs.
-#' @return A row-standardised weight matrix W — sparse (dgCMatrix) when
+#' @return A row-standardised weight matrix W: sparse (dgCMatrix) when
 #'   \pkg{Matrix} is available, otherwise a dense base matrix.
 #' @keywords internal
 #' @noRd
@@ -362,12 +363,12 @@
 #' the OLS residuals on it
 #'
 #' The Cliff & Ord residual moments are exact for \eqn{e = My} with
-#' \eqn{M = I - X(X'X)^{-1}X'} and nothing else, so rather than guessing from
-#' the fit's class whether that holds, this checks it directly: rebuild
+#' \eqn{M = I - X(X'X)^{-1}X'} and nothing else.  The fit's class does not
+#' settle whether that holds, so this checks it directly: rebuild
 #' \code{X} from \code{predictor_vars} and \code{data_sf}, regress the response
 #' on it, and compare the result with the residuals actually supplied.  The
-#' answer is exactly the condition the formula needs, and it degrades
-#' gracefully — a GWR whose bandwidth is wide enough to be global OLS passes,
+#' test is exactly the condition the formula needs, and it degrades
+#' gracefully: a GWR whose bandwidth is wide enough to be global OLS passes,
 #' the same GWR at a small bandwidth does not.
 #'
 #' @param fit A \code{spatial_fit}.
@@ -503,7 +504,7 @@
 #'
 #' \strong{Model residuals are not exchangeable.}  They are orthogonal to the
 #' design matrix, which pushes \eqn{E[I]} materially below \eqn{-1/(n-1)}
-#' whenever the covariates are spatially smooth — and pushes it further the
+#' whenever the covariates are spatially smooth, and pushes it further the
 #' more covariates there are.  In a simulation with \eqn{n = 120}, six smooth
 #' covariates and \emph{independent} errors (so the truth is "no residual
 #' autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
@@ -518,7 +519,7 @@
 #' \deqn{E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)}
 #' \deqn{Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
 #'   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
-#' These assume normal errors rather than conditioning on the observed
+#' These assume normal errors and do not condition on the observed
 #' kurtosis.  On the simulation above they restored the z-score to mean
 #' \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\% against a
 #' nominal 5\%.  They agree with \code{spdep::lm.morantest()} to machine
@@ -544,8 +545,8 @@
 #' }
 #' The random forest is anticonservative under both.  Its residuals here are
 #' the \strong{out-of-bag} ones (\code{residuals.rf_fit()}), not in-sample
-#' fits -- they are inflated rather than shrunk (measured sd 1.08 against a
-#' true 1.00) -- but they are not a linear projection of the response and
+#' fits.  They are inflated instead of shrunk (measured sd 1.08 against a
+#' true 1.00), but they are not a linear projection of the response and
 #' they are spatially heteroscedastic, so neither set of moments describes
 #' their null distribution and the variance is understated whichever is used
 #' (\eqn{sd(z) \approx 1.3}).  GWR is conservative under both, because it
@@ -558,18 +559,18 @@
 #' vector destroys exactly the orthogonality that causes the bias, so its mean
 #' is the exchangeable \eqn{-1/(n-1)} by construction (measured:
 #' \eqn{-0.00840} against \eqn{-1/(n-1) = -0.00840}) and it reproduces the
-#' randomisation null rather than correcting it.
+#' randomisation null without correcting it.
 #'
 #' @param fit A \code{spatial_fit} object (from \code{fit_gwr_model},
 #'   \code{fit_bayesian_spatial_model} or \code{fit_rf_model}).
 #' @param alternative Character: \code{"two.sided"} (default),
 #'   \code{"greater"} (positive autocorrelation), or \code{"less"}.
-#' @param weights Optional user-supplied n x n weight matrix — a base
+#' @param weights Optional user-supplied n x n weight matrix: a base
 #'   matrix or a \pkg{Matrix}-package matrix (e.g. a sparse dgCMatrix).
 #'   When \code{NULL} (the default), a row-standardised k-nearest-neighbour
 #'   weight matrix (k = 8) is built from the observation coordinates.  Ties
-#'   at the k-th distance -- every regular grid, every site with repeat
-#'   visits -- share that slot's weight equally rather than being broken by
+#'   at the k-th distance (every regular grid, every site with repeat
+#'   visits) share that slot's weight equally, with no tie-break by
 #'   row order or by which backend found them, so the matrix is a function
 #'   of the geometry alone; on distinct, untied coordinates it equals
 #'   \code{spdep}'s \code{knearneigh()} + \code{nb2listw(style = "W")}
@@ -582,8 +583,8 @@
 #'   argument that is not an n x n matrix is an error.
 #' @param k Integer number of nearest neighbours used when building the
 #'   default weight matrix (ignored when \code{weights} is supplied).
-#'   Default 8.  \code{k >= n - 1} is a complete graph -- \eqn{n(n-1)}
-#'   weights however they are stored -- and is refused above 20 million of
+#'   Default 8.  \code{k >= n - 1} is a complete graph (\eqn{n(n-1)}
+#'   weights however they are stored) and is refused above 20 million of
 #'   them.
 #' @param null Which null distribution the expectation, variance and p-value
 #'   are computed against.  One of:
@@ -603,12 +604,12 @@
 #'   \eqn{(n-p)(n-p+2)} and the normal approximation means nothing there);
 #'   \code{"residual"} logs a warning when it does, \code{"auto"} does not,
 #'   and \code{df} in the result is then \eqn{n - 1}.  Read \code{null} in
-#'   the result rather than assuming.
+#'   the result to see which it was.
 #'   See \strong{Which null, and when it is approximate} above.
 #' @param keep_weights Logical. Return the \eqn{n \times n} weight matrix in
 #'   the result? Defaults to \code{FALSE}: the matrix dominates the object's
-#'   size --- 50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
-#'   and 191 MB at the \eqn{n = 5000} the dense fallback is capped at ---
+#'   size (50.3 KB of a 53.5 KB result at \eqn{n = 500} in its sparse form,
+#'   and 191 MB at the \eqn{n = 5000} the dense fallback is capped at)
 #'   while most uses read only the statistic and its moments, and
 #'   \code{weights_summary} says what it was. Set \code{TRUE} when you need
 #'   the matrix itself.
@@ -624,15 +625,15 @@
 #'       normal approximation.}
 #'     \item{n}{Number of observations used.}
 #'     \item{null}{The null actually used, \code{"randomisation"} or
-#'       \code{"residual"} — check this rather than assuming, since
-#'       \code{"auto"} chooses per fit and \code{"residual"} can fall back.}
+#'       \code{"residual"}.  Check it, since \code{"auto"} chooses per fit
+#'       and \code{"residual"} can fall back.}
 #'     \item{df}{Residual degrees of freedom behind the moments:
 #'       \eqn{n - p} for \code{"residual"} (where \eqn{p} is the rank of the
 #'       design matrix), \eqn{n - 1} for \code{"randomisation"}.}
 #'     \item{weights}{The \eqn{n \times n} weight matrix the statistic was
-#'       computed with --- the row-standardised k-nearest-neighbour matrix
-#'       built here (sparse when \pkg{Matrix} is installed), or the
-#'       supplied \code{weights} after the diagonal was zeroed --- and
+#'       computed with, either the row-standardised k-nearest-neighbour
+#'       matrix built here (sparse when \pkg{Matrix} is installed) or the
+#'       supplied \code{weights} after the diagonal was zeroed.  It is
 #'       \code{NULL} unless \code{keep_weights = TRUE}.}
 #'     \item{kurtosis}{The residual kurtosis \eqn{m_4 / m_2^2}, which the
 #'       randomisation variance conditions on and which says how far the
@@ -644,18 +645,18 @@
 #'     \item{exact}{Logical: \code{TRUE} when the moments are exact for
 #'       these residuals (the residual null on OLS residuals of the response
 #'       on the rebuilt design), \code{FALSE} when they are an approximation
-#'       -- the residual null forced onto a non-OLS backend, or the
+#'       (the residual null forced onto a non-OLS backend, or the
 #'       randomisation null, whose exchangeable moments model residuals do
-#'       not satisfy.}
+#'       not satisfy).}
 #'     \item{weights_summary}{What the weight matrix was, present whether or
 #'       not the matrix itself was kept: \code{n}, \code{storage} (its class),
 #'       \code{neighbours} (the smallest and largest number of neighbours any
-#'       row has --- \code{NA} for a dense matrix, where counting them would
+#'       row has, and \code{NA} for a dense matrix, where counting them would
 #'       allocate a second one), \code{kept} (whether \code{weights} holds
 #'       the matrix) and \code{desc}, the one line \code{print()} shows.}
 #'   }
 #'   The list is classed \code{"morans_i"} and has a \code{print()} method,
-#'   so the console shows the statistic and its null rather than the
+#'   so the console shows the statistic and its null without printing the
 #'   \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 #'   \code{$}, \code{[[} and \code{unlist()} are unaffected.
 #'   Returns \code{NULL} with a warning if computation fails (e.g. fewer
@@ -952,9 +953,9 @@ residual_morans_i <- function(fit,
 #' Print a residual Moran's I result
 #'
 #' Shows the statistic, the null its moments come from and the evidence
-#' behind them.  The weight matrix the result carries is described in one
-#' line rather than printed: it is \eqn{n \times n}, and autoprinting it
-#' buried the statistic under a thousand lines of matrix.
+#' behind them.  The weight matrix the result carries gets a one-line
+#' description in place of the matrix: it is \eqn{n \times n}, and
+#' autoprinting it buried the statistic under a thousand lines of matrix.
 #'
 #' @param x An object of class \code{morans_i}, from
 #'   \code{\link{residual_morans_i}()}.
@@ -1007,9 +1008,9 @@ print.morans_i <- function(x, ...) {
 #'
 #' What \code{residual_morans_i()} keeps in place of the matrix itself when
 #' \code{keep_weights = FALSE}: enough to say what the statistic was computed
-#' with, at a fixed few hundred bytes rather than \eqn{n^2} doubles.  The
-#' neighbour range comes from the sparse row indices and is \code{NA} for a
-#' dense matrix, for the reason given above.
+#' with, at a fixed few hundred bytes against the matrix's \eqn{n^2} doubles.
+#' The neighbour range comes from the sparse row indices and is \code{NA} for
+#' a dense matrix, for the reason given above.
 #'
 #' @keywords internal
 #' @noRd
@@ -1068,13 +1069,13 @@ print.morans_i <- function(x, ...) {
 #' Compute in-sample (or out-of-sample) metrics for fitted spatial models
 #'
 #' Accepts a single \code{spatial_fit} object or a named list of them.
-#' Does NOT refit — uses \code{fitted()} for in-sample and
+#' Does NOT refit.  Uses \code{fitted()} for in-sample and
 #' \code{predict()} for new data.
 #'
 #' @param fits A \code{spatial_fit} object, or a named list of them
 #'   (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
 #'   used as the model labels and every element must have one; an unnamed
-#'   list is an error, and so are duplicated names --- \code{model} is the key
+#'   list is an error, and so are duplicated names.  \code{model} is the key
 #'   the comparison table is assembled on, so two fits sharing a name cannot be
 #'   told apart in the output.
 #' @param newdata Optional sf object for out-of-sample evaluation.
@@ -1168,7 +1169,7 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A data.frame comparing all models.  Alongside the metrics it carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
-#'   \code{resid_morans_null} --- the last naming which null
+#'   \code{resid_morans_null}, the last of which names the null
 #'   \code{\link{residual_morans_i}} scored each model against, since that
 #'   choice is per-fit and governs how much the p-value is worth.  The
 #'   significant-autocorrelation warning below is driven by that p-value, so
@@ -1274,9 +1275,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param models Character vector: any subset of \code{c("GWR", "Bayesian",
 #'   "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 #'   Names outside that set raise a warning and are dropped; if nothing
-#'   recognised remains, this is an error rather than a silent fallback.
+#'   recognised remains, this is an error.  There is no silent fallback.
 #'   A recognised model whose backend package is not installed is dropped with
-#'   a message so the call still returns the models that could run --- but if
+#'   a message so the call still returns the models that could run.  But if
 #'   \emph{none} of the requested backends is installed, nothing is left to
 #'   compare and the call errors with \code{"no viable models."}.  Guard with
 #'   \code{requireNamespace()} when the model set is not known in advance.
@@ -1284,23 +1285,23 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @param seed RNG seed. Default 123.
 #' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
 #'   value, or a bare list of \code{list(train =, test =)} pairs of
-#'   \code{..row_id} values.  Train and test must be disjoint — a fold that
+#'   \code{..row_id} values.  Train and test must be disjoint (a fold that
 #'   trains on its own test rows is not a cross-validation split and is refused
-#'   with an error — and IDs naming no row in the prepared data are dropped with
+#'   with an error), and IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
 #' @param boundary Optional polygon sf/sfc.
 #' @param pointize Geometry coercion strategy.
 #' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
-#'   are formal arguments of \code{cv_gwr()} are forwarded --- it has no
-#'   \code{...} --- so entries meant for \code{fit_gwr_model()} alone (e.g.
+#'   are formal arguments of \code{cv_gwr()} are forwarded (it has no
+#'   \code{...}), so entries meant for \code{fit_gwr_model()} alone (e.g.
 #'   \code{longlat}) cannot be passed this way.  Anything dropped is named in a
 #'   warning; call \code{cv_gwr()} directly if you need it.
 #' @param bayes_args Extra arguments for \code{fit_bayesian_spatial_model()}.
 #'   Forwarded whole as \code{cv_bayes(fit_args = )}, so an unrecognised name
-#'   is an error from \code{fit_bayesian_spatial_model()} rather than a silent
-#'   drop.  \code{compute_loo}, \code{boundary} and \code{pointize} are
-#'   overridden by the CV internals.
+#'   raises an error from \code{fit_bayesian_spatial_model()} and is not
+#'   dropped silently.  \code{compute_loo}, \code{boundary} and
+#'   \code{pointize} are overridden by the CV internals.
 #' @param rf_args Extra arguments for \code{\link{cv_rf}}, which passes
 #'   anything it does not recognise on to \code{\link{fit_rf_model}} and thence
 #'   to \code{ranger::ranger()}.
@@ -1328,10 +1329,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @section Coverage and CRPS in the overall table:
-#' A model can predict well on average and still be badly calibrated ---
-#' Heaton et al. (2019) found good point prediction routinely alongside poor
-#' interval coverage --- so a comparison read from RMSE alone can prefer the
-#' model whose uncertainty is wrong.  When \code{"Bayesian"} is among the
+#' A model can predict well on average and still be badly calibrated, so a
+#' comparison read from RMSE alone can prefer the model whose uncertainty is
+#' wrong.  Heaton et al. (2019) found good point prediction routinely
+#' alongside poor interval coverage.  When \code{"Bayesian"} is among the
 #' models that ran, \code{overall} therefore also carries the columns of
 #' \code{cv_bayes()$predictive_coverage}: \code{coverage_50},
 #' \code{coverage_80}, \code{coverage_95} (the share of held-out rows inside
@@ -1347,9 +1348,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \code{overall} has one row per model with the pooled metrics, the
 #'   coverage and CRPS columns described above when a Bayesian model ran, and
 #'   \code{model} as its last column.
-#'   Only the models that actually ran appear, so check which names are present
-#'   rather than assuming one entry per requested model: a backend whose package
-#'   is missing is dropped with a message.  When \strong{no} requested backend
+#'   Only the models that actually ran appear, so check which names are
+#'   present; there is not always one entry per requested model, because a
+#'   backend whose package is missing is dropped with a message.  When \strong{no} requested backend
 #'   is available there is nothing to return and the function errors with
 #'   \code{"no viable models."} instead of returning an empty comparison.
 #' @references

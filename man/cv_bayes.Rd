@@ -34,12 +34,12 @@ cv_bayes(
 \code{\link{make_folds}()} return value; a bare list of
 \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here --
-\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+The label vector is how folds built by another package are used here
+(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
 \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+refused by name.  Train and test must be disjoint: a fold that trains on
+its own test rows is not a cross-validation split and is refused with an
+error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).}
 
@@ -96,11 +96,11 @@ A list with \code{overall}, \code{fold_metrics},
 \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
 \code{predictive_coverage}.
 The two fold counts make a run where every fold failed visible in the
-return value rather than only in a warning, and \code{fold_status} (one
+return value itself, beyond the warning, and \code{fold_status} (one
 row per fold: \code{fold}, \code{status}, \code{message}) keeps the
-reason each missing fold is missing -- the error text of a fold whose
-sampler failed included -- where a long run's console output would not;
-see \code{\link{cv_spatial}} for the five statuses and for
+reason each missing fold is missing, including the error text of a fold
+whose sampler failed, where a long run's console output would not.
+See \code{\link{cv_spatial}} for the five statuses and for
 \code{orphan_rows}.  \code{predictions} carries,
 beyond the columns its siblings share, \code{yhat_sd}: the posterior
 predictive standard deviation of each held-out row, from the same draws
@@ -122,7 +122,7 @@ it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive \emph{distribution}:
 \code{predictive_coverage} says what fraction of held-out observations fell
 inside the 50/80/95\\% intervals, and \code{mean_CRPS} rates sharpness and
-calibration together.  That is the reason to reach for it -- a Bayesian model
+calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen.
 }
@@ -137,20 +137,20 @@ has settled.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 
@@ -175,7 +175,7 @@ For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
 \code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  Note that when every fold fails, the
+the response is not Gaussian.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.

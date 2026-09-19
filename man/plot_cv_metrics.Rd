@@ -21,8 +21,8 @@ A \code{ggplot} object.
 }
 \description{
 A pooled RMSE of 3.2 can come from 3.2 in every fold or from 1.1 in eight
-folds and 14 in one --- a model that works, and a model that fails in one
-region --- and the pooled number cannot tell the two apart.  This draws the
+folds and 14 in one (a model that works, and a model that fails in one
+region), and the pooled number cannot tell the two apart.  This draws the
 metric of each fold as a point, sized by the number of held-out
 predictions the fold contributed, with the pooled value from
 \code{overall} as a horizontal line, so the spread behind the number is

@@ -219,6 +219,7 @@ cat(
 "| `vignette(\"spatial-cross-validation\")` | fold schemes, block sizing, and reading a CV result |\n",
 "| `vignette(\"diagnostics\")` | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability |\n",
 "| `vignette(\"spatialkit_nc_demo\")` | the whole pipeline end to end, with maps |\n",
+"| `vignette(\"reporting\")` | handing the regions to someone else, and what to report |\n",
 sep = "")
 ```
 

@@ -34,8 +34,8 @@ cv_spatial(
 \item{fit_fn}{A function of one argument, the training slice of
 \code{data_sf}, returning a \code{spatial_fit} built with
 \code{\link{new_spatial_fit}()}.  It is called once per fold on the
-training rows only, so anything done inside it -- scaling, tuning, an inner
-variable sweep -- is already nested and leak-free.  The \code{subclass} it
+training rows only, so anything done inside it (scaling, tuning, an inner
+variable sweep) is already nested and leak-free.  The \code{subclass} it
 stamps must have a \code{predict.<subclass>()} method registered, because
 that is how each fold is scored.}
 
@@ -43,12 +43,12 @@ that is how each fold is scored.}
 \code{\link{make_folds}()} return value; a bare list of
 \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here --
-\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
+The label vector is how folds built by another package are used here
+(\code{blockCV::cv_spatial()} returns one as \code{$folds_ids}), since its
 \code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+refused by name.  Train and test must be disjoint: a fold that trains on
+its own test rows is not a cross-validation split and is refused with an
+error.  IDs naming no row in the prepared data are dropped with
 a logged count.
 Built via \code{block_kfold} when \code{NULL}.}
 
@@ -92,7 +92,7 @@ on Windows).  If an integer > 1, use that many cores.  Default
 own metrics} below.  Default \code{NULL}: the built-in metrics only.}
 
 \item{.caller}{Internal. The name the messages carry, so a wrapper such as
-\code{\link{cv_rf}} reports itself rather than \code{cv_spatial()}.}
+\code{\link{cv_rf}} reports itself in place of \code{cv_spatial()}.}
 }
 \value{
 A list with \code{overall}, \code{fold_metrics}, \code{predictions},
@@ -104,7 +104,7 @@ counts are reported deliberately: a
 \code{fit_fn} that fails on every fold otherwise looks like a successful
 run that happened to score \code{NA}, so compare them before trusting
 \code{overall}.  \code{fold_status} is a data.frame with one row per
-fold supplied -- \code{fold}, \code{status} and \code{message} -- where
+fold supplied (\code{fold}, \code{status} and \code{message}), where
 \code{status} is \code{"ok"}; \code{"error"} (the fit or its
 \code{predict()} threw; \code{message} is the error text);
 \code{"skipped"} (nothing scorable: too few matched rows, a prediction
@@ -117,19 +117,19 @@ the console output of a long run is gone.  \code{orphan_rows} holds the
 \code{..row_id}s of rows in the data that no fold names (they enter no
 training set and are never scored; non-empty only when the folds were
 built on a different or subsetted layer), and \code{n_unknown_ids}
-counts the distinct row IDs the folds name that the data does not have
---- each such row is named by every fold, once as a test row and once in
+counts the distinct row IDs the folds name that the data does not have.
+Each such row is named by every fold, once as a test row and once in
 each other fold's training set, and this counts the row, not the
-mentions (expected when
-rows were removed for missing values -- \code{n_dropped} is how many
-rows \code{prep_model_data()} removed for missing or non-finite values
-or a bad geometry before any fold was fitted).  The \code{fold} column of
+mentions (expected when rows were removed for missing values).
+\code{n_dropped} is how many rows \code{prep_model_data()} removed for
+missing or non-finite values or a bad geometry before any fold was
+fitted.  The \code{fold} column of
 \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 the fold's index in the \code{folds} object that was supplied, so it
 lines up with \code{make_folds()$assignment$fold} even when some folds
-were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the pooled
-out-of-sample predictions come from \code{k} separately fitted models and
-have no single parameter count to adjust for.  The per-fold
+were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the
+pooled out-of-sample predictions come from \code{k} separately fitted
+models and have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
 supplied, and is \code{NA} otherwise.
 }
@@ -145,7 +145,7 @@ the opposite job: \code{blockCV::cv_spatial()} \emph{builds} spatial
 folds, where this function \emph{runs} a cross-validation over folds it is
 given.  With both packages attached, whichever was attached last masks the
 other; \code{spatialkit::cv_spatial()} always resolves to this one.  The
-two cooperate rather than compete: \code{blockCV::cv_spatial()} returns
+two cooperate: \code{blockCV::cv_spatial()} returns
 its fold assignment as \code{$folds_ids}, a vector of fold labels, and
 that vector is accepted directly as the \code{folds} argument here and in
 every other \code{cv_*()} function.  Fold construction is
@@ -156,8 +156,8 @@ through data-drawn regions to a cross-validated, compared model.
 
 \section{Your own metrics}{
 
-The built-in columns -- \code{RMSE}, \code{MAE}, \code{MAPE},
-\code{SMAPE}, \code{R2}, \code{Adj_R2} -- are the Gaussian regression
+The built-in columns (\code{RMSE}, \code{MAE}, \code{MAPE},
+\code{SMAPE}, \code{R2}, \code{Adj_R2}) are the Gaussian regression
 set, and the section below says which of them survive a count or a
 bounded response.  \code{metrics} is the way to score what they cannot: a
 \code{function(y, yhat)} that returns a named numeric vector (a named
@@ -167,14 +167,14 @@ weights.  It is applied twice, in the same way the built-in metrics are:
 once per fold, to that fold's held-out rows, so each name becomes a column
 of \code{fold_metrics}; and once to the pooled out-of-sample predictions
 of every fold, so each name becomes a column of \code{overall}.  Only the
-pairs the built-in metrics use reach the function -- both \code{y} and
-\code{yhat} finite -- so its columns describe the same rows as
+pairs the built-in metrics use reach the function (both \code{y} and
+\code{yhat} finite), so its columns describe the same rows as
 \code{RMSE}, and \code{n_pred} counts them.
 
 The contract: every element named, names unique and not one of the
 built-in column names, one number per name.  Anything else is an error,
 because a scoring function that returns the wrong shape is a mistake to
-surface rather than a fold to skip.  A function that \emph{throws} on a
+surface instead of a fold to skip.  A function that \emph{throws} on a
 fold is logged and its columns are \code{NA} for that fold (and for
 \code{overall}, if it throws on the pooled predictions); a fold is never
 dropped for it.  When no fold produced a prediction the empty
@@ -192,20 +192,20 @@ across the rows of its \code{overall}.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 

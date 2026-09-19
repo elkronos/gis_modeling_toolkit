@@ -27,7 +27,7 @@ gwr_model_selection(
 predictors to choose among.  Factor, character and logical candidates are
 refused: GWmodel fits a factor as several model-matrix columns while this
 sweep counts it as one variable, so the criteria would not be comparable,
-and \code{\link{fit_gwr_model}()} -- the documented next step -- takes only
+and \code{\link{fit_gwr_model}()}, the documented next step, takes only
 numerics.  Encode them as numeric indicators first.}
 
 \item{bandwidth}{Bandwidth held fixed across all candidate models. If
@@ -35,7 +35,7 @@ numerics.  Encode them as numeric indicators first.}
 model containing every candidate. Integer neighbour count when
 \code{adaptive = TRUE}; otherwise a distance in the units of the
 \strong{projected} CRS the sweep runs in, which \code{prep_model_data()} may
-have chosen for you -- geographic input is projected before the bandwidth
+have chosen for you.  Geographic input is projected before the bandwidth
 is used, so a value in degrees would be read as metres.}
 
 \item{adaptive}{Logical; adaptive (nearest-neighbour) bandwidth. Default
@@ -56,10 +56,10 @@ matrix when \code{n} is at most this. Default 2000 (about 32 MB). Set to 0
 to disable.}
 
 \item{quiet}{Discard GWmodel's progress output. Default \code{TRUE}, because
-GWmodel writes it with bare \code{cat()} -- which no
-\code{suppressMessages()} can silence -- and emits one block per candidate
-model, so it scales with the square of the candidate count. Set
-\code{FALSE} to watch a long sweep progress.}
+GWmodel writes it with bare \code{cat()} that no \code{suppressMessages()}
+can silence, and emits one block per candidate model, so it scales with the
+square of the candidate count. Set \code{FALSE} to watch a long sweep
+progress.}
 
 \item{.engine}{Internal; injectable backend used for testing.}
 }
@@ -75,8 +75,8 @@ its name rather than by the documented position),
 \code{criterion_column} (the column it was read from) and
 \code{criterion_verified} (logical: \code{FALSE} exactly when the
 column was read positionally from a table that did not have the four
-documented columns, which is the case the log calls unverified -- gate
-a script on this rather than on the label);
+documented columns, which is the case the log calls unverified.  Gate
+a script on this field instead of on the label);
 \code{response_var} and \code{candidate_vars} (the response and the full
 candidate set the sweep ran over, both echoed by \code{print()});
 \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
@@ -89,8 +89,8 @@ its diagnostic table).
 \description{
 Wraps \code{GWmodel::gwr.model.selection()}, which grows a GWR model one
 predictor at a time and scores every intermediate model with a corrected
-Akaike information criterion, and returns the results as a ranked table
-rather than the two loosely-coupled lists GWmodel produces.
+Akaike information criterion.  GWmodel returns two loosely-coupled lists;
+this function returns a ranked table.
 }
 \section{What this optimises, and what it does not}{
 
@@ -102,10 +102,10 @@ spatially blocked estimate is not. Treat this as fast screening.
 \code{\link{select_features_forward}} performs the same forward search
 against a spatially blocked cross-validated score; it costs far more and is
 the one to trust when the answer matters. When the two disagree, the
-disagreement is itself informative -- it usually means a candidate is
+disagreement is itself informative. It usually means a candidate is
 predictive only locally.
 
-Two further limitations are structural rather than incidental:
+Two further limitations follow from the method itself:
 
 \itemize{
 \item \strong{One bandwidth for every model.} Comparing criteria across
@@ -123,9 +123,9 @@ you that none of the candidates help.
 
 \section{Cost}{
 
-The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates --
-55 at p = 10, 210 at p = 20 -- each over all \code{n} locations.
-\code{max_models} stops the call rather than letting it run for hours.
+The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates
+(55 at p = 10, 210 at p = 20), each over all \code{n} locations.
+\code{max_models} stops the call before it runs for hours.
 }
 
 \section{Using $raw with GWmodel directly}{
@@ -137,7 +137,7 @@ so the call is
 \preformatted{
   GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
 }
--- \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
+Pass \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
 \code{sel$raw[[2]]}, an unlabelled numeric matrix whose columns are
 \code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order; the
 \code{criterion} column of \code{$table} is its third column.

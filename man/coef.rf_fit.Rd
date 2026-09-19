@@ -16,7 +16,7 @@ Never returns; always signals an error.
 }
 \description{
 Consistent with \code{coef.gwr_fit()} and \code{coef.bayesian_fit()}, which
-also error rather than returning \code{NULL} when they cannot supply
-coefficients -- see the \code{coef()} contract in
+also error, instead of returning \code{NULL}, when they cannot supply
+coefficients.  See the \code{coef()} contract in
 \code{\link{new_spatial_fit}}.
 }

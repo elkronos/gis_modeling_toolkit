@@ -21,8 +21,8 @@ in \code{\link{new_spatial_fit}}.
 Returns the posterior summary of the global (non-spatial) regression terms:
 estimate, error and credible interval per predictor, as
 \code{brms::fixef()} reports them.  Reach for it to read the average effect
-of a predictor with its uncertainty attached -- the Bayesian counterpart to
-a coefficient table -- remembering that the Gaussian-process term has
+of a predictor with its uncertainty attached (the Bayesian counterpart to
+a coefficient table), remembering that the Gaussian-process term has
 already absorbed the spatially structured part of the signal, so these are
 effects net of location.
 }

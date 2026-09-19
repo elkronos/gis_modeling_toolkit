@@ -15,19 +15,19 @@ force rather than the default: \code{old <- spatialkit_quiet();
   spatialkit_quiet(old)}.}
 }
 \value{
-Invisibly, the threshold that was in force before the change --
-a \pkg{logger} level that can be passed back as \code{quiet}.
+Invisibly, the threshold that was in force before the change, a
+\pkg{logger} level that can be passed back as \code{quiet}.
 }
 \description{
 The package writes an INFO+ trace to a session temp file (logger appender
 index 1) and echoes WARN+ to the console (index 2).  Both
 \code{logger::log_appender()} and \code{logger::log_threshold()} default to
 \code{index = 1}, so the obvious two-line recipe silences the file and
-leaves the console untouched -- which is the opposite of what anyone wants.
+leaves the console untouched, which is the opposite of what anyone wants.
 This helper names the right index.
 }
 \details{
-Note that these are log records, not R conditions: \code{suppressWarnings()}
+These are log records, not R conditions: \code{suppressWarnings()}
 and \code{tryCatch(warning = )} do not see them.  Conditions the package
 raises as real R warnings are unaffected by this function.
 }

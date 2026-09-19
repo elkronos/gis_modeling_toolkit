@@ -43,18 +43,18 @@ feature (fewer if \code{keep_unassigned = FALSE} dropped unmatched ones), in
 the CRS \code{features_sf} arrived in. Any column of \code{features_sf} whose name
 would collide with the polygon ID column is dropped before the spatial
 join (with a warning), so re-assigning an already-assigned layer replaces
-the old IDs rather than failing. If \emph{no} feature falls inside any polygon
+the old IDs and does not fail. If \emph{no} feature falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
-places --- a CRS that could only be stamped, not reprojected. The
+places (a CRS that could only be stamped, not reprojected). The
 attribute \code{"ties"} records how many features matched more than one
 polygon and had the \code{tie_break} rule decide for them: a list with \code{n},
 \code{which} (their row positions in \code{features_sf}) and \code{rule}. A large \code{n}
 means the polygon layer overlaps, and per-cell counts built from the
 result depend on the rule. The record describes the rows this call
 returned and does not survive subsetting: \code{joined[i, ]} is a plain layer
-with no \code{"ties"} attribute, rather than one reporting the parent's
-count against row positions that no longer resolve.
+with no \code{"ties"} attribute, so nothing reports the parent's count
+against row positions that no longer resolve.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
@@ -62,11 +62,11 @@ Joins an sf layer of input features to a polygon layer via spatial join.
 \details{
 This is the second step of the package's pipeline: it labels every
 observation with the cell it falls in, which is what
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} then aggregates over. Reach for it directly (rather
-than for \code{\link[sf:st_join]{sf::st_join()}}) when the join has to be \emph{unambiguous} --- it
-resolves features matching several polygons by an explicit \code{tie_break} rule
-instead of silently duplicating rows, so the assigned layer keeps one row
-per input feature and cell-level counts mean what they say.
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} then aggregates over. Prefer it to \code{\link[sf:st_join]{sf::st_join()}}
+when the join has to be \emph{unambiguous}. It resolves features matching
+several polygons by an explicit \code{tie_break} rule instead of silently
+duplicating rows, so the assigned layer keeps one row per input feature
+and cell-level counts mean what they say.
 }
 \examples{
 library(sf)

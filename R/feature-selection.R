@@ -12,8 +12,8 @@
 #' Nested selection is only worth doing if the inner loop is blocked the same
 #' way the outer one is.  Random inner folds inside blocked outer folds select
 #' variables that look predictive only because nearby points leak between
-#' train and test -- and the outer loop then reports honest-looking numbers for
-#' a dishonestly chosen feature set, which is worse than not selecting at all,
+#' train and test.  The outer loop then reports honest-looking numbers for a
+#' dishonestly chosen feature set, which is worse than not selecting at all,
 #' because the dishonesty is now hidden behind a defensible-looking validation.
 #' \code{method} therefore defaults to \code{"block_kfold"} and logs a loud
 #' caution if set to \code{"random_kfold"} (a deliberate choice, so it is not
@@ -22,14 +22,14 @@
 #' Call this \emph{inside} the \code{fit_fn} you pass to \code{cv_spatial()}.
 #' \code{.cv_fit_one_fold()} calls \code{fit_fn(train_sf)} on the training
 #' slice only, so anything done inside it is automatically nested and
-#' leak-free; no extra plumbing is needed.  Note the cost: a sweep over
+#' leak-free; no extra plumbing is needed.  The cost grows fast: a sweep over
 #' \code{p} candidates costs roughly \code{p^2 / 2 * k} model fits, and nesting
 #' that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 #' \code{max_fits} guards against that.
 #'
 #' @section The score is not a performance estimate:
 #' \code{$score} is the cross-validated \code{metric} of the winning set at
-#' the final step --- the best of every candidate set the sweep scored.  That
+#' the final step: the best of every candidate set the sweep scored.  That
 #' is the number the selection optimised, and a number optimised over many
 #' candidates is optimistically biased by construction: Cawley and Talbot
 #' (2010) show the bias can exceed the genuine differences between the models
@@ -46,8 +46,8 @@
 #' @param response_var Character(1).
 #' @param candidate_vars Character vector of predictors to choose among.
 #' @param fit_fn A function \code{(train_sf, predictor_vars)} returning a
-#'   \code{spatial_fit}.  Note the two-argument signature: selection needs to
-#'   refit with different predictor sets.
+#'   \code{spatial_fit}.  The signature takes two arguments because selection
+#'   has to refit with different predictor sets.
 #' @param k Inner fold count. Default 5.
 #' @param method Inner fold method. Default \code{"block_kfold"}.
 #' @param block_size Passed to \code{make_folds()}; inherit the outer block
@@ -56,7 +56,7 @@
 #'   \code{"R2"} (maximised). Default \code{"RMSE"}.
 #' @param tol Minimum improvement required to accept a variable.  Default 0,
 #'   meaning any improvement is accepted. The first variable is judged against
-#'   the null (intercept-only) model, so \code{tol} bites from step 1 --- but
+#'   the null (intercept-only) model, so \code{tol} bites from step 1, but
 #'   only when that null model can be scored. Backends that refuse a
 #'   zero-length \code{predictor_vars} (\code{\link{fit_rf_model}} and
 #'   \code{\link{fit_gwr_model}} both do) have no null score, and there the
