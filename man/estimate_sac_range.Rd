@@ -33,7 +33,7 @@ less reliable number than for a Gaussian response.}
 
 \item{predictor_vars}{Optional character vector.  When supplied, the
 trend on these predictors is removed first and the variogram describes
-the residual autocorrelation -- the part a spatial model has to handle
+the residual autocorrelation, the part a spatial model has to handle
 once the covariates have done their work.  How the trend is removed is
 set by \code{detrend}, and it matters: see "Detrending and the
 residual-variogram bias".}
@@ -41,25 +41,25 @@ residual-variogram bias".}
 \item{n_max}{Maximum number of points to subsample before fitting.
 Variogram estimation is O(n²) so this keeps runtime bounded.}
 
-\item{cutoff}{Fraction of the maximum inter-point distance (the farthest
-pair, found on the convex hull -- not the bounding-box diagonal, which
-depends on how the axes are oriented) to use as the variogram lag cutoff.
-Default 0.5.}
+\item{cutoff}{Fraction of the maximum inter-point distance to use as the
+variogram lag cutoff.  That distance is the farthest pair, found on the
+convex hull, and not the bounding-box diagonal, which depends on how the
+axes are oriented.  Default 0.5.}
 
 \item{range_frac}{Positive numeric.  A fitted range exceeding
-\code{range_frac * cutoff * max_dist} -- that is, beyond the longest lag
-the empirical variogram was actually fitted over -- is treated as
+\code{range_frac * cutoff * max_dist} (that is, beyond the longest lag
+the empirical variogram was actually fitted over) is treated as
 unidentified and \code{NA_real_} is returned.
 \code{gstat::fit.variogram()} yields a finite number even when the
-variogram never reaches a sill, and such a value is extrapolation past the
-observed lags rather than a long autocorrelation range.  Passing it to
-\code{make_folds(auto_range = TRUE)} would collapse the block grid to a
-single block.  Default 1.0; raise it to accept ranges extrapolated beyond
-the fitted lags.}
+variogram never reaches a sill, and such a value extrapolates past the
+observed lags instead of measuring a long autocorrelation range.  Passing
+it to \code{make_folds(auto_range = TRUE)} would collapse the block grid to
+a single block.  Default 1.0; raise it to accept ranges extrapolated
+beyond the fitted lags.}
 
 \item{seed}{RNG seed for the \code{n_max} subsample, restored afterwards so
 the caller's random stream is untouched.  Default \code{123L}: the
-subsample is an internal approximation rather than part of the answer, and
+subsample is an internal approximation and no part of the answer, and
 leaving it unseeded made the returned range differ between runs on
 identical input (19531, 19589, 19605 on three calls) and silently advanced
 the caller's RNG.  Pass \code{NULL} for the old unseeded behaviour, or a
@@ -69,7 +69,7 @@ The \code{reml_max_n} subsample uses the same seed.}
 
 \item{detrend}{How the trend on \code{predictor_vars} is removed;
 ignored when there are none.  \code{"ols"} (default) fits it by ordinary
-least squares and fits the variogram to the residuals -- the
+least squares and fits the variogram to the residuals.  This is the
 long-standing behaviour, which underestimates the range (see the section
 below).  \code{"reml"} fits the trend and an exponential-plus-nugget
 covariance together by residual maximum likelihood with
@@ -90,8 +90,8 @@ variogram and fitted model as \code{directional_fits}?  Defaults to
 \code{FALSE}: the four variograms are most of the object's size (42.1 KB
 of 59.3 KB at \eqn{n = 400}, and the difference between a 52.4 KB and a
 94.6 KB \code{make_folds(auto_range = TRUE)} result), while the numbers
-read from them --- \code{directional}, \code{directional_fitted},
-\code{directional_status}, \code{anisotropy} --- are attached either
+read from them (\code{directional}, \code{directional_fitted},
+\code{directional_status}, \code{anisotropy}) are attached either
 way, and \code{plot()} draws the effective variogram from its own
 attribute.  Set \code{TRUE} to inspect the directional curves.}
 }
@@ -108,16 +108,16 @@ over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
 the all-pairs fit was unusable and the directional maximum stands in
 for it), \code{directional_status} (per azimuth, why a direction is
 \code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
--- its range ran past the largest lag fitted -- \code{"not_converged"}
+(its range ran past the largest lag fitted), \code{"not_converged"}
 or \code{"no_fit"}), \code{directional_fitted} (the range each
 direction's fit reported whether or not it was usable, so a refused
 directional range stays recoverable) and \code{directional_fits} (a
 list by azimuth of each direction's empirical \code{variogram} and
-fitted \code{model}, \code{NULL} where there is none --- and
+fitted \code{model}, \code{NULL} where there is none, and
 \code{NULL} altogether unless \code{keep_directional_fits = TRUE}),
 \code{detrended} (logical: whether the variogram is of the
-residuals on \code{predictor_vars} rather than the raw response
--- a missing predictor is an error, and a failed detrending fit
+residuals on \code{predictor_vars} or of the raw response.  A
+missing predictor is an error, and a failed detrending fit
 warns and falls back to the raw response with this set to
 \code{FALSE}), \code{detrend_method} (\code{"ols"} or \code{"reml"}
 when detrended, \code{NA} otherwise), \code{reml} (with
@@ -125,13 +125,13 @@ when detrended, \code{NA} otherwise), \code{reml} (with
 \code{subsampled}, \code{nugget_prop} and \code{sigma2} from the
 REML fit; \code{NULL} otherwise),
 \code{crs} (the projected CRS the variogram was
-fitted in -- the unit of the range), \code{max_dist},
+fitted in: the unit of the range), \code{max_dist},
 \code{cutoff_dist}, \code{variogram} (the empirical variogram),
 \code{variogram_model} (the fitted \code{gstat} model, or with
 \code{detrend = "reml"} a \code{gstat} model built from the REML
 parameters) and \code{nugget} (that model's nugget variance; see
-\code{\link{sac_nugget}}), so the fit can be inspected rather than
-trusted.}
+\code{\link{sac_nugget}}), so the fit can be inspected and need not
+be taken on trust.}
 \item{Rejected range}{\code{NA_real_} when a range was fitted but is
 not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
 \code{range_frac}); or the model did not converge; or the empirical
@@ -139,20 +139,20 @@ variogram \emph{decreases} with distance over its shorter lags (a
 net fall of more than 15 percent of the mean semivariance there,
 weighted by pairs), which is the shape of a periodic, hole-effect
 structure or of a variance that differs between a dense cluster and
-the rest of the layer -- not of an unremoved trend, which makes the
-variogram rise without a sill and is caught by the first test; or
+the rest of the layer (an unremoved trend instead makes the variogram
+rise without a sill, and the first test catches that); or
 the fitted range is non-positive.  It is classed \code{sac_range} as
-well, so it prints as a bare \code{NA} rather than dumping its
+well, so it prints as a bare \code{NA} without dumping its
 attributes, and it carries \code{max_dist}, \code{cutoff_dist},
-\code{variogram}, \code{variogram_model} and \code{nugget} --- the
-evidence for the rejection --- plus \code{rejected_range} (the value
+\code{variogram}, \code{variogram_model} and \code{nugget} (the
+evidence for the rejection), plus \code{rejected_range} (the value
 that was refused), \code{rejected_reason} (one of
 \code{"fitted range exceeds the largest lag fitted"},
 \code{"variogram model did not converge"},
 \code{"empirical variogram decreases with distance"},
-\code{"fitted range is non-positive or non-finite"}), \code{crs} —
-so the units the rejected number was in stay recoverable, which is
-what \code{plot()} labels its axis from --- and
+\code{"fitted range is non-positive or non-finite"}), \code{crs}
+(so the units the rejected number was in stay recoverable, which is
+what \code{plot()} labels its axis from) and
 \code{detrend_method}.  It carries \code{directional},
 \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
 \code{directional_fitted} and, with
@@ -181,8 +181,8 @@ way it always did.
 Fits exponential (or spherical) variogram models and returns the
 \emph{effective range}: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 \\% of the
-sill; for the spherical model -- fitted only when the exponential fit is
-singular -- the fitted range itself, which is where the spherical
+sill; for the spherical model (fitted only when the exponential fit is
+singular) the fitted range itself, which is where the spherical
 semivariance reaches its sill exactly.  Both are the distance beyond which
 two observations are (near) uncorrelated, which is what a block or a
 buffer has to exceed.
@@ -190,15 +190,15 @@ buffer has to exceed.
 \details{
 The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
 variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
-azimuths with a ±22.5° tolerance -- four windows that tile all 180 distinct
-azimuths exactly once -- and their ranges are returned in the
+azimuths with a ±22.5° tolerance.  Those four windows tile all 180 distinct
+azimuths exactly once, and their ranges are returned in the
 \code{directional} attribute, with their largest-over-smallest ratio in
 \code{anisotropy}.  They are a diagnostic, not the answer, for two reasons.
 Each direction sees about a quarter of the point pairs, and the maximum of
 four quarter-sample fits is biased upward: on simulated \emph{isotropic}
 fields it came in about 40\\% above the truth, and no hurdle placed in
 front of it (all four directions fitted, ratio above 1.5, maximum above
-1.5× the all-pairs fit) kept it out -- one isotropic field rotated in 10°
+1.5× the all-pairs fit) kept it out.  One isotropic field rotated in 10°
 steps "established" anisotropy in 14 of 18 orientations.  And the windows
 are fixed to the coordinate axes, so any answer built from them changes
 when the layer is rotated, which a property of the field must not do.  The
@@ -230,8 +230,8 @@ log note is emitted instead when the directional ranges vary but the spread
 is consistent with sampling noise.
 
 The returned range is in the coordinate units of the (projected) data and
-can be passed directly to \code{make_folds(block_size = ...)} to ensure
-that CV blocks are at least as wide as the autocorrelation range.
+can be passed directly to \code{make_folds(block_size = ...)} so that CV
+blocks are at least as wide as the autocorrelation range.
 }
 \section{Detrending and the residual-variogram bias}{
 
@@ -246,7 +246,7 @@ are.  Measured for this estimator on simulated exponential fields (n =
 ratio of the estimate from the trend-removed data to the estimate from
 the true field:
 \itemize{
-\item a white-noise covariate: OLS 1.00, REML 0.99 -- no bias to speak of;
+\item a white-noise covariate: OLS 1.00, REML 0.99 (no bias to speak of);
 \item a spatially smooth covariate (a random field with range 300 or
 1000): OLS 0.97, REML 0.95--0.98;
 \item a linear trend in the coordinates: OLS 0.92, REML 1.04;
@@ -284,10 +284,10 @@ part of the mean the covariates explain, but it does not fix the variance
 structure: the residuals of an OLS fit to a count still have a variance
 that tracks the fitted mean.  The principled remedy is a variogram of
 Pearson residuals from a model in the right family, which this function
-does not compute.  Until it does, treat the range from a count response as
-an order of magnitude rather than an estimate, size blocks conservatively
-from it, and prefer \code{\link{make_folds}(method = "nndm")}, which does
-not depend on a fitted range at all.
+does not compute.  Until it does, treat the range from a count response as no
+more than an order of magnitude, size blocks conservatively from it, and
+prefer \code{\link{make_folds}(method = "nndm")}, which does not depend on a
+fitted range at all.
 }
 
 \examples{

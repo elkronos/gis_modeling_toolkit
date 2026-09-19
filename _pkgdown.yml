@@ -3,6 +3,15 @@ url: https://elkronos.github.io/gis_modeling_toolkit/
 template:
   bootstrap: 5
 
+# Figures in the reference examples and the articles. pkgdown's default is a
+# 7.3-inch-wide figure shown in a 700-pixel column, which leaves axis and
+# strip text small on screen; 6 inches at the same column width reads a
+# quarter larger, and matches the width the vignettes use when the package
+# itself builds them. A chunk's own fig.height still wins in an article.
+figures:
+  fig.width: 6
+  fig.asp: 0.7
+
 navbar:
   structure:
     left:  [intro, reference, articles, news]
@@ -29,6 +38,7 @@ articles:
   navbar: End to end
   contents:
   - spatialkit_nc_demo
+  - reporting
 
 # The reference index follows the pipeline in ?spatialkit: resolution,
 # tessellate, assign, aggregate, fold, fit, validate, predict, check

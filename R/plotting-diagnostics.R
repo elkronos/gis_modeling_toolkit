@@ -11,8 +11,8 @@
 #' Plot one cross-validation metric fold by fold
 #'
 #' A pooled RMSE of 3.2 can come from 3.2 in every fold or from 1.1 in eight
-#' folds and 14 in one --- a model that works, and a model that fails in one
-#' region --- and the pooled number cannot tell the two apart.  This draws the
+#' folds and 14 in one (a model that works, and a model that fails in one
+#' region), and the pooled number cannot tell the two apart.  This draws the
 #' metric of each fold as a point, sized by the number of held-out
 #' predictions the fold contributed, with the pooled value from
 #' \code{overall} as a horizontal line, so the spread behind the number is
@@ -126,7 +126,11 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
     ggplot2::labs(title = title, x = "Fold", y = metric, caption = caption) +
     ggplot2::theme_minimal()
   if (n_models > 1L)
-    p <- p + ggplot2::facet_wrap(~ model, ncol = 1L, scales = "fixed")
+    # One panel per model, stacked on a shared fold axis, with room between
+    # the panels and a full-size strip label (see .plot_sweep() for why).
+    p <- p + ggplot2::facet_wrap(~ model, ncol = 1L, scales = "fixed") +
+      ggplot2::theme(panel.spacing.y = ggplot2::unit(1.1, "lines"),
+                     strip.text = ggplot2::element_text(size = ggplot2::rel(1)))
   p
 }
 
@@ -300,7 +304,7 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #' systematic over-confidence (points below the line) or intervals wider than
 #' they need to be (above it) are read at a glance.  Three levels is a thin
 #' curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
-#' \code{cv_bayes()} for a full one --- the levels are read off the column
+#' \code{cv_bayes()} for a full one.  The levels are read off the column
 #' names, so whatever was computed is drawn.
 #'
 #' @param cv The list returned by \code{\link{cv_bayes}()}, or a
@@ -398,7 +402,7 @@ plot_calibration <- function(cv, ...) {
 #' \code{plot.feature_selection()} and \code{plot.gwr_model_selection()}.  A
 #' sharp optimum means the data chose the point; a flat curve means the
 #' rule did, and the chosen value then deserves less weight than it reads
-#' with --- which is what the picture is for.
+#' with.  That is what the picture is for.
 #'
 #' @param df Data frame with columns \code{x}, \code{y}, \code{panel}
 #'   (facet; one level for a single panel) and optionally \code{label}
@@ -455,7 +459,15 @@ plot_calibration <- function(cv, ...) {
     ggplot2::theme_minimal()
   if (log_x) p <- p + ggplot2::scale_x_log10()
   if (nlevels(df$panel) > 1L)
-    p <- p + ggplot2::facet_wrap(~ panel, ncol = 1L, scales = "free_y")
+    # Stacked so the panels share one x axis, which is what makes the chosen
+    # levels comparable across criteria.  The panels then need room between
+    # them and a strip label at full size: the default strip text is 80% of
+    # the base size and the default gap half a line, and with four or five
+    # panels on one page both read as cramped.  The caller decides the figure
+    # height; about 1.6 inches per panel is comfortable.
+    p <- p + ggplot2::facet_wrap(~ panel, ncol = 1L, scales = "free_y") +
+      ggplot2::theme(panel.spacing.y = ggplot2::unit(1.1, "lines"),
+                     strip.text = ggplot2::element_text(size = ggplot2::rel(1)))
   p
 }
 
@@ -464,11 +476,11 @@ plot_calibration <- function(cv, ...) {
 #'
 #' The criteria of a \code{\link{resolution_profile}()} against the number of
 #' cells, one panel per criterion on a shared x axis, with the level each
-#' criterion selects marked and the region over which it is within
-#' \code{tol} of its optimum shaded --- the flat region
-#' \code{\link{select_resolution}()} reports, drawn.  A criterion whose
-#' optimum sits at the support ceiling or the range floor is captioned as
-#' such, because there the bound is choosing, not the criterion.
+#' criterion selects marked and the region over which it is within \code{tol}
+#' of its optimum shaded.  That shaded band is the flat region
+#' \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
+#' at the support ceiling or the range floor is captioned as such, because
+#' there the bound is choosing, not the criterion.
 #'
 #' @param x A \code{resolution_profile}.
 #' @param criteria Character vector of criteria to draw, any of
@@ -572,7 +584,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #' step and keeps the best; its \code{history} holds all of them.  This draws
 #' the accepted variable's score at each step as the path, every other
 #' candidate's score at that step as a faint point, and the step at which the
-#' selection stopped in red --- so the picture says whether the last variable
+#' selection stopped in red.  The picture then says whether the last variable
 #' was a clear gain or the first that happened to clear \code{tol}, and
 #' whether the runner-up would have done as well.  The scores are the
 #' selection's own cross-validated criterion, optimistically biased by the
@@ -673,11 +685,11 @@ plot.feature_selection <- function(x, ...) {
 #' \code{\link{gwr_model_selection}()} ranks every model it evaluated on
 #' AICc.  This draws each model's criterion against its number of
 #' predictors, the winner in red, so the gap between the best model and the
-#' runners-up --- which the ranked table shows only as numbers --- is read
+#' runners-up (which the ranked table shows only as numbers) is read
 #' as a shape: a winner well below the rest was chosen by the data, a
 #' winner a fraction of an AICc unit ahead of three others was chosen by the
 #' tie-break.  The criterion is in-sample and the caption carries the label
-#' \code{gwr_model_selection()} attached to it, including any note that it
+#' \code{gwr_model_selection()} attached to it, including any note saying it
 #' was read positionally.
 #'
 #' @param x A \code{gwr_model_selection} object.

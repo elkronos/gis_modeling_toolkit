@@ -1,23 +1,23 @@
 #' Prepare and sanitize an sf dataset for spatial modeling
 #'
 #' Ensures point geometry, projected CRS, and removes rows with missing or
-#' non-finite values in modeling columns -- \emph{including} rows whose
+#' non-finite values in modeling columns, \emph{including} rows whose
 #' geometry is empty or whose coordinates are not finite, which no model
 #' backend can use.  All non-POINT geometries (including MULTIPOINT) are
 #' coerced to representative points via \code{coerce_to_points()}, so
 #' downstream coordinate extraction always aligns one row per observation.
 #'
 #' The response may not appear in \code{predictor_vars}.  Using it as its own
-#' predictor is leakage no backend catches -- an out-of-bag R^2 near 1 in the
-#' random forest, a silently reduced design matrix in GWR, duplicated rows and a
-#' phantom \code{<none>} entry in the GWR selection table -- so it is refused
+#' predictor is leakage no backend catches: an out-of-bag R^2 near 1 in the
+#' random forest, a silently reduced design matrix in GWR, duplicated rows and
+#' a phantom \code{<none>} entry in the GWR selection table.  It is refused
 #' here.
 #'
 #' Column names must be syntactically valid R names (\code{make.names(x) == x}).
-#' Every backend builds a model formula from these names, and a name R parses
-#' as an expression -- \code{"B5-B4"} is \code{B5 - B4}, \code{"log(a)"} is a
-#' function call -- would fit a different model from the one requested while
-#' the fit object still recorded the name you asked for.  Rename the column
+#' Every backend builds a model formula from these names.  A name R parses as
+#' an expression would fit a different model from the one requested while the
+#' fit object still recorded the name you asked for: \code{"B5-B4"} is
+#' \code{B5 - B4}, and \code{"log(a)"} is a function call.  Rename the column
 #' (for example with \code{make.names()}) before fitting.
 #'
 #' @param data_sf An sf object.
@@ -47,11 +47,11 @@
 #'   describes the rows this call returned and does not survive subsetting:
 #'   \code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
 #'   and a fit given such a subset with \code{.already_prepped = TRUE} reports
-#'   \code{n_dropped = 0} rather than the parent layer's count.  The CRS is projected
-#'   whenever one can be established.  A CRS-less layer is decided by the
-#'   lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
-#'   box fits the lon/lat envelope \emph{and} it spans more than one unit on
-#'   some axis — or carries decimal-degree-like precision — it is read as
+#'   \code{n_dropped = 0} even when the parent layer dropped rows.  The CRS is
+#'   projected whenever one can be established.  A CRS-less layer is decided by
+#'   the lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
+#'   box fits the lon/lat envelope \emph{and} it either spans more than one unit
+#'   on some axis or carries decimal-degree-like precision, it is read as
 #'   EPSG:4326 and projected, with a warning.  A small planar survey inside that
 #'   envelope is included in that, deliberately; only coordinates the heuristic
 #'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
@@ -232,7 +232,7 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
-#'   before the distance quantiles are taken — \code{brms::gp()} defaults to
+#'   before the distance quantiles are taken.  \code{brms::gp()} defaults to
 #'   \code{gr = TRUE} and reduces its covariates to unique rows, so a
 #'   heavily-sampled station would otherwise weight the quantile by how often it
 #'   was measured rather than by where the sites are.
@@ -315,32 +315,33 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #'   choose_L <- function(x, c) c * max(1, max(x) - min(x))
 #' }
 #' over the column-centred covariate matrix, pooled across dimensions
-#' (\code{brms:::.data_gp()}) -- the FULL range, about twice the per-axis
+#' (\code{brms:::.data_gp()}).  That is the FULL range, about twice the per-axis
 #' half-range.  Deriving \code{c} against the half-range and handing the result
 #' to \code{brms::gp()} therefore built a boundary twice as wide as intended:
 #' \code{k} was sized for a boundary half the real one, so the GP was
 #' systematically under-resolved, and the smallest resolvable length-scale
-#' (\code{gp_ell_min}) was understated by the same factor -- making the post-fit
-#' adequacy diagnostic, whose whole job is to catch under-resolution, twice too
-#' lenient to fire.  Working in brms's own units removes both.
+#' (\code{gp_ell_min}) was understated by the same factor, which made the
+#' post-fit adequacy diagnostic, whose whole job is to catch under-resolution,
+#' twice too lenient to fire.  Working in brms's own units removes both.
 #'
-#' The floor is \code{1.25} rather than Riutort-Mayol's \code{1.2} because the
-#' floor is convention-dependent too: it is brms's own default (\code{c = 5/4}),
-#' and on the range convention it is the more generous of the two.
+#' The floor is \code{1.25} where Riutort-Mayol et al. give \code{1.2}, because
+#' the floor is convention-dependent too: it is brms's own default
+#' (\code{c = 5/4}), and on the range convention it is the more generous of the
+#' two.
 #'
 #' \code{m} is the count PER DIMENSION.  brms expands a full tensor grid over
 #' the GP covariates, so the fitted model carries \code{m^D} basis functions
-#' (\code{D = 2} for \code{gp(..x, ..y)}) -- see brms/R/data-predictor.R,
+#' (\code{D = 2} for \code{gp(..x, ..y)}).  See brms/R/data-predictor.R,
 #' \code{data_gp()}:  \code{out[[paste0("NBgp", pi)]] <- k ^ D}.  Because
 #' \code{brms::gp()} accepts a single \code{k} shared across dimensions, the
 #' per-dimension recommendations are collapsed into one value.
 #'
-#' The boundary factor is set from the UPPER length-scale bound -- it must
-#' contain the longest plausible correlation range -- while the basis count is
-#' set from the LOWER bound, because it must resolve the shortest.  Deriving
-#' both from the same length-scale estimate is the point: the previous rule
-#' scaled the basis count with the number of observations, which made the
-#' approximation cost grow as n while adding no resolution the data supported.
+#' The boundary factor is set from the UPPER length-scale bound, because it must
+#' contain the longest plausible correlation range, while the basis count is set
+#' from the LOWER bound, because it must resolve the shortest.  Deriving both
+#' from the same length-scale estimate is the point: the previous rule scaled
+#' the basis count with the number of observations, which made the approximation
+#' cost grow as n while adding no resolution the data supported.
 #'
 #' @param coords_xy Numeric matrix of (already scaled) coordinates.  Only the
 #'   first two columns are used, and replicated rows are collapsed, mirroring
@@ -350,7 +351,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @param k_min Integer floor on the per-dimension basis count.
 #' @param max_basis Integer cap on the TOTAL basis count (\code{k^2}).  The
 #'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
-#'   so there is a single cap rather than two that can contradict each other.
+#'   so there is a single cap, with no second one to contradict it.
 #' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
 #'   \code{S} (numeric; the pooled full range of the column-centred coordinates
 #'   AFTER collapsing replicated rows, i.e. exactly what \code{brms::gp(c = )}

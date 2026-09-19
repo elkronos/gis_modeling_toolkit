@@ -17,7 +17,7 @@
 }
 \description{
 Shows the statistic, the null its moments come from and the evidence
-behind them.  The weight matrix the result carries is described in one
-line rather than printed: it is \eqn{n \times n}, and autoprinting it
-buried the statistic under a thousand lines of matrix.
+behind them.  The weight matrix the result carries gets a one-line
+description in place of the matrix: it is \eqn{n \times n}, and
+autoprinting it buried the statistic under a thousand lines of matrix.
 }

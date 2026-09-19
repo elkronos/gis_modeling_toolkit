@@ -287,3 +287,35 @@ test_that("create_grid_polygons_cached validates the boundary", {
                                           cache_env = env)
   expect_equal(nrow(from_sfc), nrow(from_sf))
 })
+
+test_that("a projected tessellation gets IDs, and the same ones in any projection", {
+  # Validity is measured in the CRS the geometry is in, and the function
+  # validated the input before transforming it to the sort CRS.  Cells that
+  # are valid projected can have two vertices land on one longitude and
+  # latitude, which s2 calls a degenerate edge: st_centroid() on the
+  # transformed copy then aborted the call, on cells this package itself had
+  # just produced.
+  skip_if_not(sf::sf_use_s2())
+  set.seed(11)
+  pts <- sf::st_as_sf(
+    data.frame(x = stats::runif(200, -79.5, -76.0),
+               y = stats::runif(200,  34.5,  36.5)),
+    coords = c("x", "y"), crs = 4326)
+  pts <- ensure_projected(pts)
+  cells <- build_tessellation(pts, method = "hex", approx_n_cells = 12,
+                              boundary = clip_target_for(pts, expand = 0.01))$cells
+  expect_true(all(sf::st_is_valid(cells)))
+  cells$src <- seq_len(nrow(cells))
+
+  from_proj <- expect_no_error(ensure_stable_poly_id(cells[, "src"]))
+  expect_equal(nrow(from_proj), nrow(cells))
+  # The guarantee the function exists for: one ID per geometry, whichever
+  # projection the layer arrives in.
+  from_ll <- ensure_stable_poly_id(sf::st_transform(cells[, "src"], 4326))
+  expect_equal(from_proj$poly_id[order(from_proj$src)],
+               from_ll$poly_id[order(from_ll$src)])
+  # The repair is applied to the sort copy only; the caller's geometry is
+  # returned untouched.
+  expect_equal(sf::st_geometry(from_proj),
+               sf::st_geometry(cells)[from_proj$src])
+})

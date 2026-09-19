@@ -25,20 +25,20 @@ because the package is a cross-validation package.
 
 \enumerate{
 \item \strong{Choose a resolution.} \code{\link{determine_optimal_levels}()}
-reads a cell count out of the spatial structure of the observations,
-rather than making you guess one.
+reads a cell count out of the spatial structure of the observations, so
+you do not have to guess one.
 \item \strong{Tessellate.} \code{\link{build_tessellation}()} turns the
-point pattern into analysis regions --- Voronoi, Delaunay triangles, or a
-hex/square grid --- with reproducible cell identifiers.
+point pattern into analysis regions (Voronoi, Delaunay triangles, or a
+hex/square grid) with reproducible cell identifiers.
 \code{\link{get_voronoi_seeds}()} controls where Voronoi seeds go.
 \item \strong{Assign.} \code{\link{assign_features_to_polygons}()} labels
 every observation with the cell it falls in, resolving multi-match ties
-explicitly rather than duplicating rows.
+explicitly instead of duplicating rows.
 \item \strong{Aggregate.} \code{\link{summarize_by_cell}()} reduces to one
 row per cell, carrying a standard error and observation count with every
 aggregate, and can correct those errors for within-cell autocorrelation.
 \item \strong{Fold.} \code{\link{make_folds}()} builds spatial
-cross-validation folds --- blocked, buffered, leave-location-out or
+cross-validation folds: blocked, buffered, leave-location-out or
 nearest-neighbour distance-matched. Random folds flatter autocorrelated
 data; these do not.
 \item \strong{Fit.} \code{\link{fit_gwr_model}()} for coefficients that
@@ -70,7 +70,7 @@ seen; this is what tells you where the map should not be believed.
 Supporting these throughout, \code{\link{ensure_projected}()} and
 \code{\link{coerce_to_points}()} handle coordinate reference systems and
 geometry coercion, and \code{\link{estimate_sac_range}()} estimates the
-distance over which observations remain correlated --- the number that
+distance over which observations remain correlated.  That is the number that
 should be setting your block size.
 }
 
@@ -84,19 +84,19 @@ Defaults that cite a reference, each traceable to the help page of the
 function named:
 \itemize{
 \item \code{fit_rf_model(include_coords = FALSE)}, and \code{fitted()} on a
-forest returning out-of-bag predictions --- Meyer et al. (2019).
-\item Permutation rather than impurity importance in
-\code{fit_rf_model()} --- Strobl et al. (2007).
+forest returning out-of-bag predictions: Meyer et al. (2019).
+\item Permutation importance over impurity importance in
+\code{fit_rf_model()}: Strobl et al. (2007).
 \item The Gaussian-process basis count and boundary factor derived from
-the length-scale-to-domain ratio in \code{fit_bayesian_spatial_model()}
---- Riutort-Mayol et al. (2023).
+the length-scale-to-domain ratio in
+\code{fit_bayesian_spatial_model()}: Riutort-Mayol et al. (2023).
 \item The nearest-neighbour distance-matching folds of
-\code{make_folds(method = "nndm")} and their \code{min_train = 0.5}
---- Mila et al. (2022).
+\code{make_folds(method = "nndm")} and their \code{min_train = 0.5}:
+Mila et al. (2022).
 \item The area-of-applicability threshold as the outlier-removed maximum
-of the training dissimilarity, with importance weights applied directly
-rather than square-rooted, matching the reference implementation ---
-Meyer and Pebesma (2021).
+of the training dissimilarity, with importance weights applied directly,
+without taking their square root, matching the reference
+implementation: Meyer and Pebesma (2021).
 \item The effective range of an exponential variogram as three times its
 range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in \code{estimate_sac_range()}.
@@ -162,7 +162,7 @@ end-to-end example.
 Useful entry points by task:
 \code{\link{build_tessellation}()} (build regions),
 \code{\link{summarize_by_cell}()} (aggregate to them),
-\code{\link{make_folds}()} (split them honestly),
+\code{\link{make_folds}()} (split them without flattering the model),
 \code{\link{compare_models_cv}()} (score several models at once),
 \code{\link{area_of_applicability}()} (find where not to trust the result).
 }

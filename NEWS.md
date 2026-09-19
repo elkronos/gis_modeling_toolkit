@@ -522,6 +522,17 @@
 
 ## Bug fixes
 
+* `ensure_stable_poly_id()` could not give IDs to a tessellation this package
+  had just built.  It repaired the geometry in the layer's own CRS and then
+  transformed it to the sort CRS, but validity is a property of the geometry
+  in the CRS it is measured in: two vertices a centimetre apart in a projected
+  CRS can land on one longitude and latitude, and s2 calls the ring
+  degenerate.  On a clipped hex tessellation of North Carolina, 2 of 18 cells
+  that are valid projected are invalid once transformed, and `st_centroid()`
+  on one of them aborted the call with "Loop 0 is not valid: Edge 1 is
+  degenerate".  The sort copy is now repaired after the transform as well.  The
+  geometry returned is still the caller's own, and the same cell gets the same
+  ID whether the layer arrives projected, in lon/lat or in Web Mercator.
 * `select_features_forward()` now says when `fit_fn` is ignoring the
   variables it is handed.  The learner it takes is a function of
   `(train_sf, predictor_vars)`, but the one `cv_spatial()` takes is a function
@@ -633,9 +644,21 @@
   vignettes above, and what remains is what the package is for, a quick start
   that shows a real cross-validation gap, the troubleshooting list, and pointers
   to the rest.
+* New vignette `reporting`: what leaves the session at the end of a run.  The
+  first half is the regions as a file someone else can use.  Grouping a layer
+  you already have with `assign_features_to_polygons(largest = TRUE)` (100
+  North Carolina counties into 12 regions, one row per county), answering
+  whether a location falls in one with `keep_unassigned = TRUE`, IDs that
+  survive a reprojection, and why the aggregates go into a GeoPackage instead
+  of a shapefile: of the 10 columns `summarize_by_cell()` produces, 2 come
+  back from a shapefile with their names intact.  The second half is a worked
+  report of six numbers, each read out of an object the run already produced,
+  with what each one is there to stop a reader believing (Roberts et al. 2017;
+  Meyer and Pebesma 2021; Heaton et al. 2019).  Its example reports a run that
+  fails its own checks, which is the case the section exists for.
 * The documentation is published as a website at
   <https://elkronos.github.io/gis_modeling_toolkit/>: the README, every help
-  page grouped by pipeline step, the five vignettes as articles, and this
+  page grouped by pipeline step, the six vignettes as articles, and this
   changelog.  It is rebuilt from `main` on every push, so it describes the
   development version; the "development version" heading at the top of this
   file lists what the CRAN release does not have yet.

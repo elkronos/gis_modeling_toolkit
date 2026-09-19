@@ -9,7 +9,7 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 \arguments{
 \item{coords_xy}{Numeric matrix or data.frame of coordinates with at least
 two columns; the first two are used, and replicated rows are collapsed
-before the distance quantiles are taken — \code{brms::gp()} defaults to
+before the distance quantiles are taken.  \code{brms::gp()} defaults to
 \code{gr = TRUE} and reduces its covariates to unique rows, so a
 heavily-sampled station would otherwise weight the quantile by how often it
 was measured rather than by where the sites are.}

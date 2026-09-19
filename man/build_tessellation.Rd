@@ -74,12 +74,12 @@ A list with components:
 a \code{cell_id} column; the \code{"hex"} and \code{"square"} methods additionally
 carry \code{poly_id}, which holds the same values.}
 \item{\code{index}}{Integer vector of \code{cell_id} values, one per row of
-\code{points_sf}, and \code{NA} for a point that falls inside no cell --- one
-outside the study area, in other words. Only a point within a
-thousandth of the median cell width of a cell is snapped to it, which
-covers points sitting exactly on a shared edge without quietly
-dragging genuinely-outside points in. A summary built from \code{index}
-therefore counts only the points the tessellation actually covers.}
+\code{points_sf}, and \code{NA} for a point that falls inside no cell, that is,
+one outside the study area. Only a point within a thousandth of the
+median cell width of a cell is snapped to it. That covers points
+sitting exactly on a shared edge, and leaves points outside the study
+area as \code{NA}. A summary built from \code{index} therefore counts only the
+points the tessellation actually covers.}
 \item{\code{boundary}}{The boundary used (possibly derived and/or reprojected).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with, plus
@@ -94,21 +94,22 @@ the first step of the package's pipeline.  It wraps the four tessellation
 methods behind one interface that handles CRS projection, clipping and stable
 cell identifiers consistently, and returns the cell layer together with the
 point-to-cell index that \code{\link{assign_features_to_polygons}()} and
-\code{\link{summarize_by_cell}()} consume.  Use it rather than the
-individual constructors whenever you might want to compare methods: the
-return shape does not change with \code{method}, so swapping
-\code{"voronoi"} for \code{"hex"} costs one argument.
+\code{\link{summarize_by_cell}()} consume.  Prefer it to the individual
+constructors whenever you might want to compare methods: the return shape
+does not change with \code{method}, so swapping \code{"voronoi"} for
+\code{"hex"} costs one argument.
 }
 \details{
 Which method to reach for.  \code{"voronoi"} gives one cell per point, so
-resolution follows sampling density -- the choice when the observations
-themselves define the regions.  \code{"hex"} and \code{"square"} give
-equal-area cells on a fixed grid, so cell size is a decision you make rather
-than one the data makes for you; hexagons avoid the axis-aligned artefacts of
-squares and have uniform neighbour distances.  \code{"triangles"} returns
-the Delaunay triangulation, useful for interpolation and adjacency work
-rather than as an aggregation unit.  \code{\link{determine_optimal_levels}()}
-will suggest a cell count from the spatial structure of the data.
+resolution follows sampling density.  That is the choice when the
+observations themselves define the regions.  \code{"hex"} and
+\code{"square"} give equal-area cells on a fixed grid, so cell size is a
+decision you make, and the data does not make it for you; hexagons avoid the
+axis-aligned artefacts of squares and have uniform neighbour distances.
+\code{"triangles"} returns the Delaunay triangulation, useful for
+interpolation and adjacency work; it is not meant as an aggregation unit.
+\code{\link{determine_optimal_levels}()} will suggest a cell count from the
+spatial structure of the data.
 }
 \examples{
 library(sf)

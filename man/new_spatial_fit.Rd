@@ -37,8 +37,8 @@ except your own methods.}
 \item{data_sf}{An sf object used for fitting.}
 
 \item{info}{Named list of model-specific extras.  Set
-\code{fitted_are_oob = TRUE} if your \code{fitted()} values are held out
-rather than in-sample, so \code{summary()} labels them honestly.}
+\code{fitted_are_oob = TRUE} when your \code{fitted()} values are held
+out instead of in-sample, so \code{summary()} labels them correctly.}
 }
 \value{
 An object of class \code{c(subclass, "spatial_fit")}.
@@ -46,9 +46,9 @@ An object of class \code{c(subclass, "spatial_fit")}.
 \description{
 The constructor for the \code{spatial_fit} class, and the public entry point
 for plugging your own model backend into this package.  The three built-in
-fitters -- \code{\link{fit_gwr_model}()},
-\code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()}
--- all end by calling it, and so should a custom \code{fit_fn} written for
+fitters (\code{\link{fit_gwr_model}()},
+\code{\link{fit_bayesian_spatial_model}()} and \code{\link{fit_rf_model}()})
+all end by calling it, and so should a custom \code{fit_fn} written for
 \code{\link{cv_spatial}()}: wrapping your model in a \code{spatial_fit} is
 what lets it use the package's folds, metrics, comparison and
 area-of-applicability machinery unchanged.
@@ -56,7 +56,7 @@ area-of-applicability machinery unchanged.
 \details{
 There are two obligations.  Return an object built here from your
 \code{fit_fn}, and define a \code{predict()} method for the \code{subclass}
-you chose -- \code{\link{cv_spatial}()} scores folds by calling the
+you chose.  \code{\link{cv_spatial}()} scores folds by calling the
 \code{predict()} generic on the fit, so without a matching
 \code{predict.<subclass>()} every fold fails.  A
 \code{fitted.<subclass>()} method returning one value per row of the fit's
@@ -68,7 +68,7 @@ naming the method to define, without one.  \code{\link{residuals}()} and
 \section{The coef() contract}{
 
 \code{coef()} on one of the three built-in backends either returns the
-coefficients or signals an error -- it never returns \code{NULL}.  A custom
+coefficients or signals an error.  It never returns \code{NULL}.  A custom
 subclass inherits \code{stats::coef.default()}, which returns \code{NULL},
 so define a \code{coef.<subclass>()} that errors when your backend has no
 coefficients; otherwise the hazard described below applies to your own fits.
@@ -76,8 +76,8 @@ coefficients; otherwise the hazard described below applies to your own fits.
 always errors, because a forest has no coefficients; \code{coef.gwr_fit()}
 and \code{coef.bayesian_fit()} error when the backend cannot supply them
 (a missing package, an engine without the expected component).  A
-\code{NULL} return would be indistinguishable from "this model genuinely
-has no fixed effects", so \code{lapply(fits, coef)} would quietly produce a
+\code{NULL} return would be indistinguishable from "this model has no
+fixed effects", so \code{lapply(fits, coef)} would quietly produce a
 shorter answer than the caller expected.  Wrap in \code{try()} or
 \code{tryCatch()} when sweeping over a heterogeneous list of fits.
 }

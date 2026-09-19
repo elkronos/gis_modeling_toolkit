@@ -76,8 +76,8 @@ A blocked cross-validation with blocks smaller than the autocorrelation
 range leaks: every held-out point has a near-identical neighbour in the
 training set, and the score is optimistic in proportion.  The single
 number a \code{cv_*()} call returns cannot show this.  This runs the same
-cross-validation at a ladder of block sizes -- and, by default, once with
-random folds as the fully leaky reference -- and returns the metric at each,
+cross-validation at a ladder of block sizes, and by default once with
+random folds as the fully leaky reference.  It returns the metric at each,
 with the estimated autocorrelation range alongside so that the curve can be
 read against it: it rises as the blocks pass the range and then plateaus,
 and the height of the rise is how much the random-fold number overstated
@@ -88,9 +88,9 @@ the model.
 Each block size is a full cross-validation, so the cost is
 \code{length(block_sizes) * k} fits, plus \code{k} for the random
 reference.  \code{max_fits} caps that (default 60: six sizes at
-\code{k = 5}, plus the reference) and the call refuses to start rather than
-run past it, naming the number it would have needed.  Raise \code{max_fits}
-deliberately; the RF example below takes seconds, a Bayesian
+\code{k = 5}, plus the reference).  A sweep that would run past the cap
+refuses to start, naming the number of fits it would have needed.  Raise
+\code{max_fits} deliberately; the RF example below takes seconds, a Bayesian
 \code{fit_fn} takes minutes per fit.
 }
 
@@ -101,8 +101,8 @@ log-spaced from a twenty-fifth to a half of the shorter side of the
 data's extent, and any size at which the grid would hold fewer than
 \code{k} blocks is dropped, so every point on the curve is a \code{k}-fold
 cross-validation of the same shape.  Sizes are in the units of the CRS the
-folds are built in -- \code{make_folds()}'s \code{params$crs}, metres for
-geographic input -- and the returned table records that CRS.
+folds are built in (\code{make_folds()}'s \code{params$crs}, metres for
+geographic input), and the returned table records that CRS.
 }
 
 \examples{

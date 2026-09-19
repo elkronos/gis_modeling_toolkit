@@ -25,13 +25,13 @@ get_voronoi_seeds(
 \code{method = "provided"}, where every row of \code{seeds} is returned; a mismatch
 between \code{n} and \code{nrow(seeds)} is reported as a warning.
 
-For \code{method = "kmeans"} it is an upper bound rather than a guarantee:
+For \code{method = "kmeans"} it is an upper bound only:
 k-means cannot produce more centres than there are distinct positions in
 the sampling cloud, nor as many centres as there are rows. When \code{n}
 exceeds either ceiling it is clamped, with a warning naming the count
-actually used — \code{n = nrow(sample_points)} is the common case, and yields
-\code{nrow(sample_points) - 1} seeds. Check \code{nrow()} on the result rather than
-assuming \code{n}.
+actually used. \code{n = nrow(sample_points)} is the common case, and yields
+\code{nrow(sample_points) - 1} seeds. Check \code{nrow()} on the result; do not
+assume \code{n}.
 
 Besides a number, \code{n} accepts what the level-selection step returned:
 the integer vector of ranked candidates from \code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
@@ -45,7 +45,7 @@ saying which.}
 \item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows with empty or
-non-finite coordinates are dropped with a warning rather than reaching
+non-finite coordinates are dropped with a warning, so they never reach
 \code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
 cloud is projected before clustering.}
 

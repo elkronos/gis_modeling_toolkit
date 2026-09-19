@@ -31,18 +31,18 @@ cv_rf(
 \code{\link{make_folds}()} return value; a bare list of
 \code{list(train =, test =)} pairs of \code{..row_id} values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here --
-\code{blockCV::cv_spatial()} returns one as \code{$folds_ids} -- since its
-\code{$folds_list} holds two \emph{unnamed} vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
-a logged count.}
+The label vector is how folds built by another package are used here,
+since \code{blockCV::cv_spatial()}'s \code{$folds_list} holds two
+\emph{unnamed} vectors per fold and is refused by name.  That function
+returns a label vector as \code{$folds_ids}.  Train and test must be
+disjoint: a fold that trains on its own test rows is not a
+cross-validation split and is refused with an error.  IDs naming no row in
+the prepared data are dropped with a logged count.}
 
 \item{k}{Number of folds when \code{folds} is \code{NULL}. Default 5.}
 
 \item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
-through a per-fold draw, each fold's forest — so two different seeds give
+through a per-fold draw, each fold's forest, so two different seeds give
 different results even on identical \code{folds}. To grow every fold's
 forest from one fixed ranger seed instead, call \code{\link{cv_spatial}}
 with your own \code{fit_fn} wrapping \code{fit_rf_model(seed = )}.}
@@ -50,8 +50,8 @@ with your own \code{fit_fn} wrapping \code{fit_rf_model(seed = )}.}
 \item{parallel}{Passed to \code{\link{cv_spatial}}. Default \code{FALSE}.
 Under forked workers each fold's forest runs single-threaded unless
 \code{num_threads} is passed explicitly, so \code{parallel = 4} means
-four threads in total rather than four times the session's
-\code{mc.cores}.}
+four threads in total, where it would otherwise mean four times the
+session's \code{mc.cores}.}
 
 \item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.}
 
@@ -61,7 +61,7 @@ fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
 \item{metrics}{Optional scoring function of your own, passed to
 \code{\link{cv_spatial}}; see \strong{Your own metrics} there.}
 
-\item{...}{Passed to \code{\link{fit_rf_model}} on every fold —
+\item{...}{Passed to \code{\link{fit_rf_model}} on every fold:
 \code{num_trees}, \code{mtry}, \code{importance}, \code{include_coords}
 and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
 and \code{.already_prepped} are set by this function and must not be
@@ -82,20 +82,20 @@ the training set.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 

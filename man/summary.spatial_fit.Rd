@@ -19,7 +19,7 @@ data.frame, out-of-bag for an \code{rf_fit}).
 }
 \description{
 Computes goodness-of-fit metrics from \code{fitted(object)} against the
-observed response.  A non-numeric response is an error -- a character or
+observed response.  A non-numeric response is an error: a character or
 factor response cannot be scored, and used to come back as \code{n = 0} with
 every metric \code{NA}; a logical response is treated as 0/1.
 }
@@ -29,7 +29,7 @@ For a \code{gwr_fit} or a \code{bayesian_fit} these are \strong{in-sample}
 metrics: \code{fitted()} returns values computed at the training locations
 from the model that saw them.  For an \code{rf_fit} they are
 \strong{out-of-bag}, because \code{fitted.rf_fit()} returns out-of-bag
-predictions rather than in-sample ones (see \code{\link{fit_rf_model}}).
+predictions in place of in-sample ones (see \code{\link{fit_rf_model}}).
 The two are not comparable, and \code{print()} on the result labels which
 one it is holding, driven by \code{$info$fitted_are_oob}.  Use
 \code{\link{compare_models_cv}} to compare backends.
@@ -42,20 +42,20 @@ exceeds the global predictor count, and a GP model has no simple \code{p}.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 

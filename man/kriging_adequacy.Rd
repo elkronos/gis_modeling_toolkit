@@ -59,8 +59,8 @@ and a variance for every cell, thin or empty.  Whether that is worth
 having on a given layer is a question with a measurable answer, and this
 function measures it, changing no cell value: for every cell it reports
 the block-kriging estimate and variance implied by a fitted variogram,
-that variance as a share of the total sill, and -- where the cell has
-points -- whether it exceeds the design-based variance of the plain mean,
+that variance as a share of the total sill, and, where the cell has points,
+whether it exceeds the design-based variance of the plain mean,
 \eqn{s^2/n}; and it scores the variogram itself by blocked
 cross-validation.
 }
@@ -70,12 +70,12 @@ cross-validation.
 \item{\code{kr_ratio}}{The block-kriging variance over the total sill,
 in \eqn{[0, 1]}.  It is the coverage score, and it needs no hand-set
 threshold in metres or point counts: as it approaches 1 the estimate
-carries essentially no information from the data and is reverting to
+carries almost no information from the data and is reverting to
 the global mean.  A cell at 0.05 is well determined; a cell at 0.8 is
 mostly prior.}
 \item{\code{kr_exceeds_design}}{\code{TRUE} where the kriging variance is
 larger than \eqn{s^2/n} from the cell's own points: kriging is not
-earning its keep there, and that is said per cell rather than
+earning its keep there, and that is said per cell instead of
 globally.  \code{NA} for cells with fewer than two points, where
 \eqn{s^2} does not exist.}
 \item{\code{kr_shift}}{The kriged estimate minus the plain mean, in
@@ -97,11 +97,11 @@ small.  Measured on simulated exponential fields (n = 300 on a 1000-unit
 extent, sill 1, nugget 0.2, five blocked folds, eight draws per
 configuration): 0.93--1.07 with the true variogram, 0.85--1.01 with the
 variogram estimated from the same points.  With the nugget understated
-tenfold it moved only to 0.95--1.24, and that is a property of the folds
-rather than a weakness of the statistic: under blocked folds every
-held-out point is far from the training data, where the kriging variance
-is close to the sill whatever the nugget, so the blocked statistic checks
-the sill and range.  To check the nugget, pass random folds
+tenfold it moved only to 0.95--1.24.  That is a property of the folds and
+not a weakness of the statistic: under blocked folds every held-out point
+is far from the training data, where the kriging variance is close to the
+sill whatever the nugget, so the blocked statistic checks the sill and
+range.  To check the nugget, pass random folds
 (\code{make_folds(method = "random_kfold")}) as \code{folds}: the
 held-out points are then close to their neighbours, where the nugget
 decides the variance.  \code{gstat::krige.cv()} computes the statistic on
@@ -119,8 +119,8 @@ of populated cells, and at most one cell was empty.  Under clustered
 sampling (eight clusters of 60-unit spread) the two aggregators parted:
 shifts above one standard error in 34--63 percent of cells and above two
 in 9--25 percent, the kriging variance below \eqn{s^2/n} in only
-13--52 percent of populated cells, and 3--27 of the cells empty --- each
-with a kriged estimate and variance where the plain mean has nothing.
+13--52 percent of populated cells, and 3--27 of the cells empty, each with
+a kriged estimate and variance where the plain mean has nothing.
 So a block-kriging aggregator earns its place on clustered layers and
 rarely on uniform ones, and this function says which kind a layer is.
 }
@@ -130,8 +130,8 @@ rarely on uniform ones, and this function says which kind a layer is.
 A variogram model.  \code{sac} is a \code{\link{estimate_sac_range}()}
 result carrying one (\code{attr(, "variogram_model")}); when \code{NULL}
 it is estimated here from the response.  The model families are the ones
-the package interprets elsewhere -- exponential, spherical and Gaussian
-components with a nugget -- and anything else is refused by name.  A
+the package interprets elsewhere: exponential, spherical and Gaussian
+components with a nugget.  Anything else is refused by name.  A
 model whose range was not identified (a bare \code{NA} estimate with the
 model attached) is used with a warning: its sill was never reached by the
 data, so the ratios rest on an extrapolation.  Requires \pkg{gstat}.

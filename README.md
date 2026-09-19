@@ -310,7 +310,7 @@ you pick anything.
 
 ## Documentation
 
-Five vignettes, each executed when the package is built, so every number
+Six vignettes, each executed when the package is built, so every number
 in them is computed on the spot.
 
 | vignette                               | covers                                                                                                               |
@@ -320,6 +320,7 @@ in them is computed on the spot.
 | `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                    |
 | `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
 | `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                          |
+| `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report               |
 
 `?spatialkit` walks the pipeline in order and names the function for
 each step. Every exported function has its own page.

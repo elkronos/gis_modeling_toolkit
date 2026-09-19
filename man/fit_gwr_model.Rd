@@ -27,7 +27,7 @@ bandwidth is a fixed distance in CRS units.}
 
 \item{bandwidth}{Optional numeric bandwidth value. For adaptive mode this
 is an integer (number of neighbours); for fixed mode a distance in the
-units of the \strong{projected} CRS the fit runs in -- \code{prep_model_data()}
+units of the \strong{projected} CRS the fit runs in. \code{prep_model_data()}
 projects geographic input before the bandwidth is used, so 0.2 supplied
 for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS off
 \code{sf::st_crs(fit$data_sf)}, or pass \code{target_crs} to
@@ -52,15 +52,15 @@ default \code{FALSE}.}
 A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
-Model-specific metadata lives in \code{$info} (bandwidth, adaptive,
-kernel, AICc, \code{bandwidth_is_fallback} -- \code{TRUE} when
-automatic selection failed and the arbitrary fallback was used --
+Model-specific metadata lives in \code{$info}: bandwidth, adaptive,
+kernel, AICc, \code{bandwidth_is_fallback} (\code{TRUE} when automatic
+selection failed and the arbitrary fallback was used),
 \code{condition_index}, \code{local_collinearity},
 \code{n_local_collinear}, \code{n_local_singular},
-\code{nonfinite_coef} -- a logical matrix, one row per observation and
-one column per term (\code{Intercept} first), \code{TRUE} where the
+\code{nonfinite_coef} (a logical matrix, one row per observation and
+one column per term, with \code{Intercept} first, \code{TRUE} where the
 local coefficient came back non-finite, so the count in
-\code{n_local_singular} can be placed -- and \code{n_dropped}: the rows
+\code{n_local_singular} can be placed) and \code{n_dropped} (the rows
 \code{prep_model_data()} removed for missing or non-finite values or a
 bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
 The raw GWmodel result is in \code{$engine}.
@@ -71,24 +71,24 @@ bandwidth.
 }
 \section{Collinearity diagnostics}{
 
-The function computes the \strong{scaled condition index} of the design --
+The function computes the \strong{scaled condition index} of the design and
+warns when it exceeds 30, the conventional threshold, which Wheeler &
+Tiefelsdorf (2005) carry over to the local designs of GWR.  The index is
 the ratio of the largest to the smallest singular value after each column
-is scaled to unit length (Belsley, Kuh & Welsch 1980) -- and warns when it
-exceeds 30, the conventional threshold, which Wheeler & Tiefelsdorf (2005)
-carry over to the local designs of GWR.  Scaling makes the index
-independent of the predictors' units; \code{kappa()} on the raw matrix is
-not, and a threshold on it is a threshold on nothing in particular.
+is scaled to unit length (Belsley, Kuh & Welsch 1980).  Scaling makes the
+index independent of the predictors' units; \code{kappa()} on the raw matrix
+is not, and a threshold on it is a threshold on nothing in particular.
 A \strong{global} index is computed on the full design (intercept plus
 predictors).
-In addition, a \strong{local} spot-check is performed at up to 30 locations --
+In addition, a \strong{local} spot-check is performed at up to 30 locations:
 every location when there are 30 or fewer, otherwise 30 spread evenly over
 the extent (evenly spaced ranks of the observations ordered by x, then y),
 so the diagnostic is reproducible, draws no random numbers, does not depend
 on the row order of the data, and the count is not configurable.  For each
-sampled point the nearest neighbours within
-the bandwidth window -- the bandwidth the model is actually fitted with, not
-a stand-in -- are selected and the condition number of that local design
-sub-matrix is evaluated.  That sub-matrix is the predictors \strong{plus an
+sampled point the nearest neighbours within the bandwidth window (the
+bandwidth the model is actually fitted with, not a stand-in) are selected
+and the condition number of that local design sub-matrix is evaluated.
+That sub-matrix is the predictors \strong{plus an
 intercept column}, matching the design GWmodel fits, and is unweighted; the
 global condition number is computed on the predictors alone, so the two
 numbers are not directly comparable.  An indicator that is constant inside a
@@ -103,7 +103,7 @@ near-singular local design; the wording reports a percentage when more than
 R warnings, not log lines.
 
 After the fit, the local coefficient surfaces are scanned and a further
-warning counts local regressions that came back non-finite -- their windows
+warning counts local regressions that came back non-finite.  Their windows
 were singular.  \code{fitted()}, \code{residuals()}, \code{summary()} and
 \code{\link[=model_metrics]{model_metrics()}} all drop those rows, so when this warning fires the
 metrics describe only the part of the study area that fitted.

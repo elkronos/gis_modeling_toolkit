@@ -34,9 +34,9 @@ compare_models_cv(
 \item{models}{Character vector: any subset of \code{c("GWR", "Bayesian",
   "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 Names outside that set raise a warning and are dropped; if nothing
-recognised remains, this is an error rather than a silent fallback.
+recognised remains, this is an error.  There is no silent fallback.
 A recognised model whose backend package is not installed is dropped with
-a message so the call still returns the models that could run --- but if
+a message so the call still returns the models that could run.  But if
 \emph{none} of the requested backends is installed, nothing is left to
 compare and the call errors with \code{"no viable models."}.  Guard with
 \code{requireNamespace()} when the model set is not known in advance.}
@@ -47,9 +47,9 @@ compare and the call errors with \code{"no viable models."}.  Guard with
 
 \item{folds}{Optional fold definitions: a \code{\link{make_folds}()} return
 value, or a bare list of \code{list(train =, test =)} pairs of
-\code{..row_id} values.  Train and test must be disjoint — a fold that
+\code{..row_id} values.  Train and test must be disjoint (a fold that
 trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+with an error), and IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).}
 
@@ -58,16 +58,16 @@ the folds came from other data when they were not).}
 \item{pointize}{Geometry coercion strategy.}
 
 \item{gwr_args}{Extra arguments for \code{\link{cv_gwr}}.  Only names that
-are formal arguments of \code{cv_gwr()} are forwarded --- it has no
-\code{...} --- so entries meant for \code{fit_gwr_model()} alone (e.g.
+are formal arguments of \code{cv_gwr()} are forwarded (it has no
+\code{...}), so entries meant for \code{fit_gwr_model()} alone (e.g.
 \code{longlat}) cannot be passed this way.  Anything dropped is named in a
 warning; call \code{cv_gwr()} directly if you need it.}
 
 \item{bayes_args}{Extra arguments for \code{fit_bayesian_spatial_model()}.
 Forwarded whole as \code{cv_bayes(fit_args = )}, so an unrecognised name
-is an error from \code{fit_bayesian_spatial_model()} rather than a silent
-drop.  \code{compute_loo}, \code{boundary} and \code{pointize} are
-overridden by the CV internals.}
+raises an error from \code{fit_bayesian_spatial_model()} and is not
+dropped silently.  \code{compute_loo}, \code{boundary} and
+\code{pointize} are overridden by the CV internals.}
 
 \item{rf_args}{Extra arguments for \code{\link{cv_rf}}, which passes
 anything it does not recognise on to \code{\link{fit_rf_model}} and thence
@@ -105,9 +105,9 @@ A list with overall, by_fold, and per-model cv_results
 \code{overall} has one row per model with the pooled metrics, the
 coverage and CRPS columns described above when a Bayesian model ran, and
 \code{model} as its last column.
-Only the models that actually ran appear, so check which names are present
-rather than assuming one entry per requested model: a backend whose package
-is missing is dropped with a message.  When \strong{no} requested backend
+Only the models that actually ran appear, so check which names are
+present; there is not always one entry per requested model, because a
+backend whose package is missing is dropped with a message.  When \strong{no} requested backend
 is available there is nothing to return and the function errors with
 \code{"no viable models."} instead of returning an empty comparison.
 }
@@ -119,10 +119,10 @@ repeated fitting.
 }
 \section{Coverage and CRPS in the overall table}{
 
-A model can predict well on average and still be badly calibrated ---
-Heaton et al. (2019) found good point prediction routinely alongside poor
-interval coverage --- so a comparison read from RMSE alone can prefer the
-model whose uncertainty is wrong.  When \code{"Bayesian"} is among the
+A model can predict well on average and still be badly calibrated, so a
+comparison read from RMSE alone can prefer the model whose uncertainty is
+wrong.  Heaton et al. (2019) found good point prediction routinely
+alongside poor interval coverage.  When \code{"Bayesian"} is among the
 models that ran, \code{overall} therefore also carries the columns of
 \code{cv_bayes()$predictive_coverage}: \code{coverage_50},
 \code{coverage_80}, \code{coverage_95} (the share of held-out rows inside
@@ -139,20 +139,20 @@ overconfident, well above it is wider than it needs to be.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 
@@ -177,7 +177,7 @@ For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
 \code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  Note that when every fold fails, the
+the response is not Gaussian.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.

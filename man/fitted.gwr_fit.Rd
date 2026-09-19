@@ -19,8 +19,8 @@ failed).
 Reads the fitted values out of the GWmodel result, which stores them under
 one of several names depending on version and entry point; the extraction
 falls back through the local coefficients and the residuals when no direct
-column is present.  These are \strong{in-sample} values -- each observation
-was inside its own bandwidth window -- so \code{summary()} on a
+column is present.  These are \strong{in-sample} values (each observation
+was inside its own bandwidth window), so \code{summary()} on a
 \code{gwr_fit} reports an optimistic fit.  Use \code{\link{cv_gwr}} for a
 spatially blocked estimate.
 }

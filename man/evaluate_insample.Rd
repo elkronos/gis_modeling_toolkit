@@ -10,7 +10,7 @@ evaluate_insample(fits, newdata = NULL, ...)
 \item{fits}{A \code{spatial_fit} object, or a named list of them
 (e.g. \code{list(GWR = gwr_obj, Bayesian = bayes_obj)}).  The names are
 used as the model labels and every element must have one; an unnamed
-list is an error, and so are duplicated names --- \code{model} is the key
+list is an error, and so are duplicated names.  \code{model} is the key
 the comparison table is assembled on, so two fits sharing a name cannot be
 told apart in the output.}
 
@@ -26,27 +26,27 @@ model name and all regression metrics.
 }
 \description{
 Accepts a single \code{spatial_fit} object or a named list of them.
-Does NOT refit — uses \code{fitted()} for in-sample and
+Does NOT refit.  Uses \code{fitted()} for in-sample and
 \code{predict()} for new data.
 }
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 

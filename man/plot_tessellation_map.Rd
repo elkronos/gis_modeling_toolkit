@@ -46,8 +46,8 @@ plot_tessellation_map(
 \item{features_sf}{Optional sf/sfc layer of additional features.}
 
 \item{fill_col}{Name of the COLUMN in \code{tessellation_sf} to map to fill;
-\code{NULL} for no fill.  Note that \code{fill_col} and \code{label_col}
-name columns, while \code{outline_col}, \code{features_col},
+\code{NULL} for no fill.  \code{fill_col} and \code{label_col} name
+columns, while \code{outline_col}, \code{features_col},
 \code{seeds_col} and \code{boundary_col} are colours.}
 
 \item{palette}{Viridis palette name. Default "viridis".}
@@ -84,11 +84,11 @@ rather than in the formals, so that a Suggests package is never evaluated
 before the \code{requireNamespace()} check has run.}
 
 \item{target_crs}{Optional CRS for plotting. When \code{NULL} (the default) the
-tessellation's own CRS is used, or --- if the tessellation has none --- a
+tessellation's own CRS is used, or (if the tessellation has none) a
 CRS borrowed from the first overlay that carries one, so a CRS-less grid
 drawn with located features still lines up. Any layer that arrives without
-a CRS is brought into the plot's CRS rather than dropped: reprojected when
-its coordinates look like longitude/latitude, otherwise stamped with a
+a CRS is brought into the plot's CRS instead of being dropped: reprojected
+when its coordinates look like longitude/latitude, otherwise stamped with a
 warning, since a stamp assumes the coordinates were already in that CRS.}
 
 \item{title, subtitle, caption}{Plot annotations.}

@@ -32,8 +32,8 @@ grid) rather than every grid it ever built for the life of the session.
 \code{\link{clear_grid_cache}} empties it outright.}
 }
 \value{
-An sf data frame with a stable poly_id column.  Note that the rows
-are re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
+An sf data frame with a stable poly_id column.  The rows are
+re-ordered and re-numbered by \code{\link{ensure_stable_poly_id}},
 which \code{\link{create_grid_polygons}} does not do: the same cell
 therefore carries a different \code{poly_id} depending on which of the two
 builders produced it.  Use one builder throughout an analysis; joining a

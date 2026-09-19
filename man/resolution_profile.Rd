@@ -24,8 +24,8 @@ resolution_profile(
 representative points).}
 
 \item{response_var}{Optional response column name (numeric or logical).
-Enables \code{cp}, \code{moran_z}, and --- via a variogram estimated
-from it --- the floor of the ladder and \code{reliability}.}
+Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
+sets the floor of the ladder and \code{reliability}.}
 
 \item{predictor_vars}{Optional predictor column names (numeric or
 logical).  With them, \code{cp} scores the OLS residuals of the response
@@ -51,7 +51,7 @@ afterwards.  Default 123.}
 
 \item{sac}{Optional \code{sac_range} object from
 \code{\link{estimate_sac_range}()} to take the range, nugget and
-correlation function from --- pass one fitted with \code{detrend =
+correlation function from.  Pass one fitted with \code{detrend =
   "reml"}, say, or on a residual field of your choosing.  When
 \code{NULL} and a response is given, one is estimated on the subsample
 with the same \code{predictor_vars}.}
@@ -90,12 +90,12 @@ of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \eqn{C_p}, the residual autocorrelation of the cell
 means has a \eqn{z}, and the cell means have a reliability.  This function
 computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen --- by
-\code{\link{select_resolution}()} or by eye --- can be defended with the
-whole profile rather than one criterion's argmin.  Mallows (1973) presents
+returns the table, so that the level chosen, by
+\code{\link{select_resolution}()} or by eye, can be defended with the
+whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \eqn{C_p} itself as a display of the bias-variance trade-off across
-candidates rather than a rule that picks one; this is that display, with
-the other criteria alongside.
+candidates; he does not offer it as a rule that picks one.  This is that
+display, with the other criteria alongside.
 }
 \section{The ladder and its bounds}{
 
@@ -141,25 +141,25 @@ only when the nugget is a large share of the sill.}
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
 tessellation has left unexplained (\eqn{|z|} smaller is better).
-Calibrated and flat in \eqn{L} on a response with no structure --- see
-\code{\link{determine_optimal_levels}} --- so it separates levels only
+Calibrated and flat in \eqn{L} on a response with no structure (see
+\code{\link{determine_optimal_levels}}), so it separates levels only
 where structure remains.  \code{NA} at nine cells or fewer.}
-\item{\code{reliability}}{The share of the spread in the cell means that
-is between-cell signal rather than sampling noise, from the fitted
-variogram alone via Krige's additivity relation (Cressie 1996) ---
-the shrinkage factor of Fay and Herriot (1979) --- for square cells of
-the level's average area with the level's average point count (larger
-is better).  It has an interior optimum, and a broad one: validated
-against the empirical reliability of true block means on simulated
-fields, the analytic and empirical optima agreed to within a level or
-two where the empirical estimate was stable, and the band within 2
-percent of the maximum spanned a factor of 3--6 in \eqn{L}.  Read the
-flat region, not the argmax.  \code{NA} without a usable variogram.}
+\item{\code{reliability}}{The between-cell signal's share of the spread
+in the cell means, from the fitted variogram alone via Krige's
+additivity relation (Cressie 1996), for square cells of the level's
+average area with the level's average point count (larger is better).
+This is the shrinkage factor of Fay and Herriot (1979).  It has an
+interior optimum, and a broad one: validated against the empirical
+reliability of true block means on simulated fields, the analytic and
+empirical optima agreed to within a level or two where the empirical
+estimate was stable, and the band within 2 percent of the maximum
+spanned a factor of 3--6 in \eqn{L}.  Read the flat region, not the
+argmax.  \code{NA} without a usable variogram.}
 }
-\code{cp} and \code{reliability} answer different questions --- how well
-the cells represent the field, and whether the cell values are
-distinguishable from noise --- and can disagree; both are shown so the
-choice between them is made knowingly.
+\code{cp} and \code{reliability} answer different questions: how well the
+cells represent the field, and whether the cell values are distinguishable
+from noise.  They can disagree, and both are shown so the choice between
+them is made knowingly.
 }
 
 \examples{

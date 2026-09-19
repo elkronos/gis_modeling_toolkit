@@ -24,7 +24,7 @@ n_SMAPE (the last two are the rows each percentage error was averaged
 over; see "Percentage errors on responses with zeros").
 \code{Adj_R2} is always \code{NA}: GWR's effective parameter count far
 exceeds the global predictor count and a GP model has no simple \code{p},
-so it is deliberately suppressed.  A non-numeric response is an error -- a
+so it is deliberately suppressed.  A non-numeric response is an error: a
 character or factor response cannot be scored, and used to come back as
 \code{n = 0} with every metric \code{NA}; a logical response is treated
 as 0/1.
@@ -38,7 +38,7 @@ reading of how closely a fit tracks its training data.
 }
 \details{
 It is not a substitute for cross-validation.  With \code{newdata = NULL} the
-numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit} -- and a
+numbers are in-sample for a \code{gwr_fit} or \code{bayesian_fit}, and a
 GWR can reach a near-perfect in-sample \eqn{R^2} at a small bandwidth
 without predicting anything.  For a figure you can report, use
 \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
@@ -51,8 +51,8 @@ That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
 but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
 returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
 returned data.frame carries no label distinguishing the two, so check
-\code{object$info$fitted_are_oob} before comparing numbers across backends
--- or use \code{\link{compare_models_cv}}, which scores every backend the
+\code{object$info$fitted_are_oob} before comparing numbers across backends,
+or use \code{\link{compare_models_cv}}, which scores every backend the
 same way.
 }
 
@@ -60,20 +60,20 @@ same way.
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
-Rather than return \code{Inf} or \code{NaN}, both are averaged over the rows
+Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
 an average over a subset of the data, whatever its value.
 
-This bites on any response taking exact zeros --- counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, \code{MAPE} is an average over the 58 non-zero rows, which
 \code{n_MAPE = 58} now says.  \code{SMAPE} fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero --- which on a well-fitted zero-inflated model are the rows it got
-\emph{right} --- so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+\emph{right}), so it averages the harder rows only and reads worse than
 the fit deserves; \code{n_SMAPE} shows how many rows it kept, and the
 count is only a label, not a repair.
 
@@ -98,7 +98,7 @@ For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
 \code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  Note that when every fold fails, the
+the response is not Gaussian.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.

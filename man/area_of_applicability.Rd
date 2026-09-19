@@ -64,34 +64,34 @@ Exposed so the dense fallback can be tested.}
 \value{
 An object of class \code{aoa}: a list with
 \itemize{
-\item \code{aoa} -- \code{newdata} with a numeric \code{DI} column
+\item \code{aoa}: \code{newdata} with a numeric \code{DI} column
 and a logical \code{AOA} column added. This is the object the
 computation ran on, which for a coordinate-using model is
 \code{newdata} after pointizing, CRS reconciliation and the addition
 of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
 are not all finite gets \code{NA} in both columns.
-\item \code{threshold} -- the DI cut-off used.
-\item \code{train_DI} -- the training points' own DI values.
-\item \code{normalizer} -- the mean pairwise training distance.
-\item \code{weights} -- the weight vector actually applied, named by
+\item \code{threshold}: the DI cut-off used.
+\item \code{train_DI}: the training points' own DI values.
+\item \code{normalizer}: the mean pairwise training distance.
+\item \code{weights}: the weight vector actually applied, named by
 \code{predictor_vars}.
-\item \code{predictor_vars} -- the predictors used, including
+\item \code{predictor_vars}: the predictors used, including
 \code{"..x"}/\code{"..y"} when the model uses coordinates and
 excluding \code{dropped_vars}.
-\item \code{dropped_vars} -- predictors dropped for negligible
+\item \code{dropped_vars}: predictors dropped for negligible
 variance.
-\item \code{scaling} -- a list with \code{center} and \code{scale},
+\item \code{scaling}: a list with \code{center} and \code{scale},
 each named by \code{predictor_vars}: the training means and standard
 deviations the index is computed in, so a location's DI can be
 traced to the predictor that put it outside.
-\item \code{n_outliers} -- the number of training DI values above the
+\item \code{n_outliers}: the number of training DI values above the
 \code{Q3 + 1.5 * IQR} fence, which the default threshold rule sets
 aside (the "outlier-removed" in its name); computed whether or not
 \code{threshold} was supplied.
 \item \code{n_train}, \code{n_new}, \code{n_inside},
-\code{n_outside}, \code{n_na} -- row counts; \code{n_train} and
+\code{n_outside}, \code{n_na}: row counts; \code{n_train} and
 \code{n_new} count the rows that survived the finite-value filter.
-\item \code{params} -- a record of the call: \code{folds_supplied},
+\item \code{params} records the call: \code{folds_supplied},
 \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
 \code{normalizer_max_n}, \code{normalizer_n_used},
 \code{normalizer_subsampled}, \code{weights_supplied} and
@@ -110,7 +110,7 @@ belong next to a blocked \code{cv_*()} result.
 \description{
 Computes the dissimilarity index (DI) of Meyer & Pebesma (2021) for a set of
 prediction locations and flags those that fall inside the model's area of
-applicability (AOA) -- the region of predictor space where the model's
+applicability (AOA), the region of predictor space where the model's
 cross-validated performance estimate can be expected to hold.
 }
 \section{Why a map alone is not enough}{
@@ -131,11 +131,11 @@ prediction point \eqn{p}, the DI is the distance to its nearest training
 point in that space, divided by the mean pairwise distance among training
 points. The same quantity is computed for the training data itself, using
 each point's nearest neighbour \emph{among the training rows of the fold
-that holds it out} -- everything outside its own fold for random and block
-folds, the smaller training set that buffered and NNDM folds actually leave
-(see the next section) -- and the threshold is the largest training DI that
-is not an upper outlier. Prediction points at or below that threshold are
-inside the AOA.
+that holds it out}. That means everything outside its own fold for random
+and block folds, and the smaller training set that buffered and NNDM folds
+actually leave (see the next section). The threshold is then the largest
+training DI that is not an upper outlier. Prediction points at or below that
+threshold are inside the AOA.
 
 The DI is invariant to the overall scale of \code{weights}: the numerator
 and the normaliser carry the same factor. Importance values can be passed
@@ -148,7 +148,7 @@ With \code{folds = NULL} the training reference is each point's nearest
 neighbour anywhere in the training data, which for clustered data is very
 close, giving a small threshold and a conservative AOA. Passing the folds
 you actually validated with makes the reference distances larger and the AOA
-correspondingly wider. That is not a loophole -- the AOA is defined relative
+correspondingly wider. That is not a loophole. The AOA is defined relative
 to a performance estimate, and a spatially blocked estimate is a claim about
 predicting further away. Pass the same \code{make_folds()} result you passed
 to \code{\link{cv_spatial}}. Buffered and NNDM folds use the training set
@@ -157,15 +157,15 @@ they actually left available, not merely "everything outside the fold".
 
 \section{Limitations}{
 
-Predictors must be numeric; categorical variables are refused rather than
+Predictors must be numeric; categorical variables are refused and never
 silently dummy-coded. Predictors whose variance is negligible \emph{relative
 to their own magnitude} (the test is
 \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-metres and in gigametres is treated identically) are
-dropped, and a prediction point taking a different value there is a form of
-extrapolation this index cannot express. Without \code{weights} every
-predictor counts equally, which overstates dissimilarity along directions
-the model barely uses.
+metres and in gigametres is treated identically) are dropped, and a
+prediction point taking a different value there is a form of extrapolation
+this index cannot express. Without \code{weights} every predictor counts
+equally, which overstates dissimilarity along directions the model barely
+uses.
 }
 
 \section{Models fitted with the coordinates as predictors}{
@@ -176,17 +176,17 @@ the coordinates are added to both sides as the predictors \code{"..x"} and
 \code{"..y"} and are then centred, scaled and weighted like any other
 column. Without this a prediction point far outside the training extent but
 with ordinary covariate values reads as \emph{inside} the area of
-applicability -- exactly the extrapolation this index exists to catch.
+applicability. That is exactly the extrapolation this index exists to catch.
 
 This path needs geometry on both sides, so \code{train_sf} and
 \code{newdata} must both be \code{sf} objects; a data.frame is refused
 rather than quietly measured without location. Non-\code{POINT}
 \code{newdata} (grid polygons, say) is reduced to representative points
-first, as \code{\link{coerce_to_points}} would. If exactly one side
-carries a CRS the other is brought into it -- reprojected when its
-coordinates look like longitude/latitude, stamped otherwise, with a warning
-either way -- because degrees fed into a metre-space index silently
-understate the distances.
+first, as \code{\link{coerce_to_points}} would. If exactly one side carries
+a CRS the other is brought into it: reprojected when its coordinates look
+like longitude/latitude, stamped otherwise, with a warning either way. This
+is done because degrees fed into a metre-space index silently understate the
+distances.
 }
 
 \examples{

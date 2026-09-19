@@ -66,10 +66,10 @@
 #' index 1) and echoes WARN+ to the console (index 2).  Both
 #' \code{logger::log_appender()} and \code{logger::log_threshold()} default to
 #' \code{index = 1}, so the obvious two-line recipe silences the file and
-#' leaves the console untouched -- which is the opposite of what anyone wants.
+#' leaves the console untouched, which is the opposite of what anyone wants.
 #' This helper names the right index.
 #'
-#' Note that these are log records, not R conditions: \code{suppressWarnings()}
+#' These are log records, not R conditions: \code{suppressWarnings()}
 #' and \code{tryCatch(warning = )} do not see them.  Conditions the package
 #' raises as real R warnings are unaffected by this function.
 #'
@@ -79,8 +79,8 @@
 #'   sets that level instead, which is how to put back exactly what was in
 #'   force rather than the default: \code{old <- spatialkit_quiet();
 #'   spatialkit_quiet(old)}.
-#' @return Invisibly, the threshold that was in force before the change --
-#'   a \pkg{logger} level that can be passed back as \code{quiet}.
+#' @return Invisibly, the threshold that was in force before the change, a
+#'   \pkg{logger} level that can be passed back as \code{quiet}.
 #' @family utilities
 #' @examples
 #' old <- spatialkit_quiet()      # console echo off

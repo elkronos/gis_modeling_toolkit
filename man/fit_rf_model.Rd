@@ -54,7 +54,7 @@ the setting is recorded in \code{$info} and printed with the fit.}
 
 \item{sample_fraction}{Fraction of rows drawn for each tree.  \code{NULL}
 (default) uses ranger's rule: all rows when \code{replace = TRUE},
-0.632 --- the expected share of distinct rows in a bootstrap sample ---
+0.632 (the expected share of distinct rows in a bootstrap sample)
 when \code{replace = FALSE}.  A single number in (0, 1] overrides it.}
 
 \item{seed}{Seed passed to ranger. Default 123.}
@@ -76,7 +76,7 @@ the arguments this function already sets (\code{num.trees},
 \code{min.node.size}, \code{num.threads}, \code{mtry},
 \code{importance}, \code{seed}, \code{replace},
 \code{sample.fraction}, \code{x}, \code{y}) are rejected with a
-message naming the wrapper argument to use instead -- passing them here
+message naming the wrapper argument to use instead.  Passing them here
 would reach \code{ranger()} twice and fail the call.}
 }
 \value{
@@ -87,7 +87,7 @@ An \code{rf_fit} object (inherits from \code{spatial_fit}).
 \code{replace} and \code{sample_fraction} (the sampling each tree was
 grown on, with \code{sample_fraction} resolved to the number ranger
 used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
-ranger did not compute it -- forwarding \code{oob.error = FALSE} through
+ranger did not compute it; forwarding \code{oob.error = FALSE} through
 \code{...} is one way to get there), \code{fitted_are_oob} (always
 \code{TRUE}; \code{summary()} reads it to label its metrics),
 \code{seed} and \code{n_dropped} (the rows \code{prep_model_data()}
@@ -105,14 +105,14 @@ Fits a regression random forest on an \code{sf} dataset and returns it as a
 
 Handing a random forest the x and y coordinates lets it reproduce the
 training surface almost exactly by memorising location, and then fail badly
-anywhere it has not seen. Random cross-validation will not catch this --
-nearby points leak between folds, so the memorised surface scores well --
-which is how the practice became common. Meyer et al. (2019) show the
+anywhere it has not seen. Random cross-validation will not catch this:
+nearby points leak between folds, so the memorised surface scores well.
+That is how the practice became common. Meyer et al. (2019) show the
 collapse directly. \code{include_coords} therefore defaults to
 \code{FALSE}, and setting it to \code{TRUE} logs a caution (it is a
-deliberate choice, so it is not raised as an R warning). If you do use it, score
-the model with \code{\link{cv_spatial}} and blocked folds, never with the
-out-of-bag error.
+deliberate choice, so it is not raised as an R warning). If you do use it,
+score the model with \code{\link{cv_spatial}} and blocked folds, never with
+the out-of-bag error.
 }
 
 \section{The out-of-bag error is a random hold-out}{

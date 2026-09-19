@@ -21,10 +21,10 @@ create_grid_polygons(
 
 \item{target_cells}{Optional approximate desired number of cells.  The cell
 \emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
-square grids get genuinely square cells; for hex grids the count is
-adjusted for hexagonal packing density.  The word "approximate" is load
-bearing: a grid of square cells over an elongated bounding box needs more
-of them than a grid of rectangles would (a 1000 x 1 strip at
+square grids get square cells; for hex grids the count is adjusted for
+hexagonal packing density.  The word "approximate" is load bearing: a
+grid of square cells over an elongated bounding box needs more of them
+than a grid of rectangles would (a 1000 x 1 strip at
 \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
 and clipping to an irregular boundary moves the count again.  Pass
 \code{cellsize} when the count matters more than the shape.}
@@ -42,9 +42,9 @@ used and a differing \code{cellsize[2]} is ignored with a logged warning.}
 of columns and rows to divide the boundary's bounding box into; the cell
 size is derived from it. \code{\link[sf:st_make_grid]{sf::st_make_grid()}} derives hexagon placement
 from \code{cellsize} alone, so for \code{type = "hex"} \code{n} does not set the number of
-cells -- but it does change the grid, because the \code{cellsize} derived from
-it is what the hexagons are built with. Ignored (with a logged
-warning) when \code{cellsize} is also supplied — passing both would otherwise
+cells, although it does change the grid, because the \code{cellsize} derived
+from it is what the hexagons are built with. Ignored (with a logged
+warning) when \code{cellsize} is also supplied. Passing both would otherwise
 truncate the grid to \code{n[1]} x \code{n[2]} cells anchored at the bounding-box
 corner, covering only part of the boundary.}
 
@@ -60,9 +60,9 @@ It does not silence R warnings, nor the package's console log echo
 
 \item{max_cells}{Upper bound on the number of cells the grid may have,
 estimated from the boundary's bounding box before anything is built.
-Default \code{1e6}. A \code{cellsize} in the wrong units -- metres on a
-boundary in kilometres, say -- asks for a grid that cannot be built, and
-this refuses it with a message rather than exhausting memory. Set to
+Default \code{1e6}. A \code{cellsize} in the wrong units (metres on a
+boundary in kilometres, say) asks for a grid that cannot be built, and
+this refuses it with a message before memory is exhausted. Set to
 \code{Inf} to disable.}
 }
 \value{
@@ -71,12 +71,12 @@ An sf polygon layer with poly_id column.
 \description{
 Lays a regular grid of equal-area cells over \code{boundary} and clips it to that
 boundary. Reach for this rather than \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} when cell
-size should be a decision you make — because you need per-cell rates
+size should be a decision you make, instead of one dictated by where the
+observations happen to be. That is the case when you need per-cell rates
 comparable across the map, or a resolution that stays fixed as the sample
-grows — instead of one dictated by where the observations happen to be.
-Hexagons (\code{type = "hex"}) avoid the axis-aligned artefacts of squares and
-give every cell the same distance to all six neighbours, which matters for
-anything that reads neighbourhoods.
+grows. Hexagons (\code{type = "hex"}) avoid the axis-aligned artefacts of squares
+and give every cell the same distance to all six neighbours, which matters
+for anything that reads neighbourhoods.
 }
 \details{
 Size the grid with exactly one of \code{target_cells} (roughly how many cells you

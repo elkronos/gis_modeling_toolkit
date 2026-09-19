@@ -11,19 +11,19 @@ ensure_projected(x, target_crs = NULL, purpose = c("distance", "area"))
 
 \item{target_crs}{Optional target CRS (sf object, integer EPSG, or crs).
 Must resolve to a usable CRS via \code{\link[sf:st_crs]{sf::st_crs()}}; an unusable value (one
-that resolves to \code{NA_crs_}) raises an error rather than silently leaving
-\code{x} unprojected.}
+that resolves to \code{NA_crs_}) raises an error, so \code{x} is never left
+silently unprojected.}
 
 \item{purpose}{Which property the projection is for.  \code{"distance"} (the
 default, and everything above): the candidate that distorts pairwise
 distances least, which is what ranges, block sizes, bandwidths and
 length-scales read off the coordinates.  \code{"area"}: densities or rates
 per cell are going to be computed, so the CRS must be equal-area.  For
-lon/lat input the choice is then made among equal-area projections only
---- a Lambert azimuthal centred on the data, or an Albers conic where
-its parallels do not degenerate, whichever distorts distances less,
-which a UTM zone (conformal, not equal-area) never enters; global
-coverage gets Equal Earth rather than Web Mercator.  Already-projected
+lon/lat input the choice is then made among equal-area projections only:
+a Lambert azimuthal centred on the data, or an Albers conic where its
+parallels do not degenerate, whichever distorts distances less.  A UTM
+zone (conformal, not equal-area) never enters that comparison, and global
+coverage gets Equal Earth in place of Web Mercator.  Already-projected
 input is still returned untouched, but its area distortion over the
 extent is measured (the spread of planar-to-geodesic area ratios over
 probe polygons) and logged as a warning when it exceeds 1 percent.
@@ -39,12 +39,12 @@ computes a density.  Ignored when \code{target_crs} is given.}
 x, potentially with a new projected CRS.  When a projection was
 chosen here (lon/lat input, no \code{target_crs}) the result carries
 \code{attr(x, "crs_choice")}: a data.frame with one row per projection
-considered -- \code{name}, \code{crs} (its definition), the measured
+considered, holding \code{name}, \code{crs} (its definition), the measured
 worst-case \code{distance_error} (relative, over sampled pairs;
-\code{NA} where it could not be measured) and \code{chosen} -- so the
-figure the log line quotes for the winner is recoverable for every
-candidate, and is measured for the single candidate on the paths where
-no comparison runs (a UTM zone on a local extent, the equal-area
+\code{NA} where it could not be measured) and \code{chosen}.  The
+figure the log line quotes for the winner is therefore recoverable for
+every candidate, and is measured for the single candidate on the paths
+where no comparison runs (a UTM zone on a local extent, the equal-area
 projection chosen for a layer straddling the antimeridian).  It is
 \code{NULL} exactly when no local projection was chosen here: input
 that already carried a projected CRS, a \code{target_crs} you supplied,
@@ -52,7 +52,7 @@ or an extent no local projection fits, which falls back to Web Mercator
 or Equal Earth.  CRS-less input
 additionally carries \code{attr(x, "crs_assumed")}: \code{"EPSG:4326"} when
 the lon/lat heuristic fired, \code{"none"} when it declined.  That
-attribute is also read on the way IN — an object already carrying
+attribute is also read on the way IN.  An object already carrying
 \code{"none"} is returned untouched, with the heuristic skipped, which is
 how a \code{predict()} method replays a fit's negative decision so that a
 subset of the training rows is not judged differently from the whole.
@@ -64,7 +64,7 @@ for distance/area calculations.
 \details{
 An object that already has a projected CRS is returned untouched. Only
 geographic (lon/lat) input is transformed, and the CRS chosen depends on the
-extent of the data — it is \strong{not} always UTM:
+extent of the data. It is \strong{not} always UTM:
 
 \describe{
 \item{Local extents}{The UTM zone containing the data's centre
@@ -73,13 +73,13 @@ are close to true over a few degrees of longitude, which is the case
 this package is usually in.}
 \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 a UTM zone is designed for, a single zone can distort distances by
-several percent — and that error propagates straight into variogram
+several percent, and that error propagates straight into variogram
 ranges, block sizes, GWR bandwidths and GP length-scales. Which
 projection is actually best is then \strong{measured, not assumed}: the zone,
 a Lambert azimuthal equal-area centred on the data and (where its
 standard parallels do not degenerate) an Albers conic are each scored by
-projecting representative points of the data — a non-POINT layer is
-reduced to points first — and comparing planar with geodesic pairwise
+projecting representative points of the data (a non-POINT layer is
+reduced to points first) and comparing planar with geodesic pairwise
 distances, and the one that distorts least is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
@@ -87,7 +87,7 @@ logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they ar
 \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 hemisphere. The wrap is detected from the coordinates (one very large
 gap in the sorted longitudes) and an equal-area projection centred on
-the true extent is used. Only genuinely global coverage falls back to
+the true extent is used. Only truly global coverage falls back to
 EPSG:3857.}
 \item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
 lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
@@ -96,12 +96,13 @@ are. With \code{target_crs} supplied there is no source CRS to reproject
 from, so the same heuristic decides between two outcomes: lon/lat-looking
 coordinates are read as EPSG:4326 and reprojected to the target (a real
 warning), and anything else has the target \strong{stamped on without
-reprojection} — a relabel, logged only, so verify the coordinates really
-are in that CRS. Set the CRS explicitly to suppress either.}
+reprojection}. That is a relabel, logged only, so verify the
+coordinates really are in that CRS. Set the CRS explicitly to suppress
+either.}
 }
 
-\code{target_crs} overrides all of this: pass it whenever you need a specific,
-reproducible projection — comparing runs, matching an existing layer, or
+\code{target_crs} overrides all of this. Pass it whenever you need a specific,
+reproducible projection: comparing runs, matching an existing layer, or
 fixing the units that \code{\link[=make_folds]{make_folds()}}'s \code{block_size} will be interpreted in.
 }
 \examples{

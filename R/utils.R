@@ -22,7 +22,7 @@
 #' (`sf::st_crs(training_data)`), and that object is legitimately allowed to
 #' carry no CRS.  Passing `NA_crs_` straight through would turn a supported
 #' CRS-less workflow into a hard error, so those call sites funnel the value
-#' through here and get `NULL` — "no target, pick one automatically" — instead.
+#' through here and get `NULL` ("no target, pick one automatically") instead.
 #'
 #' @param x An sf/sfc object or anything `sf::st_crs()` accepts.
 #' @return An `sf::crs` object, or NULL when the CRS is missing.
@@ -38,7 +38,7 @@
 #' `sf::st_transform()` refuses a CRS-less object ("cannot transform sfc object
 #' with missing crs"), so any `if (!is.null(crs)) st_transform(x, crs)` turns a
 #' `crs =` argument into a hard error for exactly the users most likely to pass
-#' it — those whose data carries no CRS. Reprojection is impossible there, but
+#' it: those whose data carries no CRS. Reprojection is impossible there, but
 #' assumption is not. The lon/lat heuristic runs first, exactly as
 #' `ensure_projected()` does: coordinates that look like degrees are taken as
 #' EPSG:4326 and REPROJECTED; only when they do not is the target stamped. Both
@@ -112,7 +112,7 @@
 #' A logger line is invisible to \code{tryCatch(warning = )},
 #' \code{withCallingHandlers()}, \code{testthat::expect_warning()} and
 #' \code{options(warn = 2)}.  For a situation the caller should be able to
-#' catch or escalate -- data dropped, a CRS assumed, a result degraded -- the
+#' catch or escalate (data dropped, a CRS assumed, a result degraded), the
 #' log line is not enough on its own.  Used wherever the reference manual says
 #' the function \emph{warns}; purely methodological cautions stay
 #' \code{.log_warn()} and their documentation says "logged".
@@ -279,7 +279,7 @@
 #'   the mean of `y` is used. A scalar value (e.g., per-fold training mean) is
 #'   used directly as the baseline. A per-observation vector (length matching `y`)
 #'   is filtered in parallel with `y` and `yhat` to remove non-finite cases.
-#'   Any other length is an error — recycling it would silently produce a wrong
+#'   Any other length is an error. Recycling it would silently produce a wrong
 #'   R-squared.
 #' @return A data.frame with n, RMSE, MAE, MAPE, SMAPE, R2, Adj_R2, n_MAPE and
 #'   n_SMAPE. `Adj_R2` is always present, and is `NA` when `p` is NULL or
@@ -433,11 +433,11 @@
 #' Catch a misspelt `newdata` on the evaluation functions
 #'
 #' `model_metrics()`, `evaluate_insample()` and `compare_models()` forward
-#' `...` to `predict()`, which checks it -- but only on the out-of-sample
+#' `...` to `predict()`, which checks it, but only on the out-of-sample
 #' branch.  A misspelt `newdata` leaves `newdata` NULL and the typo in `...`,
 #' the in-sample branch never calls `predict()`, and the in-sample metrics
-#' come back with the out-of-sample return shape.  So: arguments in `...`
-#' with no `newdata` is an error here.
+#' come back with the out-of-sample return shape.  Arguments in `...` with no
+#' `newdata` are therefore an error here.
 #'
 #' @param dots `list(...)`.
 #' @param newdata The caller's `newdata`.
@@ -466,9 +466,9 @@
 #' 1980; for GWR, Wheeler & Tiefelsdorf 2005).  Columns are scaled but NOT
 #' centred, so an intercept column stays in and a column that is constant
 #' inside a window shows up as collinear with it.  The conventional threshold
-#' is 30.  \code{kappa()} on the raw matrix depends on the predictors' units
-#' -- a design with condition index 1322, whose local coefficients ran from
-#' -86 to +150 around a true value of 2, had a raw kappa under 1e6 and raised
+#' is 30.  \code{kappa()} on the raw matrix depends on the predictors' units.
+#' A design with condition index 1322, whose local coefficients ran from -86
+#' to +150 around a true value of 2, had a raw kappa under 1e6 and raised
 #' nothing.
 #'
 #' @param X Numeric matrix.
@@ -495,10 +495,11 @@
 #' Vincenty's inverse formula, vectorised over pairs.  \code{sf::st_distance()}
 #' on lon/lat geometry uses s2's SPHERE (R = 6371 km), and the sphere-to-WGS84
 #' gap of 0.24-0.56\% is the same size as the projection distortions
-#' \code{.crs_distance_error()} compares -- so the "measured error X\% vs Y\%"
-#' figures were off by up to half a percentage point and the least-distorting
-#' candidate was mis-ranked in 16 of 40 random wide extents.  The ellipsoidal
-#' distance needs no Suggests package (\pkg{lwgeom} is not a dependency).
+#' \code{.crs_distance_error()} compares.  The "measured error X\% vs Y\%"
+#' figures were therefore off by up to half a percentage point and the
+#' least-distorting candidate was mis-ranked in 16 of 40 random wide extents.
+#' The ellipsoidal distance needs no Suggests package (\pkg{lwgeom} is not a
+#' dependency).
 #'
 #' @param lon1,lat1,lon2,lat2 Numeric vectors in decimal degrees, recycled.
 #' @return Distances in metres.  Nearly antipodal pairs, where the iteration
@@ -617,8 +618,8 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'
 #' \code{\link{prep_model_data}()} and
 #' \code{\link{assign_features_to_polygons}()} return a layer with an
-#' attribute recording what happened to its rows --- \code{"dropped"} and
-#' \code{"ties"} respectively.  Those records describe the rows the layer was
+#' attribute recording what happened to its rows (\code{"dropped"} and
+#' \code{"ties"} respectively).  Those records describe the rows the layer was
 #' built with, and \code{[} on an \code{sf} object copies attributes through
 #' unchanged, which would leave a subset reporting its parent's numbers with
 #' row positions that no longer resolve.  Subsetting therefore returns a plain

@@ -25,11 +25,11 @@ A \code{ggplot} object.
 \description{
 The criteria of a \code{\link{resolution_profile}()} against the number of
 cells, one panel per criterion on a shared x axis, with the level each
-criterion selects marked and the region over which it is within
-\code{tol} of its optimum shaded --- the flat region
-\code{\link{select_resolution}()} reports, drawn.  A criterion whose
-optimum sits at the support ceiling or the range floor is captioned as
-such, because there the bound is choosing, not the criterion.
+criterion selects marked and the region over which it is within \code{tol}
+of its optimum shaded.  That shaded band is the flat region
+\code{\link{select_resolution}()} reports.  A criterion whose optimum sits
+at the support ceiling or the range floor is captioned as such, because
+there the bound is choosing, not the criterion.
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE) &&

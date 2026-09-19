@@ -146,7 +146,7 @@
 #' Each restart is seeded by \code{.kmeanspp_centers()} and run as a single
 #' start, so the spread of \code{tot.withinss} across restarts is available:
 #' it says how rough the objective is at this \code{k}, which a profile can
-#' report so a flat region is honestly wide.
+#' report so that a flat region is shown at its real width.
 #'
 #' @param xy Numeric matrix of coordinates.
 #' @param k Number of clusters (\code{>= 2}).
@@ -219,7 +219,7 @@
 #' from 0.114 at \code{k = 10} to 0.050 at \code{k = 60}; mean \eqn{|z|} over
 #' the same runs was 0.77, 0.78, 0.76, 0.80 against the theoretical
 #' \eqn{E|N(0,1)| = 0.798}.  Ranking on \eqn{|I|} therefore prefers the finest
-#' tessellation for arithmetic reasons rather than statistical ones.
+#' tessellation on arithmetic grounds alone.
 #'
 #' @param xy Numeric matrix of coordinates.
 #' @param response Numeric vector of response values.
@@ -323,9 +323,9 @@
 #' geometric WSS elbow is supplemented with Moran's I computed on OLS
 #' residuals at each candidate k.  The Moran's I profile measures how much
 #' spatial autocorrelation in the response remains *unexplained* at a given
-#' tessellation resolution — a direct reflection of the spatial process being
-#' modeled, rather than mere geometric compactness of coordinates.  The
-#' combined criterion selects the k that best balances geometric parsimony
+#' tessellation resolution.  It is a direct reflection of the spatial process
+#' being modeled instead of the mere geometric compactness of coordinates.
+#' The combined criterion selects the k that best balances geometric parsimony
 #' and residual spatial independence.
 #'
 #' To keep memory use and runtime bounded for large \code{max_levels}, the
@@ -346,14 +346,14 @@
 #' by k-means++ (Arthur and Vassilvitskii 2007), the budget at which the gain
 #' from further restarts saturates (Fränti and Sieranoja 2019; Steinley 2003
 #' on why the usual handful is not enough).  The same sweeps then had no
-#' increase at all.  A curve that still rises somewhere is reported --- a
-#' logged warning names the number of rising steps, and the model-aware
-#' paths return it as \code{wss_bumps} in the \code{"diagnostics"} attribute
-#' beside \code{wss_spread}, the relative spread of WSS across the restarts
-#' at each \code{k} --- but not refused: a bumpy curve is uncertain, not
-#' unidentified.  Because the optimiser changed, a selection made by an
-#' earlier version on a curve that had such a bump can differ from the one
-#' made now; where the earlier curve was clean, the answer is the same.
+#' increase at all.  A curve that still rises somewhere is reported but not
+#' refused: a bumpy curve is uncertain, not unidentified.  A logged warning
+#' names the number of rising steps, and the model-aware paths return it as
+#' \code{wss_bumps} in the \code{"diagnostics"} attribute beside
+#' \code{wss_spread}, the relative spread of WSS across the restarts at each
+#' \code{k}.  Because the optimiser changed, a selection made by an earlier
+#' version on a curve that had such a bump can differ from the one made now;
+#' where the earlier curve was clean, the selection is the same.
 #'
 #' \strong{The model-aware criteria rank on the standardised deviate, not on
 #' |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
@@ -364,27 +364,27 @@
 #' made an \eqn{|I|} ranking prefer the largest candidate for arithmetic
 #' reasons alone.  Candidates are therefore ordered by
 #' \eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
-#' residual moments --- exact here, because the cell-level residuals are OLS
-#' residuals by construction.  Over the same runs \eqn{z} had mean \eqn{\approx
-#' 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection rate of
-#' 0.040--0.057 at every \code{k}.  Both quantities are reported in the
-#' \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
+#' residual moments, which are exact here because the cell-level residuals
+#' are OLS residuals by construction.  Over the same runs \eqn{z} had mean
+#' \eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection
+#' rate of 0.040--0.057 at every \code{k}.  Both quantities are reported in
+#' the \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
 #'
 #' \strong{Resolution floor on the model-aware criteria.}  Moran's I is
 #' computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
 #' so it only carries information once there are more than nine cells.  At nine
 #' or fewer, every cell is a neighbour of every other, the row-standardised
 #' weight matrix is complete, and Moran's I collapses to exactly
-#' \eqn{-1/(k - 1)} for \emph{any} residual vector — a function of \code{k}
-#' alone.  The criterion ranks on \eqn{|z|}, not on \eqn{|I|}, and at the
+#' \eqn{-1/(k - 1)} for \emph{any} residual vector (a function of \code{k}
+#' alone).  The criterion ranks on \eqn{|z|}, not on \eqn{|I|}, and at the
 #' floor the residual moments give \eqn{E[I] = I} and \eqn{\mathrm{Var}[I] =
 #' 0} identically (the algebra holds to \eqn{10^{-16}}), so the standardised
 #' deviate is \eqn{0/0}: it carries no information about the tessellation, and
 #' whichever way rounding noise resolves it those candidates would rank first
 #' or last on nothing.  They therefore return \code{NA} and are excluded from
-#' the model-aware ranking.  When no candidate in the elbow neighbourhood clears
-#' the floor — which is the usual outcome for small \code{max_levels} — the
-#' whole call falls back to the geometric ranking and logs a warning; raise
+#' the model-aware ranking.  When no candidate in the elbow neighbourhood
+#' clears the floor, which is the usual outcome for small \code{max_levels},
+#' the whole call falls back to the geometric ranking and logs a warning; raise
 #' \code{max_levels} above roughly 10 if you want the model-aware criteria to
 #' contribute.  Under \code{criterion = "combined"}, a candidate below the
 #' floor that sits alongside candidates above it is ranked last on the Moran's
@@ -401,7 +401,7 @@
 #' @param response_var Optional response column name. When provided alongside
 #'   \code{predictor_vars}, enables model-aware level selection via Moran's I
 #'   on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
-#'   a factor or character response raises an error rather than being coerced,
+#'   a factor or character response raises an error and is never coerced,
 #'   because the residuals of an OLS fit to arbitrary level codes carry no
 #'   meaning to test for autocorrelation.
 #' @param predictor_vars Optional predictor column names. Must be numeric or
@@ -412,8 +412,8 @@
 #'   \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
 #'   distance and that same quantity).  Falls back to \code{"geometric"} if
 #'   response/predictors are unavailable, and also when no candidate clears the
-#'   nine-cell resolution floor described in \strong{Details}.  Note that
-#'   supplying both \code{response_var} and \code{predictor_vars} upgrades
+#'   nine-cell resolution floor described in \strong{Details}.  Supplying
+#'   both \code{response_var} and \code{predictor_vars} upgrades
 #'   \code{"geometric"} to \code{"combined"}: the selection then depends on
 #'   the response (see "Post-selection inference").
 #' @param select_on \code{"all"} (default) selects on every point;
@@ -422,8 +422,8 @@
 #'   errors computed downstream on the chosen cells are not post-selection.
 #'   See "Post-selection inference".
 #' @section Post-selection inference:
-#' When the selection reads the response --- here, whenever both
-#' \code{response_var} and \code{predictor_vars} are supplied --- everything
+#' When the selection reads the response (here, whenever both
+#' \code{response_var} and \code{predictor_vars} are supplied), everything
 #' estimated afterwards on the chosen cells is estimated on data that already
 #' influenced the choice, and its standard errors are post-selection ones:
 #' descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen and
@@ -439,15 +439,15 @@
 #' "block_kfold")}), the selection runs on the first half only, and the row
 #' positions of both halves come back in the \code{"split"} attribute
 #' (\code{selection} and \code{estimation}).  Build the tessellation on
-#' every point --- cells are geometry --- but aggregate and fit on
+#' every point (cells are geometry), but aggregate and fit on
 #' \code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
 #' saw; that restores nominal coverage with no new theory.  The price is
 #' precision: half the points estimate, and García Rasines and Young (2023)
 #' show a \emph{contiguous} spatial half is less efficient than the
 #' exchangeable split the i.i.d. theory assumes, because the two halves are
-#' not interchangeable.  Two alternatives keep the whole sample --- data
+#' not interchangeable.  Two alternatives keep the whole sample: data
 #' thinning for count responses (Neufeld et al. 2024) and data fission for
-#' Gaussian-like ones (Leiner et al. 2023) --- and are not implemented here;
+#' Gaussian-like ones (Leiner et al. 2023).  Neither is implemented here;
 #' the split needs no distributional assumption, which is why it comes first.
 #' Selection on coordinates alone (\code{"geometric"} with no response) is
 #' not exposed in this way, and \code{"split"} then changes nothing but the
@@ -465,17 +465,17 @@
 #'   budget (\code{nstart}), the geometric elbow the evaluated
 #'   neighbourhood was drawn around (\code{knee_k}) and the \code{k} at which
 #'   k-means failed (\code{failed_k}; their \code{wss} entries are
-#'   interpolated from the neighbours, not measured) — except when the model-aware path
-#'   itself falls back to the geometric result (no viable k in the elbow
-#'   neighbourhood, or Moran's I could not be computed for any candidate), in
-#'   which case no diagnostics are available and the attribute is absent. Both
-#'   fallbacks are logged as warnings.  The geometric path returns a plain
+#'   interpolated from the neighbours, not measured).  When the model-aware
+#'   path itself falls back to the geometric result (no viable k in the elbow
+#'   neighbourhood, or Moran's I could not be computed for any candidate), no
+#'   diagnostics are available and the attribute is absent. Both fallbacks are
+#'   logged as warnings.  The geometric path returns a plain
 #'   integer vector; a rising WSS curve is still logged there.  With
 #'   \code{select_on = "split"} every path adds a \code{"split"} attribute:
 #'   a list with \code{selection} and \code{estimation} (integer row
 #'   positions in \code{data_sf}), \code{method} and \code{seed}.  For a full
-#'   per-level table --- criteria, cell support, restart spread, the flat
-#'   region --- see \code{\link{resolution_profile}()}.
+#'   per-level table of criteria, cell support, restart spread and the flat
+#'   region, see \code{\link{resolution_profile}()}.
 #' @references
 #' Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of
 #' careful seeding. \emph{Proceedings of the 18th Annual ACM-SIAM Symposium

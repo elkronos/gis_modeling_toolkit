@@ -49,11 +49,11 @@ Every fit stores \code{n} as \code{$info$n_dropped}.  The record
 describes the rows this call returned and does not survive subsetting:
 \code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
 and a fit given such a subset with \code{.already_prepped = TRUE} reports
-\code{n_dropped = 0} rather than the parent layer's count.  The CRS is projected
-whenever one can be established.  A CRS-less layer is decided by the
-lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
-box fits the lon/lat envelope \emph{and} it spans more than one unit on
-some axis — or carries decimal-degree-like precision — it is read as
+\code{n_dropped = 0} even when the parent layer dropped rows.  The CRS is
+projected whenever one can be established.  A CRS-less layer is decided by
+the lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
+box fits the lon/lat envelope \emph{and} it either spans more than one unit
+on some axis or carries decimal-degree-like precision, it is read as
 EPSG:4326 and projected, with a warning.  A small planar survey inside that
 envelope is included in that, deliberately; only coordinates the heuristic
 declines are passed through as-is.  Set the CRS on \code{data_sf} if the
@@ -61,7 +61,7 @@ data are planar.
 }
 \description{
 Ensures point geometry, projected CRS, and removes rows with missing or
-non-finite values in modeling columns -- \emph{including} rows whose
+non-finite values in modeling columns, \emph{including} rows whose
 geometry is empty or whose coordinates are not finite, which no model
 backend can use.  All non-POINT geometries (including MULTIPOINT) are
 coerced to representative points via \code{coerce_to_points()}, so
@@ -69,16 +69,16 @@ downstream coordinate extraction always aligns one row per observation.
 }
 \details{
 The response may not appear in \code{predictor_vars}.  Using it as its own
-predictor is leakage no backend catches -- an out-of-bag R^2 near 1 in the
-random forest, a silently reduced design matrix in GWR, duplicated rows and a
-phantom \code{<none>} entry in the GWR selection table -- so it is refused
+predictor is leakage no backend catches: an out-of-bag R^2 near 1 in the
+random forest, a silently reduced design matrix in GWR, duplicated rows and
+a phantom \code{<none>} entry in the GWR selection table.  It is refused
 here.
 
 Column names must be syntactically valid R names (\code{make.names(x) == x}).
-Every backend builds a model formula from these names, and a name R parses
-as an expression -- \code{"B5-B4"} is \code{B5 - B4}, \code{"log(a)"} is a
-function call -- would fit a different model from the one requested while
-the fit object still recorded the name you asked for.  Rename the column
+Every backend builds a model formula from these names.  A name R parses as
+an expression would fit a different model from the one requested while the
+fit object still recorded the name you asked for: \code{"B5-B4"} is
+\code{B5 - B4}, and \code{"log(a)"} is a function call.  Rename the column
 (for example with \code{make.names()}) before fitting.
 }
 \examples{

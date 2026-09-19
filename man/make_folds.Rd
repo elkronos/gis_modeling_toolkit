@@ -33,19 +33,19 @@ make_folds(
 folding: \code{sf::st_distance()} uses every coordinate dimension, so an
 XYZ layer would otherwise have elevation folded into every buffer, block
 and neighbour distance.  CRS-less points are aligned to a \code{boundary}
-or \code{prediction_points} that carries a CRS — reprojected when the
-coordinates look like lon/lat, otherwise stamped without reprojection,
-warning either way.}
+or \code{prediction_points} that carries a CRS.  They are reprojected when
+the coordinates look like lon/lat and otherwise stamped without
+reprojection, with a warning either way.}
 
-\item{k}{Integer; number of folds.  Must be a single whole number >= 1 —
-a fraction, \code{NA} or a vector is an error, because a non-integer used
+\item{k}{Integer; number of folds.  Must be a single whole number >= 1.
+A fraction, \code{NA} or a vector is an error, because a non-integer used
 to truncate silently and leave the last rows in no test set at all.
 Not every method honours it.  \code{"buffered_loo"} and \code{"nndm"} are
 leave-one-out schemes and always return \code{k = n} regardless of what
 was asked for; \code{"block_kfold"} lowers it when the grid yields fewer
 than \code{k} non-empty blocks, and \code{"leave_location_out"} lowers it
 when there are fewer than \code{k} distinct groups.  Read the \code{k}
-element of the returned list rather than assuming the requested value.  A
+element of the returned list, and do not assume the requested value.  A
 reduction is written to the package log and raises no R warning, so
 \code{tryCatch(warning = )} will not see it and \code{suppressWarnings()}
 will not hide it.}
@@ -80,33 +80,34 @@ Which CRS that is depends on the input.  Projected input is used as it
 stands, so \code{block_size} is in your own CRS's units.  Geographic
 (lon/lat) input is projected first by \code{\link{ensure_projected}()},
 which picks a local UTM zone or, at wide extents, an equal-area
-projection — a CRS you did not choose, whose units are metres but whose
-identity varies with the data.  \code{block_size} is then interpreted in
-\emph{that} CRS.  The CRS actually used is recorded in
+projection.  That is a CRS you did not choose, whose units are metres but
+whose identity varies with the data.  \code{block_size} is then
+interpreted in \emph{that} CRS.  The CRS actually used is recorded in
 \code{params$crs} of the returned list; project the data yourself before
 calling if you want to fix the units in advance.
 
 A \code{block_size} in the wrong unit asks for an enormous grid, so a
 request above 1,000,000 blocks is refused with an error naming the grid
-dimensions, the extent and the CRS's units, rather than being built.}
+dimensions, the extent and the CRS's units.}
 
 \item{auto_range}{Logical.  If \code{TRUE}, the spatial autocorrelation
-range is estimated via \code{estimate_sac_range()} — which fits
-directional variograms to account for anisotropy — and used as the
+range is estimated via \code{estimate_sac_range()} (which fits
+directional variograms to account for anisotropy) and used as the
 minimum \code{block_size}.  Requires \code{response_var}.  An explicit
 \code{block_size} takes precedence.  Default \code{FALSE}.  Sizing
 blocks from the autocorrelation range is the recommendation of Roberts
-et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019) automates;
-note that \pkg{blockCV} takes the fitted variogram's range
+et al. (2017) and what \pkg{blockCV} (Valavi et al. 2019) automates.
+\pkg{blockCV} takes the fitted variogram's range
 \emph{parameter} as the block size, whereas this uses the
-\emph{effective} range \code{estimate_sac_range()} returns -- three
-times that parameter for an exponential fit -- so its blocks are larger
+\emph{effective} range \code{estimate_sac_range()} returns (three
+times that parameter for an exponential fit), so its blocks are larger
 than \pkg{blockCV}'s from the same variogram.}
 
 \item{range_frac}{Passed through to \code{estimate_sac_range()} when
 \code{auto_range = TRUE}.  A fitted range beyond the longest lag the
 empirical variogram was fitted over is rejected as unidentified, and block
-sizing falls back to geometry rather than collapsing to a single block.
+sizing falls back to geometry, so the grid does not collapse to a single
+block.
 Default 1.0.}
 
 \item{response_var}{Character(1) response column name.  Required when
@@ -117,17 +118,17 @@ identifies the location each observation belongs to.  Required for
 \code{method = "leave_location_out"}, which keeps every observation from a
 location together in the same fold.  Repeated measurements at the same
 site otherwise get split across folds, and the model is scored partly on
-sites it has already seen -- which random k-fold reports as excellent
+sites it has already seen, which random k-fold reports as excellent
 performance.}
 
 \item{prediction_points}{Optional \code{sf} layer of the locations you
 actually intend to predict onto.  Required for \code{method = "nndm"}.
 The grid from \code{\link{predict_surface}()} is the natural choice; a
 non-POINT layer (grid cells, polygons) is reduced to representative points
-first, so the target distances are point-to-point rather than
-point-to-polygon — the latter is zero for every cell that contains a
-training point, which pulls the target distribution towards zero and
-degenerates the CV towards plain leave-one-out.}
+first, so the target distances are point-to-point.  A point-to-polygon
+distance is zero for every cell that contains a training point, which
+pulls the target distribution towards zero and degenerates the CV towards
+plain leave-one-out.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -143,8 +144,8 @@ Default \code{0.5}, as in \code{CAST::nndm()}.}
 \item{phi}{For \code{method = "nndm"}: the distance up to which the two
 nearest-neighbour distance distributions are matched, in the CRS the
 folds are built in; the exclusion never pushes a held-out point's
-nearest neighbour beyond it.  In Mila et al. (2022) -- and
-\code{CAST::nndm()} -- \eqn{\phi} is the autocorrelation range of the
+nearest neighbour beyond it.  In Mila et al. (2022), and in
+\code{CAST::nndm()}, \eqn{\phi} is the autocorrelation range of the
 outcome: beyond it observations are effectively independent, so
 matching is unnecessary.  \code{\link{estimate_sac_range}()} gives such
 a value.  Default \code{NULL} = the largest prediction-to-training
@@ -198,8 +199,8 @@ the full \code{grid_nx} by \code{grid_ny} grid, or the row of the
 columns and in their own order.  It runs from 1 to
 \code{params$n_blocks} and is the identity when nothing was dropped.
 \code{params$block_sizes} is the number of points in each block, indexed
-by \code{block_id} -- zeros are empty blocks that
-\code{drop_empty_blocks = FALSE} kept -- and \code{params$fold_blocks}
+by \code{block_id} (zeros are empty blocks that
+\code{drop_empty_blocks = FALSE} kept), and \code{params$fold_blocks}
 is a list with one integer vector per fold naming the blocks packed into
 it.  Between them the folds account for every block exactly once,
 empty ones included, so a fold's territory on the map is all of its
@@ -209,23 +210,23 @@ it is made of, a fold can be seen to be one contiguous region or
 several, and the blocks can be drawn over the data
 (\code{\link{plot_folds}()} does so).
 
-For the methods that work in projected space — \code{"block_kfold"},
-\code{"buffered_loo"} and \code{"nndm"} — \code{params} carries a
-\code{params$blocks_supplied} says whether the blocks came from
-\code{blocks} rather than from a grid built here, and
+For the methods that work in projected space (\code{"block_kfold"},
+\code{"buffered_loo"} and \code{"nndm"}), \code{params} carries a
+\code{params$blocks_supplied} that says whether the blocks came from
+\code{blocks} or from a grid built here, and
 \code{params$boundary_supplied} whether a \code{boundary} was given;
 \code{params$row_probe} is a small sample of row IDs and coordinates
 that every \code{cv_*()} compares against the data it is handed, so
-folds built from a different layer of the same size are refused rather
-than applied silently.
+folds built from a different layer of the same size are refused, never
+applied silently.
 
 For the methods that work in projected space, \code{params} also carries a
 \code{crs} element naming the CRS the folds were built in (an
 \code{"EPSG:code"} string where there is one, otherwise the CRS's input
-definition).  Every length in \code{params} — \code{block_size},
-\code{sac_range}, \code{buffer}, \code{median_buffer} — is in that CRS's
+definition).  Every length in \code{params} (\code{block_size},
+\code{sac_range}, \code{buffer}, \code{median_buffer}) is in that CRS's
 units, which for geographic input is a CRS
-\code{\link{ensure_projected}()} chose rather than one you passed.
+\code{\link{ensure_projected}()} chose for you, and not one you passed.
 
 Rows whose geometry is empty or has non-finite coordinates are dropped
 before folding, with a logged warning naming the count; they appear in no
@@ -254,18 +255,18 @@ excludes everything within a fixed \code{buffer}.
 observations from a location share a fold.
 
 \code{"nndm"} implements the distance-matching principle of Milà et al.
-(2022): rather than choosing a buffer arbitrarily, it sizes the exclusion
-around each held-out point so that the resulting training-to-test distance
-distribution approaches the distribution of distances from your actual
-prediction locations to the training data.
+(2022): it sizes the exclusion around each held-out point, with no arbitrary
+buffer, so that the resulting training-to-test distance distribution
+approaches the distribution of distances from your actual prediction
+locations to the training data.
 
 The procedure is the paper's own (as in \code{CAST::nndm()}), and it is
 deterministic.  Let \eqn{G_{ij}} be the empirical distribution of
 prediction-to-nearest-training distances and \eqn{G_j^*} the distribution
 of each held-out point's nearest remaining training point.  Starting from
 plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
-realised distribution exceeds the target -- \eqn{G_j^*(r) > G_{ij}(r)} --
-has its nearest training neighbour removed, and this repeats until no such
+realised distribution exceeds the target (\eqn{G_j^*(r) > G_{ij}(r)}) has
+its nearest training neighbour removed, and this repeats until no such
 point remains, subject to two limits: a point's nearest-neighbour distance
 is never pushed beyond \code{phi} (default: the largest prediction distance,
 since a training point already further than every prediction distance has
@@ -291,9 +292,9 @@ A polygon layer passed as \code{blocks} is aligned to the points the way
 (reprojected if they look like lon/lat, otherwise stamped, warning either
 way), and the blocks are then brought into the CRS the folds are built in.
 A point inside more than one block is given the first (lowest row) that
-contains it, as for a point on the shared edge of two grid cells; when the
-blocks that caught such a point share area rather than an edge -- the
-layer overlaps and is not a partition -- this is warned about.  A point
+contains it, as for a point on the shared edge of two grid cells.  When the
+blocks that caught such a point share area instead of an edge, the layer
+overlaps and is not a partition, and this is warned about.  A point
 inside no block is assigned to the nearest one, by distance to the polygon
 itself, and the count of such points is warned about, unless they sit
 within a millionth of the extent of a block, which is an edge that
@@ -307,8 +308,8 @@ lowered to the number of blocks that hold points when that is smaller.
 \code{params$grid_nx} and
 \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
 median over blocks that hold points of the side of the square with the
-block's area -- the length compared against the autocorrelation range for
-the leakage warning, since a polygon has no single edge length.
+block's area.  That is the length compared against the autocorrelation range
+for the leakage warning, since a polygon has no single edge length.
 
 The connection to the rest of the package is
 \code{\link{build_tessellation}()}: every shape it builds can be a block

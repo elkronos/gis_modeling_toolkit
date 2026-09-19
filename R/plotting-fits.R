@@ -13,8 +13,8 @@
 #'
 #' Diagnostic plots for a \code{spatial_fit}.  The package previously shipped
 #' \code{print()} and \code{summary()} methods but no \code{plot()}, so the
-#' checks most likely to reveal a problem -- is there structure left in the
-#' residuals, and where is it -- had to be written by hand each time.
+#' checks most likely to reveal a problem (is there structure left in the
+#' residuals, and where is it) had to be written by hand each time.
 #'
 #' @param x A \code{spatial_fit}.
 #' @param type One of:
@@ -26,7 +26,7 @@
 #'       reference line.}
 #'     \item{\code{"variogram"}}{Empirical variogram of the residuals with the
 #'       fitted model overlaid, so the fit can be judged rather than trusted,
-#'       and --- unless \code{response = FALSE} --- the variogram of the
+#'       and (unless \code{response = FALSE}) the variogram of the
 #'       response itself on the same points and lags, drawn hollow with a
 #'       dashed fit.  The gap between the two curves is the spatial structure
 #'       the model absorbed: a residual sill well below the response sill
@@ -46,8 +46,8 @@
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 #'       of one \code{term} mapped at the training locations, which is the
 #'       reason to fit GWR at all.  Locations where the local design is
-#'       collinear -- the kernel-weighted window's scaled condition index is
-#'       above 30, or the window is singular -- are drawn hollow and grey
+#'       collinear (the kernel-weighted window's scaled condition index is
+#'       above 30, or the window is singular) are drawn hollow and grey
 #'       (\code{mask = TRUE}), because the smooth surface a naive map draws
 #'       over them is the picture of an unstable estimate, not of a
 #'       relationship; the subtitle counts them.  The condition indices are
@@ -65,9 +65,9 @@
 #' @param mask For \code{type = "coefficients"}: whether to draw locations
 #'   whose local design is collinear (scaled condition index of the
 #'   kernel-weighted window above 30, or singular) as hollow grey points
-#'   rather than coloured by a coefficient that is not to be believed there.
-#'   Default \code{TRUE}.  Locations whose coefficient is non-finite are
-#'   masked either way.
+#'   instead of colouring them by a coefficient that is not to be believed
+#'   there.  Default \code{TRUE}.  Locations whose coefficient is non-finite
+#'   are masked either way.
 #' @param ... Ignored.
 #' @return A \code{ggplot} object.
 #' @family plotting
@@ -486,7 +486,11 @@ plot.sac_range <- function(x, ...) {
 #' blocks are smaller than the autocorrelation range and therefore leaking.
 #' For \code{"block_kfold"} folds the block outlines are drawn too, from
 #' \code{folds$params$blocks}, so a fold can be seen to be one region or
-#' several and an empty block can be seen to be empty.
+#' several and an empty block can be seen to be empty.  The subtitle states
+#' the parameter that decides whether the scheme leaks, read from
+#' \code{folds$params}: the block size (and the estimated range when
+#' \code{auto_range} found one), the buffer, the number of location groups,
+#' or the median NNDM exclusion.
 #'
 #' @param folds A list returned by \code{make_folds()}.
 #' @param points_sf The \code{sf} layer the folds were built from.
@@ -550,7 +554,53 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     ggplot2::scale_colour_viridis_d(name = "Fold", na.value = "grey80") +
     ggplot2::labs(
       title = sprintf("%s folds (k = %s)", folds$method, folds$k),
-      subtitle = "Blocks smaller than the autocorrelation range still leak"
+      subtitle = .fold_subtitle(folds)
     ) +
     ggplot2::theme_minimal()
+}
+
+# The subtitle states the one parameter that decides whether the scheme
+# leaks, read from what make_folds() recorded.  It used to be a fixed line
+# about block size, which was wrong for every method that has no blocks.
+.fold_subtitle <- function(folds) {
+  prm <- folds$params
+  fin <- function(v) length(v) == 1L && is.finite(suppressWarnings(as.numeric(v)))
+  num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",")
+  units <- if (is.character(prm$crs) && length(prm$crs) == 1L && nzchar(prm$crs))
+    sprintf(" (%s units)", prm$crs) else ""
+  switch(as.character(folds$method),
+    random_kfold =
+      "Random folds: a held-out point's neighbours stay in the training set",
+    block_kfold = {
+      size <- if (isTRUE(prm$blocks_supplied))
+        sprintf("%s supplied blocks", format(prm$n_blocks %||% nrow(prm$blocks)))
+      else if (fin(prm$block_size))
+        sprintf("Block size %s%s", num(prm$block_size), units)
+      else if (fin(prm$grid_nx) && fin(prm$grid_ny))
+        sprintf("%s x %s block grid", format(prm$grid_nx), format(prm$grid_ny))
+      else "Blocked folds"
+      # Two lines: one long one is clipped at the width a help page or a
+      # vignette draws these at.
+      range <- if (!fin(prm$sac_range))
+        "Blocks smaller than the autocorrelation range leak"
+      else if (fin(prm$block_size) &&
+               isTRUE(all.equal(as.numeric(prm$block_size),
+                                as.numeric(prm$sac_range))))
+        "Sized from the estimated autocorrelation range"
+      else
+        sprintf("Estimated range %s; blocks below it leak", num(prm$sac_range))
+      paste(size, range, sep = "\n")
+    },
+    buffered_loo = if (fin(prm$buffer))
+      sprintf("Leave-one-out with a %s buffer%s", num(prm$buffer), units)
+    else "Leave-one-out with an exclusion buffer",
+    leave_location_out = if (fin(prm$n_groups) && is.character(prm$group_var))
+      sprintf("%s groups of `%s` across the folds", format(prm$n_groups),
+              prm$group_var[1L])
+    else "One location group at a time",
+    nndm = if (fin(prm$median_buffer))
+      sprintf("Distance-matched exclusion, median %s%s", num(prm$median_buffer),
+              units)
+    else "Distance-matched exclusion (NNDM)",
+    NULL)
 }

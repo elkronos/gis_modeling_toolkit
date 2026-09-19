@@ -13,7 +13,7 @@
 transformed to the CRS used at fitting time first, so a forest that
 includes the coordinates is not fed a different coordinate system.
 Categorical predictors must not carry a level the forest was never grown
-with -- meaning a level with \strong{no training rows}, not merely one
+with, meaning a level with \strong{no training rows}, not merely one
 absent from \code{levels()}: an ordinary subset, or a spatial-CV fold that
 holds out a whole class, keeps the unused level while the forest has no
 split for it.  An unseen level is an error, not a guess.  A predictor that
@@ -24,17 +24,16 @@ nonsense, so a character column is refused instead.  (ranger sees a logical
 as 0/1, so either form is accepted for one.)}
 
 \item{...}{Passed to \code{ranger}'s predict method. Arguments that make
-\code{ranger} return a matrix rather than one value per row --
-\code{predict.all = TRUE}, \code{type = "quantiles"}, \code{type = "se"}
-with \code{predict.all} -- are rejected, because this method's contract is
-one number per row of \code{newdata}. Call
-\code{predict(fit$engine, data = ...)} directly for those.
-\code{seed} defaults to a constant rather than being left unset: an unset
-\code{seed} makes \code{ranger} draw one uniform from the global RNG
-stream per call, so the number of \code{predict()} calls a script happens
-to make (via \code{\link{predict_surface}}'s \code{chunk_size}, say) would
-otherwise shift every later random draw. It does not affect a regression
-forest's predictions; pass your own if you need one.}
+\code{ranger} return a matrix (\code{predict.all = TRUE},
+\code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
+are rejected, because this method's contract is one number per row of
+\code{newdata}. Call \code{predict(fit$engine, data = ...)} directly for
+those. \code{seed} defaults to a constant: an unset \code{seed} makes
+\code{ranger} draw one uniform from the global RNG stream per call, so the
+number of \code{predict()} calls a script happens to make (via
+\code{\link{predict_surface}}'s \code{chunk_size}, say) would otherwise
+shift every later random draw. It does not affect a regression forest's
+predictions; pass your own if you need one.}
 }
 \value{
 Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
@@ -42,5 +41,5 @@ rows dropped as incomplete.
 }
 \description{
 With \code{newdata = NULL} this returns \strong{out-of-bag} predictions, not
-in-sample ones -- see \code{\link{fit_rf_model}}.
+in-sample ones.  See \code{\link{fit_rf_model}}.
 }
