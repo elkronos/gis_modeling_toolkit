@@ -1,11 +1,11 @@
 # Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 
 Fits a regression whose residual spatial structure is modelled
-explicitly, as a Gaussian process over the coordinates, rather than left
-in the errors. Two things follow, and they are the reasons to reach for
+explicitly, as a Gaussian process over the coordinates, and so kept out
+of the errors. Two things follow, and they are the reasons to reach for
 this backend. First, every quantity comes with a posterior, so
-predictions carry calibrated intervals instead of point estimates –
-score them with
+predictions carry calibrated intervals instead of point estimates. Score
+them with
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
 which reports held-out interval coverage and CRPS. Second, the fitted
 length-scale is itself an estimate of how far the spatial dependence
@@ -54,7 +54,7 @@ fit_bayesian_spatial_model(
   Predictor column names. May be `character(0)` for an intercept-only
   model: the response is then explained by the intercept and the spatial
   Gaussian process alone, which is the right baseline for asking how
-  much of the surface is spatial structure rather than covariate effect
+  much of the surface is spatial structure and how much covariate effect
   (and the natural null model for comparing against a covariate model
   with
   [`compare_models`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)).
@@ -84,8 +84,8 @@ fit_bayesian_spatial_model(
 
   Positive integer giving the number of GP basis functions *per
   dimension*, or NULL (default) to derive it from the
-  length-scale/domain ratio. Note that the fitted model carries `gp_k^2`
-  basis functions, not `gp_k` (see Details).
+  length-scale/domain ratio. The fitted model carries `gp_k^2` basis
+  functions, not `gp_k` (see Details).
 
 - gp_c:
 
@@ -100,9 +100,9 @@ fit_bayesian_spatial_model(
   Logical; passed to `brms::gp(iso = )`. `FALSE` (the default) fits a
   separate length-scale per coordinate axis, letting the model learn any
   directional structure from the data. `TRUE` fits a single shared
-  length-scale, which – because the coordinates are standardised per
-  axis beforehand – makes the kernel anisotropic in the original CRS by
-  whatever ratio `sd(X)/sd(Y)` happens to take. See Details.
+  length-scale, which makes the kernel anisotropic in the original CRS
+  by whatever ratio `sd(X)/sd(Y)` happens to take, because the
+  coordinates are standardised per axis beforehand. See Details.
 
 - prior:
 
@@ -127,7 +127,7 @@ fit_bayesian_spatial_model(
 - cores:
 
   Number of cores for the sampler, one chain per core. Default
-  `getOption("mc.cores", 1L)` – the same convention brms uses itself, so
+  `getOption("mc.cores", 1L)`, the same convention brms uses itself, so
   `options(mc.cores = 4)` once per session runs the four default chains
   in parallel everywhere. The previous default of `detectCores() - 1`
   took every core but one on any machine, which is not what a shared
@@ -140,19 +140,20 @@ fit_bayesian_spatial_model(
 - backend:
 
   "auto" (default), "cmdstanr", or "rstan". "auto" uses cmdstanr only
-  when a CmdStan build is actually available – the cmdstanr package is a
-  thin interface and can be installed without one
+  when a CmdStan build is actually available, and rstan otherwise, which
+  brms always brings. The cmdstanr package is a thin interface and can
+  be installed without a CmdStan build
   ([`cmdstanr::install_cmdstan()`](https://mc-stan.org/cmdstanr/reference/install_cmdstan.html)
-  builds it) – and rstan otherwise, which brms always brings. An
-  explicit "cmdstanr" with no usable CmdStan is an error that says how
-  to install it, rather than a failure from inside the sampler.
+  builds one). An explicit "cmdstanr" with no usable CmdStan raises an
+  error that says how to install it, so the failure does not come from
+  inside the sampler.
 
 - control:
 
   Named list of sampler controls, *merged* over the package defaults
-  `list(adapt_delta = 0.9, max_treedepth = 12)` rather than replacing
+  `list(adapt_delta = 0.9, max_treedepth = 12)` instead of replacing
   them. Passing `list(max_treedepth = 15)` therefore keeps
-  `adapt_delta = 0.9` – which matters, because that is exactly the
+  `adapt_delta = 0.9`, which matters, because that is exactly the
   setting the divergence warning tells you to raise.
 
 - compute_loo:
@@ -197,23 +198,23 @@ A `bayesian_fit` object (inherits from `spatial_fit`). Supports
 [`coef()`](https://rdrr.io/r/stats/coef.html),
 [`summary()`](https://rdrr.io/r/base/summary.html), and
 [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md).
-Model-specific metadata lives in `$info` (coords – the names of the
+Model-specific metadata lives in `$info` (coords: the names of the
 scaled coordinate columns handed to
 [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html);
 coord_scaling, predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis,
-gp_ell_min, gp_S – the pooled centred range `brms::gp(c = )` multiplies;
-gp_xy_range – the training extrema of the scaled coordinates, which
+gp_ell_min, gp_S: the pooled centred range `brms::gp(c = )` multiplies;
+gp_xy_range: the training extrema of the scaled coordinates, which
 [`predict()`](https://rdrr.io/r/stats/predict.html) uses to pin the GP
-boundary; gp_lengthscale_bounds – the `c(lower, upper)` the length-scale
-prior was calibrated over; gp_lscale_prior – the length-scale prior
+boundary; gp_lengthscale_bounds: the `c(lower, upper)` the length-scale
+prior was calibrated over; gp_lscale_prior: the length-scale prior
 [`brms::validate_prior()`](https://paulbuerkner.com/brms/reference/validate_prior.html)
 reports the model will *actually* use, which is not necessarily the one
 this function requested (several entries, semicolon-separated, if brms
 resolved the axes differently); loo, looic, convergence_ok,
-convergence_diagnostics – `n_divergent`, `max_rhat`, `min_neff_ratio`,
+convergence_diagnostics: `n_divergent`, `max_rhat`, `min_neff_ratio`,
 and `rhat_failed` / `neff_failed`, the parameters that failed each check
 by name with their values (empty when none failed), which is what makes
-a failed check actionable; and n_dropped – the rows
+a failed check actionable; and n_dropped: the rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry, so `$n` can
 be read against `nrow(data_sf)`). The raw brmsfit is in `$engine`.
@@ -235,20 +236,19 @@ whose size (`gp_k`) trades fidelity against runtime.
 **GP basis count and boundary factor.**
 [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html) builds a
 full tensor grid over its covariates, so a term `gp(..x, ..y, k = gp_k)`
-carries `gp_k^2` basis functions – the `gp_k` argument is the count *per
+carries `gp_k^2` basis functions: the `gp_k` argument is the count *per
 dimension*, not the total rank. Both `gp_k` and `gp_c` are therefore
 chosen from the ratio of the estimated length-scale to the domain
-extent, following Riutort-Mayol et al. (2023), rather than from the
-number of observations: `gp_c` is set large enough to contain the upper
-length-scale bound, and `gp_k` large enough to resolve the lower one.
-The derived value is typically 21-25 per dimension and is largely
-independent of `n`.
+extent, following Riutort-Mayol et al. (2023): `gp_c` is set large
+enough to contain the upper length-scale bound, and `gp_k` large enough
+to resolve the lower one. The derived value is typically 21-25 per
+dimension and is largely independent of `n`.
 
 The domain extent used is the one `brms::gp(c = )` itself multiplies:
 the full pooled range of the column-centred coordinates
 (`brms:::choose_L()`, taken over the **unique** coordinate rows, because
 `brms:::.data_gp()` reduces the covariates to unique rows first under
-the default `gr = TRUE` – so repeat visits to one location do not widen
+the default `gr = TRUE`, so repeat visits to one location do not widen
 the domain), not the per-axis half-range in which Riutort-Mayol et al.
 state their inequalities. Both constraints are really constraints on the
 boundary \\L = c \times S\\, so expressing them in brms's units is what
@@ -291,7 +291,7 @@ letting the model estimate directional structure from the data instead
 of inheriting it from the standardisation. Set `gp_iso = TRUE` to
 recover the previous single-length-scale behaviour.
 
-Note that `gp_iso` does not affect cost:
+`gp_iso` does not affect cost:
 [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html) builds a
 tensor grid either way, so the model carries `gp_k^2` basis functions
 regardless. The stored `$info$coord_scaling` list records the scaling
@@ -324,10 +324,10 @@ trustworthy than for a Gaussian response, and its help page says how.
 
 One trap. The response check reads the family's name through `brms`'s
 own accessor; a family object it cannot name is treated as "not
-gaussian" and the check is skipped entirely, rather than falling back to
-the gaussian rule. A malformed `family` therefore buys less validation,
-not more, and a wrong response type will surface as a Stan error rather
-than as a message from this function.
+gaussian" and the check is skipped entirely, without falling back to the
+gaussian rule. A malformed `family` therefore buys less validation, not
+more, and a wrong response type will surface as a Stan error, with no
+message from this function.
 
 ## Spatial confounding
 
@@ -341,10 +341,10 @@ specified spatial model this is not a bias but a change of estimand
 (Zimmerman and Ver Hoef 2022): the spatial coefficient is the effect
 *net of* whatever the spatial field can explain, and the non-spatial one
 is not. Which of the two a user wants depends on the question, so the
-honest diagnostic is to report both side by side — fit the same formula
-with [`stats::lm()`](https://rdrr.io/r/stats/lm.html) or
-[`stats::glm()`](https://rdrr.io/r/stats/glm.html) and compare — rather
-than to adjust one toward the other.
+honest diagnostic is to report both side by side and leave them
+unadjusted: fit the same formula with
+[`stats::lm()`](https://rdrr.io/r/stats/lm.html) or
+[`stats::glm()`](https://rdrr.io/r/stats/glm.html) and compare.
 
 The literature on remedies is unsettled and this function takes no side.
 Restricted spatial regression (Hughes and Haran 2013) projects the

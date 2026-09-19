@@ -4,8 +4,8 @@ Diagnostic plots for a `spatial_fit`. The package previously shipped
 [`print()`](https://rdrr.io/r/base/print.html) and
 [`summary()`](https://rdrr.io/r/base/summary.html) methods but no
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html), so the checks
-most likely to reveal a problem – is there structure left in the
-residuals, and where is it – had to be written by hand each time.
+most likely to reveal a problem (is there structure left in the
+residuals, and where is it) had to be written by hand each time.
 
 ## Usage
 
@@ -43,8 +43,8 @@ plot(
   `"variogram"`
 
   :   Empirical variogram of the residuals with the fitted model
-      overlaid, so the fit can be judged rather than trusted, and —
-      unless `response = FALSE` — the variogram of the response itself
+      overlaid, so the fit can be judged rather than trusted, and
+      (unless `response = FALSE`) the variogram of the response itself
       on the same points and lags, drawn hollow with a dashed fit. The
       gap between the two curves is the spatial structure the model
       absorbed: a residual sill well below the response sill means most
@@ -67,16 +67,15 @@ plot(
 
   :   For a GWR fit only: the local coefficient of one `term` mapped at
       the training locations, which is the reason to fit GWR at all.
-      Locations where the local design is collinear – the
-      kernel-weighted window's scaled condition index is above 30, or
-      the window is singular – are drawn hollow and grey
-      (`mask = TRUE`), because the smooth surface a naive map draws over
-      them is the picture of an unstable estimate, not of a
-      relationship; the subtitle counts them. The condition indices are
-      the fit's `info$local_collinearity`, computed for every location
-      when the model was fitted. A diverging scale centred on zero is
-      used when the coefficient changes sign, otherwise a sequential
-      one.
+      Locations where the local design is collinear (the kernel-weighted
+      window's scaled condition index is above 30, or the window is
+      singular) are drawn hollow and grey (`mask = TRUE`), because the
+      smooth surface a naive map draws over them is the picture of an
+      unstable estimate, not of a relationship; the subtitle counts
+      them. The condition indices are the fit's
+      `info$local_collinearity`, computed for every location when the
+      model was fitted. A diverging scale centred on zero is used when
+      the coefficient changes sign, otherwise a sequential one.
 
 - response:
 
@@ -93,10 +92,10 @@ plot(
 
   For `type = "coefficients"`: whether to draw locations whose local
   design is collinear (scaled condition index of the kernel-weighted
-  window above 30, or singular) as hollow grey points rather than
-  coloured by a coefficient that is not to be believed there. Default
-  `TRUE`. Locations whose coefficient is non-finite are masked either
-  way.
+  window above 30, or singular) as hollow grey points instead of
+  colouring them by a coefficient that is not to be believed there.
+  Default `TRUE`. Locations whose coefficient is non-finite are masked
+  either way.
 
 - ...:
 

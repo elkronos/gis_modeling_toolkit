@@ -48,8 +48,8 @@ cv_spatial(
   a `spatial_fit` built with
   [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md).
   It is called once per fold on the training rows only, so anything done
-  inside it – scaling, tuning, an inner variable sweep – is already
-  nested and leak-free. The `subclass` it stamps must have a
+  inside it (scaling, tuning, an inner variable sweep) is already nested
+  and leak-free. The `subclass` it stamps must have a
   `predict.<subclass>()` method registered, because that is how each
   fold is scored.
 
@@ -60,12 +60,12 @@ cv_spatial(
   return value; a bare list of `list(train =, test =)` pairs of
   `..row_id` values; or a vector of fold labels, one per row, which
   becomes leave-that-label-out splits. The label vector is how folds
-  built by another package are used here – `blockCV::cv_spatial()`
-  returns one as `$folds_ids` – since its `$folds_list` holds two
+  built by another package are used here (`blockCV::cv_spatial()`
+  returns one as `$folds_ids`), since its `$folds_list` holds two
   *unnamed* vectors per fold and is refused by name. Train and test must
-  be disjoint — a fold that trains on its own test rows is not a
-  cross-validation split and is refused with an error — and IDs naming
-  no row in the prepared data are dropped with a logged count. Built via
+  be disjoint: a fold that trains on its own test rows is not a
+  cross-validation split and is refused with an error. IDs naming no row
+  in the prepared data are dropped with a logged count. Built via
   `block_kfold` when `NULL`.
 
 - k:
@@ -131,7 +131,7 @@ cv_spatial(
 
   Internal. The name the messages carry, so a wrapper such as
   [`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
-  reports itself rather than `cv_spatial()`.
+  reports itself in place of `cv_spatial()`.
 
 ## Value
 
@@ -142,7 +142,7 @@ the rows: `fold_status`, `orphan_rows`, `n_unknown_ids` and `n_dropped`.
 The counts are reported deliberately: a `fit_fn` that fails on every
 fold otherwise looks like a successful run that happened to score `NA`,
 so compare them before trusting `overall`. `fold_status` is a data.frame
-with one row per fold supplied – `fold`, `status` and `message` – where
+with one row per fold supplied (`fold`, `status` and `message`), where
 `status` is `"ok"`; `"error"` (the fit or its
 [`predict()`](https://rdrr.io/r/stats/predict.html) threw; `message` is
 the error text); `"skipped"` (nothing scorable: too few matched rows, a
@@ -155,13 +155,13 @@ output of a long run is gone. `orphan_rows` holds the `..row_id`s of
 rows in the data that no fold names (they enter no training set and are
 never scored; non-empty only when the folds were built on a different or
 subsetted layer), and `n_unknown_ids` counts the distinct row IDs the
-folds name that the data does not have — each such row is named by every
+folds name that the data does not have. Each such row is named by every
 fold, once as a test row and once in each other fold's training set, and
 this counts the row, not the mentions (expected when rows were removed
-for missing values – `n_dropped` is how many rows
+for missing values). `n_dropped` is how many rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry before any
-fold was fitted). The `fold` column of `fold_metrics`, `predictions` and
+fold was fitted. The `fold` column of `fold_metrics`, `predictions` and
 `fold_status` carries the fold's index in the `folds` object that was
 supplied, so it lines up with `make_folds()$assignment$fold` even when
 some folds were unusable and dropped. `overall$Adj_R2` is always `NA`:
@@ -177,17 +177,17 @@ opposite job: `blockCV::cv_spatial()` *builds* spatial folds, where this
 function *runs* a cross-validation over folds it is given. With both
 packages attached, whichever was attached last masks the other;
 `spatialkit::cv_spatial()` always resolves to this one. The two
-cooperate rather than compete: `blockCV::cv_spatial()` returns its fold
-assignment as `$folds_ids`, a vector of fold labels, and that vector is
-accepted directly as the `folds` argument here and in every other
-`cv_*()` function. Fold construction is blockCV's home ground and this
-package does not try to match its breadth there; what this package adds
-is the path from irregular points through data-drawn regions to a
+cooperate: `blockCV::cv_spatial()` returns its fold assignment as
+`$folds_ids`, a vector of fold labels, and that vector is accepted
+directly as the `folds` argument here and in every other `cv_*()`
+function. Fold construction is blockCV's home ground and this package
+does not try to match its breadth there; what this package adds is the
+path from irregular points through data-drawn regions to a
 cross-validated, compared model.
 
 ## Your own metrics
 
-The built-in columns – `RMSE`, `MAE`, `MAPE`, `SMAPE`, `R2`, `Adj_R2` –
+The built-in columns (`RMSE`, `MAE`, `MAPE`, `SMAPE`, `R2`, `Adj_R2`)
 are the Gaussian regression set, and the section below says which of
 them survive a count or a bounded response. `metrics` is the way to
 score what they cannot: a `function(y, yhat)` that returns a named
@@ -198,16 +198,16 @@ built-in metrics are: once per fold, to that fold's held-out rows, so
 each name becomes a column of `fold_metrics`; and once to the pooled
 out-of-sample predictions of every fold, so each name becomes a column
 of `overall`. Only the pairs the built-in metrics use reach the function
-– both `y` and `yhat` finite – so its columns describe the same rows as
+(both `y` and `yhat` finite), so its columns describe the same rows as
 `RMSE`, and `n_pred` counts them.
 
 The contract: every element named, names unique and not one of the
 built-in column names, one number per name. Anything else is an error,
 because a scoring function that returns the wrong shape is a mistake to
-surface rather than a fold to skip. A function that *throws* on a fold
-is logged and its columns are `NA` for that fold (and for `overall`, if
-it throws on the pooled predictions); a fold is never dropped for it.
-When no fold produced a prediction the empty `fold_metrics` frame still
+surface instead of a fold to skip. A function that *throws* on a fold is
+logged and its columns are `NA` for that fold (and for `overall`, if it
+throws on the pooled predictions); a fold is never dropped for it. When
+no fold produced a prediction the empty `fold_metrics` frame still
 carries the function's columns, typed, provided the function can be
 called on zero-length input.
 
@@ -222,22 +222,22 @@ across the rows of its `overall`.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,

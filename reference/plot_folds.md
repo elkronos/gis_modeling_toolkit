@@ -5,7 +5,11 @@ see whether spatial blocks are actually separating the data, or whether
 the blocks are smaller than the autocorrelation range and therefore
 leaking. For `"block_kfold"` folds the block outlines are drawn too,
 from `folds$params$blocks`, so a fold can be seen to be one region or
-several and an empty block can be seen to be empty.
+several and an empty block can be seen to be empty. The subtitle states
+the parameter that decides whether the scheme leaks, read from
+`folds$params`: the block size (and the estimated range when
+`auto_range` found one), the buffer, the number of location groups, or
+the median NNDM exclusion.
 
 ## Usage
 

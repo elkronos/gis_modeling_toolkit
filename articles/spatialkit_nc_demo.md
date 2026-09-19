@@ -351,13 +351,38 @@ choropleth](spatialkit_nc_demo_files/figure-html/choro-tri-1.png)
 
 Delaunay choropleth
 
+The three stacked on one shared colour scale. Each map drawn on its own
+gets its own scale, so a colour in one means a different value in the
+next; here the limits are set from all three together and `patchwork`
+then collects the legends into one, which is what makes reading down the
+page legitimate.
+
 ``` r
 
 library(patchwork)
 
-(make_choropleth(tess_voronoi, nc_boundary, points_sf, "Voronoi") |
- make_choropleth(tess_hex,     nc_boundary, points_sf, "Hex") |
- make_choropleth(tess_square,  nc_boundary, points_sf, "Square")) +
+# The cell means of all three, so the colour scale can span them.
+cell_means <- function(tess) {
+  a <- assign_features_to_polygons(points_sf, tess$cells, polygon_id_col = "cell_id")
+  summarize_by_cell(a, response_var = "y", id_col = "cell_id")$resp_mean_y
+}
+lims <- range(unlist(lapply(list(tess_voronoi, tess_hex, tess_square), cell_means)),
+              na.rm = TRUE)
+
+# One line per map instead of a title and a subtitle, and the cell count taken
+# from the tessellation rather than typed in.
+bare <- function(tess, label) {
+  make_choropleth(tess, nc_boundary, points_sf) +
+    ggplot2::scale_fill_viridis_c(name = "Mean y", limits = lims) +
+    ggplot2::labs(title = sprintf("%s, %d cells", label, nrow(tess$cells)),
+                  subtitle = NULL) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = ggplot2::rel(1)))
+}
+
+(bare(tess_voronoi, "Voronoi") /
+ bare(tess_hex,     "Hex") /
+ bare(tess_square,  "Square")) +
+  plot_layout(guides = "collect") +
   plot_annotation(title = "Tessellation comparison, cell-level mean response")
 ```
 
@@ -441,8 +466,9 @@ or are smaller than the autocorrelation range and therefore leaking:
 ``` r
 
 library(patchwork)
-plot_folds(folds_random,  points_sf, boundary = nc_boundary) +
-  plot_folds(folds_blocked, points_sf, boundary = nc_boundary)
+(plot_folds(folds_random,  points_sf, boundary = nc_boundary) /
+ plot_folds(folds_blocked, points_sf, boundary = nc_boundary)) +
+  plot_layout(guides = "collect")
 ```
 
 ![](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
@@ -737,6 +763,7 @@ argues about it:
 | how many cells, and the four criteria that disagree | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) |
 | the five fold schemes, and sizing a block by measurement | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
 | residual autocorrelation, aggregation standard errors, and two ways to leak | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) |
+| handing the regions to someone else, and what to report | [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) |
 
 Ten numbered scripts in `system.file("scripts", package = "spatialkit")`
 run the same ground at the console, printing what to look for in each

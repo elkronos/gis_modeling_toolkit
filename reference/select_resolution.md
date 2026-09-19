@@ -2,13 +2,13 @@
 
 Picks the level a criterion prefers, together with the *flat region*:
 every level whose criterion value is within `tol` of the optimum. On the
-criteria this package computes the flat region is routinely wide — the
+criteria this package computes the flat region is routinely wide: the
 reliability curve is flat to within 2 percent over a factor of 3–6 in
 the number of cells, and \\C_p\\ on a smooth field descends to the
-support ceiling — so the region is the answer, and the argmin only a
-point in it. When the optimum sits at the ladder's ceiling or floor the
-result says so, because a bound is then doing the choosing rather than
-the criterion (see
+support ceiling. The region is the answer, and the argmin only a point
+in it. When the optimum sits at the ladder's ceiling or floor the result
+says so, because a bound is then doing the choosing rather than the
+criterion (see
 [`resolution_profile`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 for what each criterion measures and how it behaved on simulated
 fields).

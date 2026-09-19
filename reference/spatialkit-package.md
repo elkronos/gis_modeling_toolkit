@@ -47,20 +47,19 @@ cross-validation package.
 1.  **Choose a resolution.**
     [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
     reads a cell count out of the spatial structure of the observations,
-    rather than making you guess one.
+    so you do not have to guess one.
 
 2.  **Tessellate.**
     [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-    turns the point pattern into analysis regions — Voronoi, Delaunay
-    triangles, or a hex/square grid — with reproducible cell
-    identifiers.
+    turns the point pattern into analysis regions (Voronoi, Delaunay
+    triangles, or a hex/square grid) with reproducible cell identifiers.
     [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
     controls where Voronoi seeds go.
 
 3.  **Assign.**
     [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
     labels every observation with the cell it falls in, resolving
-    multi-match ties explicitly rather than duplicating rows.
+    multi-match ties explicitly instead of duplicating rows.
 
 4.  **Aggregate.**
     [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
@@ -70,7 +69,7 @@ cross-validation package.
 
 5.  **Fold.**
     [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-    builds spatial cross-validation folds — blocked, buffered,
+    builds spatial cross-validation folds: blocked, buffered,
     leave-location-out or nearest-neighbour distance-matched. Random
     folds flatter autocorrelated data; these do not.
 
@@ -127,8 +126,8 @@ and
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
 handle coordinate reference systems and geometry coercion, and
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-estimates the distance over which observations remain correlated — the
-number that should be setting your block size.
+estimates the distance over which observations remain correlated. That
+is the number that should be setting your block size.
 
 ## Defaults and their sources
 
@@ -141,25 +140,25 @@ function named:
 
 - `fit_rf_model(include_coords = FALSE)`, and
   [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) on a forest
-  returning out-of-bag predictions — Meyer et al. (2019).
+  returning out-of-bag predictions: Meyer et al. (2019).
 
-- Permutation rather than impurity importance in
-  [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-  — Strobl et al. (2007).
+- Permutation importance over impurity importance in
+  [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md):
+  Strobl et al. (2007).
 
 - The Gaussian-process basis count and boundary factor derived from the
   length-scale-to-domain ratio in
-  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-  — Riutort-Mayol et al. (2023).
+  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md):
+  Riutort-Mayol et al. (2023).
 
 - The nearest-neighbour distance-matching folds of
-  `make_folds(method = "nndm")` and their `min_train = 0.5` — Mila et
-  al. (2022).
+  `make_folds(method = "nndm")` and their `min_train = 0.5`: Mila et al.
+  (2022).
 
 - The area-of-applicability threshold as the outlier-removed maximum of
-  the training dissimilarity, with importance weights applied directly
-  rather than square-rooted, matching the reference implementation —
-  Meyer and Pebesma (2021).
+  the training dissimilarity, with importance weights applied directly,
+  without taking their square root, matching the reference
+  implementation: Meyer and Pebesma (2021).
 
 - The effective range of an exponential variogram as three times its
   range parameter, and the identifiability guard against ranges beyond
@@ -245,7 +244,7 @@ Useful entry points by task:
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 (aggregate to them),
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-(split them honestly),
+(split them without flattering the model),
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 (score several models at once),
 [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)

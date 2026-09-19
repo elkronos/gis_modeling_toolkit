@@ -30,6 +30,7 @@ grid you supply), predicts in chunks, and returns an sf layer."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -82,7 +83,7 @@ grid you supply), predicts in chunks, and returns an <code>sf</code> layer.</p>
 <code>NULL</code>, a regular grid is built over the training extent.  Must have
 at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
-on the fit), with a warning, and then reprojected – otherwise a CRS-less
+on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
 takes the same nearest feature.</p></dd>
 
@@ -91,15 +92,15 @@ takes the same nearest feature.</p></dd>
 <dd><p>Grid resolution in CRS units.  Ignored when <code>grid</code> is
 supplied; when <code>NULL</code>, derived from <code>n_cells</code>.  A value that
 would produce more than 5,000,000 cells is refused, naming the implied
-count and the CRS units – the usual cause is a value in the wrong unit.  A
+count and the CRS units.  The usual cause is a value in the wrong unit.  A
 <code>cell_size</code> wider than the extent yields a single centred cell.</p></dd>
 
 
 <dt id="arg-n-cells">n_cells<a class="anchor" aria-label="anchor" href="#arg-n-cells"></a></dt>
 <dd><p>Approximate cell count used to derive <code>cell_size</code>.
 Default 10000.  Must be a single positive finite number and at most
-5,000,000; anything else is an error.  Also ignored when <code>grid</code> is supplied – the grid you
-pass is used verbatim.</p></dd>
+5,000,000; anything else is an error.  Also ignored when <code>grid</code> is
+supplied.  The grid you pass is used verbatim.</p></dd>
 
 
 <dt id="arg-boundary">boundary<a class="anchor" aria-label="anchor" href="#arg-boundary"></a></dt>
@@ -118,7 +119,7 @@ contain them.  Values are taken from the nearest feature.</p></dd>
 <dd><p>Rows per prediction call. Default 5000.  A pure
 performance knob for the GWR and random-forest backends, whose rows do not
 interact.  For a <code>bayesian_fit</code> it is also that, <em>provided</em> the
-grid stays inside the training extent – beyond it the GP boundary has to
+grid stays inside the training extent.  Beyond it the GP boundary has to
 grow and predictions depend on which rows share the call; see
 <code><a href="predict.bayesian_fit.html">predict.bayesian_fit</a></code>.</p></dd>
 
@@ -138,7 +139,7 @@ backend supports it.  Default FALSE.</p></dd>
 <code>.pred_se</code> when <code>se = TRUE</code> and available).  For an
 auto-generated grid the resolution is attached as attribute
 <code>"cell_size"</code>.  For a user-supplied <code>grid</code> it is only whatever
-<code>"cell_size"</code> attribute that object already carried – usually
+<code>"cell_size"</code> attribute that object already carried.  That is usually
 <code>NULL</code>, and <code>NULL</code> for certain if the grid had to be
 re-projected, since <code><a href="https://r-spatial.github.io/sf/reference/st_transform.html" class="external-link">st_transform()</a></code> does not preserve custom
 attributes.  The resolution of a grid you built is not this function's to
@@ -147,8 +148,8 @@ infer.</p>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p><code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> on a <code>spatial_fit</code> requires <code>newdata</code> to be
-constructed by hand, which makes the most common downstream task – produce
-a map – more work than it should be.  This wraps the grid construction,
+constructed by hand, which makes the most common downstream task (produce
+a map) more work than it should be.  This wraps the grid construction,
 covariate join, chunking and CRS handling.</p>
 <p>Prediction over a grid is embarrassingly parallel in the sense that rows do
 not interact, so it is chunked: for <code>bayesian_fit</code> the posterior draw

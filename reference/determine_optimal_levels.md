@@ -49,9 +49,9 @@ determine_optimal_levels(
   Optional response column name. When provided alongside
   `predictor_vars`, enables model-aware level selection via Moran's I on
   OLS residuals. Must be numeric or logical (logicals are read as 0/1);
-  a factor or character response raises an error rather than being
-  coerced, because the residuals of an OLS fit to arbitrary level codes
-  carry no meaning to test for autocorrelation.
+  a factor or character response raises an error and is never coerced,
+  because the residuals of an OLS fit to arbitrary level codes carry no
+  meaning to test for autocorrelation.
 
 - predictor_vars:
 
@@ -65,7 +65,7 @@ determine_optimal_levels(
   `"combined"` (rank-average of WSS elbow distance and that same
   quantity). Falls back to `"geometric"` if response/predictors are
   unavailable, and also when no candidate clears the nine-cell
-  resolution floor described in **Details**. Note that supplying both
+  resolution floor described in **Details**. Supplying both
   `response_var` and `predictor_vars` upgrades `"geometric"` to
   `"combined"`: the selection then depends on the response (see
   "Post-selection inference").
@@ -91,16 +91,16 @@ between-restart spread at each `k` (`wss_spread`), the number of rising
 steps on it (`wss_bumps`), the restart budget (`nstart`), the geometric
 elbow the evaluated neighbourhood was drawn around (`knee_k`) and the
 `k` at which k-means failed (`failed_k`; their `wss` entries are
-interpolated from the neighbours, not measured) — except when the
-model-aware path itself falls back to the geometric result (no viable k
-in the elbow neighbourhood, or Moran's I could not be computed for any
-candidate), in which case no diagnostics are available and the attribute
-is absent. Both fallbacks are logged as warnings. The geometric path
-returns a plain integer vector; a rising WSS curve is still logged
-there. With `select_on = "split"` every path adds a `"split"` attribute:
-a list with `selection` and `estimation` (integer row positions in
-`data_sf`), `method` and `seed`. For a full per-level table — criteria,
-cell support, restart spread, the flat region — see
+interpolated from the neighbours, not measured). When the model-aware
+path itself falls back to the geometric result (no viable k in the elbow
+neighbourhood, or Moran's I could not be computed for any candidate), no
+diagnostics are available and the attribute is absent. Both fallbacks
+are logged as warnings. The geometric path returns a plain integer
+vector; a rising WSS curve is still logged there. With
+`select_on = "split"` every path adds a `"split"` attribute: a list with
+`selection` and `estimation` (integer row positions in `data_sf`),
+`method` and `seed`. For a full per-level table of criteria, cell
+support, restart spread and the flat region, see
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md).
 
 ## Details
@@ -109,10 +109,10 @@ When `response_var` and `predictor_vars` are provided, the geometric WSS
 elbow is supplemented with Moran's I computed on OLS residuals at each
 candidate k. The Moran's I profile measures how much spatial
 autocorrelation in the response remains *unexplained* at a given
-tessellation resolution — a direct reflection of the spatial process
-being modeled, rather than mere geometric compactness of coordinates.
-The combined criterion selects the k that best balances geometric
-parsimony and residual spatial independence.
+tessellation resolution. It is a direct reflection of the spatial
+process being modeled instead of the mere geometric compactness of
+coordinates. The combined criterion selects the k that best balances
+geometric parsimony and residual spatial independence.
 
 To keep memory use and runtime bounded for large `max_levels`, the
 initial k-means sweep records only within-cluster sum-of-squares (WSS)
@@ -132,14 +132,14 @@ Each `k` is therefore fitted as the best of 25 restarts seeded by
 k-means++ (Arthur and Vassilvitskii 2007), the budget at which the gain
 from further restarts saturates (Fränti and Sieranoja 2019; Steinley
 2003 on why the usual handful is not enough). The same sweeps then had
-no increase at all. A curve that still rises somewhere is reported — a
-logged warning names the number of rising steps, and the model-aware
-paths return it as `wss_bumps` in the `"diagnostics"` attribute beside
-`wss_spread`, the relative spread of WSS across the restarts at each `k`
-— but not refused: a bumpy curve is uncertain, not unidentified. Because
-the optimiser changed, a selection made by an earlier version on a curve
-that had such a bump can differ from the one made now; where the earlier
-curve was clean, the answer is the same.
+no increase at all. A curve that still rises somewhere is reported but
+not refused: a bumpy curve is uncertain, not unidentified. A logged
+warning names the number of rising steps, and the model-aware paths
+return it as `wss_bumps` in the `"diagnostics"` attribute beside
+`wss_spread`, the relative spread of WSS across the restarts at each
+`k`. Because the optimiser changed, a selection made by an earlier
+version on a curve that had such a bump can differ from the one made
+now; where the earlier curve was clean, the selection is the same.
 
 **The model-aware criteria rank on the standardised deviate, not on
 \|Moran's I\|.** Both \\E\[I\]\\ and \\Var\[I\]\\ depend on the number
@@ -149,19 +149,19 @@ response with *no* spatial structure, mean \\\|I\|\\ fell monotonically
 from 0.114 at `k = 10` to 0.050 at `k = 60` (\\-56\\\\), which made an
 \\\|I\|\\ ranking prefer the largest candidate for arithmetic reasons
 alone. Candidates are therefore ordered by \\\|z\| = \|I - E\[I\]\| /
-\mathrm{sd}(I)\\ using the Cliff & Ord regression residual moments —
-exact here, because the cell-level residuals are OLS residuals by
-construction. Over the same runs \\z\\ had mean \\\approx 0\\,
-\\\mathrm{sd} \approx 1\\ and a two-sided 5\\ 0.040–0.057 at every `k`.
-Both quantities are reported in the `"diagnostics"` attribute, as
-`moran_i` and `moran_z`.
+\mathrm{sd}(I)\\ using the Cliff & Ord regression residual moments,
+which are exact here because the cell-level residuals are OLS residuals
+by construction. Over the same runs \\z\\ had mean \\\approx 0\\,
+\\\mathrm{sd} \approx 1\\ and a two-sided 5\\ rate of 0.040–0.057 at
+every `k`. Both quantities are reported in the `"diagnostics"`
+attribute, as `moran_i` and `moran_z`.
 
 **Resolution floor on the model-aware criteria.** Moran's I is computed
 on cell-level residuals with an 8-nearest-neighbour weight matrix, so it
 only carries information once there are more than nine cells. At nine or
 fewer, every cell is a neighbour of every other, the row-standardised
 weight matrix is complete, and Moran's I collapses to exactly \\-1/(k -
-1)\\ for *any* residual vector — a function of `k` alone. The criterion
+1)\\ for *any* residual vector (a function of `k` alone). The criterion
 ranks on \\\|z\|\\, not on \\\|I\|\\, and at the floor the residual
 moments give \\E\[I\] = I\\ and \\\mathrm{Var}\[I\] = 0\\ identically
 (the algebra holds to \\10^{-16}\\), so the standardised deviate is
@@ -169,8 +169,8 @@ moments give \\E\[I\] = I\\ and \\\mathrm{Var}\[I\] = 0\\ identically
 way rounding noise resolves it those candidates would rank first or last
 on nothing. They therefore return `NA` and are excluded from the
 model-aware ranking. When no candidate in the elbow neighbourhood clears
-the floor — which is the usual outcome for small `max_levels` — the
-whole call falls back to the geometric ranking and logs a warning; raise
+the floor, which is the usual outcome for small `max_levels`, the whole
+call falls back to the geometric ranking and logs a warning; raise
 `max_levels` above roughly 10 if you want the model-aware criteria to
 contribute. Under `criterion = "combined"`, a candidate below the floor
 that sits alongside candidates above it is ranked last on the Moran's I
@@ -178,8 +178,8 @@ axis while still competing on the geometric axis.
 
 ## Post-selection inference
 
-When the selection reads the response — here, whenever both
-`response_var` and `predictor_vars` are supplied — everything estimated
+When the selection reads the response (here, whenever both
+`response_var` and `predictor_vars` are supplied), everything estimated
 afterwards on the chosen cells is estimated on data that already
 influenced the choice, and its standard errors are post-selection ones:
 descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen
@@ -195,16 +195,16 @@ spatially blocked halves
 ([`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)`(k = 2, method = "block_kfold")`),
 the selection runs on the first half only, and the row positions of both
 halves come back in the `"split"` attribute (`selection` and
-`estimation`). Build the tessellation on every point — cells are
-geometry — but aggregate and fit on
+`estimation`). Build the tessellation on every point (cells are
+geometry), but aggregate and fit on
 `data_sf[attr(x, "split")$estimation, ]`, which the selection never saw;
 that restores nominal coverage with no new theory. The price is
 precision: half the points estimate, and García Rasines and Young (2023)
 show a *contiguous* spatial half is less efficient than the exchangeable
 split the i.i.d. theory assumes, because the two halves are not
-interchangeable. Two alternatives keep the whole sample — data thinning
+interchangeable. Two alternatives keep the whole sample: data thinning
 for count responses (Neufeld et al. 2024) and data fission for
-Gaussian-like ones (Leiner et al. 2023) — and are not implemented here;
+Gaussian-like ones (Leiner et al. 2023). Neither is implemented here;
 the split needs no distributional assumption, which is why it comes
 first. Selection on coordinates alone (`"geometric"` with no response)
 is not exposed in this way, and `"split"` then changes nothing but the

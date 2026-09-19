@@ -296,7 +296,7 @@ Lower-level exports sit behind these and have pages of their own:
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 and
 [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md).
-[`help(package = "spatialkit")`](https://rdrr.io/pkg/spatialkit/man)
+[`help(package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/reference)
 lists everything.
 
 ## Choosing a backend
@@ -330,7 +330,7 @@ on the cheapest fit you can make answers it before you pick anything.
 
 ## Documentation
 
-Five vignettes, each executed when the package is built, so every number
+Six vignettes, each executed when the package is built, so every number
 in them is computed on the spot.
 
 | vignette | covers |
@@ -340,6 +340,7 @@ in them is computed on the spot.
 | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) | the five fold schemes, block sizing, and reading a CV result down to the last row |
 | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
 | [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) | the whole pipeline end to end on real boundaries, with maps |
+| [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report |
 
 [`?spatialkit`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-package.md)
 walks the pipeline in order and names the function for each step. Every

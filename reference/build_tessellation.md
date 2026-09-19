@@ -8,9 +8,9 @@ layer together with the point-to-cell index that
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 and
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-consume. Use it rather than the individual constructors whenever you
-might want to compare methods: the return shape does not change with
-`method`, so swapping `"voronoi"` for `"hex"` costs one argument.
+consume. Prefer it to the individual constructors whenever you might
+want to compare methods: the return shape does not change with `method`,
+so swapping `"voronoi"` for `"hex"` costs one argument.
 
 ## Usage
 
@@ -122,12 +122,12 @@ A list with components:
 - `index`:
 
   Integer vector of `cell_id` values, one per row of `points_sf`, and
-  `NA` for a point that falls inside no cell — one outside the study
-  area, in other words. Only a point within a thousandth of the median
-  cell width of a cell is snapped to it, which covers points sitting
-  exactly on a shared edge without quietly dragging genuinely-outside
-  points in. A summary built from `index` therefore counts only the
-  points the tessellation actually covers.
+  `NA` for a point that falls inside no cell, that is, one outside the
+  study area. Only a point within a thousandth of the median cell width
+  of a cell is snapped to it. That covers points sitting exactly on a
+  shared edge, and leaves points outside the study area as `NA`. A
+  summary built from `index` therefore counts only the points the
+  tessellation actually covers.
 
 - `boundary`:
 
@@ -147,13 +147,13 @@ A list with components:
 ## Details
 
 Which method to reach for. `"voronoi"` gives one cell per point, so
-resolution follows sampling density – the choice when the observations
-themselves define the regions. `"hex"` and `"square"` give equal-area
-cells on a fixed grid, so cell size is a decision you make rather than
-one the data makes for you; hexagons avoid the axis-aligned artefacts of
-squares and have uniform neighbour distances. `"triangles"` returns the
-Delaunay triangulation, useful for interpolation and adjacency work
-rather than as an aggregation unit.
+resolution follows sampling density. That is the choice when the
+observations themselves define the regions. `"hex"` and `"square"` give
+equal-area cells on a fixed grid, so cell size is a decision you make,
+and the data does not make it for you; hexagons avoid the axis-aligned
+artefacts of squares and have uniform neighbour distances. `"triangles"`
+returns the Delaunay triangulation, useful for interpolation and
+adjacency work; it is not meant as an aggregation unit.
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
 will suggest a cell count from the spatial structure of the data.
 

@@ -29,7 +29,7 @@ compare_models(fits, newdata = NULL, ...)
 
 A data.frame comparing all models. Alongside the metrics it carries
 `resid_morans_I`, `resid_morans_z`, `resid_morans_p` and
-`resid_morans_null` — the last naming which null
+`resid_morans_null`, the last of which names the null
 [`residual_morans_i`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
 scored each model against, since that choice is per-fit and governs how
 much the p-value is worth. The significant-autocorrelation warning below
@@ -41,22 +41,22 @@ before treating silence as evidence of no residual structure.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,

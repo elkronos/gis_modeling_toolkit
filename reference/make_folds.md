@@ -40,12 +40,13 @@ make_folds(
   uses every coordinate dimension, so an XYZ layer would otherwise have
   elevation folded into every buffer, block and neighbour distance.
   CRS-less points are aligned to a `boundary` or `prediction_points`
-  that carries a CRS — reprojected when the coordinates look like
-  lon/lat, otherwise stamped without reprojection, warning either way.
+  that carries a CRS. They are reprojected when the coordinates look
+  like lon/lat and otherwise stamped without reprojection, with a
+  warning either way.
 
 - k:
 
-  Integer; number of folds. Must be a single whole number \>= 1 — a
+  Integer; number of folds. Must be a single whole number \>= 1. A
   fraction, `NA` or a vector is an error, because a non-integer used to
   truncate silently and leave the last rows in no test set at all. Not
   every method honours it. `"buffered_loo"` and `"nndm"` are
@@ -53,7 +54,7 @@ make_folds(
   asked for; `"block_kfold"` lowers it when the grid yields fewer than
   `k` non-empty blocks, and `"leave_location_out"` lowers it when there
   are fewer than `k` distinct groups. Read the `k` element of the
-  returned list rather than assuming the requested value. A reduction is
+  returned list, and do not assume the requested value. A reduction is
   written to the package log and raises no R warning, so
   `tryCatch(warning = )` will not see it and
   [`suppressWarnings()`](https://rdrr.io/r/base/warning.html) will not
@@ -99,30 +100,29 @@ make_folds(
   (lon/lat) input is projected first by
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
   which picks a local UTM zone or, at wide extents, an equal-area
-  projection — a CRS you did not choose, whose units are metres but
-  whose identity varies with the data. `block_size` is then interpreted
-  in *that* CRS. The CRS actually used is recorded in `params$crs` of
-  the returned list; project the data yourself before calling if you
-  want to fix the units in advance.
+  projection. That is a CRS you did not choose, whose units are metres
+  but whose identity varies with the data. `block_size` is then
+  interpreted in *that* CRS. The CRS actually used is recorded in
+  `params$crs` of the returned list; project the data yourself before
+  calling if you want to fix the units in advance.
 
   A `block_size` in the wrong unit asks for an enormous grid, so a
   request above 1,000,000 blocks is refused with an error naming the
-  grid dimensions, the extent and the CRS's units, rather than being
-  built.
+  grid dimensions, the extent and the CRS's units.
 
 - auto_range:
 
   Logical. If `TRUE`, the spatial autocorrelation range is estimated via
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  — which fits directional variograms to account for anisotropy — and
-  used as the minimum `block_size`. Requires `response_var`. An explicit
+  (which fits directional variograms to account for anisotropy) and used
+  as the minimum `block_size`. Requires `response_var`. An explicit
   `block_size` takes precedence. Default `FALSE`. Sizing blocks from the
   autocorrelation range is the recommendation of Roberts et al. (2017)
-  and what blockCV (Valavi et al. 2019) automates; note that blockCV
-  takes the fitted variogram's range *parameter* as the block size,
-  whereas this uses the *effective* range
+  and what blockCV (Valavi et al. 2019) automates. blockCV takes the
+  fitted variogram's range *parameter* as the block size, whereas this
+  uses the *effective* range
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  returns – three times that parameter for an exponential fit – so its
+  returns (three times that parameter for an exponential fit), so its
   blocks are larger than blockCV's from the same variogram.
 
 - range_frac:
@@ -131,8 +131,8 @@ make_folds(
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   when `auto_range = TRUE`. A fitted range beyond the longest lag the
   empirical variogram was fitted over is rejected as unidentified, and
-  block sizing falls back to geometry rather than collapsing to a single
-  block. Default 1.0.
+  block sizing falls back to geometry, so the grid does not collapse to
+  a single block. Default 1.0.
 
 - response_var:
 
@@ -145,8 +145,8 @@ make_folds(
   `method = "leave_location_out"`, which keeps every observation from a
   location together in the same fold. Repeated measurements at the same
   site otherwise get split across folds, and the model is scored partly
-  on sites it has already seen – which random k-fold reports as
-  excellent performance.
+  on sites it has already seen, which random k-fold reports as excellent
+  performance.
 
 - prediction_points:
 
@@ -155,10 +155,9 @@ make_folds(
   [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
   is the natural choice; a non-POINT layer (grid cells, polygons) is
   reduced to representative points first, so the target distances are
-  point-to-point rather than point-to-polygon — the latter is zero for
-  every cell that contains a training point, which pulls the target
-  distribution towards zero and degenerates the CV towards plain
-  leave-one-out.
+  point-to-point. A point-to-polygon distance is zero for every cell
+  that contains a training point, which pulls the target distribution
+  towards zero and degenerates the CV towards plain leave-one-out.
 
 - predictor_vars:
 
@@ -185,8 +184,8 @@ make_folds(
   For `method = "nndm"`: the distance up to which the two
   nearest-neighbour distance distributions are matched, in the CRS the
   folds are built in; the exclusion never pushes a held-out point's
-  nearest neighbour beyond it. In Mila et al. (2022) – and
-  `CAST::nndm()` – \\\phi\\ is the autocorrelation range of the outcome:
+  nearest neighbour beyond it. In Mila et al. (2022), and in
+  `CAST::nndm()`, \\\phi\\ is the autocorrelation range of the outcome:
   beyond it observations are effectively independent, so matching is
   unnecessary.
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
@@ -246,8 +245,8 @@ argument), so `blocks[params$blocks$source_row, ]` recovers them with
 their own columns and in their own order. It runs from 1 to
 `params$n_blocks` and is the identity when nothing was dropped.
 `params$block_sizes` is the number of points in each block, indexed by
-`block_id` – zeros are empty blocks that `drop_empty_blocks = FALSE`
-kept – and `params$fold_blocks` is a list with one integer vector per
+`block_id` (zeros are empty blocks that `drop_empty_blocks = FALSE`
+kept), and `params$fold_blocks` is a list with one integer vector per
 fold naming the blocks packed into it. Between them the folds account
 for every block exactly once, empty ones included, so a fold's territory
 on the map is all of its blocks and not merely the ones that happen to
@@ -257,23 +256,23 @@ several, and the blocks can be drawn over the data
 ([`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
 does so).
 
-For the methods that work in projected space — `"block_kfold"`,
-`"buffered_loo"` and `"nndm"` — `params` carries a
-`params$blocks_supplied` says whether the blocks came from `blocks`
-rather than from a grid built here, and `params$boundary_supplied`
-whether a `boundary` was given; `params$row_probe` is a small sample of
-row IDs and coordinates that every `cv_*()` compares against the data it
-is handed, so folds built from a different layer of the same size are
-refused rather than applied silently.
+For the methods that work in projected space (`"block_kfold"`,
+`"buffered_loo"` and `"nndm"`), `params` carries a
+`params$blocks_supplied` that says whether the blocks came from `blocks`
+or from a grid built here, and `params$boundary_supplied` whether a
+`boundary` was given; `params$row_probe` is a small sample of row IDs
+and coordinates that every `cv_*()` compares against the data it is
+handed, so folds built from a different layer of the same size are
+refused, never applied silently.
 
 For the methods that work in projected space, `params` also carries a
 `crs` element naming the CRS the folds were built in (an `"EPSG:code"`
 string where there is one, otherwise the CRS's input definition). Every
-length in `params` — `block_size`, `sac_range`, `buffer`,
-`median_buffer` — is in that CRS's units, which for geographic input is
-a CRS
+length in `params` (`block_size`, `sac_range`, `buffer`,
+`median_buffer`) is in that CRS's units, which for geographic input is a
+CRS
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
-chose rather than one you passed.
+chose for you, and not one you passed.
 
 Rows whose geometry is empty or has non-finite coordinates are dropped
 before folding, with a logged warning naming the count; they appear in
@@ -298,17 +297,17 @@ excludes everything within a fixed `buffer`.
 location share a fold.
 
 `"nndm"` implements the distance-matching principle of Milà et al.
-(2022): rather than choosing a buffer arbitrarily, it sizes the
-exclusion around each held-out point so that the resulting
-training-to-test distance distribution approaches the distribution of
-distances from your actual prediction locations to the training data.
+(2022): it sizes the exclusion around each held-out point, with no
+arbitrary buffer, so that the resulting training-to-test distance
+distribution approaches the distribution of distances from your actual
+prediction locations to the training data.
 
 The procedure is the paper's own (as in `CAST::nndm()`), and it is
 deterministic. Let \\G\_{ij}\\ be the empirical distribution of
 prediction-to-nearest-training distances and \\G_j^\*\\ the distribution
 of each held-out point's nearest remaining training point. Starting from
 plain leave-one-out, the point with the smallest \\G_j^\*\\ at which the
-realised distribution exceeds the target – \\G_j^\*(r) \> G\_{ij}(r)\\ –
+realised distribution exceeds the target (\\G_j^\*(r) \> G\_{ij}(r)\\)
 has its nearest training neighbour removed, and this repeats until no
 such point remains, subject to two limits: a point's nearest-neighbour
 distance is never pushed beyond `phi` (default: the largest prediction
@@ -335,8 +334,8 @@ A polygon layer passed as `blocks` is aligned to the points the way
 either way), and the blocks are then brought into the CRS the folds are
 built in. A point inside more than one block is given the first (lowest
 row) that contains it, as for a point on the shared edge of two grid
-cells; when the blocks that caught such a point share area rather than
-an edge – the layer overlaps and is not a partition – this is warned
+cells. When the blocks that caught such a point share area instead of an
+edge, the layer overlaps and is not a partition, and this is warned
 about. A point inside no block is assigned to the nearest one, by
 distance to the polygon itself, and the count of such points is warned
 about, unless they sit within a millionth of the extent of a block,
@@ -349,9 +348,9 @@ after (so with `drop_empty_blocks = FALSE` the two are equal, and
 `sum(params$block_sizes > 0)` is how many of them hold points),
 `params$grid_nx` and `params$grid_ny` are `NA`, and `params$block_scale`
 is the median over blocks that hold points of the side of the square
-with the block's area – the length compared against the autocorrelation
-range for the leakage warning, since a polygon has no single edge
-length.
+with the block's area. That is the length compared against the
+autocorrelation range for the leakage warning, since a polygon has no
+single edge length.
 
 The connection to the rest of the package is
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md):

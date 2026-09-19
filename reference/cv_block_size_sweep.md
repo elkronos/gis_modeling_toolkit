@@ -4,8 +4,8 @@ A blocked cross-validation with blocks smaller than the autocorrelation
 range leaks: every held-out point has a near-identical neighbour in the
 training set, and the score is optimistic in proportion. The single
 number a `cv_*()` call returns cannot show this. This runs the same
-cross-validation at a ladder of block sizes – and, by default, once with
-random folds as the fully leaky reference – and returns the metric at
+cross-validation at a ladder of block sizes, and by default once with
+random folds as the fully leaky reference. It returns the metric at
 each, with the estimated autocorrelation range alongside so that the
 curve can be read against it: it rises as the blocks pass the range and
 then plateaus, and the height of the rise is how much the random-fold
@@ -116,9 +116,10 @@ result at every size.
 Each block size is a full cross-validation, so the cost is
 `length(block_sizes) * k` fits, plus `k` for the random reference.
 `max_fits` caps that (default 60: six sizes at `k = 5`, plus the
-reference) and the call refuses to start rather than run past it, naming
-the number it would have needed. Raise `max_fits` deliberately; the RF
-example below takes seconds, a Bayesian `fit_fn` takes minutes per fit.
+reference). A sweep that would run past the cap refuses to start, naming
+the number of fits it would have needed. Raise `max_fits` deliberately;
+the RF example below takes seconds, a Bayesian `fit_fn` takes minutes
+per fit.
 
 ## The ladder
 
@@ -126,9 +127,9 @@ When `block_sizes` is `NULL`, `n_sizes` values are log-spaced from a
 twenty-fifth to a half of the shorter side of the data's extent, and any
 size at which the grid would hold fewer than `k` blocks is dropped, so
 every point on the curve is a `k`-fold cross-validation of the same
-shape. Sizes are in the units of the CRS the folds are built in –
-[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
-`params$crs`, metres for geographic input – and the returned table
+shape. Sizes are in the units of the CRS the folds are built in
+([`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
+`params$crs`, metres for geographic input), and the returned table
 records that CRS.
 
 ## See also

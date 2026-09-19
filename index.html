@@ -45,6 +45,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="articles/reporting.html">What to save, and what to report</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
@@ -403,7 +404,7 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </tr>
 </tbody>
 </table>
-<p>Lower-level exports sit behind these and have pages of their own: <code><a href="reference/create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>, <code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code>, <code><a href="reference/clip_target_for.html">clip_target_for()</a></code>, <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, <code><a href="reference/voronoi_seeds_random.html">voronoi_seeds_random()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/gp_lengthscale_bounds.html">gp_lengthscale_bounds()</a></code>. <code><a href="https://rdrr.io/pkg/spatialkit/man" class="external-link">help(package = "spatialkit")</a></code> lists everything.</p>
+<p>Lower-level exports sit behind these and have pages of their own: <code><a href="reference/create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>, <code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code>, <code><a href="reference/clip_target_for.html">clip_target_for()</a></code>, <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, <code><a href="reference/voronoi_seeds_random.html">voronoi_seeds_random()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/gp_lengthscale_bounds.html">gp_lengthscale_bounds()</a></code>. <code><a href="https://elkronos.github.io/gis_modeling_toolkit/reference">help(package = "spatialkit")</a></code> lists everything.</p>
 </div>
 <div class="section level2">
 <h2 id="choosing-a-backend">Choosing a backend<a class="anchor" aria-label="anchor" href="#choosing-a-backend"></a>
@@ -447,7 +448,7 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <div class="section level2">
 <h2 id="documentation">Documentation<a class="anchor" aria-label="anchor" href="#documentation"></a>
 </h2>
-<p>Five vignettes, each executed when the package is built, so every number in them is computed on the spot.</p>
+<p>Six vignettes, each executed when the package is built, so every number in them is computed on the spot.</p>
 <table class="table">
 <colgroup>
 <col width="25%">
@@ -477,6 +478,10 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <tr>
 <td><code><a href="articles/spatialkit_nc_demo.html">vignette("spatialkit_nc_demo")</a></code></td>
 <td>the whole pipeline end to end on real boundaries, with maps</td>
+</tr>
+<tr>
+<td><code><a href="articles/reporting.html">vignette("reporting")</a></code></td>
+<td>grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report</td>
 </tr>
 </tbody>
 </table>

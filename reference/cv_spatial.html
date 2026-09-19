@@ -32,6 +32,7 @@ a fit_fn(train_sf) that returns a spatial_fit."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -99,8 +100,8 @@ a <code>fit_fn(train_sf)</code> that returns a <code>spatial_fit</code>.</p>
 <dd><p>A function of one argument, the training slice of
 <code>data_sf</code>, returning a <code>spatial_fit</code> built with
 <code><a href="new_spatial_fit.html">new_spatial_fit()</a></code>.  It is called once per fold on the
-training rows only, so anything done inside it – scaling, tuning, an inner
-variable sweep – is already nested and leak-free.  The <code>subclass</code> it
+training rows only, so anything done inside it (scaling, tuning, an inner
+variable sweep) is already nested and leak-free.  The <code>subclass</code> it
 stamps must have a <code>predict.&lt;subclass&gt;()</code> method registered, because
 that is how each fold is scored.</p></dd>
 
@@ -110,12 +111,12 @@ that is how each fold is scored.</p></dd>
 <code><a href="make_folds.html">make_folds()</a></code> return value; a bare list of
 <code>list(train =, test =)</code> pairs of <code>..row_id</code> values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here –
-<code>blockCV::cv_spatial()</code> returns one as <code>$folds_ids</code> – since its
+The label vector is how folds built by another package are used here
+(<code>blockCV::cv_spatial()</code> returns one as <code>$folds_ids</code>), since its
 <code>$folds_list</code> holds two <em>unnamed</em> vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+refused by name.  Train and test must be disjoint: a fold that trains on
+its own test rows is not a cross-validation split and is refused with an
+error.  IDs naming no row in the prepared data are dropped with
 a logged count.
 Built via <code>block_kfold</code> when <code>NULL</code>.</p></dd>
 
@@ -183,7 +184,7 @@ own metrics</strong> below.  Default <code>NULL</code>: the built-in metrics onl
 
 <dt id="arg--caller">.caller<a class="anchor" aria-label="anchor" href="#arg--caller"></a></dt>
 <dd><p>Internal. The name the messages carry, so a wrapper such as
-<code><a href="cv_rf.html">cv_rf</a></code> reports itself rather than <code>cv_spatial()</code>.</p></dd>
+<code><a href="cv_rf.html">cv_rf</a></code> reports itself in place of <code>cv_spatial()</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -197,7 +198,7 @@ counts are reported deliberately: a
 <code>fit_fn</code> that fails on every fold otherwise looks like a successful
 run that happened to score <code>NA</code>, so compare them before trusting
 <code>overall</code>.  <code>fold_status</code> is a data.frame with one row per
-fold supplied – <code>fold</code>, <code>status</code> and <code>message</code> – where
+fold supplied (<code>fold</code>, <code>status</code> and <code>message</code>), where
 <code>status</code> is <code>"ok"</code>; <code>"error"</code> (the fit or its
 <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> threw; <code>message</code> is the error text);
 <code>"skipped"</code> (nothing scorable: too few matched rows, a prediction
@@ -210,19 +211,19 @@ the console output of a long run is gone.  <code>orphan_rows</code> holds the
 <code>..row_id</code>s of rows in the data that no fold names (they enter no
 training set and are never scored; non-empty only when the folds were
 built on a different or subsetted layer), and <code>n_unknown_ids</code>
-counts the distinct row IDs the folds name that the data does not have
-— each such row is named by every fold, once as a test row and once in
+counts the distinct row IDs the folds name that the data does not have.
+Each such row is named by every fold, once as a test row and once in
 each other fold's training set, and this counts the row, not the
-mentions (expected when
-rows were removed for missing values – <code>n_dropped</code> is how many
-rows <code><a href="prep_model_data.html">prep_model_data()</a></code> removed for missing or non-finite values
-or a bad geometry before any fold was fitted).  The <code>fold</code> column of
+mentions (expected when rows were removed for missing values).
+<code>n_dropped</code> is how many rows <code><a href="prep_model_data.html">prep_model_data()</a></code> removed for
+missing or non-finite values or a bad geometry before any fold was
+fitted.  The <code>fold</code> column of
 <code>fold_metrics</code>, <code>predictions</code> and <code>fold_status</code> carries
 the fold's index in the <code>folds</code> object that was supplied, so it
 lines up with <code>make_folds()$assignment$fold</code> even when some folds
-were unusable and dropped.  <code>overall$Adj_R2</code> is always <code>NA</code>: the pooled
-out-of-sample predictions come from <code>k</code> separately fitted models and
-have no single parameter count to adjust for.  The per-fold
+were unusable and dropped.  <code>overall$Adj_R2</code> is always <code>NA</code>: the
+pooled out-of-sample predictions come from <code>k</code> separately fitted
+models and have no single parameter count to adjust for.  The per-fold
 <code>fold_metrics$Adj_R2</code> carries the adjusted value when <code>p</code> is
 supplied, and is <code>NA</code> otherwise.</p>
     </div>
@@ -235,7 +236,7 @@ the opposite job: <code>blockCV::cv_spatial()</code> <em>builds</em> spatial
 folds, where this function <em>runs</em> a cross-validation over folds it is
 given.  With both packages attached, whichever was attached last masks the
 other; <code>spatialkit::cv_spatial()</code> always resolves to this one.  The
-two cooperate rather than compete: <code>blockCV::cv_spatial()</code> returns
+two cooperate: <code>blockCV::cv_spatial()</code> returns
 its fold assignment as <code>$folds_ids</code>, a vector of fold labels, and
 that vector is accepted directly as the <code>folds</code> argument here and in
 every other <code>cv_*()</code> function.  Fold construction is
@@ -247,8 +248,8 @@ through data-drawn regions to a cross-validated, compared model.</p>
     <h2 id="your-own-metrics">Your own metrics<a class="anchor" aria-label="anchor" href="#your-own-metrics"></a></h2>
 
 
-<p>The built-in columns – <code>RMSE</code>, <code>MAE</code>, <code>MAPE</code>,
-<code>SMAPE</code>, <code>R2</code>, <code>Adj_R2</code> – are the Gaussian regression
+<p>The built-in columns (<code>RMSE</code>, <code>MAE</code>, <code>MAPE</code>,
+<code>SMAPE</code>, <code>R2</code>, <code>Adj_R2</code>) are the Gaussian regression
 set, and the section below says which of them survive a count or a
 bounded response.  <code>metrics</code> is the way to score what they cannot: a
 <code>function(y, yhat)</code> that returns a named numeric vector (a named
@@ -258,13 +259,13 @@ weights.  It is applied twice, in the same way the built-in metrics are:
 once per fold, to that fold's held-out rows, so each name becomes a column
 of <code>fold_metrics</code>; and once to the pooled out-of-sample predictions
 of every fold, so each name becomes a column of <code>overall</code>.  Only the
-pairs the built-in metrics use reach the function – both <code>y</code> and
-<code>yhat</code> finite – so its columns describe the same rows as
+pairs the built-in metrics use reach the function (both <code>y</code> and
+<code>yhat</code> finite), so its columns describe the same rows as
 <code>RMSE</code>, and <code>n_pred</code> counts them.</p>
 <p>The contract: every element named, names unique and not one of the
 built-in column names, one number per name.  Anything else is an error,
 because a scoring function that returns the wrong shape is a mistake to
-surface rather than a fold to skip.  A function that <em>throws</em> on a
+surface instead of a fold to skip.  A function that <em>throws</em> on a
 fold is logged and its columns are <code>NA</code> for that fold (and for
 <code>overall</code>, if it throws on the pooled predictions); a fold is never
 dropped for it.  When no fold produced a prediction the empty
@@ -282,19 +283,19 @@ across the rows of its <code>overall</code>.</p>
 
 <p><code>MAPE</code> divides by the observed value and <code>SMAPE</code> by
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
-Rather than return <code>Inf</code> or <code>NaN</code>, both are averaged over the rows
+Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
 an average over a subset of the data, whatever its value.</p>
-<p>This bites on any response taking exact zeros — counts, rainfall,
+<p>This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, <code>MAPE</code> is an average over the 58 non-zero rows, which
 <code>n_MAPE = 58</code> now says.  <code>SMAPE</code> fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero — which on a well-fitted zero-inflated model are the rows it got
-<em>right</em> — so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+<em>right</em>), so it averages the harder rows only and reads worse than
 the fit deserves; <code>n_SMAPE</code> shows how many rows it kept, and the
 count is only a label, not a repair.</p>
 <p><code>RMSE</code>, <code>MAE</code> and \(R^2\) use every finite row and are

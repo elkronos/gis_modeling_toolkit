@@ -3,8 +3,8 @@
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-return a layer with an attribute recording what happened to its rows —
-`"dropped"` and `"ties"` respectively. Those records describe the rows
+return a layer with an attribute recording what happened to its rows
+(`"dropped"` and `"ties"` respectively). Those records describe the rows
 the layer was built with, and `[` on an `sf` object copies attributes
 through unchanged, which would leave a subset reporting its parent's
 numbers with row positions that no longer resolve. Subsetting therefore

@@ -1,9 +1,9 @@
 # Compute in-sample (or out-of-sample) metrics for fitted spatial models
 
 Accepts a single `spatial_fit` object or a named list of them. Does NOT
-refit — uses [`fitted()`](https://rdrr.io/r/stats/fitted.values.html)
-for in-sample and [`predict()`](https://rdrr.io/r/stats/predict.html)
-for new data.
+refit. Uses [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) for
+in-sample and [`predict()`](https://rdrr.io/r/stats/predict.html) for
+new data.
 
 ## Usage
 
@@ -18,7 +18,7 @@ evaluate_insample(fits, newdata = NULL, ...)
   A `spatial_fit` object, or a named list of them (e.g.
   `list(GWR = gwr_obj, Bayesian = bayes_obj)`). The names are used as
   the model labels and every element must have one; an unnamed list is
-  an error, and so are duplicated names — `model` is the key the
+  an error, and so are duplicated names. `model` is the key the
   comparison table is assembled on, so two fits sharing a name cannot be
   told apart in the output.
 
@@ -41,22 +41,22 @@ regression metrics.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,

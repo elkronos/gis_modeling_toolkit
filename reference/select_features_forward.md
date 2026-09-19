@@ -42,8 +42,8 @@ select_features_forward(
 
 - fit_fn:
 
-  A function `(train_sf, predictor_vars)` returning a `spatial_fit`.
-  Note the two-argument signature: selection needs to refit with
+  A function `(train_sf, predictor_vars)` returning a `spatial_fit`. The
+  signature takes two arguments because selection has to refit with
   different predictor sets.
 
 - k:
@@ -70,8 +70,8 @@ select_features_forward(
 
   Minimum improvement required to accept a variable. Default 0, meaning
   any improvement is accepted. The first variable is judged against the
-  null (intercept-only) model, so `tol` bites from step 1 — but only
-  when that null model can be scored. Backends that refuse a zero-length
+  null (intercept-only) model, so `tol` bites from step 1, but only when
+  that null model can be scored. Backends that refuse a zero-length
   `predictor_vars`
   ([`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
   and
@@ -159,7 +159,7 @@ a list with `selection` and `estimation`, integer row positions in
 Nested selection is only worth doing if the inner loop is blocked the
 same way the outer one is. Random inner folds inside blocked outer folds
 select variables that look predictive only because nearby points leak
-between train and test – and the outer loop then reports honest-looking
+between train and test. The outer loop then reports honest-looking
 numbers for a dishonestly chosen feature set, which is worse than not
 selecting at all, because the dishonesty is now hidden behind a
 defensible-looking validation. `method` therefore defaults to
@@ -170,15 +170,15 @@ Call this *inside* the `fit_fn` you pass to
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
 `.cv_fit_one_fold()` calls `fit_fn(train_sf)` on the training slice
 only, so anything done inside it is automatically nested and leak-free;
-no extra plumbing is needed. Note the cost: a sweep over `p` candidates
-costs roughly `p^2 / 2 * k` model fits, and nesting that inside `n`
-outer leave-one-out folds multiplies it by `n`. `max_fits` guards
-against that.
+no extra plumbing is needed. The cost grows fast: a sweep over `p`
+candidates costs roughly `p^2 / 2 * k` model fits, and nesting that
+inside `n` outer leave-one-out folds multiplies it by `n`. `max_fits`
+guards against that.
 
 ## The score is not a performance estimate
 
 `$score` is the cross-validated `metric` of the winning set at the final
-step — the best of every candidate set the sweep scored. That is the
+step: the best of every candidate set the sweep scored. That is the
 number the selection optimised, and a number optimised over many
 candidates is optimistically biased by construction: Cawley and Talbot
 (2010) show the bias can exceed the genuine differences between the

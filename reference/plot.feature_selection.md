@@ -4,10 +4,10 @@
 scores every candidate at every step and keeps the best; its `history`
 holds all of them. This draws the accepted variable's score at each step
 as the path, every other candidate's score at that step as a faint
-point, and the step at which the selection stopped in red — so the
-picture says whether the last variable was a clear gain or the first
-that happened to clear `tol`, and whether the runner-up would have done
-as well. The scores are the selection's own cross-validated criterion,
+point, and the step at which the selection stopped in red. The picture
+then says whether the last variable was a clear gain or the first that
+happened to clear `tol`, and whether the runner-up would have done as
+well. The scores are the selection's own cross-validated criterion,
 optimistically biased by the selection (see the help page's section on
 that); when a hold-out score was computed (`select_on = "split"`) it is
 drawn as a separate mark at the final step and named in the caption.

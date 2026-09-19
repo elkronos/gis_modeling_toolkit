@@ -4,18 +4,18 @@ the first step of the package's pipeline.  It wraps the four tessellation
 methods behind one interface that handles CRS projection, clipping and stable
 cell identifiers consistently, and returns the cell layer together with the
 point-to-cell index that assign_features_to_polygons() and
-summarize_by_cell() consume.  Use it rather than the
-individual constructors whenever you might want to compare methods: the
-return shape does not change with method, so swapping
-&quot;voronoi&quot; for &quot;hex&quot; costs one argument."><meta property="og:description" content="The single entry point for turning a point pattern into analysis regions, and
+summarize_by_cell() consume.  Prefer it to the individual
+constructors whenever you might want to compare methods: the return shape
+does not change with method, so swapping &quot;voronoi&quot; for
+&quot;hex&quot; costs one argument."><meta property="og:description" content="The single entry point for turning a point pattern into analysis regions, and
 the first step of the package's pipeline.  It wraps the four tessellation
 methods behind one interface that handles CRS projection, clipping and stable
 cell identifiers consistently, and returns the cell layer together with the
 point-to-cell index that assign_features_to_polygons() and
-summarize_by_cell() consume.  Use it rather than the
-individual constructors whenever you might want to compare methods: the
-return shape does not change with method, so swapping
-&quot;voronoi&quot; for &quot;hex&quot; costs one argument."></head><body>
+summarize_by_cell() consume.  Prefer it to the individual
+constructors whenever you might want to compare methods: the return shape
+does not change with method, so swapping &quot;voronoi&quot; for
+&quot;hex&quot; costs one argument."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -44,6 +44,7 @@ return shape does not change with method, so swapping
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -68,10 +69,10 @@ the first step of the package's pipeline.  It wraps the four tessellation
 methods behind one interface that handles CRS projection, clipping and stable
 cell identifiers consistently, and returns the cell layer together with the
 point-to-cell index that <code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> and
-<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> consume.  Use it rather than the
-individual constructors whenever you might want to compare methods: the
-return shape does not change with <code>method</code>, so swapping
-<code>"voronoi"</code> for <code>"hex"</code> costs one argument.</p>
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> consume.  Prefer it to the individual
+constructors whenever you might want to compare methods: the return shape
+does not change with <code>method</code>, so swapping <code>"voronoi"</code> for
+<code>"hex"</code> costs one argument.</p>
     </div>
 
     <div class="section level2">
@@ -172,12 +173,12 @@ carry <code>poly_id</code>, which holds the same values.</p></dd>
 
 <dt><code>index</code></dt>
 <dd><p>Integer vector of <code>cell_id</code> values, one per row of
-<code>points_sf</code>, and <code>NA</code> for a point that falls inside no cell — one
-outside the study area, in other words. Only a point within a
-thousandth of the median cell width of a cell is snapped to it, which
-covers points sitting exactly on a shared edge without quietly
-dragging genuinely-outside points in. A summary built from <code>index</code>
-therefore counts only the points the tessellation actually covers.</p></dd>
+<code>points_sf</code>, and <code>NA</code> for a point that falls inside no cell, that is,
+one outside the study area. Only a point within a thousandth of the
+median cell width of a cell is snapped to it. That covers points
+sitting exactly on a shared edge, and leaves points outside the study
+area as <code>NA</code>. A summary built from <code>index</code> therefore counts only the
+points the tessellation actually covers.</p></dd>
 
 <dt><code>boundary</code></dt>
 <dd><p>The boundary used (possibly derived and/or reprojected).</p></dd>
@@ -196,14 +197,15 @@ outside every cell each sat, in CRS units).</p></dd>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>Which method to reach for.  <code>"voronoi"</code> gives one cell per point, so
-resolution follows sampling density – the choice when the observations
-themselves define the regions.  <code>"hex"</code> and <code>"square"</code> give
-equal-area cells on a fixed grid, so cell size is a decision you make rather
-than one the data makes for you; hexagons avoid the axis-aligned artefacts of
-squares and have uniform neighbour distances.  <code>"triangles"</code> returns
-the Delaunay triangulation, useful for interpolation and adjacency work
-rather than as an aggregation unit.  <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
-will suggest a cell count from the spatial structure of the data.</p>
+resolution follows sampling density.  That is the choice when the
+observations themselves define the regions.  <code>"hex"</code> and
+<code>"square"</code> give equal-area cells on a fixed grid, so cell size is a
+decision you make, and the data does not make it for you; hexagons avoid the
+axis-aligned artefacts of squares and have uniform neighbour distances.
+<code>"triangles"</code> returns the Delaunay triangulation, useful for
+interpolation and adjacency work; it is not meant as an aggregation unit.
+<code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code> will suggest a cell count from the
+spatial structure of the data.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

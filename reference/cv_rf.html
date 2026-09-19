@@ -34,6 +34,7 @@ the training set."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -99,13 +100,13 @@ the training set.</p>
 <code><a href="make_folds.html">make_folds()</a></code> return value; a bare list of
 <code>list(train =, test =)</code> pairs of <code>..row_id</code> values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here –
-<code>blockCV::cv_spatial()</code> returns one as <code>$folds_ids</code> – since its
-<code>$folds_list</code> holds two <em>unnamed</em> vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
-a logged count.</p></dd>
+The label vector is how folds built by another package are used here,
+since <code>blockCV::cv_spatial()</code>'s <code>$folds_list</code> holds two
+<em>unnamed</em> vectors per fold and is refused by name.  That function
+returns a label vector as <code>$folds_ids</code>.  Train and test must be
+disjoint: a fold that trains on its own test rows is not a
+cross-validation split and is refused with an error.  IDs naming no row in
+the prepared data are dropped with a logged count.</p></dd>
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
@@ -114,7 +115,7 @@ a logged count.</p></dd>
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
 <dd><p>RNG seed. Default 123.  It seeds fold construction <strong>and</strong>,
-through a per-fold draw, each fold's forest — so two different seeds give
+through a per-fold draw, each fold's forest, so two different seeds give
 different results even on identical <code>folds</code>. To grow every fold's
 forest from one fixed ranger seed instead, call <code><a href="cv_spatial.html">cv_spatial</a></code>
 with your own <code>fit_fn</code> wrapping <code>fit_rf_model(seed = )</code>.</p></dd>
@@ -124,8 +125,8 @@ with your own <code>fit_fn</code> wrapping <code>fit_rf_model(seed = )</code>.</
 <dd><p>Passed to <code><a href="cv_spatial.html">cv_spatial</a></code>. Default <code>FALSE</code>.
 Under forked workers each fold's forest runs single-threaded unless
 <code>num_threads</code> is passed explicitly, so <code>parallel = 4</code> means
-four threads in total rather than four times the session's
-<code>mc.cores</code>.</p></dd>
+four threads in total, where it would otherwise mean four times the
+session's <code>mc.cores</code>.</p></dd>
 
 
 <dt id="arg-block-size-auto-range-boundary">block_size, auto_range, boundary<a class="anchor" aria-label="anchor" href="#arg-block-size-auto-range-boundary"></a></dt>
@@ -143,7 +144,7 @@ fitting; passed to <code><a href="cv_spatial.html">cv_spatial</a></code>. Defaul
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Passed to <code><a href="fit_rf_model.html">fit_rf_model</a></code> on every fold —
+<dd><p>Passed to <code><a href="fit_rf_model.html">fit_rf_model</a></code> on every fold:
 <code>num_trees</code>, <code>mtry</code>, <code>importance</code>, <code>include_coords</code>
 and so on.  <code>data_sf</code>, <code>response_var</code>, <code>predictor_vars</code>
 and <code>.already_prepped</code> are set by this function and must not be
@@ -162,19 +163,19 @@ described above.</p></dd>
 
 <p><code>MAPE</code> divides by the observed value and <code>SMAPE</code> by
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
-Rather than return <code>Inf</code> or <code>NaN</code>, both are averaged over the rows
+Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
 an average over a subset of the data, whatever its value.</p>
-<p>This bites on any response taking exact zeros — counts, rainfall,
+<p>This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, <code>MAPE</code> is an average over the 58 non-zero rows, which
 <code>n_MAPE = 58</code> now says.  <code>SMAPE</code> fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero — which on a well-fitted zero-inflated model are the rows it got
-<em>right</em> — so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+<em>right</em>), so it averages the harder rows only and reads worse than
 the fit deserves; <code>n_SMAPE</code> shows how many rows it kept, and the
 count is only a label, not a repair.</p>
 <p><code>RMSE</code>, <code>MAE</code> and \(R^2\) use every finite row and are

@@ -17,3 +17,5 @@
 
 - [spatialkit: Tessellations, Spatial Cross-Validation and
   Models](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md):
+- [What to save, and what to
+  report](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md):

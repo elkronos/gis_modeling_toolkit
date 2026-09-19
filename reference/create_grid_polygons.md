@@ -3,12 +3,13 @@
 Lays a regular grid of equal-area cells over `boundary` and clips it to
 that boundary. Reach for this rather than
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
-when cell size should be a decision you make — because you need per-cell
-rates comparable across the map, or a resolution that stays fixed as the
-sample grows — instead of one dictated by where the observations happen
-to be. Hexagons (`type = "hex"`) avoid the axis-aligned artefacts of
-squares and give every cell the same distance to all six neighbours,
-which matters for anything that reads neighbourhoods.
+when cell size should be a decision you make, instead of one dictated by
+where the observations happen to be. That is the case when you need
+per-cell rates comparable across the map, or a resolution that stays
+fixed as the sample grows. Hexagons (`type = "hex"`) avoid the
+axis-aligned artefacts of squares and give every cell the same distance
+to all six neighbours, which matters for anything that reads
+neighbourhoods.
 
 ## Usage
 
@@ -36,13 +37,13 @@ create_grid_polygons(
 
   Optional approximate desired number of cells. The cell *size* is
   derived from it as `sqrt(area / target_cells)`, so square grids get
-  genuinely square cells; for hex grids the count is adjusted for
-  hexagonal packing density. The word "approximate" is load bearing: a
-  grid of square cells over an elongated bounding box needs more of them
-  than a grid of rectangles would (a 1000 x 1 strip at
-  `target_cells = 9` yields cells of side 10.5 and about 95 of them),
-  and clipping to an irregular boundary moves the count again. Pass
-  `cellsize` when the count matters more than the shape.
+  square cells; for hex grids the count is adjusted for hexagonal
+  packing density. The word "approximate" is load bearing: a grid of
+  square cells over an elongated bounding box needs more of them than a
+  grid of rectangles would (a 1000 x 1 strip at `target_cells = 9`
+  yields cells of side 10.5 and about 95 of them), and clipping to an
+  irregular boundary moves the count again. Pass `cellsize` when the
+  count matters more than the shape.
 
 - type:
 
@@ -65,12 +66,12 @@ create_grid_polygons(
   size is derived from it.
   [`sf::st_make_grid()`](https://r-spatial.github.io/sf/reference/st_make_grid.html)
   derives hexagon placement from `cellsize` alone, so for `type = "hex"`
-  `n` does not set the number of cells – but it does change the grid,
-  because the `cellsize` derived from it is what the hexagons are built
-  with. Ignored (with a logged warning) when `cellsize` is also supplied
-  — passing both would otherwise truncate the grid to `n[1]` x `n[2]`
-  cells anchored at the bounding-box corner, covering only part of the
-  boundary.
+  `n` does not set the number of cells, although it does change the
+  grid, because the `cellsize` derived from it is what the hexagons are
+  built with. Ignored (with a logged warning) when `cellsize` is also
+  supplied. Passing both would otherwise truncate the grid to `n[1]` x
+  `n[2]` cells anchored at the bounding-box corner, covering only part
+  of the boundary.
 
 - clip:
 
@@ -96,9 +97,9 @@ create_grid_polygons(
 
   Upper bound on the number of cells the grid may have, estimated from
   the boundary's bounding box before anything is built. Default `1e6`. A
-  `cellsize` in the wrong units – metres on a boundary in kilometres,
-  say – asks for a grid that cannot be built, and this refuses it with a
-  message rather than exhausting memory. Set to `Inf` to disable.
+  `cellsize` in the wrong units (metres on a boundary in kilometres,
+  say) asks for a grid that cannot be built, and this refuses it with a
+  message before memory is exhausted. Set to `Inf` to disable.
 
 ## Value
 

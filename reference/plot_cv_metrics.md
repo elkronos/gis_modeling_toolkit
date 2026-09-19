@@ -1,12 +1,11 @@
 # Plot one cross-validation metric fold by fold
 
 A pooled RMSE of 3.2 can come from 3.2 in every fold or from 1.1 in
-eight folds and 14 in one — a model that works, and a model that fails
-in one region — and the pooled number cannot tell the two apart. This
-draws the metric of each fold as a point, sized by the number of
-held-out predictions the fold contributed, with the pooled value from
-`overall` as a horizontal line, so the spread behind the number is
-visible. A
+eight folds and 14 in one (a model that works, and a model that fails in
+one region), and the pooled number cannot tell the two apart. This draws
+the metric of each fold as a point, sized by the number of held-out
+predictions the fold contributed, with the pooled value from `overall`
+as a horizontal line, so the spread behind the number is visible. A
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 result draws one panel per model on a shared scale, folds aligned, which
 is the comparison the shared fold set was built for.

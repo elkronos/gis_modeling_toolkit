@@ -30,6 +30,7 @@ brms::posterior_epred().  These are in-sample values."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -86,7 +87,7 @@ call <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-
 environment carried in <code>object$info$.cache</code> (reference semantics, so it
 survives R's copy-on-modify).  The cache holds epred column means only,
 which is why <code>predict(object, summary = "median")</code> and
-<code>predict(object, type = "predict")</code> recompute rather than reuse it.
+<code>predict(object, type = "predict")</code> recompute it from scratch.
 Call <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> if the engine has been mutated by hand
 after fitting.</p>
     </div>
@@ -95,7 +96,7 @@ after fitting.</p>
 
 
 <p>An environment has reference semantics, which is what makes the memo survive
-R's copy-on-modify – but it also means <code>fit2 &lt;- fit</code> gives the two
+R's copy-on-modify.  But it also means <code>fit2 &lt;- fit</code> gives the two
 objects <em>the same</em> cache.  Assigning a different <code>data_sf</code> to the
 copy would then have returned the original's cached values, at the original's
 length, which <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code> silently recycled against the copy's shorter
@@ -105,7 +106,7 @@ to match, so a copy with different data recomputes instead of reading the
 original's answer.</p>
 <p>Two consequences of the shared environment remain and cannot be removed from
 here: <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> on one copy empties the cache both
-share (harmless – the other simply recomputes), and <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code>
+share (harmless, since the other simply recomputes), and <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code>
 cannot distinguish two fits by their caches.  The digest covers
 <code>data_sf</code> only, not <code>$engine</code>: a hand-mutated <code>brmsfit</code> is
 what <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> is for.</p>

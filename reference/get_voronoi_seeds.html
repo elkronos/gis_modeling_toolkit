@@ -32,6 +32,7 @@ or k-means clustering of a sampling cloud.'></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -87,13 +88,13 @@ or k-means clustering of a sampling cloud.</p>
 <code>method = "kmeans"</code> and <code>method = "random"</code>. <strong>Ignored</strong> for
 <code>method = "provided"</code>, where every row of <code>seeds</code> is returned; a mismatch
 between <code>n</code> and <code>nrow(seeds)</code> is reported as a warning.</p>
-<p>For <code>method = "kmeans"</code> it is an upper bound rather than a guarantee:
+<p>For <code>method = "kmeans"</code> it is an upper bound only:
 k-means cannot produce more centres than there are distinct positions in
 the sampling cloud, nor as many centres as there are rows. When <code>n</code>
 exceeds either ceiling it is clamped, with a warning naming the count
-actually used — <code>n = nrow(sample_points)</code> is the common case, and yields
-<code>nrow(sample_points) - 1</code> seeds. Check <code><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow()</a></code> on the result rather than
-assuming <code>n</code>.</p>
+actually used. <code>n = nrow(sample_points)</code> is the common case, and yields
+<code>nrow(sample_points) - 1</code> seeds. Check <code><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow()</a></code> on the result; do not
+assume <code>n</code>.</p>
 <p>Besides a number, <code>n</code> accepts what the level-selection step returned:
 the integer vector of ranked candidates from <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
 (its first element is used), a <code><a href="select_resolution.html">select_resolution()</a></code> result (its
@@ -110,7 +111,7 @@ saying which.</p></dd>
 <dd><p>Optional sf POINT cloud for k-means clustering. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows with empty or
-non-finite coordinates are dropped with a warning rather than reaching
+non-finite coordinates are dropped with a warning, so they never reach
 <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>, which fails on them without naming a cause. A lon/lat
 cloud is projected before clustering.</p></dd>
 

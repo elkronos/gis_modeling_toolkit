@@ -32,6 +32,7 @@ information criteria (AICc, LOOIC)."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -82,7 +83,7 @@ unique; see <code><a href="evaluate_insample.html">evaluate_insample</a></code>.
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A data.frame comparing all models.  Alongside the metrics it carries
 <code>resid_morans_I</code>, <code>resid_morans_z</code>, <code>resid_morans_p</code> and
-<code>resid_morans_null</code> — the last naming which null
+<code>resid_morans_null</code>, the last of which names the null
 <code><a href="residual_morans_i.html">residual_morans_i</a></code> scored each model against, since that
 choice is per-fit and governs how much the p-value is worth.  The
 significant-autocorrelation warning below is driven by that p-value, so
@@ -95,19 +96,19 @@ evidence of no residual structure.</p>
 
 <p><code>MAPE</code> divides by the observed value and <code>SMAPE</code> by
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
-Rather than return <code>Inf</code> or <code>NaN</code>, both are averaged over the rows
+Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
 an average over a subset of the data, whatever its value.</p>
-<p>This bites on any response taking exact zeros — counts, rainfall,
+<p>This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, <code>MAPE</code> is an average over the 58 non-zero rows, which
 <code>n_MAPE = 58</code> now says.  <code>SMAPE</code> fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero — which on a well-fitted zero-inflated model are the rows it got
-<em>right</em> — so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+<em>right</em>), so it averages the harder rows only and reads worse than
 the fit deserves; <code>n_SMAPE</code> shows how many rows it kept, and the
 count is only a label, not a repair.</p>
 <p><code>RMSE</code>, <code>MAE</code> and \(R^2\) use every finite row and are

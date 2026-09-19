@@ -4,8 +4,8 @@ Consistent with
 [`coef.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.gwr_fit.md)
 and
 [`coef.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md),
-which also error rather than returning `NULL` when they cannot supply
-coefficients – see the [`coef()`](https://rdrr.io/r/stats/coef.html)
+which also error, instead of returning `NULL`, when they cannot supply
+coefficients. See the [`coef()`](https://rdrr.io/r/stats/coef.html)
 contract in
 [`new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md).
 

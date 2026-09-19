@@ -253,6 +253,7 @@ for the three backends the package ships.
 | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) | fold schemes, block sizing, and reading a CV result |
 | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability |
 | [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) | the whole pipeline end to end, with maps |
+| [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) | handing the regions to someone else, and what to report |
 
 [`?spatialkit`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-package.md)
 walks the pipeline and names the function for each step.

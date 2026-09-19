@@ -31,7 +31,7 @@ harmonize_crs(
 - on_transform_error:
 
   What to do when st_transform() fails: `"stop"` (default) raises an
-  error immediately; `"set_crs"` falls back to st_set_crs() (UNSAFE —
+  error immediately; `"set_crs"` falls back to st_set_crs() (UNSAFE:
   coordinates are NOT reprojected, only the CRS label is overwritten).
   The `"set_crs"` option exists only for rare edge cases where you are
   certain the coordinates already match the target CRS definition.

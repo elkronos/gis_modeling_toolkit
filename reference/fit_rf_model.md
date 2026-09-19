@@ -81,8 +81,8 @@ fit_rf_model(
 - sample_fraction:
 
   Fraction of rows drawn for each tree. `NULL` (default) uses ranger's
-  rule: all rows when `replace = TRUE`, 0.632 — the expected share of
-  distinct rows in a bootstrap sample — when `replace = FALSE`. A single
+  rule: all rows when `replace = TRUE`, 0.632 (the expected share of
+  distinct rows in a bootstrap sample) when `replace = FALSE`. A single
   number in (0, 1\] overrides it.
 
 - seed:
@@ -114,7 +114,7 @@ fit_rf_model(
   ranger's own spellings of the arguments this function already sets
   (`num.trees`, `min.node.size`, `num.threads`, `mtry`, `importance`,
   `seed`, `replace`, `sample.fraction`, `x`, `y`) are rejected with a
-  message naming the wrapper argument to use instead – passing them here
+  message naming the wrapper argument to use instead. Passing them here
   would reach `ranger()` twice and fail the call.
 
 ## Value
@@ -124,7 +124,7 @@ An `rf_fit` object (inherits from `spatial_fit`). `$info` carries
 named numeric, or `NULL` when `importance = "none"`), `include_coords`,
 `replace` and `sample_fraction` (the sampling each tree was grown on,
 with `sample_fraction` resolved to the number ranger used), `oob_rmse`
-and `oob_r_squared` (each `NA_real_` when ranger did not compute it –
+and `oob_r_squared` (each `NA_real_` when ranger did not compute it;
 forwarding `oob.error = FALSE` through `...` is one way to get there),
 `fitted_are_oob` (always `TRUE`;
 [`summary()`](https://rdrr.io/r/base/summary.html) reads it to label its
@@ -138,8 +138,8 @@ be read against `nrow(data_sf)`). The raw forest is in `$engine`.
 Handing a random forest the x and y coordinates lets it reproduce the
 training surface almost exactly by memorising location, and then fail
 badly anywhere it has not seen. Random cross-validation will not catch
-this – nearby points leak between folds, so the memorised surface scores
-well – which is how the practice became common. Meyer et al. (2019) show
+this: nearby points leak between folds, so the memorised surface scores
+well. That is how the practice became common. Meyer et al. (2019) show
 the collapse directly. `include_coords` therefore defaults to `FALSE`,
 and setting it to `TRUE` logs a caution (it is a deliberate choice, so
 it is not raised as an R warning). If you do use it, score the model

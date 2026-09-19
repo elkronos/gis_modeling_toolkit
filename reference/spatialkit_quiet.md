@@ -6,7 +6,7 @@ appender index 1) and echoes WARN+ to the console (index 2). Both
 and
 [`logger::log_threshold()`](https://daroczig.github.io/logger/reference/log_threshold.html)
 default to `index = 1`, so the obvious two-line recipe silences the file
-and leaves the console untouched – which is the opposite of what anyone
+and leaves the console untouched, which is the opposite of what anyone
 wants. This helper names the right index.
 
 ## Usage
@@ -28,12 +28,12 @@ spatialkit_quiet(quiet = TRUE)
 
 ## Value
 
-Invisibly, the threshold that was in force before the change – a logger
+Invisibly, the threshold that was in force before the change, a logger
 level that can be passed back as `quiet`.
 
 ## Details
 
-Note that these are log records, not R conditions:
+These are log records, not R conditions:
 [`suppressWarnings()`](https://rdrr.io/r/base/warning.html) and
 `tryCatch(warning = )` do not see them. Conditions the package raises as
 real R warnings are unaffected by this function.

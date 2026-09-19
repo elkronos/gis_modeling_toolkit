@@ -71,7 +71,7 @@ nothing else.
 
 brms 2.x does not store the Hilbert-space boundary \\L\\ in a fitted GP
 basis, so `brms:::.data_gp()` recomputes it from whatever rows
-[`predict()`](https://rdrr.io/r/stats/predict.html) is handed – which
+[`predict()`](https://rdrr.io/r/stats/predict.html) is handed, which
 moved every eigenfunction of the approximation with the newdata bounding
 box while the fitted basis coefficients stayed put. Two synthetic rows
 at the training coordinate extrema are therefore appended before the
@@ -82,7 +82,7 @@ agree.
 That is exact only for `newdata` **inside** the training coordinate
 envelope. Beyond it the boundary has to grow whatever is done, so
 predictions there are extrapolation from a basis that was not built for
-them *and* depend on which other rows share the call – including on
+them *and* depend on which other rows share the call, including on
 [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)'s
 `chunk_size`. A notice is written to the log (not raised as a warning)
 when it happens.

@@ -2,8 +2,8 @@
 
 Draws `k` seed points uniformly at random inside `boundary`, ignoring
 where the observations are. Reach for this when the cells should cover
-the study area evenly — so that sparsely sampled ground still gets its
-own cells and is visibly under-sampled in the results — rather than
+the study area evenly (so that sparsely sampled ground still gets its
+own cells and is visibly under-sampled in the results) instead of
 concentrating resolution where the data already are, which is what
 [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
 does. It is also the honest choice for a null or sensitivity comparison:

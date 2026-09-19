@@ -3,9 +3,9 @@
 Wraps
 [`GWmodel::gwr.model.selection()`](https://rdrr.io/pkg/GWmodel/man/gwr.model.selection.html),
 which grows a GWR model one predictor at a time and scores every
-intermediate model with a corrected Akaike information criterion, and
-returns the results as a ranked table rather than the two
-loosely-coupled lists GWmodel produces.
+intermediate model with a corrected Akaike information criterion.
+GWmodel returns two loosely-coupled lists; this function returns a
+ranked table.
 
 ## Usage
 
@@ -41,9 +41,9 @@ gwr_model_selection(
   among. Factor, character and logical candidates are refused: GWmodel
   fits a factor as several model-matrix columns while this sweep counts
   it as one variable, so the criteria would not be comparable, and
-  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
-  – the documented next step – takes only numerics. Encode them as
-  numeric indicators first.
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
+  the documented next step, takes only numerics. Encode them as numeric
+  indicators first.
 
 - bandwidth:
 
@@ -54,7 +54,7 @@ gwr_model_selection(
   `adaptive = TRUE`; otherwise a distance in the units of the
   **projected** CRS the sweep runs in, which
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
-  may have chosen for you – geographic input is projected before the
+  may have chosen for you. Geographic input is projected before the
   bandwidth is used, so a value in degrees would be read as metres.
 
 - adaptive:
@@ -86,9 +86,9 @@ gwr_model_selection(
 - quiet:
 
   Discard GWmodel's progress output. Default `TRUE`, because GWmodel
-  writes it with bare [`cat()`](https://rdrr.io/r/base/cat.html) – which
-  no [`suppressMessages()`](https://rdrr.io/r/base/message.html) can
-  silence – and emits one block per candidate model, so it scales with
+  writes it with bare [`cat()`](https://rdrr.io/r/base/cat.html) that no
+  [`suppressMessages()`](https://rdrr.io/r/base/message.html) can
+  silence, and emits one block per candidate model, so it scales with
   the square of the candidate count. Set `FALSE` to watch a long sweep
   progress.
 
@@ -107,8 +107,8 @@ whether that column was found by its name rather than by the documented
 position), `criterion_column` (the column it was read from) and
 `criterion_verified` (logical: `FALSE` exactly when the column was read
 positionally from a table that did not have the four documented columns,
-which is the case the log calls unverified – gate a script on this
-rather than on the label); `response_var` and `candidate_vars` (the
+which is the case the log calls unverified. Gate a script on this field
+instead of on the label); `response_var` and `candidate_vars` (the
 response and the full candidate set the sweep ran over, both echoed by
 [`print()`](https://rdrr.io/r/base/print.html)); `bandwidth`,
 `bandwidth_source`, `adaptive` and `kernel` (the smoothing held fixed
@@ -127,9 +127,9 @@ spatially blocked estimate is not. Treat this as fast screening.
 performs the same forward search against a spatially blocked
 cross-validated score; it costs far more and is the one to trust when
 the answer matters. When the two disagree, the disagreement is itself
-informative – it usually means a candidate is predictive only locally.
+informative. It usually means a candidate is predictive only locally.
 
-Two further limitations are structural rather than incidental:
+Two further limitations follow from the method itself:
 
 - **One bandwidth for every model.** Comparing criteria across models
   requires holding the smoothing fixed, but the bandwidth is itself a
@@ -145,9 +145,9 @@ Two further limitations are structural rather than incidental:
 
 ## Cost
 
-The sweep fits `p * (p + 1) / 2` GWR models for `p` candidates – 55 at p
-= 10, 210 at p = 20 – each over all `n` locations. `max_models` stops
-the call rather than letting it run for hours.
+The sweep fits `p * (p + 1) / 2` GWR models for `p` candidates (55 at p
+= 10, 210 at p = 20), each over all `n` locations. `max_models` stops
+the call before it runs for hours.
 
 ## Using \$raw with GWmodel directly
 
@@ -159,10 +159,10 @@ takes `(DeVar, InDeVars, model.list)`, so the call is
 
       GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
 
-– `sel$raw[[1]]`, not `sel$raw`. The diagnostic table is `sel$raw[[2]]`,
-an unlabelled numeric matrix whose columns are `bandwidth`, `AIC`,
-`AICc`, `RSS` in that order; the `criterion` column of `$table` is its
-third column.
+Pass `sel$raw[[1]]`, not `sel$raw`. The diagnostic table is
+`sel$raw[[2]]`, an unlabelled numeric matrix whose columns are
+`bandwidth`, `AIC`, `AICc`, `RSS` in that order; the `criterion` column
+of `$table` is its third column.
 
 ## References
 

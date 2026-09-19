@@ -43,6 +43,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -69,7 +70,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">18 September 2026</h4>
+            <h4 data-toc-skip class="date">19 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatialkit_nc_demo.Rmd" class="external-link"><code>vignettes/spatialkit_nc_demo.Rmd</code></a></small>
       <div class="d-none name"><code>spatialkit_nc_demo.Rmd</code></div>
@@ -382,12 +383,36 @@ Square grid choropleth
 Delaunay choropleth
 </p>
 </div>
+<p>The three stacked on one shared colour scale. Each map drawn on its
+own gets its own scale, so a colour in one means a different value in
+the next; here the limits are set from all three together and
+<code>patchwork</code> then collects the legends into one, which is what
+makes reading down the page legitimate.</p>
 <div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://patchwork.data-imaginist.com" class="external-link">patchwork</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="op">(</span><span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Voronoi"</span><span class="op">)</span> <span class="op">|</span></span>
-<span> <span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_hex</span>,     <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Hex"</span><span class="op">)</span> <span class="op">|</span></span>
-<span> <span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess_square</span>,  <span class="va">nc_boundary</span>, <span class="va">points_sf</span>, <span class="st">"Square"</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span><span class="co"># The cell means of all three, so the colour scale can span them.</span></span>
+<span><span class="va">cell_means</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="va">a</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">points_sf</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>, polygon_id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span></span>
+<span>  <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">a</span>, response_var <span class="op">=</span> <span class="st">"y"</span>, id_col <span class="op">=</span> <span class="st">"cell_id"</span><span class="op">)</span><span class="op">$</span><span class="va">resp_mean_y</span></span>
+<span><span class="op">}</span></span>
+<span><span class="va">lims</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="va">tess_hex</span>, <span class="va">tess_square</span><span class="op">)</span>, <span class="va">cell_means</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>              na.rm <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># One line per map instead of a title and a subtitle, and the cell count taken</span></span>
+<span><span class="co"># from the tessellation rather than typed in.</span></span>
+<span><span class="va">bare</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">tess</span>, <span class="va">label</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="fu">make_choropleth</span><span class="op">(</span><span class="va">tess</span>, <span class="va">nc_boundary</span>, <span class="va">points_sf</span><span class="op">)</span> <span class="op">+</span></span>
+<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_fill_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Mean y"</span>, limits <span class="op">=</span> <span class="va">lims</span><span class="op">)</span> <span class="op">+</span></span>
+<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">labs</a></span><span class="op">(</span>title <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"%s, %d cells"</span>, <span class="va">label</span>, <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>                  subtitle <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span> <span class="op">+</span></span>
+<span>    <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/theme.html" class="external-link">theme</a></span><span class="op">(</span>plot.title <span class="op">=</span> <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">element_text</a></span><span class="op">(</span>size <span class="op">=</span> <span class="fu">ggplot2</span><span class="fu">::</span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/element.html" class="external-link">rel</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">}</span></span>
+<span></span>
+<span><span class="op">(</span><span class="fu">bare</span><span class="op">(</span><span class="va">tess_voronoi</span>, <span class="st">"Voronoi"</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu">bare</span><span class="op">(</span><span class="va">tess_hex</span>,     <span class="st">"Hex"</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu">bare</span><span class="op">(</span><span class="va">tess_square</span>,  <span class="st">"Square"</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_annotation.html" class="external-link">plot_annotation</a></span><span class="op">(</span>title <span class="op">=</span> <span class="st">"Tessellation comparison, cell-level mean response"</span><span class="op">)</span></span></code></pre></div>
 <div class="figure" style="text-align: center">
 <img src="spatialkit_nc_demo_files/figure-html/comparison-panel-1.png" class="r-plt" alt="All three at a glance" width="100%"><p class="caption">
@@ -458,8 +483,9 @@ blocks actually separate the data or are smaller than the
 autocorrelation range and therefore leaking:</p>
 <div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://patchwork.data-imaginist.com" class="external-link">patchwork</a></span><span class="op">)</span></span>
-<span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">+</span></span>
-<span>  <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span></span></code></pre></div>
+<span><span class="op">(</span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">/</span></span>
+<span> <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
 <p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="" width="100%" style="display: block; margin: auto;"></p>
 </div>
 <div class="section level3">
@@ -750,6 +776,11 @@ measurement</td>
 <td align="left">residual autocorrelation, aggregation standard errors,
 and two ways to leak</td>
 <td align="left"><code><a href="../articles/diagnostics.html">vignette("diagnostics")</a></code></td>
+</tr>
+<tr class="odd">
+<td align="left">handing the regions to someone else, and what to
+report</td>
+<td align="left"><code><a href="../articles/reporting.html">vignette("reporting")</a></code></td>
 </tr>
 </tbody>
 </table>

@@ -60,9 +60,8 @@ plot_tessellation_map(
 - fill_col:
 
   Name of the COLUMN in `tessellation_sf` to map to fill; `NULL` for no
-  fill. Note that `fill_col` and `label_col` name columns, while
-  `outline_col`, `features_col`, `seeds_col` and `boundary_col` are
-  colours.
+  fill. `fill_col` and `label_col` name columns, while `outline_col`,
+  `features_col`, `seeds_col` and `boundary_col` are colours.
 
 - palette:
 
@@ -124,10 +123,10 @@ plot_tessellation_map(
 - target_crs:
 
   Optional CRS for plotting. When `NULL` (the default) the
-  tessellation's own CRS is used, or — if the tessellation has none — a
+  tessellation's own CRS is used, or (if the tessellation has none) a
   CRS borrowed from the first overlay that carries one, so a CRS-less
   grid drawn with located features still lines up. Any layer that
-  arrives without a CRS is brought into the plot's CRS rather than
+  arrives without a CRS is brought into the plot's CRS instead of being
   dropped: reprojected when its coordinates look like
   longitude/latitude, otherwise stamped with a warning, since a stamp
   assumes the coordinates were already in that CRS.

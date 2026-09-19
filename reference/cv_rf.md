@@ -47,12 +47,13 @@ cv_rf(
   return value; a bare list of `list(train =, test =)` pairs of
   `..row_id` values; or a vector of fold labels, one per row, which
   becomes leave-that-label-out splits. The label vector is how folds
-  built by another package are used here – `blockCV::cv_spatial()`
-  returns one as `$folds_ids` – since its `$folds_list` holds two
-  *unnamed* vectors per fold and is refused by name. Train and test must
-  be disjoint — a fold that trains on its own test rows is not a
-  cross-validation split and is refused with an error — and IDs naming
-  no row in the prepared data are dropped with a logged count.
+  built by another package are used here, since
+  `blockCV::cv_spatial()`'s `$folds_list` holds two *unnamed* vectors
+  per fold and is refused by name. That function returns a label vector
+  as `$folds_ids`. Train and test must be disjoint: a fold that trains
+  on its own test rows is not a cross-validation split and is refused
+  with an error. IDs naming no row in the prepared data are dropped with
+  a logged count.
 
 - k:
 
@@ -61,7 +62,7 @@ cv_rf(
 - seed:
 
   RNG seed. Default 123. It seeds fold construction **and**, through a
-  per-fold draw, each fold's forest — so two different seeds give
+  per-fold draw, each fold's forest, so two different seeds give
   different results even on identical `folds`. To grow every fold's
   forest from one fixed ranger seed instead, call
   [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
@@ -73,8 +74,8 @@ cv_rf(
   [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
   Default `FALSE`. Under forked workers each fold's forest runs
   single-threaded unless `num_threads` is passed explicitly, so
-  `parallel = 4` means four threads in total rather than four times the
-  session's `mc.cores`.
+  `parallel = 4` means four threads in total, where it would otherwise
+  mean four times the session's `mc.cores`.
 
 - block_size, auto_range, boundary:
 
@@ -97,8 +98,8 @@ cv_rf(
 
   Passed to
   [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-  on every fold — `num_trees`, `mtry`, `importance`, `include_coords`
-  and so on. `data_sf`, `response_var`, `predictor_vars` and
+  on every fold: `num_trees`, `mtry`, `importance`, `include_coords` and
+  so on. `data_sf`, `response_var`, `predictor_vars` and
   `.already_prepped` are set by this function and must not be passed
   here (every fold would fail with "matched by multiple actual
   arguments"). A `seed` given here overrides the per-fold draw described
@@ -114,22 +115,22 @@ result.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,

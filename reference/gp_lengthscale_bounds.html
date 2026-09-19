@@ -36,6 +36,7 @@ The "effective range" where correlation drops to ~5\
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -74,7 +75,7 @@ The "effective range" where correlation drops to ~5\<!-- % is -->
 <dl><dt id="arg-coords-xy">coords_xy<a class="anchor" aria-label="anchor" href="#arg-coords-xy"></a></dt>
 <dd><p>Numeric matrix or data.frame of coordinates with at least
 two columns; the first two are used, and replicated rows are collapsed
-before the distance quantiles are taken — <code><a href="https://paulbuerkner.com/brms/reference/gp.html" class="external-link">brms::gp()</a></code> defaults to
+before the distance quantiles are taken.  <code><a href="https://paulbuerkner.com/brms/reference/gp.html" class="external-link">brms::gp()</a></code> defaults to
 <code>gr = TRUE</code> and reduces its covariates to unique rows, so a
 heavily-sampled station would otherwise weight the quantile by how often it
 was measured rather than by where the sites are.</p></dd>

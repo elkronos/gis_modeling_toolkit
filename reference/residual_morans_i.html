@@ -38,6 +38,7 @@ after fitting."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -92,12 +93,12 @@ after fitting.</p>
 
 
 <dt id="arg-weights">weights<a class="anchor" aria-label="anchor" href="#arg-weights"></a></dt>
-<dd><p>Optional user-supplied n x n weight matrix — a base
+<dd><p>Optional user-supplied n x n weight matrix: a base
 matrix or a <span class="pkg">Matrix</span>-package matrix (e.g. a sparse dgCMatrix).
 When <code>NULL</code> (the default), a row-standardised k-nearest-neighbour
 weight matrix (k = 8) is built from the observation coordinates.  Ties
-at the k-th distance – every regular grid, every site with repeat
-visits – share that slot's weight equally rather than being broken by
+at the k-th distance (every regular grid, every site with repeat
+visits) share that slot's weight equally, with no tie-break by
 row order or by which backend found them, so the matrix is a function
 of the geometry alone; on distinct, untied coordinates it equals
 <code>spdep</code>'s <code>knearneigh()</code> + <code>nb2listw(style = "W")</code>
@@ -113,8 +114,8 @@ argument that is not an n x n matrix is an error.</p></dd>
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
 <dd><p>Integer number of nearest neighbours used when building the
 default weight matrix (ignored when <code>weights</code> is supplied).
-Default 8.  <code>k &gt;= n - 1</code> is a complete graph – \(n(n-1)\)
-weights however they are stored – and is refused above 20 million of
+Default 8.  <code>k &gt;= n - 1</code> is a complete graph (\(n(n-1)\)
+weights however they are stored) and is refused above 20 million of
 them.</p></dd>
 
 
@@ -141,15 +142,15 @@ the OLS residuals on it, in which case the moments are approximate.</p></dd>
 \((n-p)(n-p+2)\) and the normal approximation means nothing there);
 <code>"residual"</code> logs a warning when it does, <code>"auto"</code> does not,
 and <code>df</code> in the result is then \(n - 1\).  Read <code>null</code> in
-the result rather than assuming.
+the result to see which it was.
 See <strong>Which null, and when it is approximate</strong> above.</p></dd>
 
 
 <dt id="arg-keep-weights">keep_weights<a class="anchor" aria-label="anchor" href="#arg-keep-weights"></a></dt>
 <dd><p>Logical. Return the \(n \times n\) weight matrix in
 the result? Defaults to <code>FALSE</code>: the matrix dominates the object's
-size — 50.3 KB of a 53.5 KB result at \(n = 500\) in its sparse form,
-and 191 MB at the \(n = 5000\) the dense fallback is capped at —
+size (50.3 KB of a 53.5 KB result at \(n = 500\) in its sparse form,
+and 191 MB at the \(n = 5000\) the dense fallback is capped at)
 while most uses read only the statistic and its moments, and
 <code>weights_summary</code> says what it was. Set <code>TRUE</code> when you need
 the matrix itself.</p></dd>
@@ -180,8 +181,8 @@ normal approximation.</p></dd>
 
 <dt>null</dt>
 <dd><p>The null actually used, <code>"randomisation"</code> or
-<code>"residual"</code> — check this rather than assuming, since
-<code>"auto"</code> chooses per fit and <code>"residual"</code> can fall back.</p></dd>
+<code>"residual"</code>.  Check it, since <code>"auto"</code> chooses per fit
+and <code>"residual"</code> can fall back.</p></dd>
 
 <dt>df</dt>
 <dd><p>Residual degrees of freedom behind the moments:
@@ -190,9 +191,9 @@ design matrix), \(n - 1\) for <code>"randomisation"</code>.</p></dd>
 
 <dt>weights</dt>
 <dd><p>The \(n \times n\) weight matrix the statistic was
-computed with — the row-standardised k-nearest-neighbour matrix
-built here (sparse when <span class="pkg">Matrix</span> is installed), or the
-supplied <code>weights</code> after the diagonal was zeroed — and
+computed with, either the row-standardised k-nearest-neighbour
+matrix built here (sparse when <span class="pkg">Matrix</span> is installed) or the
+supplied <code>weights</code> after the diagonal was zeroed.  It is
 <code>NULL</code> unless <code>keep_weights = TRUE</code>.</p></dd>
 
 <dt>kurtosis</dt>
@@ -210,21 +211,21 @@ residuals sit from the Gaussian case the residual moments assume
 <dd><p>Logical: <code>TRUE</code> when the moments are exact for
 these residuals (the residual null on OLS residuals of the response
 on the rebuilt design), <code>FALSE</code> when they are an approximation
-– the residual null forced onto a non-OLS backend, or the
+(the residual null forced onto a non-OLS backend, or the
 randomisation null, whose exchangeable moments model residuals do
-not satisfy.</p></dd>
+not satisfy).</p></dd>
 
 <dt>weights_summary</dt>
 <dd><p>What the weight matrix was, present whether or
 not the matrix itself was kept: <code>n</code>, <code>storage</code> (its class),
 <code>neighbours</code> (the smallest and largest number of neighbours any
-row has — <code>NA</code> for a dense matrix, where counting them would
+row has, and <code>NA</code> for a dense matrix, where counting them would
 allocate a second one), <code>kept</code> (whether <code>weights</code> holds
 the matrix) and <code>desc</code>, the one line <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> shows.</p></dd>
 
 
 </dl><p>The list is classed <code>"morans_i"</code> and has a <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> method,
-so the console shows the statistic and its null rather than the
+so the console shows the statistic and its null without printing the
 \(n \times n\) <code>weights</code> matrix; <code>[</code> drops the class, and
 <code>$</code>, <code>[[</code> and <code><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist()</a></code> are unaffected.
 Returns <code>NULL</code> with a warning if computation fails (e.g. fewer
@@ -248,7 +249,7 @@ conditioning on the observed kurtosis.  These are the moments of I for a
 vector whose elements are equally likely in any order.</p>
 <p><strong>Model residuals are not exchangeable.</strong>  They are orthogonal to the
 design matrix, which pushes \(E[I]\) materially below \(-1/(n-1)\)
-whenever the covariates are spatially smooth — and pushes it further the
+whenever the covariates are spatially smooth, and pushes it further the
 more covariates there are.  In a simulation with \(n = 120\), six smooth
 covariates and <em>independent</em> errors (so the truth is "no residual
 autocorrelation"), OLS residuals had mean \(I = -0.031\) against the
@@ -262,7 +263,7 @@ regression residuals, with \(M = I - X(X'X)^{-1}X'\) rebuilt from
 $$E[I] = (n/S_0)\,\mathrm{tr}(MW)/(n-p)$$
 $$Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2$$
-These assume normal errors rather than conditioning on the observed
+These assume normal errors and do not condition on the observed
 kurtosis.  On the simulation above they restored the z-score to mean
 \(-0.09\), \(sd = 1.03\), and the rejection rate to 4.3\<!-- % against a -->
 nominal 5\<!-- %.  They agree with \code{spdep::lm.morantest()} to machine -->
@@ -279,8 +280,8 @@ them measurably makes matters worse, not better.  Measured on null data
 (\(n = 120\), three smooth covariates, independent errors; nominal 5\<!-- %, -->
 one-sided):</p><table class="table table"><tr><td><strong>backend</strong></td><td><strong>randomisation</strong></td><td><strong>residual</strong></td></tr><tr><td>OLS</td><td>0.035</td><td>0.060</td></tr><tr><td>random forest</td><td>0.128</td><td>0.200</td></tr><tr><td>GWR</td><td>0.000</td><td>0.000</td></tr></table><p>The random forest is anticonservative under both.  Its residuals here are
 the <strong>out-of-bag</strong> ones (<code><a href="residuals.rf_fit.html">residuals.rf_fit()</a></code>), not in-sample
-fits – they are inflated rather than shrunk (measured sd 1.08 against a
-true 1.00) – but they are not a linear projection of the response and
+fits.  They are inflated instead of shrunk (measured sd 1.08 against a
+true 1.00), but they are not a linear projection of the response and
 they are spatially heteroscedastic, so neither set of moments describes
 their null distribution and the variance is understated whichever is used
 (\(sd(z) \approx 1.3\)).  GWR is conservative under both, because it
@@ -292,7 +293,7 @@ covariance model when the answer has to carry weight.</p>
 vector destroys exactly the orthogonality that causes the bias, so its mean
 is the exchangeable \(-1/(n-1)\) by construction (measured:
 \(-0.00840\) against \(-1/(n-1) = -0.00840\)) and it reproduces the
-randomisation null rather than correcting it.</p>
+randomisation null without correcting it.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>

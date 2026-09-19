@@ -32,6 +32,7 @@ secondary tie-breakers) and then assigning sequential IDs."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -89,9 +90,9 @@ secondary tie-breakers) and then assigning sequential IDs.</p>
 
 <dt id="arg-transform-for-sort">transform_for_sort<a class="anchor" aria-label="anchor" href="#arg-transform-for-sort"></a></dt>
 <dd><p>CRS used only for computing sort-key coordinates.
-Default 4326. This is the whole mechanism by which the IDs are stable —
-sorting in one common CRS is what makes the same layer get the same IDs
-whichever projection it arrives in — so if the transform fails the
+Default 4326. This is the whole mechanism by which the IDs are stable
+(sorting in one common CRS is what makes the same layer get the same IDs
+whichever projection it arrives in), so if the transform fails the
 function says so rather than quietly sorting in the input's own CRS. The
 sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 the floating-point noise of a round trip through a different projection

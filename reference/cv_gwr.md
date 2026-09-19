@@ -10,7 +10,7 @@ reports on a `gwr_fit` is close to meaningless, because a local
 regression with a small bandwidth can track the training points almost
 exactly. Bandwidth is re-selected per fold unless you fix it with
 `bandwidth`, which keeps the selection itself inside the
-cross-validation rather than tuning on the full data first.
+cross-validation, with no tuning on the full data first.
 
 ## Usage
 
@@ -55,14 +55,14 @@ cv_gwr(
   return value; a bare list of `list(train =, test =)` pairs of
   `..row_id` values; or a vector of fold labels, one per row, which
   becomes leave-that-label-out splits. The label vector is how folds
-  built by another package are used here – `blockCV::cv_spatial()`
-  returns one as `$folds_ids` – since its `$folds_list` holds two
+  built by another package are used here (`blockCV::cv_spatial()`
+  returns one as `$folds_ids`), since its `$folds_list` holds two
   *unnamed* vectors per fold and is refused by name. Train and test must
-  be disjoint — a fold that trains on its own test rows is not a
-  cross-validation split and is refused with an error — and IDs naming
-  no row in the prepared data are dropped with a logged count (expected
-  when rows were removed for missing values; a sign the folds came from
-  other data when they were not).
+  be disjoint: a fold that trains on its own test rows is not a
+  cross-validation split and is refused with an error. IDs naming no row
+  in the prepared data are dropped with a logged count (expected when
+  rows were removed for missing values; a sign the folds came from other
+  data when they were not).
 
 - k:
 
@@ -102,7 +102,7 @@ cv_gwr(
 - block_size:
 
   Optional minimum block edge length for spatial CV blocks (projected
-  CRS units). Ensures blocks are at least as large as the spatial
+  CRS units). Blocks are then at least as large as the spatial
   autocorrelation range.
 
 - auto_range:
@@ -133,9 +133,9 @@ A list with `overall`, `fold_metrics`, `predictions`, `folds`,
 `n_folds_attempted`, `n_folds_succeeded`, `fold_status`, `orphan_rows`,
 `n_unknown_ids`, `n_dropped`, `formula` and `adaptive`. The two fold
 counts make a run where every fold failed visible in the return value
-rather than only in a warning, since `overall` is a well-formed all-`NA`
+itself, beyond the warning, since `overall` is a well-formed all-`NA`
 row either way, and `fold_status` (one row per fold: `fold`, `status`,
-`message`) says why each missing fold is missing – see
+`message`) says why each missing fold is missing. See
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 for the five statuses and for `orphan_rows`. `Adj_R2` is `NA` in both
 `overall` and `fold_metrics`: the pooled predictions have no single
@@ -147,7 +147,7 @@ predictor count (see
 
 Folds default to spatial blocks
 ([`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)`(method = "block_kfold")`),
-not random ones – with autocorrelated data a random split leaves a
+not random ones. With autocorrelated data a random split leaves a
 held-out point's neighbours in the training set and the score comes back
 flattering. Use
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
@@ -161,22 +161,22 @@ to score several backends on one set of folds.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,

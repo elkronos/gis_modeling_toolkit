@@ -32,6 +32,7 @@ tol."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -95,8 +96,8 @@ cross-validated score, stopping when no candidate improves it by more than
 
 <dt id="arg-fit-fn">fit_fn<a class="anchor" aria-label="anchor" href="#arg-fit-fn"></a></dt>
 <dd><p>A function <code>(train_sf, predictor_vars)</code> returning a
-<code>spatial_fit</code>.  Note the two-argument signature: selection needs to
-refit with different predictor sets.</p></dd>
+<code>spatial_fit</code>.  The signature takes two arguments because selection
+has to refit with different predictor sets.</p></dd>
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
@@ -120,7 +121,7 @@ size so inner and outer blocks are on the same spatial scale.</p></dd>
 <dt id="arg-tol">tol<a class="anchor" aria-label="anchor" href="#arg-tol"></a></dt>
 <dd><p>Minimum improvement required to accept a variable.  Default 0,
 meaning any improvement is accepted. The first variable is judged against
-the null (intercept-only) model, so <code>tol</code> bites from step 1 — but
+the null (intercept-only) model, so <code>tol</code> bites from step 1, but
 only when that null model can be scored. Backends that refuse a
 zero-length <code>predictor_vars</code> (<code><a href="fit_rf_model.html">fit_rf_model</a></code> and
 <code><a href="fit_gwr_model.html">fit_gwr_model</a></code> both do) have no null score, and there the
@@ -207,8 +208,8 @@ in <code>train_sf</code> after the completeness filter above.
 Nested selection is only worth doing if the inner loop is blocked the same
 way the outer one is.  Random inner folds inside blocked outer folds select
 variables that look predictive only because nearby points leak between
-train and test – and the outer loop then reports honest-looking numbers for
-a dishonestly chosen feature set, which is worse than not selecting at all,
+train and test.  The outer loop then reports honest-looking numbers for a
+dishonestly chosen feature set, which is worse than not selecting at all,
 because the dishonesty is now hidden behind a defensible-looking validation.
 <code>method</code> therefore defaults to <code>"block_kfold"</code> and logs a loud
 caution if set to <code>"random_kfold"</code> (a deliberate choice, so it is not
@@ -216,7 +217,7 @@ raised as an R warning).</p>
 <p>Call this <em>inside</em> the <code>fit_fn</code> you pass to <code><a href="cv_spatial.html">cv_spatial()</a></code>.
 <code>.cv_fit_one_fold()</code> calls <code>fit_fn(train_sf)</code> on the training
 slice only, so anything done inside it is automatically nested and
-leak-free; no extra plumbing is needed.  Note the cost: a sweep over
+leak-free; no extra plumbing is needed.  The cost grows fast: a sweep over
 <code>p</code> candidates costs roughly <code>p^2 / 2 * k</code> model fits, and nesting
 that inside <code>n</code> outer leave-one-out folds multiplies it by <code>n</code>.
 <code>max_fits</code> guards against that.</p>
@@ -226,7 +227,7 @@ that inside <code>n</code> outer leave-one-out folds multiplies it by <code>n</c
 
 
 <p><code>$score</code> is the cross-validated <code>metric</code> of the winning set at
-the final step — the best of every candidate set the sweep scored.  That
+the final step: the best of every candidate set the sweep scored.  That
 is the number the selection optimised, and a number optimised over many
 candidates is optimistically biased by construction: Cawley and Talbot
 (2010) show the bias can exceed the genuine differences between the models

@@ -5,23 +5,23 @@ of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
 means has a \(z\), and the cell means have a reliability.  This function
 computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen — by
-select_resolution() or by eye — can be defended with the
-whole profile rather than one criterion's argmin.  Mallows (1973) presents
+returns the table, so that the level chosen, by
+select_resolution() or by eye, can be defended with the
+whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
-candidates rather than a rule that picks one; this is that display, with
-the other criteria alongside."><meta property="og:description" content="A tessellation's resolution is the number of cells the points are cut
+candidates; he does not offer it as a rule that picks one.  This is that
+display, with the other criteria alongside."><meta property="og:description" content="A tessellation's resolution is the number of cells the points are cut
 into, and no single number settles it: the within-cluster sum of squares
 of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
 means has a \(z\), and the cell means have a reliability.  This function
 computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen — by
-select_resolution() or by eye — can be defended with the
-whole profile rather than one criterion's argmin.  Mallows (1973) presents
+returns the table, so that the level chosen, by
+select_resolution() or by eye, can be defended with the
+whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
-candidates rather than a rule that picks one; this is that display, with
-the other criteria alongside."></head><body>
+candidates; he does not offer it as a rule that picks one.  This is that
+display, with the other criteria alongside."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -50,6 +50,7 @@ the other criteria alongside."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -75,12 +76,12 @@ of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
 means has a \(z\), and the cell means have a reliability.  This function
 computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen — by
-<code><a href="select_resolution.html">select_resolution()</a></code> or by eye — can be defended with the
-whole profile rather than one criterion's argmin.  Mallows (1973) presents
+returns the table, so that the level chosen, by
+<code><a href="select_resolution.html">select_resolution()</a></code> or by eye, can be defended with the
+whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
-candidates rather than a rule that picks one; this is that display, with
-the other criteria alongside.</p>
+candidates; he does not offer it as a rule that picks one.  This is that
+display, with the other criteria alongside.</p>
     </div>
 
     <div class="section level2">
@@ -112,8 +113,8 @@ representative points).</p></dd>
 
 <dt id="arg-response-var">response_var<a class="anchor" aria-label="anchor" href="#arg-response-var"></a></dt>
 <dd><p>Optional response column name (numeric or logical).
-Enables <code>cp</code>, <code>moran_z</code>, and — via a variogram estimated
-from it — the floor of the ladder and <code>reliability</code>.</p></dd>
+Enables <code>cp</code> and <code>moran_z</code>.  A variogram estimated from it also
+sets the floor of the ladder and <code>reliability</code>.</p></dd>
 
 
 <dt id="arg-predictor-vars">predictor_vars<a class="anchor" aria-label="anchor" href="#arg-predictor-vars"></a></dt>
@@ -155,7 +156,7 @@ afterwards.  Default 123.</p></dd>
 <dt id="arg-sac">sac<a class="anchor" aria-label="anchor" href="#arg-sac"></a></dt>
 <dd><p>Optional <code>sac_range</code> object from
 <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> to take the range, nugget and
-correlation function from — pass one fitted with <code>detrend =
+correlation function from.  Pass one fitted with <code>detrend =
   "reml"</code>, say, or on a residual field of your choosing.  When
 <code>NULL</code> and a response is given, one is estimated on the subsample
 with the same <code>predictor_vars</code>.</p></dd>
@@ -244,28 +245,28 @@ only when the nugget is a large share of the sill.</p></dd>
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
 tessellation has left unexplained (\(|z|\) smaller is better).
-Calibrated and flat in \(L\) on a response with no structure — see
-<code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code> — so it separates levels only
+Calibrated and flat in \(L\) on a response with no structure (see
+<code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code>), so it separates levels only
 where structure remains.  <code>NA</code> at nine cells or fewer.</p></dd>
 
 <dt><code>reliability</code></dt>
-<dd><p>The share of the spread in the cell means that
-is between-cell signal rather than sampling noise, from the fitted
-variogram alone via Krige's additivity relation (Cressie 1996) —
-the shrinkage factor of Fay and Herriot (1979) — for square cells of
-the level's average area with the level's average point count (larger
-is better).  It has an interior optimum, and a broad one: validated
-against the empirical reliability of true block means on simulated
-fields, the analytic and empirical optima agreed to within a level or
-two where the empirical estimate was stable, and the band within 2
-percent of the maximum spanned a factor of 3–6 in \(L\).  Read the
-flat region, not the argmax.  <code>NA</code> without a usable variogram.</p></dd>
+<dd><p>The between-cell signal's share of the spread
+in the cell means, from the fitted variogram alone via Krige's
+additivity relation (Cressie 1996), for square cells of the level's
+average area with the level's average point count (larger is better).
+This is the shrinkage factor of Fay and Herriot (1979).  It has an
+interior optimum, and a broad one: validated against the empirical
+reliability of true block means on simulated fields, the analytic and
+empirical optima agreed to within a level or two where the empirical
+estimate was stable, and the band within 2 percent of the maximum
+spanned a factor of 3–6 in \(L\).  Read the flat region, not the
+argmax.  <code>NA</code> without a usable variogram.</p></dd>
 
 
-</dl><p><code>cp</code> and <code>reliability</code> answer different questions — how well
-the cells represent the field, and whether the cell values are
-distinguishable from noise — and can disagree; both are shown so the
-choice between them is made knowingly.</p>
+</dl><p><code>cp</code> and <code>reliability</code> answer different questions: how well the
+cells represent the field, and whether the cell values are distinguishable
+from noise.  They can disagree, and both are shown so the choice between
+them is made knowingly.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>

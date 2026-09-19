@@ -6,7 +6,7 @@ against. With a `boundary` it is that boundary (optionally buffered by
 optionally buffered. Reach for it when you want to see or reuse the
 exact clip target
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
-will apply — for instance to check that a study-area polygon actually
+will apply, for instance to check that a study-area polygon actually
 contains the observations before tessellating, or to pass the same
 envelope to
 [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)

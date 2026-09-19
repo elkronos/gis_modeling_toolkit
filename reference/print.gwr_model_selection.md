@@ -4,7 +4,7 @@ Shows the forward-selection trail: the response, the candidate
 predictors, and the top-ranked models with their criterion values, so
 you can see both which model won and by how much. A shallow gap between
 the first few rows means the ranking is not well identified and the
-choice of predictors should not be treated as settled – worth checking
+choice of predictors should not be treated as settled. Check the gap
 before reporting one model as the selected one.
 
 ## Usage

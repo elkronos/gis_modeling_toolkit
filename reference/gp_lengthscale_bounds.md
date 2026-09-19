@@ -17,7 +17,7 @@ gp_lengthscale_bounds(coords_xy, q_small = 0.25, max_n = 1000L)
 
   Numeric matrix or data.frame of coordinates with at least two columns;
   the first two are used, and replicated rows are collapsed before the
-  distance quantiles are taken —
+  distance quantiles are taken.
   [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html)
   defaults to `gr = TRUE` and reduces its covariates to unique rows, so
   a heavily-sampled station would otherwise weight the quantile by how

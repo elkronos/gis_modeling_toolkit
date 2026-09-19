@@ -38,6 +38,7 @@ brms::posterior_epred() or brms::posterior_predict()."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -127,7 +128,7 @@ nothing else.</p>
 
 <p>brms 2.x does not store the Hilbert-space boundary \(L\) in a fitted GP
 basis, so <code>brms:::.data_gp()</code> recomputes it from whatever rows
-<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> is handed – which moved every eigenfunction of the
+<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> is handed, which moved every eigenfunction of the
 approximation with the newdata bounding box while the fitted basis
 coefficients stayed put.  Two synthetic rows at the training coordinate
 extrema are therefore appended before the posterior draw and dropped from the
@@ -136,7 +137,7 @@ fold-wise and single-call predictions agree.</p>
 <p>That is exact only for <code>newdata</code> <strong>inside</strong> the training
 coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
 predictions there are extrapolation from a basis that was not built for them
-<em>and</em> depend on which other rows share the call – including on
+<em>and</em> depend on which other rows share the call, including on
 <code><a href="predict_surface.html">predict_surface()</a></code>'s <code>chunk_size</code>.  A notice is written to
 the log (not raised as a warning) when it happens.</p>
     </div>

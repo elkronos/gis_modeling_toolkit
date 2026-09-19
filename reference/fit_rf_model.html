@@ -34,6 +34,7 @@ plot() method like any other backend."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -134,7 +135,7 @@ the setting is recorded in <code>$info</code> and printed with the fit.</p></dd>
 <dt id="arg-sample-fraction">sample_fraction<a class="anchor" aria-label="anchor" href="#arg-sample-fraction"></a></dt>
 <dd><p>Fraction of rows drawn for each tree.  <code>NULL</code>
 (default) uses ranger's rule: all rows when <code>replace = TRUE</code>,
-0.632 — the expected share of distinct rows in a bootstrap sample —
+0.632 (the expected share of distinct rows in a bootstrap sample)
 when <code>replace = FALSE</code>.  A single number in (0, 1] overrides it.</p></dd>
 
 
@@ -164,7 +165,7 @@ the arguments this function already sets (<code>num.trees</code>,
 <code>min.node.size</code>, <code>num.threads</code>, <code>mtry</code>,
 <code>importance</code>, <code>seed</code>, <code>replace</code>,
 <code>sample.fraction</code>, <code>x</code>, <code>y</code>) are rejected with a
-message naming the wrapper argument to use instead – passing them here
+message naming the wrapper argument to use instead.  Passing them here
 would reach <code>ranger()</code> twice and fail the call.</p></dd>
 
 </dl></div>
@@ -177,7 +178,7 @@ would reach <code>ranger()</code> twice and fail the call.</p></dd>
 <code>replace</code> and <code>sample_fraction</code> (the sampling each tree was
 grown on, with <code>sample_fraction</code> resolved to the number ranger
 used), <code>oob_rmse</code> and <code>oob_r_squared</code> (each <code>NA_real_</code> when
-ranger did not compute it – forwarding <code>oob.error = FALSE</code> through
+ranger did not compute it; forwarding <code>oob.error = FALSE</code> through
 <code>...</code> is one way to get there), <code>fitted_are_oob</code> (always
 <code>TRUE</code>; <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> reads it to label its metrics),
 <code>seed</code> and <code>n_dropped</code> (the rows <code><a href="prep_model_data.html">prep_model_data()</a></code>
@@ -191,14 +192,14 @@ can be read against <code>nrow(data_sf)</code>). The raw forest is in
 
 <p>Handing a random forest the x and y coordinates lets it reproduce the
 training surface almost exactly by memorising location, and then fail badly
-anywhere it has not seen. Random cross-validation will not catch this –
-nearby points leak between folds, so the memorised surface scores well –
-which is how the practice became common. Meyer et al. (2019) show the
+anywhere it has not seen. Random cross-validation will not catch this:
+nearby points leak between folds, so the memorised surface scores well.
+That is how the practice became common. Meyer et al. (2019) show the
 collapse directly. <code>include_coords</code> therefore defaults to
 <code>FALSE</code>, and setting it to <code>TRUE</code> logs a caution (it is a
-deliberate choice, so it is not raised as an R warning). If you do use it, score
-the model with <code><a href="cv_spatial.html">cv_spatial</a></code> and blocked folds, never with the
-out-of-bag error.</p>
+deliberate choice, so it is not raised as an R warning). If you do use it,
+score the model with <code><a href="cv_spatial.html">cv_spatial</a></code> and blocked folds, never with
+the out-of-bag error.</p>
     </div>
     <div class="section level2">
     <h2 id="the-out-of-bag-error-is-a-random-hold-out">The out-of-bag error is a random hold-out<a class="anchor" aria-label="anchor" href="#the-out-of-bag-error-is-a-random-hold-out"></a></h2>

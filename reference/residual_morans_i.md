@@ -34,14 +34,14 @@ residual_morans_i(
 
 - weights:
 
-  Optional user-supplied n x n weight matrix — a base matrix or a
+  Optional user-supplied n x n weight matrix: a base matrix or a
   Matrix-package matrix (e.g. a sparse dgCMatrix). When `NULL` (the
   default), a row-standardised k-nearest-neighbour weight matrix (k = 8)
-  is built from the observation coordinates. Ties at the k-th distance –
-  every regular grid, every site with repeat visits – share that slot's
-  weight equally rather than being broken by row order or by which
-  backend found them, so the matrix is a function of the geometry alone;
-  on distinct, untied coordinates it equals `spdep`'s `knearneigh()` +
+  is built from the observation coordinates. Ties at the k-th distance
+  (every regular grid, every site with repeat visits) share that slot's
+  weight equally, with no tie-break by row order or by which backend
+  found them, so the matrix is a function of the geometry alone; on
+  distinct, untied coordinates it equals `spdep`'s `knearneigh()` +
   `nb2listw(style = "W")` exactly. If a non-row-standardised matrix is
   supplied (i.e. rows do not all sum to 1), the Cliff & Ord variance
   formula is still valid for general W and the computation proceeds; a
@@ -53,8 +53,8 @@ residual_morans_i(
 
   Integer number of nearest neighbours used when building the default
   weight matrix (ignored when `weights` is supplied). Default 8.
-  `k >= n - 1` is a complete graph – \\n(n-1)\\ weights however they are
-  stored – and is refused above 20 million of them.
+  `k >= n - 1` is a complete graph (\\n(n-1)\\ weights however they are
+  stored) and is refused above 20 million of them.
 
 - null:
 
@@ -83,17 +83,17 @@ residual_morans_i(
   residual variance divides by \\(n-p)(n-p+2)\\ and the normal
   approximation means nothing there); `"residual"` logs a warning when
   it does, `"auto"` does not, and `df` in the result is then \\n - 1\\.
-  Read `null` in the result rather than assuming. See **Which null, and
+  Read `null` in the result to see which it was. See **Which null, and
   when it is approximate** above.
 
 - keep_weights:
 
   Logical. Return the \\n \times n\\ weight matrix in the result?
-  Defaults to `FALSE`: the matrix dominates the object's size — 50.3 KB
+  Defaults to `FALSE`: the matrix dominates the object's size (50.3 KB
   of a 53.5 KB result at \\n = 500\\ in its sparse form, and 191 MB at
-  the \\n = 5000\\ the dense fallback is capped at — while most uses
-  read only the statistic and its moments, and `weights_summary` says
-  what it was. Set `TRUE` when you need the matrix itself.
+  the \\n = 5000\\ the dense fallback is capped at) while most uses read
+  only the statistic and its moments, and `weights_summary` says what it
+  was. Set `TRUE` when you need the matrix itself.
 
 ## Value
 
@@ -126,9 +126,8 @@ A list with components:
 
 - null:
 
-  The null actually used, `"randomisation"` or `"residual"` — check this
-  rather than assuming, since `"auto"` chooses per fit and `"residual"`
-  can fall back.
+  The null actually used, `"randomisation"` or `"residual"`. Check it,
+  since `"auto"` chooses per fit and `"residual"` can fall back.
 
 - df:
 
@@ -138,10 +137,10 @@ A list with components:
 
 - weights:
 
-  The \\n \times n\\ weight matrix the statistic was computed with — the
-  row-standardised k-nearest-neighbour matrix built here (sparse when
-  Matrix is installed), or the supplied `weights` after the diagonal was
-  zeroed — and `NULL` unless `keep_weights = TRUE`.
+  The \\n \times n\\ weight matrix the statistic was computed with,
+  either the row-standardised k-nearest-neighbour matrix built here
+  (sparse when Matrix is installed) or the supplied `weights` after the
+  diagonal was zeroed. It is `NULL` unless `keep_weights = TRUE`.
 
 - kurtosis:
 
@@ -158,22 +157,22 @@ A list with components:
 
   Logical: `TRUE` when the moments are exact for these residuals (the
   residual null on OLS residuals of the response on the rebuilt design),
-  `FALSE` when they are an approximation – the residual null forced onto
+  `FALSE` when they are an approximation (the residual null forced onto
   a non-OLS backend, or the randomisation null, whose exchangeable
-  moments model residuals do not satisfy.
+  moments model residuals do not satisfy).
 
 - weights_summary:
 
   What the weight matrix was, present whether or not the matrix itself
   was kept: `n`, `storage` (its class), `neighbours` (the smallest and
-  largest number of neighbours any row has — `NA` for a dense matrix,
+  largest number of neighbours any row has, and `NA` for a dense matrix,
   where counting them would allocate a second one), `kept` (whether
   `weights` holds the matrix) and `desc`, the one line
   [`print()`](https://rdrr.io/r/base/print.html) shows.
 
 The list is classed `"morans_i"` and has a
 [`print()`](https://rdrr.io/r/base/print.html) method, so the console
-shows the statistic and its null rather than the \\n \times n\\
+shows the statistic and its null without printing the \\n \times n\\
 `weights` matrix; `[` drops the class, and `$`, `[[` and
 [`unlist()`](https://rdrr.io/r/base/unlist.html) are unaffected. Returns
 `NULL` with a warning if computation fails (e.g. fewer than 4 valid
@@ -197,7 +196,7 @@ elements are equally likely in any order.
 
 **Model residuals are not exchangeable.** They are orthogonal to the
 design matrix, which pushes \\E\[I\]\\ materially below \\-1/(n-1)\\
-whenever the covariates are spatially smooth — and pushes it further the
+whenever the covariates are spatially smooth, and pushes it further the
 more covariates there are. In a simulation with \\n = 120\\, six smooth
 covariates and *independent* errors (so the truth is "no residual
 autocorrelation"), OLS residuals had mean \\I = -0.031\\ against the
@@ -212,9 +211,9 @@ regression residuals, with \\M = I - X(X'X)^{-1}X'\\ rebuilt from
 (n/S_0)\\\mathrm{tr}(MW)/(n-p)\$\$ \$\$Var\[I\] =
 (n/S_0)^2\[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
 (\mathrm{tr}MW)^2\]/\[(n-p)(n-p+2)\] - E\[I\]^2\$\$ These assume normal
-errors rather than conditioning on the observed kurtosis. On the
-simulation above they restored the z-score to mean \\-0.09\\, \\sd =
-1.03\\, and the rejection rate to 4.3\\ nominal 5\\ precision.
+errors and do not condition on the observed kurtosis. On the simulation
+above they restored the z-score to mean \\-0.09\\, \\sd = 1.03\\, and
+the rejection rate to 4.3\\ nominal 5\\ precision.
 
 **These moments are exact for \\e = My\\ and for nothing else**, so
 `null = "auto"` does not guess from the fit's class: it rebuilds `X`,
@@ -239,8 +238,8 @@ one-sided):
 The random forest is anticonservative under both. Its residuals here are
 the **out-of-bag** ones
 ([`residuals.rf_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.rf_fit.md)),
-not in-sample fits – they are inflated rather than shrunk (measured sd
-1.08 against a true 1.00) – but they are not a linear projection of the
+not in-sample fits. They are inflated instead of shrunk (measured sd
+1.08 against a true 1.00), but they are not a linear projection of the
 response and they are spatially heteroscedastic, so neither set of
 moments describes their null distribution and the variance is
 understated whichever is used (\\sd(z) \approx 1.3\\). GWR is
@@ -253,7 +252,7 @@ A permutation null was considered and rejected: permuting the residual
 vector destroys exactly the orthogonality that causes the bias, so its
 mean is the exchangeable \\-1/(n-1)\\ by construction (measured:
 \\-0.00840\\ against \\-1/(n-1) = -0.00840\\) and it reproduces the
-randomisation null rather than correcting it.
+randomisation null without correcting it.
 
 ## References
 

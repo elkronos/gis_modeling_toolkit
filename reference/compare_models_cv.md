@@ -49,11 +49,11 @@ compare_models_cv(
   Character vector: any subset of `c("GWR", "Bayesian", "RF")`, in any
   order. Each is cross-validated on the same `folds`. Names outside that
   set raise a warning and are dropped; if nothing recognised remains,
-  this is an error rather than a silent fallback. A recognised model
+  this is an error. There is no silent fallback. A recognised model
   whose backend package is not installed is dropped with a message so
-  the call still returns the models that could run — but if *none* of
-  the requested backends is installed, nothing is left to compare and
-  the call errors with `"no viable models."`. Guard with
+  the call still returns the models that could run. But if *none* of the
+  requested backends is installed, nothing is left to compare and the
+  call errors with `"no viable models."`. Guard with
   [`requireNamespace()`](https://rdrr.io/r/base/ns-load.html) when the
   model set is not known in advance.
 
@@ -70,12 +70,11 @@ compare_models_cv(
   Optional fold definitions: a
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   return value, or a bare list of `list(train =, test =)` pairs of
-  `..row_id` values. Train and test must be disjoint — a fold that
-  trains on its own test rows is not a cross-validation split and is
-  refused with an error — and IDs naming no row in the prepared data are
-  dropped with a logged count (expected when rows were removed for
-  missing values; a sign the folds came from other data when they were
-  not).
+  `..row_id` values. Train and test must be disjoint (a fold that trains
+  on its own test rows is not a cross-validation split and is refused
+  with an error), and IDs naming no row in the prepared data are dropped
+  with a logged count (expected when rows were removed for missing
+  values; a sign the folds came from other data when they were not).
 
 - boundary:
 
@@ -91,7 +90,7 @@ compare_models_cv(
   [`cv_gwr`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md).
   Only names that are formal arguments of
   [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
-  are forwarded — it has no `...` — so entries meant for
+  are forwarded (it has no `...`), so entries meant for
   [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
   alone (e.g. `longlat`) cannot be passed this way. Anything dropped is
   named in a warning; call
@@ -102,10 +101,10 @@ compare_models_cv(
 
   Extra arguments for
   [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md).
-  Forwarded whole as `cv_bayes(fit_args = )`, so an unrecognised name is
-  an error from
+  Forwarded whole as `cv_bayes(fit_args = )`, so an unrecognised name
+  raises an error from
   [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-  rather than a silent drop. `compute_loo`, `boundary` and `pointize`
+  and is not dropped silently. `compute_loo`, `boundary` and `pointize`
   are overridden by the CV internals.
 
 - rf_args:
@@ -163,19 +162,20 @@ A list with overall, by_fold, and per-model cv_results (`gwr_cv`,
 `bayes_cv`, `rf_cv` for the models that ran). `overall` has one row per
 model with the pooled metrics, the coverage and CRPS columns described
 above when a Bayesian model ran, and `model` as its last column. Only
-the models that actually ran appear, so check which names are present
-rather than assuming one entry per requested model: a backend whose
-package is missing is dropped with a message. When **no** requested
-backend is available there is nothing to return and the function errors
-with `"no viable models."` instead of returning an empty comparison.
+the models that actually ran appear, so check which names are present;
+there is not always one entry per requested model, because a backend
+whose package is missing is dropped with a message. When **no**
+requested backend is available there is nothing to return and the
+function errors with `"no viable models."` instead of returning an empty
+comparison.
 
 ## Coverage and CRPS in the overall table
 
-A model can predict well on average and still be badly calibrated —
-Heaton et al. (2019) found good point prediction routinely alongside
-poor interval coverage — so a comparison read from RMSE alone can prefer
-the model whose uncertainty is wrong. When `"Bayesian"` is among the
-models that ran, `overall` therefore also carries the columns of
+A model can predict well on average and still be badly calibrated, so a
+comparison read from RMSE alone can prefer the model whose uncertainty
+is wrong. Heaton et al. (2019) found good point prediction routinely
+alongside poor interval coverage. When `"Bayesian"` is among the models
+that ran, `overall` therefore also carries the columns of
 `cv_bayes()$predictive_coverage`: `coverage_50`, `coverage_80`,
 `coverage_95` (the share of held-out rows inside the posterior
 predictive interval at each level, averaged across folds weighted by
@@ -190,22 +190,22 @@ it is wider than it needs to be.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,
@@ -230,8 +230,8 @@ For the Bayesian backend,
 additionally reports CRPS and interval coverage at 50, 80 and 95
 percent. Both are proper scoring rules computed from posterior draws, so
 they are meaningful for any `family` the backend accepts, and they are
-the numbers to compare when the response is not Gaussian. Note that when
-every fold fails, the `fold_metrics` frame
+the numbers to compare when the response is not Gaussian. When every
+fold fails, the `fold_metrics` frame
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 returns carries the CRPS column but not the `coverage_*` columns, so
 code that reads those columns must tolerate their absence.

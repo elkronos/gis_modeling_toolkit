@@ -36,14 +36,14 @@ get_voronoi_seeds(
   every row of `seeds` is returned; a mismatch between `n` and
   `nrow(seeds)` is reported as a warning.
 
-  For `method = "kmeans"` it is an upper bound rather than a guarantee:
-  k-means cannot produce more centres than there are distinct positions
-  in the sampling cloud, nor as many centres as there are rows. When `n`
-  exceeds either ceiling it is clamped, with a warning naming the count
-  actually used — `n = nrow(sample_points)` is the common case, and
-  yields `nrow(sample_points) - 1` seeds. Check
-  [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result rather than
-  assuming `n`.
+  For `method = "kmeans"` it is an upper bound only: k-means cannot
+  produce more centres than there are distinct positions in the sampling
+  cloud, nor as many centres as there are rows. When `n` exceeds either
+  ceiling it is clamped, with a warning naming the count actually used.
+  `n = nrow(sample_points)` is the common case, and yields
+  `nrow(sample_points) - 1` seeds. Check
+  [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result; do not
+  assume `n`.
 
   Besides a number, `n` accepts what the level-selection step returned:
   the integer vector of ranked candidates from
@@ -66,7 +66,7 @@ get_voronoi_seeds(
   Optional sf POINT cloud for k-means clustering. Only the first two
   coordinate columns are clustered, so a Z or M dimension does not join
   the distance calculation and dominate it; rows with empty or
-  non-finite coordinates are dropped with a warning rather than reaching
+  non-finite coordinates are dropped with a warning, so they never reach
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html), which fails
   on them without naming a cause. A lon/lat cloud is projected before
   clustering.

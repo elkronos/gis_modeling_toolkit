@@ -6,12 +6,13 @@ of the coordinates has an elbow, a piecewise-constant approximation of
 the response has a Mallows \\C_p\\, the residual autocorrelation of the
 cell means has a \\z\\, and the cell means have a reliability. This
 function computes all of them at every level of a ladder the data bound,
-and returns the table, so that the level chosen — by
+and returns the table, so that the level chosen, by
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-or by eye — can be defended with the whole profile rather than one
+or by eye, can be defended with the whole profile in place of one
 criterion's argmin. Mallows (1973) presents \\C_p\\ itself as a display
-of the bias-variance trade-off across candidates rather than a rule that
-picks one; this is that display, with the other criteria alongside.
+of the bias-variance trade-off across candidates; he does not offer it
+as a rule that picks one. This is that display, with the other criteria
+alongside.
 
 ## Usage
 
@@ -41,8 +42,8 @@ resolution_profile(
 
 - response_var:
 
-  Optional response column name (numeric or logical). Enables `cp`,
-  `moran_z`, and — via a variogram estimated from it — the floor of the
+  Optional response column name (numeric or logical). Enables `cp` and
+  `moran_z`. A variogram estimated from it also sets the floor of the
   ladder and `reliability`.
 
 - predictor_vars:
@@ -85,7 +86,7 @@ resolution_profile(
 
   Optional `sac_range` object from
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  to take the range, nugget and correlation function from — pass one
+  to take the range, nugget and correlation function from. Pass one
   fitted with `detrend = "reml"`, say, or on a residual field of your
   choosing. When `NULL` and a response is given, one is estimated on the
   subsample with the same `predictor_vars`.
@@ -169,29 +170,28 @@ the ceiling anyway, so the profile still shows what each level costs.
   means regressed on the cell-mean predictors (an intercept alone when
   there are none): how much spatial structure the tessellation has left
   unexplained (\\\|z\|\\ smaller is better). Calibrated and flat in
-  \\L\\ on a response with no structure — see
-  [`determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  — so it separates levels only where structure remains. `NA` at nine
+  \\L\\ on a response with no structure (see
+  [`determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)),
+  so it separates levels only where structure remains. `NA` at nine
   cells or fewer.
 
 - `reliability`:
 
-  The share of the spread in the cell means that is between-cell signal
-  rather than sampling noise, from the fitted variogram alone via
-  Krige's additivity relation (Cressie 1996) — the shrinkage factor of
-  Fay and Herriot (1979) — for square cells of the level's average area
-  with the level's average point count (larger is better). It has an
-  interior optimum, and a broad one: validated against the empirical
-  reliability of true block means on simulated fields, the analytic and
-  empirical optima agreed to within a level or two where the empirical
-  estimate was stable, and the band within 2 percent of the maximum
-  spanned a factor of 3–6 in \\L\\. Read the flat region, not the
-  argmax. `NA` without a usable variogram.
+  The between-cell signal's share of the spread in the cell means, from
+  the fitted variogram alone via Krige's additivity relation (Cressie
+  1996), for square cells of the level's average area with the level's
+  average point count (larger is better). This is the shrinkage factor
+  of Fay and Herriot (1979). It has an interior optimum, and a broad
+  one: validated against the empirical reliability of true block means
+  on simulated fields, the analytic and empirical optima agreed to
+  within a level or two where the empirical estimate was stable, and the
+  band within 2 percent of the maximum spanned a factor of 3–6 in \\L\\.
+  Read the flat region, not the argmax. `NA` without a usable variogram.
 
-`cp` and `reliability` answer different questions — how well the cells
+`cp` and `reliability` answer different questions: how well the cells
 represent the field, and whether the cell values are distinguishable
-from noise — and can disagree; both are shown so the choice between them
-is made knowingly.
+from noise. They can disagree, and both are shown so the choice between
+them is made knowingly.
 
 ## References
 

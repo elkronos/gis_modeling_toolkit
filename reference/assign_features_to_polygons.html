@@ -28,6 +28,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -110,28 +111,28 @@ feature (fewer if <code>keep_unassigned = FALSE</code> dropped unmatched ones), 
 the CRS <code>features_sf</code> arrived in. Any column of <code>features_sf</code> whose name
 would collide with the polygon ID column is dropped before the spatial
 join (with a warning), so re-assigning an already-assigned layer replaces
-the old IDs rather than failing. If <em>no</em> feature falls inside any polygon
+the old IDs and does not fail. If <em>no</em> feature falls inside any polygon
 the result is empty (or all-<code>NA</code> with <code>keep_unassigned = TRUE</code>) and a
 warning is raised, since the usual cause is two layers in different
-places — a CRS that could only be stamped, not reprojected. The
+places (a CRS that could only be stamped, not reprojected). The
 attribute <code>"ties"</code> records how many features matched more than one
 polygon and had the <code>tie_break</code> rule decide for them: a list with <code>n</code>,
 <code>which</code> (their row positions in <code>features_sf</code>) and <code>rule</code>. A large <code>n</code>
 means the polygon layer overlaps, and per-cell counts built from the
 result depend on the rule. The record describes the rows this call
 returned and does not survive subsetting: <code>joined[i, ]</code> is a plain layer
-with no <code>"ties"</code> attribute, rather than one reporting the parent's
-count against row positions that no longer resolve.</p>
+with no <code>"ties"</code> attribute, so nothing reports the parent's count
+against row positions that no longer resolve.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>This is the second step of the package's pipeline: it labels every
 observation with the cell it falls in, which is what
-<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> then aggregates over. Reach for it directly (rather
-than for <code><a href="https://r-spatial.github.io/sf/reference/st_join.html" class="external-link">sf::st_join()</a></code>) when the join has to be <em>unambiguous</em> — it
-resolves features matching several polygons by an explicit <code>tie_break</code> rule
-instead of silently duplicating rows, so the assigned layer keeps one row
-per input feature and cell-level counts mean what they say.</p>
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> then aggregates over. Prefer it to <code><a href="https://r-spatial.github.io/sf/reference/st_join.html" class="external-link">sf::st_join()</a></code>
+when the join has to be <em>unambiguous</em>. It resolves features matching
+several polygons by an explicit <code>tie_break</code> rule instead of silently
+duplicating rows, so the assigned layer keeps one row per input feature
+and cell-level counts mean what they say.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

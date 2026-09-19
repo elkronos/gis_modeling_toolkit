@@ -60,17 +60,17 @@ An sf object with `polygon_id_col` attached, one row per input feature
 `features_sf` arrived in. Any column of `features_sf` whose name would
 collide with the polygon ID column is dropped before the spatial join
 (with a warning), so re-assigning an already-assigned layer replaces the
-old IDs rather than failing. If *no* feature falls inside any polygon
-the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
+old IDs and does not fail. If *no* feature falls inside any polygon the
+result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 warning is raised, since the usual cause is two layers in different
-places — a CRS that could only be stamped, not reprojected. The
+places (a CRS that could only be stamped, not reprojected). The
 attribute `"ties"` records how many features matched more than one
 polygon and had the `tie_break` rule decide for them: a list with `n`,
 `which` (their row positions in `features_sf`) and `rule`. A large `n`
 means the polygon layer overlaps, and per-cell counts built from the
 result depend on the rule. The record describes the rows this call
 returned and does not survive subsetting: `joined[i, ]` is a plain layer
-with no `"ties"` attribute, rather than one reporting the parent's count
+with no `"ties"` attribute, so nothing reports the parent's count
 against row positions that no longer resolve.
 
 ## Details
@@ -78,9 +78,9 @@ against row positions that no longer resolve.
 This is the second step of the package's pipeline: it labels every
 observation with the cell it falls in, which is what
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-then aggregates over. Reach for it directly (rather than for
-[`sf::st_join()`](https://r-spatial.github.io/sf/reference/st_join.html))
-when the join has to be *unambiguous* — it resolves features matching
+then aggregates over. Prefer it to
+[`sf::st_join()`](https://r-spatial.github.io/sf/reference/st_join.html)
+when the join has to be *unambiguous*. It resolves features matching
 several polygons by an explicit `tie_break` rule instead of silently
 duplicating rows, so the assigned layer keeps one row per input feature
 and cell-level counts mean what they say.

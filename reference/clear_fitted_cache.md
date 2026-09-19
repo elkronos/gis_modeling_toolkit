@@ -3,8 +3,8 @@
 Removes the lazily-cached
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) result so that
 the next call recomputes from the posterior. This is only necessary if
-the underlying `brmsfit` engine has been manually mutated after fitting
-– a change to `data_sf` invalidates the entry on its own, because the
+the underlying `brmsfit` engine has been manually mutated after fitting.
+A change to `data_sf` invalidates the entry on its own, because the
 cached value carries a digest of the data it was computed from (see
 [`fitted.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.bayesian_fit.md)).
 Normal usage never requires it.

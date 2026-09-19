@@ -66,7 +66,7 @@ Build the regions, with reproducible cell identifiers.
 - [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
   : Random seed generation within a polygonal boundary
 - [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
-  : Create Voronoi polygons from points with robust CRS and optional
+  : Create Voronoi polygons from points with CRS handling and optional
   clipping
 - [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
   : Create square or hexagonal grid polygons over a boundary

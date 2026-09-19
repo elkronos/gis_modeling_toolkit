@@ -2,7 +2,7 @@
 
 Computes the dissimilarity index (DI) of Meyer & Pebesma (2021) for a
 set of prediction locations and flags those that fall inside the model's
-area of applicability (AOA) – the region of predictor space where the
+area of applicability (AOA), the region of predictor space where the
 model's cross-validated performance estimate can be expected to hold.
 
 ## Usage
@@ -95,41 +95,41 @@ area_of_applicability(
 
 An object of class `aoa`: a list with
 
-- `aoa` – `newdata` with a numeric `DI` column and a logical `AOA`
-  column added. This is the object the computation ran on, which for a
+- `aoa`: `newdata` with a numeric `DI` column and a logical `AOA` column
+  added. This is the object the computation ran on, which for a
   coordinate-using model is `newdata` after pointizing, CRS
   reconciliation and the addition of the `"..x"` and `"..y"` columns. A
   row whose predictors are not all finite gets `NA` in both columns.
 
-- `threshold` – the DI cut-off used.
+- `threshold`: the DI cut-off used.
 
-- `train_DI` – the training points' own DI values.
+- `train_DI`: the training points' own DI values.
 
-- `normalizer` – the mean pairwise training distance.
+- `normalizer`: the mean pairwise training distance.
 
-- `weights` – the weight vector actually applied, named by
+- `weights`: the weight vector actually applied, named by
   `predictor_vars`.
 
-- `predictor_vars` – the predictors used, including `"..x"`/`"..y"` when
+- `predictor_vars`: the predictors used, including `"..x"`/`"..y"` when
   the model uses coordinates and excluding `dropped_vars`.
 
-- `dropped_vars` – predictors dropped for negligible variance.
+- `dropped_vars`: predictors dropped for negligible variance.
 
-- `scaling` – a list with `center` and `scale`, each named by
+- `scaling`: a list with `center` and `scale`, each named by
   `predictor_vars`: the training means and standard deviations the index
   is computed in, so a location's DI can be traced to the predictor that
   put it outside.
 
-- `n_outliers` – the number of training DI values above the
+- `n_outliers`: the number of training DI values above the
   `Q3 + 1.5 * IQR` fence, which the default threshold rule sets aside
   (the "outlier-removed" in its name); computed whether or not
   `threshold` was supplied.
 
-- `n_train`, `n_new`, `n_inside`, `n_outside`, `n_na` – row counts;
+- `n_train`, `n_new`, `n_inside`, `n_outside`, `n_na`: row counts;
   `n_train` and `n_new` count the rows that survived the finite-value
   filter.
 
-- `params` – a record of the call: `folds_supplied`, `n_folds`,
+- `params` records the call: `folds_supplied`, `n_folds`,
   `folds_method`, `threshold_supplied`, `normalizer_max_n`,
   `normalizer_n_used`, `normalizer_subsampled`, `weights_supplied` and
   `seed`. `folds_method` is the `method` of a
@@ -161,11 +161,12 @@ importance. For a prediction point \\p\\, the DI is the distance to its
 nearest training point in that space, divided by the mean pairwise
 distance among training points. The same quantity is computed for the
 training data itself, using each point's nearest neighbour *among the
-training rows of the fold that holds it out* – everything outside its
-own fold for random and block folds, the smaller training set that
-buffered and NNDM folds actually leave (see the next section) – and the
-threshold is the largest training DI that is not an upper outlier.
-Prediction points at or below that threshold are inside the AOA.
+training rows of the fold that holds it out*. That means everything
+outside its own fold for random and block folds, and the smaller
+training set that buffered and NNDM folds actually leave (see the next
+section). The threshold is then the largest training DI that is not an
+upper outlier. Prediction points at or below that threshold are inside
+the AOA.
 
 The DI is invariant to the overall scale of `weights`: the numerator and
 the normaliser carry the same factor. Importance values can be passed
@@ -177,7 +178,7 @@ With `folds = NULL` the training reference is each point's nearest
 neighbour anywhere in the training data, which for clustered data is
 very close, giving a small threshold and a conservative AOA. Passing the
 folds you actually validated with makes the reference distances larger
-and the AOA correspondingly wider. That is not a loophole – the AOA is
+and the AOA correspondingly wider. That is not a loophole. The AOA is
 defined relative to a performance estimate, and a spatially blocked
 estimate is a claim about predicting further away. Pass the same
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
@@ -188,9 +189,9 @@ available, not merely "everything outside the fold".
 
 ## Limitations
 
-Predictors must be numeric; categorical variables are refused rather
-than silently dummy-coded. Predictors whose variance is negligible
-*relative to their own magnitude* (the test is
+Predictors must be numeric; categorical variables are refused and never
+silently dummy-coded. Predictors whose variance is negligible *relative
+to their own magnitude* (the test is
 `sd < sqrt(.Machine$double.eps) * max(abs(x))`, so the same variable in
 metres and in gigametres is treated identically) are dropped, and a
 prediction point taking a different value there is a form of
@@ -205,18 +206,18 @@ location, so the dissimilarity index has to measure location too: the
 coordinates are added to both sides as the predictors `"..x"` and
 `"..y"` and are then centred, scaled and weighted like any other column.
 Without this a prediction point far outside the training extent but with
-ordinary covariate values reads as *inside* the area of applicability –
-exactly the extrapolation this index exists to catch.
+ordinary covariate values reads as *inside* the area of applicability.
+That is exactly the extrapolation this index exists to catch.
 
 This path needs geometry on both sides, so `train_sf` and `newdata` must
 both be `sf` objects; a data.frame is refused rather than quietly
 measured without location. Non-`POINT` `newdata` (grid polygons, say) is
 reduced to representative points first, as
 [`coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
-would. If exactly one side carries a CRS the other is brought into it –
+would. If exactly one side carries a CRS the other is brought into it:
 reprojected when its coordinates look like longitude/latitude, stamped
-otherwise, with a warning either way – because degrees fed into a
-metre-space index silently understate the distances.
+otherwise, with a warning either way. This is done because degrees fed
+into a metre-space index silently understate the distances.
 
 ## References
 

@@ -3,12 +3,12 @@
 index 1) and echoes WARN+ to the console (index 2).  Both
 logger::log_appender() and logger::log_threshold() default to
 index = 1, so the obvious two-line recipe silences the file and
-leaves the console untouched – which is the opposite of what anyone wants.
+leaves the console untouched, which is the opposite of what anyone wants.
 This helper names the right index."><meta property="og:description" content="The package writes an INFO+ trace to a session temp file (logger appender
 index 1) and echoes WARN+ to the console (index 2).  Both
 logger::log_appender() and logger::log_threshold() default to
 index = 1, so the obvious two-line recipe silences the file and
-leaves the console untouched – which is the opposite of what anyone wants.
+leaves the console untouched, which is the opposite of what anyone wants.
 This helper names the right index."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
@@ -38,6 +38,7 @@ This helper names the right index."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -61,7 +62,7 @@ This helper names the right index."></head><body>
 index 1) and echoes WARN+ to the console (index 2).  Both
 <code><a href="https://daroczig.github.io/logger/reference/log_appender.html" class="external-link">logger::log_appender()</a></code> and <code><a href="https://daroczig.github.io/logger/reference/log_threshold.html" class="external-link">logger::log_threshold()</a></code> default to
 <code>index = 1</code>, so the obvious two-line recipe silences the file and
-leaves the console untouched – which is the opposite of what anyone wants.
+leaves the console untouched, which is the opposite of what anyone wants.
 This helper names the right index.</p>
     </div>
 
@@ -85,12 +86,12 @@ force rather than the default: <code>old &lt;- spatialkit_quiet();
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>Invisibly, the threshold that was in force before the change –
-a <span class="pkg">logger</span> level that can be passed back as <code>quiet</code>.</p>
+    <p>Invisibly, the threshold that was in force before the change, a
+<span class="pkg">logger</span> level that can be passed back as <code>quiet</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Note that these are log records, not R conditions: <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings()</a></code>
+    <p>These are log records, not R conditions: <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings()</a></code>
 and <code>tryCatch(warning = )</code> do not see them.  Conditions the package
 raises as real R warnings are unaffected by this function.</p>
     </div>

@@ -36,6 +36,7 @@ reading of how closely a fit tracks its training data."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -95,7 +96,7 @@ n_SMAPE (the last two are the rows each percentage error was averaged
 over; see "Percentage errors on responses with zeros").
 <code>Adj_R2</code> is always <code>NA</code>: GWR's effective parameter count far
 exceeds the global predictor count and a GP model has no simple <code>p</code>,
-so it is deliberately suppressed.  A non-numeric response is an error – a
+so it is deliberately suppressed.  A non-numeric response is an error: a
 character or factor response cannot be scored, and used to come back as
 <code>n = 0</code> with every metric <code>NA</code>; a logical response is treated
 as 0/1.</p>
@@ -103,7 +104,7 @@ as 0/1.</p>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>It is not a substitute for cross-validation.  With <code>newdata = NULL</code> the
-numbers are in-sample for a <code>gwr_fit</code> or <code>bayesian_fit</code> – and a
+numbers are in-sample for a <code>gwr_fit</code> or <code>bayesian_fit</code>, and a
 GWR can reach a near-perfect in-sample \(R^2\) at a small bandwidth
 without predicting anything.  For a figure you can report, use
 <code><a href="cv_gwr.html">cv_gwr()</a></code>, <code><a href="cv_bayes.html">cv_bayes()</a></code>, <code><a href="cv_rf.html">cv_rf()</a></code>
@@ -118,8 +119,8 @@ That is <strong>in-sample</strong> for a <code>gwr_fit</code> or a <code>bayesia
 but <strong>out-of-bag</strong> for an <code>rf_fit</code>, whose <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> method
 returns out-of-bag predictions (see <code><a href="fit_rf_model.html">fit_rf_model</a></code>).  The
 returned data.frame carries no label distinguishing the two, so check
-<code>object$info$fitted_are_oob</code> before comparing numbers across backends
-– or use <code><a href="compare_models_cv.html">compare_models_cv</a></code>, which scores every backend the
+<code>object$info$fitted_are_oob</code> before comparing numbers across backends,
+or use <code><a href="compare_models_cv.html">compare_models_cv</a></code>, which scores every backend the
 same way.</p>
     </div>
     <div class="section level2">
@@ -128,19 +129,19 @@ same way.</p>
 
 <p><code>MAPE</code> divides by the observed value and <code>SMAPE</code> by
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
-Rather than return <code>Inf</code> or <code>NaN</code>, both are averaged over the rows
+Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
 an average over a subset of the data, whatever its value.</p>
-<p>This bites on any response taking exact zeros — counts, rainfall,
+<p>This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, <code>MAPE</code> is an average over the 58 non-zero rows, which
 <code>n_MAPE = 58</code> now says.  <code>SMAPE</code> fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero — which on a well-fitted zero-inflated model are the rows it got
-<em>right</em> — so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+<em>right</em>), so it averages the harder rows only and reads worse than
 the fit deserves; <code>n_SMAPE</code> shows how many rows it kept, and the
 count is only a label, not a repair.</p>
 <p><code>RMSE</code>, <code>MAE</code> and \(R^2\) use every finite row and are
@@ -164,7 +165,7 @@ be read as a rough summary rather than a score.</p>
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
 <code>family</code> the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  Note that when every fold fails, the
+the response is not Gaussian.  When every fold fails, the
 <code>fold_metrics</code> frame <code><a href="cv_bayes.html">cv_bayes()</a></code> returns carries the CRPS column
 but not the <code>coverage_*</code> columns, so code that reads those columns
 must tolerate their absence.</p>

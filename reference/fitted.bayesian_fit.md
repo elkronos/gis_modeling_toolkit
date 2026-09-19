@@ -39,14 +39,14 @@ independently, so the value is memoised in an environment carried in
 `object$info$.cache` (reference semantics, so it survives R's
 copy-on-modify). The cache holds epred column means only, which is why
 `predict(object, summary = "median")` and
-`predict(object, type = "predict")` recompute rather than reuse it. Call
+`predict(object, type = "predict")` recompute it from scratch. Call
 [`clear_fitted_cache`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
 if the engine has been mutated by hand after fitting.
 
 ## The cache is shared by copies, and validated
 
 An environment has reference semantics, which is what makes the memo
-survive R's copy-on-modify – but it also means `fit2 <- fit` gives the
+survive R's copy-on-modify. But it also means `fit2 <- fit` gives the
 two objects *the same* cache. Assigning a different `data_sf` to the
 copy would then have returned the original's cached values, at the
 original's length, which
@@ -59,9 +59,10 @@ different data recomputes instead of reading the original's answer.
 Two consequences of the shared environment remain and cannot be removed
 from here:
 [`clear_fitted_cache`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
-on one copy empties the cache both share (harmless – the other simply
-recomputes), and [`identical()`](https://rdrr.io/r/base/identical.html)
-cannot distinguish two fits by their caches. The digest covers `data_sf`
-only, not `$engine`: a hand-mutated `brmsfit` is what
+on one copy empties the cache both share (harmless, since the other
+simply recomputes), and
+[`identical()`](https://rdrr.io/r/base/identical.html) cannot
+distinguish two fits by their caches. The digest covers `data_sf` only,
+not `$engine`: a hand-mutated `brmsfit` is what
 [`clear_fitted_cache`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
 is for.

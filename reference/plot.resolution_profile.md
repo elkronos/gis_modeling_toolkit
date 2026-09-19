@@ -4,11 +4,12 @@ The criteria of a
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
 against the number of cells, one panel per criterion on a shared x axis,
 with the level each criterion selects marked and the region over which
-it is within `tol` of its optimum shaded — the flat region
+it is within `tol` of its optimum shaded. That shaded band is the flat
+region
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reports, drawn. A criterion whose optimum sits at the support ceiling or
-the range floor is captioned as such, because there the bound is
-choosing, not the criterion.
+reports. A criterion whose optimum sits at the support ceiling or the
+range floor is captioned as such, because there the bound is choosing,
+not the criterion.
 
 ## Usage
 

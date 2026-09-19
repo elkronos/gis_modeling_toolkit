@@ -52,8 +52,8 @@ create_grid_polygons_cached(
 
 ## Value
 
-An sf data frame with a stable poly_id column. Note that the rows are
-re-ordered and re-numbered by
+An sf data frame with a stable poly_id column. The rows are re-ordered
+and re-numbered by
 [`ensure_stable_poly_id`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
 which
 [`create_grid_polygons`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)

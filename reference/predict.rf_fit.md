@@ -1,7 +1,7 @@
 # Predict from a random forest fit
 
 With `newdata = NULL` this returns **out-of-bag** predictions, not
-in-sample ones – see
+in-sample ones. See
 [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md).
 
 ## Usage
@@ -22,7 +22,7 @@ predict(object, newdata = NULL, ...)
   Optional sf object carrying the same predictors. It is transformed to
   the CRS used at fitting time first, so a forest that includes the
   coordinates is not fed a different coordinate system. Categorical
-  predictors must not carry a level the forest was never grown with –
+  predictors must not carry a level the forest was never grown with,
   meaning a level with **no training rows**, not merely one absent from
   [`levels()`](https://rdrr.io/r/base/levels.html): an ordinary subset,
   or a spatial-CV fold that holds out a whole class, keeps the unused
@@ -37,14 +37,14 @@ predict(object, newdata = NULL, ...)
 - ...:
 
   Passed to `ranger`'s predict method. Arguments that make `ranger`
-  return a matrix rather than one value per row – `predict.all = TRUE`,
-  `type = "quantiles"`, `type = "se"` with `predict.all` – are rejected,
-  because this method's contract is one number per row of `newdata`.
-  Call `predict(fit$engine, data = ...)` directly for those. `seed`
-  defaults to a constant rather than being left unset: an unset `seed`
-  makes `ranger` draw one uniform from the global RNG stream per call,
-  so the number of [`predict()`](https://rdrr.io/r/stats/predict.html)
-  calls a script happens to make (via
+  return a matrix (`predict.all = TRUE`, `type = "quantiles"`,
+  `type = "se"` with `predict.all`) are rejected, because this method's
+  contract is one number per row of `newdata`. Call
+  `predict(fit$engine, data = ...)` directly for those. `seed` defaults
+  to a constant: an unset `seed` makes `ranger` draw one uniform from
+  the global RNG stream per call, so the number of
+  [`predict()`](https://rdrr.io/r/stats/predict.html) calls a script
+  happens to make (via
   [`predict_surface`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)'s
   `chunk_size`, say) would otherwise shift every later random draw. It
   does not affect a regression forest's predictions; pass your own if

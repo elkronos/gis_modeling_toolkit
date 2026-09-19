@@ -2,7 +2,7 @@
 
 Observed response minus
 [`fitted.rf_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.rf_fit.md),
-which for a forest is the **out-of-bag** prediction – each observation
+which for a forest is the **out-of-bag** prediction: each observation
 predicted only by the trees that did not see it. These are therefore
 already held-out residuals, unlike
 [`residuals.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residuals.gwr_fit.md)

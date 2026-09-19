@@ -5,7 +5,7 @@ it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive distribution:
 predictive_coverage says what fraction of held-out observations fell
 inside the 50/80/95\
-calibration together.  That is the reason to reach for it – a Bayesian model
+calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen."><meta property="og:description" content="Refits the Gaussian-process model of
 fit_bayesian_spatial_model() on each training fold and scores
@@ -13,7 +13,7 @@ it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive distribution:
 predictive_coverage says what fraction of held-out observations fell
 inside the 50/80/95\
-calibration together.  That is the reason to reach for it – a Bayesian model
+calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -44,6 +44,7 @@ whether those intervals are honest at locations the model has not seen."></head>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -69,7 +70,7 @@ it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive <em>distribution</em>:
 <code>predictive_coverage</code> says what fraction of held-out observations fell
 inside the 50/80/95\<!-- % intervals, and \code{mean_CRPS} rates sharpness and -->
-calibration together.  That is the reason to reach for it – a Bayesian model
+calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen.</p>
     </div>
@@ -117,12 +118,12 @@ whether those intervals are honest at locations the model has not seen.</p>
 <code><a href="make_folds.html">make_folds()</a></code> return value; a bare list of
 <code>list(train =, test =)</code> pairs of <code>..row_id</code> values; or a vector
 of fold labels, one per row, which becomes leave-that-label-out splits.
-The label vector is how folds built by another package are used here –
-<code>blockCV::cv_spatial()</code> returns one as <code>$folds_ids</code> – since its
+The label vector is how folds built by another package are used here
+(<code>blockCV::cv_spatial()</code> returns one as <code>$folds_ids</code>), since its
 <code>$folds_list</code> holds two <em>unnamed</em> vectors per fold and is
-refused by name.  Train and test must be disjoint — a fold that
-trains on its own test rows is not a cross-validation split and is refused
-with an error — and IDs naming no row in the prepared data are dropped with
+refused by name.  Train and test must be disjoint: a fold that trains on
+its own test rows is not a cross-validation split and is refused with an
+error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).</p></dd>
 
@@ -205,11 +206,11 @@ and <code>CRPS</code>, which this function computes itself.</p></dd>
 <code>n_unknown_ids</code>, <code>n_dropped</code>, <code>formula</code> and
 <code>predictive_coverage</code>.
 The two fold counts make a run where every fold failed visible in the
-return value rather than only in a warning, and <code>fold_status</code> (one
+return value itself, beyond the warning, and <code>fold_status</code> (one
 row per fold: <code>fold</code>, <code>status</code>, <code>message</code>) keeps the
-reason each missing fold is missing – the error text of a fold whose
-sampler failed included – where a long run's console output would not;
-see <code><a href="cv_spatial.html">cv_spatial</a></code> for the five statuses and for
+reason each missing fold is missing, including the error text of a fold
+whose sampler failed, where a long run's console output would not.
+See <code><a href="cv_spatial.html">cv_spatial</a></code> for the five statuses and for
 <code>orphan_rows</code>.  <code>predictions</code> carries,
 beyond the columns its siblings share, <code>yhat_sd</code>: the posterior
 predictive standard deviation of each held-out row, from the same draws
@@ -238,19 +239,19 @@ has settled.</p>
 
 <p><code>MAPE</code> divides by the observed value and <code>SMAPE</code> by
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
-Rather than return <code>Inf</code> or <code>NaN</code>, both are averaged over the rows
+Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
 an average over a subset of the data, whatever its value.</p>
-<p>This bites on any response taking exact zeros — counts, rainfall,
+<p>This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts.  On a zero-inflated response with 62 zeros out of
 120, <code>MAPE</code> is an average over the 58 non-zero rows, which
 <code>n_MAPE = 58</code> now says.  <code>SMAPE</code> fails differently and more
 subtly: it drops the rows where observation and prediction are both near
-zero — which on a well-fitted zero-inflated model are the rows it got
-<em>right</em> — so it averages the harder rows only and reads worse than
+zero (which on a well-fitted zero-inflated model are the rows it got
+<em>right</em>), so it averages the harder rows only and reads worse than
 the fit deserves; <code>n_SMAPE</code> shows how many rows it kept, and the
 count is only a label, not a repair.</p>
 <p><code>RMSE</code>, <code>MAE</code> and \(R^2\) use every finite row and are
@@ -274,7 +275,7 @@ be read as a rough summary rather than a score.</p>
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
 <code>family</code> the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  Note that when every fold fails, the
+the response is not Gaussian.  When every fold fails, the
 <code>fold_metrics</code> frame <code>cv_bayes()</code> returns carries the CRPS column
 but not the <code>coverage_*</code> columns, so code that reads those columns
 must tolerate their absence.</p>

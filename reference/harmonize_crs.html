@@ -28,6 +28,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -80,7 +81,7 @@
 <dt id="arg-on-transform-error">on_transform_error<a class="anchor" aria-label="anchor" href="#arg-on-transform-error"></a></dt>
 <dd><p>What to do when st_transform() fails:
 <code>"stop"</code> (default) raises an error immediately;
-<code>"set_crs"</code> falls back to st_set_crs() (UNSAFE — coordinates are
+<code>"set_crs"</code> falls back to st_set_crs() (UNSAFE: coordinates are
 NOT reprojected, only the CRS label is overwritten). The <code>"set_crs"</code>
 option exists only for rare edge cases where you are certain the
 coordinates already match the target CRS definition.</p></dd>

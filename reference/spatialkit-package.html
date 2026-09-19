@@ -38,6 +38,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -82,20 +83,20 @@ check it.  Spatial cross-validation and the area of applicability are here
 because they are what stop the central claim from being unfalsifiable, not
 because the package is a cross-validation package.</p>
 <ol><li><p><strong>Choose a resolution.</strong> <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
-reads a cell count out of the spatial structure of the observations,
-rather than making you guess one.</p></li>
+reads a cell count out of the spatial structure of the observations, so
+you do not have to guess one.</p></li>
 <li><p><strong>Tessellate.</strong> <code><a href="build_tessellation.html">build_tessellation()</a></code> turns the
-point pattern into analysis regions — Voronoi, Delaunay triangles, or a
-hex/square grid — with reproducible cell identifiers.
+point pattern into analysis regions (Voronoi, Delaunay triangles, or a
+hex/square grid) with reproducible cell identifiers.
 <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> controls where Voronoi seeds go.</p></li>
 <li><p><strong>Assign.</strong> <code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> labels
 every observation with the cell it falls in, resolving multi-match ties
-explicitly rather than duplicating rows.</p></li>
+explicitly instead of duplicating rows.</p></li>
 <li><p><strong>Aggregate.</strong> <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> reduces to one
 row per cell, carrying a standard error and observation count with every
 aggregate, and can correct those errors for within-cell autocorrelation.</p></li>
 <li><p><strong>Fold.</strong> <code><a href="make_folds.html">make_folds()</a></code> builds spatial
-cross-validation folds — blocked, buffered, leave-location-out or
+cross-validation folds: blocked, buffered, leave-location-out or
 nearest-neighbour distance-matched. Random folds flatter autocorrelated
 data; these do not.</p></li>
 <li><p><strong>Fit.</strong> <code><a href="fit_gwr_model.html">fit_gwr_model()</a></code> for coefficients that
@@ -125,7 +126,7 @@ seen; this is what tells you where the map should not be believed.</p></li>
 </ol><p>Supporting these throughout, <code><a href="ensure_projected.html">ensure_projected()</a></code> and
 <code><a href="coerce_to_points.html">coerce_to_points()</a></code> handle coordinate reference systems and
 geometry coercion, and <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> estimates the
-distance over which observations remain correlated — the number that
+distance over which observations remain correlated.  That is the number that
 should be setting your block size.</p>
     </div>
     <div class="section level2">
@@ -137,19 +138,19 @@ research rather than convention.  That is a claim with a maintenance cost,
 so this is the list it applies to, in two parts.</p>
 <p>Defaults that cite a reference, each traceable to the help page of the
 function named:</p><ul><li><p><code>fit_rf_model(include_coords = FALSE)</code>, and <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> on a
-forest returning out-of-bag predictions — Meyer et al. (2019).</p></li>
-<li><p>Permutation rather than impurity importance in
-<code><a href="fit_rf_model.html">fit_rf_model()</a></code> — Strobl et al. (2007).</p></li>
+forest returning out-of-bag predictions: Meyer et al. (2019).</p></li>
+<li><p>Permutation importance over impurity importance in
+<code><a href="fit_rf_model.html">fit_rf_model()</a></code>: Strobl et al. (2007).</p></li>
 <li><p>The Gaussian-process basis count and boundary factor derived from
-the length-scale-to-domain ratio in <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>
-— Riutort-Mayol et al. (2023).</p></li>
+the length-scale-to-domain ratio in
+<code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>: Riutort-Mayol et al. (2023).</p></li>
 <li><p>The nearest-neighbour distance-matching folds of
-<code>make_folds(method = "nndm")</code> and their <code>min_train = 0.5</code>
-— Mila et al. (2022).</p></li>
+<code>make_folds(method = "nndm")</code> and their <code>min_train = 0.5</code>:
+Mila et al. (2022).</p></li>
 <li><p>The area-of-applicability threshold as the outlier-removed maximum
-of the training dissimilarity, with importance weights applied directly
-rather than square-rooted, matching the reference implementation —
-Meyer and Pebesma (2021).</p></li>
+of the training dissimilarity, with importance weights applied directly,
+without taking their square root, matching the reference
+implementation: Meyer and Pebesma (2021).</p></li>
 <li><p>The effective range of an exponential variogram as three times its
 range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code>.</p></li>
@@ -206,7 +207,7 @@ end-to-end example.</p>
 <p>Useful entry points by task:
 <code><a href="build_tessellation.html">build_tessellation()</a></code> (build regions),
 <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> (aggregate to them),
-<code><a href="make_folds.html">make_folds()</a></code> (split them honestly),
+<code><a href="make_folds.html">make_folds()</a></code> (split them without flattering the model),
 <code><a href="compare_models_cv.html">compare_models_cv()</a></code> (score several models at once),
 <code><a href="area_of_applicability.html">area_of_applicability()</a></code> (find where not to trust the result).</p></div>
     </div>

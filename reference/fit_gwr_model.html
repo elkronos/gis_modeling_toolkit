@@ -30,6 +30,7 @@ bandwidth."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -91,7 +92,7 @@ bandwidth is a fixed distance in CRS units.</p></dd>
 <dt id="arg-bandwidth">bandwidth<a class="anchor" aria-label="anchor" href="#arg-bandwidth"></a></dt>
 <dd><p>Optional numeric bandwidth value. For adaptive mode this
 is an integer (number of neighbours); for fixed mode a distance in the
-units of the <strong>projected</strong> CRS the fit runs in – <code><a href="prep_model_data.html">prep_model_data()</a></code>
+units of the <strong>projected</strong> CRS the fit runs in. <code><a href="prep_model_data.html">prep_model_data()</a></code>
 projects geographic input before the bandwidth is used, so 0.2 supplied
 for lon/lat data is 0.2 metres, not 0.2 degrees. Read the CRS off
 <code>sf::st_crs(fit$data_sf)</code>, or pass <code>target_crs</code> to
@@ -122,15 +123,15 @@ default <code>FALSE</code>.</p></dd>
     <p>A <code>gwr_fit</code> object (inherits from <code>spatial_fit</code>).
 Supports <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code>, <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code>, <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>,
 <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code>, <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, and <code><a href="model_metrics.html">model_metrics()</a></code>.
-Model-specific metadata lives in <code>$info</code> (bandwidth, adaptive,
-kernel, AICc, <code>bandwidth_is_fallback</code> – <code>TRUE</code> when
-automatic selection failed and the arbitrary fallback was used –
+Model-specific metadata lives in <code>$info</code>: bandwidth, adaptive,
+kernel, AICc, <code>bandwidth_is_fallback</code> (<code>TRUE</code> when automatic
+selection failed and the arbitrary fallback was used),
 <code>condition_index</code>, <code>local_collinearity</code>,
 <code>n_local_collinear</code>, <code>n_local_singular</code>,
-<code>nonfinite_coef</code> – a logical matrix, one row per observation and
-one column per term (<code>Intercept</code> first), <code>TRUE</code> where the
+<code>nonfinite_coef</code> (a logical matrix, one row per observation and
+one column per term, with <code>Intercept</code> first, <code>TRUE</code> where the
 local coefficient came back non-finite, so the count in
-<code>n_local_singular</code> can be placed – and <code>n_dropped</code>: the rows
+<code>n_local_singular</code> can be placed) and <code>n_dropped</code> (the rows
 <code><a href="prep_model_data.html">prep_model_data()</a></code> removed for missing or non-finite values or a
 bad geometry, so <code>$n</code> can be read against <code>nrow(data_sf)</code>).
 The raw GWmodel result is in <code>$engine</code>.</p>
@@ -139,24 +140,24 @@ The raw GWmodel result is in <code>$engine</code>.</p>
     <h2 id="collinearity-diagnostics">Collinearity diagnostics<a class="anchor" aria-label="anchor" href="#collinearity-diagnostics"></a></h2>
 
 
-<p>The function computes the <strong>scaled condition index</strong> of the design –
+<p>The function computes the <strong>scaled condition index</strong> of the design and
+warns when it exceeds 30, the conventional threshold, which Wheeler &amp;
+Tiefelsdorf (2005) carry over to the local designs of GWR.  The index is
 the ratio of the largest to the smallest singular value after each column
-is scaled to unit length (Belsley, Kuh &amp; Welsch 1980) – and warns when it
-exceeds 30, the conventional threshold, which Wheeler &amp; Tiefelsdorf (2005)
-carry over to the local designs of GWR.  Scaling makes the index
-independent of the predictors' units; <code><a href="https://rdrr.io/r/base/kappa.html" class="external-link">kappa()</a></code> on the raw matrix is
-not, and a threshold on it is a threshold on nothing in particular.
+is scaled to unit length (Belsley, Kuh &amp; Welsch 1980).  Scaling makes the
+index independent of the predictors' units; <code><a href="https://rdrr.io/r/base/kappa.html" class="external-link">kappa()</a></code> on the raw matrix
+is not, and a threshold on it is a threshold on nothing in particular.
 A <strong>global</strong> index is computed on the full design (intercept plus
 predictors).
-In addition, a <strong>local</strong> spot-check is performed at up to 30 locations –
+In addition, a <strong>local</strong> spot-check is performed at up to 30 locations:
 every location when there are 30 or fewer, otherwise 30 spread evenly over
 the extent (evenly spaced ranks of the observations ordered by x, then y),
 so the diagnostic is reproducible, draws no random numbers, does not depend
 on the row order of the data, and the count is not configurable.  For each
-sampled point the nearest neighbours within
-the bandwidth window – the bandwidth the model is actually fitted with, not
-a stand-in – are selected and the condition number of that local design
-sub-matrix is evaluated.  That sub-matrix is the predictors <strong>plus an
+sampled point the nearest neighbours within the bandwidth window (the
+bandwidth the model is actually fitted with, not a stand-in) are selected
+and the condition number of that local design sub-matrix is evaluated.
+That sub-matrix is the predictors <strong>plus an
 intercept column</strong>, matching the design GWmodel fits, and is unweighted; the
 global condition number is computed on the predictors alone, so the two
 numbers are not directly comparable.  An indicator that is constant inside a
@@ -169,7 +170,7 @@ near-singular local design; the wording reports a percentage when more than
 25\<!-- % of sampled locations are affected and a count otherwise.  Both are real -->
 R warnings, not log lines.</p>
 <p>After the fit, the local coefficient surfaces are scanned and a further
-warning counts local regressions that came back non-finite – their windows
+warning counts local regressions that came back non-finite.  Their windows
 were singular.  <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code>, <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>, <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> and
 <code><a href="model_metrics.html">model_metrics()</a></code> all drop those rows, so when this warning fires the
 metrics describe only the part of the study area that fitted.</p>

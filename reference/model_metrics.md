@@ -37,14 +37,14 @@ n_SMAPE (the last two are the rows each percentage error was averaged
 over; see "Percentage errors on responses with zeros"). `Adj_R2` is
 always `NA`: GWR's effective parameter count far exceeds the global
 predictor count and a GP model has no simple `p`, so it is deliberately
-suppressed. A non-numeric response is an error – a character or factor
+suppressed. A non-numeric response is an error: a character or factor
 response cannot be scored, and used to come back as `n = 0` with every
 metric `NA`; a logical response is treated as 0/1.
 
 ## Details
 
 It is not a substitute for cross-validation. With `newdata = NULL` the
-numbers are in-sample for a `gwr_fit` or `bayesian_fit` – and a GWR can
+numbers are in-sample for a `gwr_fit` or `bayesian_fit`, and a GWR can
 reach a near-perfect in-sample \\R^2\\ at a small bandwidth without
 predicting anything. For a figure you can report, use
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
@@ -63,7 +63,7 @@ out-of-bag predictions (see
 [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)).
 The returned data.frame carries no label distinguishing the two, so
 check `object$info$fitted_are_oob` before comparing numbers across
-backends – or use
+backends, or use
 [`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
 which scores every backend the same way.
 
@@ -71,22 +71,22 @@ which scores every backend the same way.
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
-Rather than return `Inf` or `NaN`, both are averaged over the rows whose
+Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
 denominator is non-zero, and are `NA` when no row qualifies. The
 `n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
 column counts finite observation/prediction pairs. Read a percentage
 error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
 subset of the data, whatever its value.
 
-This bites on any response taking exact zeros — counts, rainfall,
+This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
 of 120, `MAPE` is an average over the 58 non-zero rows, which
 `n_MAPE = 58` now says. `SMAPE` fails differently and more subtly: it
-drops the rows where observation and prediction are both near zero —
-which on a well-fitted zero-inflated model are the rows it got *right* —
-so it averages the harder rows only and reads worse than the fit
-deserves; `n_SMAPE` shows how many rows it kept, and the count is only a
-label, not a repair.
+drops the rows where observation and prediction are both near zero
+(which on a well-fitted zero-inflated model are the rows it got
+*right*), so it averages the harder rows only and reads worse than the
+fit deserves; `n_SMAPE` shows how many rows it kept, and the count is
+only a label, not a repair.
 
 `RMSE`, `MAE` and \\R^2\\ use every finite row and are unaffected;
 prefer them whenever the response can be zero. For a Bayesian fit,
@@ -111,8 +111,8 @@ For the Bayesian backend,
 additionally reports CRPS and interval coverage at 50, 80 and 95
 percent. Both are proper scoring rules computed from posterior draws, so
 they are meaningful for any `family` the backend accepts, and they are
-the numbers to compare when the response is not Gaussian. Note that when
-every fold fails, the `fold_metrics` frame
+the numbers to compare when the response is not Gaussian. When every
+fold fails, the `fold_metrics` frame
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 returns carries the CRPS column but not the `coverage_*` columns, so
 code that reads those columns must tolerate their absence.

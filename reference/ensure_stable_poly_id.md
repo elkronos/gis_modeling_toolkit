@@ -38,9 +38,9 @@ ensure_stable_poly_id(
 - transform_for_sort:
 
   CRS used only for computing sort-key coordinates. Default 4326. This
-  is the whole mechanism by which the IDs are stable — sorting in one
+  is the whole mechanism by which the IDs are stable (sorting in one
   common CRS is what makes the same layer get the same IDs whichever
-  projection it arrives in — so if the transform fails the function says
+  projection it arrives in), so if the transform fails the function says
   so rather than quietly sorting in the input's own CRS. The sort key is
   rounded to 7 decimal degrees (about 1 cm) before ordering, so the
   floating-point noise of a round trip through a different projection

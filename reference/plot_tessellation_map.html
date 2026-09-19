@@ -30,6 +30,7 @@ overlays for a study boundary, seed points, and additional features."></head><bo
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -110,8 +111,8 @@ overlays for a study boundary, seed points, and additional features.</p>
 
 <dt id="arg-fill-col">fill_col<a class="anchor" aria-label="anchor" href="#arg-fill-col"></a></dt>
 <dd><p>Name of the COLUMN in <code>tessellation_sf</code> to map to fill;
-<code>NULL</code> for no fill.  Note that <code>fill_col</code> and <code>label_col</code>
-name columns, while <code>outline_col</code>, <code>features_col</code>,
+<code>NULL</code> for no fill.  <code>fill_col</code> and <code>label_col</code> name
+columns, while <code>outline_col</code>, <code>features_col</code>,
 <code>seeds_col</code> and <code>boundary_col</code> are colours.</p></dd>
 
 
@@ -176,11 +177,11 @@ before the <code><a href="https://rdrr.io/r/base/ns-load.html" class="external-l
 
 <dt id="arg-target-crs">target_crs<a class="anchor" aria-label="anchor" href="#arg-target-crs"></a></dt>
 <dd><p>Optional CRS for plotting. When <code>NULL</code> (the default) the
-tessellation's own CRS is used, or — if the tessellation has none — a
+tessellation's own CRS is used, or (if the tessellation has none) a
 CRS borrowed from the first overlay that carries one, so a CRS-less grid
 drawn with located features still lines up. Any layer that arrives without
-a CRS is brought into the plot's CRS rather than dropped: reprojected when
-its coordinates look like longitude/latitude, otherwise stamped with a
+a CRS is brought into the plot's CRS instead of being dropped: reprojected
+when its coordinates look like longitude/latitude, otherwise stamped with a
 warning, since a stamp assumes the coordinates were already in that CRS.</p></dd>
 
 
@@ -225,7 +226,7 @@ Default TRUE.</p></dd>
 <span class="r-in"><span>                             fill_col <span class="op">=</span> <span class="st">"cell_id"</span>, legend <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">p</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-plt img"><img src="plot_tessellation_map-1.png" alt="" width="700" height="433"></span>
+<span class="r-plt img"><img src="plot_tessellation_map-1.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

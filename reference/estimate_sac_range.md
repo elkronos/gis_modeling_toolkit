@@ -3,8 +3,8 @@
 Fits exponential (or spherical) variogram models and returns the
 *effective range*: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 \\ sill;
-for the spherical model – fitted only when the exponential fit is
-singular – the fitted range itself, which is where the spherical
+for the spherical model (fitted only when the exponential fit is
+singular) the fitted range itself, which is where the spherical
 semivariance reaches its sill exactly. Both are the distance beyond
 which two observations are (near) uncorrelated, which is what a block or
 a buffer has to exceed.
@@ -50,7 +50,7 @@ estimate_sac_range(
 
   Optional character vector. When supplied, the trend on these
   predictors is removed first and the variogram describes the residual
-  autocorrelation – the part a spatial model has to handle once the
+  autocorrelation, the part a spatial model has to handle once the
   covariates have done their work. How the trend is removed is set by
   `detrend`, and it matters: see "Detrending and the residual-variogram
   bias".
@@ -62,21 +62,21 @@ estimate_sac_range(
 
 - cutoff:
 
-  Fraction of the maximum inter-point distance (the farthest pair, found
-  on the convex hull – not the bounding-box diagonal, which depends on
-  how the axes are oriented) to use as the variogram lag cutoff. Default
-  0.5.
+  Fraction of the maximum inter-point distance to use as the variogram
+  lag cutoff. That distance is the farthest pair, found on the convex
+  hull, and not the bounding-box diagonal, which depends on how the axes
+  are oriented. Default 0.5.
 
 - range_frac:
 
   Positive numeric. A fitted range exceeding
-  `range_frac * cutoff * max_dist` – that is, beyond the longest lag the
-  empirical variogram was actually fitted over – is treated as
+  `range_frac * cutoff * max_dist` (that is, beyond the longest lag the
+  empirical variogram was actually fitted over) is treated as
   unidentified and `NA_real_` is returned.
   [`gstat::fit.variogram()`](https://r-spatial.github.io/gstat/reference/fit.variogram.html)
   yields a finite number even when the variogram never reaches a sill,
-  and such a value is extrapolation past the observed lags rather than a
-  long autocorrelation range. Passing it to
+  and such a value extrapolates past the observed lags instead of
+  measuring a long autocorrelation range. Passing it to
   `make_folds(auto_range = TRUE)` would collapse the block grid to a
   single block. Default 1.0; raise it to accept ranges extrapolated
   beyond the fitted lags.
@@ -85,8 +85,8 @@ estimate_sac_range(
 
   RNG seed for the `n_max` subsample, restored afterwards so the
   caller's random stream is untouched. Default `123L`: the subsample is
-  an internal approximation rather than part of the answer, and leaving
-  it unseeded made the returned range differ between runs on identical
+  an internal approximation and no part of the answer, and leaving it
+  unseeded made the returned range differ between runs on identical
   input (19531, 19589, 19605 on three calls) and silently advanced the
   caller's RNG. Pass `NULL` for the old unseeded behaviour, or a
   different number to check how sensitive the estimate is to the
@@ -97,7 +97,7 @@ estimate_sac_range(
 
   How the trend on `predictor_vars` is removed; ignored when there are
   none. `"ols"` (default) fits it by ordinary least squares and fits the
-  variogram to the residuals – the long-standing behaviour, which
+  variogram to the residuals. This is the long-standing behaviour, which
   underestimates the range (see the section below). `"reml"` fits the
   trend and an exponential-plus-nugget covariance together by residual
   maximum likelihood with
@@ -123,8 +123,8 @@ estimate_sac_range(
   most of the object's size (42.1 KB of 59.3 KB at \\n = 400\\, and the
   difference between a 52.4 KB and a 94.6 KB
   `make_folds(auto_range = TRUE)` result), while the numbers read from
-  them — `directional`, `directional_fitted`, `directional_status`,
-  `anisotropy` — are attached either way, and
+  them (`directional`, `directional_fitted`, `directional_status`,
+  `anisotropy`) are attached either way, and
   [`plot()`](https://rdrr.io/r/graphics/plot.default.html) draws the
   effective variogram from its own attribute. Set `TRUE` to inspect the
   directional curves.
@@ -144,26 +144,26 @@ ordinary number. The shapes carry different attributes:
   (logical: `TRUE` only when the all-pairs fit was unusable and the
   directional maximum stands in for it), `directional_status` (per
   azimuth, why a direction is `NA` in `directional`: `"ok"`,
-  `"over_cutoff"` – its range ran past the largest lag fitted –
+  `"over_cutoff"` (its range ran past the largest lag fitted),
   `"not_converged"` or `"no_fit"`), `directional_fitted` (the range each
   direction's fit reported whether or not it was usable, so a refused
   directional range stays recoverable) and `directional_fits` (a list by
   azimuth of each direction's empirical `variogram` and fitted `model`,
-  `NULL` where there is none — and `NULL` altogether unless
+  `NULL` where there is none, and `NULL` altogether unless
   `keep_directional_fits = TRUE`), `detrended` (logical: whether the
-  variogram is of the residuals on `predictor_vars` rather than the raw
-  response – a missing predictor is an error, and a failed detrending
-  fit warns and falls back to the raw response with this set to
-  `FALSE`), `detrend_method` (`"ols"` or `"reml"` when detrended, `NA`
-  otherwise), `reml` (with `detrend = "reml"`: a list with `n_used`,
-  `subsampled`, `nugget_prop` and `sigma2` from the REML fit; `NULL`
-  otherwise), `crs` (the projected CRS the variogram was fitted in – the
-  unit of the range), `max_dist`, `cutoff_dist`, `variogram` (the
-  empirical variogram), `variogram_model` (the fitted `gstat` model, or
-  with `detrend = "reml"` a `gstat` model built from the REML
-  parameters) and `nugget` (that model's nugget variance; see
+  variogram is of the residuals on `predictor_vars` or of the raw
+  response. A missing predictor is an error, and a failed detrending fit
+  warns and falls back to the raw response with this set to `FALSE`),
+  `detrend_method` (`"ols"` or `"reml"` when detrended, `NA` otherwise),
+  `reml` (with `detrend = "reml"`: a list with `n_used`, `subsampled`,
+  `nugget_prop` and `sigma2` from the REML fit; `NULL` otherwise), `crs`
+  (the projected CRS the variogram was fitted in: the unit of the
+  range), `max_dist`, `cutoff_dist`, `variogram` (the empirical
+  variogram), `variogram_model` (the fitted `gstat` model, or with
+  `detrend = "reml"` a `gstat` model built from the REML parameters) and
+  `nugget` (that model's nugget variance; see
   [`sac_nugget`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)),
-  so the fit can be inspected rather than trusted.
+  so the fit can be inspected and need not be taken on trust.
 
 - Rejected range:
 
@@ -173,20 +173,20 @@ ordinary number. The shapes carry different attributes:
   over its shorter lags (a net fall of more than 15 percent of the mean
   semivariance there, weighted by pairs), which is the shape of a
   periodic, hole-effect structure or of a variance that differs between
-  a dense cluster and the rest of the layer – not of an unremoved trend,
-  which makes the variogram rise without a sill and is caught by the
-  first test; or the fitted range is non-positive. It is classed
-  `sac_range` as well, so it prints as a bare `NA` rather than dumping
-  its attributes, and it carries `max_dist`, `cutoff_dist`, `variogram`,
-  `variogram_model` and `nugget` — the evidence for the rejection — plus
+  a dense cluster and the rest of the layer (an unremoved trend instead
+  makes the variogram rise without a sill, and the first test catches
+  that); or the fitted range is non-positive. It is classed `sac_range`
+  as well, so it prints as a bare `NA` without dumping its attributes,
+  and it carries `max_dist`, `cutoff_dist`, `variogram`,
+  `variogram_model` and `nugget` (the evidence for the rejection), plus
   `rejected_range` (the value that was refused), `rejected_reason` (one
   of `"fitted range exceeds the largest lag fitted"`,
   `"variogram model did not converge"`,
   `"empirical variogram decreases with distance"`,
-  `"fitted range is non-positive or non-finite"`), `crs` — so the units
+  `"fitted range is non-positive or non-finite"`), `crs` (so the units
   the rejected number was in stay recoverable, which is what
   [`plot()`](https://rdrr.io/r/graphics/plot.default.html) labels its
-  axis from — and `detrend_method`. It carries `directional`,
+  axis from) and `detrend_method`. It carries `directional`,
   `anisotropy`, `anisotropy_used`, `directional_status`,
   `directional_fitted` and, with `keep_directional_fits = TRUE`,
   `directional_fits` as well: the directional sweep runs whatever
@@ -215,14 +215,14 @@ downstream guard treats all three the same way it always did.
 
 The estimate is the **omnidirectional** (all-pairs) fit. Directional
 variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
-azimuths with a ±22.5° tolerance – four windows that tile all 180
-distinct azimuths exactly once – and their ranges are returned in the
+azimuths with a ±22.5° tolerance. Those four windows tile all 180
+distinct azimuths exactly once, and their ranges are returned in the
 `directional` attribute, with their largest-over-smallest ratio in
 `anisotropy`. They are a diagnostic, not the answer, for two reasons.
 Each direction sees about a quarter of the point pairs, and the maximum
 of four quarter-sample fits is biased upward: on simulated *isotropic*
 fields it came in about 40\\ front of it (all four directions fitted,
-ratio above 1.5, maximum above 1.5× the all-pairs fit) kept it out – one
+ratio above 1.5, maximum above 1.5× the all-pairs fit) kept it out. One
 isotropic field rotated in 10° steps "established" anisotropy in 14 of
 18 orientations. And the windows are fixed to the coordinate axes, so
 any answer built from them changes when the layer is rotated, which a
@@ -255,8 +255,8 @@ estimate. A log note is emitted instead when the directional ranges vary
 but the spread is consistent with sampling noise.
 
 The returned range is in the coordinate units of the (projected) data
-and can be passed directly to `make_folds(block_size = ...)` to ensure
-that CV blocks are at least as wide as the autocorrelation range.
+and can be passed directly to `make_folds(block_size = ...)` so that CV
+blocks are at least as wide as the autocorrelation range.
 
 ## Detrending and the residual-variogram bias
 
@@ -271,7 +271,7 @@ fields (n = 300, true effective range 300, nugget 0.2, 40–60 draws), as
 the median ratio of the estimate from the trend-removed data to the
 estimate from the true field:
 
-- a white-noise covariate: OLS 1.00, REML 0.99 – no bias to speak of;
+- a white-noise covariate: OLS 1.00, REML 0.99 (no bias to speak of);
 
 - a spatially smooth covariate (a random field with range 300 or 1000):
   OLS 0.97, REML 0.95–0.98;
@@ -312,8 +312,8 @@ structure: the residuals of an OLS fit to a count still have a variance
 that tracks the fitted mean. The principled remedy is a variogram of
 Pearson residuals from a model in the right family, which this function
 does not compute. Until it does, treat the range from a count response
-as an order of magnitude rather than an estimate, size blocks
-conservatively from it, and prefer
+as no more than an order of magnitude, size blocks conservatively from
+it, and prefer
 [`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)`(method = "nndm")`,
 which does not depend on a fitted range at all.
 

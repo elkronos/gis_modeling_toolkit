@@ -34,7 +34,7 @@ predict_surface(
   is built over the training extent. Must have at least one row. It is
   brought into the fit's CRS first: a CRS-less grid is given the
   interpretation the training data got (the assumption recorded on the
-  fit), with a warning, and then reprojected – otherwise a CRS-less grid
+  fit), with a warning, and then reprojected. Otherwise a CRS-less grid
   can land thousands of kilometres from the covariates and every cell
   takes the same nearest feature.
 
@@ -42,15 +42,15 @@ predict_surface(
 
   Grid resolution in CRS units. Ignored when `grid` is supplied; when
   `NULL`, derived from `n_cells`. A value that would produce more than
-  5,000,000 cells is refused, naming the implied count and the CRS units
-  – the usual cause is a value in the wrong unit. A `cell_size` wider
-  than the extent yields a single centred cell.
+  5,000,000 cells is refused, naming the implied count and the CRS
+  units. The usual cause is a value in the wrong unit. A `cell_size`
+  wider than the extent yields a single centred cell.
 
 - n_cells:
 
   Approximate cell count used to derive `cell_size`. Default 10000. Must
   be a single positive finite number and at most 5,000,000; anything
-  else is an error. Also ignored when `grid` is supplied – the grid you
+  else is an error. Also ignored when `grid` is supplied. The grid you
   pass is used verbatim.
 
 - boundary:
@@ -69,8 +69,8 @@ predict_surface(
   Rows per prediction call. Default 5000. A pure performance knob for
   the GWR and random-forest backends, whose rows do not interact. For a
   `bayesian_fit` it is also that, *provided* the grid stays inside the
-  training extent – beyond it the GP boundary has to grow and
-  predictions depend on which rows share the call; see
+  training extent. Beyond it the GP boundary has to grow and predictions
+  depend on which rows share the call; see
   [`predict.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.bayesian_fit.md).
 
 - se:
@@ -87,8 +87,8 @@ predict_surface(
 An `sf` POINT layer with a `.pred` column (and `.pred_se` when
 `se = TRUE` and available). For an auto-generated grid the resolution is
 attached as attribute `"cell_size"`. For a user-supplied `grid` it is
-only whatever `"cell_size"` attribute that object already carried –
-usually `NULL`, and `NULL` for certain if the grid had to be
+only whatever `"cell_size"` attribute that object already carried. That
+is usually `NULL`, and `NULL` for certain if the grid had to be
 re-projected, since
 [`st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
 does not preserve custom attributes. The resolution of a grid you built
@@ -98,9 +98,8 @@ is not this function's to infer.
 
 [`predict()`](https://rdrr.io/r/stats/predict.html) on a `spatial_fit`
 requires `newdata` to be constructed by hand, which makes the most
-common downstream task – produce a map – more work than it should be.
-This wraps the grid construction, covariate join, chunking and CRS
-handling.
+common downstream task (produce a map) more work than it should be. This
+wraps the grid construction, covariate join, chunking and CRS handling.
 
 Prediction over a grid is embarrassingly parallel in the sense that rows
 do not interact, so it is chunked: for `bayesian_fit` the posterior draw

@@ -30,6 +30,7 @@ buffered leave-one-out strategies."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -89,21 +90,21 @@ buffered leave-one-out strategies.</p>
 folding: <code><a href="https://r-spatial.github.io/sf/reference/geos_measures.html" class="external-link">sf::st_distance()</a></code> uses every coordinate dimension, so an
 XYZ layer would otherwise have elevation folded into every buffer, block
 and neighbour distance.  CRS-less points are aligned to a <code>boundary</code>
-or <code>prediction_points</code> that carries a CRS — reprojected when the
-coordinates look like lon/lat, otherwise stamped without reprojection,
-warning either way.</p></dd>
+or <code>prediction_points</code> that carries a CRS.  They are reprojected when
+the coordinates look like lon/lat and otherwise stamped without
+reprojection, with a warning either way.</p></dd>
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
-<dd><p>Integer; number of folds.  Must be a single whole number &gt;= 1 —
-a fraction, <code>NA</code> or a vector is an error, because a non-integer used
+<dd><p>Integer; number of folds.  Must be a single whole number &gt;= 1.
+A fraction, <code>NA</code> or a vector is an error, because a non-integer used
 to truncate silently and leave the last rows in no test set at all.
 Not every method honours it.  <code>"buffered_loo"</code> and <code>"nndm"</code> are
 leave-one-out schemes and always return <code>k = n</code> regardless of what
 was asked for; <code>"block_kfold"</code> lowers it when the grid yields fewer
 than <code>k</code> non-empty blocks, and <code>"leave_location_out"</code> lowers it
 when there are fewer than <code>k</code> distinct groups.  Read the <code>k</code>
-element of the returned list rather than assuming the requested value.  A
+element of the returned list, and do not assume the requested value.  A
 reduction is written to the package log and raises no R warning, so
 <code>tryCatch(warning = )</code> will not see it and <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings()</a></code>
 will not hide it.</p></dd>
@@ -147,28 +148,28 @@ tall.  Takes precedence over <code>block_nx</code>/<code>block_ny</code> and
 stands, so <code>block_size</code> is in your own CRS's units.  Geographic
 (lon/lat) input is projected first by <code><a href="ensure_projected.html">ensure_projected()</a></code>,
 which picks a local UTM zone or, at wide extents, an equal-area
-projection — a CRS you did not choose, whose units are metres but whose
-identity varies with the data.  <code>block_size</code> is then interpreted in
-<em>that</em> CRS.  The CRS actually used is recorded in
+projection.  That is a CRS you did not choose, whose units are metres but
+whose identity varies with the data.  <code>block_size</code> is then
+interpreted in <em>that</em> CRS.  The CRS actually used is recorded in
 <code>params$crs</code> of the returned list; project the data yourself before
 calling if you want to fix the units in advance.</p>
 <p>A <code>block_size</code> in the wrong unit asks for an enormous grid, so a
 request above 1,000,000 blocks is refused with an error naming the grid
-dimensions, the extent and the CRS's units, rather than being built.</p></dd>
+dimensions, the extent and the CRS's units.</p></dd>
 
 
 <dt id="arg-auto-range">auto_range<a class="anchor" aria-label="anchor" href="#arg-auto-range"></a></dt>
 <dd><p>Logical.  If <code>TRUE</code>, the spatial autocorrelation
-range is estimated via <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> — which fits
-directional variograms to account for anisotropy — and used as the
+range is estimated via <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> (which fits
+directional variograms to account for anisotropy) and used as the
 minimum <code>block_size</code>.  Requires <code>response_var</code>.  An explicit
 <code>block_size</code> takes precedence.  Default <code>FALSE</code>.  Sizing
 blocks from the autocorrelation range is the recommendation of Roberts
-et al. (2017) and what <span class="pkg">blockCV</span> (Valavi et al. 2019) automates;
-note that <span class="pkg">blockCV</span> takes the fitted variogram's range
+et al. (2017) and what <span class="pkg">blockCV</span> (Valavi et al. 2019) automates.
+<span class="pkg">blockCV</span> takes the fitted variogram's range
 <em>parameter</em> as the block size, whereas this uses the
-<em>effective</em> range <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> returns – three
-times that parameter for an exponential fit – so its blocks are larger
+<em>effective</em> range <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> returns (three
+times that parameter for an exponential fit), so its blocks are larger
 than <span class="pkg">blockCV</span>'s from the same variogram.</p></dd>
 
 
@@ -176,7 +177,8 @@ than <span class="pkg">blockCV</span>'s from the same variogram.</p></dd>
 <dd><p>Passed through to <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> when
 <code>auto_range = TRUE</code>.  A fitted range beyond the longest lag the
 empirical variogram was fitted over is rejected as unidentified, and block
-sizing falls back to geometry rather than collapsing to a single block.
+sizing falls back to geometry, so the grid does not collapse to a single
+block.
 Default 1.0.</p></dd>
 
 
@@ -191,7 +193,7 @@ identifies the location each observation belongs to.  Required for
 <code>method = "leave_location_out"</code>, which keeps every observation from a
 location together in the same fold.  Repeated measurements at the same
 site otherwise get split across folds, and the model is scored partly on
-sites it has already seen – which random k-fold reports as excellent
+sites it has already seen, which random k-fold reports as excellent
 performance.</p></dd>
 
 
@@ -200,10 +202,10 @@ performance.</p></dd>
 actually intend to predict onto.  Required for <code>method = "nndm"</code>.
 The grid from <code><a href="predict_surface.html">predict_surface()</a></code> is the natural choice; a
 non-POINT layer (grid cells, polygons) is reduced to representative points
-first, so the target distances are point-to-point rather than
-point-to-polygon — the latter is zero for every cell that contains a
-training point, which pulls the target distribution towards zero and
-degenerates the CV towards plain leave-one-out.</p></dd>
+first, so the target distances are point-to-point.  A point-to-polygon
+distance is zero for every cell that contains a training point, which
+pulls the target distribution towards zero and degenerates the CV towards
+plain leave-one-out.</p></dd>
 
 
 <dt id="arg-predictor-vars">predictor_vars<a class="anchor" aria-label="anchor" href="#arg-predictor-vars"></a></dt>
@@ -229,8 +231,8 @@ Default <code>0.5</code>, as in <code>CAST::nndm()</code>.</p></dd>
 <dd><p>For <code>method = "nndm"</code>: the distance up to which the two
 nearest-neighbour distance distributions are matched, in the CRS the
 folds are built in; the exclusion never pushes a held-out point's
-nearest neighbour beyond it.  In Mila et al. (2022) – and
-<code>CAST::nndm()</code> – \(\phi\) is the autocorrelation range of the
+nearest neighbour beyond it.  In Mila et al. (2022), and in
+<code>CAST::nndm()</code>, \(\phi\) is the autocorrelation range of the
 outcome: beyond it observations are effectively independent, so
 matching is unnecessary.  <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> gives such
 a value.  Default <code>NULL</code> = the largest prediction-to-training
@@ -291,8 +293,8 @@ the full <code>grid_nx</code> by <code>grid_ny</code> grid, or the row of the
 columns and in their own order.  It runs from 1 to
 <code>params$n_blocks</code> and is the identity when nothing was dropped.
 <code>params$block_sizes</code> is the number of points in each block, indexed
-by <code>block_id</code> – zeros are empty blocks that
-<code>drop_empty_blocks = FALSE</code> kept – and <code>params$fold_blocks</code>
+by <code>block_id</code> (zeros are empty blocks that
+<code>drop_empty_blocks = FALSE</code> kept), and <code>params$fold_blocks</code>
 is a list with one integer vector per fold naming the blocks packed into
 it.  Between them the folds account for every block exactly once,
 empty ones included, so a fold's territory on the map is all of its
@@ -301,22 +303,22 @@ blocks and not merely the ones that happen to hold points.  So
 it is made of, a fold can be seen to be one contiguous region or
 several, and the blocks can be drawn over the data
 (<code><a href="plot_folds.html">plot_folds()</a></code> does so).</p>
-<p>For the methods that work in projected space — <code>"block_kfold"</code>,
-<code>"buffered_loo"</code> and <code>"nndm"</code> — <code>params</code> carries a
-<code>params$blocks_supplied</code> says whether the blocks came from
-<code>blocks</code> rather than from a grid built here, and
+<p>For the methods that work in projected space (<code>"block_kfold"</code>,
+<code>"buffered_loo"</code> and <code>"nndm"</code>), <code>params</code> carries a
+<code>params$blocks_supplied</code> that says whether the blocks came from
+<code>blocks</code> or from a grid built here, and
 <code>params$boundary_supplied</code> whether a <code>boundary</code> was given;
 <code>params$row_probe</code> is a small sample of row IDs and coordinates
 that every <code>cv_*()</code> compares against the data it is handed, so
-folds built from a different layer of the same size are refused rather
-than applied silently.</p>
+folds built from a different layer of the same size are refused, never
+applied silently.</p>
 <p>For the methods that work in projected space, <code>params</code> also carries a
 <code>crs</code> element naming the CRS the folds were built in (an
 <code>"EPSG:code"</code> string where there is one, otherwise the CRS's input
-definition).  Every length in <code>params</code> — <code>block_size</code>,
-<code>sac_range</code>, <code>buffer</code>, <code>median_buffer</code> — is in that CRS's
+definition).  Every length in <code>params</code> (<code>block_size</code>,
+<code>sac_range</code>, <code>buffer</code>, <code>median_buffer</code>) is in that CRS's
 units, which for geographic input is a CRS
-<code><a href="ensure_projected.html">ensure_projected()</a></code> chose rather than one you passed.</p>
+<code><a href="ensure_projected.html">ensure_projected()</a></code> chose for you, and not one you passed.</p>
 <p>Rows whose geometry is empty or has non-finite coordinates are dropped
 before folding, with a logged warning naming the count; they appear in no
 fold and in no <code>assignment</code> row.</p>
@@ -338,17 +340,17 @@ excludes everything within a fixed <code>buffer</code>.</p>
 <p><code>"leave_location_out"</code> groups by <code>group_var</code>, so all
 observations from a location share a fold.</p>
 <p><code>"nndm"</code> implements the distance-matching principle of Milà et al.
-(2022): rather than choosing a buffer arbitrarily, it sizes the exclusion
-around each held-out point so that the resulting training-to-test distance
-distribution approaches the distribution of distances from your actual
-prediction locations to the training data.</p>
+(2022): it sizes the exclusion around each held-out point, with no arbitrary
+buffer, so that the resulting training-to-test distance distribution
+approaches the distribution of distances from your actual prediction
+locations to the training data.</p>
 <p>The procedure is the paper's own (as in <code>CAST::nndm()</code>), and it is
 deterministic.  Let \(G_{ij}\) be the empirical distribution of
 prediction-to-nearest-training distances and \(G_j^*\) the distribution
 of each held-out point's nearest remaining training point.  Starting from
 plain leave-one-out, the point with the smallest \(G_j^*\) at which the
-realised distribution exceeds the target – \(G_j^*(r) &gt; G_{ij}(r)\) –
-has its nearest training neighbour removed, and this repeats until no such
+realised distribution exceeds the target (\(G_j^*(r) &gt; G_{ij}(r)\)) has
+its nearest training neighbour removed, and this repeats until no such
 point remains, subject to two limits: a point's nearest-neighbour distance
 is never pushed beyond <code>phi</code> (default: the largest prediction distance,
 since a training point already further than every prediction distance has
@@ -375,9 +377,9 @@ the largest remaining excess; compare <code>params$target_median</code> with
 (reprojected if they look like lon/lat, otherwise stamped, warning either
 way), and the blocks are then brought into the CRS the folds are built in.
 A point inside more than one block is given the first (lowest row) that
-contains it, as for a point on the shared edge of two grid cells; when the
-blocks that caught such a point share area rather than an edge – the
-layer overlaps and is not a partition – this is warned about.  A point
+contains it, as for a point on the shared edge of two grid cells.  When the
+blocks that caught such a point share area instead of an edge, the layer
+overlaps and is not a partition, and this is warned about.  A point
 inside no block is assigned to the nearest one, by distance to the polygon
 itself, and the count of such points is warned about, unless they sit
 within a millionth of the extent of a block, which is an edge that
@@ -391,8 +393,8 @@ lowered to the number of blocks that hold points when that is smaller.
 <code>params$grid_nx</code> and
 <code>params$grid_ny</code> are <code>NA</code>, and <code>params$block_scale</code> is the
 median over blocks that hold points of the side of the square with the
-block's area – the length compared against the autocorrelation range for
-the leakage warning, since a polygon has no single edge length.</p>
+block's area.  That is the length compared against the autocorrelation range
+for the leakage warning, since a polygon has no single edge length.</p>
 <p>The connection to the rest of the package is
 <code><a href="build_tessellation.html">build_tessellation()</a></code>: every shape it builds can be a block
 design here, including Voronoi cells around

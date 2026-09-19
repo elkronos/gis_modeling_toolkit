@@ -2,12 +2,12 @@
 
 The constructor for the `spatial_fit` class, and the public entry point
 for plugging your own model backend into this package. The three
-built-in fitters –
-[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
+built-in fitters
+([`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
 and
-[`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
-– all end by calling it, and so should a custom `fit_fn` written for
+[`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md))
+all end by calling it, and so should a custom `fit_fn` written for
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md):
 wrapping your model in a `spatial_fit` is what lets it use the package's
 folds, metrics, comparison and area-of-applicability machinery
@@ -66,11 +66,11 @@ new_spatial_fit(
 
 - info:
 
-  Named list of model-specific extras. Set `fitted_are_oob = TRUE` if
+  Named list of model-specific extras. Set `fitted_are_oob = TRUE` when
   your [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) values
-  are held out rather than in-sample, so
+  are held out instead of in-sample, so
   [`summary()`](https://rdrr.io/r/base/summary.html) labels them
-  honestly.
+  correctly.
 
 ## Value
 
@@ -81,7 +81,7 @@ An object of class `c(subclass, "spatial_fit")`.
 There are two obligations. Return an object built here from your
 `fit_fn`, and define a
 [`predict()`](https://rdrr.io/r/stats/predict.html) method for the
-`subclass` you chose –
+`subclass` you chose.
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 scores folds by calling the
 [`predict()`](https://rdrr.io/r/stats/predict.html) generic on the fit,
@@ -97,8 +97,8 @@ both error, naming the method to define, without one.
 ## The coef() contract
 
 [`coef()`](https://rdrr.io/r/stats/coef.html) on one of the three
-built-in backends either returns the coefficients or signals an error –
-it never returns `NULL`. A custom subclass inherits
+built-in backends either returns the coefficients or signals an error.
+It never returns `NULL`. A custom subclass inherits
 [`stats::coef.default()`](https://rdrr.io/r/stats/coef.html), which
 returns `NULL`, so define a `coef.<subclass>()` that errors when your
 backend has no coefficients; otherwise the hazard described below
@@ -110,7 +110,7 @@ and
 [`coef.bayesian_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md)
 error when the backend cannot supply them (a missing package, an engine
 without the expected component). A `NULL` return would be
-indistinguishable from "this model genuinely has no fixed effects", so
+indistinguishable from "this model has no fixed effects", so
 `lapply(fits, coef)` would quietly produce a shorter answer than the
 caller expected. Wrap in [`try()`](https://rdrr.io/r/base/try.html) or
 [`tryCatch()`](https://rdrr.io/r/base/conditions.html) when sweeping

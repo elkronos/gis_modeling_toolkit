@@ -3,8 +3,8 @@
 range leaks: every held-out point has a near-identical neighbour in the
 training set, and the score is optimistic in proportion.  The single
 number a cv_*() call returns cannot show this.  This runs the same
-cross-validation at a ladder of block sizes – and, by default, once with
-random folds as the fully leaky reference – and returns the metric at each,
+cross-validation at a ladder of block sizes, and by default once with
+random folds as the fully leaky reference.  It returns the metric at each,
 with the estimated autocorrelation range alongside so that the curve can be
 read against it: it rises as the blocks pass the range and then plateaus,
 and the height of the rise is how much the random-fold number overstated
@@ -12,8 +12,8 @@ the model."><meta property="og:description" content="A blocked cross-validation 
 range leaks: every held-out point has a near-identical neighbour in the
 training set, and the score is optimistic in proportion.  The single
 number a cv_*() call returns cannot show this.  This runs the same
-cross-validation at a ladder of block sizes – and, by default, once with
-random folds as the fully leaky reference – and returns the metric at each,
+cross-validation at a ladder of block sizes, and by default once with
+random folds as the fully leaky reference.  It returns the metric at each,
 with the estimated autocorrelation range alongside so that the curve can be
 read against it: it rises as the blocks pass the range and then plateaus,
 and the height of the rise is how much the random-fold number overstated
@@ -46,6 +46,7 @@ the model."></head><body>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>End to end</h6></li>
     <li><a class="dropdown-item" href="../articles/spatialkit_nc_demo.html">spatialkit: Tessellations, Spatial Cross-Validation and Models</a></li>
+    <li><a class="dropdown-item" href="../articles/reporting.html">What to save, and what to report</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -69,8 +70,8 @@ the model."></head><body>
 range leaks: every held-out point has a near-identical neighbour in the
 training set, and the score is optimistic in proportion.  The single
 number a <code>cv_*()</code> call returns cannot show this.  This runs the same
-cross-validation at a ladder of block sizes – and, by default, once with
-random folds as the fully leaky reference – and returns the metric at each,
+cross-validation at a ladder of block sizes, and by default once with
+random folds as the fully leaky reference.  It returns the metric at each,
 with the estimated autocorrelation range alongside so that the curve can be
 read against it: it rises as the blocks pass the range and then plateaus,
 and the height of the rise is how much the random-fold number overstated
@@ -184,9 +185,9 @@ effective range, or <code>NA</code>), <code>crs</code>, <code>n_fits</code>, and
 <p>Each block size is a full cross-validation, so the cost is
 <code>length(block_sizes) * k</code> fits, plus <code>k</code> for the random
 reference.  <code>max_fits</code> caps that (default 60: six sizes at
-<code>k = 5</code>, plus the reference) and the call refuses to start rather than
-run past it, naming the number it would have needed.  Raise <code>max_fits</code>
-deliberately; the RF example below takes seconds, a Bayesian
+<code>k = 5</code>, plus the reference).  A sweep that would run past the cap
+refuses to start, naming the number of fits it would have needed.  Raise
+<code>max_fits</code> deliberately; the RF example below takes seconds, a Bayesian
 <code>fit_fn</code> takes minutes per fit.</p>
     </div>
     <div class="section level2">
@@ -198,8 +199,8 @@ log-spaced from a twenty-fifth to a half of the shorter side of the
 data's extent, and any size at which the grid would hold fewer than
 <code>k</code> blocks is dropped, so every point on the curve is a <code>k</code>-fold
 cross-validation of the same shape.  Sizes are in the units of the CRS the
-folds are built in – <code><a href="make_folds.html">make_folds()</a></code>'s <code>params$crs</code>, metres for
-geographic input – and the returned table records that CRS.</p>
+folds are built in (<code><a href="make_folds.html">make_folds()</a></code>'s <code>params$crs</code>, metres for
+geographic input), and the returned table records that CRS.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -236,7 +237,7 @@ geographic input – and the returned table records that CRS.</p>
 <span class="r-in"><span>  <span class="va">sw</span></span></span>
 <span class="r-in"><span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"ggplot2"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-plt img"><img src="cv_block_size_sweep-1.png" alt="" width="700" height="433"></span>
+<span class="r-plt img"><img src="cv_block_size_sweep-1.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
