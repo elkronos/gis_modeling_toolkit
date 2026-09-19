@@ -104,7 +104,7 @@ sum(is.na(cells$n))
 rather than being silently dropped. A region with no data in it is a fact about
 the map, and one worth keeping: it is where the model has nothing to stand on.
 
-```{r map, eval=has_ggplot, fig.height=3.6}
+```{r map, eval=has_ggplot, fig.height=3.6, fig.alt="The North Carolina counties grouped into eighteen hexagonal regions, each shaded by the mean 1974 SIDS rate of the counties inside it. County outlines show underneath. Six regions along the edges hold no county and are grey."}
 library(ggplot2)
 
 ggplot() +

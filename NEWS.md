@@ -522,6 +522,17 @@
 
 ## Bug fixes
 
+* Figure labels no longer run off the right edge.  ggplot2 clips a title,
+  subtitle or caption that is wider than the figure instead of wrapping it,
+  and at the six-inch width a help page and an article draw these at, three
+  plots lost text: `plot.aoa()` dropped the end of its title and of the line
+  giving the share of prediction locations inside the threshold, and
+  `plot.sac_range()` and `plot.spatial_fit(type = "variogram")` cut the
+  sentence that says why no range was identified, one of them mid-word.  The
+  labels built from a fit's own numbers are now wrapped at draw time, at a
+  width measured from the drawn text, and the fixed titles are broken where
+  they read.
+
 * `ensure_stable_poly_id()` could not give IDs to a tessellation this package
   had just built.  It repaired the geometry in the layer's own CRS and then
   transformed it to the sort CRS, but validity is a property of the geometry
@@ -617,6 +628,11 @@
   call runs exactly as before.
 
 ## Documentation
+
+* Every figure in the vignettes carries alt text, which is what a screen
+  reader announces and the only thing a reader gets when an image fails to
+  load.  Each one states what the picture shows and what it is there to
+  demonstrate, rather than naming the axes.
 
 * Every one of the 77 help pages now ends with a "See also" that leads
   somewhere.  Thirty-six had none, `predict_surface()`, `model_metrics()` and

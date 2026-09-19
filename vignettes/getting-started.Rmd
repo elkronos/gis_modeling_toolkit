@@ -197,7 +197,7 @@ head(st_drop_geometry(cells)[, c("poly_id", "n", "resp_mean_rate",
 Every aggregate comes with a count and a standard error. The `..sd_` and `..se_`
 columns are prefixed so they cannot collide with a column of your own.
 
-```{r map, eval=has_ggplot, fig.height=4.5}
+```{r map, eval=has_ggplot, fig.height=4.5, fig.alt="Choropleth of North Carolina divided into about twenty hexagonal cells, each shaded by its mean response rate. The values run from near zero in one western cell to about four in a southern coastal cell, with no obvious regional pattern."}
 plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate")
 ```
 

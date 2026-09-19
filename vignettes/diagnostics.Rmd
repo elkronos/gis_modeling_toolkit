@@ -232,7 +232,7 @@ aoa <- area_of_applicability(gp, model = fit)
 aoa
 ```
 
-```{r aoa-plot, fig.height=4.5}
+```{r aoa-plot, fig.height=4.5, fig.alt="Cumulative distribution of the dissimilarity index. The prediction locations rise far more slowly than the cross-validated training points, and most of them sit beyond the dashed threshold, so the cross-validated score does not apply to most of the grid."}
 plot(aoa)
 ```
 

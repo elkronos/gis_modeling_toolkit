@@ -145,7 +145,7 @@ points_sf <- st_sf(
 )
 ```
 
-```{r quick-peek, fig.height=3.6}
+```{r quick-peek, fig.height=3.6, fig.alt="Three hundred simulated observation points scattered across North Carolina, coloured by response value. Lower values cluster in the west and higher values along the eastern coast."}
 ggplot() +
   geom_sf(data = nc_boundary, fill = "grey95", colour = "black") +
   geom_sf(data = points_sf, aes(colour = y), size = 1.1) +
@@ -306,19 +306,19 @@ make_choropleth <- function(tess, boundary, points, title = NULL) {
 }
 ```
 
-```{r choro-voronoi, fig.cap="Voronoi choropleth"}
+```{r choro-voronoi, fig.cap="Voronoi choropleth", fig.alt="The same response aggregated into forty Voronoi cells over North Carolina. Cell sizes follow the density of the observations, and the west-to-east gradient from low to high values is visible."}
 make_choropleth(tess_voronoi, nc_boundary, points_sf, "Voronoi tessellation")
 ```
 
-```{r choro-hex, fig.cap="Hex grid choropleth"}
+```{r choro-hex, fig.cap="Hex grid choropleth", fig.alt="The same response aggregated into a regular hexagonal grid of about fifty equal-area cells, showing the same west-to-east gradient on a fixed geometry rather than one drawn from the data."}
 make_choropleth(tess_hex, nc_boundary, points_sf, "Hexagonal grid")
 ```
 
-```{r choro-square, fig.cap="Square grid choropleth"}
+```{r choro-square, fig.cap="Square grid choropleth", fig.alt="The same response aggregated into a regular square grid of about forty-five cells, showing the same gradient with the axis-aligned artefacts a square grid introduces."}
 make_choropleth(tess_square, nc_boundary, points_sf, "Square grid")
 ```
 
-```{r choro-tri, fig.cap="Delaunay choropleth", eval=has_ggplot && has_geom}
+```{r choro-tri, fig.cap="Delaunay choropleth", eval=has_ggplot && has_geom, fig.alt="The same response aggregated onto the Delaunay triangulation of the observation points, which produces many small irregular triangles rather than compact cells."}
 make_choropleth(tess_tri, nc_boundary, points_sf, "Delaunay triangulation")
 ```
 
@@ -327,7 +327,7 @@ its own scale, so a colour in one means a different value in the next; here the
 limits are set from all three together and `patchwork` then collects the
 legends into one, which is what makes reading down the page legitimate.
 
-```{r comparison-panel, fig.width=7, fig.height=5.4, fig.cap="All three at a glance", eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE)}
+```{r comparison-panel, fig.width=7, fig.height=5.4, fig.cap="All three at a glance", eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE), fig.alt="The Voronoi, hexagonal and square maps stacked on one shared colour scale, so the cell values can be compared down the page. All three show the same west-to-east gradient; they differ in how the cell boundaries fall."}
 library(patchwork)
 
 # The cell means of all three, so the colour scale can span them.
@@ -411,7 +411,7 @@ c(random = folds_random$k, blocked = folds_blocked$k)
 `plot_folds()` is the fastest way to see whether the blocks actually separate
 the data or are smaller than the autocorrelation range and therefore leaking:
 
-```{r plot-folds, fig.width=7, fig.height=6, eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE)}
+```{r plot-folds, fig.width=7, fig.height=6, eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE), fig.alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map each fold occupies a contiguous part of the state, with the block grid drawn behind."}
 library(patchwork)
 (plot_folds(folds_random,  points_sf, boundary = nc_boundary) /
  plot_folds(folds_blocked, points_sf, boundary = nc_boundary)) +
@@ -488,7 +488,7 @@ matches to four decimals. If you need a figure comparable across backends, use
 `plot()` on any `spatial_fit` maps the residuals; visible structure means
 unmodelled spatial autocorrelation. `residual_morans_i()` puts a number on it.
 
-```{r rf-resid, fig.height=3.6, eval=has_ggplot && has_ranger}
+```{r rf-resid, fig.height=3.6, eval=has_ggplot && has_ranger, fig.alt="Residuals of the random forest mapped over North Carolina on a red-to-blue scale. Positive residuals cluster in the west and negative ones through the centre, which is the visible spatial structure the model has not captured."}
 plot(rf_fit, type = "residuals")
 ```
 
@@ -537,7 +537,7 @@ cmp$overall
 `predict_surface()` builds a regular grid over the training extent, joins
 covariates from the nearest observation, clips to the boundary and predicts:
 
-```{r surface, fig.height=3.6, eval=has_ggplot && has_ranger}
+```{r surface, fig.height=3.6, eval=has_ggplot && has_ranger, fig.alt="The fitted random forest predicted onto a regular grid over North Carolina and clipped to the state boundary, with predictions lowest in the far west and highest along the eastern coast."}
 surf <- predict_surface(rf_fit, n_cells = 3000,
                         covariates = points_sf, boundary = nc_boundary)
 
@@ -554,7 +554,7 @@ locations whose predictor values look nothing like the training data.
 `area_of_applicability()` marks where the cross-validated score actually
 applies. Pass the folds you validated with:
 
-```{r aoa, fig.height=3.6, eval=has_ggplot && has_ranger}
+```{r aoa, fig.height=3.6, eval=has_ggplot && has_ranger, fig.alt="The same predicted surface with cells outside the area of applicability blanked out. Nothing is blanked, because the grid took its covariates from the nearest observation and so holds no combination the model had not already seen."}
 aoa <- area_of_applicability(surf, model = rf_fit, folds = folds_blocked)
 
 cat(sprintf("inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n",

@@ -137,7 +137,7 @@ the field, and whether the cell values can be told apart from noise. `moran_z`
 is the diagnostic, and a large deviate says the cells are still leaving spatial
 pattern on the table.
 
-```{r plot-profile, fig.height=8}
+```{r plot-profile, fig.height=8, fig.alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls then flattens, reliability declines steadily, the elbow statistic peaks around twenty cells, and the absolute Moran's z is lowest below twenty-five. A red dotted line marks each criterion's choice and a shaded band the region within tolerance of it: the four disagree, and each flat region is wide."}
 plot(prof)
 ```
 
