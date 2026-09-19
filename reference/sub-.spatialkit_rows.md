@@ -37,6 +37,13 @@ The subset, without the row records and without this class. A subset
 that is not a data frame (a single column taken with `drop = TRUE`) is
 returned unchanged.
 
+## See also
+
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+and
+[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md),
+the two functions that attach the records this method removes.
+
 ## Examples
 
 ``` r

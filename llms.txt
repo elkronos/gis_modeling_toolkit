@@ -769,8 +769,6 @@ Build the regions, with reproducible cell identifiers.
   : Create square or hexagonal grid polygons over a boundary
 - [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
   : Create and cache grid polygons over a boundary
-- [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
-  : Clear the in-session grid cache
 - [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
   : Create deterministic, stable polygon IDs based on spatial sort keys
 - [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md)
@@ -821,8 +819,6 @@ backend of your own.
   brms)
 - [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
   : Heuristic length-scale bounds for a squared-exponential GP
-- [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
-  : Clear cached fitted values for a Bayesian spatial model
 
 ## Methods on a fit
 
@@ -909,10 +905,17 @@ the residuals.
 - [`plot(`*`<aoa>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md)
   : Plot the dissimilarity distribution behind an area of applicability
 
-## Package options
+## Package options and caches
+
+The console log, and the two in-session caches. Both caches are keyed on
+the inputs, so they only need clearing when memory is the constraint.
 
 - [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
   : Quieten (or restore) spatialkit's console log
+- [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
+  : Clear the in-session grid cache
+- [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
+  : Clear cached fitted values for a Bayesian spatial model
 
 # Articles
 

@@ -264,7 +264,8 @@ Applications*. Pion, London. Section 8.3.
 Other model evaluation:
 [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md),
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
-[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md),
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
 
 ## Examples
 

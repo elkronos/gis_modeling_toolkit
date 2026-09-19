@@ -106,6 +106,11 @@ do not interact, so it is chunked: for `bayesian_fit` the posterior draw
 matrix is `n_draws x n_newdata`, which will exhaust memory on a fine
 grid long before the fit itself would.
 
+## See also
+
+Other prediction:
+[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+
 ## Examples
 
 ``` r

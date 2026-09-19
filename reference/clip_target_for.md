@@ -55,6 +55,14 @@ An sf polygon layer representing the clip target. For lon/lat input the
 layer is returned in the automatically selected local projected CRS, not
 the input CRS; a message reports this unless `quiet = TRUE`.
 
+## See also
+
+Other spatial data preparation:
+[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+[`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+
 ## Examples
 
 ``` r

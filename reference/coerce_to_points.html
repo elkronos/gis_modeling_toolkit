@@ -97,6 +97,14 @@ no point for an EMPTY LINESTRING.  Rather than silently misaligning the
 result (or letting sf crash), such input raises an error; drop empty
 geometries first with <code>x &lt;- x[!sf::st_is_empty(x), ]</code>.</p>
     </div>
+    <div class="section level2">
+    <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
+    <div class="dont-index"><p>Other spatial data preparation:
+<code><a href="clip_target_for.html">clip_target_for()</a></code>,
+<code><a href="ensure_projected.html">ensure_projected()</a></code>,
+<code><a href="harmonize_crs.html">harmonize_crs()</a></code>,
+<code><a href="prep_model_data.html">prep_model_data()</a></code></p></div>
+    </div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>

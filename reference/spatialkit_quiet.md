@@ -38,6 +38,13 @@ These are log records, not R conditions:
 `tryCatch(warning = )` do not see them. Conditions the package raises as
 real R warnings are unaffected by this function.
 
+## See also
+
+Other package options and caches:
+[`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
+[`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md),
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+
 ## Examples
 
 ``` r

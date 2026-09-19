@@ -31,6 +31,13 @@ The cache environment is shared by every copy of a fit, so clearing it
 through one copy clears it for all of them. That is harmless: the others
 recompute.
 
+## See also
+
+Other package options and caches:
+[`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md),
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
+[`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+
 ## Examples
 
 ``` r

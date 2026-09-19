@@ -126,6 +126,14 @@ layer, or fixing the units that
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
 `block_size` will be interpreted in.
 
+## See also
+
+Other spatial data preparation:
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+[`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+
 ## Examples
 
 ``` r

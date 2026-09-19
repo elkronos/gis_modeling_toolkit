@@ -762,6 +762,45 @@
 
 ### Documentation
 
+- Every one of the 77 help pages now ends with a “See also” that leads
+  somewhere. Thirty-six had none,
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  and every S3 method among them, and two more carried a family of one,
+  which roxygen renders as nothing at all. Four families are new:
+  **spatial data preparation**
+  ([`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+  [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+  [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)),
+  **package options and caches**
+  ([`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md),
+  the two cache clearers,
+  [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)),
+  **methods on a fitted model** (the
+  [`predict()`](https://rdrr.io/r/stats/predict.html),
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html),
+  [`coef()`](https://rdrr.io/r/stats/coef.html),
+  [`print()`](https://rdrr.io/r/base/print.html) and
+  [`summary()`](https://rdrr.io/r/base/summary.html) methods of the
+  three backends, which document one contract between them) and **print
+  methods** for the other result objects. The seed generators, the
+  cached grid constructor and
+  [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+  join **tessellation**,
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  joins **model evaluation**,
+  [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
+  joins **cross-validation**,
+  [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
+  joins **model fitting**, and
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  is now in **prediction** as well as cross-validation. The website’s
+  reference index moves the two cache clearers into the same group, so
+  it and the help pages agree.
+
 - Ten numbered scripts are installed with the package, in
   `system.file("scripts", package = "spatialkit")`. `00-run-all.R` runs
   them in order; each of `01-` to `10-` is self-contained and covers one

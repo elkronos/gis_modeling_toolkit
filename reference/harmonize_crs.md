@@ -52,6 +52,14 @@ EPSG:4326 and **reprojected** to the other object's CRS (or
 which relabels without moving them. Either way the assumption is
 announced with a warning.
 
+## See also
+
+Other spatial data preparation:
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+
 ## Examples
 
 ``` r

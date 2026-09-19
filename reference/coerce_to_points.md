@@ -46,6 +46,14 @@ which yields no point for an EMPTY LINESTRING. Rather than silently
 misaligning the result (or letting sf crash), such input raises an
 error; drop empty geometries first with `x <- x[!sf::st_is_empty(x), ]`.
 
+## See also
+
+Other spatial data preparation:
+[`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+[`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+
 ## Examples
 
 ``` r

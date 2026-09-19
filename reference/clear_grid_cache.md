@@ -18,6 +18,13 @@ clear_grid_cache(cache_env = .gmt_cache)
 
 Invisibly, the number of entries removed.
 
+## See also
+
+Other package options and caches:
+[`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
+[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md),
+[`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+
 ## Examples
 
 ``` r
