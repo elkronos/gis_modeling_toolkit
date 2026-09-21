@@ -109,8 +109,9 @@ anywhere it has not seen. Random cross-validation will not catch this:
 nearby points leak between folds, so the memorised surface scores well.
 That is how the practice became common. Meyer et al. (2019) show the
 collapse directly. \code{include_coords} therefore defaults to
-\code{FALSE}, and setting it to \code{TRUE} logs a caution (it is a
-deliberate choice, so it is not raised as an R warning). If you do use it,
+\code{FALSE}, and setting it to \code{TRUE} logs a caution, once per
+session (it is a deliberate choice, so it is not raised as an R warning,
+and it is not repeated for every fold of a cross-validation). If you do use it,
 score the model with \code{\link{cv_spatial}} and blocked folds, never with
 the out-of-bag error.
 }
@@ -149,8 +150,8 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
   fit <- fit_rf_model(dat, "z", c("a", "b"))
-  fit
-  fit$info$importance
+  print(fit)              # print(): only a block's last value shows on its own
+  fit$info$importance     # permutation importance, a and b
 }
 }
 \references{

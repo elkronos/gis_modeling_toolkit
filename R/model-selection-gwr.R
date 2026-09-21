@@ -496,8 +496,10 @@
 #'   )
 #'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
 #'   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-#'   sel$best
+#'   print(sel)              # every model tried, by AICc
+#'   print(sel$best)         # the winning predictor set: a and b, not noise
 #'   fit <- fit_gwr_model(dat, "z", sel$best)
+#'   fit
 #' }
 #' @export
 gwr_model_selection <- function(data_sf, response_var, candidate_vars,

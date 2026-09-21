@@ -366,7 +366,7 @@
 #' \eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
 #' residual moments, which are exact here because the cell-level residuals
 #' are OLS residuals by construction.  Over the same runs \eqn{z} had mean
-#' \eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection
+#' \eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5% rejection
 #' rate of 0.040--0.057 at every \code{k}.  Both quantities are reported in
 #' the \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
 #'
@@ -463,9 +463,14 @@
 #'   the relative between-restart spread at each \code{k} (\code{wss_spread}),
 #'   the number of rising steps on it (\code{wss_bumps}), the restart
 #'   budget (\code{nstart}), the geometric elbow the evaluated
-#'   neighbourhood was drawn around (\code{knee_k}) and the \code{k} at which
+#'   neighbourhood was drawn around (\code{knee_k}), the \code{k} at which
 #'   k-means failed (\code{failed_k}; their \code{wss} entries are
-#'   interpolated from the neighbours, not measured).  When the model-aware
+#'   interpolated from the neighbours, not measured) and the \code{k} the
+#'   model-aware pass actually scored (\code{eval_ks}, the elbow's
+#'   neighbourhood).  Under \code{"combined"} it also carries the WSS of the
+#'   re-run clustering at those \code{k} (\code{wss_eval}), the rank average
+#'   that ordered them (\code{combined_rank}, named by \code{k}) and
+#'   \code{criterion = "combined"}.  When the model-aware
 #'   path itself falls back to the geometric result (no viable k in the elbow
 #'   neighbourhood, or Moran's I could not be computed for any candidate), no
 #'   diagnostics are available and the attribute is absent. Both fallbacks are
@@ -568,7 +573,11 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   if (identical(select_on, "split")) {
     split <- .spatial_half_split(data_sf, seed = set_seed,
                                  caller = "determine_optimal_levels")
-    data_sf <- data_sf[split$selection, , drop = FALSE]
+    # The split exists so that a selection made on the response can be
+    # estimated on points it never saw.  A geometric selection reads no
+    # response, so there is nothing for the other half to protect; it sees
+    # every point, as the page says, and only the attribute is added.
+    if (has_model_vars) data_sf <- data_sf[split$selection, , drop = FALSE]
   }
   .with_split <- function(out) {
     if (!is.null(split)) attr(out, "split") <- split

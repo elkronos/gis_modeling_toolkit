@@ -359,3 +359,269 @@ test_that("print() survives a subset that no longer carries the ladder", {
   expect_error(plot(prof[0, ]), "no levels to draw")
 })
 
+
+
+test_that("summary() puts every criterion's pick in one table", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 10)))
+
+  s <- summary(prof)
+  expect_s3_class(s, "resolution_summary")
+  expect_s3_class(s, "data.frame")
+  expect_true(all(c("criterion", "best", "flat_min", "flat_max", "n_flat",
+                    "value", "at_floor", "at_ceiling") %in% names(s)))
+  expect_true(nrow(s) >= 1L)
+  expect_true(all(s$criterion %in% c("cp", "reliability", "elbow", "moran_z")))
+  expect_false(anyDuplicated(s$criterion) > 0L)
+
+  # Each row has to agree with select_resolution() on the same criterion:
+  # the table is a view of that function, not a second implementation.
+  for (i in seq_len(nrow(s))) {
+    one <- select_resolution(prof, criterion = s$criterion[i])
+    expect_identical(s$best[i], one$best)
+    expect_identical(s$flat_min[i], min(one$flat))
+    expect_identical(s$flat_max[i], max(one$flat))
+    expect_identical(s$n_flat[i], length(one$flat))
+    expect_equal(s$value[i], as.numeric(one$value))
+  }
+
+  # `common` is the intersection of the BANDS, not of the picks, and every
+  # level in it is inside every band.
+  cm <- attr(s, "common")
+  expect_true(is.integer(cm))
+  for (i in seq_len(nrow(s)))
+    expect_true(all(cm >= s$flat_min[i] & cm <= s$flat_max[i]))
+  expect_identical(attr(s, "ladder"), as.integer(prof$levels))
+  expect_identical(attr(s, "n_levels"), nrow(prof))
+  # `bands` carries each region in full, because flat_min/flat_max are only
+  # its ends and a region can skip a rung.
+  expect_identical(names(attr(s, "bands")), s$criterion)
+  for (i in seq_len(nrow(s)))
+    expect_identical(attr(s, "bands")[[i]], select_resolution(prof, s$criterion[i])$flat)
+
+  # tol widens the bands, so it can only grow the intersection.
+  expect_gte(length(attr(summary(prof, tol = 0.2), "common")), length(cm))
+})
+
+
+test_that("summary() reports only the criteria a profile can score", {
+  skip_if_not_installed("gstat")
+  pts <- rp_field(n = 250)
+  geo <- suppressWarnings(suppressMessages(resolution_profile(pts, n_levels = 6)))
+
+  # No response: cp, reliability and moran_z are NA at every level, so the
+  # default is the one criterion that is not.
+  s <- summary(geo)
+  expect_identical(s$criterion, "elbow")
+  # One criterion compares with nothing, so neither closing line is printed.
+  out <- utils::capture.output(print(s))
+  expect_false(any(grepl("picks span|flat region:", out)))
+  expect_true(any(grepl("1 criterion over 6 levels", out)))
+
+  expect_error(summary(geo, criteria = "cp"), "NA at every level")
+  expect_error(summary(geo, criteria = "nope"), "unknown criteria")
+  # summary() is a generic, so a plain data.frame never reaches the method;
+  # the guard is there for the object that still carries the class.
+  expect_error(spatialkit:::summary.resolution_profile(data.frame(levels = 1:3)),
+               "must come from")
+  expect_error(summary(geo[0, ]), "no levels to summarise")
+  # `[` keeps the class but a column subset can drop every criterion, which
+  # is a different fault from a criterion that is NA at every level.
+  expect_error(summary(geo[, 1:3]), "carries none of the criterion columns")
+
+  # Each of these used to be reported as a fault in the profile's data, or
+  # died somewhere with no mention of this function.
+  expect_error(summary(geo, tol = -1), "non-negative")
+  expect_error(summary(geo, tol = c(0.02, 0.05)), "non-negative")
+  expect_error(summary(geo, criteria = character(0)), "is empty")
+  expect_error(summary(geo, criteria = factor("elbow")), "character vector")
+  expect_error(summary(geo, criteria = c("elbow", "elbow")), "repeats")
+
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 250), response_var = "z", n_levels = 8)))
+  expect_identical(summary(prof, criteria = c("elbow", "cp"))$criterion,
+                   c("elbow", "cp"))
+  expect_output(print(summary(prof)), "^Resolution picks: ")
+})
+
+
+test_that("a flat region with a hole in it is not printed as a solid range", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 10)))
+  lv <- as.integer(prof$levels)
+
+  # A criterion curve that dips, rises and dips again: the levels within tol
+  # of the optimum are the first two and the fifth, and the third and fourth
+  # are not.  Printing "first to fifth" would claim the criterion accepts
+  # levels it rejects.
+  holed <- prof
+  holed$cp <- c(10, 10.1, 60, 60, 10.15, rep(60, length(lv) - 5L))[seq_along(lv)]
+  band <- select_resolution(holed, "cp")$flat
+  expect_identical(band, lv[c(1, 2, 5)])
+
+  out <- utils::capture.output(print(summary(holed, criteria = "cp")))
+  lab <- sprintf("%d to %d, %d", lv[1], lv[2], lv[5])
+  expect_true(any(grepl(lab, out, fixed = TRUE)))
+  expect_false(any(grepl(sprintf("%d to %d ", lv[1], lv[5]), out, fixed = TRUE)))
+  # print() on the one-criterion object says the same thing.
+  expect_output(print(select_resolution(holed, "cp")), lab, fixed = TRUE)
+
+  # A solid run is still printed as a range.
+  solid <- prof
+  solid$cp <- c(10, 10.1, 10.15, rep(60, length(lv) - 3L))[seq_along(lv)]
+  expect_true(any(grepl(sprintf("%d to %d", lv[1], lv[3]),
+                        utils::capture.output(print(summary(solid, criteria = "cp"))),
+                        fixed = TRUE)))
+})
+
+
+test_that("a subset of the summary reads honestly, and print() survives one", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 12)))
+  lv <- as.integer(prof$levels)
+
+  # Two criteria that share a band, and a third that does not, so the full
+  # intersection is empty while the first two plainly overlap.
+  p <- prof
+  p$cp          <- c(1, 1.005, 1.01, rep(50, length(lv) - 3L))[seq_along(lv)]
+  p$reliability <- c(0.9, 0.895, 0.89, rep(0.1, length(lv) - 3L))[seq_along(lv)]
+  p$elbow       <- c(rep(0, length(lv) - 1L), 1)
+  s <- summary(p, criteria = c("cp", "reliability", "elbow"))
+  expect_length(attr(s, "common"), 0L)
+
+  sub <- s[s$criterion %in% c("cp", "reliability"), ]
+  out <- utils::capture.output(print(sub))
+  # The parent's verdict is carried on the attribute by `[`; the print method
+  # has to recompute it from the rows in hand or it denies an overlap the two
+  # rows above it show.
+  expect_false(any(grepl("no level is in every", out)))
+  expect_true(any(grepl("in every flat region", out)))
+
+  # A column subset is not a summary any more, and used to abort in print().
+  expect_error(utils::capture.output(print(s[c("criterion", "best")])), NA)
+  expect_output(print(s[c("criterion", "best")]), "subset")
+})
+
+
+test_that("a non-positive optimum still yields a band containing the optimum", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 250), response_var = "z", n_levels = 8)))
+
+  # cp = rss/n + 2 * nugget * L / n is non-negative through the package's own
+  # plumbing, but the multiplicative band `v <= opt * (1 + tol)` excludes even
+  # the argmin once the optimum is negative, and the empty band it returned
+  # then killed summary() inside vapply() with a message about types.
+  neg <- prof; neg$cp <- neg$cp - max(neg$cp, na.rm = TRUE) - 1
+  sel <- select_resolution(neg, "cp")
+  expect_true(all(neg$cp[neg$levels %in% sel$flat] < 0))
+  expect_true(sel$best %in% sel$flat)
+  expect_gte(length(sel$flat), 1L)
+  expect_s3_class(summary(neg), "resolution_summary")
+})
+
+
+test_that("a band is read as a set everywhere it is reported", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 12)))
+  lv <- as.integer(prof$levels)
+
+  # Two runs with a hole between them.
+  h <- prof
+  h$cp <- c(10, 10.1, 60, 60, 10.15, rep(60, length(lv) - 5L))[seq_along(lv)]
+  sel <- select_resolution(h, "cp")
+  expect_identical(sel$flat, lv[c(1, 2, 5)])
+
+  skip_if_not_installed("ggplot2")
+  # plot() shades one rectangle per run.  One rectangle over the hull shaded
+  # the levels the criterion rejected, under a caption saying everything
+  # shaded is within tolerance.
+  drawn <- function(p, cn) {
+    l <- as.numeric(p$levels)
+    logx <- length(l) > 2L && max(l) / min(l) > 8
+    b <- ggplot2::ggplot_build(plot(p, criteria = cn))
+    r <- do.call(rbind, lapply(b$data, function(d)
+      if (all(c("xmin", "xmax") %in% names(d)) && nrow(d)) d[, c("xmin", "xmax")] else NULL))
+    r <- unique(r[is.finite(r$xmin), , drop = FALSE])
+    if (logx) r <- 10^r          # ggplot_build reports the transformed space
+    list(rects = r, covered = sort(unique(unlist(Map(
+      function(a, z) l[l >= a * (1 - 1e-9) & l <= z * (1 + 1e-9)], r$xmin, r$xmax)))))
+  }
+  d <- drawn(h, "cp")
+  expect_identical(nrow(d$rects), 2L)
+  expect_identical(as.integer(d$covered), sel$flat)
+  # A run of one level has zero width in data space and would disappear, so
+  # every run is widened to the half-gap either side.
+  expect_true(all(d$rects$xmax > d$rects$xmin))
+
+  # The same has to hold on the log axis a wide ladder switches to, where the
+  # midpoint of a gap is geometric.
+  # An explicit ladder, so the span that triggers the log axis is a property
+  # of the test rather than of whatever floor the fixture's variogram sets.
+  wide <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z",
+                       levels = unique(round(exp(seq(log(4), log(60),
+                                                     length.out = 12)))))))
+  expect_true(max(wide$levels) / min(wide$levels) > 8)
+  for (cn in c("cp", "reliability", "elbow", "moran_z")) {
+    w <- drawn(wide, cn)
+    sw <- select_resolution(wide, cn)
+    expect_identical(nrow(w$rects),
+                     nrow(spatialkit:::.band_runs(sw$flat,
+                                                  spatialkit:::.scored_levels(sw$values))))
+    expect_true(all(w$rects$xmax > w$rects$xmin))
+    expect_identical(as.integer(w$covered), sw$flat)
+  }
+})
+
+
+test_that("an unscored level is not reported as a rejection", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 12)))
+  lv <- as.integer(prof$levels)
+
+  # k-means can fail at a level, which leaves every criterion NA there.  The
+  # band either side of it is still one run: the criterion never rejected
+  # that level, it was never scored.
+  nah <- prof
+  nah$cp <- c(10, 10.1, NA, 10.2, 10.15, rep(60, length(lv) - 5L))[seq_along(lv)]
+  sel <- select_resolution(nah, "cp")
+  expect_false(lv[3] %in% sel$flat)
+  expect_output(print(sel), sprintf("%d to %d", lv[1], lv[5]), fixed = TRUE)
+  expect_true(any(grepl(sprintf("%d to %d", lv[1], lv[5]),
+                        utils::capture.output(print(summary(nah, criteria = "cp"))),
+                        fixed = TRUE)))
+})
+
+
+test_that("print() survives every subset `[` produces, and stays inside 80 columns", {
+  skip_if_not_installed("gstat")
+  prof <- suppressWarnings(suppressMessages(
+    resolution_profile(rp_field(n = 300), response_var = "z", n_levels = 12)))
+  s <- summary(prof)
+
+  # `[` keeps the class and the columns on a column subset but drops every
+  # attribute, so a subset that merely drops `value` used to reach min() with
+  # no levels and abort on "%d".
+  expect_true(is.null(attr(s[, -6], "ladder")))
+  for (sub in list(s[, -6], s[-6], s[1:2, -6], s[, 1:2], s[0, ], s[2, ],
+                   subset(s, select = -value)))
+    expect_error(utils::capture.output(print(sub)), NA)
+
+  # Every criterion at a bound puts four names on one note line, which is the
+  # wrapping the notes were moved below the table to avoid.
+  lv <- as.integer(prof$levels)
+  edge <- prof
+  edge$cp          <- seq(10, 1, length.out = length(lv))
+  edge$reliability <- seq(0.1, 0.9, length.out = length(lv))
+  edge$elbow       <- seq(0.1, 0.9, length.out = length(lv))
+  edge$moran_z     <- seq(5, 0.1, length.out = length(lv))
+  out <- utils::capture.output(print(summary(edge)))
+  expect_lte(max(nchar(out)), 80L)
+  expect_lte(max(nchar(utils::capture.output(print(s)))), 80L)
+})

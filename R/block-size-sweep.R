@@ -86,7 +86,7 @@
 #'     fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100, seed = 1)
 #'   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
 #'                             quiet = TRUE)
-#'   sw
+#'   print(sw)               # the curve as a table, with the random-fold reference
 #'   if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
 #' }
 #' @export
@@ -288,9 +288,10 @@ print.block_size_sweep <- function(x, ...) {
 #'                  seed = 1)
 #'   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
 #'                             quiet = TRUE)
-#'   # Error rises from the random-fold reference (dashed) towards the estimated
-#'   # autocorrelation range (vertical marker) and plateaus past it.  The height
-#'   # of that rise is what random folds were hiding.
+#'   # Error rises from the random-fold reference (dashed) as the blocks grow
+#'   # towards the estimated autocorrelation range (vertical marker).  The
+#'   # height of that rise is what random folds were hiding; with four sizes the
+#'   # ladder stops near the range, so the plateau beyond it is not drawn here.
 #'   plot(sw)
 #' }
 #' @export

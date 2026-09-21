@@ -43,10 +43,14 @@
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' g <- create_grid_polygons(bnd, target_cells = 9)
-#' # Reverse the rows: the IDs come back in the same spatial order regardless
-#' ids_fwd <- ensure_stable_poly_id(g)$poly_id
-#' ids_rev <- ensure_stable_poly_id(g[nrow(g):1, ])$poly_id
-#' identical(sort(ids_fwd), sort(ids_rev))
+#' # Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+#' # which is the property a row-position ID does not have.  The check joins
+#' # the two layers on geometry, because comparing sorted ID vectors would
+#' # pass for any two permutations of 1:9.
+#' fwd <- ensure_stable_poly_id(g)
+#' rev <- ensure_stable_poly_id(g[nrow(g):1, ])
+#' same_cell <- match(st_as_text(st_geometry(rev)), st_as_text(st_geometry(fwd)))
+#' all(rev$poly_id == fwd$poly_id[same_cell])
 #' @export
 ensure_stable_poly_id <- function(polygons_sf,
                                   id_col = "poly_id",
@@ -283,7 +287,15 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' ))), crs = 32632))
 #' g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
 #' nrow(g)
-#' head(g$poly_id)   # stable IDs from ensure_stable_poly_id()
+#' # The IDs come from ensure_stable_poly_id(), so they follow the geometry:
+#' # the same request with the boundary's vertices in another order gives the
+#' # same ID to the same cell.
+#' bnd2 <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(100, 100), c(0, 100), c(0, 0), c(100, 0), c(100, 100)
+#' ))), crs = 32632))
+#' g2 <- create_grid_polygons_cached(bnd2, target_cells = 16, type = "hex")
+#' same_cell <- match(st_as_text(st_geometry(g2)), st_as_text(st_geometry(g)))
+#' all(g2$poly_id == g$poly_id[same_cell])
 #' @export
 create_grid_polygons_cached <- function(boundary,
                                         target_cells,
@@ -348,7 +360,8 @@ create_grid_polygons_cached <- function(boundary,
 #' ))), crs = 32632))
 #' g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 #' g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-#' clear_grid_cache()                                          # entries removed
+#' clear_grid_cache()   # returns the number of entries removed, invisibly
+#' print(clear_grid_cache())                                   # 0: already empty
 #' @export
 clear_grid_cache <- function(cache_env = .gmt_cache) {
   # Only OUR entries.  rm(ls()) wiped every binding in the environment it was

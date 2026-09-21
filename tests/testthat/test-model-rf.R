@@ -134,10 +134,19 @@ test_that("include_coords logs a warning and shows the coordinates in the formul
   dat <- mk_rf_pts(120)
   # .log_warn() writes through the logger; it raises no R condition, so
   # expect_warning() would pass vacuously here.  Capture the log instead.
+  # The warning is about a choice and is logged once per session, so an
+  # earlier test that made the same choice would leave nothing to capture.
+  rm(list = ls(spatialkit:::.warned_once), envir = spatialkit:::.warned_once)
   logged <- capture_spatialkit_log(
     fit <- fit_rf_model(dat, "z", "a", num_trees = 100L, include_coords = TRUE))
   expect_match(paste(logged, collapse = "\n"), "include_coords = TRUE")
   expect_match(paste(logged, collapse = "\n"), "memorising location")
+  expect_match(paste(logged, collapse = "\n"), "once per session")
+  # A second forest with the same choice does not repeat it: a five-fold
+  # cv_rf() used to print the paragraph five times.
+  again <- capture_spatialkit_log(
+    fit_rf_model(dat, "z", "a", num_trees = 50L, include_coords = TRUE))
+  expect_false(any(grepl("include_coords = TRUE", again)))
   expect_true(fit$info$include_coords)
   expect_true(all(c("..x", "..y") %in% all.vars(fit$formula)))
   expect_setequal(names(fit$info$importance), c("..x", "..y", "a"))

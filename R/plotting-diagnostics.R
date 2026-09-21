@@ -188,8 +188,9 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' that of the cross-validated training data, with the threshold marked, so
 #' the prediction set can be read as mostly inside, marginal or largely
 #' outside.  The training curve is the reference the threshold was derived
-#' from: its upper tail ends where the threshold is (or below it, when the
-#' outlier fence removed the tail).
+#' from: the threshold is the largest cross-validated training DI inside an
+#' outlier fence, so the curve reaches it exactly when no training value was
+#' fenced off and runs past it, by the tail the fence removed, when some were.
 #'
 #' @param x An \code{aoa} object from \code{\link{area_of_applicability}()}.
 #' @param type \code{"ecdf"} (default), the two empirical distribution
@@ -214,7 +215,8 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #'                a = rnorm(100, mean = 2), b = rnorm(100)),
 #'     coords = c("x", "y"), crs = 32632)
 #'   aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
-#'   plot(aoa)
+#'   print(plot(aoa))              # the two ECDFs; print() because only a
+#'                                 # block's last value is drawn on its own
 #'   plot(aoa, type = "histogram")
 #' }
 #' @export
@@ -268,8 +270,7 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
       ggplot2::scale_colour_manual(values = c("Training (cross-validated)" = "grey45",
                                               "Prediction locations" = "#2166AC"),
                                    name = NULL) +
-      ggplot2::labs(title = paste("Dissimilarity index: prediction locations",
-                                  "against training", sep = "\n"),
+      ggplot2::labs(title = "Dissimilarity index: prediction locations against training",
                     subtitle = subtitle, caption = caption,
                     x = "Dissimilarity index (DI)", y = "Cumulative share") +
       ggplot2::theme_minimal() +
@@ -321,12 +322,22 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' \donttest{
-#' if (requireNamespace("brms", quietly = TRUE) &&
-#'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   # cv <- cv_bayes(dat, "z", "a", k = 3, coverage_levels = seq(0.1, 0.9, 0.2))
-#'   # plot_calibration(cv)
-#' }
+#' \dontrun{
+#' # Needs brms and a Stan toolchain, and takes minutes: run it, do not check it.
+#' library(sf)
+#' set.seed(1)
+#' n <- 80
+#' dat <- st_as_sf(
+#'   data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'              a = rnorm(n)),
+#'   coords = c("x", "y"), crs = 32632)
+#' dat$z <- 2 * dat$a + rnorm(n)
+#' # Nine coverage levels give a curve rather than three points; chains and
+#' # iterations are kept small to keep this to a few minutes, so the intervals
+#' # will be rough.
+#' cv <- cv_bayes(dat, "z", "a", k = 3, coverage_levels = seq(0.1, 0.9, 0.1),
+#'                fit_args = list(chains = 2, iter = 1000))
+#' plot_calibration(cv)
 #' }
 #' @export
 plot_calibration <- function(cv, ...) {
@@ -486,8 +497,11 @@ plot_calibration <- function(cv, ...) {
 #' criterion selects marked and the region over which it is within \code{tol}
 #' of its optimum shaded.  That shaded band is the flat region
 #' \code{\link{select_resolution}()} reports.  A criterion whose optimum sits
-#' at the support ceiling or the range floor is captioned as such, because
-#' there the bound is choosing, not the criterion.
+#' at an end of the levels it was scored at is captioned with which bound that
+#' is (the support ceiling, the range floor, the ladder's own end, or the
+#' first level the criterion is computable at), because there the bound is
+#' choosing, not the criterion.  A criterion that is \code{NA} at every
+#' level is left out with a log line rather than drawn empty.
 #'
 #' @param x A \code{resolution_profile}.
 #' @param criteria Character vector of criteria to draw, any of
@@ -503,14 +517,17 @@ plot_calibration <- function(cv, ...) {
 #' if (requireNamespace("gstat", quietly = TRUE) &&
 #'     requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(sf)
-#'   set.seed(3)
+#'   # The same field as ?resolution_profile: an exponential covariance with
+#'   # range parameter 200 and a nugget of 0.6 on a unit sill.
+#'   set.seed(2)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   xy$z <- sin(xy$x / 200) + cos(xy$y / 250) + rnorm(n, sd = 0.3)
+#'   D  <- as.matrix(dist(xy))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-#'   prof <- resolution_profile(pts, response_var = "z", n_levels = 10)
-#'   plot(prof)
-#'   plot(prof, criteria = c("cp", "wss"))
+#'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+#'   print(plot(prof))                     # all four criteria, one panel each
+#'   plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 #' }
 #' @export
 plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
@@ -535,39 +552,59 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   if (length(bad))
     stop("plot.resolution_profile(): unknown criteria: ", paste(bad, collapse = ", "),
          ". Choose from ", paste(allowed, collapse = ", "), ".", call. = FALSE)
+  if (!length(criteria))
+    stop("plot.resolution_profile(): `criteria` is empty.", call. = FALSE)
+  criteria <- unique(criteria)
 
   lv <- as.numeric(x$levels)
+  # Decided here rather than at the .plot_sweep() call, because the shaded
+  # bands are widened to half a rung either side and the midpoint of a gap is
+  # geometric on a log axis.
+  log_x <- length(lv) > 2L && max(lv) / min(lv) > 8
   labels <- c(cp = "Mallows' Cp (lower is better)",
               reliability = "Reliability of cell means (higher is better)",
               elbow = "WSS elbow statistic (higher is better)",
               moran_z = "|Moran's z| of cell means (lower is better)",
               wss = "Within-cluster sum of squares")
   rows <- list(); chosen <- list(); flat <- list(); notes <- character(0)
+  skipped <- character(0)
   for (cn in criteria) {
     v <- suppressWarnings(as.numeric(x[[cn]]))
     if (cn == "moran_z") v <- abs(v)
     ok <- is.finite(v)
+    # A criterion that is NA at every level has no panel.  It used to reach
+    # data.frame() with a length-1 panel label and no rows and abort on
+    # "differing number of rows", so the "none is finite" error below could
+    # never be the one a caller saw.
+    if (!any(ok)) { skipped <- c(skipped, cn); next }
     rows[[cn]] <- data.frame(panel = labels[[cn]], x = lv[ok], y = v[ok],
                              stringsAsFactors = FALSE)
-    if (cn %in% selectable && any(ok)) {
+    if (cn %in% selectable) {
       sel <- try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE)
       if (!inherits(sel, "try-error")) {
         chosen[[cn]] <- data.frame(panel = labels[[cn]], x = sel$best,
                                    y = v[match(sel$best, lv)], stringsAsFactors = FALSE)
-        if (length(sel$flat))
-          flat[[cn]] <- data.frame(panel = labels[[cn]], xmin = min(sel$flat),
-                                   xmax = max(sel$flat), stringsAsFactors = FALSE)
-        if (isTRUE(sel$at_ceiling))
-          notes <- c(notes, sprintf("%s: optimum at the support ceiling (the bound is choosing)", cn))
-        else if (isTRUE(sel$at_floor))
-          notes <- c(notes, sprintf("%s: optimum at the range floor (the bound is choosing)", cn))
+        # One rectangle per RUN, not one over the hull: a flat region can skip
+        # a rung, and a single rect shaded the levels the criterion rejected
+        # under a caption saying everything shaded is within tolerance.
+        rects <- .band_rects(sel$flat, .scored_levels(sel$values), ladder = lv,
+                             log_x = log_x)
+        if (!is.null(rects))
+          flat[[cn]] <- data.frame(panel = labels[[cn]], xmin = rects$xmin,
+                                   xmax = rects$xmax, stringsAsFactors = FALSE)
+        edge <- sel$edge %||% NA_character_
+        if (!is.na(edge))
+          notes <- c(notes, sprintf("%s: optimum at %s (the bound is choosing)", cn, edge))
       }
     }
   }
+  if (!length(rows))
+    stop("plot.resolution_profile(): none of the requested criteria (",
+         paste(criteria, collapse = ", "), ") is finite at any level.", call. = FALSE)
+  if (length(skipped))
+    .log_info("plot.resolution_profile(): %s NA at every level; not drawn.",
+              paste(skipped, collapse = ", "))
   df <- do.call(rbind, rows)
-  if (!nrow(df))
-    stop("plot.resolution_profile(): none of the requested criteria is finite at ",
-         "any level.", call. = FALSE)
   bounds <- attr(x, "bounds")
   subtitle <- if (is.list(bounds))
     sprintf("%d levels from %d to %d cells (floor %s, ceiling %s)%s",
@@ -580,8 +617,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
                      notes), collapse = "\n")
   .plot_sweep(df, chosen = do.call(rbind, chosen), flat = do.call(rbind, flat),
               title = "Resolution profile", subtitle = subtitle, caption = caption,
-              x_lab = "Number of cells", y_lab = NULL,
-              log_x = length(lv) > 2L && max(lv) / min(lv) > 8)
+              x_lab = "Number of cells", y_lab = NULL, log_x = log_x)
 }
 
 
@@ -704,12 +740,20 @@ plot.feature_selection <- function(x, ...) {
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' \donttest{
 #' if (requireNamespace("GWmodel", quietly = TRUE) &&
+#'     requireNamespace("sp", quietly = TRUE) &&
 #'     requireNamespace("ggplot2", quietly = TRUE)) {
-#'   # sel <- gwr_model_selection(dat, "z", c("a", "b", "c"))
-#'   # plot(sel)
-#' }
+#'   library(sf)
+#'   set.seed(1)
+#'   n <- 80
+#'   dat <- st_as_sf(
+#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+#'     coords = c("x", "y"), crs = 32632)
+#'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+#'   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
+#'   # Every model tried, AICc against its size; the winner (a and b) marked.
+#'   plot(sel)
 #' }
 #' @export
 plot.gwr_model_selection <- function(x, ...) {

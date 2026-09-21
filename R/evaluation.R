@@ -511,7 +511,7 @@
 #' exchangeable \eqn{E[I] = -0.008}; the z-score averaged \eqn{-0.54} with
 #' \eqn{sd = 0.90} instead of 0 and 1.  The cost is power, which is the point
 #' of the test: at a moderate residual autocorrelation the exchangeable null
-#' rejected 13\% of the time where the correct one rejected 31\%.
+#' rejected 13% of the time where the correct one rejected 31%.
 #'
 #' \code{"residual"} therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
 #' regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
@@ -521,8 +521,8 @@
 #'   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
 #' These assume normal errors and do not condition on the observed
 #' kurtosis.  On the simulation above they restored the z-score to mean
-#' \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\% against a
-#' nominal 5\%.  They agree with \code{spdep::lm.morantest()} to machine
+#' \eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3% against a
+#' nominal 5%.  They agree with \code{spdep::lm.morantest()} to machine
 #' precision.
 #'
 #' \strong{These moments are exact for \eqn{e = My} and for nothing else}, so
@@ -535,7 +535,7 @@
 #' \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 #' leaves them on \code{"randomisation"} because forcing the OLS moments on
 #' them measurably makes matters worse, not better.  Measured on null data
-#' (\eqn{n = 120}, three smooth covariates, independent errors; nominal 5\%,
+#' (\eqn{n = 120}, three smooth covariates, independent errors; nominal 5%,
 #' one-sided):
 #' \tabular{lrr}{
 #'   \strong{backend} \tab \strong{randomisation} \tab \strong{residual} \cr
@@ -1099,9 +1099,11 @@ print.morans_i <- function(x, ...) {
 #'     coords = c("x", "y"), crs = 32632
 #'   )
 #'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-#'   fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
-#'   evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
-#'   evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
+#'   # Fit on 40 rows and keep 20 back, so the second call really is out of
+#'   # sample; scoring the training rows again would only re-read the fit.
+#'   fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+#'   print(evaluate_insample(fit))                    # in-sample (out-of-bag for RF)
+#'   evaluate_insample(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
 #' }
 #' @export
 evaluate_insample <- function(fits, newdata = NULL, ...) {
@@ -1186,12 +1188,16 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   set.seed(1)
 #'   pts <- st_as_sf(
 #'     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-#'                a = rnorm(60)),
+#'                a = rnorm(60), b = rnorm(60)),
 #'     coords = c("x", "y"), crs = 32632
 #'   )
-#'   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-#'   fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
-#'                RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
+#'   # An offset keeps the response away from zero, where MAPE is undefined.
+#'   pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
+#'   # Two predictor sets for the same learner: the model that leaves `b` out
+#'   # against the one that has it.  These are in-sample (out-of-bag) numbers;
+#'   # compare_models_cv() scores the same question on spatial folds.
+#'   fits <- list(a_only = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
+#'                a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
 #'   compare_models(fits)
 #' }
 #' @export
@@ -1378,8 +1384,14 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   )
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
-#'   cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
-#'                            rf_args = list(num_trees = 100))
+#'   # The random forest, and GWR beside it when GWmodel is installed, on the
+#'   # same folds.  "Bayesian" is left out here because a Stan fit per fold
+#'   # takes minutes; add it to `models` for a run to report.
+#'   models <- c("RF", if (requireNamespace("GWmodel", quietly = TRUE) &&
+#'                        requireNamespace("sp", quietly = TRUE)) "GWR")
+#'   cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
+#'                            rf_args = list(num_trees = 100),
+#'                            gwr_args = list(bandwidth = 30))
 #'   cmp$overall
 #' }
 #' @export

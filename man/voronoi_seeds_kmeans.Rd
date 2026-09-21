@@ -45,7 +45,8 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 seeds <- voronoi_seeds_kmeans(pts, k = 8)
-nrow(seeds)   # at most 8
+nrow(seeds)   # at most 8: one seed per non-empty cluster
+seeds         # the cluster centres, as an sf POINT layer in the points' CRS
 }
 \seealso{
 Other tessellation: 

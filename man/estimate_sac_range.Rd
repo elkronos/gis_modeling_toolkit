@@ -150,7 +150,8 @@ that was refused), \code{rejected_reason} (one of
 \code{"fitted range exceeds the largest lag fitted"},
 \code{"variogram model did not converge"},
 \code{"empirical variogram decreases with distance"},
-\code{"fitted range is non-positive or non-finite"}), \code{crs}
+\code{"fitted range is non-positive or non-finite"},
+\code{"no variogram model could be fitted (singular fits)"}), \code{crs}
 (so the units the rejected number was in stay recoverable, which is
 what \code{plot()} labels its axis from) and
 \code{detrend_method}.  It carries \code{directional},
@@ -180,7 +181,7 @@ way it always did.
 \description{
 Fits exponential (or spherical) variogram models and returns the
 \emph{effective range}: for the exponential model, three times the fitted
-range parameter, which is where the semivariance reaches ~95 \\% of the
+range parameter, which is where the semivariance reaches ~95 \% of the
 sill; for the spherical model (fitted only when the exponential fit is
 singular) the fitted range itself, which is where the spherical
 semivariance reaches its sill exactly.  Both are the distance beyond which
@@ -196,7 +197,7 @@ azimuths exactly once, and their ranges are returned in the
 \code{anisotropy}.  They are a diagnostic, not the answer, for two reasons.
 Each direction sees about a quarter of the point pairs, and the maximum of
 four quarter-sample fits is biased upward: on simulated \emph{isotropic}
-fields it came in about 40\\% above the truth, and no hurdle placed in
+fields it came in about 40\% above the truth, and no hurdle placed in
 front of it (all four directions fitted, ratio above 1.5, maximum above
 1.5× the all-pairs fit) kept it out.  One isotropic field rotated in 10°
 steps "established" anisotropy in 14 of 18 orientations.  And the windows
@@ -303,9 +304,11 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) \%*\% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   r <- estimate_sac_range(pts, response_var = "z")
-  r                              # the effective range, in metres
-  attr(r, "directional")         # the four directional ranges
-  attr(r, "variogram_model")     # the fitted gstat model behind it
+  # print() throughout, because only the last value of a braced block is
+  # shown on its own, and every one of these is worth reading.
+  print(r)                              # the effective range, in metres
+  print(attr(r, "directional"))         # the four directional ranges
+  print(attr(r, "variogram_model"))     # the fitted gstat model behind it
 
   # A field whose range the data cannot pin down: the variogram never
   # reaches a sill within the lags fitted, so the answer is NA with the
@@ -313,7 +316,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
                            response_var = "trend")
-  r2
+  print(r2)
   attr(r2, "rejected_range")
 }
 }

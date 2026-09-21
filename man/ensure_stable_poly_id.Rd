@@ -49,10 +49,14 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 g <- create_grid_polygons(bnd, target_cells = 9)
-# Reverse the rows: the IDs come back in the same spatial order regardless
-ids_fwd <- ensure_stable_poly_id(g)$poly_id
-ids_rev <- ensure_stable_poly_id(g[nrow(g):1, ])$poly_id
-identical(sort(ids_fwd), sort(ids_rev))
+# Reverse the rows and re-derive the IDs: the SAME cell gets the same ID,
+# which is the property a row-position ID does not have.  The check joins
+# the two layers on geometry, because comparing sorted ID vectors would
+# pass for any two permutations of 1:9.
+fwd <- ensure_stable_poly_id(g)
+rev <- ensure_stable_poly_id(g[nrow(g):1, ])
+same_cell <- match(st_as_text(st_geometry(rev)), st_as_text(st_geometry(fwd)))
+all(rev$poly_id == fwd$poly_id[same_cell])
 }
 \seealso{
 Other tessellation: 

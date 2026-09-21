@@ -32,7 +32,7 @@ or no positive distances remain.
 Computes sensible prior bounds for the GP length-scale parameter \eqn{\ell}
 of a squared-exponential (exponentiated-quadratic) kernel,
 \eqn{k(h) = \exp(-h^2 / (2\ell^2))}{k(h) = exp(-h^2 / (2 l^2))}.
-The "effective range" where correlation drops to ~5\\% is
+The "effective range" where correlation drops to ~5\% is
 \eqn{\ell \sqrt{2 \ln 20} \approx 2.45\,\ell}{l * sqrt(2 log(20)) ≈ 2.45 l}.
 }
 \details{

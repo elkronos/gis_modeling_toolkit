@@ -4,8 +4,9 @@
 #   source(system.file("scripts", "00-run-all.R", package = "spatialkit"))
 #
 # Runs scripts 01 to 10 in order, reporting how long each took and what it
-# skipped. Scripts 09 (GWR) and 10 (Bayesian) need optional packages and skip
-# themselves cleanly when those are missing.
+# skipped. Scripts 02 (resolution), 09 (GWR) and 10 (Bayesian) need optional
+# packages -- gstat, GWmodel, brms -- and skip themselves cleanly when those
+# are missing; the others skip only the part that needs one.
 #
 # Scripts 01 to 09 run in about a minute between them. Script 10 takes several
 # more on its own, because Stan compiles the model separately for each of its

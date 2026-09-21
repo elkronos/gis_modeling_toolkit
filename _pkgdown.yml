@@ -74,6 +74,7 @@ reference:
   - determine_optimal_levels
   - resolution_profile
   - select_resolution
+  - summary.resolution_profile
   - print.resolution_profile
   - plot.resolution_profile
 
@@ -93,12 +94,13 @@ reference:
 - title: Assign and aggregate
   desc: >
     One row per cell, with a count and a standard error for every aggregate,
-    and the record of which rows were dropped or tied on the way.
+    the record of which rows were dropped or tied on the way, and whether a
+    block-kriging estimate would have beaten the plain cell mean.
   contents:
   - assign_features_to_polygons
   - summarize_by_cell
-  - "[.spatialkit_rows"
   - kriging_adequacy
+  - "[.spatialkit_rows"
 
 - title: Fold
   desc: Spatial cross-validation folds, and how large the blocks should be.
@@ -116,9 +118,19 @@ reference:
   - new_spatial_fit
   - fit_rf_model
   - fit_gwr_model
-  - gwr_model_selection
   - fit_bayesian_spatial_model
   - gp_lengthscale_bounds
+
+- title: Choose the predictors
+  desc: >
+    Forward selection scored on spatial folds for any backend, and an AICc
+    search over predictor sets for GWR.
+  contents:
+  - select_features_forward
+  - plot.feature_selection
+  - gwr_model_selection
+  - print.gwr_model_selection
+  - plot.gwr_model_selection
 
 - title: Methods on a fit
   contents:
@@ -138,11 +150,21 @@ reference:
   - coef.gwr_fit
   - coef.bayesian_fit
   - print.rf_fit
-  - print.gwr_model_selection
-  - plot.gwr_model_selection
+
+- title: Read a fit in sample
+  desc: >
+    Metrics on the training data (out-of-bag for a forest), and the residual
+    checks that say whether structure was left behind. In-sample numbers are
+    not comparable across backends; `compare_models_cv()` is.
+  contents:
+  - model_metrics
+  - evaluate_insample
+  - compare_models
+  - residual_morans_i
+  - print.morans_i
 
 - title: Validate
-  desc: Score on held-out blocks, compare backends on the same folds, and test the residuals.
+  desc: Score on held-out blocks, and compare backends on the same folds.
   contents:
   - cv_spatial
   - cv_rf
@@ -151,13 +173,6 @@ reference:
   - compare_models_cv
   - plot_cv_metrics
   - plot_calibration
-  - select_features_forward
-  - plot.feature_selection
-  - model_metrics
-  - evaluate_insample
-  - compare_models
-  - residual_morans_i
-  - print.morans_i
 
 - title: Predict, and check where the prediction applies
   contents:

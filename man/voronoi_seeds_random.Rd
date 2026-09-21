@@ -40,7 +40,8 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 seeds <- voronoi_seeds_random(bnd, k = 10)
-nrow(seeds)   # at most 10
+nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
+seeds
 }
 \seealso{
 Other tessellation: 
