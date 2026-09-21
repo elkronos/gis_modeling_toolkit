@@ -16,11 +16,13 @@
 # known until the fit is in hand, so the break has to be found at draw time.
 # The widths passed in were set from the six-inch figure the reference pages
 # and the articles are drawn at, measuring the drawn text rather than
-# counting characters: the subtitle face runs about 0.085 inches a character
-# there, so 68 fill the width, and the caption face about 0.058, against a
-# width the panel sets rather than the figure, so a right-hand legend takes
-# from it.  Both callers pass a count short of that, which is the room a run
-# of wide characters needs.  Breaks already in the string are kept.
+# counting characters.  The subtitle face runs 0.074 to 0.078 inches a
+# character, so about 68 fill the 5.3 inches left of it.  The caption face
+# runs 0.058 to 0.060, against a width the panel sets rather than the figure:
+# a right-hand legend pulls the caption's right edge in, from 5.9 inches to
+# 5.1 on the variogram plot, and the text runs leftwards from there.  Both
+# callers pass a count short of the limit, which is the room a run of wide
+# characters needs.  Breaks already in the string are kept.
 .wrap_label <- function(x, width) {
   if (is.null(x) || length(x) != 1L || is.na(x) || !nzchar(x)) return(x)
   parts <- strsplit(as.character(x), "\n", fixed = TRUE)[[1]]
@@ -53,17 +55,20 @@
 #'       dashed fit.  The gap between the two curves is the spatial structure
 #'       the model absorbed: a residual sill well below the response sill
 #'       means most of it, two curves that coincide mean none.  When both
-#'       models were fitted the caption gives the residual sill as a share of
-#'       the response sill, and the two effective ranges; the residual range
-#'       is expected to come out shorter and the residual sill lower even
-#'       when the model is right, because residuals of a fitted trend
-#'       understate the variogram (see \code{\link{estimate_sac_range}()},
-#'       "Detrending and the residual-variogram bias").
+#'       effective ranges were identified the caption gives the residual sill
+#'       as a share of the response sill and the two ranges; when either
+#'       variogram reached no sill the caption says so and compares nothing,
+#'       because a sill the data never reached is not a number to divide by.
+#'       The residual range is expected to come out shorter and the residual
+#'       sill lower even when the model is right, because residuals of a
+#'       fitted trend understate the variogram (see
+#'       \code{\link{estimate_sac_range}()}, "Detrending and the
+#'       residual-variogram bias").
 #'       The distance axis is labelled in the units of the CRS the variogram
 #'       was actually fitted in, which is not necessarily the fit's own CRS
 #'       (lon/lat data are projected first). A single-direction fit names its
-#'       azimuth in the subtitle; a fit that did not converge says so in the
-#'       caption, since the overlaid model line is then not a fit to believe.
+#'       azimuth in the title; a fit that identified no range says why in the
+#'       subtitle, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 #'       of one \code{term} mapped at the training locations, which is the
@@ -99,20 +104,23 @@
 #' if (requireNamespace("ranger", quietly = TRUE) &&
 #'     requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(sf)
-#'   set.seed(1)
+#'   # price depends on elevation, which the forest sees, and on a spatially
+#'   # correlated field it does not: that field is what the residual plots
+#'   # are there to find.
+#'   set.seed(2)
 #'   n <- 120
-#'   pts <- st_as_sf(
-#'     data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-#'                elev = rnorm(n)),
-#'     coords = c("x", "y"), crs = 32632
-#'   )
-#'   pts$price <- 10 + 0.01 * (st_coordinates(pts)[, 1] - 5e5) +
-#'     2 * pts$elev + rnorm(n)
+#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+#'                    elev = rnorm(n))
+#'   D  <- as.matrix(dist(xy[, c("x", "y")]))
+#'   xy$price <- 10 + 2 * xy$elev +
+#'     as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
-#'   plot(fit, type = "residuals")
-#'   plot(fit, type = "observed_predicted")
+#'   # print() each one: inside a braced block only the last value is drawn.
+#'   print(plot(fit, type = "residuals"))          # structure left in the residuals
+#'   print(plot(fit, type = "observed_predicted"))
 #'   if (requireNamespace("gstat", quietly = TRUE))
-#'     plot(fit, type = "variogram")
+#'     plot(fit, type = "variogram")   # residual and response variograms compared
 #' }
 #' @seealso \code{\link{coef.gwr_fit}()} for the coefficients themselves.
 #' @export
@@ -190,7 +198,7 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 
   dat$.resid <- as.numeric(res)
   sac <- estimate_sac_range(dat, ".resid")
-  if (is.null(attr(sac, "variogram")))
+  if (is.null(attr(sac, "variogram", exact = TRUE)))
     stop("plot.spatial_fit(): the residual variogram could not be computed; ",
          "there may be too few finite residuals, or the fit's data_sf may ",
          "carry no usable geometry.", call. = FALSE)
@@ -204,7 +212,7 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
       estimate_sac_range(dat, x$response_var),
       threshold = logger::FATAL, namespace = "spatialkit", index = 2),
       silent = TRUE)
-    if (inherits(resp, "try-error") || is.null(attr(resp, "variogram"))) resp <- NULL
+    if (inherits(resp, "try-error") || is.null(attr(resp, "variogram", exact = TRUE))) resp <- NULL
   }
   .draw_sac_variogram(sac, what = "Residual variogram", overlay = resp,
                       overlay_label = sprintf("Response (%s)", x$response_var))
@@ -321,13 +329,24 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 #' if (requireNamespace("gstat", quietly = TRUE) &&
 #'     requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(sf)
+#'   # An exponential field with range parameter 150 (effective range about
+#'   # 450 m) and a nugget of half the sill, so the fitted model, the nugget
+#'   # and the range line all have something to show.
 #'   set.seed(3)
-#'   n <- 150
+#'   n <- 250
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-#'   xy$z <- sin(xy$x / 150) + rnorm(n, sd = 0.3)
+#'   D  <- as.matrix(dist(xy))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   r <- estimate_sac_range(pts, response_var = "z")
 #'   plot(r)
+#'
+#'   # A field whose variogram never reaches a sill: the plot still draws it,
+#'   # and the subtitle says why no range is marked.
+#'   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+#'   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+#'                            response_var = "trend")
+#'   plot(r2)
 #' }
 #' @export
 plot.sac_range <- function(x, ...) {
@@ -335,7 +354,7 @@ plot.sac_range <- function(x, ...) {
   if (!inherits(x, "sac_range"))
     stop("plot.sac_range(): `x` must be an object returned by ",
          "estimate_sac_range().", call. = FALSE)
-  if (is.null(attr(x, "variogram")))
+  if (is.null(attr(x, "variogram", exact = TRUE)))
     stop("plot.sac_range(): this estimate carries no empirical variogram to ",
          "draw. estimate_sac_range() returns a bare NA, with nothing attached, ",
          "when the input has too few usable points or the variogram could not ",
@@ -365,9 +384,9 @@ plot.sac_range <- function(x, ...) {
 #' @noRd
 .draw_sac_variogram <- function(sac, what = "Empirical variogram",
                                 overlay = NULL, overlay_label = "Response") {
-  vg  <- attr(sac, "variogram")
+  vg  <- attr(sac, "variogram", exact = TRUE)
   vm  <- attr(sac, "variogram_model")
-  if (!is.null(overlay) && is.null(attr(overlay, "variogram"))) overlay <- NULL
+  if (!is.null(overlay) && is.null(attr(overlay, "variogram", exact = TRUE))) overlay <- NULL
 
   # The axis is in the units of the CRS the VARIOGRAM was fitted in, which
   # estimate_sac_range() chose with ensure_projected() -- not necessarily the
@@ -415,7 +434,7 @@ plot.sac_range <- function(x, ...) {
   # variogram, sharing the axes.  Nothing about the main curve changes.
   overlay_caption <- NULL
   if (!is.null(overlay)) {
-    ovg <- attr(overlay, "variogram")
+    ovg <- attr(overlay, "variogram", exact = TRUE)
     ovm <- attr(overlay, "variogram_model")
     p <- p + ggplot2::geom_point(data = ovg,
                                  ggplot2::aes(x = .data$dist, y = .data$gamma,

@@ -150,7 +150,8 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   cells <- create_grid_polygons(bnd, target_cells = 16, type = "square")
   asg <- assign_features_to_polygons(pts, cells)
   ka <- kriging_adequacy(asg, "z", cells, k = 4)
-  ka
+  print(ka)                   # the report; print() because only a block's
+                              # last value shows on its own
   attr(ka, "cv")$zscore_var   # about 1 when the variogram is right
 }
 }
@@ -165,6 +166,7 @@ Other aggregation:
 \code{\link{determine_optimal_levels}()},
 \code{\link{resolution_profile}()},
 \code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()}
+\code{\link{summarize_by_cell}()},
+\code{\link{summary.resolution_profile}()}
 }
 \concept{aggregation}

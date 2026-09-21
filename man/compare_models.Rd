@@ -62,12 +62,16 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   set.seed(1)
   pts <- st_as_sf(
     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
+               a = rnorm(60), b = rnorm(60)),
     coords = c("x", "y"), crs = 32632
   )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
-               RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
+  # An offset keeps the response away from zero, where MAPE is undefined.
+  pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
+  # Two predictor sets for the same learner: the model that leaves `b` out
+  # against the one that has it.  These are in-sample (out-of-bag) numbers;
+  # compare_models_cv() scores the same question on spatial folds.
+  fits <- list(a_only = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
+               a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
   compare_models(fits)
 }
 }

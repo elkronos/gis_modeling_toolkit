@@ -47,6 +47,7 @@ a <- st_as_sf(data.frame(x = c(500000, 500100), y = c(4000000, 4000100)),
               coords = c("x", "y"), crs = 32632)
 b <- st_transform(a, 4326)                 # same points, lon/lat
 h <- harmonize_crs(a, b)                    # b is brought into a's CRS
+c(a = st_crs(h$a)$epsg, b = st_crs(h$b)$epsg)
 st_crs(h$a) == st_crs(h$b)
 }
 \seealso{

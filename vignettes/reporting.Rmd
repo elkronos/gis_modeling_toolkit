@@ -1,5 +1,7 @@
 ---
 title: "What to save, and what to report"
+description: >
+  What leaves the session: grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -39,11 +41,17 @@ a validated model, and two things have to leave your session: the regions, in a
 form someone else can open and join to, and the numbers that say how far the
 map they are looking at can be trusted.
 
+*Everything here runs on the hard dependencies, with two exceptions that skip
+themselves with a note when absent: **ggplot2** draws the one map, and
+**gstat** fits the variogram in the second half.*
+
 ## The regions as a file someone else can use
 
-North Carolina's counties, with the 1974 SIDS rate per thousand births, and
-twelve regions drawn from where the counties are rather than from the county
-boundaries themselves.
+North Carolina's counties, with the 1974 SIDS rate per thousand births, and a
+hexagonal grid of regions drawn from where the counties are rather than from
+the county boundaries themselves. Twelve cells are asked for; a grid clipped
+to an irregular outline returns more, and the count that comes back is the
+one to quote.
 
 ```{r regions}
 library(sf)
@@ -156,10 +164,13 @@ falls in both cells, so `tie_break` decides which one it is recorded in; see
 
 ### IDs that survive a reprojection
 
-A region's `cell_id` is its position in the layer, so it changes if the layer
-is re-sorted. `ensure_stable_poly_id()` derives an ID from the geometry itself,
-in a common CRS, so the same region keeps the same ID however the file has been
-handled on the way to whoever opens it.
+The `cell_id` a tessellation carries is already derived from the geometry, so
+it does not change when the input points arrive in another order. What it is
+not is portable: a file that has been reprojected, re-sorted and re-read
+elsewhere has no memory of how it was built. `ensure_stable_poly_id()` derives
+an ID from the geometry itself, in a common CRS, so the same region gets the
+same ID from whoever computes it, in whatever projection the file is in by
+then.
 
 ```{r stable-ids}
 regions$src <- seq_len(nrow(regions))

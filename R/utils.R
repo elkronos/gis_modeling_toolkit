@@ -107,6 +107,19 @@
   logger::log_warn(sprintf(fmt, ...), namespace = "spatialkit")
 }
 
+# A warning about a CHOICE, logged once per session under `key`.  A choice
+# made once is warned about once: fit_rf_model(include_coords = TRUE) inside
+# a five-fold cv_rf() or a twenty-fit cv_block_size_sweep() used to print the
+# same paragraph on every fit, which reads as twenty problems rather than one
+# decision.  The first line says it will not repeat.
+.warned_once <- new.env(parent = emptyenv())
+.log_warn_once <- function(key, fmt, ...) {
+  if (isTRUE(.warned_once[[key]])) return(invisible(FALSE))
+  .warned_once[[key]] <- TRUE
+  .log_warn(paste0(fmt, " (This is logged once per session.)"), ...)
+  invisible(TRUE)
+}
+
 #' Log a warning AND raise it as an R condition
 #'
 #' A logger line is invisible to \code{tryCatch(warning = )},
@@ -494,8 +507,8 @@
 #'
 #' Vincenty's inverse formula, vectorised over pairs.  \code{sf::st_distance()}
 #' on lon/lat geometry uses s2's SPHERE (R = 6371 km), and the sphere-to-WGS84
-#' gap of 0.24-0.56\% is the same size as the projection distortions
-#' \code{.crs_distance_error()} compares.  The "measured error X\% vs Y\%"
+#' gap of 0.24-0.56% is the same size as the projection distortions
+#' \code{.crs_distance_error()} compares.  The "measured error X% vs Y%"
 #' figures were therefore off by up to half a percentage point and the
 #' least-distorting candidate was mis-ranked in 16 of 40 random wide extents.
 #' The ellipsoidal distance needs no Suggests package (\pkg{lwgeom} is not a

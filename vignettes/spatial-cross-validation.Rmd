@@ -1,5 +1,7 @@
 ---
 title: "Spatial cross-validation"
+description: >
+  The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -40,6 +42,10 @@ cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
     "run.** Install them with `install.packages(c(\"gstat\", \"ggplot2\"))`",
     "and rebuild.\n")
 ```
+
+*This article needs two optional packages: **gstat**, which fits the variogram
+behind the autocorrelation range, and **ggplot2** for the figures. When either
+is missing the code is shown but not run, and a note at the top says so.*
 
 ## The problem with a random fold
 
@@ -117,8 +123,11 @@ pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 Same data, same learner, two fold schemes.
 
 ```{r the-gap}
+# The field was simulated with an effective range of 180 units, so 200-unit
+# blocks hold out whole patches of it.  Sizing blocks from the data, when the
+# range is not known, is the next section.
 fr <- make_folds(pts, k = 5, method = "random_kfold", seed = 1)
-fb <- make_folds(pts, k = 5, method = "block_kfold",  seed = 1)
+fb <- make_folds(pts, k = 5, method = "block_kfold", block_size = 200, seed = 1)
 
 cv_random  <- cv_spatial(pts, "z", character(0), fit_fn = knn_fn, folds = fr)
 cv_blocked <- cv_spatial(pts, "z", character(0), fit_fn = knn_fn, folds = fb)
@@ -196,7 +205,7 @@ numbers.
 When the variogram identifies no range, `estimate_sac_range()` returns `NA` with
 the reason attached, `auto_range` logs that it is falling back to geometric
 blocks, and you are back to choosing a size yourself. An `NA` there is a finding
-about the data. `?estimate_sac_range` lists the four reasons and what each one
+about the data. `?estimate_sac_range` lists the five reasons and what each one
 means; `plot()` on the returned object draws the variogram that produced it.
 
 ## Sizing it by measurement
@@ -211,7 +220,7 @@ sw <- cv_block_size_sweep(pts, "z", character(0), fit_fn = knn_fn,
 sw
 ```
 
-```{r plot-sweep, fig.height=4.5, fig.alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.85 at the smallest to about 1.12 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range."}
+```{r plot-sweep, fig.height=4.5, fig.alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.80 at the smallest to about 1.13 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range."}
 plot(sw)
 ```
 
@@ -237,8 +246,17 @@ plot_cv_metrics(cv_blocked, metric = "RMSE")
 
 ### Every row and every fold is accounted for
 
-Four fields say what happened to the data on the way through. On the clean run
-above they are all zero, so here is a run where they are not.
+Four fields say what happened to the data on the way through:
+`n_folds_attempted` against `n_folds_succeeded`, `n_dropped` (rows the data
+lost), `orphan_rows` (rows no fold names) and `n_unknown_ids` (fold rows the
+data does not have). On the clean run above nothing went missing:
+
+```{r accounting-clean}
+c(attempted = cv_blocked$n_folds_attempted, succeeded = cv_blocked$n_folds_succeeded,
+  dropped = cv_blocked$n_dropped, orphans = length(cv_blocked$orphan_rows))
+```
+
+So here are two runs where something does.
 
 A learner that fails on one fold:
 

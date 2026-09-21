@@ -316,7 +316,7 @@ north <- runif(n, 0, 100)
 # A response with spatial structure, so the within-cell ICC is not zero.
 pts <- st_as_sf(
   data.frame(x = 5e5 + east, y = 5e6 + north,
-             val = 0.05 * east + 0.05 * north + rnorm(n, sd = 0.5)),
+             val = 5 + 0.02 * east + 0.02 * north + rnorm(n, sd = 0.5)),
   coords = c("x", "y"), crs = 32632
 )
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -326,7 +326,10 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)
 
-# IID standard errors (default) vs Kish design-effect adjustment
+# IID standard errors (default) vs Kish design-effect adjustment.  The
+# correction is large here, and meant to be: about 22 points per cell that
+# all share the cell's part of the trend carry far fewer than 22
+# independent pieces of information about the cell mean.
 naive <- summarize_by_cell(assigned, response_var = "val")
 kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
 data.frame(n = naive$n,
@@ -360,6 +363,7 @@ Other aggregation:
 \code{\link{determine_optimal_levels}()},
 \code{\link{kriging_adequacy}()},
 \code{\link{resolution_profile}()},
-\code{\link{select_resolution}()}
+\code{\link{select_resolution}()},
+\code{\link{summary.resolution_profile}()}
 }
 \concept{aggregation}

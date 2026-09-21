@@ -212,22 +212,27 @@ for (g in c("predict", "residuals", "fitted"))
 ```
 
 ``` r
+# The blocks are sized to the field's own correlation: its effective range is
+# 3 x 80 = 240 units, so 250-unit blocks hold out whole patches.  On real data
+# the range is estimated, by estimate_sac_range() or make_folds(auto_range =
+# TRUE); vignette("spatial-cross-validation") is about that choice.
 random  <- cv_spatial(site, "z", "w", fit_fn = trend_fit,
                       folds = make_folds(site, k = 5, method = "random_kfold", seed = 1))
 blocked <- cv_spatial(site, "z", "w", fit_fn = trend_fit,
-                      folds = make_folds(site, k = 5, method = "block_kfold", seed = 1))
+                      folds = make_folds(site, k = 5, method = "block_kfold",
+                                         block_size = 250, seed = 1))
 
 c(random  = random$overall$RMSE,
   blocked = blocked$overall$RMSE,
   ratio   = blocked$overall$RMSE / random$overall$RMSE)
 #>   random  blocked    ratio 
-#> 1.011489 1.860229 1.839100
+#> 1.011489 1.584805 1.566804
 ```
 
-Same 400 observations, same model, one number nearly twice the other.
-The difference is entirely in which rows were allowed to train on which,
-and the blocked figure is the one that answers the question a map is
-used for: what happens where there is no observation nearby.
+Same 400 observations, same model, one number more than half again the
+other. The difference is entirely in which rows were allowed to train on
+which, and the blocked figure is the one that answers the question a map
+is used for: what happens where there is no observation nearby.
 
 Is there structure the model missed?
 
@@ -249,51 +254,51 @@ approximate.
 
 ## Which function do I want?
 
-| I want to…                                                  | Use                                                                                          |
-|-------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| get my data into a projected CRS                            | `ensure_projected()`, `coerce_to_points()`, `harmonize_crs()`                                |
-| cut my study area into cells                                | `build_tessellation()` (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`)                     |
-| place the seeds a Voronoi grows from                        | `get_voronoi_seeds()`                                                                        |
-| choose how many cells, quickly                              | `determine_optimal_levels()`                                                                 |
-| see what every cell count costs                             | `resolution_profile()`, then `select_resolution()`                                           |
-| put points into cells and aggregate                         | `assign_features_to_polygons()` → `summarize_by_cell()`                                      |
-| check whether a cell mean is the best estimate of that cell | `kriging_adequacy()`                                                                         |
-| draw the result                                             | `plot_tessellation_map()`                                                                    |
-| know how far spatial correlation reaches                    | `estimate_sac_range()`, and `sac_nugget()` for its nugget                                    |
-| build honest CV folds                                       | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`) |
-| see whether my folds actually separate                      | `plot_folds()`                                                                               |
-| size the blocks by measurement                              | `cv_block_size_sweep()`, and `plot()` on the result                                          |
-| fit a model                                                 | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`                          |
-| score it out of sample                                      | `cv_gwr()`, `cv_bayes()`, `cv_rf()`                                                          |
-| score *my own* learner on the same folds                    | `cv_spatial()` + `new_spatial_fit()`                                                         |
-| score it in sample                                          | `model_metrics()`, `evaluate_insample()`, `compare_models()`                                 |
-| see the fold-to-fold spread of a CV score                   | `plot_cv_metrics()`                                                                          |
-| check whether predicted intervals are the width they claim  | `plot_calibration()`                                                                         |
-| pick predictors without leaking                             | `select_features_forward()` (`gwr_model_selection()` for the AICc counterpart)               |
-| compare backends head to head                               | `compare_models_cv()`                                                                        |
-| check for leftover spatial structure                        | `residual_morans_i()`, `plot(fit, type = "variogram")`                                       |
-| turn a fit into a map                                       | `predict_surface()`                                                                          |
-| know where that map is extrapolation                        | `area_of_applicability()`                                                                    |
-| free memory held by the caches                              | `clear_grid_cache()`, `clear_fitted_cache()`                                                 |
+| I want to…                                                              | Use                                                                                                         |
+|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| get my data into a projected CRS                                        | `ensure_projected()`, `coerce_to_points()`, `harmonize_crs()`                                               |
+| cut my study area into cells                                            | `build_tessellation()` (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`)                                    |
+| place the seeds a Voronoi grows from                                    | `get_voronoi_seeds()`                                                                                       |
+| choose how many cells, quickly (coordinates only, no optional packages) | `determine_optimal_levels()`                                                                                |
+| see what every cell count costs                                         | `resolution_profile()`, then `summary()` on it for every criterion’s pick, or `select_resolution()` for one |
+| put points into cells and aggregate                                     | `assign_features_to_polygons()` → `summarize_by_cell()`                                                     |
+| check whether a cell mean is the best estimate of that cell             | `kriging_adequacy()`                                                                                        |
+| draw the result                                                         | `plot_tessellation_map()`                                                                                   |
+| know how far spatial correlation reaches                                | `estimate_sac_range()`, and `sac_nugget()` for its nugget                                                   |
+| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`)                |
+| see whether my folds actually separate                                  | `plot_folds()`                                                                                              |
+| size the blocks by measurement                                          | `cv_block_size_sweep()`, and `plot()` on the result                                                         |
+| fit a model                                                             | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`                                         |
+| score it out of sample                                                  | `cv_gwr()`, `cv_bayes()`, `cv_rf()`                                                                         |
+| score *my own* learner on the same folds                                | `cv_spatial()` + `new_spatial_fit()`                                                                        |
+| score it in sample                                                      | `model_metrics()`, `evaluate_insample()`, `compare_models()`                                                |
+| see the fold-to-fold spread of a CV score                               | `plot_cv_metrics()`                                                                                         |
+| check whether predicted intervals are the width they claim              | `plot_calibration()`                                                                                        |
+| pick predictors without leaking                                         | `select_features_forward()` (`gwr_model_selection()` for the AICc counterpart)                              |
+| compare backends head to head                                           | `compare_models_cv()`                                                                                       |
+| check for leftover spatial structure                                    | `residual_morans_i()`, `plot(fit, type = "variogram")`                                                      |
+| turn a fit into a map                                                   | `predict_surface()`                                                                                         |
+| know where that map is extrapolation                                    | `area_of_applicability()`                                                                                   |
+| free memory held by the caches                                          | `clear_grid_cache()`, `clear_fitted_cache()`                                                                |
 
 Lower-level exports sit behind these and have pages of their own:
 `create_voronoi_polygons()`, `create_grid_polygons()`,
 `create_grid_polygons_cached()`, `clip_target_for()`,
 `ensure_stable_poly_id()`, `voronoi_seeds_kmeans()`,
 `voronoi_seeds_random()`, `prep_model_data()` and
-`gp_lengthscale_bounds()`. `help(package = "spatialkit")` lists
-everything.
+`gp_lengthscale_bounds()`. The reference index lists everything, grouped
+by pipeline step.
 
 ## Choosing a backend
 
 `compare_models_cv()` scores all three on identical folds and is the
-right answer when you can afford it. It is not always cheap. On the
-recorded baselines (`dev/baseline-accuracy.rds`: one machine, one run,
-4-fold CV, 2 chains × 1,000 iterations) the Bayesian GP took **1,186 s**
-at n = 2,000 against **109 s** for `cv_gwr()` on the same data. At n =
-300 it was 142 s against 0.8 s, so the ratio is not fixed either. A
-`cv_rf()` of the same shape is seconds. So it is worth knowing what each
-backend is *for* before you spend an afternoon comparing them:
+right answer when you can afford it. It is not always cheap. On one
+recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations) the
+Bayesian GP took **1,186 s** at n = 2,000 against **109 s** for
+`cv_gwr()` on the same data. At n = 300 it was 142 s against 0.8 s, so
+the ratio is not fixed either. A `cv_rf()` of the same shape is seconds.
+So it is worth knowing what each backend is *for* before you spend an
+afternoon comparing them:
 
 | Backend                                                          | Reach for it when you want                                                                                                                                                                                                                                                 | Cost                                              |
 |------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
@@ -303,9 +308,9 @@ backend is *for* before you spend an afternoon comparing them:
 
 Two things that are not backend choices. First, none of them fixes bad
 folds. All three can interpolate location directly, which is where the
-gap at the top of this file is widest, so the fold scheme has to be
-right before the backend comparison means anything. Second, if the
-question is only “is there spatial structure my predictors miss”,
+gap the quick start showed is widest, so the fold scheme has to be right
+before the backend comparison means anything. Second, if the question is
+only “is there spatial structure my predictors miss”,
 `residual_morans_i()` on the cheapest fit you can make answers it before
 you pick anything.
 
@@ -314,14 +319,14 @@ you pick anything.
 Six vignettes, each executed when the package is built, so every number
 in them is computed on the spot.
 
-| vignette                               | covers                                                                                                               |
-|----------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the five-call pipeline                            |
-| `vignette("resolution")`               | choosing a cell count, the four criteria, and why they disagree                                                      |
-| `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                    |
-| `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
-| `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                          |
-| `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report               |
+| vignette                               | covers                                                                                                                  |
+|----------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
+| `vignette("resolution")`               | choosing a cell count, the four criteria, and why they disagree                                                         |
+| `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                       |
+| `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak    |
+| `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                             |
+| `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report                  |
 
 `?spatialkit` walks the pipeline in order and names the function for
 each step. Every exported function has its own page.
@@ -346,23 +351,29 @@ source(file.path(dir, "03-folds.R"))    # one topic
 source(file.path(dir, "00-run-all.R"))  # all ten, seven minutes or so
 ```
 
-| script                | topic                                                                      |
-|-----------------------|----------------------------------------------------------------------------|
-| `01-tessellations.R`  | Voronoi, hex, square and Delaunay cells, and what seeding changes          |
-| `02-resolution.R`     | the range, the ladder, four criteria that disagree, and the leak           |
-| `03-folds.R`          | random against blocked folds, plus buffered leave-one-out and NNDM         |
-| `04-block-size.R`     | sweeping the block size, and the two shapes the curve takes                |
-| `05-fit-diagnose.R`   | wrapping your own model, residual autocorrelation, cell means              |
-| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                          |
-| `07-surface-aoa.R`    | predicting onto a grid, and where the map stops meaning anything           |
-| `08-feature-select.R` | forward selection, and measuring the selection effect                      |
-| `09-gwr.R`            | coefficients that vary over space (needs GWmodel)                          |
-| `10-bayes.R`          | a Bayesian GP, and whether its intervals are calibrated (needs brms; slow) |
+| script                | topic                                                              | needs, beyond ggplot2                                   |
+|-----------------------|--------------------------------------------------------------------|---------------------------------------------------------|
+| `01-tessellations.R`  | Voronoi, hex, square and Delaunay cells, and what seeding changes  | geometry for the Delaunay part                          |
+| `02-resolution.R`     | the range, the ladder, four criteria that disagree, and the leak   | gstat                                                   |
+| `03-folds.R`          | random against blocked folds, plus buffered leave-one-out and NNDM |                                                         |
+| `04-block-size.R`     | sweeping the block size, and the two shapes the curve takes        | gstat, for the range marker                             |
+| `05-fit-diagnose.R`   | wrapping your own model, residual autocorrelation, cell means      | gstat, for the residual variogram and the kriging check |
+| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                  | ranger and GWmodel, for the backend comparison          |
+| `07-surface-aoa.R`    | predicting onto a grid, and where the map stops meaning anything   | stars for the raster part                               |
+| `08-feature-select.R` | forward selection, and measuring the selection effect              |                                                         |
+| `09-gwr.R`            | coefficients that vary over space                                  | GWmodel                                                 |
+| `10-bayes.R`          | a Bayesian GP, and whether its intervals are calibrated            | brms and a Stan toolchain; slow                         |
 
-Most of `00-run-all.R`’s running time is script 10, which compiles a
-Stan model once per fit. Set `SPATIALKIT_TOUR_OUTPUT` to a folder to
-write the figures there instead of drawing them. `example_nc_demo.R` in
-the same folder is the runnable version of the nc demo vignette.
+Every script draws with ggplot2. When a package a script needs is absent
+it skips the part that needs it, or the whole script for 02, 09 and 10,
+with a message naming the package. In an interactive session each script
+pauses at `[enter]` between figures; set
+`Sys.setenv(SPATIALKIT_TOUR_PAUSE = "no")` first to run one straight
+through, which is what `00-run-all.R` expects. Most of `00-run-all.R`’s
+running time is script 10, which compiles a Stan model once per fit. Set
+`SPATIALKIT_TOUR_OUTPUT` to a folder to write the figures there instead
+of drawing them. `example_nc_demo.R` in the same folder is the runnable
+version of the nc demo vignette.
 
 ## Troubleshooting
 
@@ -436,7 +447,7 @@ asked for.
 
 **`estimate_sac_range()` returned `NA`.** The range was not identified,
 so nothing is reported. `attr(x, "rejected_reason")` names which of the
-four refusals it was, `?estimate_sac_range` says what each one means,
+five refusals it was, `?estimate_sac_range` says what each one means,
 and `plot()` on the returned object draws the variogram behind it.
 `vignette("spatial-cross-validation")` covers what an `NA` there leaves
 you to decide about the block size.

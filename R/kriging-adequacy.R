@@ -123,7 +123,8 @@
 #'   cells <- create_grid_polygons(bnd, target_cells = 16, type = "square")
 #'   asg <- assign_features_to_polygons(pts, cells)
 #'   ka <- kriging_adequacy(asg, "z", cells, k = 4)
-#'   ka
+#'   print(ka)                   # the report; print() because only a block's
+#'                               # last value shows on its own
 #'   attr(ka, "cv")$zscore_var   # about 1 when the variogram is right
 #' }
 #' @export
@@ -305,7 +306,7 @@ print.kriging_adequacy <- function(x, ...) {
   # table is an ordinary thing to do, and knitr reaches print() through
   # knit_print.data.frame() without being asked, so the subset prints as what it
   # now is instead of failing on the first missing piece.
-  if (is.null(attr(x, "variogram")) || is.null(attr(x, "n_points"))) {
+  if (is.null(attr(x, "variogram", exact = TRUE)) || is.null(attr(x, "n_points"))) {
     y <- x
     class(y) <- setdiff(class(y), "kriging_adequacy")
     cat("Block-kriging adequacy (subset; the fitted summary is not carried",
@@ -317,7 +318,7 @@ print.kriging_adequacy <- function(x, ...) {
   cv <- attr(x, "cv")
   cat(sprintf("Block-kriging adequacy over %d cells (%d points, nmax %d)\n",
               nrow(df), attr(x, "n_points"), attr(x, "nmax")))
-  vm <- attr(x, "variogram")
+  vm <- attr(x, "variogram", exact = TRUE)
   cat(sprintf("  variogram: %s; sill %.3g, nugget %.3g (%.0f%%), range %s\n",
               paste(sprintf("%s(%.3g, %.3g)", vm$model, vm$psill, vm$range), collapse = " + "),
               attr(x, "sill"), attr(x, "nugget"),
@@ -330,7 +331,7 @@ print.kriging_adequacy <- function(x, ...) {
                 stats::median(r), min(r), max(r), sum(r > 0.5)))
   pop <- df[is.finite(df$kr_exceeds_design), , drop = FALSE]
   if (nrow(pop))
-    cat(sprintf("  kriging variance exceeds s^2/n in %d of %d populated cell(s)\n",
+    cat(sprintf("  kriging variance exceeds s^2/n in %d of the %d cell(s) with two or more points\n",
                 sum(pop$kr_exceeds_design), nrow(pop)))
   sh <- df$kr_shift[is.finite(df$kr_shift)]
   if (length(sh))

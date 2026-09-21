@@ -328,7 +328,7 @@
 #'
 #' A warning is issued whenever **any** sampled location has a singular or
 #' near-singular local design; the wording reports a percentage when more than
-#' 25\% of sampled locations are affected and a count otherwise.  Both are real
+#' 25% of sampled locations are affected and a count otherwise.  Both are real
 #' R warnings, not log lines.
 #'
 #' After the fit, the local coefficient surfaces are scanned and a further
@@ -372,7 +372,7 @@
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
 #'   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
-#'   summary(fit)
+#'   print(summary(fit))     # print(): only a block's last value shows on its own
 #'   head(predict(fit, newdata = dat))   # newdata is re-projected if needed
 #' }
 #' @export

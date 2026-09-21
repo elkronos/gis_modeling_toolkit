@@ -1,5 +1,7 @@
 ---
 title: "Diagnostics"
+description: >
+  Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, and two ways a score can leak.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -41,6 +43,10 @@ cat("**gstat or ggplot2 is not installed, so the code below is shown but not",
     "and rebuild.\n")
 ```
 
+*This article needs two optional packages: **gstat**, which fits the variogram
+behind the autocorrelation range, and **ggplot2** for the figures. When either
+is missing the code is shown but not run, and a note at the top says so.*
+
 ## Four questions a score does not answer
 
 A cross-validated RMSE tells you how far the predictions fell from the held-out
@@ -48,7 +54,7 @@ values. It is silent on four things that decide whether the analysis holds up:
 whether the model left spatial structure in its residuals, whether the standard
 errors on aggregated values are the width they claim, whether a cell mean is the
 best estimate of that cell available, and where on the map the score applies at
-all.
+all. A fifth section shows two ways the score itself can be wrong.
 
 ## A fixture and a model that is wrong in a known way
 
@@ -212,7 +218,10 @@ head(st_drop_geometry(ka)[, c("n", "mean", "se", "kr_pred", "kr_var", "kr_shift"
 
 An empty cell still gets a kriged estimate and variance, which is the practical
 reason to run this: a tessellation fine enough to be useful usually has cells
-with no observation in them.
+with no observation in them. This grid has none, as the report's `empty
+cells` line says, because 25 cells over 350 points leaves every cell
+populated; the reporting vignette's grid over the North Carolina counties has
+six.
 
 ## 4. Where the score applies
 

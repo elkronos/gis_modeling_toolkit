@@ -101,8 +101,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
     2 * pts$elev + rnorm(n)
   fit  <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
   surf <- predict_surface(fit, n_cells = 500, covariates = pts)
-  surf[".pred"]
-  # Check where that surface is extrapolating before mapping it.
+  print(surf[".pred"])        # one prediction per grid cell, as an sf layer
+  # Check where that surface is extrapolating before mapping it.  The grid
+  # took its covariates from the nearest observation, so here nothing is
+  # outside; a grid with its own covariate raster is where this bites.
   area_of_applicability(surf, model = fit)
 }
 }

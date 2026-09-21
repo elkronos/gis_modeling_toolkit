@@ -2,6 +2,16 @@
 
 ## New features
 
+* `summary()` on a `resolution_profile()` puts every criterion's pick in one
+  table: the level each prefers, the flat region around it, whether a ladder
+  bound is doing the choosing, and the levels that lie in every band.  Reading
+  the criteria off a profile took one `select_resolution()` call per criterion,
+  and the comparison had to be assembled by hand.  The intersection of the
+  bands is often empty, which is a result rather than a failure: it says the
+  field has no single resolution that satisfies every way of asking.  Nothing
+  in the table chooses, and the help page says so.  Each region comes back in
+  full on the `"bands"` attribute.
+
 * Every `cv_*()` result now says what became of each fold.  `fold_status`
   is a data.frame with one row per fold supplied --- `fold`, `status`,
   `message` --- where `status` is `"ok"`, `"error"` (the fit or its
@@ -72,9 +82,13 @@
   indistinguishable before), `directional_fitted` (the range each direction's
   fit reported whether or not it was usable, so a refused directional range
   --- the most informative number in an anisotropic failure --- stays
-  recoverable) and `directional_fits` (each direction's empirical variogram
-  and fitted model).  `print()` names the reason and the refused value for a
-  direction it cannot use.
+  recoverable) and, under `keep_directional_fits = TRUE`, `directional_fits`
+  (each direction's empirical variogram and fitted model).  Those four
+  objects are off by default because they dominate the result when present
+  --- 42.2 KB of a 58.8 KB object at n = 400, against 16.6 KB without them
+  --- and `make_folds(auto_range = TRUE)` calls this on every build.
+  `print()` names the reason and the refused value for a direction it
+  cannot use.
 
 * A roster of quantities the package already computed and dropped are now
   returned.  `summarize_by_cell()` attaches the Kish ICCs it estimated as
@@ -92,12 +106,22 @@
   projection reports what it picked, the two that compare nothing included:
   a UTM zone on a local extent, and the equal-area projection chosen for a
   layer straddling the antimeridian.
-  `residual_morans_i()` returns the weight matrix it used, the residual
-  `kurtosis` the randomisation variance conditions on, the design rank `p`
-  behind the residual moments, and `exact`, whether those moments are exact
-  for these residuals.  Because that weight matrix is \eqn{n \times n}, the
-  result is classed `"morans_i"` and prints through a `print()` method that
-  shows the statistic, its null and a one-line description of the weights;
+  `residual_morans_i()` returns the residual `kurtosis` the randomisation
+  variance conditions on, the design rank `p` behind the residual moments,
+  `exact`, whether those moments are exact for these residuals, and
+  `weights_summary`, a description of the weight matrix it used: `n`,
+  `storage` (the matrix class), `neighbours` (the smallest and largest
+  number of neighbours any row has, `NA` for a dense matrix, where counting
+  them would allocate a second one), `kept` and `desc`, the line `print()`
+  shows.  The matrix itself comes back as `weights` under
+  `keep_weights = TRUE` and is `NULL` otherwise, because it is n by n: at
+  n = 500 it is 50.3 KB of a 53.5 KB object in its sparse form, 112.7 KB at
+  n = 120 when the dense fallback is taken (going sparse needs both **FNN**
+  and **Matrix**, so a no-Suggests install always falls back), and 191 MB
+  at the n = 5000 that fallback is capped at --- against the 3.2 KB
+  everything else occupies --- and scoring a list of fits would hold one
+  matrix per fit.  The result is classed `"morans_i"` and prints through a
+  `print()` method that shows the statistic, its null and the weights line;
   `[` drops the class, and `$`, `[[` and `unlist()` read the result exactly
   as for a plain list.  `fit_gwr_model()` keeps `info$nonfinite_coef`, the
   per-row, per-term mask behind `n_local_singular`, and
@@ -245,13 +269,17 @@
   spread.  A floor above the ceiling is reported as a finding rather than
   resolved silently.  `select_resolution()` reads a level off one criterion
   together with its flat region and says when a bound, not the criterion,
-  is choosing.  Two things measured before this shipped, both on the help
-  page: on smooth fields with a small nugget C_p descends to the
-  support ceiling (every replicate at effective ranges 90--900 with nugget
-  0.3 on a unit sill; interior only at nugget 2), and the reliability
-  optimum agrees with the empirical one from true block means on simulated
-  fields but is broad --- flat to within 2 percent over a factor of 3--6 in
-  the number of cells.  Read the flat region.
+  is choosing.  The flat region is a set, not an interval: the criterion
+  curves are not monotone, so a region can skip a rung of the ladder, and it
+  is printed as the runs the criterion accepts ("19 to 21, 26, 31 to 33")
+  rather than a range that would quietly include the levels it rejected.
+  Two things measured before this shipped, both on the help page: on smooth
+  fields with a small nugget C_p descends to the support ceiling (every
+  replicate at effective ranges 90--900 with nugget 0.3 on a unit sill;
+  interior only at nugget 2), and the reliability optimum agrees with the
+  empirical one from true block means on simulated fields but is broad ---
+  flat to within 2 percent over a factor of 3--6 in the number of cells.
+  Read the flat region.
   `determine_optimal_levels()` is unchanged in shape and keeps its
   integer-vector interface.
 
@@ -403,7 +431,7 @@
     same points and lags, so the structure the model absorbed is the gap
     between the two curves.  The caption compares the sills only when both
     ranges were identified; `response = FALSE` restores the residual curve
-    alone.  `plot.sac_range()` is unchanged.
+    alone.
   - `plot_calibration(cv)`: observed against nominal coverage of
     `cv_bayes()`'s posterior predictive intervals, pooled (blue) and per
     fold (grey), with the diagonal and a one-line verdict.  The levels are
@@ -498,40 +526,13 @@
   metric columns by position is unaffected; code pinning the exact column set
   needs the two names added.
 
-* `residual_morans_i()` gains `keep_weights` and a `weights_summary`.  The
-  result now describes its weight matrix instead of carrying it: `weights` is
-  `NULL` unless `keep_weights = TRUE`, and `weights_summary` reports `n`,
-  `storage` (the matrix class), `neighbours` (the smallest and largest number
-  of neighbours any row has, `NA` for a dense matrix, where counting them
-  would allocate a second one), `kept` and `desc`, the line `print()` shows.
-  Carrying it is expensive enough to be worth the option: the matrix is n by
-  n, and at n = 500 it is 50.3 KB of a 53.5 KB object in its sparse form,
-  112.7 KB at n = 120 when the dense fallback is taken (going sparse needs
-  both **FNN** and **Matrix**, so a no-Suggests install always falls back),
-  and 191 MB at the n = 5000 that fallback is capped at --- against the 3.2 KB
-  everything else occupies.  Scoring a list of fits held one matrix per fit.
-
-* `estimate_sac_range()` gains `keep_directional_fits`.  The directional sweep
-  behind the anisotropy check has always reported its per-azimuth ranges and
-  the ratio, and `print()` has always shown them; the four fitted variogram
-  objects behind those numbers can now be kept as well, under
-  `keep_directional_fits = TRUE`.  They are off by default because they
-  dominate the result when present: 42.2 KB of a 58.8 KB object at n = 400,
-  against 16.6 KB without them.  `make_folds(auto_range = TRUE)` calls this on
-  every build, so the default matters.
-
 ## Bug fixes
 
-* Figure labels no longer run off the right edge.  ggplot2 clips a title,
-  subtitle or caption that is wider than the figure instead of wrapping it,
-  and at the six-inch width a help page and an article draw these at, three
-  plots lost text: `plot.aoa()` dropped the end of its title and of the line
-  giving the share of prediction locations inside the threshold, and
-  `plot.sac_range()` and `plot.spatial_fit(type = "variogram")` cut the
-  sentence that says why no range was identified, one of them mid-word.  The
-  labels built from a fit's own numbers are now wrapped at draw time, at a
-  width measured from the drawn text, and the fixed titles are broken where
-  they read.
+* `plot(fit, type = "variogram")` no longer runs its subtitle off the edge of
+  the figure.  ggplot2 clips a label that is wider than the plot instead of
+  wrapping it, and the sentence saying why no range was identified is up to
+  150 characters, so on a six-inch figure it was cut mid-word.  Labels built
+  from a fit's own numbers are now wrapped at draw time.
 
 * `ensure_stable_poly_id()` could not give IDs to a tessellation this package
   had just built.  It repaired the geometry in the layer's own CRS and then
@@ -610,6 +611,12 @@
   skipped (with an INFO log line saying so) when `gstat` is not installed or
   there are fewer than 30 points.
 
+* `fit_rf_model(include_coords = TRUE)` logs its caution once per session
+  rather than once per fit.  Inside a five-fold `cv_rf()` or a twenty-fit
+  `cv_block_size_sweep()` the same paragraph printed on every fit, which
+  reads as twenty problems rather than one decision; the message now says
+  it will not repeat.
+
 * `fit_rf_model()` reports what ranger actually objected to.  ranger diagnoses
   a bad argument in its C++ layer, writes the diagnosis straight to stderr and
   then throws "User interrupt or internal error." --- so `mtry = 99` on a
@@ -634,11 +641,9 @@
   load.  Each one states what the picture shows and what it is there to
   demonstrate, rather than naming the axes.
 
-* Every one of the 77 help pages now ends with a "See also" that leads
-  somewhere.  Thirty-six had none, `predict_surface()`, `model_metrics()` and
-  every S3 method among them, and two more carried a family of one, which
-  roxygen renders as nothing at all.  Four families are new: **spatial data
-  preparation** (`ensure_projected()`, `harmonize_crs()`,
+* Every help page now ends with a "See also" that leads somewhere; more than
+  a third had none, every S3 method among them.  Four families are new:
+  **spatial data preparation** (`ensure_projected()`, `harmonize_crs()`,
   `coerce_to_points()`, `clip_target_for()`, `prep_model_data()`), **package
   options and caches** (`spatialkit_quiet()`, the two cache clearers,
   `create_grid_polygons_cached()`), **methods on a fitted model** (the
@@ -663,10 +668,12 @@
   it did not compute, so a run that finishes is one whose claims held on the
   machine that ran it.  `SPATIALKIT_TOUR_OUTPUT` writes the figures to a folder
   instead of the device; `SPATIALKIT_TOUR_PAUSE = "no"` skips the per-figure
-  pause.  Scripts 09 and 10 skip themselves cleanly when GWmodel or brms is
-  absent.
+  pause.  A script skips the part that needs an absent package with a message
+  naming it, and scripts 02, 09 and 10 skip themselves when gstat, GWmodel or
+  brms is absent.
 * Four vignettes join `spatialkit_nc_demo`: `getting-started` (installing, what
-  the coordinates are in, the five-call pipeline), `resolution` (the ladder, the
+  the coordinates are in, the pipeline from points to a scored model and a map,
+  and a glossary of the terms that recur), `resolution` (the ladder, the
   four criteria and why they disagree), `spatial-cross-validation` (the five
   fold schemes, block sizing, and reading a CV result down to the last row) and
   `diagnostics` (residual autocorrelation, aggregation standard errors, kriging
@@ -681,7 +688,8 @@
 * New vignette `reporting`: what leaves the session at the end of a run.  The
   first half is the regions as a file someone else can use.  Grouping a layer
   you already have with `assign_features_to_polygons(largest = TRUE)` (100
-  North Carolina counties into 12 regions, one row per county), answering
+  North Carolina counties into a hex grid of 18 regions, 12 of them
+  populated, one row per county), answering
   whether a location falls in one with `keep_unassigned = TRUE`, IDs that
   survive a reprojection, and why the aggregates go into a GeoPackage instead
   of a shapefile: of the 10 columns `summarize_by_cell()` produces, 2 come
@@ -736,10 +744,6 @@
 * `cv_spatial()` documents its name collision with `blockCV::cv_spatial()`,
   which builds folds where this one runs them, and that `blockCV`'s
   `$folds_ids` is accepted directly as `folds` everywhere.
-* The "Defaults and their sources" list on `?spatialkit` named
-  `nstart = 5` in `determine_optimal_levels()`, which the k-means++ change
-  above replaced; it now names the 25-restart budget, and the fold-imbalance
-  tolerance by its new argument.
 
 # spatialkit 2.0.0
 

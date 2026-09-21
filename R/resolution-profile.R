@@ -111,8 +111,8 @@
 #' step wastes fits at large \eqn{L} and starves resolution at small.  The
 #' ladder runs from a floor to a ceiling the data impose.  The ceiling is
 #' \code{floor(n / min_cell_n)}: cells with fewer than \code{min_cell_n} points
-#' on average have too little support, and the model-aware criteria are not
-#' computable below nine cells in any case.  The floor is
+#' on average have too little support, and Moran's z is not computable at
+#' nine cells or fewer in any case.  The floor is
 #' \code{ceiling(area / range^2)} when an autocorrelation range is available:
 #' cells wider than the range average over more than one patch of the field.
 #' When the floor exceeds the ceiling the data cannot support a tessellation
@@ -174,7 +174,9 @@
 #'   on the predictors, the variogram is estimated from those residuals, and
 #'   \code{moran_z} regresses the cell means on the cell-mean predictors.
 #' @param levels Optional integer vector of level counts to score, replacing
-#'   the ladder; values outside \code{[2, n - 1]} are dropped.
+#'   the ladder; values below 2, or at or above the number of distinct
+#'   locations, are dropped (k-means cannot place more centres than there are
+#'   distinct points).
 #' @param n_levels Number of levels on the ladder.  Default 20.
 #' @param min_cell_n Minimum average number of points per cell that a level
 #'   must keep; sets the ceiling.  Default 9.
@@ -190,8 +192,6 @@
 #'   "reml"}, say, or on a residual field of your choosing.  When
 #'   \code{NULL} and a response is given, one is estimated on the subsample
 #'   with the same \code{predictor_vars}.
-#' @param quiet Logical; suppress this function's progress \code{message()}s.
-#'   Default \code{TRUE}.
 #' @param select_on \code{"all"} (default) profiles every point;
 #'   \code{"split"} profiles one spatially blocked half and returns the other
 #'   half as the set to estimate on, in the \code{"split"} attribute.  See
@@ -205,14 +205,17 @@
 #'   radius of the cells, in coordinate units), \code{rss}, \code{cp},
 #'   \code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
 #'   input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
-#'   with \code{floor}, \code{ceiling}, \code{supported}, \code{area},
-#'   \code{range}, \code{n}, \code{min_cell_n}), \code{variogram} (a list with
+#'   with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"}
+#'   or \code{"distinct locations"}, whichever bound it), \code{supported},
+#'   \code{area}, \code{range}, \code{n}, \code{n_distinct},
+#'   \code{min_cell_n}), \code{variogram} (a list with
 #'   \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 #'   when none was usable), \code{variable} (\code{"response"},
 #'   \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
 #'   \code{sac} (the range object used) and, with \code{select_on =
-#'   "split"}, \code{split} (a list with \code{selection} and
-#'   \code{estimation}, integer row positions in \code{data_sf}).
+#'   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
+#'   and \code{estimation}, integer row positions in \code{data_sf}, with
+#'   the \code{method} and \code{seed} that made them).
 #' @references
 #' Cressie, N. (1996). Change of support and the modifiable areal unit
 #' problem. \emph{Geographical Systems}, 3(2--3), 159--180.
@@ -234,23 +237,26 @@
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
 #'   library(sf)
+#'   # An exponential field with range parameter 200 (true effective range
+#'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+#'   # noise for Mallows' Cp to have an interior optimum rather than descend
+#'   # to the ceiling.
 #'   set.seed(2)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-#'   prof
-#'   select_resolution(prof, criterion = "reliability")
+#'   print(prof)               # one row per level; print() because only the
+#'                             # last value of a braced block is shown
+#'   select_resolution(prof, criterion = "cp")
 #' }
 #' @export
 resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NULL,
                                levels = NULL, n_levels = 20L, min_cell_n = 9L,
                                sample_n = 1500L, nstart = 25L, seed = 123L,
-                               sac = NULL, quiet = TRUE,
-                               select_on = c("all", "split")) {
-  .msg <- function(...) if (!quiet) message(...)
+                               sac = NULL, select_on = c("all", "split")) {
   select_on <- match.arg(select_on)
   if (!inherits(data_sf, "sf"))
     stop("resolution_profile(): `data_sf` must be an sf object.", call. = FALSE)
@@ -260,6 +266,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   if (!is.numeric(nstart) || length(nstart) != 1L || !is.finite(nstart) || nstart < 1)
     stop("resolution_profile(): `nstart` must be a single number >= 1.", call. = FALSE)
   nstart <- as.integer(nstart)
+  # These three used to fail deep inside seq() or an if() with R's own message,
+  # and a fractional min_cell_n printed a ceiling that did not match it.
+  if (!is.numeric(n_levels) || length(n_levels) != 1L || !is.finite(n_levels) || n_levels < 2)
+    stop("resolution_profile(): `n_levels` must be a single number >= 2.", call. = FALSE)
+  if (!is.numeric(sample_n) || length(sample_n) != 1L || !is.finite(sample_n) || sample_n < 3)
+    stop("resolution_profile(): `sample_n` must be a single number >= 3.", call. = FALSE)
+  min_cell_n <- as.integer(floor(min_cell_n))
   has_resp <- !is.null(response_var)
   has_pred <- !is.null(predictor_vars) && length(predictor_vars) > 0L
   if (has_pred && !has_resp)
@@ -391,18 +404,28 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
   if (!is.finite(area) || area <= 0) area <- bbw * bbh
   n_uniq  <- nrow(unique(round(xy, 8)))
-  ceiling_L <- max(2L, min(as.integer(floor(n / min_cell_n)), n_uniq - 1L))
-  floor_L   <- if (is.finite(range_eff) && range_eff > 0)
-    max(2L, as.integer(ceiling(area / range_eff^2))) else 2L
-  supported <- floor_L <= ceiling_L
+  by_support <- floor(n / min_cell_n)
+  # The ceiling is the smaller of what the point count supports and what the
+  # distinct locations allow (k-means cannot place more centres than there
+  # are distinct points).  Which one bound it is recorded, because the print
+  # and the "bound is choosing" notes name it.
+  ceiling_L    <- max(2L, as.integer(min(by_support, n_uniq - 1L)))
+  ceiling_from <- if (by_support <= n_uniq - 1L) "min_cell_n" else "distinct locations"
+  # Kept as a double until the comparison: a short range on a continental
+  # extent puts area / range^2 past .Machine$integer.max, and as.integer() of
+  # that is NA, which turned the "not supported" branch into an abort.
+  floor_raw <- if (is.finite(range_eff) && range_eff > 0)
+    max(2, ceiling(area / range_eff^2)) else 2
+  supported <- floor_raw <= ceiling_L
+  floor_L   <- if (floor_raw <= .Machine$integer.max) as.integer(floor_raw) else NA_integer_
   if (!supported)
     .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
-                     "range (%.0f) would need at least %d of them, but %d points ",
+                     "range (%.0f) would need at least %.0f of them, but %d points ",
                      "at min_cell_n = %d support at most %d. The data cannot ",
                      "support a tessellation that respects their own ",
                      "correlation structure; the profile runs from 2 to %d so ",
                      "the cost of each level is still visible."),
-              range_eff, floor_L, n, as.integer(min_cell_n), ceiling_L, ceiling_L)
+              range_eff, floor_raw, n, min_cell_n, ceiling_L, ceiling_L)
   lo <- if (supported) floor_L else 2L
   if (is.null(levels)) {
     levels <- unique(as.integer(round(exp(seq(log(lo), log(ceiling_L),
@@ -414,9 +437,9 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     if (!length(levels))
       stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
   }
-  bounds <- list(floor = floor_L, ceiling = ceiling_L, supported = supported,
-                 area = area, range = range_eff, n = n,
-                 min_cell_n = as.integer(min_cell_n))
+  bounds <- list(floor = floor_L, ceiling = ceiling_L, ceiling_from = ceiling_from,
+                 supported = supported, area = area, range = range_eff, n = n,
+                 n_distinct = n_uniq, min_cell_n = min_cell_n)
 
   rbar_V <- if (!is.null(vg)) .rbar_rect(vg$cor_fn, bbw, bbh) else NA_real_
   pred_for_moran <- if (has_pred) pred else matrix(numeric(0), nrow = n, ncol = 0L)
@@ -520,13 +543,17 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     return(invisible(x))
   }
   cat("Resolution profile:", nrow(x), "levels on", b$n, "points\n")
-  cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d at min_cell_n = %d)%s\n",
+  cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d from %s)%s\n",
               min(x$levels), max(x$levels),
-              if (is.finite(b$range)) sprintf("%d from range %.0f", b$floor, b$range)
-              else "2 (no range)",
-              b$ceiling, b$min_cell_n,
+              if (!is.finite(b$range)) "2 (no range)"
+              else if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
+              else sprintf("%d from range %.0f", b$floor, b$range),
+              b$ceiling,
+              if (identical(b$ceiling_from, "distinct locations"))
+                sprintf("%d distinct locations", b$n_distinct %||% NA_integer_)
+              else sprintf("min_cell_n = %d", b$min_cell_n),
               if (isTRUE(b$supported)) "" else "  -- floor above ceiling: not supported"))
-  vg <- attr(x, "variogram")
+  vg <- attr(x, "variogram", exact = TRUE)
   cat(sprintf("  variogram   : %s\n",
               if (is.null(vg)) "none usable (cp and reliability are NA)" else
                 sprintf("nugget %.3g, partial sill %.3g, range %s", vg$nugget, vg$psill,
@@ -548,6 +575,74 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 }
 
 
+# A flat region is every level within `tol` of the optimum, and the criterion
+# curves are not monotone, so the region is a SET and routinely has holes in
+# it: over 25 simulated fields, 9 of 100 criterion bands skipped at least one
+# rung, one of them printing as "12 to 19" while rejecting five of the seven
+# levels inside that range.  Adjacency is a fact about the ladder rather than
+# about the numbers (19 and 21 are neighbours when nothing was scored between
+# them), so the ladder has to come in with the band.
+# The levels a criterion actually scored, read off the named value vector
+# select_resolution() carries.
+.scored_levels <- function(values) {
+  if (is.null(values)) return(integer(0))
+  as.integer(names(values))[is.finite(values)]
+}
+
+.band_runs <- function(flat, ladder) {
+  flat <- sort(unique(as.integer(flat)))
+  if (!length(flat)) return(NULL)
+  # `ladder` is the levels the criterion was SCORED at, not every level on the
+  # profile: a level k-means failed at is NA for every criterion, and treating
+  # it as a rejection would print a hole the criterion never made.
+  # Sorted here, not trusted: a profile re-sorted by a criterion column
+  # (`prof[order(prof$cp), ]`) keeps its class and hands its levels over in
+  # that order, and adjacency read off an unsorted ladder split every band.
+  ladder <- sort(unique(as.integer(ladder)))
+  pos <- match(flat, ladder)
+  if (anyNA(pos)) return(data.frame(from = min(flat), to = max(flat)))
+  cuts <- c(0L, which(diff(pos) != 1L), length(pos))
+  do.call(rbind, lapply(seq_len(length(cuts) - 1L), function(i) {
+    r <- flat[(cuts[i] + 1L):cuts[i + 1L]]
+    data.frame(from = min(r), to = max(r))
+  }))
+}
+
+# A band is a set of levels on a discrete ladder, drawn on a continuous axis.
+# A run of a single level has zero width and vanishes, so each run is widened
+# to the half-gap either side: the shading then covers the rungs it names and
+# stops halfway to the ones it does not.  The end rungs mirror their one
+# neighbouring gap so they get a band the same shape as the rest.
+.band_rects <- function(flat, scored, ladder = scored, log_x = FALSE) {
+  # Two ladders: adjacency (whether a gap is a rejection) is read off the
+  # levels the criterion was SCORED at, while the half-gaps are measured on
+  # the full ladder the axis shows, so an unscored rung between two accepted
+  # ones is not shaded over and an end rung mirrors its real neighbour.
+  runs <- .band_runs(flat, scored)
+  if (is.null(runs)) return(NULL)
+  lv <- sort(unique(as.numeric(ladder)))
+  plain <- data.frame(xmin = runs$from, xmax = runs$to)
+  if (length(lv) < 2L) return(plain)
+  mid <- if (isTRUE(log_x)) function(a, b) sqrt(a * b) else function(a, b) (a + b) / 2
+  inner <- mid(lv[-length(lv)], lv[-1L])
+  edges <- c(if (isTRUE(log_x)) lv[1L]^2 / inner[1L] else 2 * lv[1L] - inner[1L],
+             inner,
+             if (isTRUE(log_x)) lv[length(lv)]^2 / inner[length(inner)]
+             else 2 * lv[length(lv)] - inner[length(inner)])
+  i <- match(runs$from, lv); j <- match(runs$to, lv)
+  if (anyNA(i) || anyNA(j) || !all(is.finite(edges))) return(plain)
+  data.frame(xmin = edges[i], xmax = edges[j + 1L])
+}
+
+
+.band_label <- function(flat, ladder) {
+  runs <- .band_runs(flat, ladder)
+  if (is.null(runs)) return("none")
+  paste(ifelse(runs$from == runs$to, as.character(runs$from),
+               sprintf("%d to %d", runs$from, runs$to)), collapse = ", ")
+}
+
+
 #' Read a level, and the region over which it is not distinguishable, off a profile
 #'
 #' Picks the level a criterion prefers, together with the \emph{flat region}:
@@ -556,8 +651,9 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #' reliability curve is flat to within 2 percent over a factor of 3--6 in the
 #' number of cells, and \eqn{C_p} on a smooth field descends to the support
 #' ceiling.  The region is the answer, and the argmin only a point in it.
-#' When the optimum sits at the ladder's ceiling or floor the result says so,
-#' because a bound is then doing the choosing rather than the criterion (see
+#' When the optimum sits at an end of the levels the criterion was scored at,
+#' the result says so and names the bound, because a bound is then doing the
+#' choosing rather than the criterion (see
 #' \code{\link{resolution_profile}} for what each criterion measures and how
 #' it behaved on simulated fields).
 #'
@@ -570,31 +666,41 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   percent of it); for \code{elbow} and \code{moran_z}, whose optimum can
 #'   be zero, it is relative to the criterion's range over the ladder.
 #' @return A list of class \code{resolution_selection} with \code{best} (the
-#'   level), \code{flat} (the levels in the flat region, ascending),
-#'   \code{criterion}, \code{value} (the optimum), \code{at_ceiling} and
-#'   \code{at_floor} (logical: the optimum is the last or first level of the
-#'   ladder), \code{n_levels} and \code{values} (the criterion at every
-#'   level).
+#'   level), \code{flat} (the levels in the flat region, ascending; a set,
+#'   which can skip a rung), \code{criterion}, \code{value} (the optimum),
+#'   \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
+#'   or first of the levels this criterion was scored at, which for
+#'   \code{moran_z} starts above nine cells), \code{edge} (which bound that
+#'   is, in words: the support ceiling, the range floor, the ladder's own end,
+#'   or the first or last level the criterion is computable at; \code{NA} for
+#'   an interior optimum), \code{n_levels} and \code{values} (the criterion
+#'   at every level, \code{NA} where it could not be computed).
 #' @family aggregation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
 #'   library(sf)
+#'   # An exponential field with range parameter 200 (true effective range
+#'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+#'   # noise for Mallows' Cp to have an interior optimum rather than descend
+#'   # to the ceiling.
 #'   set.seed(2)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
 #'
-#'   sel <- select_resolution(prof, criterion = "reliability")
-#'   sel                      # the level, and the flat region around it
-#'   sel$flat                 # every level within `tol` of the optimum
-#'   sel$at_ceiling           # TRUE would mean the ladder, not the criterion, chose
+#'   sel <- select_resolution(prof, criterion = "cp")
+#'   print(sel)               # the level, and the flat region around it
+#'   print(sel$flat)          # every level within `tol` of the optimum
+#'   print(sel$edge)          # NA here: the optimum is interior
 #'
-#'   # A different criterion can prefer a different level while agreeing on the
-#'   # region: the flat region is the answer, the argmin a point in it.
-#'   select_resolution(prof, criterion = "cp")$flat
+#'   # Reliability prefers coarse cells and here runs into the floor the
+#'   # autocorrelation range sets, which the result says in words.
+#'   rel <- select_resolution(prof, criterion = "reliability")
+#'   print(rel)
+#'   c(at_floor = rel$at_floor, edge = rel$edge)
 #' }
 #' @export
 select_resolution <- function(profile,
@@ -642,12 +748,52 @@ select_resolution <- function(profile,
     band <- tol * diff(range(v[ok]))
     if (maximise) lv[ok][v[ok] >= opt - band] else lv[ok][v[ok] <= opt + band]
   }
+  # A negative optimum sends the multiplicative threshold PAST the optimum, so
+  # not even the argmin qualifies and the band comes back empty.  The optimum
+  # is within any tolerance of itself by definition, so that is the floor.
+  if (!length(flat)) flat <- best
+  # The edge flags are relative to the levels this criterion was SCORED at,
+  # not to the ladder: Moran's z is NA at nine cells or fewer, and an optimum
+  # at the first level it could be computed at is a bound choosing just as
+  # much as the ladder's end is.  `edge` then says WHICH bound, read off the
+  # profile's own record of why the ladder stops where it does, because the
+  # notes used to name "the support ceiling (n / min_cell_n)" for a ladder
+  # the caller had set with `levels =`.
+  scored <- lv[ok]
+  at_ceiling <- best == max(scored); at_floor <- best == min(scored)
+  edge <- .ladder_edge(best, scored, lv, attr(profile, "bounds"))
   structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
                  criterion = criterion, value = opt,
-                 at_ceiling = best == max(lv), at_floor = best == min(lv),
+                 at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,
                  n_levels = length(lv),
                  values = stats::setNames(v, lv)),
             class = "resolution_selection")
+}
+
+
+# Which bound an optimum at the end of the scored levels is sitting on.  NA
+# when it is interior.  The wording is shared by the print methods, the
+# profile plot's caption and the tessellation builders' provenance note.
+.ladder_edge <- function(best, scored, ladder, bounds) {
+  if (best == max(scored) && best == min(scored)) return("the only level scored")
+  if (best == max(scored)) {
+    if (max(scored) < max(ladder))
+      return("the last level the criterion is computable at")
+    if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
+      return(if (identical(bounds$ceiling_from, "distinct locations"))
+               "the support ceiling (one short of the distinct locations)"
+             else "the support ceiling (n / min_cell_n)")
+    return("the last level of the ladder")
+  }
+  if (best == min(scored)) {
+    if (min(scored) > min(ladder))
+      return("the first level the criterion is computable at")
+    if (is.list(bounds) && isTRUE(bounds$supported) && is.finite(bounds$range %||% NA) &&
+        identical(as.integer(min(ladder)), as.integer(bounds$floor)))
+      return("the range floor (area / range^2)")
+    return("the first level of the ladder")
+  }
+  NA_character_
 }
 
 
@@ -655,16 +801,282 @@ select_resolution <- function(profile,
 print.resolution_selection <- function(x, ...) {
   cat(sprintf("Resolution by %s: %d cells\n", x$criterion, x$best))
   cat(sprintf("  flat region : %s (%d of %d levels)\n",
-              if (length(x$flat) > 1L) sprintf("%d to %d", min(x$flat), max(x$flat))
-              else as.character(x$flat),
+              .band_label(x$flat, .scored_levels(x$values)),
               length(x$flat), x$n_levels))
-  if (isTRUE(x$at_ceiling))
-    cat("  note        : the optimum is the support ceiling (n / min_cell_n); the\n",
-        "               bound is choosing, not the criterion. Lower min_cell_n to\n",
-        "               see whether the criterion keeps descending.\n", sep = "")
-  if (isTRUE(x$at_floor))
-    cat("  note        : the optimum is the first level of the ladder; the floor\n",
-        "               is choosing, not the criterion.\n", sep = "")
+  edge <- x$edge %||% NA_character_
+  if (!is.na(edge)) {
+    hint <- if (grepl("min_cell_n", edge, fixed = TRUE))
+      " Lower min_cell_n to see whether the criterion keeps going."
+    else if (grepl("range floor", edge, fixed = TRUE))
+      " Fewer cells would be wider than the range and average over more than one patch of the field."
+    else ""
+    # strwrap() collapses runs of spaces, so the aligned label is put back
+    # after wrapping rather than wrapped with the sentence.
+    body <- strwrap(sprintf("the optimum is %s; the bound is choosing, not the criterion.%s",
+                            edge, hint), width = 62)
+    cat(paste0(c("  note        : ", rep("                ", length(body) - 1L)), body),
+        sep = "\n")
+  }
+  invisible(x)
+}
+
+
+#' Every criterion's pick, side by side
+#'
+#' \code{\link{select_resolution}()} reads one criterion at a time.  This puts
+#' all of them in one table: the level each prefers, the flat region around
+#' it, and whether a ladder bound is doing the choosing rather than the
+#' criterion.  The closing line gives the levels that lie in \emph{every} flat
+#' region, the cell counts no criterion objects to.
+#'
+#' A flat region is a set, not an interval.  The criterion curves are not
+#' monotone, so a region can skip a rung of the ladder, and the table prints
+#' what the criterion actually accepts (\code{"26, 31"}, not \code{"26 to
+#' 31"}) rather than a range that would quietly include the levels it
+#' rejected.
+#'
+#' That set is often empty, and an empty one is a result rather than a
+#' failure.  The criteria answer different questions: how well the cells
+#' represent the field (\eqn{C_p}), whether the cell values are
+#' distinguishable from noise (\code{reliability}), where the within-cluster
+#' sum of squares bends (\code{elbow}), and whether the cell means still carry
+#' autocorrelation (\code{moran_z}).  A field with no single right resolution
+#' shows up here as disjoint bands, and the spread between the picks is
+#' printed for the same reason.
+#'
+#' Nothing in the table is a decision procedure.  Each flat region is
+#' routinely wide, the choice within it belongs to the analyst, and
+#' \code{\link{plot.resolution_profile}()} draws the curves the bands were
+#' read from.
+#'
+#' @param object A \code{\link{resolution_profile}()}.
+#' @param criteria Character vector, any of \code{"cp"},
+#'   \code{"reliability"}, \code{"elbow"}, \code{"moran_z"}.  Default: every
+#'   one of the four that is finite at some level.
+#' @param tol Passed to \code{\link{select_resolution}()} for the flat
+#'   region.  Default 0.02.
+#' @param ... Ignored.
+#' @return A data.frame of class \code{resolution_summary}, one row per
+#'   criterion in the order given, with columns \code{criterion},
+#'   \code{best}, \code{flat_min}, \code{flat_max}, \code{n_flat},
+#'   \code{value} (the optimum itself, on that criterion's own scale and so
+#'   not comparable across rows, which is why the print method leaves it out),
+#'   \code{at_floor}, \code{at_ceiling} and \code{edge} (which bound an
+#'   edge optimum sits on, as \code{\link{select_resolution}()} reports it;
+#'   \code{NA} when interior).  Attributes: \code{bands} (a named list holding each
+#'   criterion's flat region in full, since \code{flat_min} and
+#'   \code{flat_max} are only its ends and the region can have holes in it),
+#'   \code{common} (the levels in every flat region, an integer vector that is
+#'   empty when the regions do not overlap), \code{scored} (the levels each
+#'   criterion returned a finite value at, which is what decides whether a gap
+#'   in a band is a rejection or a level nothing was computed at),
+#'   \code{ladder} (every level on the profile), \code{n_levels}, \code{tol}
+#'   and \code{variable} (what the criteria were scored on).  The print method recomputes the closing
+#'   comparison from \code{bands}, so a row subset of the result reads
+#'   honestly.
+#' @family aggregation
+#' @seealso \code{\link{select_resolution}()} for one criterion, with the
+#'   per-level values attached; \code{\link{plot.resolution_profile}()} for
+#'   the curves behind these bands.
+#' @examples
+#' if (requireNamespace("gstat", quietly = TRUE)) {
+#'   library(sf)
+#'   # An exponential field with range parameter 200 (true effective range
+#'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+#'   # noise for Mallows' Cp to have an interior optimum rather than descend
+#'   # to the ceiling.
+#'   set.seed(2)
+#'   n <- 400
+#'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+#'   D  <- as.matrix(dist(xy))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
+#'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+#'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+#'
+#'   # print() is explicit because only the last value of a braced block is
+#'   # shown, and the table is the thing worth seeing here.
+#'   print(summary(prof))
+#'   print(attr(summary(prof), "common")) # the levels all of them accept, if any
+#'   attr(summary(prof), "bands")         # each criterion's region in full
+#' }
+#' @export
+summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...) {
+  if (!inherits(object, "resolution_profile"))
+    stop("summary.resolution_profile(): `object` must come from resolution_profile().",
+         call. = FALSE)
+  # `[` keeps the class, so a subset arrives here looking like a profile.
+  if (nrow(object) == 0L || !("levels" %in% names(object)))
+    stop("summary.resolution_profile(): `object` has no levels to summarise; it is an ",
+         if (nrow(object) == 0L) "empty" else "incomplete",
+         " subset of a resolution profile.", call. = FALSE)
+  # `tol` is checked here as well as in select_resolution(), because the try()
+  # below would otherwise swallow that check and report a bad tolerance as a
+  # fault in the profile's data.
+  if (!is.numeric(tol) || length(tol) != 1L || !is.finite(tol) || tol < 0)
+    stop("summary.resolution_profile(): `tol` must be a single non-negative number.",
+         call. = FALSE)
+  selectable <- c("cp", "reliability", "elbow", "moran_z")
+  # A criterion the caller named is reported on by select_resolution() itself,
+  # whose message says which input it is missing.  Only the defaulted set is
+  # filtered here, and then a failure is unexpected rather than informative.
+  explicit <- !is.null(criteria)
+  if (explicit) {
+    # setdiff() coerces, so a factor used to pass the check below and then die
+    # inside match.arg() with no mention of this function.
+    if (!is.character(criteria))
+      stop("summary.resolution_profile(): `criteria` must be a character vector; got ",
+           class(criteria)[1L], ".", call. = FALSE)
+    if (!length(criteria))
+      stop("summary.resolution_profile(): `criteria` is empty. Name at least one of ",
+           paste(selectable, collapse = ", "), ", or leave it NULL for every one ",
+           "the profile can score.", call. = FALSE)
+    if (anyDuplicated(criteria))
+      stop("summary.resolution_profile(): `criteria` repeats ",
+           paste(unique(criteria[duplicated(criteria)]), collapse = ", "),
+           ". A criterion counted twice agrees with itself, which would make the ",
+           "closing comparison meaningless.", call. = FALSE)
+  } else {
+    criteria <- selectable[vapply(selectable, function(cn)
+      cn %in% names(object) &&
+        any(is.finite(suppressWarnings(as.numeric(object[[cn]])))), logical(1))]
+  }
+  bad <- setdiff(criteria, selectable)
+  if (length(bad))
+    stop("summary.resolution_profile(): unknown criteria: ", paste(bad, collapse = ", "),
+         ". Choose from ", paste(selectable, collapse = ", "), ".", call. = FALSE)
+  if (!length(criteria)) {
+    # Two different faults reach here, and the wrong message sends the caller
+    # off to fix the data when the object is what is wrong.
+    if (!any(selectable %in% names(object)))
+      stop("summary.resolution_profile(): `object` carries none of the ",
+           "criterion columns (", paste(selectable, collapse = ", "),
+           "); it is a column subset of a resolution profile. Pass the ",
+           "profile resolution_profile() returned.", call. = FALSE)
+    stop("summary.resolution_profile(): no criterion is finite at any level. ",
+         "cp and reliability need a usable variogram, moran_z a response and ",
+         "more than nine cells; a geometry-only profile carries elbow alone.",
+         call. = FALSE)
+  }
+
+  sels <- if (explicit)
+    lapply(criteria, function(cn) select_resolution(object, criterion = cn, tol = tol))
+  else {
+    got <- lapply(criteria, function(cn)
+      try(select_resolution(object, criterion = cn, tol = tol), silent = TRUE))
+    ok <- !vapply(got, inherits, logical(1), "try-error")
+    if (!any(ok))
+      stop("summary.resolution_profile(): no criterion could be read off this profile.",
+           call. = FALSE)
+    got[ok]
+  }
+
+  out <- data.frame(
+    criterion  = vapply(sels, function(s) s$criterion, character(1)),
+    best       = vapply(sels, function(s) as.integer(s$best), integer(1)),
+    flat_min   = vapply(sels, function(s) min(s$flat), integer(1)),
+    flat_max   = vapply(sels, function(s) max(s$flat), integer(1)),
+    n_flat     = vapply(sels, function(s) length(s$flat), integer(1)),
+    value      = vapply(sels, function(s) as.numeric(s$value), numeric(1)),
+    at_floor   = vapply(sels, function(s) isTRUE(s$at_floor), logical(1)),
+    at_ceiling = vapply(sels, function(s) isTRUE(s$at_ceiling), logical(1)),
+    edge       = vapply(sels, function(s) s$edge %||% NA_character_, character(1)),
+    stringsAsFactors = FALSE)
+
+  # The levels no criterion objects to.  Intersecting the regions rather than
+  # the picks is the point: a single level chosen by one criterion says
+  # nothing about whether the others can live with it.
+  cnames <- vapply(sels, function(s) s$criterion, character(1))
+  bands  <- stats::setNames(lapply(sels, function(s) s$flat), cnames)
+  scored <- stats::setNames(lapply(sels, function(s) .scored_levels(s$values)), cnames)
+  common <- Reduce(intersect, bands)
+  lv <- as.integer(object$levels)
+  # The whole ladder, not its ends: the print method needs it to tell a band
+  # with a hole in it from a solid run, and `[` on the result keeps it, so a
+  # subset can still be read honestly.
+  structure(out, class = c("resolution_summary", "data.frame"),
+            common = sort(unique(as.integer(common))), bands = bands,
+            scored = scored, ladder = lv,
+            n_levels = nrow(object), tol = tol, variable = attr(object, "variable"))
+}
+
+
+#' @export
+print.resolution_summary <- function(x, ...) {
+  need <- c("criterion", "best", "flat_min", "flat_max", "n_flat",
+            "at_floor", "at_ceiling")
+  # `[` keeps the class, so a column subset arrives here looking like a
+  # summary.  It drops every custom attribute while keeping the columns, so
+  # BOTH have to be checked: a subset that merely drops `value` keeps all of
+  # the columns below and then hands min()/max() no levels, which are Inf and
+  # -Inf, which "%d" refuses.  knitr prints a data frame without being asked,
+  # so this path is reachable from a document.
+  if (!all(need %in% names(x)) || !length(attr(x, "ladder"))) {
+    cat("Resolution picks (subset; the comparison is not carried by a column subset)\n\n")
+    print(as.data.frame(unclass(x)), row.names = FALSE)
+    return(invisible(x))
+  }
+  lad <- attr(x, "ladder"); bands <- attr(x, "bands"); scored <- attr(x, "scored")
+  n_lv <- attr(x, "n_levels") %||% length(lad)
+  rungs_of <- function(cn) if (!is.null(scored[[cn]])) scored[[cn]] else lad
+  band_of <- function(i) {
+    cn <- x$criterion[i]
+    b <- if (!is.null(bands[[cn]])) bands[[cn]] else seq(x$flat_min[i], x$flat_max[i])
+    .band_label(b, rungs_of(cn))
+  }
+  cat(sprintf("Resolution picks: %d criteri%s over %d level%s (%d to %d cells)\n\n",
+              nrow(x), if (nrow(x) == 1L) "on" else "a",
+              n_lv, if (n_lv == 1L) "" else "s",
+              min(lad), max(lad)))
+  tab <- data.frame(
+    criterion = x$criterion,
+    best = x$best,
+    `flat region` = vapply(seq_len(nrow(x)), band_of, character(1)),
+    `levels in band` = x$n_flat,
+    check.names = FALSE, stringsAsFactors = FALSE)
+  print(tab, row.names = FALSE)
+  # The notes go under the table rather than in a column of it: a listed band
+  # such as "19 to 21, 26, 31 to 33" is wide, and a fifth column of sentences
+  # pushed the whole thing past eighty characters and wrapped it.
+  # One line per distinct bound, naming the criteria sitting on it.  `edge`
+  # is absent from an object built before it existed; the flags still say
+  # that a bound chose, just not which.
+  edge <- if ("edge" %in% names(x)) x$edge
+          else ifelse(x$at_ceiling, "the last level of the ladder",
+                      ifelse(x$at_floor, "the first level of the ladder", NA_character_))
+  on_edge <- !is.na(edge)
+  if (any(on_edge)) {
+    # Wrapped, because with four criteria named one line reached 87
+    # columns, which is the wrapping this block was moved here to avoid.
+    cat("\n")
+    for (e in unique(edge[on_edge]))
+      cat(strwrap(sprintf("%s: the optimum is %s.",
+                          paste(x$criterion[on_edge & edge == e], collapse = ", "), e),
+                  width = 78, prefix = "  ", exdent = 2), sep = "\n")
+    cat("  There the bound is choosing, not the criterion.\n")
+  }
+  # With one criterion there is nothing to compare: the spread is zero and the
+  # intersection is that criterion's own band, so the closing block is skipped.
+  if (nrow(x) > 1L) {
+    # Recomputed from the rows in hand rather than read off the attribute.
+    # `[` carries `common` through a row subset unchanged, so a two-criterion
+    # slice of a four-criterion table used to print the parent's verdict: on
+    # 25 simulated fields that was wrong for 39 of 250 subsets, denying an
+    # overlap the two rows above it plainly showed.
+    cm <- if (!is.null(bands) && all(x$criterion %in% names(bands)))
+      sort(unique(Reduce(intersect, bands[x$criterion])))
+    else sort(unique(attr(x, "common")))
+    cat("\n")
+    rng <- range(x$best)
+    cat(sprintf("  picks span %d to %d cells (%.1fx)\n", rng[1L], rng[2L],
+                rng[2L] / max(rng[1L], 1L)))
+    if (length(cm))
+      cat(sprintf("  in every flat region: %s (%d level%s)\n",
+                  .band_label(cm, Reduce(intersect, lapply(x$criterion, rungs_of))),
+                  length(cm), if (length(cm) == 1L) "" else "s"))
+    else
+      cat("  no level is in every flat region: the criteria disagree over the\n",
+          "  whole ladder. plot() draws the curves they were read from.\n", sep = "")
+  }
   invisible(x)
 }
 
@@ -691,21 +1103,30 @@ print.resolution_selection <- function(x, ...) {
 .resolve_cell_count <- function(x, arg, caller) {
   if (is.null(x)) return(NULL)
   from <- NULL
+  edge_note <- function(sel) {
+    e <- sel$edge %||% NA_character_
+    if (is.na(e)) "" else sprintf(", an optimum at %s", e)
+  }
   if (inherits(x, "resolution_selection")) {
     n <- x$best
-    from <- sprintf("select_resolution(criterion = \"%s\")%s", x$criterion,
-                    if (isTRUE(x$at_ceiling)) ", an optimum at the support ceiling"
-                    else if (isTRUE(x$at_floor)) ", an optimum at the range floor"
-                    else "")
+    from <- sprintf("select_resolution(criterion = \"%s\")%s", x$criterion, edge_note(x))
   } else if (inherits(x, "resolution_profile")) {
-    sel <- select_resolution(x)
+    # The default criterion is cp, which a geometry-only profile cannot score;
+    # fall through to the first criterion that is finite somewhere rather
+    # than fail with cp's own message, which names neither this function
+    # nor the way round it.
+    usable <- Filter(function(cn) cn %in% names(x) &&
+                       any(is.finite(suppressWarnings(as.numeric(x[[cn]])))),
+                     c("cp", "reliability", "elbow", "moran_z"))
+    if (!length(usable))
+      stop(sprintf(paste0("%s(): `%s` is a resolution profile with no criterion finite at ",
+                          "any level, so no cell count can be read off it."),
+                   caller, arg), call. = FALSE)
+    sel <- select_resolution(x, criterion = usable[[1L]])
     n <- sel$best
     from <- sprintf("resolution_profile() read with select_resolution(criterion = \"%s\")%s",
-                    sel$criterion,
-                    if (isTRUE(sel$at_ceiling)) ", an optimum at the support ceiling"
-                    else if (isTRUE(sel$at_floor)) ", an optimum at the range floor"
-                    else "")
-    .log_info("%s(): `%s` is a resolution profile; read with select_resolution()'s default criterion (%s): %d cells.",
+                    sel$criterion, edge_note(sel))
+    .log_info("%s(): `%s` is a resolution profile; read with select_resolution(criterion = \"%s\"): %d cells.",
               caller, arg, sel$criterion, n)
   } else if (is.numeric(x) && length(x) >= 1L && !is.list(x)) {
     n <- x[[1L]]

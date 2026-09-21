@@ -1208,13 +1208,14 @@
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
 #'   library(sf)
-#'   set.seed(9)
-#'   n <- 150
+#'   # A field with a real nugget: half a unit of white noise on a unit sill.
+#'   set.seed(3)
+#'   n <- 250
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
-#'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
+#'   xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
 #'   r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
-#'   sac_nugget(r)
+#'   print(sac_nugget(r))  # the fitted nugget variance, on the sill's scale
 #'   sac_nugget(NA)        # nothing fitted: NA
 #' }
 #' @export
@@ -1230,7 +1231,7 @@ sac_nugget <- function(x) {
 #'
 #' Fits exponential (or spherical) variogram models and returns the
 #' \emph{effective range}: for the exponential model, three times the fitted
-#' range parameter, which is where the semivariance reaches ~95 \% of the
+#' range parameter, which is where the semivariance reaches ~95 % of the
 #' sill; for the spherical model (fitted only when the exponential fit is
 #' singular) the fitted range itself, which is where the spherical
 #' semivariance reaches its sill exactly.  Both are the distance beyond which
@@ -1245,7 +1246,7 @@ sac_nugget <- function(x) {
 #' \code{anisotropy}.  They are a diagnostic, not the answer, for two reasons.
 #' Each direction sees about a quarter of the point pairs, and the maximum of
 #' four quarter-sample fits is biased upward: on simulated \emph{isotropic}
-#' fields it came in about 40\% above the truth, and no hurdle placed in
+#' fields it came in about 40% above the truth, and no hurdle placed in
 #' front of it (all four directions fitted, ratio above 1.5, maximum above
 #' 1.5× the all-pairs fit) kept it out.  One isotropic field rotated in 10°
 #' steps "established" anisotropy in 14 of 18 orientations.  And the windows
@@ -1456,7 +1457,8 @@ sac_nugget <- function(x) {
 #'       \code{"fitted range exceeds the largest lag fitted"},
 #'       \code{"variogram model did not converge"},
 #'       \code{"empirical variogram decreases with distance"},
-#'       \code{"fitted range is non-positive or non-finite"}), \code{crs}
+#'       \code{"fitted range is non-positive or non-finite"},
+#'       \code{"no variogram model could be fitted (singular fits)"}), \code{crs}
 #'       (so the units the rejected number was in stay recoverable, which is
 #'       what \code{plot()} labels its axis from) and
 #'       \code{detrend_method}.  It carries \code{directional},
@@ -1508,9 +1510,11 @@ sac_nugget <- function(x) {
 #'   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   r <- estimate_sac_range(pts, response_var = "z")
-#'   r                              # the effective range, in metres
-#'   attr(r, "directional")         # the four directional ranges
-#'   attr(r, "variogram_model")     # the fitted gstat model behind it
+#'   # print() throughout, because only the last value of a braced block is
+#'   # shown on its own, and every one of these is worth reading.
+#'   print(r)                              # the effective range, in metres
+#'   print(attr(r, "directional"))         # the four directional ranges
+#'   print(attr(r, "variogram_model"))     # the fitted gstat model behind it
 #'
 #'   # A field whose range the data cannot pin down: the variogram never
 #'   # reaches a sill within the lags fitted, so the answer is NA with the
@@ -1518,7 +1522,7 @@ sac_nugget <- function(x) {
 #'   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
 #'   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
 #'                            response_var = "trend")
-#'   r2
+#'   print(r2)
 #'   attr(r2, "rejected_range")
 #' }
 #' @export
@@ -2638,8 +2642,8 @@ print.sac_range <- function(x, ...) {
 #' An earlier version of this package drew one random radius per point from
 #' \eqn{G_{ij}} and excluded up to the order statistic \emph{closest} to it,
 #' which rounds down half the time: on a two-cluster layout the realised
-#' distribution exceeded the target by up to 0.17 (13\% of folds had a
-#' nearest training point within 50 m against a target of 9\%), an
+#' distribution exceeded the target by up to 0.17 (13% of folds had a
+#' nearest training point within 50 m against a target of 9%), an
 #' \emph{optimistic} cross-validation.  \code{params$max_ecdf_excess} reports
 #' the largest remaining excess; compare \code{params$target_median} with
 #' \code{params$realised_median} as well.
@@ -3903,8 +3907,8 @@ make_folds <- function(points_sf, k,
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
 #'   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
-#'   cv$overall
-#'   cv$fold_metrics
+#'   print(cv$overall)       # pooled over the held-out rows of every fold
+#'   cv$fold_metrics         # and fold by fold
 #' }
 #' @export
 cv_gwr <- function(data_sf, response_var, predictor_vars,
@@ -4031,7 +4035,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #' it on the held-out fold.  Beyond the point-prediction metrics the other CV
 #' wrappers report, this one scores the whole predictive \emph{distribution}:
 #' \code{predictive_coverage} says what fraction of held-out observations fell
-#' inside the 50/80/95\% intervals, and \code{mean_CRPS} rates sharpness and
+#' inside the 50/80/95% intervals, and \code{mean_CRPS} rates sharpness and
 #' calibration together.  That is the reason to reach for it.  A Bayesian model
 #' is usually chosen for its uncertainty, and only held-out coverage shows
 #' whether those intervals are honest at locations the model has not seen.
@@ -4133,9 +4137,12 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   )
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
+#'   # Two short chains per fold keep this to a few minutes and leave the
+#'   # posterior rough, so the intervals below will run narrow; a run to
+#'   # report uses brms's defaults (chains = 4, iter = 2000).
 #'   cv <- cv_bayes(dat, "price", "elev", k = 2,
-#'                  fit_args = list(chains = 2, iter = 500))
-#'   cv$overall
+#'                  fit_args = list(chains = 2, iter = 1000))
+#'   print(cv$overall)
 #'   cv$predictive_coverage  # coverage at 50/80/95% plus mean CRPS
 #' }
 #' }

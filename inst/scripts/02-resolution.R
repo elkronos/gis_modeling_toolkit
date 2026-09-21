@@ -7,6 +7,11 @@
   system.file("scripts", package = "spatialkit") else "."
 source(file.path(.tour_dir, "_common.R"))
 
+if (skip_without("gstat", "the whole of script 02")) {
+  cat("  The range is what the ladder's floor and two of its four criteria come\n",
+      "  from, and gstat fits the variogram behind it.\n", sep = "")
+} else {
+
 pts <- tour_points()
 
 step("02.1", "How far does the field reach?")
@@ -56,8 +61,14 @@ for (cr in c("cp", "reliability", "elbow", "moran_z")) {
   # ladder chose and the criterion did not. Widen n_levels and run it again.
   edge <- if (isTRUE(s$at_floor)) "  <- at the floor of the ladder"
           else if (isTRUE(s$at_ceiling)) "  <- at the ceiling of the ladder" else ""
-  band <- if (length(s$flat) >= 2L && all(is.finite(s$flat)))
-    sprintf(" (tied with %d to %d)", s$flat[1L], s$flat[2L]) else " (no tie)"
+  # The flat region is a SET: it can skip a rung, so printing its first two
+  # members as "a to b" both truncated it and implied the levels between were
+  # in it.  Name the others, or count them when there are too many to read.
+  others <- setdiff(s$flat, s$best)
+  band <- if (!length(others)) " (no tie)"
+          else if (length(others) <= 4L)
+            sprintf(" (tied with %s)", paste(others, collapse = ", "))
+          else sprintf(" (tied with %d other levels)", length(others))
   cat(sprintf("  %-12s %2d cells%s%s\n", cr, s$best, band, edge))
 }
 cat("  Pick one before you look, and say which one you picked.\n")
@@ -112,4 +123,6 @@ if (!skip_without("ggplot2", "the maps")) {
                                     title = sprintf("%d cells: mean of z", k)),
               sprintf("02-cells-%02d.png", k))
   }
+}
+
 }

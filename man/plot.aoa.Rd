@@ -26,8 +26,9 @@ This draws the dissimilarity index of the prediction locations against
 that of the cross-validated training data, with the threshold marked, so
 the prediction set can be read as mostly inside, marginal or largely
 outside.  The training curve is the reference the threshold was derived
-from: its upper tail ends where the threshold is (or below it, when the
-outlier fence removed the tail).
+from: the threshold is the largest cross-validated training DI inside an
+outlier fence, so the curve reaches it exactly when no training value was
+fenced off and runs past it, by the tail the fence removed, when some were.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {
@@ -45,7 +46,8 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
                a = rnorm(100, mean = 2), b = rnorm(100)),
     coords = c("x", "y"), crs = 32632)
   aoa <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
-  plot(aoa)
+  print(plot(aoa))              # the two ECDFs; print() because only a
+                                # block's last value is drawn on its own
   plot(aoa, type = "histogram")
 }
 }

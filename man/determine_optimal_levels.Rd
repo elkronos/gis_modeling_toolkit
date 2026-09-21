@@ -69,9 +69,14 @@ standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
 the relative between-restart spread at each \code{k} (\code{wss_spread}),
 the number of rising steps on it (\code{wss_bumps}), the restart
 budget (\code{nstart}), the geometric elbow the evaluated
-neighbourhood was drawn around (\code{knee_k}) and the \code{k} at which
+neighbourhood was drawn around (\code{knee_k}), the \code{k} at which
 k-means failed (\code{failed_k}; their \code{wss} entries are
-interpolated from the neighbours, not measured).  When the model-aware
+interpolated from the neighbours, not measured) and the \code{k} the
+model-aware pass actually scored (\code{eval_ks}, the elbow's
+neighbourhood).  Under \code{"combined"} it also carries the WSS of the
+re-run clustering at those \code{k} (\code{wss_eval}), the rank average
+that ordered them (\code{combined_rank}, named by \code{k}) and
+\code{criterion = "combined"}.  When the model-aware
 path itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), no
 diagnostics are available and the attribute is absent. Both fallbacks are
@@ -135,7 +140,7 @@ reasons alone.  Candidates are therefore ordered by
 \eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
 residual moments, which are exact here because the cell-level residuals
 are OLS residuals by construction.  Over the same runs \eqn{z} had mean
-\eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\\% rejection
+\eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection
 rate of 0.040--0.057 at every \code{k}.  Both quantities are reported in
 the \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
 
@@ -249,6 +254,7 @@ Other aggregation:
 \code{\link{kriging_adequacy}()},
 \code{\link{resolution_profile}()},
 \code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()}
+\code{\link{summarize_by_cell}()},
+\code{\link{summary.resolution_profile}()}
 }
 \concept{aggregation}

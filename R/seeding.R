@@ -274,7 +274,8 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' seeds <- voronoi_seeds_kmeans(pts, k = 8)
-#' nrow(seeds)   # at most 8
+#' nrow(seeds)   # at most 8: one seed per non-empty cluster
+#' seeds         # the cluster centres, as an sf POINT layer in the points' CRS
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
   .assert_sf(points_sf, "POINT", "points_sf")
@@ -361,7 +362,8 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' seeds <- voronoi_seeds_random(bnd, k = 10)
-#' nrow(seeds)   # at most 10
+#' nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
+#' seeds
 #' @export
 voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
   # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.

@@ -139,8 +139,16 @@ not a figure from the paper.
 \section{Where to start}{
 
 If you are reading a single page, read
-\code{vignette("spatialkit_nc_demo", package = "spatialkit")}: it runs the
-whole pipeline above on North Carolina data, with maps at each step.
+\code{vignette("getting-started", package = "spatialkit")}: it takes an
+\code{sf} layer of points through every step above, from a cell count to a
+cross-validated model and a map with its area of applicability, on North
+Carolina data, needing only \pkg{ranger} for the model and \pkg{ggplot2}
+for the maps beyond the hard dependencies.
+\code{vignette("spatialkit_nc_demo", package = "spatialkit")} is the longer
+worked example, with four tessellations, both fold schemes side by side and
+a GWR fit; it takes its cell counts as given, and
+\code{vignette("resolution", package = "spatialkit")} is where those are
+argued for.
 
 If you would rather run something, ten numbered scripts are installed with
 the package.  Each prints what it is doing and says what to look for in a
@@ -152,12 +160,14 @@ source(file.path(dir, "03-folds.R"))    # one topic
 source(file.path(dir, "00-run-all.R"))  # all ten
 }
 Set \code{SPATIALKIT_TOUR_OUTPUT} to a folder to write the figures there
-instead of drawing them.
+instead of drawing them, and \code{SPATIALKIT_TOUR_PAUSE} to \code{"no"}
+to skip the pause between figures that an interactive session gets.
 }
 
 \seealso{
-\code{vignette("spatialkit_nc_demo", package = "spatialkit")} for the worked
-end-to-end example.
+\code{vignette("getting-started", package = "spatialkit")} for the pipeline
+on one page, and \code{vignette("spatialkit_nc_demo", package =
+"spatialkit")} for the longer worked example.
 
 Useful entry points by task:
 \code{\link{build_tessellation}()} (build regions),

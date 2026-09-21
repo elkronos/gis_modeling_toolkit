@@ -15,7 +15,6 @@ resolution_profile(
   nstart = 25L,
   seed = 123L,
   sac = NULL,
-  quiet = TRUE,
   select_on = c("all", "split")
 )
 }
@@ -33,7 +32,9 @@ on the predictors, the variogram is estimated from those residuals, and
 \code{moran_z} regresses the cell means on the cell-mean predictors.}
 
 \item{levels}{Optional integer vector of level counts to score, replacing
-the ladder; values outside \code{[2, n - 1]} are dropped.}
+the ladder; values below 2, or at or above the number of distinct
+locations, are dropped (k-means cannot place more centres than there are
+distinct points).}
 
 \item{n_levels}{Number of levels on the ladder.  Default 20.}
 
@@ -56,9 +57,6 @@ correlation function from.  Pass one fitted with \code{detrend =
 \code{NULL} and a response is given, one is estimated on the subsample
 with the same \code{predictor_vars}.}
 
-\item{quiet}{Logical; suppress this function's progress \code{message()}s.
-Default \code{TRUE}.}
-
 \item{select_on}{\code{"all"} (default) profiles every point;
 \code{"split"} profiles one spatially blocked half and returns the other
 half as the set to estimate on, in the \code{"split"} attribute.  See
@@ -74,14 +72,17 @@ spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
 radius of the cells, in coordinate units), \code{rss}, \code{cp},
 \code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
 input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
-with \code{floor}, \code{ceiling}, \code{supported}, \code{area},
-\code{range}, \code{n}, \code{min_cell_n}), \code{variogram} (a list with
+with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"}
+or \code{"distinct locations"}, whichever bound it), \code{supported},
+\code{area}, \code{range}, \code{n}, \code{n_distinct},
+\code{min_cell_n}), \code{variogram} (a list with
 \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 when none was usable), \code{variable} (\code{"response"},
 \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
 \code{sac} (the range object used) and, with \code{select_on =
-  "split"}, \code{split} (a list with \code{selection} and
-\code{estimation}, integer row positions in \code{data_sf}).
+  "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
+and \code{estimation}, integer row positions in \code{data_sf}, with
+the \code{method} and \code{seed} that made them).
 }
 \description{
 A tessellation's resolution is the number of cells the points are cut
@@ -106,8 +107,8 @@ logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
 step wastes fits at large \eqn{L} and starves resolution at small.  The
 ladder runs from a floor to a ceiling the data impose.  The ceiling is
 \code{floor(n / min_cell_n)}: cells with fewer than \code{min_cell_n} points
-on average have too little support, and the model-aware criteria are not
-computable below nine cells in any case.  The floor is
+on average have too little support, and Moran's z is not computable at
+nine cells or fewer in any case.  The floor is
 \code{ceiling(area / range^2)} when an autocorrelation range is available:
 cells wider than the range average over more than one patch of the field.
 When the floor exceeds the ceiling the data cannot support a tessellation
@@ -165,15 +166,20 @@ them is made knowingly.
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
+  # An exponential field with range parameter 200 (true effective range
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+  # noise for Mallows' Cp to have an interior optimum rather than descend
+  # to the ceiling.
   set.seed(2)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) \%*\% rnorm(n))
+  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-  prof
-  select_resolution(prof, criterion = "reliability")
+  print(prof)               # one row per level; print() because only the
+                            # last value of a braced block is shown
+  select_resolution(prof, criterion = "cp")
 }
 }
 \references{
@@ -201,6 +207,7 @@ Other aggregation:
 \code{\link{determine_optimal_levels}()},
 \code{\link{kriging_adequacy}()},
 \code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()}
+\code{\link{summarize_by_cell}()},
+\code{\link{summary.resolution_profile}()}
 }
 \concept{aggregation}

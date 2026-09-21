@@ -24,11 +24,15 @@ be zero, it is relative to the criterion's range over the ladder.}
 }
 \value{
 A list of class \code{resolution_selection} with \code{best} (the
-level), \code{flat} (the levels in the flat region, ascending),
-\code{criterion}, \code{value} (the optimum), \code{at_ceiling} and
-\code{at_floor} (logical: the optimum is the last or first level of the
-ladder), \code{n_levels} and \code{values} (the criterion at every
-level).
+level), \code{flat} (the levels in the flat region, ascending; a set,
+which can skip a rung), \code{criterion}, \code{value} (the optimum),
+\code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
+or first of the levels this criterion was scored at, which for
+\code{moran_z} starts above nine cells), \code{edge} (which bound that
+is, in words: the support ceiling, the range floor, the ladder's own end,
+or the first or last level the criterion is computable at; \code{NA} for
+an interior optimum), \code{n_levels} and \code{values} (the criterion
+at every level, \code{NA} where it could not be computed).
 }
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:
@@ -37,30 +41,37 @@ the criteria this package computes the flat region is routinely wide: the
 reliability curve is flat to within 2 percent over a factor of 3--6 in the
 number of cells, and \eqn{C_p} on a smooth field descends to the support
 ceiling.  The region is the answer, and the argmin only a point in it.
-When the optimum sits at the ladder's ceiling or floor the result says so,
-because a bound is then doing the choosing rather than the criterion (see
+When the optimum sits at an end of the levels the criterion was scored at,
+the result says so and names the bound, because a bound is then doing the
+choosing rather than the criterion (see
 \code{\link{resolution_profile}} for what each criterion measures and how
 it behaved on simulated fields).
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
+  # An exponential field with range parameter 200 (true effective range
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+  # noise for Mallows' Cp to have an interior optimum rather than descend
+  # to the ceiling.
   set.seed(2)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) \%*\% rnorm(n))
+  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
 
-  sel <- select_resolution(prof, criterion = "reliability")
-  sel                      # the level, and the flat region around it
-  sel$flat                 # every level within `tol` of the optimum
-  sel$at_ceiling           # TRUE would mean the ladder, not the criterion, chose
+  sel <- select_resolution(prof, criterion = "cp")
+  print(sel)               # the level, and the flat region around it
+  print(sel$flat)          # every level within `tol` of the optimum
+  print(sel$edge)          # NA here: the optimum is interior
 
-  # A different criterion can prefer a different level while agreeing on the
-  # region: the flat region is the answer, the argmin a point in it.
-  select_resolution(prof, criterion = "cp")$flat
+  # Reliability prefers coarse cells and here runs into the floor the
+  # autocorrelation range sets, which the result says in words.
+  rel <- select_resolution(prof, criterion = "reliability")
+  print(rel)
+  c(at_floor = rel$at_floor, edge = rel$edge)
 }
 }
 \seealso{
@@ -69,6 +80,7 @@ Other aggregation:
 \code{\link{determine_optimal_levels}()},
 \code{\link{kriging_adequacy}()},
 \code{\link{resolution_profile}()},
-\code{\link{summarize_by_cell}()}
+\code{\link{summarize_by_cell}()},
+\code{\link{summary.resolution_profile}()}
 }
 \concept{aggregation}

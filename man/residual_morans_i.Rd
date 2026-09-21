@@ -154,7 +154,7 @@ autocorrelation"), OLS residuals had mean \eqn{I = -0.031} against the
 exchangeable \eqn{E[I] = -0.008}; the z-score averaged \eqn{-0.54} with
 \eqn{sd = 0.90} instead of 0 and 1.  The cost is power, which is the point
 of the test: at a moderate residual autocorrelation the exchangeable null
-rejected 13\\% of the time where the correct one rejected 31\\%.
+rejected 13\% of the time where the correct one rejected 31\%.
 
 \code{"residual"} therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
 regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
@@ -164,8 +164,8 @@ regression residuals, with \eqn{M = I - X(X'X)^{-1}X'} rebuilt from
   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2}
 These assume normal errors and do not condition on the observed
 kurtosis.  On the simulation above they restored the z-score to mean
-\eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\\% against a
-nominal 5\\%.  They agree with \code{spdep::lm.morantest()} to machine
+\eqn{-0.09}, \eqn{sd = 1.03}, and the rejection rate to 4.3\% against a
+nominal 5\%.  They agree with \code{spdep::lm.morantest()} to machine
 precision.
 
 \strong{These moments are exact for \eqn{e = My} and for nothing else}, so
@@ -178,7 +178,7 @@ test; the same GWR at a working bandwidth does not.
 \strong{For the flexible backends neither null is exact}, and \code{"auto"}
 leaves them on \code{"randomisation"} because forcing the OLS moments on
 them measurably makes matters worse, not better.  Measured on null data
-(\eqn{n = 120}, three smooth covariates, independent errors; nominal 5\\%,
+(\eqn{n = 120}, three smooth covariates, independent errors; nominal 5\%,
 one-sided):
 \tabular{lrr}{
 \strong{backend} \tab \strong{randomisation} \tab \strong{residual} \cr

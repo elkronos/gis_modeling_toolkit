@@ -159,8 +159,8 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
-  cv$overall
-  cv$fold_metrics
+  print(cv$overall)       # pooled over the held-out rows of every fold
+  cv$fold_metrics         # and fold by fold
 }
 }
 \seealso{

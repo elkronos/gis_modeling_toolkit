@@ -287,7 +287,7 @@ assign_features_to_polygons <- function(
 #' \deqn{E[s^2] = \sigma^2 (n - \mathrm{deff}) / (n - 1)}
 #' so \eqn{s^2} understates \eqn{\sigma^2} by very nearly the factor deff
 #' inflates the mean's variance by, and the two errors compound rather than
-#' cancel.  Measured 95\% CI coverage of the uncorrected form at \eqn{n = 30}
+#' cancel.  Measured 95% CI coverage of the uncorrected form at \eqn{n = 30}
 #' over 20,000 replicates: 0.921 at \eqn{\rho = 0.2}, 0.844 at \eqn{\rho = 0.5},
 #' 0.628 at \eqn{\rho = 0.8}.  With the \eqn{\sqrt{(n-1)/(n-\mathrm{deff})}}
 #' rescale below: 0.948, 0.950, 0.949.
@@ -769,7 +769,7 @@ assign_features_to_polygons <- function(
 #' # A response with spatial structure, so the within-cell ICC is not zero.
 #' pts <- st_as_sf(
 #'   data.frame(x = 5e5 + east, y = 5e6 + north,
-#'              val = 0.05 * east + 0.05 * north + rnorm(n, sd = 0.5)),
+#'              val = 5 + 0.02 * east + 0.02 * north + rnorm(n, sd = 0.5)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -779,7 +779,10 @@ assign_features_to_polygons <- function(
 #' grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 #' assigned <- assign_features_to_polygons(pts, grid)
 #'
-#' # IID standard errors (default) vs Kish design-effect adjustment
+#' # IID standard errors (default) vs Kish design-effect adjustment.  The
+#' # correction is large here, and meant to be: about 22 points per cell that
+#' # all share the cell's part of the trend carry far fewer than 22
+#' # independent pieces of information about the cell mean.
 #' naive <- summarize_by_cell(assigned, response_var = "val")
 #' kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
 #' data.frame(n = naive$n,
