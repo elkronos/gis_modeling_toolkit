@@ -121,9 +121,10 @@ of the rise is what the random-fold number overstated.</p>
 <span class="r-in"><span>                 seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">sw</span> <span class="op">&lt;-</span> <span class="fu"><a href="cv_block_size_sweep.html">cv_block_size_sweep</a></span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, fit_fn <span class="op">=</span> <span class="va">rf_fn</span>, k <span class="op">=</span> <span class="fl">4</span>, n_sizes <span class="op">=</span> <span class="fl">4</span>,</span></span>
 <span class="r-in"><span>                            quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="co"># Error rises from the random-fold reference (dashed) towards the estimated</span></span></span>
-<span class="r-in"><span>  <span class="co"># autocorrelation range (vertical marker) and plateaus past it.  The height</span></span></span>
-<span class="r-in"><span>  <span class="co"># of that rise is what random folds were hiding.</span></span></span>
+<span class="r-in"><span>  <span class="co"># Error rises from the random-fold reference (dashed) as the blocks grow</span></span></span>
+<span class="r-in"><span>  <span class="co"># towards the estimated autocorrelation range (vertical marker).  The</span></span></span>
+<span class="r-in"><span>  <span class="co"># height of that rise is what random folds were hiding; with four sizes the</span></span></span>
+<span class="r-in"><span>  <span class="co"># ladder stops near the range, so the plateau beyond it is not drawn here.</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-plt img"><img src="plot.block_size_sweep-1.png" alt="" width="576" height="403"></span>

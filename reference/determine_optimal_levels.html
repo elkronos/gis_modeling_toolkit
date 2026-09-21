@@ -144,9 +144,14 @@ standardised deviates (<code>moran_z</code>), the WSS curve (<code>wss</code>) w
 the relative between-restart spread at each <code>k</code> (<code>wss_spread</code>),
 the number of rising steps on it (<code>wss_bumps</code>), the restart
 budget (<code>nstart</code>), the geometric elbow the evaluated
-neighbourhood was drawn around (<code>knee_k</code>) and the <code>k</code> at which
+neighbourhood was drawn around (<code>knee_k</code>), the <code>k</code> at which
 k-means failed (<code>failed_k</code>; their <code>wss</code> entries are
-interpolated from the neighbours, not measured).  When the model-aware
+interpolated from the neighbours, not measured) and the <code>k</code> the
+model-aware pass actually scored (<code>eval_ks</code>, the elbow's
+neighbourhood).  Under <code>"combined"</code> it also carries the WSS of the
+re-run clustering at those <code>k</code> (<code>wss_eval</code>), the rank average
+that ordered them (<code>combined_rank</code>, named by <code>k</code>) and
+<code>criterion = "combined"</code>.  When the model-aware
 path itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), no
 diagnostics are available and the attribute is absent. Both fallbacks are
@@ -204,7 +209,7 @@ reasons alone.  Candidates are therefore ordered by
 \(|z| = |I - E[I]| / \mathrm{sd}(I)\) using the Cliff &amp; Ord regression
 residual moments, which are exact here because the cell-level residuals
 are OLS residuals by construction.  Over the same runs \(z\) had mean
-\(\approx 0\), \(\mathrm{sd} \approx 1\) and a two-sided 5\<!-- % rejection -->
+\(\approx 0\), \(\mathrm{sd} \approx 1\) and a two-sided 5% rejection
 rate of 0.040–0.057 at every <code>k</code>.  Both quantities are reported in
 the <code>"diagnostics"</code> attribute, as <code>moran_i</code> and <code>moran_z</code>.</p>
 <p><strong>Resolution floor on the model-aware criteria.</strong>  Moran's I is
@@ -300,7 +305,8 @@ that follow.</p>
 <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>,
 <code><a href="resolution_profile.html">resolution_profile()</a></code>,
 <code><a href="select_resolution.html">select_resolution()</a></code>,
-<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code></p></div>
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>,
+<code><a href="summary.resolution_profile.html">summary.resolution_profile()</a></code></p></div>
     </div>
 
     <div class="section level2">

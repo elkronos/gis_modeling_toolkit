@@ -34,5 +34,7 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 ))), crs = 32632))
 g1 <- create_grid_polygons_cached(bnd, target_cells = 9)
 g2 <- create_grid_polygons_cached(bnd, target_cells = 9)   # cache hit
-clear_grid_cache()                                          # entries removed
+clear_grid_cache()   # returns the number of entries removed, invisibly
+print(clear_grid_cache())                                   # 0: already empty
+#> [1] 0
 ```

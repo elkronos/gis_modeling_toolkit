@@ -89,14 +89,18 @@ attached with per-k Moran's I values (`moran_i`) and their standardised
 deviates (`moran_z`), the WSS curve (`wss`) with the relative
 between-restart spread at each `k` (`wss_spread`), the number of rising
 steps on it (`wss_bumps`), the restart budget (`nstart`), the geometric
-elbow the evaluated neighbourhood was drawn around (`knee_k`) and the
-`k` at which k-means failed (`failed_k`; their `wss` entries are
-interpolated from the neighbours, not measured). When the model-aware
-path itself falls back to the geometric result (no viable k in the elbow
-neighbourhood, or Moran's I could not be computed for any candidate), no
-diagnostics are available and the attribute is absent. Both fallbacks
-are logged as warnings. The geometric path returns a plain integer
-vector; a rising WSS curve is still logged there. With
+elbow the evaluated neighbourhood was drawn around (`knee_k`), the `k`
+at which k-means failed (`failed_k`; their `wss` entries are
+interpolated from the neighbours, not measured) and the `k` the
+model-aware pass actually scored (`eval_ks`, the elbow's neighbourhood).
+Under `"combined"` it also carries the WSS of the re-run clustering at
+those `k` (`wss_eval`), the rank average that ordered them
+(`combined_rank`, named by `k`) and `criterion = "combined"`. When the
+model-aware path itself falls back to the geometric result (no viable k
+in the elbow neighbourhood, or Moran's I could not be computed for any
+candidate), no diagnostics are available and the attribute is absent.
+Both fallbacks are logged as warnings. The geometric path returns a
+plain integer vector; a rising WSS curve is still logged there. With
 `select_on = "split"` every path adds a `"split"` attribute: a list with
 `selection` and `estimation` (integer row positions in `data_sf`),
 `method` and `seed`. For a full per-level table of criteria, cell
@@ -152,9 +156,9 @@ alone. Candidates are therefore ordered by \\\|z\| = \|I - E\[I\]\| /
 \mathrm{sd}(I)\\ using the Cliff & Ord regression residual moments,
 which are exact here because the cell-level residuals are OLS residuals
 by construction. Over the same runs \\z\\ had mean \\\approx 0\\,
-\\\mathrm{sd} \approx 1\\ and a two-sided 5\\ rate of 0.040–0.057 at
-every `k`. Both quantities are reported in the `"diagnostics"`
-attribute, as `moran_i` and `moran_z`.
+\\\mathrm{sd} \approx 1\\ and a two-sided 5% rejection rate of
+0.040–0.057 at every `k`. Both quantities are reported in the
+`"diagnostics"` attribute, as `moran_i` and `moran_z`.
 
 **Resolution floor on the model-aware criteria.** Moran's I is computed
 on cell-level residuals with an 8-nearest-neighbour weight matrix, so it
@@ -266,7 +270,8 @@ Other aggregation:
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 

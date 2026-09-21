@@ -208,8 +208,9 @@ fixing the units that <code><a href="make_folds.html">make_folds()</a></code>'s 
 <span class="r-in"><span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="fu">ensure_projected</span><span class="op">(</span><span class="va">pts_ll</span>, target_crs <span class="op">=</span> <span class="fl">3035</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">epsg</span>  <span class="co"># 3035</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 3035</span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span><span class="co"># For densities per cell the CRS has to be equal-area: a Lambert azimuthal</span></span></span>
-<span class="r-in"><span><span class="co"># centred on the data rather than the UTM zone.</span></span></span>
+<span class="r-in"><span><span class="co"># For densities per cell the CRS has to be equal-area.  Two candidates are</span></span></span>
+<span class="r-in"><span><span class="co"># scored, an Albers conic and a Lambert azimuthal, both centred on the data,</span></span></span>
+<span class="r-in"><span><span class="co"># and whichever distorts distance less over the extent is used: here Albers.</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="fu">ensure_projected</span><span class="op">(</span><span class="va">pts_ll</span>, purpose <span class="op">=</span> <span class="st">"area"</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">proj4string</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] "+proj=aea +lat_0=48.750011 +lon_0=9.14995 +lat_1=48.716667 +lat_2=48.783333 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"</span>
 </code></pre></div>

@@ -203,7 +203,7 @@ autocorrelation"), OLS residuals had mean \\I = -0.031\\ against the
 exchangeable \\E\[I\] = -0.008\\; the z-score averaged \\-0.54\\ with
 \\sd = 0.90\\ instead of 0 and 1. The cost is power, which is the point
 of the test: at a moderate residual autocorrelation the exchangeable
-null rejected 13\\
+null rejected 13% of the time where the correct one rejected 31%.
 
 `"residual"` therefore uses the Cliff & Ord (1981) sec. 8.3 moments for
 regression residuals, with \\M = I - X(X'X)^{-1}X'\\ rebuilt from
@@ -213,7 +213,9 @@ regression residuals, with \\M = I - X(X'X)^{-1}X'\\ rebuilt from
 (\mathrm{tr}MW)^2\]/\[(n-p)(n-p+2)\] - E\[I\]^2\$\$ These assume normal
 errors and do not condition on the observed kurtosis. On the simulation
 above they restored the z-score to mean \\-0.09\\, \\sd = 1.03\\, and
-the rejection rate to 4.3\\ nominal 5\\ precision.
+the rejection rate to 4.3% against a nominal 5%. They agree with
+[`spdep::lm.morantest()`](https://r-spatial.github.io/spdep/reference/lm.morantest.html)
+to machine precision.
 
 **These moments are exact for \\e = My\\ and for nothing else**, so
 `null = "auto"` does not guess from the fit's class: it rebuilds `X`,
@@ -225,7 +227,7 @@ same GWR at a working bandwidth does not.
 **For the flexible backends neither null is exact**, and `"auto"` leaves
 them on `"randomisation"` because forcing the OLS moments on them
 measurably makes matters worse, not better. Measured on null data (\\n =
-120\\, three smooth covariates, independent errors; nominal 5\\
+120\\, three smooth covariates, independent errors; nominal 5%,
 one-sided):
 
 |               |                   |              |

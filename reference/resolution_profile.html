@@ -97,7 +97,6 @@ display, with the other criteria alongside.</p>
 <span>  nstart <span class="op">=</span> <span class="fl">25L</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">123L</span>,</span>
 <span>  sac <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  quiet <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  select_on <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"all"</span>, <span class="st">"split"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -126,7 +125,9 @@ on the predictors, the variogram is estimated from those residuals, and
 
 <dt id="arg-levels">levels<a class="anchor" aria-label="anchor" href="#arg-levels"></a></dt>
 <dd><p>Optional integer vector of level counts to score, replacing
-the ladder; values outside <code>[2, n - 1]</code> are dropped.</p></dd>
+the ladder; values below 2, or at or above the number of distinct
+locations, are dropped (k-means cannot place more centres than there are
+distinct points).</p></dd>
 
 
 <dt id="arg-n-levels">n_levels<a class="anchor" aria-label="anchor" href="#arg-n-levels"></a></dt>
@@ -162,11 +163,6 @@ correlation function from.  Pass one fitted with <code>detrend =
 with the same <code>predictor_vars</code>.</p></dd>
 
 
-<dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
-<dd><p>Logical; suppress this function's progress <code><a href="https://rdrr.io/r/base/message.html" class="external-link">message()</a></code>s.
-Default <code>TRUE</code>.</p></dd>
-
-
 <dt id="arg-select-on">select_on<a class="anchor" aria-label="anchor" href="#arg-select-on"></a></dt>
 <dd><p><code>"all"</code> (default) profiles every point;
 <code>"split"</code> profiles one spatially blocked half and returns the other
@@ -185,14 +181,17 @@ spread of WSS across the restarts), <code>elbow</code>, <code>cell_n_min</code>,
 radius of the cells, in coordinate units), <code>rss</code>, <code>cp</code>,
 <code>moran_i</code>, <code>moran_z</code> and <code>reliability</code>; columns a missing
 input leaves undefined are <code>NA</code>.  Attributes: <code>bounds</code> (a list
-with <code>floor</code>, <code>ceiling</code>, <code>supported</code>, <code>area</code>,
-<code>range</code>, <code>n</code>, <code>min_cell_n</code>), <code>variogram</code> (a list with
+with <code>floor</code>, <code>ceiling</code>, <code>ceiling_from</code> (<code>"min_cell_n"</code>
+or <code>"distinct locations"</code>, whichever bound it), <code>supported</code>,
+<code>area</code>, <code>range</code>, <code>n</code>, <code>n_distinct</code>,
+<code>min_cell_n</code>), <code>variogram</code> (a list with
 <code>nugget</code>, <code>psill</code>, <code>range</code>, <code>model</code>; <code>NULL</code>
 when none was usable), <code>variable</code> (<code>"response"</code>,
 <code>"residuals"</code> or <code>NA</code>), <code>wss_bumps</code>, <code>nstart</code>,
 <code>sac</code> (the range object used) and, with <code>select_on =
-  "split"</code>, <code>split</code> (a list with <code>selection</code> and
-<code>estimation</code>, integer row positions in <code>data_sf</code>).</p>
+  "split"</code>, <code>split</code> (a <code>spatialkit_split</code>: <code>selection</code>
+and <code>estimation</code>, integer row positions in <code>data_sf</code>, with
+the <code>method</code> and <code>seed</code> that made them).</p>
     </div>
     <div class="section level2">
     <h2 id="the-ladder-and-its-bounds">The ladder and its bounds<a class="anchor" aria-label="anchor" href="#the-ladder-and-its-bounds"></a></h2>
@@ -205,8 +204,8 @@ logarithmically, because cell diameter scales as \(L^{-1/2}\): a unit
 step wastes fits at large \(L\) and starves resolution at small.  The
 ladder runs from a floor to a ceiling the data impose.  The ceiling is
 <code>floor(n / min_cell_n)</code>: cells with fewer than <code>min_cell_n</code> points
-on average have too little support, and the model-aware criteria are not
-computable below nine cells in any case.  The floor is
+on average have too little support, and Moran's z is not computable at
+nine cells or fewer in any case.  The floor is
 <code>ceiling(area / range^2)</code> when an autocorrelation range is available:
 cells wider than the range average over more than one patch of the field.
 When the floor exceeds the ceiling the data cannot support a tessellation
@@ -292,27 +291,62 @@ and <code>n</code>.</p>
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>,
 <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>,
 <code><a href="select_resolution.html">select_resolution()</a></code>,
-<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code></p></div>
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>,
+<code><a href="summary.resolution_profile.html">summary.resolution_profile()</a></code></p></div>
     </div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"gstat"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
 <span class="r-in"><span>  <span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># An exponential field with range parameter 200 (true effective range</span></span></span>
+<span class="r-in"><span>  <span class="co"># 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough</span></span></span>
+<span class="r-in"><span>  <span class="co"># noise for Mallows' Cp to have an interior optimum rather than descend</span></span></span>
+<span class="r-in"><span>  <span class="co"># to the ceiling.</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">2</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">n</span> <span class="op">&lt;-</span> <span class="fl">400</span></span></span>
 <span class="r-in"><span>  <span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">D</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/dist.html" class="external-link">dist</a></span><span class="op">(</span><span class="va">xy</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">xy</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">100</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">0.3</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">xy</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">200</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">0.6</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="va">xy</span>, coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">prof</span> <span class="op">&lt;-</span> <span class="fu">resolution_profile</span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, n_levels <span class="op">=</span> <span class="fl">12</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">prof</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="st">"reliability"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span>               <span class="co"># one row per level; print() because only the</span></span></span>
+<span class="r-in"><span>                            <span class="co"># last value of a braced block is shown</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="st">"cp"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution by reliability: 23 cells</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   flat region : 23 to 31 (6 of 12 levels)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   note        : the optimum is the first level of the ladder; the floor</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>                is choosing, not the criterion.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution profile: 12 levels on 400 points</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   ladder      : 6 to 44 cells (floor 6 from range 407, ceiling 44 from min_cell_n = 9)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   variogram   : nugget 0.545, partial sill 0.846, range 407</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       6 11300000     0.0594 0.000         56          61.5              338 438</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       7  9370000     0.0931 0.113         52          57.0              293 424</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       9  7070000     0.1180 0.237         31          48.0              265 415</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      10  6270000     0.0962 0.273         30          39.5              251 411</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      12  5140000     0.0845 0.316         24          33.0              225 409</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      15  3980000     0.1330 0.340         17          26.0              194 379</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      18  3260000     0.1170 0.335         13          23.0              177 375</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      21  2680000     0.1220 0.320         13          20.0              158 374</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      26  2110000     0.0982 0.267         10          15.0              143 345</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      31  1700000     0.1080 0.202          7          13.0              129 324</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      37  1400000     0.1370 0.112          4          10.0              114 314</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      44  1130000     0.1050 0.000          5           9.0              106 310</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     cp moran_i moran_z reliability</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.110      NA      NA       0.842</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.080      NA      NA       0.838</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.060      NA      NA       0.828</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.050 -0.0863   0.618       0.823</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.060 -0.1300  -0.625       0.813</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.988  0.0236   1.400       0.798</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.986  0.0718   1.760       0.784</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.992  0.0962   1.980       0.770</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.933  0.1300   2.300       0.749</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.895  0.1300   2.290       0.730</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.887  0.1920   3.230       0.708</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.894  0.2540   4.370       0.685</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution by cp: 37 cells</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   flat region : 31 to 44 (3 of 12 levels)</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -74,6 +74,21 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 seeds <- voronoi_seeds_kmeans(pts, k = 8)
-nrow(seeds)   # at most 8
+nrow(seeds)   # at most 8: one seed per non-empty cluster
 #> [1] 8
+seeds         # the cluster centres, as an sf POINT layer in the points' CRS
+#> Simple feature collection with 8 features and 2 fields
+#> Geometry type: POINT
+#> Dimension:     XY
+#> Bounding box:  xmin: 500102 ymin: 5000143 xmax: 500813 ymax: 5000897
+#> Projected CRS: WGS 84 / UTM zone 32N
+#>                   geometry seed_id method
+#> 1   POINT (500145 5000616)       1 kmeans
+#> 2   POINT (500813 5000237)       2 kmeans
+#> 3 POINT (500786.3 5000897)       3 kmeans
+#> 4   POINT (500102 5000222)       4 kmeans
+#> 5 POINT (500354.4 5000832)       5 kmeans
+#> 6 POINT (500377.9 5000474)       6 kmeans
+#> 7 POINT (500502.9 5000143)       7 kmeans
+#> 8   POINT (500756 5000585)       8 kmeans
 ```

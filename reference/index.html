@@ -175,6 +175,13 @@
 
         <dt>
 
+          <code><a href="summary.resolution_profile.html">summary(<i>&lt;resolution_profile&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Every criterion's pick, side by side</dd>
+
+        <dt>
+
           <code><a href="print.resolution_profile.html">print(<i>&lt;resolution_profile&gt;</i>)</a></code>
 
         </dt>
@@ -261,7 +268,7 @@
       </dl></div><div class="section level2">
       <h2 id="assign-and-aggregate">Assign and aggregate<a class="anchor" aria-label="anchor" href="#assign-and-aggregate"></a></h2>
 
-      <div class="section-desc"><p>One row per cell, with a count and a standard error for every aggregate, and the record of which rows were dropped or tied on the way.</p></div>
+      <div class="section-desc"><p>One row per cell, with a count and a standard error for every aggregate, the record of which rows were dropped or tied on the way, and whether a block-kriging estimate would have beaten the plain cell mean.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -284,17 +291,17 @@
 
         <dt>
 
-          <code><a href="sub-.spatialkit_rows.html">`[`(<i>&lt;spatialkit_rows&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Subset a layer that carries a row record</dd>
-
-        <dt>
-
           <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>
 
         </dt>
         <dd>Block-kriging adequacy diagnostics for a set of cells</dd>
+
+        <dt>
+
+          <code><a href="sub-.spatialkit_rows.html">`[`(<i>&lt;spatialkit_rows&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Subset a layer that carries a row record</dd>
       </dl></div><div class="section level2">
       <h2 id="fold">Fold<a class="anchor" aria-label="anchor" href="#fold"></a></h2>
 
@@ -365,13 +372,6 @@
 
         <dt>
 
-          <code><a href="gwr_model_selection.html">gwr_model_selection()</a></code>
-
-        </dt>
-        <dd>Forward model selection for geographically weighted regression</dd>
-
-        <dt>
-
           <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>
 
         </dt>
@@ -383,6 +383,50 @@
 
         </dt>
         <dd>Heuristic length-scale bounds for a squared-exponential GP</dd>
+      </dl></div><div class="section level2">
+      <h2 id="choose-the-predictors">Choose the predictors<a class="anchor" aria-label="anchor" href="#choose-the-predictors"></a></h2>
+
+      <div class="section-desc"><p>Forward selection scored on spatial folds for any backend, and an AICc search over predictor sets for GWR.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="select_features_forward.html">select_features_forward()</a></code>
+
+        </dt>
+        <dd>Greedy forward feature selection with spatially blocked inner folds</dd>
+
+        <dt>
+
+          <code><a href="plot.feature_selection.html">plot(<i>&lt;feature_selection&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot the path of a forward feature selection</dd>
+
+        <dt>
+
+          <code><a href="gwr_model_selection.html">gwr_model_selection()</a></code>
+
+        </dt>
+        <dd>Forward model selection for geographically weighted regression</dd>
+
+        <dt>
+
+          <code><a href="print.gwr_model_selection.html">print(<i>&lt;gwr_model_selection&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Print a GWR model selection result</dd>
+
+        <dt>
+
+          <code><a href="plot.gwr_model_selection.html">plot(<i>&lt;gwr_model_selection&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot a GWR model selection</dd>
       </dl></div><div class="section level2">
       <h2 id="methods-on-a-fit">Methods on a fit<a class="anchor" aria-label="anchor" href="#methods-on-a-fit"></a></h2>
 
@@ -504,24 +548,54 @@
 
         </dt>
         <dd>Print a random forest fit</dd>
+      </dl></div><div class="section level2">
+      <h2 id="read-a-fit-in-sample">Read a fit in sample<a class="anchor" aria-label="anchor" href="#read-a-fit-in-sample"></a></h2>
+
+      <div class="section-desc"><p>Metrics on the training data (out-of-bag for a forest), and the residual checks that say whether structure was left behind. In-sample numbers are not comparable across backends; <code><a href="../reference/compare_models_cv.html">compare_models_cv()</a></code> is.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="model_metrics.html">model_metrics()</a></code>
+
+        </dt>
+        <dd>Compute goodness-of-fit metrics for a spatial model</dd>
 
         <dt>
 
-          <code><a href="print.gwr_model_selection.html">print(<i>&lt;gwr_model_selection&gt;</i>)</a></code>
+          <code><a href="evaluate_insample.html">evaluate_insample()</a></code>
 
         </dt>
-        <dd>Print a GWR model selection result</dd>
+        <dd>Compute in-sample (or out-of-sample) metrics for fitted spatial models</dd>
 
         <dt>
 
-          <code><a href="plot.gwr_model_selection.html">plot(<i>&lt;gwr_model_selection&gt;</i>)</a></code>
+          <code><a href="compare_models.html">compare_models()</a></code>
 
         </dt>
-        <dd>Plot a GWR model selection</dd>
+        <dd>Side-by-side comparison of fitted spatial models</dd>
+
+        <dt>
+
+          <code><a href="residual_morans_i.html">residual_morans_i()</a></code>
+
+        </dt>
+        <dd>Compute Moran's I on the residuals of a fitted spatial model</dd>
+
+        <dt>
+
+          <code><a href="print.morans_i.html">print(<i>&lt;morans_i&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Print a residual Moran's I result</dd>
       </dl></div><div class="section level2">
       <h2 id="validate">Validate<a class="anchor" aria-label="anchor" href="#validate"></a></h2>
 
-      <div class="section-desc"><p>Score on held-out blocks, compare backends on the same folds, and test the residuals.</p></div>
+      <div class="section-desc"><p>Score on held-out blocks, and compare backends on the same folds.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -576,55 +650,6 @@
 
         </dt>
         <dd>Plot the interval calibration of a Bayesian cross-validation</dd>
-
-        <dt>
-
-          <code><a href="select_features_forward.html">select_features_forward()</a></code>
-
-        </dt>
-        <dd>Greedy forward feature selection with spatially blocked inner folds</dd>
-
-        <dt>
-
-          <code><a href="plot.feature_selection.html">plot(<i>&lt;feature_selection&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Plot the path of a forward feature selection</dd>
-
-        <dt>
-
-          <code><a href="model_metrics.html">model_metrics()</a></code>
-
-        </dt>
-        <dd>Compute goodness-of-fit metrics for a spatial model</dd>
-
-        <dt>
-
-          <code><a href="evaluate_insample.html">evaluate_insample()</a></code>
-
-        </dt>
-        <dd>Compute in-sample (or out-of-sample) metrics for fitted spatial models</dd>
-
-        <dt>
-
-          <code><a href="compare_models.html">compare_models()</a></code>
-
-        </dt>
-        <dd>Side-by-side comparison of fitted spatial models</dd>
-
-        <dt>
-
-          <code><a href="residual_morans_i.html">residual_morans_i()</a></code>
-
-        </dt>
-        <dd>Compute Moran's I on the residuals of a fitted spatial model</dd>
-
-        <dt>
-
-          <code><a href="print.morans_i.html">print(<i>&lt;morans_i&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Print a residual Moran's I result</dd>
       </dl></div><div class="section level2">
       <h2 id="predict-and-check-where-the-prediction-applies">Predict, and check where the prediction applies<a class="anchor" aria-label="anchor" href="#predict-and-check-where-the-prediction-applies"></a></h2>
 

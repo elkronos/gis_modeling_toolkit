@@ -11,6 +11,10 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Choosing a resolution">
+<meta name="description" content="How many cells the data support: the ladder, four criteria that disagree, and how to read the flat region.
+">
+<meta property="og:description" content="How many cells the data support: the ladder, four criteria that disagree, and how to read the flat region.
+">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -70,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">19 September 2026</h4>
+            <h4 data-toc-skip class="date">21 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/resolution.Rmd" class="external-link"><code>vignettes/resolution.Rmd</code></a></small>
       <div class="d-none name"><code>resolution.Rmd</code></div>
@@ -78,6 +82,10 @@ Chase</h4>
 
     
     
+<p><em>This article needs two optional packages: <strong>gstat</strong>,
+which fits the variogram behind the autocorrelation range, and
+<strong>ggplot2</strong> for the figures. When either is missing the
+code is shown but not run, and a note at the top says so.</em></p>
 <div class="section level2">
 <h2 id="the-question">The question<a class="anchor" aria-label="anchor" href="#the-question"></a>
 </h2>
@@ -92,7 +100,23 @@ leaves the decision with you, and the number propagates into the
 variance of the cell means, the design effect, and the size of the
 blocks a spatial cross-validation holds out.</p>
 <p>Three functions answer the question, in increasing order of how much
-they tell you.</p>
+they tell you. <code><a href="../reference/determine_optimal_levels.html">determine_optimal_levels()</a></code> reads an elbow
+off the coordinates alone and runs on the hard dependencies; it is the
+quick answer and the one <code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> accepts
+directly. <code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> scores every cell count on a
+ladder against four criteria at once and needs gstat for two of them.
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads one criterion off that profile,
+and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads all four side by side.
+If the cells will feed a model, the profile is the one to use; if you
+need a count now and the data are all you have, the elbow is defensible
+and this article says where it falls short.</p>
+<p>The argument that says “how many” is spelled differently by the
+function it belongs to: <code>max_levels</code> bounds the elbow’s
+ladder, <code>n_levels</code> sets the profile’s,
+<code>approx_n_cells</code> and <code>target_cells</code> are what the
+grid builders take, and <code>n</code> is what
+<code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> takes. Each of the last three accepts
+the object the first two return.</p>
 </div>
 <div class="section level2">
 <h2 id="a-fixture-with-known-structure">A fixture with known structure<a class="anchor" aria-label="anchor" href="#a-fixture-with-known-structure"></a>
@@ -134,7 +158,7 @@ section shows the two calls in order.</p>
 <code>criterion = "combined"</code> settings need both
 <code>response_var</code> and <code>predictor_vars</code>; give it only
 a response and it logs a warning and falls back to
-<code>"geometric"</code>. And its ladder runs from 2 to
+<code>"geometric"</code>. And its ladder runs from 1 to
 <code>max_levels</code> with no lower bound from the spatial correlation
 of the data, so it can prefer cells wider than the field’s own
 correlation range. The profile below does impose that bound, which is
@@ -152,7 +176,7 @@ cell diameter falls as
 <code class="sourceCode R"><span><span class="va">prof</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, n_levels <span class="op">=</span> <span class="fl">16</span><span class="op">)</span></span>
 <span><span class="va">prof</span></span></code></pre></div>
 <pre><code><span><span class="co">## Resolution profile: 16 levels on 500 points</span></span>
-<span><span class="co">##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 at min_cell_n = 9)</span></span>
+<span><span class="co">##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 from min_cell_n = 9)</span></span>
 <span><span class="co">##   variogram   : nugget 0.877, partial sill 1.29, range 314</span></span>
 <span><span class="co">##   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)</span></span>
 <span><span class="co">## </span></span>
@@ -252,13 +276,13 @@ whether the cell values can be told apart from noise.
 cells are still leaving spatial pattern on the table.</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
-<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls then flattens, reliability declines steadily, the elbow statistic peaks around twenty cells, and the absolute Moran's z is lowest below twenty-five. A red dotted line marks each criterion's choice and a shaded band the region within tolerance of it: the four disagree, and each flat region is wide." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, the elbow statistic peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all four." width="100%" style="display: block; margin: auto;"></p>
 <p>Two behaviours are worth knowing before reading the numbers.</p>
 <p><strong><code>cp</code> needs a nugget to have an interior
 optimum.</strong> On a smooth field the piecewise-constant approximation
 keeps improving as cells shrink, the penalty is too small to stop it,
 and the minimum lands wherever <code>min_cell_n</code> stops the ladder.
-The support floor is then doing the choosing, and
+The support ceiling is then doing the choosing, and
 <code><a href="../reference/select_resolution.html">select_resolution()</a></code> flags it. This fixture has a fitted
 nugget of 0.88 against a partial sill of 1.29, which is why
 <code>cp</code> turns around inside the ladder here.</p>
@@ -279,8 +303,9 @@ and reports the band around it.</p>
 <span><span class="va">sel</span></span></code></pre></div>
 <pre><code><span><span class="co">## Resolution by reliability: 10 cells</span></span>
 <span><span class="co">##   flat region : 10 to 13 (3 of 16 levels)</span></span>
-<span><span class="co">##   note        : the optimum is the first level of the ladder; the floor</span></span>
-<span><span class="co">##                is choosing, not the criterion.</span></span></code></pre>
+<span><span class="co">##   note        : the optimum is the range floor (area / range^2); the bound is</span></span>
+<span><span class="co">##                 choosing, not the criterion. Fewer cells would be wider than</span></span>
+<span><span class="co">##                 the range and average over more than one patch of the field.</span></span></code></pre>
 <p><code>sel$best</code> is the optimum and <code>sel$flat</code> is
 every level within <code>tol</code> of it. Quote the band when you write
 the analysis up. <code>tol</code> is relative to the optimum’s value for
@@ -298,19 +323,44 @@ read the answer as <em>at most this fine</em> and take the number as a
 bound on the analysis, not as an optimum. The floor is a fact about the
 data, so the fix is a different question, not a different
 <code>tol</code>.</p>
-<p>Criteria can prefer different levels while agreeing on a region:</p>
+<p>Criteria can prefer different levels while agreeing on a region.
+<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads all four at once, and closes
+with the levels that every band contains:</p>
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elbow"</span>, <span class="st">"cp"</span>, <span class="st">"reliability"</span>, <span class="st">"moran_z"</span><span class="op">)</span>, <span class="kw">function</span><span class="op">(</span><span class="va">cr</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="va">s</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="va">cr</span><span class="op">)</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>best <span class="op">=</span> <span class="va">s</span><span class="op">$</span><span class="va">best</span>, flat_lo <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">min</a></span><span class="op">(</span><span class="va">s</span><span class="op">$</span><span class="va">flat</span><span class="op">)</span>, flat_hi <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">s</span><span class="op">$</span><span class="va">flat</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="op">}</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">##         elbow cp reliability moran_z</span></span>
-<span><span class="co">## best       22 39          10      16</span></span>
-<span><span class="co">## flat_lo    22 39          10      10</span></span>
-<span><span class="co">## flat_hi    25 49          13      25</span></span></code></pre>
-<p>Where the bands overlap you have a defensible range. Where they do
-not, the criteria are answering different questions and you have to say
-which one your analysis needs.</p>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## Resolution picks: 4 criteria over 16 levels (10 to 55 cells)</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##    criterion best flat region levels in band</span></span>
+<span><span class="co">##           cp   39      39, 49              2</span></span>
+<span><span class="co">##  reliability   10    10 to 13              3</span></span>
+<span><span class="co">##        elbow   22    22 to 25              2</span></span>
+<span><span class="co">##      moran_z   16  10, 16, 25              3</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   reliability: the optimum is the range floor (area / range^2).</span></span>
+<span><span class="co">##   There the bound is choosing, not the criterion.</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   picks span 10 to 39 cells (3.9x)</span></span>
+<span><span class="co">##   no level is in every flat region: the criteria disagree over the</span></span>
+<span><span class="co">##   whole ladder. plot() draws the curves they were read from.</span></span></code></pre>
+<p>A band is a set of levels, not an interval, because the criterion
+curves are not monotone: the <code>cp</code> band above accepts 39 and
+49 and rejects the 44 between them, while a solid run of 3 rungs prints
+as a range, as <code>reliability</code> does with <code>10 to 13</code>.
+Where the bands overlap you have a defensible set of levels, and the
+last line names it; <code>attr(summary(prof), "common")</code> returns
+the same levels for use in code, and
+<code>attr(summary(prof), "bands")</code> each criterion’s region in
+full. Where they do not overlap, the criteria are answering different
+questions and you have to say which one your analysis needs. An empty
+intersection is a result: it says this field has no single resolution
+that satisfies every way of asking.</p>
+<p>The table is not a decision procedure, and nothing in the package
+will pick for you. Cross-validating a model at each suggested level is
+affordable, but it does not settle the question either: on a simulated
+field the level that won on cross-validated
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>R</mi><mn>2</mn></msup><annotation encoding="application/x-tex">R^2</annotation></semantics></math>
+moved with the fold seed, and the coarsest grid won most often because
+its score had the widest spread, not because it was better.</p>
 </div>
 <div class="section level2">
 <h2 id="what-the-ladder-can-support">What the ladder can support<a class="anchor" aria-label="anchor" href="#what-the-ladder-can-support"></a>
@@ -319,17 +369,22 @@ which one your analysis needs.</p>
 the profile.</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## List of 7</span></span>
-<span><span class="co">##  $ floor     : int 10</span></span>
-<span><span class="co">##  $ ceiling   : int 55</span></span>
-<span><span class="co">##  $ supported : logi TRUE</span></span>
-<span><span class="co">##  $ area      : num 976371</span></span>
-<span><span class="co">##  $ range     : num 314</span></span>
-<span><span class="co">##  $ n         : int 500</span></span>
-<span><span class="co">##  $ min_cell_n: int 9</span></span></code></pre>
-<p>The ceiling is <code>floor(n / min_cell_n)</code>. Past it the
-average cell holds too few points to estimate anything from. The floor
-is <code>ceiling(area / range^2)</code>, from the fitted autocorrelation
+<pre><code><span><span class="co">## List of 9</span></span>
+<span><span class="co">##  $ floor       : int 10</span></span>
+<span><span class="co">##  $ ceiling     : int 55</span></span>
+<span><span class="co">##  $ ceiling_from: chr "min_cell_n"</span></span>
+<span><span class="co">##  $ supported   : logi TRUE</span></span>
+<span><span class="co">##  $ area        : num 976371</span></span>
+<span><span class="co">##  $ range       : num 314</span></span>
+<span><span class="co">##  $ n           : int 500</span></span>
+<span><span class="co">##  $ n_distinct  : int 500</span></span>
+<span><span class="co">##  $ min_cell_n  : int 9</span></span></code></pre>
+<p>The ceiling is <code>floor(n / min_cell_n)</code>, or one short of
+the number of distinct locations when that is smaller;
+<code>ceiling_from</code> says which. Past it the average cell holds too
+few points to estimate anything from, or k-means has more centres to
+place than distinct points. The floor is
+<code>ceiling(area / range^2)</code>, from the fitted autocorrelation
 range: cells wider than the range average over more than one patch of
 the field, mixing values the field itself keeps apart.</p>
 <p>When the floor exceeds the ceiling, the data cannot support a

@@ -305,15 +305,24 @@ study competition among methods for analyzing large spatial data.
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">price</span> <span class="op">&lt;-</span> <span class="fl">10</span> <span class="op">+</span> <span class="fl">0.01</span> <span class="op">*</span> <span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">-</span> <span class="fl">5e5</span><span class="op">)</span> <span class="op">+</span></span></span>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">cmp</span> <span class="op">&lt;-</span> <span class="fu">compare_models_cv</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, models <span class="op">=</span> <span class="st">"RF"</span>, k <span class="op">=</span> <span class="fl">3</span>,</span></span>
-<span class="r-in"><span>                           rf_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>num_trees <span class="op">=</span> <span class="fl">100</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># The random forest, and GWR beside it when GWmodel is installed, on the</span></span></span>
+<span class="r-in"><span>  <span class="co"># same folds.  "Bayesian" is left out here because a Stan fit per fold</span></span></span>
+<span class="r-in"><span>  <span class="co"># takes minutes; add it to `models` for a run to report.</span></span></span>
+<span class="r-in"><span>  <span class="va">models</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RF"</span>, <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"GWmodel"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">&amp;&amp;</span></span></span>
+<span class="r-in"><span>                       <span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"sp"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="st">"GWR"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">cmp</span> <span class="op">&lt;-</span> <span class="fu">compare_models_cv</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, models <span class="op">=</span> <span class="va">models</span>, k <span class="op">=</span> <span class="fl">3</span>,</span></span>
+<span class="r-in"><span>                           rf_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>num_trees <span class="op">=</span> <span class="fl">100</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>                           gwr_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>bandwidth <span class="op">=</span> <span class="fl">30</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">cmp</span><span class="op">$</span><span class="va">overall</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> compare_models_cv(): running CV for GWR ...</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> compare_models_cv(): running CV for RF ...</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>       RMSE      MAE     MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1 3.711068 3.128498 21.71902 20.99972 0.1368361     NA    120    120     120</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1 2.281133 1.853980 12.79336 12.53050 0.6738657     NA    120    120     120</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2 3.711068 3.128498 21.71902 20.99972 0.1368361     NA    120    120     120</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   model</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1    RF</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1   GWR</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2    RF</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

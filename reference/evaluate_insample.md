@@ -84,12 +84,18 @@ if (requireNamespace("ranger", quietly = TRUE)) {
     coords = c("x", "y"), crs = 32632
   )
   pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  fit <- fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1)
-  evaluate_insample(fit)                       # in-sample (out-of-bag for RF)
-  evaluate_insample(fit, newdata = pts[1:20, ])  # on held-out rows
+  # Fit on 40 rows and keep 20 back, so the second call really is out of
+  # sample; scoring the training rows again would only re-read the fit.
+  fit <- fit_rf_model(pts[1:40, ], "z", "a", num_trees = 50, seed = 1)
+  print(evaluate_insample(fit))                    # in-sample (out-of-bag for RF)
+  evaluate_insample(fit, newdata = pts[41:60, ])   # on the 20 held-out rows
 }
+#>    model  n     RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE
+#> 1 rf_fit 40 0.409009 0.3236812 86.57837 50.87364 0.9541711     NA     40
+#>   n_SMAPE
+#> 1      40
 #>    model  n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE
-#> 1 rf_fit 20 0.1887327 0.1349218 44.46459 39.90399 0.9915757     NA     20
+#> 1 rf_fit 20 0.5080838 0.3836504 158.4334 63.30707 0.8999583     NA     20
 #>   n_SMAPE
 #> 1      20
 ```

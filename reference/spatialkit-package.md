@@ -216,9 +216,16 @@ kind:
 ## Where to start
 
 If you are reading a single page, read
-[`vignette("spatialkit_nc_demo", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md):
-it runs the whole pipeline above on North Carolina data, with maps at
-each step.
+[`vignette("getting-started", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md):
+it takes an `sf` layer of points through every step above, from a cell
+count to a cross-validated model and a map with its area of
+applicability, on North Carolina data, needing only ranger for the model
+and ggplot2 for the maps beyond the hard dependencies.
+[`vignette("spatialkit_nc_demo", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
+is the longer worked example, with four tessellations, both fold schemes
+side by side and a GWR fit; it takes its cell counts as given, and
+[`vignette("resolution", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
+is where those are argued for.
 
 If you would rather run something, ten numbered scripts are installed
 with the package. Each prints what it is doing and says what to look for
@@ -231,12 +238,15 @@ in a figure before drawing it:
     source(file.path(dir, "00-run-all.R"))  # all ten
 
 Set `SPATIALKIT_TOUR_OUTPUT` to a folder to write the figures there
-instead of drawing them.
+instead of drawing them, and `SPATIALKIT_TOUR_PAUSE` to `"no"` to skip
+the pause between figures that an interactive session gets.
 
 ## See also
 
+[`vignette("getting-started", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md)
+for the pipeline on one page, and
 [`vignette("spatialkit_nc_demo", package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md)
-for the worked end-to-end example.
+for the longer worked example.
 
 Useful entry points by task:
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)

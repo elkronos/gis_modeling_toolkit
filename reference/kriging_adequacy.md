@@ -172,7 +172,8 @@ Other aggregation:
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 
@@ -189,11 +190,19 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   cells <- create_grid_polygons(bnd, target_cells = 16, type = "square")
   asg <- assign_features_to_polygons(pts, cells)
   ka <- kriging_adequacy(asg, "z", cells, k = 4)
-  ka
+  print(ka)                   # the report; print() because only a block's
+                              # last value shows on its own
   attr(ka, "cv")$zscore_var   # about 1 when the variogram is right
 }
 #> Registered S3 method overwritten by 'stars':
 #>   method                  from
 #>   st_interpolate_aw.stars sf  
+#> Block-kriging adequacy over 20 cells (200 points, nmax 50)
+#>   variogram: Nug(0.168, 0) + Exp(1.23, 138); sill 1.39, nugget 0.168 (12%), range 414.6
+#>   kriging variance / sill: median 0.026, range 0.013-0.164; 0 cell(s) above 0.5
+#>   kriging variance exceeds s^2/n in 0 of the 16 cell(s) with two or more points
+#>   kriged minus plain mean: |shift| > 1 SE in 2 of 16 cell(s), > 2 SE in 0
+#>   empty cells: 1 (kriged estimate and variance available for each)
+#>   blocked CV (block_kfold, 4 folds, 200 points): var of standardised error 0.95 (1 = kriging variance correct; above 1 = understated), mean -0.12, RMSE 0.972
 #> [1] 0.947184
 ```

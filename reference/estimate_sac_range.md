@@ -2,8 +2,8 @@
 
 Fits exponential (or spherical) variogram models and returns the
 *effective range*: for the exponential model, three times the fitted
-range parameter, which is where the semivariance reaches ~95 \\ sill;
-for the spherical model (fitted only when the exponential fit is
+range parameter, which is where the semivariance reaches ~95 % of the
+sill; for the spherical model (fitted only when the exponential fit is
 singular) the fitted range itself, which is where the spherical
 semivariance reaches its sill exactly. Both are the distance beyond
 which two observations are (near) uncorrelated, which is what a block or
@@ -183,8 +183,9 @@ ordinary number. The shapes carry different attributes:
   of `"fitted range exceeds the largest lag fitted"`,
   `"variogram model did not converge"`,
   `"empirical variogram decreases with distance"`,
-  `"fitted range is non-positive or non-finite"`), `crs` (so the units
-  the rejected number was in stay recoverable, which is what
+  `"fitted range is non-positive or non-finite"`,
+  `"no variogram model could be fitted (singular fits)"`), `crs` (so the
+  units the rejected number was in stay recoverable, which is what
   [`plot()`](https://rdrr.io/r/graphics/plot.default.html) labels its
   axis from) and `detrend_method`. It carries `directional`,
   `anisotropy`, `anisotropy_used`, `directional_status`,
@@ -221,13 +222,14 @@ distinct azimuths exactly once, and their ranges are returned in the
 `anisotropy`. They are a diagnostic, not the answer, for two reasons.
 Each direction sees about a quarter of the point pairs, and the maximum
 of four quarter-sample fits is biased upward: on simulated *isotropic*
-fields it came in about 40\\ front of it (all four directions fitted,
-ratio above 1.5, maximum above 1.5× the all-pairs fit) kept it out. One
-isotropic field rotated in 10° steps "established" anisotropy in 14 of
-18 orientations. And the windows are fixed to the coordinate axes, so
-any answer built from them changes when the layer is rotated, which a
-property of the field must not do. The all-pairs fit is the best-powered
-estimate available and is invariant to rotation.
+fields it came in about 40% above the truth, and no hurdle placed in
+front of it (all four directions fitted, ratio above 1.5, maximum above
+1.5× the all-pairs fit) kept it out. One isotropic field rotated in 10°
+steps "established" anisotropy in 14 of 18 orientations. And the windows
+are fixed to the coordinate axes, so any answer built from them changes
+when the layer is rotated, which a property of the field must not do.
+The all-pairs fit is the best-powered estimate available and is
+invariant to rotation.
 
 Where a field is *known* to be anisotropic, blocks must be at least as
 large as the longest autocorrelation range to avoid leakage, and the
@@ -364,9 +366,11 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   r <- estimate_sac_range(pts, response_var = "z")
-  r                              # the effective range, in metres
-  attr(r, "directional")         # the four directional ranges
-  attr(r, "variogram_model")     # the fitted gstat model behind it
+  # print() throughout, because only the last value of a braced block is
+  # shown on its own, and every one of these is worth reading.
+  print(r)                              # the effective range, in metres
+  print(attr(r, "directional"))         # the four directional ranges
+  print(attr(r, "variogram_model"))     # the fitted gstat model behind it
 
   # A field whose range the data cannot pin down: the variogram never
   # reaches a sill within the lags fitted, so the answer is NA with the
@@ -374,8 +378,17 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
   r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
                            response_var = "trend")
-  r2
+  print(r2)
   attr(r2, "rejected_range")
 }
+#> 304.4623 
+#>   directional: 0 deg = 267.5557, 45 deg = 439.1852, 90 deg = 370.9347, 135 deg = 328.2169  (ratio 1.64)
+#>        0       45       90      135 
+#> 267.5557 439.1852 370.9347 328.2169 
+#>   model    psill    range
+#> 1   Nug 0.000000   0.0000
+#> 2   Exp 1.286699 101.4874
+#> NA 
+#>   directional: 0 deg = 13190.44 (not converged), 45 deg = 42407.17 (not converged), 90 deg = 114115.2 (not converged), 135 deg = 45807.9 (not converged)
 #> [1] 47261.27
 ```

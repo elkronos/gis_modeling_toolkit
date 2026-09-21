@@ -4,6 +4,20 @@
 
 ### New features
 
+- [`summary()`](https://rdrr.io/r/base/summary.html) on a
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  puts every criterion’s pick in one table: the level each prefers, the
+  flat region around it, whether a ladder bound is doing the choosing,
+  and the levels that lie in every band. Reading the criteria off a
+  profile took one
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  call per criterion, and the comparison had to be assembled by hand.
+  The intersection of the bands is often empty, which is a result rather
+  than a failure: it says the field has no single resolution that
+  satisfies every way of asking. Nothing in the table chooses, and the
+  help page says so. Each region comes back in full on the `"bands"`
+  attribute.
+
 - Every `cv_*()` result now says what became of each fold. `fold_status`
   is a data.frame with one row per fold supplied — `fold`, `status`,
   `message` — where `status` is `"ok"`, `"error"` (the fit or its
@@ -82,8 +96,12 @@
   `"no_fit"`, which were indistinguishable before), `directional_fitted`
   (the range each direction’s fit reported whether or not it was usable,
   so a refused directional range — the most informative number in an
-  anisotropic failure — stays recoverable) and `directional_fits` (each
-  direction’s empirical variogram and fitted model).
+  anisotropic failure — stays recoverable) and, under
+  `keep_directional_fits = TRUE`, `directional_fits` (each direction’s
+  empirical variogram and fitted model). Those four objects are off by
+  default because they dominate the result when present — 42.2 KB of a
+  58.8 KB object at n = 400, against 16.6 KB without them — and
+  `make_folds(auto_range = TRUE)` calls this on every build.
   [`print()`](https://rdrr.io/r/base/print.html) names the reason and
   the refused value for a direction it cannot use.
 
@@ -108,16 +126,26 @@
   included: a UTM zone on a local extent, and the equal-area projection
   chosen for a layer straddling the antimeridian.
   [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-  returns the weight matrix it used, the residual `kurtosis` the
-  randomisation variance conditions on, the design rank `p` behind the
-  residual moments, and `exact`, whether those moments are exact for
-  these residuals. Because that weight matrix is , the result is classed
-  `"morans_i"` and prints through a
+  returns the residual `kurtosis` the randomisation variance conditions
+  on, the design rank `p` behind the residual moments, `exact`, whether
+  those moments are exact for these residuals, and `weights_summary`, a
+  description of the weight matrix it used: `n`, `storage` (the matrix
+  class), `neighbours` (the smallest and largest number of neighbours
+  any row has, `NA` for a dense matrix, where counting them would
+  allocate a second one), `kept` and `desc`, the line
+  [`print()`](https://rdrr.io/r/base/print.html) shows. The matrix
+  itself comes back as `weights` under `keep_weights = TRUE` and is
+  `NULL` otherwise, because it is n by n: at n = 500 it is 50.3 KB of a
+  53.5 KB object in its sparse form, 112.7 KB at n = 120 when the dense
+  fallback is taken (going sparse needs both **FNN** and **Matrix**, so
+  a no-Suggests install always falls back), and 191 MB at the n = 5000
+  that fallback is capped at — against the 3.2 KB everything else
+  occupies — and scoring a list of fits would hold one matrix per fit.
+  The result is classed `"morans_i"` and prints through a
   [`print()`](https://rdrr.io/r/base/print.html) method that shows the
-  statistic, its null and a one-line description of the weights; `[`
-  drops the class, and `$`, `[[` and
-  [`unlist()`](https://rdrr.io/r/base/unlist.html) read the result
-  exactly as for a plain list.
+  statistic, its null and the weights line; `[` drops the class, and
+  `$`, `[[` and [`unlist()`](https://rdrr.io/r/base/unlist.html) read
+  the result exactly as for a plain list.
   [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
   keeps `info$nonfinite_coef`, the per-row, per-term mask behind
   `n_local_singular`, and
@@ -305,7 +333,11 @@
   the ceiling is reported as a finding rather than resolved silently.
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   reads a level off one criterion together with its flat region and says
-  when a bound, not the criterion, is choosing. Two things measured
+  when a bound, not the criterion, is choosing. The flat region is a
+  set, not an interval: the criterion curves are not monotone, so a
+  region can skip a rung of the ladder, and it is printed as the runs
+  the criterion accepts (“19 to 21, 26, 31 to 33”) rather than a range
+  that would quietly include the levels it rejected. Two things measured
   before this shipped, both on the help page: on smooth fields with a
   small nugget C_p descends to the support ceiling (every replicate at
   effective ranges 90–900 with nugget 0.3 on a unit sill; interior only
@@ -489,8 +521,6 @@
     gap between the two curves. The caption compares the sills only when
     both ranges were identified; `response = FALSE` restores the
     residual curve alone.
-    [`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md)
-    is unchanged.
   - `plot_calibration(cv)`: observed against nominal coverage of
     [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)’s
     posterior predictive intervals, pooled (blue) and per fold (grey),
@@ -613,48 +643,14 @@
   columns by position is unaffected; code pinning the exact column set
   needs the two names added.
 
-- [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-  gains `keep_weights` and a `weights_summary`. The result now describes
-  its weight matrix instead of carrying it: `weights` is `NULL` unless
-  `keep_weights = TRUE`, and `weights_summary` reports `n`, `storage`
-  (the matrix class), `neighbours` (the smallest and largest number of
-  neighbours any row has, `NA` for a dense matrix, where counting them
-  would allocate a second one), `kept` and `desc`, the line
-  [`print()`](https://rdrr.io/r/base/print.html) shows. Carrying it is
-  expensive enough to be worth the option: the matrix is n by n, and at
-  n = 500 it is 50.3 KB of a 53.5 KB object in its sparse form, 112.7 KB
-  at n = 120 when the dense fallback is taken (going sparse needs both
-  **FNN** and **Matrix**, so a no-Suggests install always falls back),
-  and 191 MB at the n = 5000 that fallback is capped at — against the
-  3.2 KB everything else occupies. Scoring a list of fits held one
-  matrix per fit.
-
-- [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  gains `keep_directional_fits`. The directional sweep behind the
-  anisotropy check has always reported its per-azimuth ranges and the
-  ratio, and [`print()`](https://rdrr.io/r/base/print.html) has always
-  shown them; the four fitted variogram objects behind those numbers can
-  now be kept as well, under `keep_directional_fits = TRUE`. They are
-  off by default because they dominate the result when present: 42.2 KB
-  of a 58.8 KB object at n = 400, against 16.6 KB without them.
-  `make_folds(auto_range = TRUE)` calls this on every build, so the
-  default matters.
-
 ### Bug fixes
 
-- Figure labels no longer run off the right edge. ggplot2 clips a title,
-  subtitle or caption that is wider than the figure instead of wrapping
-  it, and at the six-inch width a help page and an article draw these
-  at, three plots lost text:
-  [`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md)
-  dropped the end of its title and of the line giving the share of
-  prediction locations inside the threshold, and
-  [`plot.sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.sac_range.md)
-  and `plot.spatial_fit(type = "variogram")` cut the sentence that says
-  why no range was identified, one of them mid-word. The labels built
-  from a fit’s own numbers are now wrapped at draw time, at a width
-  measured from the drawn text, and the fixed titles are broken where
-  they read.
+- `plot(fit, type = "variogram")` no longer runs its subtitle off the
+  edge of the figure. ggplot2 clips a label that is wider than the plot
+  instead of wrapping it, and the sentence saying why no range was
+  identified is up to 150 characters, so on a six-inch figure it was cut
+  mid-word. Labels built from a fit’s own numbers are now wrapped at
+  draw time.
 
 - [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
   could not give IDs to a tessellation this package had just built. It
@@ -753,6 +749,15 @@
   saying so) when `gstat` is not installed or there are fewer than 30
   points.
 
+- `fit_rf_model(include_coords = TRUE)` logs its caution once per
+  session rather than once per fit. Inside a five-fold
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  or a twenty-fit
+  [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+  the same paragraph printed on every fit, which reads as twenty
+  problems rather than one decision; the message now says it will not
+  repeat.
+
 - [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
   reports what ranger actually objected to. ranger diagnoses a bad
   argument in its C++ layer, writes the diagnosis straight to stderr and
@@ -781,13 +786,9 @@
   to load. Each one states what the picture shows and what it is there
   to demonstrate, rather than naming the axes.
 
-- Every one of the 77 help pages now ends with a “See also” that leads
-  somewhere. Thirty-six had none,
-  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
-  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
-  and every S3 method among them, and two more carried a family of one,
-  which roxygen renders as nothing at all. Four families are new:
-  **spatial data preparation**
+- Every help page now ends with a “See also” that leads somewhere; more
+  than a third had none, every S3 method among them. Four families are
+  new: **spatial data preparation**
   ([`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
   [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md),
   [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
@@ -831,11 +832,14 @@
   asserts a number it did not compute, so a run that finishes is one
   whose claims held on the machine that ran it. `SPATIALKIT_TOUR_OUTPUT`
   writes the figures to a folder instead of the device;
-  `SPATIALKIT_TOUR_PAUSE = "no"` skips the per-figure pause. Scripts 09
-  and 10 skip themselves cleanly when GWmodel or brms is absent.
+  `SPATIALKIT_TOUR_PAUSE = "no"` skips the per-figure pause. A script
+  skips the part that needs an absent package with a message naming it,
+  and scripts 02, 09 and 10 skip themselves when gstat, GWmodel or brms
+  is absent.
 
 - Four vignettes join `spatialkit_nc_demo`: `getting-started`
-  (installing, what the coordinates are in, the five-call pipeline),
+  (installing, what the coordinates are in, the pipeline from points to
+  a scored model and a map, and a glossary of the terms that recur),
   `resolution` (the ladder, the four criteria and why they disagree),
   `spatial-cross-validation` (the five fold schemes, block sizing, and
   reading a CV result down to the last row) and `diagnostics` (residual
@@ -854,10 +858,11 @@
   The first half is the regions as a file someone else can use. Grouping
   a layer you already have with
   `assign_features_to_polygons(largest = TRUE)` (100 North Carolina
-  counties into 12 regions, one row per county), answering whether a
-  location falls in one with `keep_unassigned = TRUE`, IDs that survive
-  a reprojection, and why the aggregates go into a GeoPackage instead of
-  a shapefile: of the 10 columns
+  counties into a hex grid of 18 regions, 12 of them populated, one row
+  per county), answering whether a location falls in one with
+  `keep_unassigned = TRUE`, IDs that survive a reprojection, and why the
+  aggregates go into a GeoPackage instead of a shapefile: of the 10
+  columns
   [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
   produces, 2 come back from a shapefile with their names intact. The
   second half is a worked report of six numbers, each read out of an
@@ -933,13 +938,6 @@
   documents its name collision with `blockCV::cv_spatial()`, which
   builds folds where this one runs them, and that `blockCV`’s
   `$folds_ids` is accepted directly as `folds` everywhere.
-
-- The “Defaults and their sources” list on
-  [`?spatialkit`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit-package.md)
-  named `nstart = 5` in
-  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
-  which the k-means++ change above replaced; it now names the 25-restart
-  budget, and the fold-imbalance tolerance by its new argument.
 
 ## spatialkit 2.0.0
 

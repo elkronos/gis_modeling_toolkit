@@ -54,12 +54,21 @@ Other plotting:
 ## Examples
 
 ``` r
-# \donttest{
-if (requireNamespace("brms", quietly = TRUE) &&
-    requireNamespace("ggplot2", quietly = TRUE)) {
-  # cv <- cv_bayes(dat, "z", "a", k = 3, coverage_levels = seq(0.1, 0.9, 0.2))
-  # plot_calibration(cv)
-}
-#> NULL
-# }
+if (FALSE) { # \dontrun{
+# Needs brms and a Stan toolchain, and takes minutes: run it, do not check it.
+library(sf)
+set.seed(1)
+n <- 80
+dat <- st_as_sf(
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+             a = rnorm(n)),
+  coords = c("x", "y"), crs = 32632)
+dat$z <- 2 * dat$a + rnorm(n)
+# Nine coverage levels give a curve rather than three points; chains and
+# iterations are kept small to keep this to a few minutes, so the intervals
+# will be rough.
+cv <- cv_bayes(dat, "z", "a", k = 3, coverage_levels = seq(0.1, 0.9, 0.1),
+               fit_args = list(chains = 2, iter = 1000))
+plot_calibration(cv)
+} # }
 ```

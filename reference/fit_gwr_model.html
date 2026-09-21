@@ -167,7 +167,7 @@ extreme: <code><a href="https://rdrr.io/r/base/kappa.html" class="external-link"
 worst case, not an exempt one.</p>
 <p>A warning is issued whenever <strong>any</strong> sampled location has a singular or
 near-singular local design; the wording reports a percentage when more than
-25\<!-- % of sampled locations are affected and a count otherwise.  Both are real -->
+25% of sampled locations are affected and a count otherwise.  Both are real
 R warnings, not log lines.</p>
 <p>After the fit, the local coefficient surfaces are scanned and a further
 warning counts local regressions that came back non-finite.  Their windows
@@ -204,9 +204,18 @@ audit as a post-fit diagnostic.</p>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">price</span> <span class="op">&lt;-</span> <span class="fl">10</span> <span class="op">+</span> <span class="fl">0.01</span> <span class="op">*</span> <span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">-</span> <span class="fl">5e5</span><span class="op">)</span> <span class="op">+</span></span></span>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu">fit_gwr_model</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, bandwidth <span class="op">=</span> <span class="fl">30</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span><span class="op">)</span>     <span class="co"># print(): only a block's last value shows on its own</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">fit</span>, newdata <span class="op">=</span> <span class="va">dat</span><span class="op">)</span><span class="op">)</span>   <span class="co"># newdata is re-projected if needed</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Summary of &lt;gwr_fit&gt; fit (n = 60)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Formula: price ~ elev</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   In-sample metrics:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     RMSE    = 1.1889</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     MAE     = 0.9995</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     R^2     = 0.8583</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     SMAPE   = 6.87%</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 16.47047 13.69566 17.02994 18.13618 11.49180 18.37175</span>
 </code></pre></div>
     </div>

@@ -377,7 +377,8 @@ Other aggregation:
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
-[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 
@@ -390,7 +391,7 @@ north <- runif(n, 0, 100)
 # A response with spatial structure, so the within-cell ICC is not zero.
 pts <- st_as_sf(
   data.frame(x = 5e5 + east, y = 5e6 + north,
-             val = 0.05 * east + 0.05 * north + rnorm(n, sd = 0.5)),
+             val = 5 + 0.02 * east + 0.02 * north + rnorm(n, sd = 0.5)),
   coords = c("x", "y"), crs = 32632
 )
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
@@ -400,35 +401,38 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)
 
-# IID standard errors (default) vs Kish design-effect adjustment
+# IID standard errors (default) vs Kish design-effect adjustment.  The
+# correction is large here, and meant to be: about 22 points per cell that
+# all share the cell's part of the trend carry far fewer than 22
+# independent pieces of information about the cell mean.
 naive <- summarize_by_cell(assigned, response_var = "val")
 kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
 data.frame(n = naive$n,
            se_naive = naive$..se_resp_val,
            se_kish  = kish$..se_resp_val)
-#>    n  se_naive  se_kish
-#> 1 25 0.1282574 1.576773
-#> 2 28 0.1687903 2.195277
-#> 3 25 0.1586372 1.950257
-#> 4 21 0.1797135 2.026192
-#> 5 23 0.2010768 2.371742
-#> 6 21 0.1974045 2.225651
-#> 7 10 0.2315705 1.809441
-#> 8 27 0.1499232 1.914966
-#> 9 20 0.2162204 2.379509
+#>    n   se_naive   se_kish
+#> 1 25 0.09706775 0.7210227
+#> 2 28 0.11815220 0.9279034
+#> 3 25 0.11573069 0.8596517
+#> 4 21 0.11556510 0.7881134
+#> 5 23 0.13192931 0.9407000
+#> 6 21 0.12707224 0.8665880
+#> 7 10 0.18215988 0.8673238
+#> 8 27 0.09534639 0.7355266
+#> 9 20 0.14402822 0.9590654
 attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
 #> $method
 #> [1] "kish"
 #> 
 #> $icc_resp
-#> [1] 0.8572554
+#> [1] 0.6842466
 #> 
 #> $icc_pred
 #> [1] NA
 #> 
 #> $deff
-#> [1] 21.574129 24.145895 21.574129 18.145108 19.859618 18.145108  8.715298
-#> [8] 23.288640 17.287852
+#> [1] 17.42192 19.47466 17.42192 14.68493 16.05343 14.68493  7.15822 18.79041
+#> [9] 14.00069
 #> 
 
 # A 95% interval for each cell mean as an estimate of the grand mean, on
@@ -440,14 +444,14 @@ ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
 #> # A tibble: 9 × 7
 #>   poly_id     n resp_mean_val ..neff_resp_val ..df_resp_val ..ci_lo_resp_val
 #>     <int> <int>         <dbl>           <dbl>         <dbl>            <dbl>
-#> 1       1    25          1.74            1.16            24          -1.52  
-#> 2       2    28          3.25            1.16            27          -1.26  
-#> 3       3    25          5.02            1.16            24           1.000 
-#> 4       4    21          3.37            1.16            20          -0.857 
-#> 5       5    23          5.01            1.16            22           0.0947
-#> 6       6    21          7.00            1.16            20           2.35  
-#> 7       7    10          5.43            1.15             9           1.34  
-#> 8       8    27          6.84            1.16            26           2.90  
-#> 9       9    20          7.94            1.16            19           2.96  
+#> 1       1    25          5.63            1.43            24             4.14
+#> 2       2    28          6.30            1.44            27             4.40
+#> 3       3    25          6.93            1.43            24             5.16
+#> 4       4    21          6.42            1.43            20             4.77
+#> 5       5    23          7.11            1.43            22             5.15
+#> 6       6    21          7.89            1.43            20             6.09
+#> 7       7    10          7.16            1.40             9             5.19
+#> 8       8    27          7.77            1.44            26             6.25
+#> 9       9    20          8.16            1.43            19             6.15
 #> # ℹ 1 more variable: ..ci_hi_resp_val <dbl>
 ```

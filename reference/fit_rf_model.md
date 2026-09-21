@@ -141,9 +141,10 @@ badly anywhere it has not seen. Random cross-validation will not catch
 this: nearby points leak between folds, so the memorised surface scores
 well. That is how the practice became common. Meyer et al. (2019) show
 the collapse directly. `include_coords` therefore defaults to `FALSE`,
-and setting it to `TRUE` logs a caution (it is a deliberate choice, so
-it is not raised as an R warning). If you do use it, score the model
-with
+and setting it to `TRUE` logs a caution, once per session (it is a
+deliberate choice, so it is not raised as an R warning, and it is not
+repeated for every fold of a cross-validation). If you do use it, score
+the model with
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 and blocked folds, never with the out-of-bag error.
 
@@ -213,9 +214,21 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.3)
   fit <- fit_rf_model(dat, "z", c("a", "b"))
-  fit
-  fit$info$importance
+  print(fit)              # print(): only a block's last value shows on its own
+  fit$info$importance     # permutation importance, a and b
 }
+#> <Random Forest (ranger)> spatial model fit
+#>   Formula : z ~ a + b
+#>   n       : 150
+#>   CRS     : EPSG:32632
+#>   Trees   : 500 (mtry = 1, min node = 5)
+#>   Coords as predictors: no
+#>   Sampling: bootstrap, with replacement (100.0% of rows per tree)
+#>   OOB RMSE: 0.6995   OOB R^2: 0.9093
+#>   Importance (permutation): a=6.886, b=1.583
+#> 
+#>   OOB is a random hold-out and is optimistic under spatial
+#>   autocorrelation; use cv_rf() for a spatial estimate.
 #>        a        b 
 #> 6.886377 1.583079 
 ```

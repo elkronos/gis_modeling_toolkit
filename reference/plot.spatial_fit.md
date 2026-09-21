@@ -48,19 +48,21 @@ plot(
       on the same points and lags, drawn hollow with a dashed fit. The
       gap between the two curves is the spatial structure the model
       absorbed: a residual sill well below the response sill means most
-      of it, two curves that coincide mean none. When both models were
-      fitted the caption gives the residual sill as a share of the
-      response sill, and the two effective ranges; the residual range is
-      expected to come out shorter and the residual sill lower even when
-      the model is right, because residuals of a fitted trend understate
-      the variogram (see
+      of it, two curves that coincide mean none. When both effective
+      ranges were identified the caption gives the residual sill as a
+      share of the response sill and the two ranges; when either
+      variogram reached no sill the caption says so and compares
+      nothing, because a sill the data never reached is not a number to
+      divide by. The residual range is expected to come out shorter and
+      the residual sill lower even when the model is right, because
+      residuals of a fitted trend understate the variogram (see
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
       "Detrending and the residual-variogram bias"). The distance axis
       is labelled in the units of the CRS the variogram was actually
       fitted in, which is not necessarily the fit's own CRS (lon/lat
       data are projected first). A single-direction fit names its
-      azimuth in the subtitle; a fit that did not converge says so in
-      the caption, since the overlaid model line is then not a fit to
+      azimuth in the title; a fit that identified no range says why in
+      the subtitle, since the overlaid model line is then not a fit to
       believe. Requires 'gstat'.
 
   `"coefficients"`
@@ -129,19 +131,24 @@ Other plotting:
 if (requireNamespace("ranger", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
-  set.seed(1)
+  # price depends on elevation, which the forest sees, and on a spatially
+  # correlated field it does not: that field is what the residual plots
+  # are there to find.
+  set.seed(2)
   n <- 120
-  pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
-               elev = rnorm(n)),
-    coords = c("x", "y"), crs = 32632
-  )
-  pts$price <- 10 + 0.01 * (st_coordinates(pts)[, 1] - 5e5) +
-    2 * pts$elev + rnorm(n)
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+                   elev = rnorm(n))
+  D  <- as.matrix(dist(xy[, c("x", "y")]))
+  xy$price <- 10 + 2 * xy$elev +
+    as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+  pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   fit <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
-  plot(fit, type = "residuals")
-  plot(fit, type = "observed_predicted")
+  # print() each one: inside a braced block only the last value is drawn.
+  print(plot(fit, type = "residuals"))          # structure left in the residuals
+  print(plot(fit, type = "observed_predicted"))
   if (requireNamespace("gstat", quietly = TRUE))
-    plot(fit, type = "variogram")
+    plot(fit, type = "variogram")   # residual and response variograms compared
 }
+
+
 ```

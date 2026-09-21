@@ -257,9 +257,40 @@ selected model.</p>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">a</span> <span class="op">-</span> <span class="va">dat</span><span class="op">$</span><span class="va">b</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">0.5</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">sel</span> <span class="op">&lt;-</span> <span class="fu">gwr_model_selection</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span>, <span class="st">"noise"</span><span class="op">)</span>, bandwidth <span class="op">=</span> <span class="fl">30</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">sel</span><span class="op">$</span><span class="va">best</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">sel</span><span class="op">)</span>              <span class="co"># every model tried, by AICc</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">sel</span><span class="op">$</span><span class="va">best</span><span class="op">)</span>         <span class="co"># the winning predictor set: a and b, not noise</span></span></span>
 <span class="r-in"><span>  <span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="fit_gwr_model.html">fit_gwr_model</a></span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="va">sel</span><span class="op">$</span><span class="va">best</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">fit</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Geographically weighted regression - forward model selection</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   response    : z</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   candidates  : 3 (a, b, noise)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   observations: 80</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   models      : 6</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   bandwidth   : 30 (adaptive; supplied)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   kernel      : bisquare</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   criterion   : AICc (assumed: column 3, unlabelled)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  rank n_vars     variables criterion</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1      2         a + b  136.6185</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     2      3 a + b + noise  150.6764</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     3      1             a  273.2590</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     4      2     a + noise  278.3346</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     5      1             b  360.8372</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     6      1         noise  378.2502</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Selected: z ~ a + b</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> The criterion is in-sample and every model shares one bandwidth.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Confirm with select_features_forward() before relying on this.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "a" "b"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> &lt;GWR (GWmodel)&gt; spatial model fit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Formula : z ~ a + b</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   n       : 80</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   CRS     : EPSG:32632</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Bandwidth: 78 (adaptive, bisquare kernel)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   AICc    : 123.31</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -131,8 +131,23 @@ warning, and <code>k</code> is clamped to the number of distinct positions.</p>
 <span class="r-in"><span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">seeds</span> <span class="op">&lt;-</span> <span class="fu">voronoi_seeds_kmeans</span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">8</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">seeds</span><span class="op">)</span>   <span class="co"># at most 8</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">seeds</span><span class="op">)</span>   <span class="co"># at most 8: one seed per non-empty cluster</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 8</span>
+<span class="r-in"><span><span class="va">seeds</span>         <span class="co"># the cluster centres, as an sf POINT layer in the points' CRS</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 8 features and 2 fields</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Geometry type: POINT</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Dimension:     XY</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 500102 ymin: 5000143 xmax: 500813 ymax: 5000897</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Projected CRS: WGS 84 / UTM zone 32N</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                   geometry seed_id method</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1   POINT (500145 5000616)       1 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2   POINT (500813 5000237)       2 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3 POINT (500786.3 5000897)       3 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4   POINT (500102 5000222)       4 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5 POINT (500354.4 5000832)       5 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6 POINT (500377.9 5000474)       6 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7 POINT (500502.9 5000143)       7 kmeans</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8   POINT (500756 5000585)       8 kmeans</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

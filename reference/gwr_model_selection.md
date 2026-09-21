@@ -206,7 +206,38 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   )
   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-  sel$best
+  print(sel)              # every model tried, by AICc
+  print(sel$best)         # the winning predictor set: a and b, not noise
   fit <- fit_gwr_model(dat, "z", sel$best)
+  fit
 }
+#> Geographically weighted regression - forward model selection
+#> 
+#>   response    : z
+#>   candidates  : 3 (a, b, noise)
+#>   observations: 80
+#>   models      : 6
+#>   bandwidth   : 30 (adaptive; supplied)
+#>   kernel      : bisquare
+#>   criterion   : AICc (assumed: column 3, unlabelled)
+#> 
+#>  rank n_vars     variables criterion
+#>     1      2         a + b  136.6185
+#>     2      3 a + b + noise  150.6764
+#>     3      1             a  273.2590
+#>     4      2     a + noise  278.3346
+#>     5      1             b  360.8372
+#>     6      1         noise  378.2502
+#> 
+#> Selected: z ~ a + b
+#> 
+#> The criterion is in-sample and every model shares one bandwidth.
+#> Confirm with select_features_forward() before relying on this.
+#> [1] "a" "b"
+#> <GWR (GWmodel)> spatial model fit
+#>   Formula : z ~ a + b
+#>   n       : 80
+#>   CRS     : EPSG:32632
+#>   Bandwidth: 78 (adaptive, bisquare kernel)
+#>   AICc    : 123.31
 ```

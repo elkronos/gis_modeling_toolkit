@@ -270,8 +270,9 @@ length-scale quantity in the wrong units.
 
 After fitting, the posterior length-scale is compared against the
 smallest scale the chosen basis can resolve (`1.75 * gp_c * S / gp_k`,
-stored as `$info$gp_ell_min`); a warning is issued when more than 10\\
-which is the signal that `gp_k` should be raised.
+stored as `$info$gp_ell_min`); a warning is issued when more than 10% of
+the posterior mass falls below it, which is the signal that `gp_k`
+should be raised.
 
 **Coordinate scaling and anisotropy.** Before fitting the GP, X and Y
 coordinates are each centred and divided by their own standard
@@ -426,20 +427,25 @@ if (requireNamespace("brms", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
+  # Two short chains keep this to a few minutes; expect Stan to warn about
+  # effective sample size, which is the cost of that.  Use its defaults
+  # (chains = 4, iter = 2000) for a fit to report.
   fit <- fit_bayesian_spatial_model(dat, "price", "elev",
-                                    chains = 2, iter = 500,
+                                    chains = 2, iter = 1000,
                                     compute_loo = FALSE)
-  summary(fit)
+  print(summary(fit))
   head(predict(fit, newdata = dat))
 
-  # A zero-inflated count.  The family is the only thing that changes;
-  # score it with cv_bayes()'s CRPS and coverage, not with MAPE or R2.
+  # A zero-inflated count.  The family is the only thing that changes.
+  # summary()'s R2 and MAPE assume a Gaussian response, so for a count
+  # read the coefficients here and score the model with cv_bayes(), whose
+  # CRPS and interval coverage are defined for any response.
   dat$count <- rpois(n, exp(0.5 + 0.8 * dat$elev)) * rbinom(n, 1, 0.7)
   fit_zip <- fit_bayesian_spatial_model(dat, "count", "elev",
                                         family = brms::zero_inflated_poisson(),
-                                        chains = 2, iter = 500,
+                                        chains = 2, iter = 1000,
                                         compute_loo = FALSE)
-  summary(fit_zip)
+  coef(fit_zip)
 }
 } # }
 ```

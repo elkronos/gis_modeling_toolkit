@@ -179,10 +179,29 @@ grid long before the fit itself would.</p>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">pts</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">fit</span>  <span class="op">&lt;-</span> <span class="fu"><a href="fit_rf_model.html">fit_rf_model</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, num_trees <span class="op">=</span> <span class="fl">100</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">surf</span> <span class="op">&lt;-</span> <span class="fu">predict_surface</span><span class="op">(</span><span class="va">fit</span>, n_cells <span class="op">=</span> <span class="fl">500</span>, covariates <span class="op">=</span> <span class="va">pts</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">surf</span><span class="op">[</span><span class="st">".pred"</span><span class="op">]</span></span></span>
-<span class="r-in"><span>  <span class="co"># Check where that surface is extrapolating before mapping it.</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">surf</span><span class="op">[</span><span class="st">".pred"</span><span class="op">]</span><span class="op">)</span>        <span class="co"># one prediction per grid cell, as an sf layer</span></span></span>
+<span class="r-in"><span>  <span class="co"># Check where that surface is extrapolating before mapping it.  The grid</span></span></span>
+<span class="r-in"><span>  <span class="co"># took its covariates from the nearest observation, so here nothing is</span></span></span>
+<span class="r-in"><span>  <span class="co"># outside; a grid with its own covariate raster is where this bites.</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">surf</span>, model <span class="op">=</span> <span class="va">fit</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 484 features and 1 field</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Geometry type: POINT</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Dimension:     XY</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 500034.7 ymin: 5000057 xmax: 500943.7 ymax: 5000966</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Projected CRS: WGS 84 / UTM zone 32N</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> First 10 features:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       .pred                 geometry</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1  11.53496 POINT (500034.7 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2  11.71447   POINT (500078 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3  11.71447 POINT (500121.3 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4  12.06628 POINT (500164.6 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5  12.06628 POINT (500207.9 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6  12.06628 POINT (500251.1 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7  13.07745 POINT (500294.4 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8  13.07745 POINT (500337.7 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9  13.07745   POINT (500381 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 10 11.63669 POINT (500424.3 5000057)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Area of applicability (Meyer &amp; Pebesma 2021)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   predictors  : 1 (elev)</span>

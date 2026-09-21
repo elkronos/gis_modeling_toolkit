@@ -62,12 +62,23 @@ Other plotting:
 if (requireNamespace("gstat", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
+  # An exponential field with range parameter 150 (effective range about
+  # 450 m) and a nugget of half the sill, so the fitted model, the nugget
+  # and the range line all have something to show.
   set.seed(3)
-  n <- 150
+  n <- 250
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  xy$z <- sin(xy$x / 150) + rnorm(n, sd = 0.3)
+  D  <- as.matrix(dist(xy))
+  xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   r <- estimate_sac_range(pts, response_var = "z")
   plot(r)
+
+  # A field whose variogram never reaches a sill: the plot still draws it,
+  # and the subtitle says why no range is marked.
+  xy$trend <- sin(xy$x / 400) + rnorm(n, sd = 0.2)
+  r2 <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632),
+                           response_var = "trend")
+  plot(r2)
 }
 ```

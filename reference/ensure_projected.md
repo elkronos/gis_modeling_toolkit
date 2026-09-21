@@ -164,8 +164,9 @@ st_crs(ensure_projected(wide))$proj4string
 st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
 #> [1] 3035
 
-# For densities per cell the CRS has to be equal-area: a Lambert azimuthal
-# centred on the data rather than the UTM zone.
+# For densities per cell the CRS has to be equal-area.  Two candidates are
+# scored, an Albers conic and a Lambert azimuthal, both centred on the data,
+# and whichever distorts distance less over the extent is used: here Albers.
 st_crs(ensure_projected(pts_ll, purpose = "area"))$proj4string
 #> [1] "+proj=aea +lat_0=48.750011 +lon_0=9.14995 +lat_1=48.716667 +lat_2=48.783333 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 ```

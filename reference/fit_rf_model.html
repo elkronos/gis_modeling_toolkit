@@ -196,8 +196,9 @@ anywhere it has not seen. Random cross-validation will not catch this:
 nearby points leak between folds, so the memorised surface scores well.
 That is how the practice became common. Meyer et al. (2019) show the
 collapse directly. <code>include_coords</code> therefore defaults to
-<code>FALSE</code>, and setting it to <code>TRUE</code> logs a caution (it is a
-deliberate choice, so it is not raised as an R warning). If you do use it,
+<code>FALSE</code>, and setting it to <code>TRUE</code> logs a caution, once per
+session (it is a deliberate choice, so it is not raised as an R warning,
+and it is not repeated for every fold of a cross-validation). If you do use it,
 score the model with <code><a href="cv_spatial.html">cv_spatial</a></code> and blocked folds, never with
 the out-of-bag error.</p>
     </div>
@@ -261,9 +262,21 @@ solution. <em>BMC Bioinformatics</em> 8, 25. <a href="https://doi.org/10.1186/14
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">a</span> <span class="op">-</span> <span class="va">dat</span><span class="op">$</span><span class="va">b</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">0.3</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu">fit_rf_model</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">fit</span></span></span>
-<span class="r-in"><span>  <span class="va">fit</span><span class="op">$</span><span class="va">info</span><span class="op">$</span><span class="va">importance</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span>              <span class="co"># print(): only a block's last value shows on its own</span></span></span>
+<span class="r-in"><span>  <span class="va">fit</span><span class="op">$</span><span class="va">info</span><span class="op">$</span><span class="va">importance</span>     <span class="co"># permutation importance, a and b</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> &lt;Random Forest (ranger)&gt; spatial model fit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Formula : z ~ a + b</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   n       : 150</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   CRS     : EPSG:32632</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Trees   : 500 (mtry = 1, min node = 5)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Coords as predictors: no</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Sampling: bootstrap, with replacement (100.0% of rows per tree)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   OOB RMSE: 0.6995   OOB R^2: 0.9093</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Importance (permutation): a=6.886, b=1.583</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   OOB is a random hold-out and is optimistic under spatial</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   autocorrelation; use cv_rf() for a spatial estimate.</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>        a        b </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 6.886377 1.583079 </span>
 </code></pre></div>

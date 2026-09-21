@@ -5,10 +5,11 @@ Refits the Gaussian-process model of
 on each training fold and scores it on the held-out fold. Beyond the
 point-prediction metrics the other CV wrappers report, this one scores
 the whole predictive *distribution*: `predictive_coverage` says what
-fraction of held-out observations fell inside the 50/80/95\\ calibration
-together. That is the reason to reach for it. A Bayesian model is
-usually chosen for its uncertainty, and only held-out coverage shows
-whether those intervals are honest at locations the model has not seen.
+fraction of held-out observations fell inside the 50/80/95% intervals,
+and `mean_CRPS` rates sharpness and calibration together. That is the
+reason to reach for it. A Bayesian model is usually chosen for its
+uncertainty, and only held-out coverage shows whether those intervals
+are honest at locations the model has not seen.
 
 ## Usage
 
@@ -244,9 +245,12 @@ if (requireNamespace("brms", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
+  # Two short chains per fold keep this to a few minutes and leave the
+  # posterior rough, so the intervals below will run narrow; a run to
+  # report uses brms's defaults (chains = 4, iter = 2000).
   cv <- cv_bayes(dat, "price", "elev", k = 2,
-                 fit_args = list(chains = 2, iter = 500))
-  cv$overall
+                 fit_args = list(chains = 2, iter = 1000))
+  print(cv$overall)
   cv$predictive_coverage  # coverage at 50/80/95% plus mean CRPS
 }
 } # }

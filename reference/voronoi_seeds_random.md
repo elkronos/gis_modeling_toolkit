@@ -63,6 +63,23 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 seeds <- voronoi_seeds_random(bnd, k = 10)
-nrow(seeds)   # at most 10
+nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
 #> [1] 10
+seeds
+#> Simple feature collection with 10 features and 2 fields
+#> Geometry type: POINT
+#> Dimension:     XY
+#> Bounding box:  xmin: 8.243274 ymin: 21.79086 xmax: 85.21335 ymax: 84.31172
+#> Projected CRS: WGS 84 / UTM zone 32N
+#>                     geometry seed_id method
+#> 1   POINT (8.95516 37.29459)       1 random
+#> 2  POINT (21.05123 21.79086)       2 random
+#> 3   POINT (73.29553 75.5105)       3 random
+#> 4  POINT (85.21335 82.16811)       4 random
+#> 5  POINT (78.83979 59.89182)       5 random
+#> 6    POINT (33.196 65.10336)       6 random
+#> 7  POINT (8.243274 84.31172)       7 random
+#> 8  POINT (28.55269 45.32381)       8 random
+#> 9  POINT (23.75033 71.67571)       9 random
+#> 10 POINT (38.52362 29.12222)      10 random
 ```

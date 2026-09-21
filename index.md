@@ -221,22 +221,27 @@ for (g in c("predict", "residuals", "fitted"))
 
 ``` r
 
+# The blocks are sized to the field's own correlation: its effective range is
+# 3 x 80 = 240 units, so 250-unit blocks hold out whole patches.  On real data
+# the range is estimated, by estimate_sac_range() or make_folds(auto_range =
+# TRUE); vignette("spatial-cross-validation") is about that choice.
 random  <- cv_spatial(site, "z", "w", fit_fn = trend_fit,
                       folds = make_folds(site, k = 5, method = "random_kfold", seed = 1))
 blocked <- cv_spatial(site, "z", "w", fit_fn = trend_fit,
-                      folds = make_folds(site, k = 5, method = "block_kfold", seed = 1))
+                      folds = make_folds(site, k = 5, method = "block_kfold",
+                                         block_size = 250, seed = 1))
 
 c(random  = random$overall$RMSE,
   blocked = blocked$overall$RMSE,
   ratio   = blocked$overall$RMSE / random$overall$RMSE)
 #>   random  blocked    ratio 
-#> 1.011489 1.860229 1.839100
+#> 1.011489 1.584805 1.566804
 ```
 
-Same 400 observations, same model, one number nearly twice the other.
-The difference is entirely in which rows were allowed to train on which,
-and the blocked figure is the one that answers the question a map is
-used for: what happens where there is no observation nearby.
+Same 400 observations, same model, one number more than half again the
+other. The difference is entirely in which rows were allowed to train on
+which, and the blocked figure is the one that answers the question a map
+is used for: what happens where there is no observation nearby.
 
 Is there structure the model missed?
 
@@ -264,8 +269,8 @@ approximate.
 | get my data into a projected CRS | [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md), [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md), [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md) |
 | cut my study area into cells | [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md) (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`) |
 | place the seeds a Voronoi grows from | [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md) |
-| choose how many cells, quickly | [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md) |
-| see what every cell count costs | [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md), then [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md) |
+| choose how many cells, quickly (coordinates only, no optional packages) | [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md) |
+| see what every cell count costs | [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md), then [`summary()`](https://rdrr.io/r/base/summary.html) on it for every criterion’s pick, or [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md) for one |
 | put points into cells and aggregate | [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md) → [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md) |
 | check whether a cell mean is the best estimate of that cell | [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md) |
 | draw the result | [`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md) |
@@ -297,17 +302,15 @@ Lower-level exports sit behind these and have pages of their own:
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 and
 [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md).
-[`help(package = "spatialkit")`](https://elkronos.github.io/gis_modeling_toolkit/reference)
-lists everything.
+The reference index lists everything, grouped by pipeline step.
 
 ## Choosing a backend
 
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 scores all three on identical folds and is the right answer when you can
-afford it. It is not always cheap. On the recorded baselines
-(`dev/baseline-accuracy.rds`: one machine, one run, 4-fold CV, 2 chains
-× 1,000 iterations) the Bayesian GP took **1,186 s** at n = 2,000
-against **109 s** for
+afford it. It is not always cheap. On one recorded run (one machine,
+4-fold CV, 2 chains × 1,000 iterations) the Bayesian GP took **1,186 s**
+at n = 2,000 against **109 s** for
 [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
 on the same data. At n = 300 it was 142 s against 0.8 s, so the ratio is
 not fixed either. A
@@ -323,9 +326,9 @@ is *for* before you spend an afternoon comparing them:
 
 Two things that are not backend choices. First, none of them fixes bad
 folds. All three can interpolate location directly, which is where the
-gap at the top of this file is widest, so the fold scheme has to be
-right before the backend comparison means anything. Second, if the
-question is only “is there spatial structure my predictors miss”,
+gap the quick start showed is widest, so the fold scheme has to be right
+before the backend comparison means anything. Second, if the question is
+only “is there spatial structure my predictors miss”,
 [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
 on the cheapest fit you can make answers it before you pick anything.
 
@@ -336,7 +339,7 @@ in them is computed on the spot.
 
 | vignette | covers |
 |----|----|
-| [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) | installing, getting your data in, what the coordinates are in, and the five-call pipeline |
+| [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
 | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) | choosing a cell count, the four criteria, and why they disagree |
 | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) | the five fold schemes, block sizing, and reading a CV result down to the last row |
 | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak |
@@ -368,23 +371,29 @@ source(file.path(dir, "03-folds.R"))    # one topic
 source(file.path(dir, "00-run-all.R"))  # all ten, seven minutes or so
 ```
 
-| script | topic |
-|----|----|
-| `01-tessellations.R` | Voronoi, hex, square and Delaunay cells, and what seeding changes |
-| `02-resolution.R` | the range, the ladder, four criteria that disagree, and the leak |
-| `03-folds.R` | random against blocked folds, plus buffered leave-one-out and NNDM |
-| `04-block-size.R` | sweeping the block size, and the two shapes the curve takes |
-| `05-fit-diagnose.R` | wrapping your own model, residual autocorrelation, cell means |
-| `06-cv-compare.R` | comparing models fold by fold on one set of folds |
-| `07-surface-aoa.R` | predicting onto a grid, and where the map stops meaning anything |
-| `08-feature-select.R` | forward selection, and measuring the selection effect |
-| `09-gwr.R` | coefficients that vary over space (needs GWmodel) |
-| `10-bayes.R` | a Bayesian GP, and whether its intervals are calibrated (needs brms; slow) |
+| script | topic | needs, beyond ggplot2 |
+|----|----|----|
+| `01-tessellations.R` | Voronoi, hex, square and Delaunay cells, and what seeding changes | geometry for the Delaunay part |
+| `02-resolution.R` | the range, the ladder, four criteria that disagree, and the leak | gstat |
+| `03-folds.R` | random against blocked folds, plus buffered leave-one-out and NNDM |  |
+| `04-block-size.R` | sweeping the block size, and the two shapes the curve takes | gstat, for the range marker |
+| `05-fit-diagnose.R` | wrapping your own model, residual autocorrelation, cell means | gstat, for the residual variogram and the kriging check |
+| `06-cv-compare.R` | comparing models fold by fold on one set of folds | ranger and GWmodel, for the backend comparison |
+| `07-surface-aoa.R` | predicting onto a grid, and where the map stops meaning anything | stars for the raster part |
+| `08-feature-select.R` | forward selection, and measuring the selection effect |  |
+| `09-gwr.R` | coefficients that vary over space | GWmodel |
+| `10-bayes.R` | a Bayesian GP, and whether its intervals are calibrated | brms and a Stan toolchain; slow |
 
-Most of `00-run-all.R`’s running time is script 10, which compiles a
-Stan model once per fit. Set `SPATIALKIT_TOUR_OUTPUT` to a folder to
-write the figures there instead of drawing them. `example_nc_demo.R` in
-the same folder is the runnable version of the nc demo vignette.
+Every script draws with ggplot2. When a package a script needs is absent
+it skips the part that needs it, or the whole script for 02, 09 and 10,
+with a message naming the package. In an interactive session each script
+pauses at `[enter]` between figures; set
+`Sys.setenv(SPATIALKIT_TOUR_PAUSE = "no")` first to run one straight
+through, which is what `00-run-all.R` expects. Most of `00-run-all.R`’s
+running time is script 10, which compiles a Stan model once per fit. Set
+`SPATIALKIT_TOUR_OUTPUT` to a folder to write the figures there instead
+of drawing them. `example_nc_demo.R` in the same folder is the runnable
+version of the nc demo vignette.
 
 ## Troubleshooting
 
@@ -468,7 +477,7 @@ asked for.
 
 **[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 returned `NA`.** The range was not identified, so nothing is reported.
-`attr(x, "rejected_reason")` names which of the four refusals it was,
+`attr(x, "rejected_reason")` names which of the five refusals it was,
 [`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 says what each one means, and
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the returned

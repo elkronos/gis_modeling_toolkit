@@ -11,6 +11,10 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="What to save, and what to report">
+<meta name="description" content="What leaves the session: grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report.
+">
+<meta property="og:description" content="What leaves the session: grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report.
+">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -70,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">19 September 2026</h4>
+            <h4 data-toc-skip class="date">21 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/reporting.Rmd" class="external-link"><code>vignettes/reporting.Rmd</code></a></small>
       <div class="d-none name"><code>reporting.Rmd</code></div>
@@ -84,12 +88,18 @@ You have regions and a validated model, and two things have to leave
 your session: the regions, in a form someone else can open and join to,
 and the numbers that say how far the map they are looking at can be
 trusted.</p>
+<p><em>Everything here runs on the hard dependencies, with two
+exceptions that skip themselves with a note when absent:
+<strong>ggplot2</strong> draws the one map, and <strong>gstat</strong>
+fits the variogram in the second half.</em></p>
 <div class="section level2">
 <h2 id="the-regions-as-a-file-someone-else-can-use">The regions as a file someone else can use<a class="anchor" aria-label="anchor" href="#the-regions-as-a-file-someone-else-can-use"></a>
 </h2>
 <p>North Carolina’s counties, with the 1974 SIDS rate per thousand
-births, and twelve regions drawn from where the counties are rather than
-from the county boundaries themselves.</p>
+births, and a hexagonal grid of regions drawn from where the counties
+are rather than from the county boundaries themselves. Twelve cells are
+asked for; a grid clipped to an irregular outline returns more, and the
+count that comes back is the one to quote.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://elkronos.github.io/gis_modeling_toolkit/">spatialkit</a></span><span class="op">)</span></span>
@@ -204,11 +214,14 @@ rules.</p>
 <div class="section level3">
 <h3 id="ids-that-survive-a-reprojection">IDs that survive a reprojection<a class="anchor" aria-label="anchor" href="#ids-that-survive-a-reprojection"></a>
 </h3>
-<p>A region’s <code>cell_id</code> is its position in the layer, so it
-changes if the layer is re-sorted. <code><a href="../reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>
-derives an ID from the geometry itself, in a common CRS, so the same
-region keeps the same ID however the file has been handled on the way to
-whoever opens it.</p>
+<p>The <code>cell_id</code> a tessellation carries is already derived
+from the geometry, so it does not change when the input points arrive in
+another order. What it is not is portable: a file that has been
+reprojected, re-sorted and re-read elsewhere has no memory of how it was
+built. <code><a href="../reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code> derives an ID from the
+geometry itself, in a common CRS, so the same region gets the same ID
+from whoever computes it, in whatever projection the file is in by
+then.</p>
 <div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">regions</span><span class="op">$</span><span class="va">src</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq_len</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">regions</span><span class="op">)</span><span class="op">)</span></span>
 <span></span>

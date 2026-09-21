@@ -248,7 +248,8 @@ variance, section 2.6.4.)</p>
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>,
 <code><a href="resolution_profile.html">resolution_profile()</a></code>,
 <code><a href="select_resolution.html">select_resolution()</a></code>,
-<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code></p></div>
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>,
+<code><a href="summary.resolution_profile.html">summary.resolution_profile()</a></code></p></div>
     </div>
 
     <div class="section level2">
@@ -265,12 +266,20 @@ variance, section 2.6.4.)</p>
 <span class="r-in"><span>  <span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="create_grid_polygons.html">create_grid_polygons</a></span><span class="op">(</span><span class="va">bnd</span>, target_cells <span class="op">=</span> <span class="fl">16</span>, type <span class="op">=</span> <span class="st">"square"</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">asg</span> <span class="op">&lt;-</span> <span class="fu"><a href="assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">pts</span>, <span class="va">cells</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">ka</span> <span class="op">&lt;-</span> <span class="fu">kriging_adequacy</span><span class="op">(</span><span class="va">asg</span>, <span class="st">"z"</span>, <span class="va">cells</span>, k <span class="op">=</span> <span class="fl">4</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">ka</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">ka</span><span class="op">)</span>                   <span class="co"># the report; print() because only a block's</span></span></span>
+<span class="r-in"><span>                              <span class="co"># last value shows on its own</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">ka</span>, <span class="st">"cv"</span><span class="op">)</span><span class="op">$</span><span class="va">zscore_var</span>   <span class="co"># about 1 when the variogram is right</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> Registered S3 method overwritten by 'stars':</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   method                  from</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   st_interpolate_aw.stars sf  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Block-kriging adequacy over 20 cells (200 points, nmax 50)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   variogram: Nug(0.168, 0) + Exp(1.23, 138); sill 1.39, nugget 0.168 (12%), range 414.6</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   kriging variance / sill: median 0.026, range 0.013-0.164; 0 cell(s) above 0.5</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   kriging variance exceeds s^2/n in 0 of the 16 cell(s) with two or more points</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   kriged minus plain mean: |shift| &gt; 1 SE in 2 of 16 cell(s), &gt; 2 SE in 0</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   empty cells: 1 (kriged estimate and variance available for each)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   blocked CV (block_kfold, 4 folds, 200 points): var of standardised error 0.95 (1 = kriging variance correct; above 1 = understated), mean -0.12, RMSE 0.972</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0.947184</span>
 </code></pre></div>
     </div>

@@ -256,7 +256,7 @@ autocorrelation"), OLS residuals had mean \(I = -0.031\) against the
 exchangeable \(E[I] = -0.008\); the z-score averaged \(-0.54\) with
 \(sd = 0.90\) instead of 0 and 1.  The cost is power, which is the point
 of the test: at a moderate residual autocorrelation the exchangeable null
-rejected 13\<!-- % of the time where the correct one rejected 31\\%. --></p>
+rejected 13% of the time where the correct one rejected 31%.</p>
 <p><code>"residual"</code> therefore uses the Cliff &amp; Ord (1981) sec. 8.3 moments for
 regression residuals, with \(M = I - X(X'X)^{-1}X'\) rebuilt from
 <code>predictor_vars</code> and <code>data_sf</code>:
@@ -265,8 +265,8 @@ $$Var[I] = (n/S_0)^2[\mathrm{tr}(MWMW') + \mathrm{tr}((MW)^2) +
   (\mathrm{tr}MW)^2]/[(n-p)(n-p+2)] - E[I]^2$$
 These assume normal errors and do not condition on the observed
 kurtosis.  On the simulation above they restored the z-score to mean
-\(-0.09\), \(sd = 1.03\), and the rejection rate to 4.3\<!-- % against a -->
-nominal 5\<!-- %.  They agree with \code{spdep::lm.morantest()} to machine -->
+\(-0.09\), \(sd = 1.03\), and the rejection rate to 4.3% against a
+nominal 5%.  They agree with <code><a href="https://r-spatial.github.io/spdep/reference/lm.morantest.html" class="external-link">spdep::lm.morantest()</a></code> to machine
 precision.</p>
 <p><strong>These moments are exact for \(e = My\) and for nothing else</strong>, so
 <code>null = "auto"</code> does not guess from the fit's class: it rebuilds
@@ -277,7 +277,7 @@ test; the same GWR at a working bandwidth does not.</p>
 <p><strong>For the flexible backends neither null is exact</strong>, and <code>"auto"</code>
 leaves them on <code>"randomisation"</code> because forcing the OLS moments on
 them measurably makes matters worse, not better.  Measured on null data
-(\(n = 120\), three smooth covariates, independent errors; nominal 5\<!-- %, -->
+(\(n = 120\), three smooth covariates, independent errors; nominal 5%,
 one-sided):</p><table class="table table"><tr><td><strong>backend</strong></td><td><strong>randomisation</strong></td><td><strong>residual</strong></td></tr><tr><td>OLS</td><td>0.035</td><td>0.060</td></tr><tr><td>random forest</td><td>0.128</td><td>0.200</td></tr><tr><td>GWR</td><td>0.000</td><td>0.000</td></tr></table><p>The random forest is anticonservative under both.  Its residuals here are
 the <strong>out-of-bag</strong> ones (<code><a href="residuals.rf_fit.html">residuals.rf_fit()</a></code>), not in-sample
 fits.  They are inflated instead of shrunk (measured sd 1.08 against a

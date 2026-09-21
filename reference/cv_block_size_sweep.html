@@ -235,9 +235,23 @@ geographic input), and the returned table records that CRS.</p>
 <span class="r-in"><span>    <span class="fu"><a href="fit_rf_model.html">fit_rf_model</a></span><span class="op">(</span><span class="va">train_sf</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, include_coords <span class="op">=</span> <span class="cn">TRUE</span>, num_trees <span class="op">=</span> <span class="fl">100</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">sw</span> <span class="op">&lt;-</span> <span class="fu">cv_block_size_sweep</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, fit_fn <span class="op">=</span> <span class="va">rf_fn</span>, k <span class="op">=</span> <span class="fl">4</span>, n_sizes <span class="op">=</span> <span class="fl">4</span>,</span></span>
 <span class="r-in"><span>                            quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">sw</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span>               <span class="co"># the curve as a table, with the random-fold reference</span></span></span>
 <span class="r-in"><span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"ggplot2"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Cross-validation RMSE against block size (20 fits, k = 4, sizes in EPSG:32632)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   estimated autocorrelation range: 452.5</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  block_size       method blocks_used k n_folds_succeeded  value fold_min</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      random random_kfold          NA 4                 4 0.9639   0.8346</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       38.73  block_kfold         172 4                 4 0.9438   0.7825</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       89.89  block_kfold          87 4                 4 1.0380   0.8706</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      208.60  block_kfold          16 4                 4 1.1289   1.0262</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      484.10  block_kfold           4 4                 4 1.2438   0.9707</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  fold_max</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1.146</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1.079</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1.117</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1.233</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     1.540</span>
 <span class="r-plt img"><img src="cv_block_size_sweep-1.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>

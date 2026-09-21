@@ -166,7 +166,21 @@ if (requireNamespace("ranger", quietly = TRUE) &&
     fit_rf_model(train_sf, "z", "a", include_coords = TRUE, num_trees = 100, seed = 1)
   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
                             quiet = TRUE)
-  sw
+  print(sw)               # the curve as a table, with the random-fold reference
   if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
 }
+#> Cross-validation RMSE against block size (20 fits, k = 4, sizes in EPSG:32632)
+#>   estimated autocorrelation range: 452.5
+#>  block_size       method blocks_used k n_folds_succeeded  value fold_min
+#>      random random_kfold          NA 4                 4 0.9639   0.8346
+#>       38.73  block_kfold         172 4                 4 0.9438   0.7825
+#>       89.89  block_kfold          87 4                 4 1.0380   0.8706
+#>      208.60  block_kfold          16 4                 4 1.1289   1.0262
+#>      484.10  block_kfold           4 4                 4 1.2438   0.9707
+#>  fold_max
+#>     1.146
+#>     1.079
+#>     1.117
+#>     1.233
+#>     1.540
 ```

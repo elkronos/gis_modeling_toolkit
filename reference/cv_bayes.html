@@ -4,7 +4,7 @@ fit_bayesian_spatial_model() on each training fold and scores
 it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive distribution:
 predictive_coverage says what fraction of held-out observations fell
-inside the 50/80/95\
+inside the 50/80/95% intervals, and mean_CRPS rates sharpness and
 calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen."><meta property="og:description" content="Refits the Gaussian-process model of
@@ -12,7 +12,7 @@ fit_bayesian_spatial_model() on each training fold and scores
 it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive distribution:
 predictive_coverage says what fraction of held-out observations fell
-inside the 50/80/95\
+inside the 50/80/95% intervals, and mean_CRPS rates sharpness and
 calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen."></head><body>
@@ -69,7 +69,7 @@ whether those intervals are honest at locations the model has not seen."></head>
 it on the held-out fold.  Beyond the point-prediction metrics the other CV
 wrappers report, this one scores the whole predictive <em>distribution</em>:
 <code>predictive_coverage</code> says what fraction of held-out observations fell
-inside the 50/80/95\<!-- % intervals, and \code{mean_CRPS} rates sharpness and -->
+inside the 50/80/95% intervals, and <code>mean_CRPS</code> rates sharpness and
 calibration together.  That is the reason to reach for it.  A Bayesian model
 is usually chosen for its uncertainty, and only held-out coverage shows
 whether those intervals are honest at locations the model has not seen.</p>
@@ -311,9 +311,12 @@ must tolerate their absence.</p>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">price</span> <span class="op">&lt;-</span> <span class="fl">10</span> <span class="op">+</span> <span class="fl">0.01</span> <span class="op">*</span> <span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">-</span> <span class="fl">5e5</span><span class="op">)</span> <span class="op">+</span></span></span>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># Two short chains per fold keep this to a few minutes and leave the</span></span></span>
+<span class="r-in"><span>  <span class="co"># posterior rough, so the intervals below will run narrow; a run to</span></span></span>
+<span class="r-in"><span>  <span class="co"># report uses brms's defaults (chains = 4, iter = 2000).</span></span></span>
 <span class="r-in"><span>  <span class="va">cv</span> <span class="op">&lt;-</span> <span class="fu">cv_bayes</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, k <span class="op">=</span> <span class="fl">2</span>,</span></span>
-<span class="r-in"><span>                 fit_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">500</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">cv</span><span class="op">$</span><span class="va">overall</span></span></span>
+<span class="r-in"><span>                 fit_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">cv</span><span class="op">$</span><span class="va">overall</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">cv</span><span class="op">$</span><span class="va">predictive_coverage</span>  <span class="co"># coverage at 50/80/95% plus mean CRPS</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-in"><span><span class="op">}</span> <span class="co"># }</span></span></span>

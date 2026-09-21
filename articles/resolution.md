@@ -1,5 +1,10 @@
 # Choosing a resolution
 
+*This article needs two optional packages: **gstat**, which fits the
+variogram behind the autocorrelation range, and **ggplot2** for the
+figures. When either is missing the code is shown but not run, and a
+note at the top says so.*
+
 ## The question
 
 Before point observations can be aggregated into regions, something has
@@ -16,6 +21,27 @@ cross-validation holds out.
 
 Three functions answer the question, in increasing order of how much
 they tell you.
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+reads an elbow off the coordinates alone and runs on the hard
+dependencies; it is the quick answer and the one
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+accepts directly.
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+scores every cell count on a ladder against four criteria at once and
+needs gstat for two of them.
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+reads one criterion off that profile, and
+[`summary()`](https://rdrr.io/r/base/summary.html) on the profile reads
+all four side by side. If the cells will feed a model, the profile is
+the one to use; if you need a count now and the data are all you have,
+the elbow is defensible and this article says where it falls short.
+
+The argument that says “how many” is spelled differently by the function
+it belongs to: `max_levels` bounds the elbow’s ladder, `n_levels` sets
+the profile’s, `approx_n_cells` and `target_cells` are what the grid
+builders take, and `n` is what
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+takes. Each of the last three accepts the object the first two return.
 
 ## A fixture with known structure
 
@@ -63,7 +89,7 @@ when you tessellate them. The last section shows the two calls in order.
 Two things to know about this function before you rely on it. Its
 `criterion = "morans_i"` and `criterion = "combined"` settings need both
 `response_var` and `predictor_vars`; give it only a response and it logs
-a warning and falls back to `"geometric"`. And its ladder runs from 2 to
+a warning and falls back to `"geometric"`. And its ladder runs from 1 to
 `max_levels` with no lower bound from the spatial correlation of the
 data, so it can prefer cells wider than the field’s own correlation
 range. The profile below does impose that bound, which is why the two
@@ -83,7 +109,7 @@ prof
 ```
 
     ## Resolution profile: 16 levels on 500 points
-    ##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 at min_cell_n = 9)
+    ##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 from min_cell_n = 9)
     ##   variogram   : nugget 0.877, partial sill 1.29, range 314
     ##   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)
     ## 
@@ -149,19 +175,21 @@ plot(prof)
 ```
 
 ![Four stacked panels, one per criterion, against the number of cells on
-a shared axis. Mallows' Cp falls then flattens, reliability declines
-steadily, the elbow statistic peaks around twenty cells, and the
-absolute Moran's z is lowest below twenty-five. A red dotted line marks
-each criterion's choice and a shaded band the region within tolerance of
-it: the four disagree, and each flat region is
-wide.](resolution_files/figure-html/plot-profile-1.png)
+a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens,
+reliability declines steadily from 10 cells on, the elbow statistic
+peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25
+cells before climbing past 30. A red dot and dotted line mark each
+criterion's choice, and shaded bands the levels within tolerance of it.
+The bands are two or three levels wide, two of them have gaps, and no
+level sits inside all
+four.](resolution_files/figure-html/plot-profile-1.png)
 
 Two behaviours are worth knowing before reading the numbers.
 
 **`cp` needs a nugget to have an interior optimum.** On a smooth field
 the piecewise-constant approximation keeps improving as cells shrink,
 the penalty is too small to stop it, and the minimum lands wherever
-`min_cell_n` stops the ladder. The support floor is then doing the
+`min_cell_n` stops the ladder. The support ceiling is then doing the
 choosing, and
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
 flags it. This fixture has a fitted nugget of 0.88 against a partial
@@ -185,8 +213,9 @@ sel
 
     ## Resolution by reliability: 10 cells
     ##   flat region : 10 to 13 (3 of 16 levels)
-    ##   note        : the optimum is the first level of the ladder; the floor
-    ##                is choosing, not the criterion.
+    ##   note        : the optimum is the range floor (area / range^2); the bound is
+    ##                 choosing, not the criterion. Fewer cells would be wider than
+    ##                 the range and average over more than one patch of the field.
 
 `sel$best` is the optimum and `sel$flat` is every level within `tol` of
 it. Quote the band when you write the analysis up. `tol` is relative to
@@ -209,24 +238,48 @@ this fine* and take the number as a bound on the analysis, not as an
 optimum. The floor is a fact about the data, so the fix is a different
 question, not a different `tol`.
 
-Criteria can prefer different levels while agreeing on a region:
+Criteria can prefer different levels while agreeing on a region.
+[`summary()`](https://rdrr.io/r/base/summary.html) on the profile reads
+all four at once, and closes with the levels that every band contains:
 
 ``` r
 
-sapply(c("elbow", "cp", "reliability", "moran_z"), function(cr) {
-  s <- select_resolution(prof, criterion = cr)
-  c(best = s$best, flat_lo = min(s$flat), flat_hi = max(s$flat))
-})
+summary(prof)
 ```
 
-    ##         elbow cp reliability moran_z
-    ## best       22 39          10      16
-    ## flat_lo    22 39          10      10
-    ## flat_hi    25 49          13      25
+    ## Resolution picks: 4 criteria over 16 levels (10 to 55 cells)
+    ## 
+    ##    criterion best flat region levels in band
+    ##           cp   39      39, 49              2
+    ##  reliability   10    10 to 13              3
+    ##        elbow   22    22 to 25              2
+    ##      moran_z   16  10, 16, 25              3
+    ## 
+    ##   reliability: the optimum is the range floor (area / range^2).
+    ##   There the bound is choosing, not the criterion.
+    ## 
+    ##   picks span 10 to 39 cells (3.9x)
+    ##   no level is in every flat region: the criteria disagree over the
+    ##   whole ladder. plot() draws the curves they were read from.
 
-Where the bands overlap you have a defensible range. Where they do not,
-the criteria are answering different questions and you have to say which
-one your analysis needs.
+A band is a set of levels, not an interval, because the criterion curves
+are not monotone: the `cp` band above accepts 39 and 49 and rejects the
+44 between them, while a solid run of 3 rungs prints as a range, as
+`reliability` does with `10 to 13`. Where the bands overlap you have a
+defensible set of levels, and the last line names it;
+`attr(summary(prof), "common")` returns the same levels for use in code,
+and `attr(summary(prof), "bands")` each criterion’s region in full.
+Where they do not overlap, the criteria are answering different
+questions and you have to say which one your analysis needs. An empty
+intersection is a result: it says this field has no single resolution
+that satisfies every way of asking.
+
+The table is not a decision procedure, and nothing in the package will
+pick for you. Cross-validating a model at each suggested level is
+affordable, but it does not settle the question either: on a simulated
+field the level that won on cross-validated $`R^2`$ moved with the fold
+seed, and the coarsest grid won most often because its score had the
+widest spread, not because it was better.
 
 ## What the ladder can support
 
@@ -238,17 +291,21 @@ profile.
 str(attr(prof, "bounds"))
 ```
 
-    ## List of 7
-    ##  $ floor     : int 10
-    ##  $ ceiling   : int 55
-    ##  $ supported : logi TRUE
-    ##  $ area      : num 976371
-    ##  $ range     : num 314
-    ##  $ n         : int 500
-    ##  $ min_cell_n: int 9
+    ## List of 9
+    ##  $ floor       : int 10
+    ##  $ ceiling     : int 55
+    ##  $ ceiling_from: chr "min_cell_n"
+    ##  $ supported   : logi TRUE
+    ##  $ area        : num 976371
+    ##  $ range       : num 314
+    ##  $ n           : int 500
+    ##  $ n_distinct  : int 500
+    ##  $ min_cell_n  : int 9
 
-The ceiling is `floor(n / min_cell_n)`. Past it the average cell holds
-too few points to estimate anything from. The floor is
+The ceiling is `floor(n / min_cell_n)`, or one short of the number of
+distinct locations when that is smaller; `ceiling_from` says which. Past
+it the average cell holds too few points to estimate anything from, or
+k-means has more centres to place than distinct points. The floor is
 `ceiling(area / range^2)`, from the fitted autocorrelation range: cells
 wider than the range average over more than one patch of the field,
 mixing values the field itself keeps apart.

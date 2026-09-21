@@ -89,6 +89,14 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 g <- create_grid_polygons_cached(bnd, target_cells = 16, type = "hex")
 nrow(g)
 #> [1] 27
-head(g$poly_id)   # stable IDs from ensure_stable_poly_id()
-#> [1] 1 2 3 4 5 6
+# The IDs come from ensure_stable_poly_id(), so they follow the geometry:
+# the same request with the boundary's vertices in another order gives the
+# same ID to the same cell.
+bnd2 <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+  c(100, 100), c(0, 100), c(0, 0), c(100, 0), c(100, 100)
+))), crs = 32632))
+g2 <- create_grid_polygons_cached(bnd2, target_cells = 16, type = "hex")
+same_cell <- match(st_as_text(st_geometry(g2)), st_as_text(st_geometry(g)))
+all(g2$poly_id == g$poly_id[same_cell])
+#> [1] TRUE
 ```

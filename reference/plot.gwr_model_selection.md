@@ -48,12 +48,19 @@ Other plotting:
 ## Examples
 
 ``` r
-# \donttest{
 if (requireNamespace("GWmodel", quietly = TRUE) &&
+    requireNamespace("sp", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
-  # sel <- gwr_model_selection(dat, "z", c("a", "b", "c"))
-  # plot(sel)
+  library(sf)
+  set.seed(1)
+  n <- 80
+  dat <- st_as_sf(
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               a = rnorm(n), b = rnorm(n), noise = rnorm(n)),
+    coords = c("x", "y"), crs = 32632)
+  dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
+  sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
+  # Every model tried, AICc against its size; the winner (a and b) marked.
+  plot(sel)
 }
-#> NULL
-# }
 ```

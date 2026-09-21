@@ -1,5 +1,10 @@
 # Diagnostics
 
+*This article needs two optional packages: **gstat**, which fits the
+variogram behind the autocorrelation range, and **ggplot2** for the
+figures. When either is missing the code is shown but not run, and a
+note at the top says so.*
+
 ## Four questions a score does not answer
 
 A cross-validated RMSE tells you how far the predictions fell from the
@@ -7,7 +12,8 @@ held-out values. It is silent on four things that decide whether the
 analysis holds up: whether the model left spatial structure in its
 residuals, whether the standard errors on aggregated values are the
 width they claim, whether a cell mean is the best estimate of that cell
-available, and where on the map the score applies at all.
+available, and where on the map the score applies at all. A fifth
+section shows two ways the score itself can be wrong.
 
 ## A fixture and a model that is wrong in a known way
 
@@ -221,7 +227,7 @@ ka
     ## Block-kriging adequacy over 25 cells (350 points, nmax 50)
     ##   variogram: Nug(2.34, 0) + Exp(1.49, 208); sill 3.83, nugget 2.34 (61%), range 623.7
     ##   kriging variance / sill: median 0.031, range 0.021-0.054; 0 cell(s) above 0.5
-    ##   kriging variance exceeds s^2/n in 4 of 25 populated cell(s)
+    ##   kriging variance exceeds s^2/n in 4 of the 25 cell(s) with two or more points
     ##   kriged minus plain mean: |shift| > 1 SE in 4 of 25 cell(s), > 2 SE in 0
     ##   empty cells: 0 (kriged estimate and variance available for each)
     ##   blocked CV (block_kfold, 4 folds, 350 points): var of standardised error 0.96 (1 = kriging variance correct; above 1 = understated), mean -0.04, RMSE 1.76
@@ -249,7 +255,10 @@ head(st_drop_geometry(ka)[, c("n", "mean", "se", "kr_pred", "kr_var", "kr_shift"
 
 An empty cell still gets a kriged estimate and variance, which is the
 practical reason to run this: a tessellation fine enough to be useful
-usually has cells with no observation in them.
+usually has cells with no observation in them. This grid has none, as
+the report’s `empty cells` line says, because 25 cells over 350 points
+leaves every cell populated; the reporting vignette’s grid over the
+North Carolina counties has six.
 
 ## 4. Where the score applies
 

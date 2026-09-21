@@ -49,14 +49,16 @@ Other cross-validation:
 ``` r
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
-  set.seed(9)
-  n <- 150
+  # A field with a real nugget: half a unit of white noise on a unit sill.
+  set.seed(3)
+  n <- 250
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.1, n))) %*% rnorm(n))
+  xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
   r <- estimate_sac_range(st_as_sf(xy, coords = c("x", "y"), crs = 32632), "z")
-  sac_nugget(r)
+  print(sac_nugget(r))  # the fitted nugget variance, on the sill's scale
   sac_nugget(NA)        # nothing fitted: NA
 }
+#> [1] 0.4075242
 #> [1] NA
 ```

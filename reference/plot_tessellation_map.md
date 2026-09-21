@@ -166,13 +166,18 @@ Other tessellation:
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
   set.seed(1)
+  n <- 60
   pts <- st_as_sf(
-    data.frame(x = 5e5 + runif(20, 0, 100), y = 5e6 + runif(20, 0, 100)),
+    data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+               z = rnorm(n)),
     coords = c("x", "y"), crs = 32632
   )
-  tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
-  p <- plot_tessellation_map(tess$cells, features_sf = pts,
-                             fill_col = "cell_id", legend = FALSE)
-  p
+  # Cells from the points, the response aggregated onto them, and the map
+  # shaded by the cell mean rather than by an arbitrary ID.
+  tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
+  cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
+                             response_var = "z", cells_sf = tess$cells)
+  plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
+                        legend_title = "mean z")
 }
 ```

@@ -47,6 +47,8 @@ How many cells, and how sure that number is.
 - [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   : Read a level, and the region over which it is not distinguishable,
   off a profile
+- [`summary(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
+  : Every criterion's pick, side by side
 - [`print(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.resolution_profile.md)
   : Print a resolution profile
 - [`plot(`*`<resolution_profile>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
@@ -80,16 +82,17 @@ Build the regions, with reproducible cell identifiers.
 ## Assign and aggregate
 
 One row per cell, with a count and a standard error for every aggregate,
-and the record of which rows were dropped or tied on the way.
+the record of which rows were dropped or tied on the way, and whether a
+block-kriging estimate would have beaten the plain cell mean.
 
 - [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   : Assign features to polygons and attach a polygon ID
 - [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
   : Summarize features by polygon/cell ID
-- [`` `[`( ``*`<spatialkit_rows>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
-  : Subset a layer that carries a row record
 - [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
   : Block-kriging adequacy diagnostics for a set of cells
+- [`` `[`( ``*`<spatialkit_rows>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
+  : Subset a layer that carries a row record
 
 ## Fold
 
@@ -115,13 +118,27 @@ backend of your own.
   : Fit a random forest via ranger
 - [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
   : Fit a Geographically Weighted Regression (GWR) via GWmodel
-- [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
-  : Forward model selection for geographically weighted regression
 - [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
   : Fit a Bayesian spatial regression with a 2D Gaussian Process (via
   brms)
 - [`gp_lengthscale_bounds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
   : Heuristic length-scale bounds for a squared-exponential GP
+
+## Choose the predictors
+
+Forward selection scored on spatial folds for any backend, and an AICc
+search over predictor sets for GWR.
+
+- [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+  : Greedy forward feature selection with spatially blocked inner folds
+- [`plot(`*`<feature_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
+  : Plot the path of a forward feature selection
+- [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  : Forward model selection for geographically weighted regression
+- [`print(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.gwr_model_selection.md)
+  : Print a GWR model selection result
+- [`plot(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md)
+  : Plot a GWR model selection
 
 ## Methods on a fit
 
@@ -157,15 +174,30 @@ backend of your own.
   : Extract Bayesian model fixed-effect summaries
 - [`print(`*`<rf_fit>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.rf_fit.md)
   : Print a random forest fit
-- [`print(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.gwr_model_selection.md)
-  : Print a GWR model selection result
-- [`plot(`*`<gwr_model_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md)
-  : Plot a GWR model selection
+
+## Read a fit in sample
+
+Metrics on the training data (out-of-bag for a forest), and the residual
+checks that say whether structure was left behind. In-sample numbers are
+not comparable across backends;
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+is.
+
+- [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  : Compute goodness-of-fit metrics for a spatial model
+- [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+  : Compute in-sample (or out-of-sample) metrics for fitted spatial
+  models
+- [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  : Side-by-side comparison of fitted spatial models
+- [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+  : Compute Moran's I on the residuals of a fitted spatial model
+- [`print(`*`<morans_i>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.morans_i.md)
+  : Print a residual Moran's I result
 
 ## Validate
 
-Score on held-out blocks, compare backends on the same folds, and test
-the residuals.
+Score on held-out blocks, and compare backends on the same folds.
 
 - [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
   : Model-agnostic spatial cross-validation
@@ -181,21 +213,6 @@ the residuals.
   : Plot one cross-validation metric fold by fold
 - [`plot_calibration()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_calibration.md)
   : Plot the interval calibration of a Bayesian cross-validation
-- [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
-  : Greedy forward feature selection with spatially blocked inner folds
-- [`plot(`*`<feature_selection>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
-  : Plot the path of a forward feature selection
-- [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
-  : Compute goodness-of-fit metrics for a spatial model
-- [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
-  : Compute in-sample (or out-of-sample) metrics for fitted spatial
-  models
-- [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
-  : Side-by-side comparison of fitted spatial models
-- [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
-  : Compute Moran's I on the residuals of a fitted spatial model
-- [`print(`*`<morans_i>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.morans_i.md)
-  : Print a residual Moran's I result
 
 ## Predict, and check where the prediction applies
 

@@ -11,6 +11,10 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Getting started">
+<meta name="description" content="Installing, getting an sf layer of points in, what the coordinates are in, and the pipeline from points to a scored model and a map.
+">
+<meta property="og:description" content="Installing, getting an sf layer of points in, what the coordinates are in, and the pipeline from points to a scored model and a map.
+">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -70,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">19 September 2026</h4>
+            <h4 data-toc-skip class="date">21 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/getting-started.Rmd" class="external-link"><code>vignettes/getting-started.Rmd</code></a></small>
       <div class="d-none name"><code>getting-started.Rmd</code></div>
@@ -186,13 +190,20 @@ guaranteed to fall inside it, using <code><a href="https://r-spatial.github.io/s
 a line to its midpoint, and a MULTIPOINT to its centroid. Attribute
 columns come along.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">counties</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/ensure_projected.html">ensure_projected</a></span><span class="op">(</span><span class="va">nc</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"BIR74"</span>, <span class="st">"SID74"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">counties</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/ensure_projected.html">ensure_projected</a></span><span class="op">(</span><span class="va">nc</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"BIR74"</span>, <span class="st">"SID74"</span>, <span class="st">"NWBIR74"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="va">obs</span>      <span class="op">&lt;-</span> <span class="fu"><a href="../reference/coerce_to_points.html">coerce_to_points</a></span><span class="op">(</span><span class="va">counties</span><span class="op">)</span></span>
-<span><span class="va">obs</span><span class="op">$</span><span class="va">rate</span> <span class="op">&lt;-</span> <span class="fl">1000</span> <span class="op">*</span> <span class="va">obs</span><span class="op">$</span><span class="va">SID74</span> <span class="op">/</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmax</a></span><span class="op">(</span><span class="va">obs</span><span class="op">$</span><span class="va">BIR74</span>, <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">obs</span><span class="op">$</span><span class="va">rate</span>     <span class="op">&lt;-</span> <span class="fl">1000</span> <span class="op">*</span> <span class="va">obs</span><span class="op">$</span><span class="va">SID74</span> <span class="op">/</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmax</a></span><span class="op">(</span><span class="va">obs</span><span class="op">$</span><span class="va">BIR74</span>, <span class="fl">1</span><span class="op">)</span>   <span class="co"># the response</span></span>
+<span><span class="va">obs</span><span class="op">$</span><span class="va">nw_share</span> <span class="op">&lt;-</span> <span class="va">obs</span><span class="op">$</span><span class="va">NWBIR74</span> <span class="op">/</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmax</a></span><span class="op">(</span><span class="va">obs</span><span class="op">$</span><span class="va">BIR74</span>, <span class="fl">1</span><span class="op">)</span>        <span class="co"># one predictor</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>points <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">obs</span><span class="op">)</span>, geometry <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry_type.html" class="external-link">st_geometry_type</a></span><span class="op">(</span><span class="va">obs</span><span class="op">)</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##   points geometry </span></span>
 <span><span class="co">##    "100"  "POINT"</span></span></code></pre>
+<p>Two conventions run through every function from here on. The response
+and the predictors are named by their <strong>column names</strong>, as
+strings: <code>response_var = "rate"</code>,
+<code>predictor_vars = "nw_share"</code>. And the response must be
+numeric or logical; a factor or a character column is refused with a
+message saying so.</p>
 <p>Hex and square grids need a study area. Dissolving the source
 polygons is the usual way to get one, and <code><a href="https://r-spatial.github.io/sf/reference/st_read.html" class="external-link">st_read()</a></code> a
 separate outline if you have it.</p>
@@ -259,54 +270,210 @@ which returns both in a common CRS:</p>
 <code class="sourceCode R"><span><span class="va">pair</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/harmonize_crs.html">harmonize_crs</a></span><span class="op">(</span><span class="va">obs</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">5</span>, <span class="op">]</span>, <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_transform.html" class="external-link">st_transform</a></span><span class="op">(</span><span class="va">boundary</span>, <span class="fl">4326</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="va">pair</span><span class="op">$</span><span class="va">a</span><span class="op">)</span> <span class="op">==</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="va">pair</span><span class="op">$</span><span class="va">b</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] TRUE</span></span></code></pre>
+<p>You do not have to project first. Every function that measures a
+distance (<code><a href="../reference/make_folds.html">make_folds()</a></code>, the <code>fit_*()</code> and
+<code>cv_*()</code> functions, <code><a href="../reference/predict_surface.html">predict_surface()</a></code>) calls
+<code><a href="../reference/ensure_projected.html">ensure_projected()</a></code> on what it is given, so a lon/lat layer
+is projected on the way in and the same choice is logged. Calling it
+yourself, as above, only means the choice is made once and can be
+seen.</p>
+<p>Four more things about the data, each handled without stopping
+you:</p>
+<ul>
+<li>A row whose response or predictor is <code>NA</code>,
+<code>NaN</code> or infinite is dropped before a fit, and the count is
+logged; <code><a href="../reference/prep_model_data.html">prep_model_data()</a></code> is the function that does it and
+<code>attr(x, "dropped")</code> says which rows.</li>
+<li>Two observations at the same coordinates are fine for models and
+folds; a Voronoi tessellation keeps one seed per location
+(<code>build_tessellation(keep_duplicates = )</code> says what to do
+with the rest).</li>
+<li>A point outside the boundary you tessellate gets no cell:
+<code>tess$index</code> is <code>NA</code> for it and
+<code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> leaves it out unless you ask
+for it back with <code>keep_unassigned = TRUE</code>.</li>
+<li>A variogram, which is what sizes blocks from the data, needs about
+thirty points; below that <code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> returns
+<code>NA</code> and says so.</li>
+</ul>
 </div>
 <div class="section level2">
 <h2 id="the-pipeline-end-to-end">The pipeline, end to end<a class="anchor" aria-label="anchor" href="#the-pipeline-end-to-end"></a>
 </h2>
-<p>Five calls, each covered in depth by one of the other vignettes.</p>
+<p>Seven calls, from points to a map you can defend. The first four turn
+the points into regions with aggregates; the last three fit a model on
+the points, score it on folds that hold out whole regions, and say where
+its predictions can be trusted. Each is covered in depth by one of the
+other vignettes.</p>
+<div class="section level3">
+<h3 id="regions-and-aggregates">Regions and aggregates<a class="anchor" aria-label="anchor" href="#regions-and-aggregates"></a>
+</h3>
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># 1. How many cells can these data support?</span></span>
+<code class="sourceCode R"><span><span class="co"># 1. How many cells can these data support?  The answer is a ranked vector,</span></span>
+<span><span class="co">#    best first, and the next call takes it as it is.</span></span>
 <span><span class="va">lv</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/determine_optimal_levels.html">determine_optimal_levels</a></span><span class="op">(</span><span class="va">obs</span>, max_levels <span class="op">=</span> <span class="fl">40</span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># 2. Draw them.</span></span>
+<span><span class="va">lv</span></span></code></pre></div>
+<pre><code><span><span class="co">## [1] 5 4 6</span></span></code></pre>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># 2. Draw them.  A hex grid clipped to an irregular outline returns a few</span></span>
+<span><span class="co">#    more cells than asked for; params records where the count came from.</span></span>
 <span><span class="va">tess</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">obs</span>, boundary <span class="op">=</span> <span class="va">boundary</span>, method <span class="op">=</span> <span class="st">"hex"</span>,</span>
-<span>                           approx_n_cells <span class="op">=</span> <span class="fl">25</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>                           approx_n_cells <span class="op">=</span> <span class="va">lv</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># 3. Put every observation in a cell.</span></span>
 <span><span class="va">asg</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">obs</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># 4. Aggregate, with standard errors corrected for within-cell correlation.</span></span>
+<span><span class="co">#    cells_sf attaches the geometry so the result maps; deff = "kish" is the</span></span>
+<span><span class="co">#    correction.</span></span>
 <span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="va">asg</span>, <span class="st">"rate"</span>, cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>, deff <span class="op">=</span> <span class="st">"kish"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># 5. Build folds that hold out whole regions.</span></span>
-<span><span class="va">folds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">obs</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>candidate_levels <span class="op">=</span> <span class="va">lv</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span>, cells <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span>
-<span>  folds <span class="op">=</span> <span class="va">folds</span><span class="op">$</span><span class="va">k</span>, blocks <span class="op">=</span> <span class="va">folds</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">blocks_used</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## candidate_levels            cells            folds           blocks </span></span>
-<span><span class="co">##                5               31                4               11</span></span></code></pre>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>best_level <span class="op">=</span> <span class="va">lv</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span>, cells <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## best_level      cells </span></span>
+<span><span class="co">##          5          8</span></span></code></pre>
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">tess</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">approx_n_cells_from</span></span></code></pre></div>
+<pre><code><span><span class="co">## [1] "the first of 3 ranked candidates (5, 4, 6)"</span></span></code></pre>
+<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] "poly_id"        "n"              "resp_mean_rate" "..sd_resp_rate"</span></span>
 <span><span class="co">## [5] "..se_resp_rate" "cell_weight"    "geometry"</span></span></code></pre>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"poly_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_rate"</span>,</span>
 <span>                                 <span class="st">"..se_resp_rate"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">4</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##   poly_id  n resp_mean_rate ..se_resp_rate</span></span>
-<span><span class="co">## 1       1  2      0.9737098       1.127417</span></span>
-<span><span class="co">## 2       2  1      0.0000000             NA</span></span>
-<span><span class="co">## 3       3  5      1.9399276       1.029025</span></span>
-<span><span class="co">## 4       4 NA             NA             NA</span></span></code></pre>
+<span><span class="co">## 1       1 NA             NA             NA</span></span>
+<span><span class="co">## 2       2 22       1.483964      0.4154388</span></span>
+<span><span class="co">## 3       3 NA             NA             NA</span></span>
+<span><span class="co">## 4       4 37       1.886037      0.4882373</span></span></code></pre>
 <p>Every aggregate comes with a count and a standard error. The
 <code>..sd_</code> and <code>..se_</code> columns are prefixed so they
-cannot collide with a column of your own.</p>
-<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_tessellation_map.html">plot_tessellation_map</a></span><span class="op">(</span><span class="va">cells</span>, boundary <span class="op">=</span> <span class="va">boundary</span>, fill_col <span class="op">=</span> <span class="st">"resp_mean_rate"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="getting-started_files/figure-html/map-1.png" class="r-plt" alt="Choropleth of North Carolina divided into about twenty hexagonal cells, each shaded by its mean response rate. The values run from near zero in one western cell to about four in a southern coastal cell, with no obvious regional pattern." width="100%" style="display: block; margin: auto;"></p>
-<p>Cross-validating a model over those folds is
-<code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> with your own learner, or
-<code><a href="../reference/cv_rf.html">cv_rf()</a></code>, <code><a href="../reference/cv_gwr.html">cv_gwr()</a></code> and <code><a href="../reference/cv_bayes.html">cv_bayes()</a></code>
-for the three backends the package ships.</p>
+cannot collide with a column of your own. A cell with one observation
+has a standard error of <code>NA</code>, because one number has no
+spread, and an empty cell has <code>n = NA</code>: both are kept,
+because a region with nothing in it is a fact about the map.</p>
+<p>Two ID columns can appear on a cell layer. Every tessellation carries
+<code>cell_id</code>, derived from the geometry, so it is the same for
+the same cell whatever order the points came in. The hex and square
+grids also carry <code>poly_id</code>, which the aggregation defaults
+to; <code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> and
+<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> take <code>polygon_id_col</code> and
+<code>id_col</code> to name either, and fall back through both when
+neither is named.</p>
+<p>Eight cells, four of them slivers at the state’s edge with no county
+inside, is coarse. That is what the elbow finds on a hundred points, and
+<code><a href="../articles/resolution.html">vignette("resolution")</a></code> is where to argue with it:
+<code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> scores every cell count on four
+criteria at once.</p>
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_tessellation_map.html">plot_tessellation_map</a></span><span class="op">(</span><span class="va">cells</span>, boundary <span class="op">=</span> <span class="va">boundary</span>, fill_col <span class="op">=</span> <span class="st">"resp_mean_rate"</span>,</span>
+<span>                      legend_title <span class="op">=</span> <span class="st">"mean rate"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="getting-started_files/figure-html/map-1.png" class="r-plt" alt="North Carolina covered by four large hexagonal cells shaded by their mean SIDS rate, plus four unshaded slivers at the edges that hold no county. The western cell has the lowest mean, about 1.5 per thousand, and the small southern cell the highest, about 2.8." width="100%" style="display: block; margin: auto;"></p>
+</div>
+<div class="section level3">
+<h3 id="cells-or-points">Cells or points?<a class="anchor" aria-label="anchor" href="#cells-or-points"></a>
+</h3>
+<p>Steps 1 to 4 answer <em>what is the value of each region</em>. The
+model in the next steps is fitted on the points, because a hundred
+counties are a hundred observations and eight cell means are eight. Fit
+on cells when the cells are the unit you will report or act on, when the
+point-level data cannot leave the building, or when the points are so
+dense that the cell means are what the model should see; the reporting
+vignette does exactly that. Either way the folds come from the points’
+locations, and the cells can serve as the blocks that define them
+(<code>make_folds(blocks = tess$cells)</code>).</p>
+</div>
+<div class="section level3">
+<h3 id="a-model-scored-honestly">A model, scored honestly<a class="anchor" aria-label="anchor" href="#a-model-scored-honestly"></a>
+</h3>
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># 5. Build folds that hold out whole regions.  block_size is a distance in</span></span>
+<span><span class="co">#    the CRS's units, here metres.  Blocks have to be at least as wide as the</span></span>
+<span><span class="co">#    autocorrelation range for the folds to be honest; on these data no range</span></span>
+<span><span class="co">#    could be identified, so 100 km is set by hand.  vignette("spatial-cross-</span></span>
+<span><span class="co">#    validation") is about that choice, and make_folds(auto_range = TRUE)</span></span>
+<span><span class="co">#    makes it from the data when gstat is installed.</span></span>
+<span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">obs</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">obs</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, block_size <span class="op">=</span> <span class="fl">100e3</span>,</span>
+<span>                      seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>folds <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">k</span>, blocks <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">blocks_used</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##  folds blocks </span></span>
+<span><span class="co">##      4     14</span></span></code></pre>
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># 6. Fit and score.  cv_rf() fits a random forest inside every fold and pools</span></span>
+<span><span class="co">#    the held-out predictions; the same call with random folds is the number</span></span>
+<span><span class="co">#    a random split would have reported.</span></span>
+<span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">obs</span>, <span class="st">"rate"</span>, <span class="st">"nw_share"</span>, folds <span class="op">=</span> <span class="va">random</span>,  num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">cv_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">obs</span>, <span class="st">"rate"</span>, <span class="st">"nw_share"</span>, folds <span class="op">=</span> <span class="va">blocked</span>, num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span>random <span class="op">=</span> <span class="va">cv_random</span><span class="op">$</span><span class="va">overall</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RMSE"</span>, <span class="st">"MAE"</span>, <span class="st">"R2"</span><span class="op">)</span><span class="op">]</span>,</span>
+<span>      blocked <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RMSE"</span>, <span class="st">"MAE"</span>, <span class="st">"R2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##             RMSE      MAE          R2</span></span>
+<span><span class="co">## random  1.604483 1.120585 -0.04952951</span></span>
+<span><span class="co">## blocked 1.365868 1.056827  0.29493961</span></span></code></pre>
+<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># The pooled number hides how much the folds disagree; with a hundred</span></span>
+<span><span class="co"># observations they disagree a lot.</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="va">cv_random</span><span class="op">$</span><span class="va">fold_metrics</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span>,</span>
+<span>      blocked <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="va">cv_blocked</span><span class="op">$</span><span class="va">fold_metrics</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##              [,1]     [,2]</span></span>
+<span><span class="co">## random  1.0390731 2.189466</span></span>
+<span><span class="co">## blocked 0.9565161 1.935064</span></span></code></pre>
+<p>The two pooled numbers differ by less than the folds do: the random
+folds’ RMSE runs from 1.04 to 2.19 and the blocked folds’ from 0.96 to
+1.94, and each pooled value sits inside the other scheme’s range. On a
+hundred observations that is all a fold scheme can say, and it is the
+reason to read the per-fold range before the pooled number. The gap that
+blocked folds exist to expose opens when a model can borrow from its
+neighbours, through the coordinates or a spatially smooth predictor; the
+README’s quick start shows one of about 1.6 on a larger simulated
+field.</p>
+<p><code><a href="../reference/cv_gwr.html">cv_gwr()</a></code> and <code><a href="../reference/cv_bayes.html">cv_bayes()</a></code> are the same call
+for the other two backends, and <code><a href="../reference/cv_spatial.html">cv_spatial()</a></code> takes any
+learner you write. <code><a href="../reference/compare_models_cv.html">compare_models_cv()</a></code> runs the backends on
+the same folds and puts them in one table.</p>
+</div>
+<div class="section level3">
+<h3 id="a-surface-and-where-to-trust-it">A surface, and where to trust it<a class="anchor" aria-label="anchor" href="#a-surface-and-where-to-trust-it"></a>
+</h3>
+<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># 7. Predict on a grid over the study area and ask where the prediction is</span></span>
+<span><span class="co">#    extrapolating.  The area of applicability compares each grid cell's</span></span>
+<span><span class="co">#    predictors with the training data, using the folds above as the</span></span>
+<span><span class="co">#    reference, so the threshold is the one the cross-validated score was</span></span>
+<span><span class="co">#    earned under.</span></span>
+<span><span class="va">fit</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/fit_rf_model.html">fit_rf_model</a></span><span class="op">(</span><span class="va">obs</span>, <span class="st">"rate"</span>, <span class="st">"nw_share"</span>, num_trees <span class="op">=</span> <span class="fl">300</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">surf</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/predict_surface.html">predict_surface</a></span><span class="op">(</span><span class="va">fit</span>, n_cells <span class="op">=</span> <span class="fl">4000</span>, covariates <span class="op">=</span> <span class="va">obs</span>,</span>
+<span>                        boundary <span class="op">=</span> <span class="va">boundary</span><span class="op">)</span></span>
+<span><span class="va">aoa</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">surf</span>, model <span class="op">=</span> <span class="va">fit</span>, folds <span class="op">=</span> <span class="va">blocked</span><span class="op">)</span></span>
+<span><span class="va">aoa</span></span></code></pre></div>
+<pre><code><span><span class="co">## Area of applicability (Meyer &amp; Pebesma 2021)</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   predictors  : 1 (nw_share)</span></span>
+<span><span class="co">##   weighted    : no (all predictors count equally)</span></span>
+<span><span class="co">##   training    : 100 points</span></span>
+<span><span class="co">##   reference   : nearest point outside each of 4 CV folds (block_kfold)</span></span>
+<span><span class="co">##   normaliser  : 1.1527 (mean pairwise distance)</span></span>
+<span><span class="co">##   threshold   : 0.0440 (outlier-removed max of training DI)</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   2384 of 2384 prediction points inside the AOA (100.0%)</span></span></code></pre>
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://ggplot2.tidyverse.org" class="external-link">ggplot2</a></span><span class="op">)</span></span>
+<span><span class="co"># predict_surface() returns the grid as points (cell centres), so the surface</span></span>
+<span><span class="co"># is drawn as coloured points; the county points sit on top in black.</span></span>
+<span><span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggplot.html" class="external-link">ggplot</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">surf</span>, <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/aes.html" class="external-link">aes</a></span><span class="op">(</span>colour <span class="op">=</span> <span class="va">.pred</span><span class="op">)</span>, size <span class="op">=</span> <span class="fl">1.1</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">boundary</span>, fill <span class="op">=</span> <span class="cn">NA</span>, colour <span class="op">=</span> <span class="st">"grey20"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggsf.html" class="external-link">geom_sf</a></span><span class="op">(</span>data <span class="op">=</span> <span class="va">obs</span>, size <span class="op">=</span> <span class="fl">0.5</span>, colour <span class="op">=</span> <span class="st">"black"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/scale_viridis.html" class="external-link">scale_colour_viridis_c</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"predicted rate"</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/ggtheme.html" class="external-link">theme_void</a></span><span class="op">(</span><span class="op">)</span> <span class="op">+</span></span>
+<span>  <span class="fu"><a href="https://ggplot2.tidyverse.org/reference/labs.html" class="external-link">ggtitle</a></span><span class="op">(</span><span class="st">"Predicted SIDS rate per thousand births"</span><span class="op">)</span></span></code></pre></div>
+<p><img src="getting-started_files/figure-html/surface-map-1.png" class="r-plt" alt="The random forest's predicted SIDS rate on a fine grid over North Carolina, clipped to the state outline, with the hundred county points drawn over it. The surface is low across the west and centre, and highest in one south-central patch and in parts of the east, following the share of non-white births it was fitted on." width="100%" style="display: block; margin: auto;"></p>
+<p>Every grid cell is inside the area of applicability here, because the
+grid took its predictor from the nearest county: nothing on it is a
+combination the model has not seen. Hand <code><a href="../reference/predict_surface.html">predict_surface()</a></code>
+a covariate raster of its own and this is the check that says which
+parts of the map are guesses.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="where-to-go-next">Where to go next<a class="anchor" aria-label="anchor" href="#where-to-go-next"></a>
@@ -346,7 +513,82 @@ adequacy, area of applicability</td>
 </tbody>
 </table>
 <p><code><a href="../reference/spatialkit-package.html">?spatialkit</a></code> walks the pipeline and names the function
-for each step.</p>
+for each step. Ten numbered scripts install with the package and run the
+same steps on a simulated field with known structure, printing what to
+look for before each figure:</p>
+<div class="sourceCode" id="cb38"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">dir</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"scripts"</span>, package <span class="op">=</span> <span class="st">"spatialkit"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/list.files.html" class="external-link">list.files</a></span><span class="op">(</span><span class="va">dir</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/Sys.setenv.html" class="external-link">Sys.setenv</a></span><span class="op">(</span>SPATIALKIT_TOUR_PAUSE <span class="op">=</span> <span class="st">"no"</span><span class="op">)</span>   <span class="co"># or press Enter between figures</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/source.html" class="external-link">source</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">dir</span>, <span class="st">"03-folds.R"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="words-that-recur">Words that recur<a class="anchor" aria-label="anchor" href="#words-that-recur"></a>
+</h2>
+<table class="table">
+<colgroup>
+<col width="50%">
+<col width="50%">
+</colgroup>
+<thead><tr class="header">
+<th>term</th>
+<th>meaning here</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td><strong>variogram</strong></td>
+<td>semivariance of the response against the distance between pairs of
+points; the curve <code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> fits</td>
+</tr>
+<tr class="even">
+<td><strong>nugget, sill, range</strong></td>
+<td>the variogram’s value at zero distance (noise), the value it levels
+off at (total variance), and the distance at which it gets there; the
+<em>effective</em> range is where it reaches 95 percent of the sill</td>
+</tr>
+<tr class="odd">
+<td><strong>autocorrelation range</strong></td>
+<td>that effective range: beyond it two observations are nearly
+independent, which is what a block or a buffer has to exceed</td>
+</tr>
+<tr class="even">
+<td><strong>block</strong></td>
+<td>a square of the study area used to build a fold; a fold holds out
+whole blocks</td>
+</tr>
+<tr class="odd">
+<td><strong>design effect (<code>deff</code>)</strong></td>
+<td>how many times larger a cell mean’s variance is than the
+independent-sample formula says, because the points in a cell are
+correlated; <code>n / deff</code> is the effective sample size</td>
+</tr>
+<tr class="even">
+<td><strong>flat region</strong></td>
+<td>the cell counts a resolution criterion cannot distinguish from its
+optimum; a set, not an interval</td>
+</tr>
+<tr class="odd">
+<td><strong>support ceiling, range floor</strong></td>
+<td>the most cells the point count allows (<code>n / min_cell_n</code>)
+and the fewest the autocorrelation range allows
+(<code>area / range^2</code>); a criterion whose optimum sits on either
+is being chosen for by that bound</td>
+</tr>
+<tr class="even">
+<td><strong>dissimilarity index (DI)</strong></td>
+<td>how far a prediction location’s predictors sit from the training
+data, on the scale of the training data’s own spread; the area of
+applicability is where DI stays below what cross-validation saw</td>
+</tr>
+<tr class="odd">
+<td><strong>row ID</strong></td>
+<td>
+<code>..row_id</code>, a column the package stamps on a layer so
+that folds and dropped rows can be traced back to the rows you passed
+in</td>
+</tr>
+</tbody>
+</table>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

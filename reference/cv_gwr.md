@@ -214,10 +214,12 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
   cv <- cv_gwr(dat, "price", "elev", k = 3, bandwidth = 30)
-  cv$overall
-  cv$fold_metrics
+  print(cv$overall)       # pooled over the held-out rows of every fold
+  cv$fold_metrics         # and fold by fold
 }
 #> cv_gwr(): no folds supplied -- using spatial block k-fold CV (k=3).
+#>       RMSE      MAE     MAPE    SMAPE       R2 Adj_R2 n_pred n_MAPE n_SMAPE
+#> 1 1.970881 1.640318 11.65992 11.14015 0.620296     NA     60     60      60
 #>   fold n_train n_test n_pred    RMSE      MAE      MAPE     SMAPE        R2
 #> 1    1      39     21     21 1.34471 1.167010  7.532286  7.606738 0.6918865
 #> 2    2      41     19     19 2.31357 1.985458 14.905985 13.676105 0.5117606

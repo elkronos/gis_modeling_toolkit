@@ -129,10 +129,29 @@ if (requireNamespace("ranger", quietly = TRUE)) {
     2 * pts$elev + rnorm(n)
   fit  <- fit_rf_model(pts, "price", "elev", num_trees = 100, seed = 1)
   surf <- predict_surface(fit, n_cells = 500, covariates = pts)
-  surf[".pred"]
-  # Check where that surface is extrapolating before mapping it.
+  print(surf[".pred"])        # one prediction per grid cell, as an sf layer
+  # Check where that surface is extrapolating before mapping it.  The grid
+  # took its covariates from the nearest observation, so here nothing is
+  # outside; a grid with its own covariate raster is where this bites.
   area_of_applicability(surf, model = fit)
 }
+#> Simple feature collection with 484 features and 1 field
+#> Geometry type: POINT
+#> Dimension:     XY
+#> Bounding box:  xmin: 500034.7 ymin: 5000057 xmax: 500943.7 ymax: 5000966
+#> Projected CRS: WGS 84 / UTM zone 32N
+#> First 10 features:
+#>       .pred                 geometry
+#> 1  11.53496 POINT (500034.7 5000057)
+#> 2  11.71447   POINT (500078 5000057)
+#> 3  11.71447 POINT (500121.3 5000057)
+#> 4  12.06628 POINT (500164.6 5000057)
+#> 5  12.06628 POINT (500207.9 5000057)
+#> 6  12.06628 POINT (500251.1 5000057)
+#> 7  13.07745 POINT (500294.4 5000057)
+#> 8  13.07745 POINT (500337.7 5000057)
+#> 9  13.07745   POINT (500381 5000057)
+#> 10 11.63669 POINT (500424.3 5000057)
 #> Area of applicability (Meyer & Pebesma 2021)
 #> 
 #>   predictors  : 1 (elev)

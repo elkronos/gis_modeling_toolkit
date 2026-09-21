@@ -7,9 +7,12 @@ with the level each criterion selects marked and the region over which
 it is within `tol` of its optimum shaded. That shaded band is the flat
 region
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
-reports. A criterion whose optimum sits at the support ceiling or the
-range floor is captioned as such, because there the bound is choosing,
-not the criterion.
+reports. A criterion whose optimum sits at an end of the levels it was
+scored at is captioned with which bound that is (the support ceiling,
+the range floor, the ladder's own end, or the first level the criterion
+is computable at), because there the bound is choosing, not the
+criterion. A criterion that is `NA` at every level is left out with a
+log line rather than drawn empty.
 
 ## Usage
 
@@ -64,13 +67,17 @@ Other plotting:
 if (requireNamespace("gstat", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
-  set.seed(3)
+  # The same field as ?resolution_profile: an exponential covariance with
+  # range parameter 200 and a nugget of 0.6 on a unit sill.
+  set.seed(2)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
-  xy$z <- sin(xy$x / 200) + cos(xy$y / 250) + rnorm(n, sd = 0.3)
+  D  <- as.matrix(dist(xy))
+  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pts, response_var = "z", n_levels = 10)
-  plot(prof)
-  plot(prof, criteria = c("cp", "wss"))
+  prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
+  print(plot(prof))                     # all four criteria, one panel each
+  plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 }
+
 ```

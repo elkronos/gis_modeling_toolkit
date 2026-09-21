@@ -249,17 +249,22 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <span><span class="kw">for</span> <span class="op">(</span><span class="va">g</span> <span class="kw">in</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"predict"</span>, <span class="st">"residuals"</span>, <span class="st">"fitted"</span><span class="op">)</span><span class="op">)</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/ns-internal.html" class="external-link">registerS3method</a></span><span class="op">(</span><span class="va">g</span>, <span class="st">"trend_fit"</span>, <span class="fu"><a href="https://rdrr.io/r/base/get.html" class="external-link">get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">g</span>, <span class="st">".trend_fit"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, fit_fn <span class="op">=</span> <span class="va">trend_fit</span>,</span>
+<code class="sourceCode R"><span><span class="co"># The blocks are sized to the field's own correlation: its effective range is</span></span>
+<span><span class="co"># 3 x 80 = 240 units, so 250-unit blocks hold out whole patches.  On real data</span></span>
+<span><span class="co"># the range is estimated, by estimate_sac_range() or make_folds(auto_range =</span></span>
+<span><span class="co"># TRUE); vignette("spatial-cross-validation") is about that choice.</span></span>
+<span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, fit_fn <span class="op">=</span> <span class="va">trend_fit</span>,</span>
 <span>                      folds <span class="op">=</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">site</span>, <span class="st">"z"</span>, <span class="st">"w"</span>, fit_fn <span class="op">=</span> <span class="va">trend_fit</span>,</span>
-<span>                      folds <span class="op">=</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
+<span>                      folds <span class="op">=</span> <span class="fu"><a href="reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">site</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span>
+<span>                                         block_size <span class="op">=</span> <span class="fl">250</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>random  <span class="op">=</span> <span class="va">random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>,</span>
 <span>  blocked <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>,</span>
 <span>  ratio   <span class="op">=</span> <span class="va">blocked</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span> <span class="op">/</span> <span class="va">random</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   random  blocked    ratio </span></span>
-<span><span class="co">#&gt; 1.011489 1.860229 1.839100</span></span></code></pre></div>
-<p>Same 400 observations, same model, one number nearly twice the other. The difference is entirely in which rows were allowed to train on which, and the blocked figure is the one that answers the question a map is used for: what happens where there is no observation nearby.</p>
+<span><span class="co">#&gt; 1.011489 1.584805 1.566804</span></span></code></pre></div>
+<p>Same 400 observations, same model, one number more than half again the other. The difference is entirely in which rows were allowed to train on which, and the blocked figure is the one that answers the question a map is used for: what happens where there is no observation nearby.</p>
 <p>Is there structure the model missed?</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/residual_morans_i.html">residual_morans_i</a></span><span class="op">(</span><span class="fu">trend_fit</span><span class="op">(</span><span class="va">site</span><span class="op">)</span><span class="op">)</span></span>
@@ -275,8 +280,8 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </h2>
 <table class="table">
 <colgroup>
-<col width="39%">
-<col width="60%">
+<col width="40%">
+<col width="59%">
 </colgroup>
 <thead><tr>
 <th>I want to…</th>
@@ -299,14 +304,13 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <td><code><a href="reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code></td>
 </tr>
 <tr>
-<td>choose how many cells, quickly</td>
+<td>choose how many cells, quickly (coordinates only, no optional packages)</td>
 <td><code><a href="reference/determine_optimal_levels.html">determine_optimal_levels()</a></code></td>
 </tr>
 <tr>
 <td>see what every cell count costs</td>
 <td>
-<code><a href="reference/resolution_profile.html">resolution_profile()</a></code>, then <code><a href="reference/select_resolution.html">select_resolution()</a></code>
-</td>
+<code><a href="reference/resolution_profile.html">resolution_profile()</a></code>, then <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on it for every criterion’s pick, or <code><a href="reference/select_resolution.html">select_resolution()</a></code> for one</td>
 </tr>
 <tr>
 <td>put points into cells and aggregate</td>
@@ -404,12 +408,12 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </tr>
 </tbody>
 </table>
-<p>Lower-level exports sit behind these and have pages of their own: <code><a href="reference/create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>, <code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code>, <code><a href="reference/clip_target_for.html">clip_target_for()</a></code>, <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, <code><a href="reference/voronoi_seeds_random.html">voronoi_seeds_random()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/gp_lengthscale_bounds.html">gp_lengthscale_bounds()</a></code>. <code><a href="https://elkronos.github.io/gis_modeling_toolkit/reference">help(package = "spatialkit")</a></code> lists everything.</p>
+<p>Lower-level exports sit behind these and have pages of their own: <code><a href="reference/create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, <code><a href="reference/create_grid_polygons.html">create_grid_polygons()</a></code>, <code><a href="reference/create_grid_polygons_cached.html">create_grid_polygons_cached()</a></code>, <code><a href="reference/clip_target_for.html">clip_target_for()</a></code>, <code><a href="reference/ensure_stable_poly_id.html">ensure_stable_poly_id()</a></code>, <code><a href="reference/voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, <code><a href="reference/voronoi_seeds_random.html">voronoi_seeds_random()</a></code>, <code><a href="reference/prep_model_data.html">prep_model_data()</a></code> and <code><a href="reference/gp_lengthscale_bounds.html">gp_lengthscale_bounds()</a></code>. The reference index lists everything, grouped by pipeline step.</p>
 </div>
 <div class="section level2">
 <h2 id="choosing-a-backend">Choosing a backend<a class="anchor" aria-label="anchor" href="#choosing-a-backend"></a>
 </h2>
-<p><code><a href="reference/compare_models_cv.html">compare_models_cv()</a></code> scores all three on identical folds and is the right answer when you can afford it. It is not always cheap. On the recorded baselines (<code>dev/baseline-accuracy.rds</code>: one machine, one run, 4-fold CV, 2 chains × 1,000 iterations) the Bayesian GP took <strong>1,186 s</strong> at n = 2,000 against <strong>109 s</strong> for <code><a href="reference/cv_gwr.html">cv_gwr()</a></code> on the same data. At n = 300 it was 142 s against 0.8 s, so the ratio is not fixed either. A <code><a href="reference/cv_rf.html">cv_rf()</a></code> of the same shape is seconds. So it is worth knowing what each backend is <em>for</em> before you spend an afternoon comparing them:</p>
+<p><code><a href="reference/compare_models_cv.html">compare_models_cv()</a></code> scores all three on identical folds and is the right answer when you can afford it. It is not always cheap. On one recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations) the Bayesian GP took <strong>1,186 s</strong> at n = 2,000 against <strong>109 s</strong> for <code><a href="reference/cv_gwr.html">cv_gwr()</a></code> on the same data. At n = 300 it was 142 s against 0.8 s, so the ratio is not fixed either. A <code><a href="reference/cv_rf.html">cv_rf()</a></code> of the same shape is seconds. So it is worth knowing what each backend is <em>for</em> before you spend an afternoon comparing them:</p>
 <table class="table">
 <colgroup>
 <col width="17%">
@@ -443,7 +447,7 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 </tr>
 </tbody>
 </table>
-<p>Two things that are not backend choices. First, none of them fixes bad folds. All three can interpolate location directly, which is where the gap at the top of this file is widest, so the fold scheme has to be right before the backend comparison means anything. Second, if the question is only “is there spatial structure my predictors miss”, <code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code> on the cheapest fit you can make answers it before you pick anything.</p>
+<p>Two things that are not backend choices. First, none of them fixes bad folds. All three can interpolate location directly, which is where the gap the quick start showed is widest, so the fold scheme has to be right before the backend comparison means anything. Second, if the question is only “is there spatial structure my predictors miss”, <code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code> on the cheapest fit you can make answers it before you pick anything.</p>
 </div>
 <div class="section level2">
 <h2 id="documentation">Documentation<a class="anchor" aria-label="anchor" href="#documentation"></a>
@@ -451,8 +455,8 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <p>Six vignettes, each executed when the package is built, so every number in them is computed on the spot.</p>
 <table class="table">
 <colgroup>
-<col width="25%">
-<col width="74%">
+<col width="24%">
+<col width="75%">
 </colgroup>
 <thead><tr>
 <th>vignette</th>
@@ -461,7 +465,7 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <tbody>
 <tr>
 <td><code><a href="articles/getting-started.html">vignette("getting-started")</a></code></td>
-<td>installing, getting your data in, what the coordinates are in, and the five-call pipeline</td>
+<td>installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map</td>
 </tr>
 <tr>
 <td><code><a href="articles/resolution.html">vignette("resolution")</a></code></td>
@@ -499,57 +503,69 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <span><span class="kw"><a href="https://rdrr.io/r/base/source.html" class="external-link">source</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">dir</span>, <span class="st">"00-run-all.R"</span><span class="op">)</span><span class="op">)</span>  <span class="co"># all ten, seven minutes or so</span></span></code></pre></div>
 <table class="table">
 <colgroup>
-<col width="23%">
-<col width="76%">
+<col width="15%">
+<col width="45%">
+<col width="38%">
 </colgroup>
 <thead><tr>
 <th>script</th>
 <th>topic</th>
+<th>needs, beyond ggplot2</th>
 </tr></thead>
 <tbody>
 <tr>
 <td><code>01-tessellations.R</code></td>
 <td>Voronoi, hex, square and Delaunay cells, and what seeding changes</td>
+<td>geometry for the Delaunay part</td>
 </tr>
 <tr>
 <td><code>02-resolution.R</code></td>
 <td>the range, the ladder, four criteria that disagree, and the leak</td>
+<td>gstat</td>
 </tr>
 <tr>
 <td><code>03-folds.R</code></td>
 <td>random against blocked folds, plus buffered leave-one-out and NNDM</td>
+<td></td>
 </tr>
 <tr>
 <td><code>04-block-size.R</code></td>
 <td>sweeping the block size, and the two shapes the curve takes</td>
+<td>gstat, for the range marker</td>
 </tr>
 <tr>
 <td><code>05-fit-diagnose.R</code></td>
 <td>wrapping your own model, residual autocorrelation, cell means</td>
+<td>gstat, for the residual variogram and the kriging check</td>
 </tr>
 <tr>
 <td><code>06-cv-compare.R</code></td>
 <td>comparing models fold by fold on one set of folds</td>
+<td>ranger and GWmodel, for the backend comparison</td>
 </tr>
 <tr>
 <td><code>07-surface-aoa.R</code></td>
 <td>predicting onto a grid, and where the map stops meaning anything</td>
+<td>stars for the raster part</td>
 </tr>
 <tr>
 <td><code>08-feature-select.R</code></td>
 <td>forward selection, and measuring the selection effect</td>
+<td></td>
 </tr>
 <tr>
 <td><code>09-gwr.R</code></td>
-<td>coefficients that vary over space (needs GWmodel)</td>
+<td>coefficients that vary over space</td>
+<td>GWmodel</td>
 </tr>
 <tr>
 <td><code>10-bayes.R</code></td>
-<td>a Bayesian GP, and whether its intervals are calibrated (needs brms; slow)</td>
+<td>a Bayesian GP, and whether its intervals are calibrated</td>
+<td>brms and a Stan toolchain; slow</td>
 </tr>
 </tbody>
 </table>
-<p>Most of <code>00-run-all.R</code>’s running time is script 10, which compiles a Stan model once per fit. Set <code>SPATIALKIT_TOUR_OUTPUT</code> to a folder to write the figures there instead of drawing them. <code>example_nc_demo.R</code> in the same folder is the runnable version of the nc demo vignette.</p>
+<p>Every script draws with ggplot2. When a package a script needs is absent it skips the part that needs it, or the whole script for 02, 09 and 10, with a message naming the package. In an interactive session each script pauses at <code>[enter]</code> between figures; set <code>Sys.setenv(SPATIALKIT_TOUR_PAUSE = "no")</code> first to run one straight through, which is what <code>00-run-all.R</code> expects. Most of <code>00-run-all.R</code>’s running time is script 10, which compiles a Stan model once per fit. Set <code>SPATIALKIT_TOUR_OUTPUT</code> to a folder to write the figures there instead of drawing them. <code>example_nc_demo.R</code> in the same folder is the runnable version of the nc demo vignette.</p>
 </div>
 </div>
 <div class="section level2">
@@ -566,7 +582,7 @@ Random k-fold versus spatial block k-fold assignments across North Carolina
 <p><strong><code>n = 6000 requires FNN for k-NN weights, and Matrix to hold them sparsely</code></strong> <code><a href="reference/residual_morans_i.html">residual_morans_i()</a></code> above n = 5,000. The fallback allocates a dense n x n matrix, which is why it stops here. <code>install.packages(c("FNN", "Matrix"))</code>, both of them.</p>
 <p><strong><code>compare_models_cv(): no viable models.</code></strong> Every requested backend was dropped: unrecognised names raise a warning, uninstalled backends print <code>dropping &lt;name&gt; (package/function unavailable)</code>. Read the messages immediately above the error; they name each one. Install the backend, or request one you have.</p>
 <p><strong><code>cv_*(): all folds failed; cross-validation results contain no predictions.</code></strong> This is a warning: <code>$overall</code> comes back all-<code>NA</code> with <code>n_pred = 0</code>. The per-fold <code>WARN</code> lines name the cause, most often a missing backend, sometimes a degenerate training slice or a predictor constant within a fold. Compare <code>cv$n_folds_succeeded</code> against <code>cv$n_folds_attempted</code> on every run, including the ones that look fine: a <em>partial</em> failure produces a plausible-looking score computed from fewer folds than you asked for.</p>
-<p><strong><code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code> returned <code>NA</code>.</strong> The range was not identified, so nothing is reported. <code>attr(x, "rejected_reason")</code> names which of the four refusals it was, <code><a href="reference/estimate_sac_range.html">?estimate_sac_range</a></code> says what each one means, and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the returned object draws the variogram behind it. <code><a href="articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> covers what an <code>NA</code> there leaves you to decide about the block size.</p>
+<p><strong><code><a href="reference/estimate_sac_range.html">estimate_sac_range()</a></code> returned <code>NA</code>.</strong> The range was not identified, so nothing is reported. <code>attr(x, "rejected_reason")</code> names which of the five refusals it was, <code><a href="reference/estimate_sac_range.html">?estimate_sac_range</a></code> says what each one means, and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the returned object draws the variogram behind it. <code><a href="articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> covers what an <code>NA</code> there leaves you to decide about the block size.</p>
 <p><strong><code>determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.</code></strong> Every candidate resolution sat below the nine-cell floor where Moran’s I is arithmetically degenerate. Expected at small <code>max_levels</code>; see <code><a href="articles/resolution.html">vignette("resolution")</a></code>.</p>
 <p><strong>Distances, bandwidths or block sizes look absurd.</strong> Check the working CRS first: <code>st_crs(x)$units_gdal</code>. A block size that made sense in metres is meaningless in US survey feet, and lon/lat input gets projected to a CRS the package chose. <code><a href="articles/getting-started.html">vignette("getting-started")</a></code> covers what the coordinates are in and how that choice is made.</p>
 </div>

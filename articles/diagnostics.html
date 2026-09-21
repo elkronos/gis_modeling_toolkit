@@ -11,6 +11,10 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Diagnostics">
+<meta name="description" content="Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, and two ways a score can leak.
+">
+<meta property="og:description" content="Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, and two ways a score can leak.
+">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -70,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">19 September 2026</h4>
+            <h4 data-toc-skip class="date">21 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/diagnostics.Rmd" class="external-link"><code>vignettes/diagnostics.Rmd</code></a></small>
       <div class="d-none name"><code>diagnostics.Rmd</code></div>
@@ -78,6 +82,10 @@ Chase</h4>
 
     
     
+<p><em>This article needs two optional packages: <strong>gstat</strong>,
+which fits the variogram behind the autocorrelation range, and
+<strong>ggplot2</strong> for the figures. When either is missing the
+code is shown but not run, and a note at the top says so.</em></p>
 <div class="section level2">
 <h2 id="four-questions-a-score-does-not-answer">Four questions a score does not answer<a class="anchor" aria-label="anchor" href="#four-questions-a-score-does-not-answer"></a>
 </h2>
@@ -86,7 +94,8 @@ the held-out values. It is silent on four things that decide whether the
 analysis holds up: whether the model left spatial structure in its
 residuals, whether the standard errors on aggregated values are the
 width they claim, whether a cell mean is the best estimate of that cell
-available, and where on the map the score applies at all.</p>
+available, and where on the map the score applies at all. A fifth
+section shows two ways the score itself can be wrong.</p>
 </div>
 <div class="section level2">
 <h2 id="a-fixture-and-a-model-that-is-wrong-in-a-known-way">A fixture and a model that is wrong in a known way<a class="anchor" aria-label="anchor" href="#a-fixture-and-a-model-that-is-wrong-in-a-known-way"></a>
@@ -261,7 +270,7 @@ model. <code><a href="../reference/kriging_adequacy.html">kriging_adequacy()</a>
 <pre><code><span><span class="co">## Block-kriging adequacy over 25 cells (350 points, nmax 50)</span></span>
 <span><span class="co">##   variogram: Nug(2.34, 0) + Exp(1.49, 208); sill 3.83, nugget 2.34 (61%), range 623.7</span></span>
 <span><span class="co">##   kriging variance / sill: median 0.031, range 0.021-0.054; 0 cell(s) above 0.5</span></span>
-<span><span class="co">##   kriging variance exceeds s^2/n in 4 of 25 populated cell(s)</span></span>
+<span><span class="co">##   kriging variance exceeds s^2/n in 4 of the 25 cell(s) with two or more points</span></span>
 <span><span class="co">##   kriged minus plain mean: |shift| &gt; 1 SE in 4 of 25 cell(s), &gt; 2 SE in 0</span></span>
 <span><span class="co">##   empty cells: 0 (kriged estimate and variance available for each)</span></span>
 <span><span class="co">##   blocked CV (block_kfold, 4 folds, 350 points): var of standardised error 0.96 (1 = kriging variance correct; above 1 = understated), mean -0.04, RMSE 1.76</span></span></code></pre>
@@ -283,7 +292,10 @@ variance is right, and above 1 means it is understated.</p>
 <span><span class="co">## 4 16 1.5055114 0.5920044 1.2414298 0.1078660 -0.4460805</span></span></code></pre>
 <p>An empty cell still gets a kriged estimate and variance, which is the
 practical reason to run this: a tessellation fine enough to be useful
-usually has cells with no observation in them.</p>
+usually has cells with no observation in them. This grid has none, as
+the report’s <code>empty cells</code> line says, because 25 cells over
+350 points leaves every cell populated; the reporting vignette’s grid
+over the North Carolina counties has six.</p>
 </div>
 <div class="section level2">
 <h2 id="where-the-score-applies">4. Where the score applies<a class="anchor" aria-label="anchor" href="#where-the-score-applies"></a>

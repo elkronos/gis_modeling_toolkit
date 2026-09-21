@@ -28,7 +28,6 @@ resolution_profile(
   nstart = 25L,
   seed = 123L,
   sac = NULL,
-  quiet = TRUE,
   select_on = c("all", "split")
 )
 ```
@@ -56,7 +55,9 @@ resolution_profile(
 - levels:
 
   Optional integer vector of level counts to score, replacing the
-  ladder; values outside `[2, n - 1]` are dropped.
+  ladder; values below 2, or at or above the number of distinct
+  locations, are dropped (k-means cannot place more centres than there
+  are distinct points).
 
 - n_levels:
 
@@ -91,11 +92,6 @@ resolution_profile(
   choosing. When `NULL` and a response is given, one is estimated on the
   subsample with the same `predictor_vars`.
 
-- quiet:
-
-  Logical; suppress this function's progress
-  [`message()`](https://rdrr.io/r/base/message.html)s. Default `TRUE`.
-
 - select_on:
 
   `"all"` (default) profiles every point; `"split"` profiles one
@@ -113,12 +109,14 @@ restarts), `elbow`, `cell_n_min`, `cell_n_median`, `cell_diam_median`
 (twice the median RMS radius of the cells, in coordinate units), `rss`,
 `cp`, `moran_i`, `moran_z` and `reliability`; columns a missing input
 leaves undefined are `NA`. Attributes: `bounds` (a list with `floor`,
-`ceiling`, `supported`, `area`, `range`, `n`, `min_cell_n`), `variogram`
-(a list with `nugget`, `psill`, `range`, `model`; `NULL` when none was
-usable), `variable` (`"response"`, `"residuals"` or `NA`), `wss_bumps`,
-`nstart`, `sac` (the range object used) and, with `select_on = "split"`,
-`split` (a list with `selection` and `estimation`, integer row positions
-in `data_sf`).
+`ceiling`, `ceiling_from` (`"min_cell_n"` or `"distinct locations"`,
+whichever bound it), `supported`, `area`, `range`, `n`, `n_distinct`,
+`min_cell_n`), `variogram` (a list with `nugget`, `psill`, `range`,
+`model`; `NULL` when none was usable), `variable` (`"response"`,
+`"residuals"` or `NA`), `wss_bumps`, `nstart`, `sac` (the range object
+used) and, with `select_on = "split"`, `split` (a `spatialkit_split`:
+`selection` and `estimation`, integer row positions in `data_sf`, with
+the `method` and `seed` that made them).
 
 ## The ladder and its bounds
 
@@ -130,12 +128,12 @@ scales as \\L^{-1/2}\\: a unit step wastes fits at large \\L\\ and
 starves resolution at small. The ladder runs from a floor to a ceiling
 the data impose. The ceiling is `floor(n / min_cell_n)`: cells with
 fewer than `min_cell_n` points on average have too little support, and
-the model-aware criteria are not computable below nine cells in any
-case. The floor is `ceiling(area / range^2)` when an autocorrelation
-range is available: cells wider than the range average over more than
-one patch of the field. When the floor exceeds the ceiling the data
-cannot support a tessellation that respects their own correlation
-structure; that is reported as a finding (a logged warning, and
+Moran's z is not computable at nine cells or fewer in any case. The
+floor is `ceiling(area / range^2)` when an autocorrelation range is
+available: cells wider than the range average over more than one patch
+of the field. When the floor exceeds the ceiling the data cannot support
+a tessellation that respects their own correlation structure; that is
+reported as a finding (a logged warning, and
 `attr(x, "bounds")$supported` is `FALSE`) and the ladder runs from 2 to
 the ceiling anyway, so the profile still shows what each level costs.
 
@@ -225,25 +223,60 @@ Other aggregation:
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
 [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
-[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+[`summary.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summary.resolution_profile.md)
 
 ## Examples
 
 ``` r
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
+  # An exponential field with range parameter 200 (true effective range
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
+  # noise for Mallows' Cp to have an interior optimum rather than descend
+  # to the ceiling.
   set.seed(2)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
-  xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(0.3, n))) %*% rnorm(n))
+  xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-  prof
-  select_resolution(prof, criterion = "reliability")
+  print(prof)               # one row per level; print() because only the
+                            # last value of a braced block is shown
+  select_resolution(prof, criterion = "cp")
 }
-#> Resolution by reliability: 23 cells
-#>   flat region : 23 to 31 (6 of 12 levels)
-#>   note        : the optimum is the first level of the ladder; the floor
-#>                is choosing, not the criterion.
+#> Resolution profile: 12 levels on 400 points
+#>   ladder      : 6 to 44 cells (floor 6 from range 407, ceiling 44 from min_cell_n = 9)
+#>   variogram   : nugget 0.545, partial sill 0.846, range 407
+#>   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)
+#> 
+#>  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss
+#>       6 11300000     0.0594 0.000         56          61.5              338 438
+#>       7  9370000     0.0931 0.113         52          57.0              293 424
+#>       9  7070000     0.1180 0.237         31          48.0              265 415
+#>      10  6270000     0.0962 0.273         30          39.5              251 411
+#>      12  5140000     0.0845 0.316         24          33.0              225 409
+#>      15  3980000     0.1330 0.340         17          26.0              194 379
+#>      18  3260000     0.1170 0.335         13          23.0              177 375
+#>      21  2680000     0.1220 0.320         13          20.0              158 374
+#>      26  2110000     0.0982 0.267         10          15.0              143 345
+#>      31  1700000     0.1080 0.202          7          13.0              129 324
+#>      37  1400000     0.1370 0.112          4          10.0              114 314
+#>      44  1130000     0.1050 0.000          5           9.0              106 310
+#>     cp moran_i moran_z reliability
+#>  1.110      NA      NA       0.842
+#>  1.080      NA      NA       0.838
+#>  1.060      NA      NA       0.828
+#>  1.050 -0.0863   0.618       0.823
+#>  1.060 -0.1300  -0.625       0.813
+#>  0.988  0.0236   1.400       0.798
+#>  0.986  0.0718   1.760       0.784
+#>  0.992  0.0962   1.980       0.770
+#>  0.933  0.1300   2.300       0.749
+#>  0.895  0.1300   2.290       0.730
+#>  0.887  0.1920   3.230       0.708
+#>  0.894  0.2540   4.370       0.685
+#> Resolution by cp: 37 cells
+#>   flat region : 31 to 44 (3 of 12 levels)
 ```

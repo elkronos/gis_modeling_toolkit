@@ -122,7 +122,8 @@ exactly singular design, which is the worst case, not an exempt one.
 
 A warning is issued whenever **any** sampled location has a singular or
 near-singular local design; the wording reports a percentage when more
-than 25\\ R warnings, not log lines.
+than 25% of sampled locations are affected and a count otherwise. Both
+are real R warnings, not log lines.
 
 After the fit, the local coefficient surfaces are scanned and a further
 warning counts local regressions that came back non-finite. Their
@@ -164,8 +165,17 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
   fit <- fit_gwr_model(dat, "price", "elev", bandwidth = 30)
-  summary(fit)
+  print(summary(fit))     # print(): only a block's last value shows on its own
   head(predict(fit, newdata = dat))   # newdata is re-projected if needed
 }
+#> Summary of <gwr_fit> fit (n = 60)
+#> 
+#>   Formula: price ~ elev
+#> 
+#>   In-sample metrics:
+#>     RMSE    = 1.1889
+#>     MAE     = 0.9995
+#>     R^2     = 0.8583
+#>     SMAPE   = 6.87%
 #> [1] 16.47047 13.69566 17.02994 18.13618 11.49180 18.37175
 ```

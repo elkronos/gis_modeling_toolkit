@@ -308,7 +308,7 @@ normalisation would leave every length-scale quantity in the wrong units.</p>
 <p>After fitting, the posterior length-scale is compared against the smallest
 scale the chosen basis can resolve
 (<code>1.75 * gp_c * S / gp_k</code>, stored as <code>$info$gp_ell_min</code>); a
-warning is issued when more than 10\<!-- % of the posterior mass falls below it, -->
+warning is issued when more than 10% of the posterior mass falls below it,
 which is the signal that <code>gp_k</code> should be raised.</p>
 <p><strong>Coordinate scaling and anisotropy.</strong>
 Before fitting the GP, X and Y coordinates are each centred and divided by
@@ -439,20 +439,25 @@ confounding in linear models. <em>The American Statistician</em>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">price</span> <span class="op">&lt;-</span> <span class="fl">10</span> <span class="op">+</span> <span class="fl">0.01</span> <span class="op">*</span> <span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">-</span> <span class="fl">5e5</span><span class="op">)</span> <span class="op">+</span></span></span>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># Two short chains keep this to a few minutes; expect Stan to warn about</span></span></span>
+<span class="r-in"><span>  <span class="co"># effective sample size, which is the cost of that.  Use its defaults</span></span></span>
+<span class="r-in"><span>  <span class="co"># (chains = 4, iter = 2000) for a fit to report.</span></span></span>
 <span class="r-in"><span>  <span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu">fit_bayesian_spatial_model</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>,</span></span>
-<span class="r-in"><span>                                    chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">500</span>,</span></span>
+<span class="r-in"><span>                                    chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">1000</span>,</span></span>
 <span class="r-in"><span>                                    compute_loo <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">fit</span>, newdata <span class="op">=</span> <span class="va">dat</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span>  <span class="co"># A zero-inflated count.  The family is the only thing that changes;</span></span></span>
-<span class="r-in"><span>  <span class="co"># score it with cv_bayes()'s CRPS and coverage, not with MAPE or R2.</span></span></span>
+<span class="r-in"><span>  <span class="co"># A zero-inflated count.  The family is the only thing that changes.</span></span></span>
+<span class="r-in"><span>  <span class="co"># summary()'s R2 and MAPE assume a Gaussian response, so for a count</span></span></span>
+<span class="r-in"><span>  <span class="co"># read the coefficients here and score the model with cv_bayes(), whose</span></span></span>
+<span class="r-in"><span>  <span class="co"># CRPS and interval coverage are defined for any response.</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">count</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/Poisson.html" class="external-link">rpois</a></span><span class="op">(</span><span class="va">n</span>, <span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="fl">0.5</span> <span class="op">+</span> <span class="fl">0.8</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span><span class="op">)</span><span class="op">)</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/stats/Binomial.html" class="external-link">rbinom</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">1</span>, <span class="fl">0.7</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">fit_zip</span> <span class="op">&lt;-</span> <span class="fu">fit_bayesian_spatial_model</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"count"</span>, <span class="st">"elev"</span>,</span></span>
 <span class="r-in"><span>                                        family <span class="op">=</span> <span class="fu">brms</span><span class="fu">::</span><span class="fu"><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">zero_inflated_poisson</a></span><span class="op">(</span><span class="op">)</span>,</span></span>
-<span class="r-in"><span>                                        chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">500</span>,</span></span>
+<span class="r-in"><span>                                        chains <span class="op">=</span> <span class="fl">2</span>, iter <span class="op">=</span> <span class="fl">1000</span>,</span></span>
 <span class="r-in"><span>                                        compute_loo <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit_zip</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">fit_zip</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-in"><span><span class="op">}</span> <span class="co"># }</span></span></span>
 </code></pre></div>

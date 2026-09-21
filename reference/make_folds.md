@@ -321,10 +321,11 @@ neighbour distances, which is the property the method exists to deliver.
 An earlier version of this package drew one random radius per point from
 \\G\_{ij}\\ and excluded up to the order statistic *closest* to it,
 which rounds down half the time: on a two-cluster layout the realised
-distribution exceeded the target by up to 0.17 (13\\ nearest training
-point within 50 m against a target of 9\\ *optimistic* cross-validation.
-`params$max_ecdf_excess` reports the largest remaining excess; compare
-`params$target_median` with `params$realised_median` as well.
+distribution exceeded the target by up to 0.17 (13% of folds had a
+nearest training point within 50 m against a target of 9%), an
+*optimistic* cross-validation. `params$max_ecdf_excess` reports the
+largest remaining excess; compare `params$target_median` with
+`params$realised_median` as well.
 
 ## Supplied blocks
 

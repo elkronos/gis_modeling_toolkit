@@ -5,13 +5,17 @@
 This vignette generates **synthetic spatial data** over North Carolina
 and walks through the `spatialkit` workflow end to end:
 
-1.  Build four tessellation types (Voronoi, hex, square, Delaunay)
-2.  Assign points to cells and aggregate with
-    [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-3.  Draw choropleths of the cell-level mean response
-4.  Estimate the autocorrelation range and build spatial CV folds
-5.  Fit a model, and score it under **blocked** versus **random** folds
-6.  Predict onto a surface and mark where that surface is extrapolation
+1.  Load the boundary and check which optional packages are present
+2.  Simulate observations with known structure over it
+3.  Build four tessellation types (Voronoi, hex, square, Delaunay)
+4.  Assign points to cells, aggregate with
+    [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
+    and map the cell means
+5.  Estimate the autocorrelation range, build spatial CV folds, and
+    score a model under **blocked** versus **random** folds
+6.  Fit the models to keep: a random forest, GWR when it is installed,
+    and the two compared on identical folds
+7.  Predict onto a surface and mark where that surface is extrapolation
 
 Everything is self-contained — the boundary comes from the `nc.shp` demo
 shapefile bundled with `sf`, so no external files are needed.
@@ -24,10 +28,11 @@ producing output:
 
     ##        package available                          used_for
     ## 1      ggplot2      TRUE                         all plots
-    ## 2     geometry      TRUE       true Delaunay triangulation
-    ## 3       ranger      TRUE             random forest backend
-    ## 4        gstat      TRUE variogram / autocorrelation range
-    ## 5 GWmodel + sp      TRUE                       GWR backend
+    ## 2    patchwork      TRUE     the stacked comparison panels
+    ## 3     geometry      TRUE       true Delaunay triangulation
+    ## 4       ranger      TRUE             random forest backend
+    ## 5        gstat      TRUE variogram / autocorrelation range
+    ## 6 GWmodel + sp      TRUE                       GWR backend
 
 ------------------------------------------------------------------------
 
@@ -212,6 +217,12 @@ cat(sprintf(
 ```
 
     ## Voronoi: 40 | Hex: 49 | Square: 45 | Triangles: 586
+
+``` r
+
+# has_geom is requireNamespace("geometry", quietly = TRUE), set in the
+# hidden setup chunk with the other availability flags the table above shows.
+```
 
 ------------------------------------------------------------------------
 
@@ -452,25 +463,33 @@ if (is.na(sac)) {
 
     ## no identified range: fitted range exceeds the largest lag fitted
 
-The fit is attached either way, so `plot(fit, type = "variogram")` on a
-fitted model can draw the curve and let you judge it rather than trust
-it — the distance axis is labelled in the units of the CRS the variogram
-was fitted in, and a fit that did not converge says so in the caption. A
-rejected range must not be handed to `make_folds(auto_range = TRUE)`,
-which is why it comes back `NA` rather than as a long range.
+The variogram is attached either way, so `plot(sac)` draws the curve and
+lets you judge it rather than trust it (`plot(fit, type = "variogram")`
+does the same for a fitted model’s residuals). The distance axis is
+labelled in the units of the CRS the variogram was fitted in, and when
+no range was identified the subtitle says why. A rejected range must not
+be handed to `make_folds(auto_range = TRUE)`, which is why it comes back
+`NA` rather than as a long range.
 
 ### 5b. Two fold schemes on the same data
 
 ``` r
 
+# No range was identified in 5a, so the block size cannot come from the
+# variogram.  The field was built as a sine wave with a quarter-wavelength of
+# about 390,000 ft, the scale over which it changes sign; 400,000-ft blocks
+# hold out whole lobes of it.  cv_block_size_sweep() is the tool for sizing
+# blocks by measurement when nothing is known in advance.
 folds_random  <- make_folds(points_sf, k = 5, method = "random_kfold", seed = 42)
-folds_blocked <- make_folds(points_sf, k = 5, method = "block_kfold",  seed = 42)
+folds_blocked <- make_folds(points_sf, k = 5, method = "block_kfold",
+                            block_size = 400000, seed = 42)
 
-c(random = folds_random$k, blocked = folds_blocked$k)
+c(random = folds_random$k, blocked = folds_blocked$k,
+  blocks = folds_blocked$params$blocks_used)
 ```
 
-    ##  random blocked 
-    ##       5       5
+    ##  random blocked  blocks 
+    ##       5       5      12
 
 [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
 is the fastest way to see whether the blocks actually separate the data
@@ -503,12 +522,12 @@ gap:
 
 ``` r
 
-rf_args <- list(include_coords = TRUE, num_trees = 300, seed = 1)
-
-cv_random  <- do.call(cv_rf, c(list(points_sf, "y", c("elevation", "pop_density"),
-                                    folds = folds_random),  rf_args))
-cv_blocked <- do.call(cv_rf, c(list(points_sf, "y", c("elevation", "pop_density"),
-                                    folds = folds_blocked), rf_args))
+cv_random  <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
+                    folds = folds_random, include_coords = TRUE,
+                    num_trees = 300, seed = 1)
+cv_blocked <- cv_rf(points_sf, "y", c("elevation", "pop_density"),
+                    folds = folds_blocked, include_coords = TRUE,
+                    num_trees = 300, seed = 1)
 
 data.frame(
   folds = c("random_kfold", "block_kfold"),
@@ -522,7 +541,7 @@ data.frame(
     ## 2  block_kfold 0.6310837 8.997421
 
 Random folds report R² = 0.795; blocked folds report 0.631 on the same
-fitted model — a drop of 21% of the reported skill.
+fitted model, a drop of 21% of the reported skill.
 
 The blocked estimate is the one to report. The random one describes
 interpolation between points you already have, which is not the task.
@@ -640,11 +659,13 @@ gwr_fit <- fit_gwr_model(
 )
 
 gwr_met <- model_metrics(gwr_fit)
-cat(sprintf("Bandwidth: %.1f | in-sample R2: %.3f | RMSE: %.3f\n",
+# With adaptive = TRUE the bandwidth is a number of nearest neighbours, not a
+# distance in feet: each local regression uses the same count of points.
+cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
             gwr_fit$info$bandwidth, gwr_met$R2, gwr_met$RMSE))
 ```
 
-    ## Bandwidth: 42.0 | in-sample R2: 0.879 | RMSE: 4.664
+    ## Bandwidth: 42 neighbours | in-sample R2: 0.879 | RMSE: 4.664
 
 ### Comparing backends on identical folds
 
@@ -670,6 +691,17 @@ cmp$overall
     ##   n_SMAPE model
     ## 1     300   GWR
     ## 2     300    RF
+
+The RF row is the forest *without* the coordinates, and on the same
+blocked folds it scores worse than the coordinate forest in 5c did. That
+is not a contradiction. The field is a smooth wave that the two
+predictors do not carry, so the coordinates are informative out of block
+as well as in, and the blocked score says how much. What 5c measured was
+how much of the *random*-fold score was interpolation between
+neighbours; what this table measures is what the predictors alone are
+worth. `Adj_R2` is `NA` in every `cv_*()` result’s `overall`: the pooled
+predictions come from `k` separately fitted models and have no single
+parameter count to adjust for.
 
 ------------------------------------------------------------------------
 

@@ -80,21 +80,25 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   set.seed(1)
   pts <- st_as_sf(
     data.frame(x = 5e5 + runif(60, 0, 1000), y = 5e6 + runif(60, 0, 1000),
-               a = rnorm(60)),
+               a = rnorm(60), b = rnorm(60)),
     coords = c("x", "y"), crs = 32632
   )
-  pts$z <- 2 * pts$a + rnorm(60, 0, 0.3)
-  fits <- list(RF_small = fit_rf_model(pts, "z", "a", num_trees = 50, seed = 1),
-               RF_big   = fit_rf_model(pts, "z", "a", num_trees = 200, seed = 1))
+  # An offset keeps the response away from zero, where MAPE is undefined.
+  pts$z <- 10 + 2 * pts$a - pts$b + rnorm(60, 0, 0.3)
+  # Two predictor sets for the same learner: the model that leaves `b` out
+  # against the one that has it.  These are in-sample (out-of-bag) numbers;
+  # compare_models_cv() scores the same question on spatial folds.
+  fits <- list(a_only = fit_rf_model(pts, "z", "a", num_trees = 100, seed = 1),
+               a_and_b = fit_rf_model(pts, "z", c("a", "b"), num_trees = 100, seed = 1))
   compare_models(fits)
 }
-#>      model  n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE
-#> 1 RF_small 60 0.4093787 0.3269714 148.2661 55.86883 0.9493199     NA     60
-#> 2   RF_big 60 0.3986436 0.3176596 132.5399 54.88182 0.9519430     NA     60
+#>     model  n      RMSE       MAE      MAPE    SMAPE        R2 Adj_R2 n_MAPE
+#> 1  a_only 60 1.2209445 0.9721158 10.181689 9.914608 0.6804065     NA     60
+#> 2 a_and_b 60 0.7698265 0.5989365  6.332639 6.133211 0.8729450     NA     60
 #>   n_SMAPE AICc LOOIC bandwidth_is_fallback resid_morans_I resid_morans_z
-#> 1      60   NA    NA                    NA    -0.03130007     -0.2541733
-#> 2      60   NA    NA                    NA    -0.02473830     -0.1378124
+#> 1      60   NA    NA                    NA    -0.04684408     -0.5291138
+#> 2      60   NA    NA                    NA    -0.06447357     -0.8456951
 #>   resid_morans_p resid_morans_null
-#> 1      0.7993617     randomisation
-#> 2      0.8903887     randomisation
+#> 1      0.5967265     randomisation
+#> 2      0.3977229     randomisation
 ```

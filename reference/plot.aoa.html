@@ -6,16 +6,18 @@ This draws the dissimilarity index of the prediction locations against
 that of the cross-validated training data, with the threshold marked, so
 the prediction set can be read as mostly inside, marginal or largely
 outside.  The training curve is the reference the threshold was derived
-from: its upper tail ends where the threshold is (or below it, when the
-outlier fence removed the tail)."><meta property="og:description" content="n_outside says how many prediction locations fall outside the area
+from: the threshold is the largest cross-validated training DI inside an
+outlier fence, so the curve reaches it exactly when no training value was
+fenced off and runs past it, by the tail the fence removed, when some were."><meta property="og:description" content="n_outside says how many prediction locations fall outside the area
 of applicability; it does not say whether the rest sit comfortably inside
 or crowd against the threshold, nor how far outside the outsiders are.
 This draws the dissimilarity index of the prediction locations against
 that of the cross-validated training data, with the threshold marked, so
 the prediction set can be read as mostly inside, marginal or largely
 outside.  The training curve is the reference the threshold was derived
-from: its upper tail ends where the threshold is (or below it, when the
-outlier fence removed the tail)."></head><body>
+from: the threshold is the largest cross-validated training DI inside an
+outlier fence, so the curve reaches it exactly when no training value was
+fenced off and runs past it, by the tail the fence removed, when some were."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -71,8 +73,9 @@ This draws the dissimilarity index of the prediction locations against
 that of the cross-validated training data, with the threshold marked, so
 the prediction set can be read as mostly inside, marginal or largely
 outside.  The training curve is the reference the threshold was derived
-from: its upper tail ends where the threshold is (or below it, when the
-outlier fence removed the tail).</p>
+from: the threshold is the largest cross-validated training DI inside an
+outlier fence, so the curve reaches it exactly when no training value was
+fenced off and runs past it, by the tail the fence removed, when some were.</p>
     </div>
 
     <div class="section level2">
@@ -134,10 +137,12 @@ with the training DI as an outline.</p></dd>
 <span class="r-in"><span>               a <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">100</span>, mean <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>, b <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">100</span><span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>    coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">aoa</span> <span class="op">&lt;-</span> <span class="fu"><a href="area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">new</span>, train_sf <span class="op">=</span> <span class="va">train</span>, predictor_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">aoa</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">aoa</span><span class="op">)</span><span class="op">)</span>              <span class="co"># the two ECDFs; print() because only a</span></span></span>
+<span class="r-in"><span>                                <span class="co"># block's last value is drawn on its own</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">aoa</span>, type <span class="op">=</span> <span class="st">"histogram"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-plt img"><img src="plot.aoa-1.png" alt="" width="576" height="403"></span>
+<span class="r-plt img"><img src="plot.aoa-2.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

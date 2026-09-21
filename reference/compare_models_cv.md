@@ -268,13 +268,22 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
-  cmp <- compare_models_cv(dat, "price", "elev", models = "RF", k = 3,
-                           rf_args = list(num_trees = 100))
+  # The random forest, and GWR beside it when GWmodel is installed, on the
+  # same folds.  "Bayesian" is left out here because a Stan fit per fold
+  # takes minutes; add it to `models` for a run to report.
+  models <- c("RF", if (requireNamespace("GWmodel", quietly = TRUE) &&
+                       requireNamespace("sp", quietly = TRUE)) "GWR")
+  cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
+                           rf_args = list(num_trees = 100),
+                           gwr_args = list(bandwidth = 30))
   cmp$overall
 }
+#> compare_models_cv(): running CV for GWR ...
 #> compare_models_cv(): running CV for RF ...
 #>       RMSE      MAE     MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
-#> 1 3.711068 3.128498 21.71902 20.99972 0.1368361     NA    120    120     120
+#> 1 2.281133 1.853980 12.79336 12.53050 0.6738657     NA    120    120     120
+#> 2 3.711068 3.128498 21.71902 20.99972 0.1368361     NA    120    120     120
 #>   model
-#> 1    RF
+#> 1   GWR
+#> 2    RF
 ```

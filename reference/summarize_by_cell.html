@@ -407,7 +407,8 @@ variance components. <em>Biometrics Bulletin</em>, 2(6), 110–114.
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>,
 <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>,
 <code><a href="resolution_profile.html">resolution_profile()</a></code>,
-<code><a href="select_resolution.html">select_resolution()</a></code></p></div>
+<code><a href="select_resolution.html">select_resolution()</a></code>,
+<code><a href="summary.resolution_profile.html">summary.resolution_profile()</a></code></p></div>
     </div>
 
     <div class="section level2">
@@ -420,7 +421,7 @@ variance components. <em>Biometrics Bulletin</em>, 2(6), 110–114.
 <span class="r-in"><span><span class="co"># A response with spatial structure, so the within-cell ICC is not zero.</span></span></span>
 <span class="r-in"><span><span class="va">pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="va">east</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="va">north</span>,</span></span>
-<span class="r-in"><span>             val <span class="op">=</span> <span class="fl">0.05</span> <span class="op">*</span> <span class="va">east</span> <span class="op">+</span> <span class="fl">0.05</span> <span class="op">*</span> <span class="va">north</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, sd <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>             val <span class="op">=</span> <span class="fl">5</span> <span class="op">+</span> <span class="fl">0.02</span> <span class="op">*</span> <span class="va">east</span> <span class="op">+</span> <span class="fl">0.02</span> <span class="op">*</span> <span class="va">north</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, sd <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">bnd</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sf.html" class="external-link">st_sf</a></span><span class="op">(</span>geometry <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sfc.html" class="external-link">st_sfc</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st.html" class="external-link">st_polygon</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span></span></span>
@@ -430,35 +431,38 @@ variance components. <em>Biometrics Bulletin</em>, 2(6), 110–114.
 <span class="r-in"><span><span class="va">grid</span> <span class="op">&lt;-</span> <span class="fu"><a href="create_grid_polygons.html">create_grid_polygons</a></span><span class="op">(</span><span class="va">bnd</span>, target_cells <span class="op">=</span> <span class="fl">9</span>, type <span class="op">=</span> <span class="st">"square"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">pts</span>, <span class="va">grid</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span><span class="co"># IID standard errors (default) vs Kish design-effect adjustment</span></span></span>
+<span class="r-in"><span><span class="co"># IID standard errors (default) vs Kish design-effect adjustment.  The</span></span></span>
+<span class="r-in"><span><span class="co"># correction is large here, and meant to be: about 22 points per cell that</span></span></span>
+<span class="r-in"><span><span class="co"># all share the cell's part of the trend carry far fewer than 22</span></span></span>
+<span class="r-in"><span><span class="co"># independent pieces of information about the cell mean.</span></span></span>
 <span class="r-in"><span><span class="va">naive</span> <span class="op">&lt;-</span> <span class="fu">summarize_by_cell</span><span class="op">(</span><span class="va">assigned</span>, response_var <span class="op">=</span> <span class="st">"val"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">kish</span>  <span class="op">&lt;-</span> <span class="fu">summarize_by_cell</span><span class="op">(</span><span class="va">assigned</span>, response_var <span class="op">=</span> <span class="st">"val"</span>, deff <span class="op">=</span> <span class="st">"kish"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>n <span class="op">=</span> <span class="va">naive</span><span class="op">$</span><span class="va">n</span>,</span></span>
 <span class="r-in"><span>           se_naive <span class="op">=</span> <span class="va">naive</span><span class="op">$</span><span class="va">..se_resp_val</span>,</span></span>
 <span class="r-in"><span>           se_kish  <span class="op">=</span> <span class="va">kish</span><span class="op">$</span><span class="va">..se_resp_val</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>    n  se_naive  se_kish</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1 25 0.1282574 1.576773</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2 28 0.1687903 2.195277</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3 25 0.1586372 1.950257</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4 21 0.1797135 2.026192</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5 23 0.2010768 2.371742</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6 21 0.1974045 2.225651</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 7 10 0.2315705 1.809441</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 8 27 0.1499232 1.914966</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 9 20 0.2162204 2.379509</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    n   se_naive   se_kish</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1 25 0.09706775 0.7210227</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2 28 0.11815220 0.9279034</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3 25 0.11573069 0.8596517</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4 21 0.11556510 0.7881134</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5 23 0.13192931 0.9407000</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6 21 0.12707224 0.8665880</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7 10 0.18215988 0.8673238</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8 27 0.09534639 0.7355266</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9 20 0.14402822 0.9590654</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">kish</span>, <span class="st">"deff_applied"</span><span class="op">)</span>   <span class="co"># method, icc_resp, icc_pred, per-cell deff</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $method</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] "kish"</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $icc_resp</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0.8572554</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0.6842466</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $icc_pred</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $deff</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 21.574129 24.145895 21.574129 18.145108 19.859618 18.145108  8.715298</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [8] 23.288640 17.287852</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 17.42192 19.47466 17.42192 14.68493 16.05343 14.68493  7.15822 18.79041</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [9] 14.00069</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># A 95% interval for each cell mean as an estimate of the grand mean, on</span></span></span>
@@ -470,15 +474,15 @@ variance components. <em>Biometrics Bulletin</em>, 2(6), 110–114.
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 9 × 7</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   poly_id     n resp_mean_val ..neff_resp_val ..df_resp_val ..ci_lo_resp_val</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>           <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span>       1    25          1.74            1.16            24          -<span style="color: #BB0000;">1.52</span>  </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">2</span>       2    28          3.25            1.16            27          -<span style="color: #BB0000;">1.26</span>  </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">3</span>       3    25          5.02            1.16            24           1.000 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">4</span>       4    21          3.37            1.16            20          -<span style="color: #BB0000;">0.857</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">5</span>       5    23          5.01            1.16            22           0.094<span style="text-decoration: underline;">7</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">6</span>       6    21          7.00            1.16            20           2.35  </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">7</span>       7    10          5.43            1.15             9           1.34  </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">8</span>       8    27          6.84            1.16            26           2.90  </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">9</span>       9    20          7.94            1.16            19           2.96  </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span>       1    25          5.63            1.43            24             4.14</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">2</span>       2    28          6.30            1.44            27             4.40</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">3</span>       3    25          6.93            1.43            24             5.16</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">4</span>       4    21          6.42            1.43            20             4.77</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">5</span>       5    23          7.11            1.43            22             5.15</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">6</span>       6    21          7.89            1.43            20             6.09</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">7</span>       7    10          7.16            1.40             9             5.19</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">8</span>       8    27          7.77            1.44            26             6.25</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">9</span>       9    20          8.16            1.43            19             6.15</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 1 more variable: ..ci_hi_resp_val &lt;dbl&gt;</span></span>
 </code></pre></div>
     </div>

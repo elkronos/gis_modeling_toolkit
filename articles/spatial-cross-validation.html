@@ -11,6 +11,10 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Spatial cross-validation">
+<meta name="description" content="The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
+">
+<meta property="og:description" content="The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
+">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -70,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">19 September 2026</h4>
+            <h4 data-toc-skip class="date">21 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatial-cross-validation.Rmd" class="external-link"><code>vignettes/spatial-cross-validation.Rmd</code></a></small>
       <div class="d-none name"><code>spatial-cross-validation.Rmd</code></div>
@@ -78,6 +82,10 @@ Chase</h4>
 
     
     
+<p><em>This article needs two optional packages: <strong>gstat</strong>,
+which fits the variogram behind the autocorrelation range, and
+<strong>ggplot2</strong> for the figures. When either is missing the
+code is shown but not run, and a note at the top says so.</em></p>
 <div class="section level2">
 <h2 id="the-problem-with-a-random-fold">The problem with a random fold<a class="anchor" aria-label="anchor" href="#the-problem-with-a-random-fold"></a>
 </h2>
@@ -150,8 +158,11 @@ of 180 units over a 1000-unit square:</p>
 </h2>
 <p>Same data, same learner, two fold schemes.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">fr</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
-<span><span class="va">fb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,  seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="co"># The field was simulated with an effective range of 180 units, so 200-unit</span></span>
+<span><span class="co"># blocks hold out whole patches of it.  Sizing blocks from the data, when the</span></span>
+<span><span class="co"># range is not known, is the next section.</span></span>
+<span><span class="va">fr</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="va">fb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, block_size <span class="op">=</span> <span class="fl">200</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">cv_random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fr</span><span class="op">)</span></span>
 <span><span class="va">cv_blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
@@ -255,7 +266,7 @@ printing it whole also prints the directional summary;
 reason attached, <code>auto_range</code> logs that it is falling back to
 geometric blocks, and you are back to choosing a size yourself. An
 <code>NA</code> there is a finding about the data.
-<code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code> lists the four reasons and what each
+<code><a href="../reference/estimate_sac_range.html">?estimate_sac_range</a></code> lists the five reasons and what each
 one means; <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the returned object draws the
 variogram that produced it.</p>
 </div>
@@ -288,7 +299,7 @@ reference.</p>
 <span><span class="co">##    1.4184</span></span></code></pre>
 <div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.85 at the smallest to about 1.12 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatial-cross-validation_files/figure-html/plot-sweep-1.png" class="r-plt" alt="Cross-validated RMSE against block edge length on a log scale. The error rises steadily as the blocks grow, from about 0.80 at the smallest to about 1.13 at the largest, staying above the dashed random-fold reference throughout. A dotted line marks the estimated autocorrelation range." width="100%" style="display: block; margin: auto;"></p>
 <p>Error climbs away from the random-fold reference as blocks widen, and
 the estimated range is marked. The height of the climb is what random
 folds were hiding.</p>
@@ -313,11 +324,19 @@ describes neither.</p>
 <div class="section level3">
 <h3 id="every-row-and-every-fold-is-accounted-for">Every row and every fold is accounted for<a class="anchor" aria-label="anchor" href="#every-row-and-every-fold-is-accounted-for"></a>
 </h3>
-<p>Four fields say what happened to the data on the way through. On the
-clean run above they are all zero, so here is a run where they are
-not.</p>
-<p>A learner that fails on one fold:</p>
+<p>Four fields say what happened to the data on the way through:
+<code>n_folds_attempted</code> against <code>n_folds_succeeded</code>,
+<code>n_dropped</code> (rows the data lost), <code>orphan_rows</code>
+(rows no fold names) and <code>n_unknown_ids</code> (fold rows the data
+does not have). On the clean run above nothing went missing:</p>
 <div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_attempted</span>, succeeded <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_folds_succeeded</span>,</span>
+<span>  dropped <span class="op">=</span> <span class="va">cv_blocked</span><span class="op">$</span><span class="va">n_dropped</span>, orphans <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_blocked</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## attempted succeeded   dropped   orphans </span></span>
+<span><span class="co">##         5         5         0         0</span></span></code></pre>
+<p>So here are two runs where something does.</p>
+<p>A learner that fails on one fold:</p>
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">flaky</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">...</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span> <span class="op">&lt;</span> <span class="fl">320</span><span class="op">)</span> <span class="kw"><a href="https://rdrr.io/r/base/stop.html" class="external-link">stop</a></span><span class="op">(</span><span class="st">"not enough training rows for this toy learner"</span><span class="op">)</span></span>
 <span>  <span class="fu">knn_fit</span><span class="op">(</span><span class="va">train_sf</span>, <span class="st">"z"</span>, k <span class="op">=</span> <span class="fl">5L</span><span class="op">)</span></span>
@@ -331,7 +350,7 @@ not.</p>
 <span><span class="co">## 3    3  error not enough training rows for this toy learner</span></span>
 <span><span class="co">## 4    4     ok                                              </span></span>
 <span><span class="co">## 5    5     ok</span></span></code></pre>
-<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>attempted <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_attempted</span>, succeeded <span class="op">=</span> <span class="va">cv_flaky</span><span class="op">$</span><span class="va">n_folds_succeeded</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## attempted succeeded </span></span>
 <span><span class="co">##         5         4</span></span></code></pre>
@@ -342,7 +361,7 @@ one of <code>ok</code>, <code>error</code>, <code>skipped</code>,
 a partial failure left its causes in console scrollback, which a script
 or a knitted document does not keep.</p>
 <p>Rows the data lost, and rows no fold names:</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">holed</span> <span class="op">&lt;-</span> <span class="va">pts</span></span>
 <span><span class="va">holed</span><span class="op">$</span><span class="va">z</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">3</span>, <span class="fl">17</span>, <span class="fl">42</span><span class="op">)</span><span class="op">]</span> <span class="op">&lt;-</span> <span class="cn">NA</span>                       <span class="co"># three rows will be dropped</span></span>
 <span><span class="va">part</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">300</span>, <span class="op">]</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
@@ -363,7 +382,7 @@ row IDs the folds name that the data does not have, which here is the
 three rows the <code>NA</code>s removed.</p>
 <p>The two mirror each other, and which one is non-zero tells you which
 way the mismatch runs:</p>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cv_rev</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_spatial.html">cv_spatial</a></span><span class="op">(</span><span class="va">pts</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">300</span>, <span class="op">]</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">knn_fn</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>n_orphans <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">cv_rev</span><span class="op">$</span><span class="va">orphan_rows</span><span class="op">)</span>, n_unknown_ids <span class="op">=</span> <span class="va">cv_rev</span><span class="op">$</span><span class="va">n_unknown_ids</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##     n_orphans n_unknown_ids </span></span>
@@ -382,7 +401,7 @@ observation.</p>
 the intervals are the width they claim. <code><a href="../reference/plot_calibration.html">plot_calibration()</a></code>
 draws nominal coverage against realised coverage per fold, from a
 <code><a href="../reference/cv_bayes.html">cv_bayes()</a></code> result.</p>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cvb</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_bayes.html">cv_bayes</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span>, folds <span class="op">=</span> <span class="va">fb</span><span class="op">)</span>   <span class="co"># needs brms</span></span>
 <span><span class="fu"><a href="../reference/plot_calibration.html">plot_calibration</a></span><span class="op">(</span><span class="va">cvb</span><span class="op">)</span></span></code></pre></div>
 <p>Points below the diagonal are intervals that are too narrow: a
