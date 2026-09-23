@@ -645,6 +645,143 @@
 
 ### Bug fixes
 
+- **A `bayesian_fit`’s cached fitted values could come from another
+  model.** The cache lives in an environment, so it is shared by every
+  copy of a fit, and the entry was stamped with the row count and a
+  digest of the training data only. Two fits over the same data hash
+  identically however different their engines are, so
+  `refit <- fit; refit$engine <- <re-estimated>` made
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html),
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  and [`summary()`](https://rdrr.io/r/base/summary.html) on *either*
+  object return the other’s numbers — and
+  [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
+  which the help page offers for exactly this case, could not fix it,
+  because clearing through one copy cleared the one shared entry and the
+  next call re-wrote it. The entry now carries the engine it was
+  computed from and is used only for that engine
+  ([`identical()`](https://rdrr.io/r/base/identical.html), which settles
+  the common case by pointer, so nothing is slower and no memory is held
+  that the fit did not already hold). A stale entry is no longer deleted
+  on a miss either: the fit that wrote it still wants it.
+  [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+  now always builds a fresh cache rather than adopting one that arrived
+  in `info`, and [`summary()`](https://rdrr.io/r/base/summary.html) no
+  longer carries `.cache` at all — a summary was not a value snapshot
+  (its contents changed when anyone later called
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) on the fit),
+  [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
+  on a summary emptied the *fit’s* cache, and
+  [`saveRDS()`](https://rdrr.io/r/base/readRDS.html) on one serialised
+  an environment holding the full n-vector.
+
+- **Every CRPS was `NA` above 46,340 posterior draws.** `.crps_energy()`
+  formed its weights with `m * m`, where `m` is `nrow(draws)` and
+  therefore an integer, so the product overflowed and took `CRPS`,
+  `mean_CRPS` and the whole `predictive_coverage` summary to `NA` behind
+  one `"NAs produced by integer overflow"` warning. 48,000 draws is an
+  ordinary `cv_bayes(fit_args = list(chains = 4, iter = 13000))` run.
+  The arithmetic is now done in double precision; the values it produces
+  were, and remain, exact against the closed-form Gaussian CRPS.
+
+- **Fold numbers depended on the machine’s collation.** Character fold
+  labels are turned into a factor, whose levels
+  [`as.factor()`](https://rdrr.io/r/base/factor.html) sorts under
+  `LC_COLLATE`, and a fold’s number is its level’s position. Labels
+  differing only in case or punctuation — `"north"` and `"North"` —
+  therefore landed in a different order under `C` than under `en_US`, so
+  `fold_metrics$fold`, `predictions$fold` and `fold_status$fold` named
+  different groups on different machines from the same data and the same
+  seed. The partition was never affected, so pooled scores were right.
+  The levels are now sorted with `method = "radix"`, which is always C
+  collation, making the numbering a property of the labels alone.
+
+- **`residual_morans_i(k = )` silently answered a different question.**
+  `k` reached the weight builder unvalidated, where
+  [`min()`](https://rdrr.io/r/base/Extremes.html) collapses a vector:
+  `k = c(4, 8)` built the `k = 4` matrix and returned a statistic for
+  neighbours the caller never asked for, with no condition raised, and
+  `k = NA` aborted on `"missing value where TRUE/FALSE needed"`. `k` is
+  now checked. Two neighbouring gaps are closed with it: a user-supplied
+  `weights` matrix holding any `NA`, `NaN` or `Inf` is refused by name
+  instead of aborting inside a guard after a log line reading
+  `"row sums range from NA to NA"`, and a row whose geometry is empty is
+  now dropped with a count, as
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  and
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  already do — its residual is perfectly finite, so it used to survive
+  into [`FNN::get.knn()`](https://rdrr.io/pkg/FNN/man/get.knn.html) and
+  abort with `"Data include NAs"`.
+
+- **A scalar argument that reaches
+  [`as.integer()`](https://rdrr.io/r/base/integer.html) is validated.**
+  Seven exported functions took a count or a distance and passed it
+  straight into [`as.integer()`](https://rdrr.io/r/base/integer.html) or
+  an `if ()` test, where `NA`, `Inf`, a length-2 vector or any value
+  above `.Machine$integer.max` aborts with
+  `"missing value where TRUE/FALSE needed"` or
+  `"'length = 2' in coercion to 'logical(1)'"` — errors that name
+  nothing the caller passed. `fit_gwr_model(bandwidth = )` under
+  `adaptive = TRUE`, `predict_surface(chunk_size = )` (`Inf` being the
+  natural way to ask for one chunk), `voronoi_seeds_kmeans(k = )`,
+  `voronoi_seeds_random(k = )` and the count resolved by
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  /
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+  now report the argument and the bound. `voronoi_seeds_kmeans(k = 0)`
+  and a negative `k` used to return *one* seed in silence, which “at
+  most `k`” does not describe.
+
+- **`expand` was ignored rather than refused.**
+  `clip_target_for(expand = c(0.05, 0.05))` returned a clip target
+  byte-identical to `expand = 0` with no condition raised, and
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  did the same for a non-numeric `expand`, because both tested
+  `is.numeric(expand) && expand > 0` and short-circuited to FALSE. A
+  malformed `expand` is now an error naming the argument; the same
+  values on a degenerate bounding box used to abort inside the expansion
+  helper instead.
+
+- **`summarize_by_cell(deff = "variogram")` aborted when given no value
+  column.** With neither `response_var` nor `predictor_vars` the
+  internal primary column is `NULL` by design, and `df[[NULL]]` raised
+  `"attempt to select less than one element in get1index"`. The
+  variogram design effect is a function of the cell’s coordinates and
+  the fitted correlation, not of any column’s values, so every point in
+  the cell now counts and the call returns its counts and `cell_weight`
+  as documented.
+
+- **[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  aborted on a list holding no `spatial_fit`.**
+  [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+  warns and skips a non-fit and returns `NULL` when every element was
+  skipped; the `NULL` then became a bare list and `seq_len(nrow(NULL))`
+  raised `"argument must be coercible to non-negative integer"`. It now
+  says which argument is wrong and what belongs there.
+
+- **`fit_rf_model(include_coords = TRUE)`’s caveat said “once per
+  session” and was not.** `.log_warn_once()` records the key in a
+  package-level environment, and under `cv_rf(parallel = )` that write
+  happens inside a forked worker and dies with it: the paragraph printed
+  once per worker, the parent’s registry stayed empty, and the next
+  sequential fit printed it again.
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  now raises it in the parent before dispatching any fold, so each
+  worker inherits the already-warned flag and stays quiet. Measured on
+  two workers: three occurrences before, one after.
+
+- **The grid cache’s order registry outlived the environments it
+  described.** Insertion order is kept in a package-level environment
+  keyed by the cache environment’s printed address, and
+  [`clear_grid_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_grid_cache.md)
+  removes only the entry for the environment it is handed. Passing a
+  fresh `cache_env` per call therefore left one permanent character
+  vector per call, for environments that had since been
+  garbage-collected and could no longer be named. A finalizer now
+  removes an entry with its environment.
+
 - `plot(fit, type = "variogram")` no longer runs its subtitle off the
   edge of the figure. ggplot2 clips a label that is wider than the plot
   instead of wrapping it, and the sentence saying why no range was
