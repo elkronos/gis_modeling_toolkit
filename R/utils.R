@@ -120,6 +120,49 @@
   invisible(TRUE)
 }
 
+
+#' Validate a scalar argument before it reaches \code{as.integer()} or \code{if ()}
+#'
+#' Seven exported functions took a count or a distance and passed it straight
+#' into \code{as.integer()} or an \code{if ()} test.  Unvalidated, a length-2
+#' vector aborts with "'length = 2' in coercion to 'logical(1)'", \code{NA}
+#' and \code{Inf} abort with "missing value where TRUE/FALSE needed" (because
+#' \code{as.integer()} of either is \code{NA}), and so does any value above
+#' \code{.Machine$integer.max} -- none of which names the argument the caller
+#' passed.  \code{resolution_profile()} already guards that last trap
+#' explicitly; this is the same guard, shared.
+#'
+#' @param x The value to check.
+#' @param arg,caller Names used in the message.
+#' @param min,max Inclusive bounds.  Pass \code{max = .Machine$integer.max}
+#'   wherever the value later reaches \code{as.integer()}.
+#' @param what A noun phrase describing what the argument is, for the message.
+#' @return \code{x}, invisibly, when it is valid; otherwise an error.
+#' @keywords internal
+#' @noRd
+.check_scalar <- function(x, arg, caller, min = -Inf, max = Inf,
+                          what = "a single finite number") {
+  if (!is.numeric(x) || length(x) != 1L || !is.finite(x))
+    stop(sprintf("%s(): `%s` must be %s; got %s.", caller, arg, what,
+                 if (length(x) != 1L)
+                   sprintf("%s of length %d", class(x)[1L], length(x))
+                 else if (is.numeric(x)) format(x)
+                 else class(x)[1L]),
+         call. = FALSE)
+  if (x < min)
+    stop(sprintf("%s(): `%s` must be %s and at least %s; got %s.",
+                 caller, arg, what, format(min), format(x)), call. = FALSE)
+  if (x > max)
+    stop(sprintf("%s(): `%s` must be %s and at most %s%s; got %s.",
+                 caller, arg, what, format(max),
+                 if (identical(max, .Machine$integer.max))
+                   " (R's largest integer)" else "",
+                 format(x)),
+         call. = FALSE)
+  invisible(x)
+}
+
+
 #' Log a warning AND raise it as an R condition
 #'
 #' A logger line is invisible to \code{tryCatch(warning = )},

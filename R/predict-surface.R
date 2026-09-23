@@ -253,6 +253,11 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
 
   # ---- chunked prediction --------------------------------------------------
   n <- nrow(grid)
+  # Inf is the natural way to ask for "one chunk, do not split", and it is
+  # exactly what as.integer() turns into NA -- after which seq(by = NA) fails
+  # with "invalid '(to - from)/by'", naming nothing the caller passed.
+  .check_scalar(chunk_size, "chunk_size", "predict_surface", min = 1,
+                max = .Machine$integer.max, what = "a single positive number")
   chunk_size <- max(1L, as.integer(chunk_size))
   starts <- seq(1L, n, by = chunk_size)
 

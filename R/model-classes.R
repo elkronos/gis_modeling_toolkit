@@ -104,7 +104,12 @@ new_spatial_fit <- function(subclass, engine, formula, response_var,
   # Use an environment for the cache so it has reference semantics —
 
   # mutations persist across calls without triggering R copy-on-modify.
-  if (is.null(info$.cache)) info$.cache <- new.env(parent = emptyenv())
+  # ALWAYS a fresh one: an `info` list handed in by the caller can carry
+  # another fit's `.cache` (summary() used to hand one out), and two fits
+  # sharing a cache is exactly the condition under which one can read the
+  # other's fitted values back.  Reusing it saved nothing -- the entry is
+  # keyed anyway -- and cost correctness.
+  info$.cache <- new.env(parent = emptyenv())
   obj <- list(
     engine         = engine,
     formula        = formula,
@@ -287,7 +292,13 @@ summary.spatial_fit <- function(object, ...) {
     n              = object$n,
     response_var   = object$response_var,
     predictor_vars = object$predictor_vars,
-    info           = object$info,
+    # `.cache` is an ENVIRONMENT, so carrying it here would not copy it: the
+    # summary would hold the fit's live cache.  That made a summary something
+    # other than a value snapshot (its contents changed when anyone later
+    # called fitted() on the fit), made clear_fitted_cache(summary) empty the
+    # FIT's cache, and made saveRDS()/identical() on two summaries of
+    # structurally identical fits disagree.  Drop it.
+    info           = object$info[setdiff(names(object$info), ".cache")],
     in_sample      = met
   )
   class(out) <- "summary.spatial_fit"
@@ -950,13 +961,25 @@ fitted.bayesian_fit <- function(object, ...) {
   key   <- .fitted_cache_key(object)
   if (!is.null(cache) && exists(".fitted_values", envir = cache, inherits = FALSE)) {
     hit <- get(".fitted_values", envir = cache, inherits = FALSE)
+    # `hit$engine` is the identity check the data stamp cannot make.  The key
+    # digests n, the attribute table and the coordinates, so two fits over the
+    # SAME data hash identically however different their engines are -- and
+    # because the cache is shared by every copy of a fit, `refit <- fit;
+    # refit$engine <- <re-estimated>` then read the original engine's fitted
+    # values back out.  identical() is cheap here: for the common case it is
+    # the same object, which R settles by pointer.  Holding the reference
+    # costs no memory -- the fit already holds the engine.
     if (is.list(hit) && identical(hit$n, object$n) &&
         identical(hit$key, key) &&
+        identical(hit$engine, object$engine) &&
         is.numeric(hit$values) && length(hit$values) == object$n)
       return(hit$values)
-    # Stale (a copy carrying different data, or an entry written by an older
-    # version of this package).  Drop it rather than returning it.
-    rm(list = ".fitted_values", envir = cache)
+    # Stale: a copy carrying different data or a different engine, or an entry
+    # written by an older version of this package.  It is not returned -- the
+    # test above already refused it -- and it is not deleted either: the cache
+    # is shared by every copy of a fit, so deleting here threw away an entry
+    # that is still valid for the fit that wrote it, and a recompute that then
+    # failed left that fit with nothing.  The write below replaces it.
   }
 
   if (!requireNamespace("brms", quietly = TRUE))
@@ -986,7 +1009,8 @@ fitted.bayesian_fit <- function(object, ...) {
   # data cannot read it back.  A wrong-length result is never cached.
   if (!is.null(cache) && length(fitted_vals) == object$n) {
     assign(".fitted_values",
-           list(n = object$n, key = key, values = fitted_vals),
+           list(n = object$n, key = key, engine = object$engine,
+                values = fitted_vals),
            envir = cache)
   }
 

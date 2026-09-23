@@ -551,7 +551,17 @@
   if (length(folds) != n)
     stop(sprintf("%s(): `folds` has %d labels but the data has %d rows.",
                  caller, length(folds), n), call. = FALSE)
-  f <- droplevels(as.factor(folds))
+  # as.factor() orders its levels with sort(), which uses LC_COLLATE: labels
+  # differing only in case or punctuation ("north"/"North") land in a
+  # different order under C than under en_US, and since the fold NUMBER is the
+  # level's position, fold_metrics$fold, predictions$fold and
+  # fold_status$fold then name different groups on different machines.  The
+  # partition is unaffected; the numbering was not reproducible.  sort() with
+  # method = "radix" is always C-collation, so the numbering is now a property
+  # of the labels alone.
+  f <- factor(as.character(folds),
+              levels = sort(unique(as.character(folds)), method = "radix"))
+  f <- droplevels(f)
   if (anyNA(f))
     stop(caller, "(): `folds` contains missing labels.", call. = FALSE)
   if (nlevels(f) < 2L)
@@ -794,7 +804,14 @@
   mae_terms <- colMeans(abs(sweep(draws, 2L, y)))
   # Vectorised within-column sort in base R: order by column, then by value.
   sorted_draws <- matrix(draws[order(col(draws), draws)], nrow = m)
-  weights <- (2 * seq_len(m) - m - 1) / (m * m)
+  # `m` is nrow(), an INTEGER, so m * m overflows above 46,340 draws and the
+  # whole weight vector goes NA -- which made every CRPS, and with it
+  # `mean_CRPS` and the calibration summary, silently NA behind one
+  # "NAs produced by integer overflow" warning.  48,000 draws is an ordinary
+  # cv_bayes(fit_args = list(chains = 4, iter = 13000)) run.  Do the
+  # arithmetic in double.
+  md <- as.numeric(m)
+  weights <- (2 * seq_len(m) - md - 1) / (md * md)
   spread_terms <- colSums(sorted_draws * weights)
   mae_terms - spread_terms
 }

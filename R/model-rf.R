@@ -3,6 +3,34 @@
 # =============================================================================
 
 
+
+#' The include_coords caveat, raised once per session
+#'
+#' Kept here rather than inline because BOTH \code{fit_rf_model()} and
+#' \code{cv_rf()} raise it, and they must not drift apart.  \code{cv_rf()}
+#' raises it in the parent BEFORE dispatching folds: \code{.log_warn_once()}
+#' records the key in a package-level environment, and under
+#' \code{parallel = TRUE} that write happens in a forked child and dies with
+#' it -- so the caveat printed once per worker, the parent's registry stayed
+#' empty, and the next sequential fit printed it again.  A fork COPIES the
+#' parent's memory, so setting the flag before the fork makes every child
+#' inherit it and stay quiet, and leaves the parent correctly stamped.
+#'
+#' @return \code{TRUE} if this call logged, \code{FALSE} if it was already
+#'   raised in this session.  Invisibly.
+#' @keywords internal
+#' @noRd
+.warn_include_coords <- function() {
+  .log_warn_once("rf_include_coords",
+                 paste0("fit_rf_model(): include_coords = TRUE. A forest given ",
+                        "the coordinates can reproduce the training surface by ",
+                        "memorising location and then fail wherever it has not ",
+                        "been; random cross-validation will not detect this. ",
+                        "Score the result with cv_rf() and blocked folds, not ",
+                        "with the out-of-bag error (Meyer et al. 2019)."))
+}
+
+
 #' Build the predictor frame a ranger forest expects
 #'
 #' Fitting and prediction must produce identical column names in identical
@@ -297,14 +325,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   # fold's subset inside cv_*() has neither, and cv_*() reports its own.
   n_dropped <- as.integer(.get_row_record(dat, "dropped")$n %||% 0L)
 
-  if (isTRUE(include_coords))
-    .log_warn_once("rf_include_coords",
-                   paste0("fit_rf_model(): include_coords = TRUE. A forest given ",
-                          "the coordinates can reproduce the training surface by ",
-                          "memorising location and then fail wherever it has not ",
-                          "been; random cross-validation will not detect this. ",
-                          "Score the result with cv_rf() and blocked folds, not ",
-                          "with the out-of-bag error (Meyer et al. 2019)."))
+  if (isTRUE(include_coords)) .warn_include_coords()
 
   y <- sf::st_drop_geometry(dat)[[response_var]]
   if (!is.numeric(y))
@@ -473,6 +494,10 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
                   metrics = NULL, ...) {
   if (!requireNamespace("ranger", quietly = TRUE))
     stop("cv_rf(): package 'ranger' is required.", call. = FALSE)
+  # Raised HERE, in the parent, so that a forked worker inherits the
+  # already-warned flag instead of each one raising its own copy.  See
+  # .warn_include_coords().
+  if (isTRUE(list(...)$include_coords)) .warn_include_coords()
   # `seed` has to reach the FOREST, not just the fold construction.
   # fit_rf_model() carries its own seed = 123L default and `...` did not
   # override it, so every fold's forest was grown with ranger seed 123

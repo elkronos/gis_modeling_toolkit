@@ -13,6 +13,9 @@
 ^\.gitignore$
 # Stray graphics-device output. Base plot() called with no open device writes
 # Rplots.pdf into the working directory, and R CMD build will happily ship it.
-^Rplots\.pdf$
+# NOT anchored to the package root: the copy that actually gets made is the one
+# in inst/scripts/, written whenever a tour script is sourced from that folder,
+# and inst/ is exactly the tree that ships.
+(^|/)Rplots\.pdf$
 \.DS_Store$
 ^Claude outputs$

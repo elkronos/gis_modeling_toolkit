@@ -279,6 +279,14 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
   .assert_sf(points_sf, "POINT", "points_sf")
+  # `k` was never validated here, unlike get_voronoi_seeds(), which routes
+  # `n` through .resolve_cell_count(): k = NA or a length-2 vector aborted on
+  # the clamp below, k above .Machine$integer.max became NA through
+  # as.integer(), and k = 0 or negative silently returned ONE seed -- which
+  # the @return section's "at most k" does not describe.
+  .check_scalar(k, "k", "voronoi_seeds_kmeans", min = 1,
+                max = .Machine$integer.max,
+                what = "a single positive number of seeds")
 
   # Project to metric CRS if lon/lat to make k-means distance-faithful
   pts_for_km <- points_sf
@@ -366,6 +374,14 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #' seeds
 #' @export
 voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
+  # `k` was never validated here, unlike get_voronoi_seeds(), which routes
+  # `n` through .resolve_cell_count(): k = NA or a length-2 vector aborted on
+  # the clamp below, k above .Machine$integer.max became NA through
+  # as.integer(), and k = 0 or negative silently returned ONE seed -- which
+  # the @return section's "at most k" does not describe.
+  .check_scalar(k, "k", "voronoi_seeds_random", min = 1,
+                max = .Machine$integer.max,
+                what = "a single positive number of seeds")
   # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.
   if (inherits(boundary, "sfc")) boundary <- sf::st_as_sf(boundary)
   .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")

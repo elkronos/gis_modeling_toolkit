@@ -694,6 +694,13 @@ residual_morans_i <- function(fit,
                               null = c("auto", "randomisation", "residual"),
                               keep_weights = FALSE) {
   alternative <- match.arg(alternative)
+  # `k` reached .build_knn_weights() unvalidated, where min() collapses a
+  # vector: k = c(4, 8) silently built the k = 4 matrix and returned a
+  # statistic for neighbours the caller never asked for, with no condition
+  # raised, and k = NA aborted on "missing value where TRUE/FALSE needed".
+  .check_scalar(k, "k", "residual_morans_i", min = 1,
+                max = .Machine$integer.max,
+                what = "a single number of neighbours")
   null        <- match.arg(null)
 
   if (!inherits(fit, "spatial_fit")) {
@@ -718,8 +725,19 @@ residual_morans_i <- function(fit,
     return(NULL)
   }
 
-  # Drop any non-finite residuals
-  ok <- is.finite(resid)
+  # Drop any non-finite residual OR non-finite coordinate.  Filtering on the
+  # residual alone left a row with an empty POINT geometry in place (its
+  # residual is perfectly finite), and st_coordinates() gives that row an
+  # all-NA pair: FNN::get.knn() then aborts with "Data include NAs" and the
+  # dense fallback with "index k outside bounds", neither of which names the
+  # geometry.  make_folds() and estimate_sac_range() both drop such rows with
+  # a count; this is the sibling that did not.
+  ok <- is.finite(resid) & stats::complete.cases(coords) &
+        is.finite(coords[, 1L]) & is.finite(coords[, 2L])
+  n_bad_geom <- sum(is.finite(resid) & !ok)
+  if (n_bad_geom > 0L)
+    .warn_and_log(sprintf(paste0("residual_morans_i(): dropping %d row(s) with ",
+                                 "an empty or non-finite geometry."), n_bad_geom))
   if (sum(ok) < 4L) {
     .warn_and_log("residual_morans_i(): fewer than 4 finite residuals.")
     return(NULL)
@@ -754,6 +772,16 @@ residual_morans_i <- function(fit,
            call. = FALSE)
     } else {
       W <- weights
+      # Every moment below sums W.  One NA anywhere makes S0 NA, and the
+      # `S0 < eps || ss_c < eps` guard then fails with "missing value where
+      # TRUE/FALSE needed" after a log line reading "row sums range from NA to
+      # NA".  The shape, diagonal and row-standardisation are all checked
+      # above; finiteness was the one property that was not.
+      if (!all(is.finite(as.numeric(W))))
+        stop(sprintf(paste0("residual_morans_i(): `weights` holds %d non-finite ",
+                            "value(s) (NA, NaN or Inf). Every weight must be a ",
+                            "finite number."),
+                     sum(!is.finite(as.numeric(W)))), call. = FALSE)
       # A non-zero diagonal breaks the null distribution, not just the
       # interpretation.  Every moment formula in this file -- E[I], Var[I]
       # under randomisation, and the regression-residual moments -- assumes
@@ -1216,6 +1244,16 @@ compare_models <- function(fits, newdata = NULL, ...) {
   met_df <- evaluate_insample(fits, newdata = newdata, ...)
 
   # Append model-specific information criteria
+  # evaluate_insample() warns-and-skips any element that is not a spatial_fit
+  # and returns NULL when EVERY element was skipped.  `met_df$AICc <- NA_real_`
+  # then turns that NULL into a bare list, nrow() is NULL, and seq_len(NULL)
+  # aborts with "argument must be coercible to non-negative integer" -- the
+  # same failure the comment above records as fixed for the unnamed-list case.
+  if (is.null(met_df) || !is.data.frame(met_df) || nrow(met_df) == 0L)
+    stop(paste0("compare_models(): no element of `models` is a spatial_fit, ",
+                "so there is nothing to compare. Pass fits from fit_rf_model(), ",
+                "fit_gwr_model(), fit_bayesian_spatial_model() or ",
+                "new_spatial_fit()."), call. = FALSE)
   met_df$AICc  <- NA_real_
   met_df$LOOIC <- NA_real_
   met_df$bandwidth_is_fallback <- NA

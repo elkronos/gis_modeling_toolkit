@@ -43,6 +43,14 @@
 clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALSE) {
   .msg <- function(...) if (!quiet) message(...)
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
+  # .expand_distance() below TOLERATES a malformed `expand` by returning 0,
+  # which turned `expand = c(0.05, 0.05)` into a silent no-op -- the returned
+  # bbox was byte-identical to expand = 0, with no condition raised -- and a
+  # degenerate bbox reached `if (expand == 0)` in the caller before that
+  # tolerance applied, aborting on NA or on a length-2 vector.  Check once,
+  # here, so both paths get the same answer.
+  .check_scalar(expand, "expand", "clip_target_for", min = 0,
+                what = "a single non-negative number (a fraction of the extent below 1, otherwise a distance)")
 
   .expand_distance <- function(ref_geom, expand) {
     if (!is.numeric(expand) || length(expand) != 1 || is.na(expand) || expand == 0) return(0)
@@ -270,7 +278,15 @@ create_voronoi_polygons <- function(
   }
   boundary <- .safe_make_valid(boundary)
 
-  boundary_expanded <- if (isTRUE(is.numeric(expand)) && expand > 0) {
+  # `isTRUE(is.numeric(expand)) && expand > 0` short-circuits to FALSE for a
+  # character `expand`, dropping the requested expansion with no condition at
+  # all, and raises R's own "'length = 2' in coercion to 'logical(1)'" for a
+  # length-2 one -- an error for input that build_tessellation(method = "hex")
+  # accepts without complaint.
+  .check_scalar(expand, "expand", "create_voronoi_polygons", min = 0,
+                what = "a single non-negative buffer distance")
+
+  boundary_expanded <- if (expand > 0) {
     suppressWarnings(sf::st_buffer(boundary, dist = expand))
   } else boundary
 
@@ -285,7 +301,7 @@ create_voronoi_polygons <- function(
   cells <- .safe_make_valid(cells)
 
   if (clip) {
-    clip_to <- if (isTRUE(is.numeric(expand)) && expand > 0) boundary_expanded else boundary
+    clip_to <- if (expand > 0) boundary_expanded else boundary
     # Union the boundary first (as the Voronoi envelope above already does).
     # Intersecting against a multi-feature boundary splits every straddling
     # cell into one row per boundary feature and grafts the boundary's
