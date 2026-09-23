@@ -96,12 +96,15 @@ block-kriging estimate would have beaten the plain cell mean.
 
 ## Fold
 
-Spatial cross-validation folds, and how large the blocks should be.
+Spatial cross-validation folds, how large the blocks should be, and how
+far the held-out points ended up from the training data.
 
 - [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   : Create spatial cross-validation folds
 - [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
   : Map a cross-validation fold scheme
+- [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  : How far the held-out points actually sit from the training data
 - [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
   : Cross-validate at a ladder of block sizes
 - [`plot(`*`<block_size_sweep>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md)
