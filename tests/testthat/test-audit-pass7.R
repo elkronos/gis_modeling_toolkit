@@ -158,7 +158,13 @@ test_that("a fitted-value cache entry belongs to the engine that produced it", {
   # and the cache is shared by every copy of a fit.  `cp$engine <- <other>`
   # therefore used to read the first engine's fitted values back out.
   cp <- f1; cp$engine <- list(tag = "E2")
-  expect_error(fitted(cp), "posterior_epred")   # a miss: it recomputes
+  # A cache HIT returns the stored 10 silently, so any error here proves the
+  # miss.  The pattern matches the method's own message in BOTH environments:
+  # with brms installed it fails inside posterior_epred(), without it at the
+  # requireNamespace() guard.  Pinning the posterior_epred wording made this
+  # test pass only where brms happens to be installed, which is not the CI
+  # matrix.
+  expect_error(fitted(cp), "fitted\\.bayesian_fit\\(\\)")
   expect_equal(fitted(f1)[[1]], 10)             # and did not evict the valid entry
 
   # summary() used to hand out the live cache environment, so a summary was
