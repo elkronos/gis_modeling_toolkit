@@ -103,10 +103,13 @@ reference:
   - "[.spatialkit_rows"
 
 - title: Fold
-  desc: Spatial cross-validation folds, and how large the blocks should be.
+  desc: >
+    Spatial cross-validation folds, how large the blocks should be, and how
+    far the held-out points ended up from the training data.
   contents:
   - make_folds
   - plot_folds
+  - fold_separation
   - cv_block_size_sweep
   - plot.block_size_sweep
 

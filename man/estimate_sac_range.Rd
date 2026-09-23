@@ -342,6 +342,7 @@ Other cross-validation:
 \code{\link{cv_gwr}()},
 \code{\link{cv_rf}()},
 \code{\link{cv_spatial}()},
+\code{\link{fold_separation}()},
 \code{\link{gwr_model_selection}()},
 \code{\link{make_folds}()},
 \code{\link{sac_nugget}()},
