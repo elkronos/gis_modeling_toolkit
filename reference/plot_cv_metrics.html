@@ -148,6 +148,7 @@ counterpart (a bandwidth), in which case the caption says so.</p>
 <span class="r-in"><span>  <span class="fu">plot_cv_metrics</span><span class="op">(</span><span class="va">cv</span>, <span class="st">"RMSE"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=5).</span>
+<span class="r-wrn co"><span class="r-pr">#&gt;</span> <span class="warning">Warning: </span>make_folds(): block dimension (238.4) &lt; autocorrelation range (494.0). Spatial CV may leak correlated information across folds. Pass block_size = 494 or auto_range = TRUE.</span>
 <span class="r-plt img"><img src="plot_cv_metrics-1.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>
