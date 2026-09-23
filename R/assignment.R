@@ -1370,7 +1370,17 @@ summarize_by_cell <- function(assigned_points_sf,
     # Same rule as the closures: rbar over the primary column's observed rows.
     rb <- vapply(seq_len(nrow(out)), function(i) {
       cell <- out[[id_col]][i]
-      rows <- which(df[[id_col]] == cell & !is.na(df[[primary_col]]))
+      # `primary_col` is NULL when neither response_var nor predictor_vars was
+      # supplied (see its definition above), and df[[NULL]] aborts with
+      # "attempt to select less than one element in get1index" -- nowhere near
+      # the cause.  The variogram design effect is a function of the cell's
+      # COORDINATES and the fitted correlation, not of any column's values, so
+      # with no value column there is nothing to filter on and every point in
+      # the cell counts.
+      rows <- if (is.null(primary_col))
+        which(df[[id_col]] == cell)
+      else
+        which(df[[id_col]] == cell & !is.na(df[[primary_col]]))
       if (length(rows) == n_valid_primary[i] && length(rows) == sum(df[[id_col]] == cell, na.rm = TRUE)) {
         v <- vgm_rbar[as.character(cell)]
         if (is.finite(v)) unname(v) else 0

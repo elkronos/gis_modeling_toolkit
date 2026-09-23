@@ -1142,6 +1142,15 @@ print.resolution_summary <- function(x, ...) {
                         "result or a resolution_profile(); got an object of class %s."),
                  caller, arg, paste(class(x), collapse = "/")), call. = FALSE)
   }
+  # The integer ceiling matters as much as the floor: every consumer of this
+  # count reaches as.integer() eventually, which turns anything above
+  # .Machine$integer.max into NA and then aborts inside a clamp that names
+  # neither the argument nor the cause.
+  if (is.numeric(n) && length(n) == 1L && is.finite(n) && n > .Machine$integer.max)
+    stop(sprintf(paste0("%s(): `%s` must resolve to at most %s cells (R's ",
+                        "largest integer); got %s."),
+                 caller, arg, format(.Machine$integer.max), format(n)),
+         call. = FALSE)
   if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1)
     stop(sprintf("%s(): `%s` must resolve to a positive number of cells; got %s.",
                  caller, arg, paste(format(n), collapse = ", ")), call. = FALSE)

@@ -236,7 +236,8 @@ ensure_stable_poly_id <- function(polygons_sf,
 # identity, rather than as a binding inside the cache environment: a user
 # who hands over their own environment gets nothing written into it but the
 # grids.  A recycled address is harmless because the order is re-derived
-# from what is still bound before it is used.
+# from what is still bound before it is used, and .set_cache_order() registers
+# a finalizer so an entry does not outlive the environment it describes.
 .gmt_cache_meta <- new.env(parent = emptyenv())
 
 .cache_env_id <- function(cache_env) format(cache_env)
@@ -247,7 +248,21 @@ ensure_stable_poly_id <- function(polygons_sf,
 }
 
 .set_cache_order <- function(cache_env, order) {
-  assign(.cache_env_id(cache_env), order, envir = .gmt_cache_meta)
+  id <- .cache_env_id(cache_env)
+  # First time we record anything for this environment, arrange for its entry
+  # to die with it.  Without this the registry grew one permanent character
+  # vector per cache environment ever used -- the environments themselves are
+  # collected, so no caller could name them to clear them, and
+  # clear_grid_cache() only removes the entry for the environment it is
+  # handed.  The finalizer takes the environment as its ARGUMENT rather than
+  # closing over it, so registering it does not keep the environment alive.
+  if (!exists(id, envir = .gmt_cache_meta, inherits = FALSE))
+    reg.finalizer(cache_env, function(e) {
+      eid <- format(e)
+      if (exists(eid, envir = .gmt_cache_meta, inherits = FALSE))
+        rm(list = eid, envir = .gmt_cache_meta)
+    }, onexit = FALSE)
+  assign(id, order, envir = .gmt_cache_meta)
   invisible(order)
 }
 

@@ -684,6 +684,15 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 
   # Clamp bandwidth to safe range
   if (adaptive) {
+    # The up-front check admits any positive finite number, which is right for
+    # a fixed-distance bandwidth but not for an adaptive one: a distance in
+    # metres passed while forgetting adaptive = FALSE can exceed
+    # .Machine$integer.max, as.integer() makes it NA, and the clamp below --
+    # which exists precisely to cap an over-large adaptive bandwidth at n_obs
+    # -- aborts on "missing value where TRUE/FALSE needed" instead.
+    .check_scalar(bw, "bandwidth", "fit_gwr_model", min = 1,
+                  max = .Machine$integer.max,
+                  what = "a single number of nearest neighbours when adaptive = TRUE")
     bw <- as.integer(round(bw))
     min_bw <- n_params + 1L
     max_bw <- n_obs
