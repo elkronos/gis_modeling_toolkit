@@ -181,6 +181,7 @@ Other cross-validation:
 \code{\link{cv_rf}()},
 \code{\link{cv_spatial}()},
 \code{\link{estimate_sac_range}()},
+\code{\link{fold_separation}()},
 \code{\link{make_folds}()},
 \code{\link{sac_nugget}()},
 \code{\link{select_features_forward}()}

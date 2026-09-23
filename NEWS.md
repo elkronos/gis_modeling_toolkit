@@ -2,6 +2,25 @@
 
 ## New features
 
+* `fold_separation()` measures what blocked cross-validation is for: the
+  distance from every held-out point to its nearest training point,
+  summarised per fold.  Until now the only evidence a fold scheme worked was
+  a proxy --- the block size compared against the estimated autocorrelation
+  range, which `make_folds()` warns about.  That is a statement about the
+  design; this is the result, and the two can disagree in the direction that
+  matters.  Measured on 300 points over a 1000-unit square with a fitted
+  range of 292: blocks of 343 units are wider than the range, so
+  `make_folds()` raises no warning at all, and yet 76 percent of the
+  held-out points still sit closer to a training point than the range, the
+  nearest of them 23 units away.  Blocks wider than the range leak wherever
+  a test point sits near a block edge with training data just across it,
+  which in a fine grid is most of them.  The returned table carries
+  `n_train`, `n_test`, `n_blocks`, `min_dist`, `median_dist` and
+  `within_range` (the share inside the range), and its `print()` method
+  closes with what that share means for the score.  Nothing is estimated:
+  the distances come from the geometry and the range is the one the folds
+  already carry or the one you pass.
+
 * `summary()` on a `resolution_profile()` puts every criterion's pick in one
   table: the level each prefers, the flat region around it, whether a ladder
   bound is doing the choosing, and the levels that lie in every band.  Reading
