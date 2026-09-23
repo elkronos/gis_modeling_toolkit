@@ -9,10 +9,10 @@
   range, which `make_folds()` warns about.  That is a statement about the
   design; this is the result, and the two can disagree in the direction that
   matters.  Measured on 300 points over a 1000-unit square with a fitted
-  range of 292: blocks of 343 units are wider than the range, so
+  range of 292.5: blocks of 343 units are wider than the range, so
   `make_folds()` raises no warning at all, and yet 76 percent of the
   held-out points still sit closer to a training point than the range, the
-  nearest of them 23 units away.  Blocks wider than the range leak wherever
+  nearest of them 23.3 units away.  Blocks wider than the range leak wherever
   a test point sits near a block edge with training data just across it,
   which in a fine grid is most of them.  The returned table carries
   `n_train`, `n_test`, `n_blocks`, `min_dist`, `median_dist` and

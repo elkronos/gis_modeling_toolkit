@@ -138,12 +138,26 @@ print.fold_separation <- function(x, ...) {
   df$min_dist    <- signif(df$min_dist, 4)
   df$median_dist <- signif(df$median_dist, 4)
   if (all(is.na(df$within_range))) df$within_range <- NULL
-  else df$within_range <- sprintf("%.0f%%", 100 * df$within_range)
+  else df$within_range <- ifelse(is.na(df$within_range), "NA",
+                                 sprintf("%.0f%%", 100 * df$within_range))
   if (all(is.na(df$n_blocks))) df$n_blocks <- NULL
   cat("\n"); print(df, row.names = FALSE); cat("\n")
   if (is.finite(sac)) {
     share <- stats::weighted.mean(x$within_range, x$n_test, na.rm = TRUE)
     closest <- suppressWarnings(min(x$min_dist, na.rm = TRUE))
+    # Every fold can be unmeasurable at once -- no test rows anywhere, or none
+    # with a usable coordinate -- and then weighted.mean() over an all-NA
+    # vector is NaN and min() is Inf, so the `share > 0.5` test below aborted
+    # on "missing value where TRUE/FALSE needed".  Say there is nothing to
+    # report instead of failing to say it.
+    if (!is.finite(share) || !is.finite(closest)) {
+      cat(strwrap(paste("No held-out point could be measured against the",
+                        "range, so there is no separation to report. Check",
+                        "n_test above: a fold with no scorable rows is a",
+                        "finding about the fold scheme, not about the model."),
+                  width = 74, prefix = "  "), sep = "\n")
+      return(invisible(x))
+    }
     # The verdict is about leakage, so it is stated in terms of what leaks:
     # a held-out point closer to training data than the range is one whose
     # value the training set partly carries.

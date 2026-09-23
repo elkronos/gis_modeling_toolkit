@@ -96,3 +96,57 @@ test_that("fold entries naming rows the layer does not have are skipped", {
   expect_gt(attr(s, "n_unknown_ids"), 0L)
   expect_true(all(is.finite(s$n_test)))
 })
+
+test_that("print() survives folds with nothing measurable in them", {
+  pts <- make_pts(n = 30, seed = 8)
+  f <- make_folds(pts, k = 3, method = "random_kfold", seed = 1)
+
+  # One fold with no test rows: the table keeps it, the verdict ignores it.
+  f1 <- f; f1$folds[[1]]$test <- integer(0)
+  out1 <- utils::capture.output(print(fold_separation(f1, pts, sac = 50)))
+  # strwrap() breaks the verdict across lines AND indents each one, so the
+  # collapsed text carries runs of spaces at every wrap point: normalise them
+  # before matching or the pattern depends on where the line happened to break.
+  flatten <- function(x) gsub("\\s+", " ", paste(x, collapse = " "))
+  flat1 <- flatten(out1)
+  expect_match(flat1, "closer to a training point")
+  expect_true(any(grepl("\\bNA\\b", out1)))          # rendered NA, not "NA%"
+  expect_false(any(grepl("NA%", out1, fixed = TRUE)))
+
+  # Every fold unmeasurable: weighted.mean() over an all-NA vector is NaN and
+  # min() is Inf, and the verdict's `share > 0.5` test aborted on "missing
+  # value where TRUE/FALSE needed" rather than saying there was nothing to
+  # measure.
+  fa <- f
+  for (j in seq_along(fa$folds)) fa$folds[[j]]$test <- integer(0)
+  flat2 <- flatten(utils::capture.output(print(fold_separation(fa, pts, sac = 50))))
+  expect_match(flat2, "no separation to report")
+  expect_no_match(flat2, "closer to a training point")
+})
+
+test_that("a lon/lat layer is measured in projected units, not degrees", {
+  set.seed(2); m <- 60
+  ll <- sf::st_as_sf(
+    data.frame(lon = runif(m, -79.5, -78.5), lat = runif(m, 35.4, 36.2)),
+    coords = c("lon", "lat"), crs = 4326)
+  f <- make_folds(ll, k = 3, method = "random_kfold", seed = 1)
+  s <- fold_separation(f, ll)
+  # A degree-space distance here would be under 2; metres are thousands.
+  expect_gt(stats::median(s$median_dist), 1000)
+  expect_false(grepl("4326", attr(s, "crs")))
+})
+
+test_that("a layer whose geometry must be coerced keeps its row identity", {
+  # coerce_to_points() runs AFTER the row ids are read, so if it reordered or
+  # dropped rows every distance would pair the wrong points.
+  poly <- sf::st_as_sf(sf::st_make_grid(
+    sf::st_as_sfc(sf::st_bbox(c(xmin = 0, ymin = 0, xmax = 100, ymax = 100),
+                              crs = 32632)), n = c(5, 8)))
+  f <- make_folds(poly, k = 4, method = "random_kfold", seed = 3)
+  s <- fold_separation(f, poly)
+  xy <- sf::st_coordinates(coerce_to_points(poly, "auto"))
+  te <- f$folds[[1]]$test; tr <- f$folds[[1]]$train
+  d <- apply(xy[te, , drop = FALSE], 1L, function(p)
+    min(sqrt((xy[tr, 1] - p[1])^2 + (xy[tr, 2] - p[2])^2)))
+  expect_equal(s$min_dist[1], min(d))
+})
