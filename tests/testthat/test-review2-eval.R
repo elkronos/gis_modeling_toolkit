@@ -230,3 +230,24 @@ test_that("compare_models_cv() assigns polygon rows to blocks by `pointize`", {
     expect_equal(res$rf_cv$n_folds_succeeded, 3L, info = pz)
   }
 })
+
+
+# ---------------------------------------------------------------------------
+# gaps G4.6: select_features_forward()'s split indexes the layer as passed
+# ---------------------------------------------------------------------------
+
+test_that("select_features_forward()'s split positions index the caller's layer", {
+  d <- .r2e_pts(200, seed = 18)
+  d$a <- rnorm(200); d$b <- rnorm(200)
+  d$z <- 2 * d$a + rnorm(200, 0, 0.5)
+  d$b[c(3, 40, 77, 120, 150, 181, 199)] <- NA
+  fs <- suppressWarnings(select_features_forward(
+    d, "z", c("a", "b"), fit_fn = function(tr, v) lm_spatial_fit(tr, "z", v),
+    k = 3, quiet = TRUE, select_on = "split"))
+  both <- c(fs$split$selection, fs$split$estimation)
+  complete <- which(!is.na(d$b))
+  # Every complete row in exactly one half, and no dropped row in either.
+  expect_setequal(both, complete)
+  expect_false(anyDuplicated(both) > 0L)
+  expect_false(anyNA(d$b[fs$split$estimation]))
+})
