@@ -86,7 +86,10 @@ Default \code{FALSE}.}
 auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).}
+\code{FALSE} (sequential).  A learner that runs OpenMP code (GWmodel,
+or an xgboost built with GNU libgomp) can hang the forked workers once
+it has run in the session; keep such a \code{fit_fn} sequential, as
+\code{\link{cv_gwr}()} does.}
 
 \item{metrics}{Optional scoring function of your own; see \strong{Your
 own metrics} below.  Default \code{NULL}: the built-in metrics only.}
