@@ -25,17 +25,21 @@ input's numbers, not planar midpoints.  Set the CRS, or pass
 \code{tmp_project = FALSE}, for planar data.}
 }
 \value{
-An sf object with geometry coerced to POINTs.
+An sf object with geometry coerced to POINTs, row for row with
+\code{x}; an empty input geometry gives an empty POINT.
 }
 \description{
 Converts the geometry column of an sf object to POINTs using one of several
 strategies.
 }
 \details{
-LINESTRING midpoints are sampled with \code{\link[sf:st_line_sample]{sf::st_line_sample()}}, which yields
-no point for an EMPTY LINESTRING.  Rather than silently misaligning the
-result (or letting sf crash), such input raises an error; drop empty
-geometries first with \code{x <- x[!sf::st_is_empty(x), ]}.
+The result has one row per row of \code{x}, in the same order.  An EMPTY
+geometry of any type, lines included, becomes an EMPTY POINT in its own
+row; \code{\link[=prep_model_data]{prep_model_data()}} and \code{\link[=make_folds]{make_folds()}} then drop such rows, as they
+drop any other empty geometry.  Empty lines are never handed to
+\code{\link[sf:st_line_sample]{sf::st_line_sample()}}: it yields no midpoint for them, which would
+misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
+empty part of one) crashed the R session.
 }
 \examples{
 library(sf)

@@ -979,10 +979,13 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' Converts the geometry column of an sf object to POINTs using one of several
 #' strategies.
 #'
-#' LINESTRING midpoints are sampled with [sf::st_line_sample()], which yields
-#' no point for an EMPTY LINESTRING.  Rather than silently misaligning the
-#' result (or letting sf crash), such input raises an error; drop empty
-#' geometries first with `x <- x[!sf::st_is_empty(x), ]`.
+#' The result has one row per row of `x`, in the same order.  An EMPTY
+#' geometry of any type, lines included, becomes an EMPTY POINT in its own
+#' row; [prep_model_data()] and [make_folds()] then drop such rows, as they
+#' drop any other empty geometry.  Empty lines are never handed to
+#' [sf::st_line_sample()]: it yields no midpoint for them, which would
+#' misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
+#' empty part of one) crashed the R session.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
@@ -993,7 +996,8 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #'   warning) and the midpoints returned are geodesic ones brought back to the
 #'   input's numbers, not planar midpoints.  Set the CRS, or pass
 #'   \code{tmp_project = FALSE}, for planar data.
-#' @return An sf object with geometry coerced to POINTs.
+#' @return An sf object with geometry coerced to POINTs, row for row with
+#'   `x`; an empty input geometry gives an empty POINT.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -1034,25 +1038,6 @@ coerce_to_points <- function(
 
   is_ll <- .is_longlat(x)
 
-  # An EMPTY LINESTRING has no midpoint: st_line_sample() yields an empty
-  # MULTIPOINT that st_cast(, "POINT") silently drops (and in sf 1.0.x the
-  # call segfaults outright), so the sampled midpoints would no longer align
-  # 1:1 with the rows they are scattered back into.  Reject before sampling.
-  .guard_empty_lines <- function(geom, idx_ls) {
-    empty <- which(sf::st_is_empty(geom))
-    if (!length(empty)) return(invisible(NULL))
-    shown <- idx_ls[empty][seq_len(min(5L, length(empty)))]
-    stop(sprintf(
-      paste0("coerce_to_points(): %d of %d LINESTRING feature(s) are EMPTY ",
-             "(row(s) %s%s); st_line_sample() yields no midpoint for them, ",
-             "which would misalign the result. Drop them first, e.g. ",
-             "x <- x[!sf::st_is_empty(x), ]."),
-      length(empty), length(idx_ls),
-      paste(shown, collapse = ", "),
-      if (length(empty) > 5L) ", ..." else ""
-    ), call. = FALSE)
-  }
-
   # Backstop for any other way the sampled count could diverge from the number
   # of LINESTRING rows being filled.
   .check_midpoint_alignment <- function(midps, idx_ls) {
@@ -1064,6 +1049,30 @@ coerce_to_points <- function(
     ), call. = FALSE)
   }
 
+  # Midpoints of the LINESTRING rows `idx_ls`, one per row, batched: project
+  # once, sample all, back-transform once.  An EMPTY line has no midpoint:
+  # st_line_sample() yields an empty MULTIPOINT that st_cast(, "POINT")
+  # silently drops (and in sf 1.0.x the call can segfault outright), so the
+  # samples would no longer align 1:1 with the rows they are scattered back
+  # into.  Empty rows never reach the sampler.  They get an EMPTY POINT, as an
+  # empty polygon, point or collection already does, so the rows stay aligned
+  # and prep_model_data() and make_folds() drop them like any empty geometry.
+  # This used to be an error, which made a line layer with one null geometry
+  # the only kind of layer those "drop empty rows" paths could not clean.
+  .line_midpoints <- function(idx_ls) {
+    res  <- rep(list(sf::st_point()), length(idx_ls))
+    full <- which(!sf::st_is_empty(g[idx_ls]))
+    if (!length(full)) return(res)
+    g_ls_sf   <- sf::st_sf(geometry = g[idx_ls[full]])
+    g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
+    midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
+    midps     <- sf::st_cast(midps, "POINT")
+    midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
+    .check_midpoint_alignment(midps, full)
+    res[full] <- as.list(midps)
+    res
+  }
+
   if (mode == "line_midpoint") {
     gtypes <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
     if (any(gtypes %in% c("MULTILINESTRING", "GEOMETRYCOLLECTION"))) {
@@ -1073,21 +1082,12 @@ coerce_to_points <- function(
     idx_other <- which(gtypes != "LINESTRING")
     out <- vector("list", length(g))
 
-    # Batch all LINESTRINGs: project once, sample all, back-transform once
     if (length(idx_ls)) {
       if (is_ll && !tmp_project) {
         ctr <- suppressWarnings(sf::st_centroid(g[idx_ls]))
         out[idx_ls] <- as.list(ctr)
       } else {
-        g_ls      <- g[idx_ls]
-        .guard_empty_lines(g_ls, idx_ls)
-        g_ls_sf   <- sf::st_sf(geometry = g_ls)
-        g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
-        midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-        midps     <- sf::st_cast(midps, "POINT")
-        midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
-        .check_midpoint_alignment(midps, idx_ls)
-        out[idx_ls] <- as.list(midps)
+        out[idx_ls] <- .line_midpoints(idx_ls)
       }
     }
     # Non-LINESTRING fallback to centroid
@@ -1130,15 +1130,7 @@ coerce_to_points <- function(
       ctr <- suppressWarnings(sf::st_centroid(g[idx_ls]))
       out[idx_ls] <- as.list(ctr)
     } else {
-      g_ls     <- g[idx_ls]
-      .guard_empty_lines(g_ls, idx_ls)
-      g_ls_sf  <- sf::st_sf(geometry = g_ls)
-      g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
-      midps    <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-      midps    <- sf::st_cast(midps, "POINT")
-      midps    <- .back_to_input_crs(midps, g_ls_proj, crs)
-      .check_midpoint_alignment(midps, idx_ls)
-      out[idx_ls] <- as.list(midps)
+      out[idx_ls] <- .line_midpoints(idx_ls)
     }
   }
 
@@ -1155,9 +1147,18 @@ coerce_to_points <- function(
       proj_geom  <- sf::st_geometry(g_mls_proj)
       proj_crs   <- sf::st_crs(g_mls_proj)
       for (j in seq_along(idx_mls)) {
+        # st_cast() turns an EMPTY MULTILINESTRING into ONE empty LINESTRING,
+        # not zero parts, and a MULTILINESTRING can also carry an empty part
+        # beside real ones.  Either reached st_line_sample() below, which
+        # segfaults on an empty line in sf 1.0.x and took the R session with
+        # it (the usual source: a null geometry in a line layer, which
+        # GeoPackage and st_read()'s promote_to_multi return as
+        # MULTILINESTRING EMPTY).  Sample only parts that have a midpoint; a
+        # feature with none gets an EMPTY POINT, as an empty LINESTRING does.
         parts <- suppressWarnings(sf::st_cast(proj_geom[j], "LINESTRING"))
+        parts <- parts[!sf::st_is_empty(parts)]
         if (length(parts) == 0L) {
-          out[[idx_mls[j]]] <- suppressWarnings(sf::st_centroid(g[idx_mls[j]]))[[1]]
+          out[[idx_mls[j]]] <- sf::st_point()
         } else {
           lens <- as.numeric(sf::st_length(parts))
           k    <- if (length(lens)) which.max(lens) else 1L
