@@ -512,8 +512,10 @@
   set of cells, computed beside the plain means and changing none of them.
   Per cell, from a fitted variogram (`estimate_sac_range()`'s, or estimated
   here): the block-kriging estimate and variance, that variance as a share
-  of the sill (`kr_ratio`, the coverage score --- near 1 the estimate is
-  the global mean), whether it exceeds the design-based `s^2/n` of the
+  of the variance the cell's mean would have with no data at all
+  (`kr_ratio`, the coverage score --- near 1 the data tell the cell nothing;
+  a share of the point sill never came near 1 for cells larger than the
+  range), whether it exceeds the design-based `s^2/n` of the
   plain mean (`kr_exceeds_design`), and the kriged-minus-plain shift in
   standard errors (`kr_shift`); plus the variance of the standardised
   errors from blocked cross-validation (`attr(, "cv")$zscore_var`), which
@@ -525,9 +527,14 @@
   function exists for: under uniform sampling kriged and plain means
   differed by more than one standard error in 11--24 percent of cells; under
   clustered sampling in 34--63 percent, with 3--27 of 16--64 cells empty
-  and kriged anyway.  This is the first kriging path in the package
-  (`gstat::krige()` and `gstat::krige.cv()`); its model families are the
-  ones the package interprets elsewhere, and any other is refused by name.
+  and kriged anyway.  Repeat visits to one location are kriged from their
+  mean, with the part of the nugget that varies between visits divided by
+  their count; kriging them as separate rows made every kriging system
+  singular and returned `NA` everywhere.  Any cell or held-out location
+  gstat still cannot solve is counted in a warning.  This is the first
+  kriging path in the package (`gstat::krige()`); its model families are
+  the ones the package interprets elsewhere, and any other is refused by
+  name.
 
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
   metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
@@ -546,6 +553,137 @@
   needs the two names added.
 
 ## Bug fixes
+
+* **`coerce_to_points()` crashed R on an empty line feature.**  sf's
+  `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
+  zero parts, and `st_line_sample()` on it segfaulted and took the session
+  with it.  A null geometry in a line layer loads exactly like this from a
+  GeoPackage or a shapefile, and `prep_model_data()`, every `cv_*()` function
+  and `fold_separation()` go through this path.  GEOS's
+  `st_point_on_surface()` crashed the same way on a line feature holding an
+  empty part beside real ones, which `ensure_projected()` reached on ordinary
+  lon/lat input.  Empty parts are now removed before either call, and an
+  empty feature becomes an empty POINT in its own row, which
+  `prep_model_data()` and `make_folds()` drop like any empty geometry.  An
+  empty LINESTRING used to raise an error; it now gives an empty POINT like
+  every other geometry type.
+
+* **`cv_gwr(parallel = n)` hung forever once a GWR had been fitted in the
+  session.**  GWmodel is built with OpenMP, and GNU libgomp is not fork-safe:
+  after `fit_gwr_model()`, a sequential `cv_gwr()` or a bare
+  `GWmodel::bw.gwr()`, the forked `mclapply()` workers blocked on a futex and
+  never returned, with no timeout.  That is the ordinary fit-then-validate
+  order on Linux.  `cv_gwr()` now runs its folds one after another whenever
+  `parallel` would fork, and says so in a warning.  This gives up the
+  speed-up parallel folds had in a fresh session; the other `cv_*()`
+  functions still fork, since ranger does not use libgomp.  A `cv_spatial()`
+  `fit_fn` that calls GWmodel can still hang with `parallel`, which its help
+  page now says.
+
+* **When some folds failed, `overall` quietly left them out.**  A partial
+  failure was only logged, so `overall` pooled the surviving folds with no R
+  condition, and the folds that fail are usually the hardest to predict (a
+  region or a factor level no training fold covers).  `cv_gwr()`,
+  `cv_bayes()`, `cv_spatial()` and `cv_rf()` now warn, naming each failed
+  fold and how many rows `overall` covers.  Folds dropped before fitting are
+  already warned about and are not counted twice.
+
+* **`select_features_forward()` could pick a variable for making folds
+  fail.**  Each candidate was scored on whatever rows its CV run predicted,
+  so a set whose fit failed on a fold (a factor level found in one block, an
+  ordinary case under block folds) was scored on fewer, easier rows.  A
+  pure-noise factor beat the true driver: RMSE 2.35 on 192 rows against 2.63
+  on 250, although the driver scored 1.73 on those same 192 rows.  Every
+  candidate is now scored on one fixed row set (the rows the null model
+  predicts, or, with no null model, the rows the step-1 sets predict), a set
+  that leaves any of them unpredicted scores `NA` with a warning, and
+  `history` gains `n_pred`.
+
+* **`compare_models_cv()` ranked models scored on different rows.**  Shared
+  folds guarantee the same splits, not the same scored rows: when one
+  backend lost a fold or returned `NA` predictions its `overall` row pooled a
+  subset, and the help page called the columns comparable.  A fixed-bandwidth
+  GWR scored on 158 of 200 rows ranked above a random forest scored on all
+  200, although the forest was 45 percent better on the 158 rows both
+  predicted.  When the predicted row sets differ, every model is now rescored
+  on the rows all of them predicted, with a warning, `overall` carries
+  `n_pred`, and the all-rows numbers stay in `attr(overall, "all_rows")`.
+  The per-fold table and the Bayesian coverage columns are not rescored.
+
+* **One invalid polygon changed the assignment rule for the whole layer.**
+  `assign_features_to_polygons()` wrapped `st_join(largest = TRUE)` in a
+  retry without `largest` on any error.  The comment blamed a predicate that
+  cannot take `largest`, but sf never calls the predicate on that path; the
+  retry fired when GEOS threw on an invalid ring, and every straddling
+  feature was then assigned by `tie_break` instead: 95 of 200 buffered
+  parcels changed cell, and a polygon 91 percent inside one cell went to its
+  neighbour, with no warning.  Invalid features and cells are now repaired
+  with `sf::st_make_valid()` for the join only, with a warning counting them,
+  and a join that still fails stops and names `largest = FALSE`.
+
+* **Lon/lat polygons were assigned to projected cells on bent cell edges.**
+  `assign_features_to_polygons()` moved the cells into the features' CRS, so
+  lon/lat features pulled the package's own projected cells into lon/lat,
+  and with s2 the largest-overlap join failed and fell into the silent
+  retry above: 55 of North Carolina's 100 counties went to a cell other than
+  their largest overlap on a 36-cell grid.  The join now runs in the cells'
+  CRS whenever it is projected, and the features come back with the
+  geometry they arrived with.  Lon/lat points near a cell edge can change
+  cell as a result; they now agree with a join done in the projected CRS.
+
+* **`build_tessellation(method = "triangles")` dropped most points at UTM
+  coordinates.**  qhull lifts each point onto x^2 + y^2, and at projected
+  magnitudes (a northing near 5e6) the lift had no precision left to
+  separate points a few metres apart, so they never became vertices: 200
+  points over 100 m gave 26 triangles instead of 386, and the help page's own
+  example lost 8 of its 20 points.  The points are now centred before
+  triangulation.  Triangles that were already right are the same triangles,
+  but qhull returns them in a different order, so triangle `cell_id` values
+  change.
+
+* **Data around a pole were projected to Web Mercator.**  A layer spanning
+  more than 180 degrees of longitude with no gap was treated as global
+  coverage.  Antarctic stations came out with worst-case distance errors near
+  20,000 percent (the South Pole at y = -2.4e8 m), and Voronoi cells put 9.5
+  percent of Arctic locations in a station's cell that was not their
+  nearest.  A layer that lies wholly on one side of the equator now gets a
+  Lambert azimuthal equal-area projection centred on its pole whenever that
+  measures a smaller distance error than the global fallback: about 2
+  percent on the same stations.
+
+* **GWR mixed elevation into its distances.**  `prep_model_data()` kept the
+  Z (and M) coordinate of POINT Z input, which GPS layers and
+  `st_as_sf(coords = c("x", "y", "z"))` produce.  `predict.gwr_fit()` then
+  handed GWmodel three coordinate columns, which it reshaped into two,
+  scrambling the prediction locations with no warning;
+  `gwr_model_selection()` ranked models on 3-D distances; and
+  `fit_gwr_model()` and `cv_gwr()` failed.  Z and M are now dropped in
+  `prep_model_data()` and again where the data are handed to GWmodel.
+
+* **`predict.gwr_fit()` lost every prediction to one bad location.**  It
+  went through `GWmodel::gwr.predict()`, which returns nothing for any row if
+  one location's window is empty or singular, so fixed-bandwidth block CV
+  failed every fold.  It also never assigns its distance matrix once
+  training and new rows together exceed 10,000 (a 100 by 100 prediction grid
+  came back all `NA`), and it built the full training hat matrix for a
+  variance it then discarded, which is cubic in the training size.
+  Predictions now come from `gwr.basic(regression.points = )` in chunks, a
+  failing chunk is redone location by location, and only a truly singular
+  location is `NA`, with a warning counting them.  Where the old path
+  worked, the values are identical.
+
+* **On brms 2.17 to 2.22, one far-off row moved every Bayesian prediction in
+  the call.**  brms rebuilt the Hilbert-space GP's boundary from the rows
+  being predicted, and the package's padding rows could only widen it, so a
+  single row outside the training envelope changed the basis for every row,
+  interior ones included: a 40 by 40 grid padded 15 percent moved the
+  in-bbox cells by a mean of 22 percent of the surface's standard deviation,
+  and `predict_surface()` depended on `chunk_size`.  On those versions the
+  GP term's boundary factor is now rescaled per call so the boundary stays
+  at its fitted value, and a row beyond the boundary, where the basis means
+  nothing, is `NA` with a warning.  brms 2.23 stores the boundary itself;
+  there only the `NA` rule applies.  The help page no longer says the
+  boundary "has to grow".
 
 * **A `bayesian_fit`'s cached fitted values could come from another model.**
   The cache lives in an environment, so it is shared by every copy of a fit,
