@@ -93,7 +93,11 @@ test_that("a successful bandwidth selection is not labelled a fallback", {
                     kernel = "bisquare", adaptive = TRUE)))
   expect_equal(auto$info$bandwidth, ref)
   expect_true(is.finite(auto$info$AICc))
-  small <- fit_gwr_model(dat, "y", "x1", bandwidth = 5, adaptive = TRUE)
+  # Four-point windows: the local collinearity survey (which covers a single
+  # predictor, since the intercept is in every design) flags a couple of them.
+  small <- suppressWarnings(
+    fit_gwr_model(dat, "y", "x1", bandwidth = 5, adaptive = TRUE))
+  expect_true(is.finite(small$info$AICc))
   expect_lt(auto$info$AICc, small$info$AICc)
 })
 
