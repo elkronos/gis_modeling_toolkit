@@ -68,7 +68,8 @@ ensure_stable_poly_id <- function(polygons_sf,
   # Normalize to sf
   if (inherits(polygons_sf, "sfc")) polygons_sf <- sf::st_as_sf(polygons_sf)
   if (!inherits(polygons_sf, "sf"))
-    stop("ensure_stable_poly_id(): `polygons_sf` must be an sf/sfc object.")
+    stop(paste0("ensure_stable_poly_id(): `polygons_sf` must be an sf/sfc object",
+                .tess_hint(polygons_sf, "$cells"), "."))
 
   # Keep only polygon rows
   gtypes <- as.character(sf::st_geometry_type(polygons_sf, by_geometry = TRUE))
@@ -356,7 +357,8 @@ create_grid_polygons_cached <- function(boundary,
 
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
-    stop("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON.")
+    stop(paste0("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON",
+                .tess_hint(bnd, "$boundary"), "."))
   # The same projection create_grid_polygons() makes, so a cached grid is laid
   # in the CRS an uncached one would be (see .project_for_grid()).
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
