@@ -219,6 +219,11 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @keywords internal
 #' @noRd
 .robust_st_sample <- function(geom, n) {
+  # st_sample() sizes its draw from st_area(), which on lon/lat input needs
+  # lwgeom (not a dependency) when sf_use_s2() is FALSE: random and k-means
+  # seeding on a lon/lat boundary failed with "package lwgeom required".
+  if (.is_longlat(geom) && !isTRUE(sf::sf_use_s2()))
+    return(.with_s2(.robust_st_sample(geom, n)))
   pts <- try(sf::st_sample(geom, size = n, type = "random", exact = TRUE),
              silent = TRUE)
   if (inherits(pts, "try-error")) {

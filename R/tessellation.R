@@ -1,4 +1,42 @@
 # -----------------------------------------------------------------------------
+# CRS handling shared by the tessellation builders
+# -----------------------------------------------------------------------------
+
+#' Project a lon/lat boundary for a grid of equal-area cells
+#'
+#' The CRS ensure_projected() picks for distances, unless that CRS distorts
+#' areas across the boundary by more than \code{.area_error_tol}, in which
+#' case the equal-area choice (\code{purpose = "area"}) is used.  A UTM zone
+#' on a local extent is within a quarter of a percent and is kept, so local
+#' grids are unchanged; Web Mercator over near-global extents (whole cells
+#' differing five-fold in area) and a zone stretched past its width are not.
+#' Projected input is returned as it is.  Used by create_grid_polygons() and
+#' create_grid_polygons_cached(), so the two lay a grid in the same CRS.
+#'
+#' @param boundary sf polygon layer.
+#' @param caller Function name for the log line.
+#' @keywords internal
+#' @noRd
+.project_for_grid <- function(boundary, caller = "create_grid_polygons") {
+  crs0 <- sf::st_crs(boundary)
+  proj <- ensure_projected(boundary)
+  lonlat <- .is_longlat(boundary) ||
+    (is.na(crs0) && identical(attr(proj, "crs_assumed"), "EPSG:4326"))
+  if (!lonlat) return(proj)
+  err <- .crs_area_error(proj, grid = TRUE)
+  if (!is.finite(err) || err <= .area_error_tol) return(proj)
+  src <- if (is.na(crs0)) sf::st_set_crs(boundary, 4326) else boundary
+  eq  <- ensure_projected(src, purpose = "area")
+  .log_warn(paste0("%s(): %s distorts areas across this boundary by up to %.1f%%, ",
+                   "so its cells would not be equal-area; laying the grid in %s ",
+                   "(ensure_projected(purpose = \"area\")) instead. Pass `crs` ",
+                   "to choose the CRS yourself."),
+            caller, .fold_crs_label(proj), 100 * err, .fold_crs_label(eq))
+  if (is.na(crs0)) attr(eq, "crs_assumed") <- "EPSG:4326"
+  eq
+}
+
+# -----------------------------------------------------------------------------
 # Clip Target
 # -----------------------------------------------------------------------------
 
@@ -385,9 +423,14 @@ create_voronoi_polygons <- function(
 #'   truncate the grid to `n[1]` x `n[2]` cells anchored at the bounding-box
 #'   corner, covering only part of the boundary.
 #' @param clip Logical; clip grid to boundary.
-#' @param crs Optional target CRS. When `NULL` (default) the boundary is
+#' @param crs Optional target CRS. When `NULL` (default) a lon/lat boundary is
 #'   projected with [ensure_projected()], which changes the CRS of the returned
-#'   grid; a message reports this unless `quiet = TRUE`.
+#'   grid; a message reports this unless `quiet = TRUE`. When that CRS would
+#'   distort cell areas across the boundary by more than 1 percent (Web
+#'   Mercator over a near-global extent, a UTM zone stretched well past its
+#'   width), `ensure_projected(purpose = "area")` is used instead, with a
+#'   logged warning, so the cells stay equal-area; a local extent keeps its
+#'   UTM zone.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -435,7 +478,7 @@ create_grid_polygons <- function(
     boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
   } else {
     crs_before <- sf::st_crs(boundary)
-    boundary <- ensure_projected(boundary)
+    boundary <- .project_for_grid(boundary)
     if (!identical(crs_before, sf::st_crs(boundary)))
       .msg("create_grid_polygons(): projecting `boundary` to a local projected ",
            "CRS; the returned grid uses that CRS. Pass `crs` to control it.")

@@ -70,7 +70,9 @@ extent of the data. It is \strong{not} always UTM:
 \item{Local extents}{The UTM zone containing the data's centre
 (EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
 are close to true over a few degrees of longitude, which is the case
-this package is usually in.}
+this package is usually in. The centre is the centroid on the sphere,
+computed with s2 whatever \code{\link[sf:s2]{sf::sf_use_s2()}} is set to, so data near a
+zone edge get the same zone in every session.}
 \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 a UTM zone is designed for, a single zone can distort distances by
 several percent, and that error propagates straight into variogram
@@ -79,8 +81,10 @@ projection is actually best is then \strong{measured, not assumed}: the zone,
 a Lambert azimuthal equal-area centred on the data and (where its
 standard parallels do not degenerate) an Albers conic are each scored by
 projecting representative points of the data (a non-POINT layer is
-reduced to points first) and comparing planar with geodesic pairwise
-distances, and the one that distorts least is used.
+reduced to one point per feature, plus the vertices of its outline when
+it has fewer than 40 features, so a single study-area polygon is scored
+too) and comparing planar with geodesic pairwise distances, and the one
+that distorts least is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
 \code{tryCatch(warning = )} does not see them.}

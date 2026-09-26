@@ -2,6 +2,77 @@
 # CRS Selection
 # -----------------------------------------------------------------------------
 
+#' Evaluate an expression with sf's spherical engine (s2) switched on
+#'
+#' On lon/lat data sf hands st_area(), st_centroid(), st_union() and
+#' st_sample() to s2 when \code{sf::sf_use_s2()} is TRUE.  With it FALSE,
+#' areas and sampling need lwgeom, which this package does not depend on
+#' ("package lwgeom required" from every Voronoi tessellation, even a
+#' projected one, because the stable-ID sort key is measured in lon/lat), and
+#' centroids and unions become planar arithmetic on degrees, which moves the
+#' centre that picks a UTM zone and prints sf's warnings past \code{quiet}.
+#' The package's own measurements on the sphere therefore run with s2 on
+#' whatever the session says, and the session's setting is restored on the
+#' way out, error or not.  Nothing is toggled when s2 is already on.
+#'
+#' @param expr Expression to evaluate.
+#' @return The value of \code{expr}.
+#' @keywords internal
+#' @noRd
+.with_s2 <- function(expr) {
+  if (isTRUE(sf::sf_use_s2())) return(expr)
+  suppressMessages(sf::sf_use_s2(TRUE))
+  on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
+  expr
+}
+
+
+#' Centre of a lon/lat layer on the sphere
+#'
+#' The centroid s2 gives for the union of the layer, which is what
+#' \code{.pick_local_projected_crs()} has always used with s2 on (the
+#' default).  Three things went wrong when it was taken with a bare
+#' \code{st_centroid(st_union())}: with \code{sf_use_s2(FALSE)} the centre
+#' was planar in degrees, so the UTM zone chosen for data near a zone edge
+#' depended on a session option; sf's warning and message about that got past
+#' \code{quiet}; and with s2 on, a polygon GEOS accepts but s2 rejects (a
+#' repeated vertex, common in real shapefiles) stopped
+#' \code{ensure_projected()} with "Edge 1 is degenerate" although a plain
+#' \code{st_transform()} of it works.  Now s2 is always used; a geometry it
+#' rejects is repaired and tried again; and if that fails too, the centre is
+#' the normalised mean of the vertices' unit vectors (for a point layer
+#' exactly what s2 returns), which needs no valid geometry at all.
+#'
+#' @param x_ll An sf/sfc object in a geographic CRS.
+#' @return A 1 x 2 matrix (\code{X}, \code{Y}) in degrees, possibly
+#'   non-finite when no centre exists (the caller falls back then).
+#' @keywords internal
+#' @noRd
+.lonlat_centre <- function(x_ll) {
+  g <- sf::st_geometry(x_ll)
+  centre_of <- function(geom) {
+    ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(geom)))
+    if (!is.numeric(ctr) || length(ctr) < 2L) stop("no centroid")
+    ctr[1L, 1:2, drop = FALSE]
+  }
+  ctr <- tryCatch(.with_s2(centre_of(g)), error = function(e) NULL)
+  if (is.null(ctr))
+    ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
+  if (is.null(ctr)) {
+    xy <- tryCatch(sf::st_coordinates(g)[, 1:2, drop = FALSE],
+                   error = function(e) matrix(numeric(0), 0L, 2L))
+    xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
+    lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
+    v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
+    ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
+                    c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
+                  else c(NA_real_, NA_real_),
+                  1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  }
+  ctr
+}
+
+
 #' Pick a sensible local projected CRS for an sf/sfc object
 #'
 #' Chooses an appropriate projected coordinate reference system for spatial
@@ -89,7 +160,9 @@
   if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
     return(list(crs = global_crs(), candidates = NULL))
 
-  ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(sf::st_geometry(x_ll))))
+  # On the sphere whatever sf_use_s2() says, and without failing on a polygon
+  # s2 rejects: see .lonlat_centre().
+  ctr <- .lonlat_centre(x_ll)
   if (!is.numeric(ctr) || length(ctr) < 2) return(list(crs = global_crs(), candidates = NULL))
   lon <- ctr[1]; lat <- ctr[2]
 
@@ -395,6 +468,9 @@
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
 #'   reduced to representative points first, so the two distance vectors are
 #'   the same length (\code{st_coordinates()} yields one row per vertex).
+#'   With fewer than \code{max_n} features the outline's vertices, densified
+#'   along its edges, are added to those points, so that a single study-area
+#'   polygon is measured across its extent rather than not at all.
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
 #' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|}, or \code{NA}
@@ -415,8 +491,46 @@
     # parts go first: one inside a line feature segfaults GEOS here (see
     # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
     # lon/lat line layer with a null part took ensure_projected() down.
-    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-      g <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(g)))
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
+      g_full <- .drop_empty_parts(g)
+      g <- suppressWarnings(sf::st_point_on_surface(g_full))
+      # One point per feature is nothing to measure on a study-area outline:
+      # a single polygon gave one point, every candidate scored NA, and the
+      # selector kept the UTM zone at any extent -- a CONUS outline got zone
+      # 15 (13.7% worst-case error) where its vertices score Albers at 2.4%,
+      # and prep_model_data(boundary =) moved a whole analysis into it.  A
+      # handful of features gives a handful of pairs, none near the edges
+      # where a zone distorts most.  So below `max_n` points, add the
+      # outline's own vertices, densified along each edge until there are
+      # about `max_n` of them (a box has only its four corners).  Layers with
+      # `max_n` features or more are measured as before, and so is a
+      # GEOMETRYCOLLECTION layer, whose vertices st_coordinates() refuses.
+      xy <- if (length(g) < max_n)
+        tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
+      if (!is.null(xy)) {
+        ring <- if (ncol(xy) > 2L)
+          do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
+        xy <- xy[, 1:2, drop = FALSE]
+        ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+        xy <- xy[ok, , drop = FALSE]; ring <- ring[ok]
+        if (nrow(xy) > 0L) {
+          per_edge <- max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
+          if (per_edge > 0L && nrow(xy) > 1L) {
+            same <- ring[-1L] == ring[-length(ring)]
+            a <- xy[-nrow(xy), , drop = FALSE][same, , drop = FALSE]
+            b <- xy[-1L, , drop = FALSE][same, , drop = FALSE]
+            f <- rep(seq_len(per_edge) / (per_edge + 1), each = nrow(a))
+            a <- a[rep(seq_len(nrow(a)), per_edge), , drop = FALSE]
+            b <- b[rep(seq_len(nrow(b)), per_edge), , drop = FALSE]
+            xy <- rbind(xy, a + f * (b - a))
+          }
+          xy <- unique(xy)
+          g <- c(sf::st_geometry(g), sf::st_geometry(sf::st_as_sf(
+            data.frame(x = xy[, 1L], y = xy[, 2L]), coords = c("x", "y"),
+            crs = sf::st_crs(g))))
+        }
+      }
+    }
     n <- length(g)
     if (n < 2L) return(NA_real_)
     if (n > max_n) g <- g[unique(round(seq(1, n, length.out = max_n)))]
@@ -454,12 +568,15 @@
 #' @param crs The projection to score; default the CRS of \code{x}.
 #' @param n Probe grid size when \code{x} has no polygons.
 #' @param max_n Largest number of the layer's own polygons to measure.
+#' @param grid Logical; probe with the \code{n x n} grid over the bounding box
+#'   even when \code{x} has polygons.  A single study-area polygon is one
+#'   probe, and one ratio has no spread to measure.
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
 #'   \code{NA} when it cannot be computed (no CRS, no area, geodesic areas
 #'   unavailable).
 #' @keywords internal
 #' @noRd
-.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L) {
+.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE) {
   tryCatch({
     if (is.null(crs)) crs <- sf::st_crs(x)
     if (is.na(crs) || is.na(sf::st_crs(x))) return(NA_real_)
@@ -467,15 +584,29 @@
     g <- g[!sf::st_is_empty(g)]
     if (!length(g)) return(NA_real_)
     types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
-    probe <- if (all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
+    probe <- if (!isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
       if (length(g) > max_n) g[unique(round(seq(1, length(g), length.out = max_n)))] else g
     } else {
       bb <- sf::st_bbox(sf::st_transform(g, crs))
       sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
     }
     probe  <- sf::st_transform(probe, crs)
+    # Densify before going to lon/lat: s2 reads each edge as a great circle,
+    # and over a continental probe that is not the straight edge the planar
+    # area was measured on -- an Equal Earth grid over a near-global extent
+    # measured 10% "distortion".  A projected CRS only; densifying lon/lat
+    # needs lwgeom.
+    if (!isTRUE(sf::st_is_longlat(crs))) {
+      pb  <- sf::st_bbox(probe)
+      ext <- max(as.numeric(pb["xmax"] - pb["xmin"]), as.numeric(pb["ymax"] - pb["ymin"]))
+      if (is.finite(ext) && ext > 0) probe <- sf::st_segmentize(probe, dfMaxLength = ext / 100)
+    }
     planar <- as.numeric(sf::st_area(probe))
-    geod   <- as.numeric(sf::st_area(sf::st_transform(probe, 4326)))
+    # Geodesic areas on the sphere whatever sf_use_s2() says: with it off, sf
+    # asks lwgeom for them, which is not a dependency, the error became NA
+    # here, and summarize_by_cell(area = TRUE) then refused every grid while
+    # ensure_projected(purpose = "area") skipped its distortion check.
+    geod   <- .with_s2(as.numeric(sf::st_area(sf::st_transform(probe, 4326))))
     ratio  <- planar / geod
     ok <- is.finite(ratio) & is.finite(geod) & geod > 0
     if (sum(ok) < 2L) return(NA_real_)
@@ -652,7 +783,9 @@
 #'   \item{Local extents}{The UTM zone containing the data's centre
 #'     (EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
 #'     are close to true over a few degrees of longitude, which is the case
-#'     this package is usually in.}
+#'     this package is usually in. The centre is the centroid on the sphere,
+#'     computed with s2 whatever [sf::sf_use_s2()] is set to, so data near a
+#'     zone edge get the same zone in every session.}
 #'   \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 #'     a UTM zone is designed for, a single zone can distort distances by
 #'     several percent, and that error propagates straight into variogram
@@ -661,8 +794,10 @@
 #'     a Lambert azimuthal equal-area centred on the data and (where its
 #'     standard parallels do not degenerate) an Albers conic are each scored by
 #'     projecting representative points of the data (a non-POINT layer is
-#'     reduced to points first) and comparing planar with geodesic pairwise
-#'     distances, and the one that distorts least is used.
+#'     reduced to one point per feature, plus the vertices of its outline when
+#'     it has fewer than 40 features, so a single study-area polygon is scored
+#'     too) and comparing planar with geodesic pairwise distances, and the one
+#'     that distorts least is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
@@ -1160,7 +1295,12 @@ coerce_to_points <- function(
     return(sf::st_set_geometry(x, .bbox_center_sfc(x)))
   }
 
-  # -- direct spherical-safe ops ---
+  # -- direct ops ---
+  # Not spherical-safe, whatever this heading used to say.  On lon/lat input
+  # st_centroid() is spherical only while sf_use_s2() is TRUE: with it FALSE
+  # it is planar in degrees (a box -120..-60 x 50..75 got a centre 155 km
+  # from the s2 one) and its warning is suppressed here.  st_point_on_surface()
+  # is GEOS, planar in degrees under either setting.
   if (mode == "centroid") {
     return(sf::st_set_geometry(x, suppressWarnings(sf::st_centroid(g))))
   }
