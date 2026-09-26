@@ -494,6 +494,22 @@
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
       g_full <- .drop_empty_parts(g)
       g <- suppressWarnings(sf::st_point_on_surface(g_full))
+      # GEOS reads a feature that crosses +-180 the long way round, so its
+      # interior point landed on the far side of the globe ((-0.5, -17) for a
+      # box around Fiji) and the error reported for a projection accurate to
+      # 0.02% on the box was 25%.  Such a feature spans more than 180 degrees
+      # of raw longitude; take its spherical centroid instead.
+      bb_all <- sf::st_bbox(g_full)
+      if (isTRUE(sf::st_is_longlat(g_full)) && all(is.finite(bb_all)) &&
+          bb_all[["xmax"]] - bb_all[["xmin"]] > 180) {
+        wide <- vapply(g_full, function(s) {
+          b <- sf::st_bbox(s)
+          isTRUE(b[["xmax"]] - b[["xmin"]] > 180)
+        }, logical(1))
+        ctr <- if (any(wide))
+          tryCatch(.with_s2(sf::st_centroid(g_full[wide])), error = function(e) NULL)
+        if (!is.null(ctr)) g[wide] <- ctr
+      }
       # One point per feature is nothing to measure on a study-area outline:
       # a single polygon gave one point, every candidate scored NA, and the
       # selector kept the UTM zone at any extent -- a CONUS outline got zone
@@ -507,6 +523,15 @@
       # GEOMETRYCOLLECTION layer, whose vertices st_coordinates() refuses.
       xy <- if (length(g) < max_n)
         tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
+      # Only about `max_n` of these points are measured (the evenly spaced
+      # subsample below), so thin a detailed outline to a few times that
+      # first, by evenly spaced index.  unique() on the whole vertex matrix,
+      # twice, and a ring key pasted for every vertex made the score cost
+      # 2.8 s per candidate on a 300,000-vertex outline (0.04 s before the
+      # outline was scored), and ensure_projected() 14 s.  Such an outline has
+      # far more than `max_n` vertices, so it is not densified either way.
+      if (!is.null(xy) && nrow(xy) > 4L * max_n)
+        xy <- xy[unique(round(seq(1, nrow(xy), length.out = 4L * max_n))), , drop = FALSE]
       if (!is.null(xy)) {
         ring <- if (ncol(xy) > 2L)
           do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
@@ -522,7 +547,16 @@
             f <- rep(seq_len(per_edge) / (per_edge + 1), each = nrow(a))
             a <- a[rep(seq_len(nrow(a)), per_edge), , drop = FALSE]
             b <- b[rep(seq_len(nrow(b)), per_edge), , drop = FALSE]
-            xy <- rbind(xy, a + f * (b - a))
+            # Along the edge as it runs on the globe, the short way round.
+            # Interpolated in raw degrees, the edge of an outline from 177 to
+            # -178 was filled with points near longitude 0, and a box around
+            # Fiji reported a 164% distance error for a projection accurate to
+            # 0.02% on it.
+            dl <- b[, 1L] - a[, 1L]
+            dl <- ((dl + 180) %% 360) - 180
+            lon <- ((a[, 1L] + f * dl + 180) %% 360) - 180
+            lat <- a[, 2L] + f * (b[, 2L] - a[, 2L])
+            xy <- rbind(xy, cbind(lon, lat))
           }
           xy <- unique(xy)
           g <- c(sf::st_geometry(g), sf::st_geometry(sf::st_as_sf(
@@ -1265,11 +1299,13 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
 #' @param tmp_project Logical; temporarily project for line-based midpoints.
-#'   When \code{x} has no CRS and its coordinates fall inside the lon/lat
-#'   envelope, that temporary projection interprets them as EPSG:4326 (with a
-#'   warning) and the midpoints returned are geodesic ones brought back to the
-#'   input's numbers, not planar midpoints.  Set the CRS, or pass
-#'   \code{tmp_project = FALSE}, for planar data.
+#'   When \code{x} has no CRS and the lon/lat heuristic of
+#'   \code{\link{ensure_projected}()} takes its coordinates for degrees
+#'   (inside the lon/lat envelope and more than one unit across, or with
+#'   decimal-degree precision), that temporary projection interprets them as
+#'   EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
+#'   brought back to the input's numbers, not planar midpoints.  Set the CRS,
+#'   or pass \code{tmp_project = FALSE}, for planar data.
 #' @return An sf object with geometry coerced to POINTs, row for row with
 #'   `x`; an empty input geometry gives an empty POINT.
 #' @family spatial data preparation

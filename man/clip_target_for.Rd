@@ -10,9 +10,12 @@ clip_target_for(points_sf, boundary = NULL, expand = 0, quiet = FALSE)
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometry.}
 
 \item{boundary}{Optional polygonal sf object. One with no CRS, given with
-points that have one, is interpreted in the points' CRS as
-\code{\link[=harmonize_crs]{harmonize_crs()}} does, with a warning: coordinates that look like
-lon/lat are taken as EPSG:4326 and reprojected, anything else is stamped.}
+points that have one, is interpreted in the points' own CRS, with a
+warning. With points in a projected CRS it is read as \code{\link[=harmonize_crs]{harmonize_crs()}}
+does: coordinates that look like lon/lat are taken as EPSG:4326 and
+reprojected, anything else is stamped with the points' CRS. With lon/lat
+points it is read as lon/lat when its coordinates fit the lon/lat
+envelope, and refused with an error otherwise.}
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
@@ -35,7 +38,9 @@ Resolves a single polygon to tessellate within. With a \code{boundary} it is
 that boundary (optionally buffered by \code{expand}); without one it is the
 axis-aligned bounding box of \code{points_sf} (the rectangle in the working
 CRS), again optionally buffered, or a small buffer around the points when
-they all share one x or one y. Reach for it to build the \code{boundary} that
+they all share one x or one y, or nearly so (the short side of their
+bounding box below a millionth of the long side). Reach for it to build the
+\code{boundary} that
 \code{method = "hex"} and \code{"square"} require, to check that a study-area
 polygon actually contains the observations before tessellating, or to
 pass the same envelope to \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} and
