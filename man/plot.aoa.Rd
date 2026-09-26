@@ -32,6 +32,11 @@ caption say which.  The training curve is the reference the threshold was
 derived from: the threshold is the largest training DI inside an outlier
 fence, so the curve reaches it exactly when no training value was fenced
 off and runs past it, by the tail the fence removed, when some were.
+A prediction location outside on a predictor dropped for having no
+training variance has \code{DI = Inf}: it counts in the prediction curve,
+which then tops out below 1, and the caption says how many are off the
+axis.  A location with a missing predictor (\code{DI = NA}) is neither
+inside nor outside; it is left out of the curve and the caption counts it.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {

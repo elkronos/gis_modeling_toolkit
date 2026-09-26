@@ -78,7 +78,8 @@ outline.}
 \code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
 the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
 output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
-labelled without naming one.}
+labelled without naming one.  A \code{units} or \code{difftime} column
+is drawn formatted, with its unit.}
 
 \item{label_size}{Label text size. Default 2.7.}
 

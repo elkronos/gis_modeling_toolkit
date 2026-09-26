@@ -40,7 +40,11 @@ refused with a message saying why rather than drawn as an empty panel:
 \code{overall} when it carries the metric, from
 \code{predictive_coverage} for \code{cv_bayes()}'s coverage and CRPS
 columns, and not at all for a per-fold extra that has no pooled
-counterpart (a bandwidth), in which case the caption says so.
+counterpart (a bandwidth) or for a count (\code{n_pred},
+\code{n_MAPE}, \code{n_SMAPE}), whose \code{overall} value is the
+total over the folds; the caption says which.  A model with no finite
+per-fold value gets no panel and no pooled line, and the caption
+names it.
 }
 \examples{
 if (requireNamespace("ranger", quietly = TRUE) &&
