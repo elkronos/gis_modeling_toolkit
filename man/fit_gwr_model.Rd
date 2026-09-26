@@ -37,7 +37,12 @@ If NULL (default), bandwidth is selected automatically via
 smaller than a ten-thousandth of the data's extent raises a warning naming
 the extent and the CRS the fit runs in: every local window is then likely
 to be empty, which used to produce a fit whose coefficients were all
-\code{NaN} with nothing raised anywhere.}
+\code{NaN} with nothing raised anywhere.  With \code{adaptive = TRUE}
+the count is rounded, and one too small for the model is raised, with a
+warning, to the smallest that gives every local regression more points
+of non-zero weight than parameters: the number of predictors plus 3 for
+the bisquare and tricube kernels (which give the farthest neighbour in a
+window weight 0), plus 2 for the others.}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
 "gaussian", "tricube", "boxcar", "exponential".}
@@ -53,7 +58,11 @@ A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 Model-specific metadata lives in \code{$info}: bandwidth, adaptive,
-kernel, AICc, \code{bandwidth_is_fallback} (\code{TRUE} when automatic
+kernel, AICc (\code{NA}, with a warning, where GWmodel's AICc is
+undefined: its effective number of parameters \eqn{tr(S)} is not below
+\eqn{n - 2}, the local regressions all but interpolate the data, and the
+large negative value GWmodel reports would rank the fit above any
+other), \code{bandwidth_is_fallback} (\code{TRUE} when automatic
 selection failed and the arbitrary fallback was used),
 \code{condition_index}, \code{local_collinearity},
 \code{n_local_collinear}, \code{n_local_singular},
