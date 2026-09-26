@@ -195,7 +195,11 @@ test_that("nndm excludes a held-out point's co-located duplicate", {
   grid <- sf::st_as_sf(data.frame(x = c(-500, 900), y = 0),
                        coords = c("x", "y"), crs = 3857)
 
-  f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
+  # Six points against targets 500 away: every fold reaches min_train while
+  # still closer than the target, which make_folds() now says.
+  expect_warning(
+    f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid)),
+    "stopped the distance matching")
   D <- as.matrix(sf::st_distance(pts)); units(D) <- NULL
 
   expect_false(2L %in% f$folds[[1]]$train)        # the twin is excluded
@@ -224,7 +228,11 @@ test_that("nndm honours min_train exactly when n * min_train is fractional", {
   grid <- sf::st_as_sf(data.frame(x = c(-8000, 9000), y = c(-8000, 9000)),
                        coords = c("x", "y"), crs = 3857)
 
-  f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
+  # Reaching the floor is the point of this layout, so the floor warning is
+  # expected.
+  expect_warning(
+    f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid)),
+    "stopped the distance matching")
   sizes <- vapply(f$folds, function(z) length(z$train), integer(1))
   # The rule is (n - 1 - removed) > n * min_train, so the smallest permitted
   # training set is 37 -- floor() left the matrix one column short and stopped

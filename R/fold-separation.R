@@ -27,16 +27,28 @@
 #'   position otherwise, which is what \code{make_folds()} and every
 #'   \code{cv_*()} do.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
-#'   single number, in the CRS units of \code{data_sf}.  Defaults to the range
-#'   the folds carry, if any.  Supplying one adds the \code{within_range}
-#'   column and the closing verdict.
+#'   single number.  Defaults to the range the folds carry, if any.  Supplying
+#'   one adds the \code{within_range} column and the closing verdict.  A
+#'   range that records its CRS (the folds' own, or an
+#'   \code{estimate_sac_range()} result) is compared with distances measured
+#'   in that CRS, whatever CRS \code{data_sf} is in.  A bare number is taken
+#'   to be in the units the distances are otherwise measured in: those of
+#'   \code{data_sf} if it is projected, and for geographic (lon/lat) input
+#'   metres, in the CRS \code{\link{ensure_projected}()} chooses (as for
+#'   \code{make_folds()}'s \code{block_size}), not degrees.  A \code{units}
+#'   object is refused.
 #' @return A data.frame of class \code{fold_separation}, one row per fold:
-#'   \code{fold}, \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
+#'   \code{fold} (the fold's number: for the \code{$folds} of a
+#'   \code{cv_*()} result, the \code{fold_id} its \code{fold_metrics} use,
+#'   which differs from the list position once a fold has been dropped),
+#'   \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
 #'   for a scheme with no blocks), \code{min_dist} and \code{median_dist}
-#'   (distance from a held-out point to its nearest training point, in CRS
-#'   units), and \code{within_range} (the share of held-out points closer to
+#'   (distance from a held-out point to its nearest training point, in the
+#'   units of the CRS the \code{crs} attribute names), and
+#'   \code{within_range} (the share of held-out points closer to
 #'   training data than \code{sac}; \code{NA} without one).  Attributes:
-#'   \code{method}, \code{sac_range}, \code{crs} and \code{n_unknown_ids}.
+#'   \code{method}, \code{sac_range}, \code{crs} (the CRS the distances were
+#'   measured in) and \code{n_unknown_ids}.
 #' @family cross-validation
 #' @seealso \code{\link{make_folds}()} for the fold schemes and the block
 #'   sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
@@ -74,20 +86,45 @@ fold_separation <- function(folds, data_sf, sac = NULL) {
   ids <- if ("..row_id" %in% names(data_sf)) data_sf[["..row_id"]] else
     seq_len(nrow(data_sf))
 
+  # as.numeric() strips a `units` object to its number in whatever unit it
+  # was written in, so 20 km became a range of 20 compared against metres.
+  if (inherits(sac, "units"))
+    stop("fold_separation(): `sac` must be a plain number in the units of the ",
+         "CRS the distances are measured in (metres for lon/lat input); got ",
+         format(sac), ".", call. = FALSE)
+  sac_val <- if (!is.null(sac)) suppressWarnings(as.numeric(sac)[1L]) else
+    suppressWarnings(as.numeric(folds$params$sac_range %||% NA_real_)[1L])
+  if (!length(sac_val) || !is.finite(sac_val)) sac_val <- NA_real_
+
+  # A range is a length in the CRS it was measured in.  The one the folds
+  # carry is in the folds' CRS (params$crs), and an estimate_sac_range()
+  # result records its own; measuring the distances in whatever CRS data_sf
+  # happened to arrive in compared a metre range with foot distances and
+  # printed a verdict about leakage that was off by a factor of 3.3.  So when
+  # the range says where it is from, the distances are measured there.  A
+  # bare number says nothing, and stays in data_sf's (projected) units.
+  rng_crs <- NULL
+  if (is.finite(sac_val)) {
+    cr <- if (!is.null(sac)) attr(sac, "crs")
+          else attr(folds$params$sac_range, "crs") %||% folds$params$crs
+    cr <- if (is.null(cr)) NULL
+          else tryCatch(sf::st_crs(cr), error = function(e) NULL)
+    if (!is.null(cr) && !is.na(cr) && !isTRUE(sf::st_is_longlat(cr)))
+      rng_crs <- cr
+  }
+
   pts <- data_sf
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
     pts <- coerce_to_points(pts, "auto")
-  pts <- sf::st_zm(ensure_projected(pts), drop = TRUE, what = "ZM")
+  pts <- if (is.null(rng_crs)) ensure_projected(pts) else
+    .transform_or_stamp(pts, rng_crs, what = "data_sf", caller = "fold_separation")
+  pts <- sf::st_zm(pts, drop = TRUE, what = "ZM")
 
   # A distance is only meaningful between finite coordinates.
   xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   ok <- stats::complete.cases(xy) & is.finite(xy[, 1L]) & is.finite(xy[, 2L])
   if (!any(ok))
     stop("fold_separation(): `data_sf` has no usable coordinates.", call. = FALSE)
-
-  sac_val <- if (!is.null(sac)) suppressWarnings(as.numeric(sac)[1L]) else
-    suppressWarnings(as.numeric(folds$params$sac_range %||% NA_real_)[1L])
-  if (!length(sac_val) || !is.finite(sac_val)) sac_val <- NA_real_
 
   fold_blocks <- folds$params$fold_blocks
   unknown <- 0L
@@ -102,7 +139,11 @@ fold_separation <- function(folds, data_sf, sac = NULL) {
     d <- if (length(te) && length(tr)) .nn_dist_to(pts[te, ], pts[tr, ]) else numeric(0)
     d <- d[is.finite(d)]
     data.frame(
-      fold         = j,
+      # A cv_*() result's $folds carries each split's index in the original
+      # fold list as fold_id, and its fold_metrics are labelled by it.  After
+      # a fold is dropped the list position no longer matches, and labelling
+      # by position paired each fold's error with another fold's distances.
+      fold         = as.integer(s$fold_id %||% j),
       n_train      = length(tr),
       n_test       = length(te),
       n_blocks     = if (is.list(fold_blocks) && length(fold_blocks) >= j)
@@ -122,7 +163,7 @@ fold_separation <- function(folds, data_sf, sac = NULL) {
   structure(out, class = c("fold_separation", "data.frame"),
             method = folds$method %||% "supplied splits",
             sac_range = sac_val, n_unknown_ids = unknown,
-            crs = sf::st_crs(pts)$input %||% NA_character_)
+            crs = .fold_crs_label(pts))
 }
 
 
@@ -133,7 +174,8 @@ print.fold_separation <- function(x, ...) {
               attr(x, "method"), nrow(x), sum(x$n_test, na.rm = TRUE),
               if (is.na(crs)) "" else sprintf(" (%s)", crs)))
   if (is.finite(sac))
-    cat(sprintf("  autocorrelation range: %s\n", format(sac, digits = 4)))
+    cat(sprintf("  autocorrelation range: %s%s\n", format(sac, digits = 4),
+                if (is.na(crs)) "" else sprintf(" (in %s units, like the distances)", crs)))
   df <- as.data.frame(x)
   df$min_dist    <- signif(df$min_dist, 4)
   df$median_dist <- signif(df$median_dist, 4)

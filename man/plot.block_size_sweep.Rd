@@ -20,7 +20,11 @@ each block size, the fold-to-fold range as a band, the random-fold
 reference as a dashed line, and the estimated autocorrelation range as a
 vertical marker.  Blocks smaller than the range leak, so the curve rises
 from the reference towards the range and plateaus beyond it; the height
-of the rise is what the random-fold number overstated.
+of the rise is what the random-fold number overstated.  The caption says
+which way is better: higher for \code{R2} and \code{Adj_R2}, closer to
+the nominal level for a \code{coverage_*} column (0.975 for
+\code{coverage_97.5}), since over-coverage is miscalibration too, and
+lower for everything else.
 }
 \examples{
 if (requireNamespace("ranger", quietly = TRUE) &&
