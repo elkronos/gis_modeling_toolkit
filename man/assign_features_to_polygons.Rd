@@ -73,6 +73,13 @@ when the join has to be \emph{unambiguous}. It resolves features matching
 several polygons by an explicit \code{tie_break} rule instead of silently
 duplicating rows, so the assigned layer keeps one row per input feature
 and cell-level counts mean what they say.
+
+The join runs in the CRS of \code{polygons_sf} whenever that CRS is projected,
+so cell edges are the straight lines the cells were drawn with and overlap
+areas are planar. A copy of \code{features_sf} is transformed for it, and the
+features come back with the coordinates they arrived with. Otherwise (the
+polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
+\code{features_sf}.
 }
 \examples{
 library(sf)

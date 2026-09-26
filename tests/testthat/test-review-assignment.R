@@ -103,3 +103,51 @@ test_that("a largest-overlap join that still fails stops instead of falling back
   expect_equal(suppressWarnings(
     assign_features_to_polygons(x, .rv_two_cells(), largest = FALSE))$poly_id, 1L)
 })
+
+
+# Evaluate `code` with sf_use_s2() set to `on`, restoring the session's value.
+.rv_with_s2 <- function(on, code) {
+  was <- suppressMessages(sf::sf_use_s2(on))
+  on.exit(suppressMessages(sf::sf_use_s2(was)), add = TRUE)
+  force(code)
+}
+
+test_that("lon/lat features are assigned in the cells' projected CRS", {
+  # Two 200 km cells in Web Mercator sharing a horizontal edge near 45N.  The
+  # features used to stay in lon/lat and the cells were moved to them, where
+  # s2 reads that edge as a great-circle arc bulging about 0.8 km north
+  # mid-way; with s2 off the largest-overlap join needed lwgeom and failed.
+  y0 <- 5621521                          # ~45N in EPSG:3857
+  w  <- 2e5 / cos(pi / 4)                # 200 km of ground
+  mid <- w / 2
+  cells <- sf::st_sf(poly_id = c(1L, 2L),
+                     geometry = sf::st_sfc(.rv_sq(0, y0 - w, w, y0),
+                                           .rv_sq(0, y0, w, y0 + w),
+                                           crs = 3857))
+  # 1200 of its 2000 units of height lie in cell 2, drawn in the cells' CRS.
+  feat_ll <- sf::st_transform(
+    sf::st_sf(v = 1L, geometry = sf::st_sfc(
+      .rv_sq(mid - 5000, y0 - 800, mid + 5000, y0 + 1200), crs = 3857)),
+    4326)
+  # Points 500 units either side of the edge.
+  pts_ll <- sf::st_transform(
+    sf::st_sf(v = 1:2, geometry = sf::st_sfc(sf::st_point(c(mid, y0 + 500)),
+                                             sf::st_point(c(mid, y0 - 500)),
+                                             crs = 3857)),
+    4326)
+
+  for (s2 in c(TRUE, FALSE)) {
+    .rv_with_s2(s2, {
+      out <- suppressWarnings(assign_features_to_polygons(feat_ll, cells))
+      pts <- assign_features_to_polygons(pts_ll, cells)
+    })
+    # Under s2 the old code put the polygon, and the point inside cell 2, in
+    # cell 1.
+    expect_equal(out$poly_id, 2L, info = paste("s2 =", s2))
+    expect_equal(pts$poly_id, c(2L, 1L), info = paste("s2 =", s2))
+    # Only a copy was moved into the cells' CRS: the caller's coordinates come
+    # back untouched, not as a transform round trip.
+    expect_identical(sf::st_geometry(out), sf::st_geometry(feat_ll))
+    expect_identical(sf::st_geometry(pts), sf::st_geometry(pts_ll))
+  }
+})
