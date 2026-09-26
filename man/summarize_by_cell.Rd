@@ -255,13 +255,18 @@ Pass it as the \code{weights} argument of a downstream regression.
 \section{Spatial autocorrelation and standard-error bias}{
 
 By default (\code{deff = 1}), the \verb{..se_*} columns are computed as
-\code{sd / sqrt(n)}, which assumes observations within each cell are independent.
-When data are spatially autocorrelated (the common case for the spatial
-workflows this package supports), within-cell observations are typically
-positively correlated, so the effective sample size is smaller than \code{n}.
-The naive SE is therefore \strong{anticonservative} (too small), and downstream
-weighted regressions using \code{cell_weight} or \verb{..se_*} columns will produce
-overconfident standard errors for cells with strong intra-cell correlation.
+\code{sd / sqrt(n)}, which treats the observations within each cell as
+independent. When data are spatially autocorrelated (the common case for the
+spatial workflows this package supports), within-cell observations are
+typically positively correlated: they share the cell's departure from the
+population mean, so as an estimate of the \strong{population (grand) mean} a cell
+mean has an effective sample size smaller than \code{n}. For that estimand the
+naive SE is \strong{anticonservative} (too small), and a downstream weighted
+regression that uses \code{cell_weight} or the \verb{..se_*} columns for population-level
+inference will produce overconfident standard errors for cells with strong
+intra-cell correlation. For the cell's \strong{own} mean the naive SE is the right
+one when the cell's points are spread through it, and the corrected SE is too
+wide; see "What the standard error estimates" before setting \code{deff}.
 
 Setting \code{deff = "kish"} applies an approximate correction using Kish's
 design effect. Separate intra-class correlations (ICCs) are estimated for
@@ -316,7 +321,8 @@ over that cell), which is what a cell-level map or a regression on cell
 values usually wants. For that quantity the naive \code{sd / sqrt(n)} is the
 better of the two on offer: measured coverage 0.95 under exchangeable
 within-cell correlation, against very nearly 1.00 for the
-design-effect-corrected SE, which is about five times too wide. That 0.95
+design-effect-corrected SE, which is too wide by the factor
+\code{sqrt(deff / (1 - rho))} (4.6 at 20 points a cell and \code{rho = 0.5}). That 0.95
 is exact under the exchangeable model and holds under a spatial covariance
 model only when the cell's points are spread through the cell; with
 \emph{clustered} sampling inside a cell it is anticonservative for the block
