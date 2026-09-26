@@ -1147,8 +1147,12 @@ fitted.gwr_fit <- function(object, ...) {
 #' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
 #' share (harmless, since the other simply recomputes), and \code{identical()}
 #' cannot distinguish two fits by their caches.  The digest covers
-#' \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
-#' what \code{\link{clear_fitted_cache}} is for.
+#' \code{data_sf} only.  The entry is also tied to the engine that computed
+#' it -- a refit or \code{update()} of the \code{brmsfit} is a different
+#' sampling run and recomputes -- but a \code{brmsfit} edited by hand in place
+#' is what \code{\link{clear_fitted_cache}} is for.  The entry holds only the
+#' values and a small identifier of the sampling run, so a fit saved with
+#' \code{saveRDS()} after \code{fitted()} is no larger for it.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
@@ -1175,12 +1179,13 @@ fitted.bayesian_fit <- function(object, ...) {
     # SAME data hash identically however different their engines are -- and
     # because the cache is shared by every copy of a fit, `refit <- fit;
     # refit$engine <- <re-estimated>` then read the original engine's fitted
-    # values back out.  identical() is cheap here: for the common case it is
-    # the same object, which R settles by pointer.  Holding the reference
-    # costs no memory -- the fit already holds the engine.
+    # values back out.  It holds .fitted_engine_token(), not necessarily the
+    # engine itself: see there for why holding the engine doubled saveRDS().
+    # identical() is cheap here: for the common case it is the same object,
+    # which R settles by pointer.
     if (is.list(hit) && identical(hit$n, object$n) &&
         identical(hit$key, key) &&
-        identical(hit$engine, object$engine) &&
+        identical(hit$engine, .fitted_engine_token(object$engine)) &&
         is.numeric(hit$values) && length(hit$values) == object$n)
       return(hit$values)
     # Stale: a copy carrying different data or a different engine, or an entry
@@ -1227,12 +1232,41 @@ fitted.bayesian_fit <- function(object, ...) {
   # data cannot read it back.  A wrong-length result is never cached.
   if (!is.null(cache) && length(fitted_vals) == object$n) {
     assign(".fitted_values",
-           list(n = object$n, key = key, engine = object$engine,
+           list(n = object$n, key = key,
+                engine = .fitted_engine_token(object$engine),
                 values = fitted_vals),
            envir = cache)
   }
 
   fitted_vals
+}
+
+
+#' What a fitted() cache entry keeps to tell one engine from another
+#'
+#' The entry must belong to the engine that produced it (see
+#' \code{fitted.bayesian_fit}), and it used to hold the engine itself.  That
+#' costs nothing in memory, but \code{serialize()} tracks environments by
+#' reference and lists not at all, so \code{saveRDS()} on a fit whose cache was
+#' warm -- after any \code{summary()}, \code{residuals()} or
+#' \code{model_metrics()} -- wrote the whole brmsfit a second time: a 40 MB
+#' engine saved as 80 MB before \code{fitted()} and 120 MB after.
+#'
+#' A brmsfit carries a stanfit, and every stanfit carries an environment
+#' (\code{@.MISC}) that rstan's sampler, and brms's reader for CmdStan output,
+#' create afresh for each run.  Copies of the engine share it, a refit or an
+#' \code{update()} gets a new one, and it is serialised once however many
+#' references point at it, so it tells engines apart as well as the engine
+#' does and adds nothing to a saved fit.  Any other engine (a custom backend,
+#' a test double) is its own token, as before.
+#'
+#' @param engine The fit's \code{$engine}.
+#' @return An environment, or \code{engine}.
+#' @keywords internal
+#' @noRd
+.fitted_engine_token <- function(engine) {
+  misc <- tryCatch(engine$fit@.MISC, error = function(e) NULL)
+  if (is.environment(misc)) misc else engine
 }
 
 

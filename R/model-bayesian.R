@@ -849,7 +849,15 @@ fit_bayesian_spatial_model <- function(
   # makes the prior far too diffuse and the adequacy check fire on every fit.
   # With scale = FALSE there is exactly one coordinate scaling, ours.
   gp_term <- .gp_formula_term(gp_k, gp_c, gp_iso)
-  fml <- stats::as.formula(sprintf("%s ~ %s + %s", response_var, rhs_terms, gp_term))
+  # env = globalenv(), not this frame.  A formula carries its environment, and
+  # brms stores the formula inside the brmsfit, so the default (the frame this
+  # line runs in) made the fit and its $engine capture THIS frame -- which by
+  # the end holds the brmsfit itself (`fit`), the data twice and every
+  # intermediate.  An environment is serialised once but a list every time it
+  # is met, so saveRDS() wrote the whole brmsfit twice.  The formula names
+  # columns of the data and brms's own gp(); nothing in it needs this frame.
+  fml <- stats::as.formula(sprintf("%s ~ %s + %s", response_var, rhs_terms, gp_term),
+                           env = globalenv())
 
   # Build priors in two independent steps:
   # 1. Regression coefficient priors (only when no user prior and predictors
