@@ -253,3 +253,90 @@ test_that("with no null model the rows every step-1 set predicted are the refere
   expect_identical(sel$params$n_scored, 250L)
   expect_identical(sel$history$n_pred, c(250L, 192L))
 })
+
+
+# ---------------------------------------------------------------------------
+# compare_models_cv(): backends compared on the same rows
+# ---------------------------------------------------------------------------
+
+test_that("compare_models_cv() re-scores the models on the rows they all predicted", {
+  # GWR with a fixed bandwidth cannot reach the outlying valley block, so it
+  # lost that fold -- the hardest rows -- and its pooled RMSE (1.81 on 158
+  # rows) beat RF's (1.95 on 200) although RF scored 0.99 on the same 158.
+  skip_if_not_installed("ranger")
+  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
+  set.seed(4); n <- 200
+  xy <- rbind(cbind(runif(150, 0, 600), runif(150, 0, 1000)),
+              cbind(runif(50, 850, 1000), runif(50, 0, 1000)))
+  d <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], a = runif(n, -2, 2)),
+                    coords = c("x", "y"), crs = 32632)
+  d$z <- 10 + 3 * sign(d$a) + rnorm(n, 0, 0.3)
+  mae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
+  r <- .rv_warnings(suppressMessages(compare_models_cv(
+    d, "z", "a", models = c("RF", "GWR"), k = 5, seed = 1, quiet = TRUE,
+    metrics = mae, rf_args = list(num_trees = 100),
+    gwr_args = list(adaptive = FALSE, bandwidth = 300))))
+  cmp <- r$value
+  expect_true(any(grepl(paste0("^compare_models_cv\\(\\): the models predicted ",
+                               "different rows \\(GWR [0-9]+, RF 200\\)"),
+                        r$warnings)))
+  gp <- cmp$gwr_cv$predictions; rp <- cmp$rf_cv$predictions
+  common <- intersect(gp$`..row_id`[is.finite(gp$yhat)], rp$`..row_id`)
+  expect_lt(length(common), 200L)
+  ov <- cmp$overall
+  expect_identical(ov$n_pred, rep(length(common), 2L))
+  # Each row is exactly the backend's metrics over the common rows ...
+  for (m in c("GWR", "RF")) {
+    p <- if (m == "GWR") gp else rp
+    ref <- spatialkit:::.cv_overall_metrics(p[p$`..row_id` %in% common, ], mae)
+    got <- ov[ov$model == m, names(ref)]
+    rownames(got) <- NULL
+    expect_equal(got, ref, info = m)
+  }
+  # ... and what each reported over its own rows is kept beside it.
+  all_rows <- attr(ov, "all_rows")
+  expect_identical(all_rows$model, ov$model)
+  expect_equal(all_rows$RMSE[all_rows$model == "RF"], cmp$rf_cv$overall$RMSE)
+  expect_identical(all_rows$n_pred[all_rows$model == "RF"], 200L)
+})
+
+test_that("compare_models_cv() re-scores the point metrics only, and says so", {
+  # A stand-in Bayesian backend that lost the last fold: its point metrics and
+  # the user metric are recomputed on the shared rows; coverage and CRPS,
+  # which are per fold, are carried as they came; by_fold is untouched.
+  skip_if_not_installed("ranger")
+  pts <- surf_test_points(60, seed = 4)
+  fake_bayes <- function(data_sf, response_var, predictor_vars, folds = NULL, ...) {
+    lost <- folds$folds[[3]]$test
+    keep <- !(data_sf$..row_id %in% lost)
+    y <- sf::st_drop_geometry(data_sf)[[response_var]][keep]
+    pr <- data.frame(`..row_id` = data_sf$..row_id[keep], fold = 1L, y = y,
+                     yhat = y + 0.1, y_train_mean = mean(y), check.names = FALSE)
+    fm <- data.frame(fold = 1:2, n_pred = c(20L, 20L), RMSE = c(0.1, 0.1))
+    list(overall = spatialkit:::.cv_overall_metrics(pr, list(...)$metrics),
+         fold_metrics = fm, predictions = pr, folds = folds,
+         n_folds_attempted = 3L, n_folds_succeeded = 2L,
+         predictive_coverage = list(coverage_95 = 0.9, mean_CRPS = 0.2))
+  }
+  local_mocked_bindings(cv_bayes = fake_bayes,
+                        .model_available = function(model_name) TRUE,
+                        .package = "spatialkit")
+  mae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
+  expect_warning(
+    res <- compare_models_cv(pts, "z", "w", models = c("RF", "Bayesian"), k = 3,
+                             rf_args = list(num_trees = 40), quiet = TRUE,
+                             metrics = mae),
+    "different rows \\(Bayesian [0-9]+, RF 60\\)")
+  ov <- res$overall
+  n_common <- nrow(res$bayes_cv$predictions)
+  expect_identical(ov$n_pred, rep(n_common, 2L))
+  rp <- res$rf_cv$predictions
+  rp <- rp[rp$`..row_id` %in% res$bayes_cv$predictions$`..row_id`, ]
+  expect_equal(ov$RMSE[ov$model == "RF"], sqrt(mean((rp$y - rp$yhat)^2)))
+  expect_equal(ov$MedAE[ov$model == "RF"], stats::median(abs(rp$y - rp$yhat)))
+  expect_identical(ov$coverage_95[ov$model == "Bayesian"], 0.9)
+  expect_identical(ov$mean_CRPS[ov$model == "Bayesian"], 0.2)
+  expect_equal(attr(ov, "all_rows")$RMSE[ov$model == "RF"], res$rf_cv$overall$RMSE)
+  expect_identical(nrow(res$by_fold), 2L + nrow(res$rf_cv$fold_metrics))
+})
