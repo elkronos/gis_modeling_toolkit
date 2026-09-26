@@ -19,7 +19,11 @@ pts$junk1 <- stats::rnorm(nrow(pts))
 pts$junk2 <- stats::rnorm(nrow(pts))
 pts$junk3 <- stats::rnorm(nrow(pts))
 cands <- c("elev", "slope", "noise", "junk1", "junk2", "junk3")
-BS <- 300   # block size, comfortably wider than the estimated range
+# Block size: a little UNDER the range script 02 estimates on z (about 357),
+# because the 1000-unit square holds only four blocks of 360, fewer than the
+# five folds, and the half-layer of 08.5 only two. Blocks this size still leak
+# a little across their edges, so the scores below are somewhat optimistic.
+BS <- 300
 
 xy <- sf::st_coordinates(pts)
 cat(sprintf("  slope has no effect on z by construction, yet cor(slope, z) = %.2f,\n",
@@ -115,7 +119,9 @@ cat("  Set it from what would matter in the application, not from what leaves\n"
 step("08.5", "The honest score for a selected model")
 # The cross-validation that drove the search cannot also measure the winner.
 # `select_on = "split"` runs the search on half the data, spatially split, and
-# leaves the other half untouched to score with.
+# holds the other half out of the search to score with. Held out is not
+# independent: the halves share a border, and rows near it are still
+# correlated with the half the search saw.
 # (It warns about fold imbalance: half the rows means uneven counts per block.)
 sel_sp <- select_features_forward(pts, "z", cands, fit_fn = lm_on, k = 5,
                                   method = "block_kfold", block_size = BS,
@@ -125,10 +131,13 @@ print(sel_sp$split)
 cat(sprintf("  selected on the search half : %s\n",
             paste(sel_sp$selected, collapse = ", ")))
 cat(sprintf("  score on the search half    : %.3f\n", sel_sp$score))
-cat(sprintf("  score on the untouched half : %.3f", sel_sp$score_holdout))
+cat(sprintf("  score on the held-out half  : %.3f", sel_sp$score_holdout))
 cat(sprintf("   (%.0f%% worse)\n",
             100 * (sel_sp$score_holdout / sel_sp$score - 1)))
-cat("  That difference is the selection effect, measured rather than assumed.\n")
+cat("  Part of that gap is the selection effect. Part is that the two scores\n",
+    "  come from different rows, a different region and a different amount of\n",
+    "  training data, so the gap is one estimate, not a measurement of it.\n",
+    sep = "")
 
 step("08.6", "Two runs, two answers, one write-up")
 cat(sprintf("  searched on all %d rows : %s\n", nrow(pts),

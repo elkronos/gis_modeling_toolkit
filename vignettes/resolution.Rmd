@@ -70,8 +70,9 @@ of them. `select_resolution()` reads one criterion off that profile, and
 a model, the profile is the one to use. If you need a count now and the data
 are all you have, the elbow is defensible when the points cluster, and this
 article says where it falls short. On points spread evenly there is no elbow
-to read, and both functions say so rather than hand back a count the ladder's
-ends chose.
+to read, and both functions say so: the profile leaves its `elbow` column
+empty, and `determine_optimal_levels()` warns that the count it still returns
+was chosen by the ends of its ladder, not by the data.
 
 The argument that says "how many" is spelled differently by the function it
 belongs to: `max_levels` bounds the elbow's ladder, `n_levels` sets the
@@ -154,7 +155,7 @@ with that factor in mind.
 cat(
 "| criterion | measures | needs | direction |\n",
 "|---|---|---|---|\n",
-"| `elbow` | how far the within-cluster sum of squares curve bends below its own chord | coordinates only | larger |\n",
+"| `elbow` | how far the log of the within-cluster sum of squares sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |\n",
 "| `cp` | Mallows' \\(C_p\\) of the piecewise-constant approximation of the response by cell means | a response, and a variogram for the nugget | smaller |\n",
 "| `moran_z` | spatial structure surviving in the residuals of the cell means | a response | nearer zero |\n",
 "| `reliability` | the share of the spread in the cell means that is signal, not sampling noise | a variogram | larger |\n",
