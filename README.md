@@ -405,8 +405,11 @@ geometry column is not a predictor.
 
 **`fit_rf_model(): response 'y' is not numeric.`** (And its
 `fit_gwr_model()` / `fit_bayesian_spatial_model()` equivalents.)
-Everything here is regression. A factor or character response is refused
-outright; a response that came back as character from a CSV needs
+Everything here is regression, with one exception:
+`fit_bayesian_spatial_model()` takes a factor or character response under
+`brms::categorical()` or an ordinal family (see “Non-Gaussian responses” in
+`?fit_bayesian_spatial_model`). Anywhere else a factor or character response
+is refused outright; a response that came back as character from a CSV needs
 `as.numeric()` first. Check for a stray thousands separator or an `"NA"`
 string if that produces `NA`s. `fit_gwr_model()` additionally refuses an
 integer-coded two-valued response and points at `GWmodel::ggwr.basic()`.

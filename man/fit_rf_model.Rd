@@ -145,8 +145,12 @@ reports \code{NaN} for it.  That is every row under \code{replace = FALSE}
 with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
 The fit warns with the count; \code{fitted()} and \code{residuals()} are
 \code{NaN} on those rows, and \code{summary()} says how many rows its
-metrics were computed on.  With no row out of bag at all, the OOB error and
-the permutation importance are \code{NaN} too.
+metrics were computed on.  With no row out of bag at all, the OOB error
+(\code{NA} in \code{$info$oob_rmse} and \code{$info$oob_r_squared}) and
+the permutation importance (\code{NaN}) are undefined too, and
+\code{print()} says so.  \code{\link{cv_rf}()} scores its fold forests on
+the held-out rows, never out of bag, so it warns once with the number of
+folds affected rather than once per fold.
 }
 
 \examples{

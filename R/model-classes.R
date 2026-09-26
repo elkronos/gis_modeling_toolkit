@@ -464,8 +464,11 @@ print.summary.spatial_fit <- function(x, ...) {
 #' For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 #' CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 #' scoring rules computed from posterior draws, so they are meaningful for any
-#' \code{family} the backend accepts, and they are the numbers to compare when
-#' the response is not Gaussian.  When every fold fails, the
+#' \code{family} that predicts one number per row (a count, a rate, a binary
+#' or bounded outcome), and they are the numbers to compare when the response
+#' is not Gaussian.  A categorical or ordinal family predicts a probability
+#' per response category instead, so \code{cv_bayes()} refuses one before
+#' fitting anything.  When every fold fails, the
 #' \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 #' but not the \code{coverage_*} columns, so code that reads those columns
 #' must tolerate their absence.
@@ -945,6 +948,17 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
                paste(dim(draws), collapse = " x "), hint), call. = FALSE)
 }
 
+# What predict.bayesian_fit() offers instead for a category family: the
+# posterior predictive draws, which go through the method's own newdata
+# pipeline.  A draw of Y is category k with the posterior mean probability of
+# k, so the share of draws in k estimates exactly what posterior_epred()
+# would average to.
+.category_draws_hint <- paste0(
+  "Use type = \"predict\", draws = TRUE for posterior draws of the predicted ",
+  "category (as category indices); the share of draws in each category ",
+  "estimates its probability. brms::posterior_epred(<fit>$engine) gives the ",
+  "probabilities for the training rows.")
+
 
 #' Predict from a Bayesian spatial GP model
 #'
@@ -997,9 +1011,14 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #'   \code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
 #'   family is not a failed draw and is an error under
 #'   \code{type = "epred"}: its expected value is a probability per response
-#'   category, not one number per row; use \code{type = "predict"}.  With
-#'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
-#'   for the default \code{summary = "mean"}, \code{type = "epred"},
+#'   category, not one number per row.  Use \code{type = "predict",
+#'   draws = TRUE} for posterior draws of the predicted category, as category
+#'   indices; the share of draws in each category estimates its probability.
+#'   Without \code{draws = TRUE}, \code{type = "predict"} returns the mean (or
+#'   median) category index, an expected rank for an ordinal family and an
+#'   error for \code{brms::categorical()}, whose categories have no order.
+#'   With \code{newdata = NULL} the cached \code{fitted()} values are returned
+#'   only for the default \code{summary = "mean"}, \code{type = "epred"},
 #'   \code{draws = FALSE} combination; any other combination is recomputed
 #'   against the training data, because the cache holds epred column means and
 #'   nothing else.
@@ -1033,6 +1052,19 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   model_obj <- object$engine
   if (!inherits(model_obj, "brmsfit"))
     stop("predict.bayesian_fit(): engine is not a brmsfit object.", call. = FALSE)
+
+  # type = "predict" draws category INDICES for a category family.  Their
+  # mean (or median) is an expected rank for an ordinal family, but nothing
+  # at all for brms::categorical(), whose categories have no order: it came
+  # back as 1.46, 1.97, 1.48, ... with no word.
+  if (type == "predict" && !isTRUE(draws) &&
+      identical(.brms_family_name(tryCatch(model_obj$family,
+                                           error = function(e) NULL)),
+                "categorical"))
+    stop(paste0("predict.bayesian_fit(): the 'categorical' family's categories ",
+                "have no order, so the ", summary, " of the predicted category ",
+                "indices is not a prediction. ", .category_draws_hint),
+         call. = FALSE)
 
   # ---- Preprocessing: match the pipeline used during fitting ----
   # Ensure newdata is in the same projected CRS that was used for training,
@@ -1093,18 +1125,26 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   if (is.matrix(draw_mat) && pinned$n_pad > 0L &&
       ncol(draw_mat) == nrow(pinned$df))
     draw_mat <- draw_mat[, seq_len(ncol(draw_mat) - pinned$n_pad), drop = FALSE]
+  # An ordinal or categorical epred is a draws x rows x categories array; the
+  # padding rows are dropped from it too, so the message below counts the
+  # caller's rows (it said "150 x 7 x 3" for five).
+  if (is.array(draw_mat) && length(dim(draw_mat)) == 3L && pinned$n_pad > 0L &&
+      dim(draw_mat)[2L] == nrow(pinned$df))
+    draw_mat <- draw_mat[, seq_len(dim(draw_mat)[2L] - pinned$n_pad), ,
+                         drop = FALSE]
   if (is.matrix(draw_mat) && ncol(draw_mat) == length(pinned$beyond))
     draw_mat[, pinned$beyond] <- NA_real_
 
   # Not a failed draw: an ordinal or categorical family's epred.  Raised, not
-  # returned as NA, because no retry will produce one number per row.
+  # returned as NA, because no retry will produce one number per row.  The
+  # probabilities for new rows are not offered through
+  # brms::posterior_epred(<fit>$engine, newdata = ): the engine needs the
+  # scaled ..x/..y (and standardised predictors) this method builds, and it
+  # refused the user's newdata.  The share of predicted-category draws in
+  # each category estimates the same posterior mean probability.
   if (type == "epred")
     .stop_if_category_epred(draw_mat, model_obj, "predict.bayesian_fit",
-                            hint = paste0("Use type = \"predict\" (with draws = ",
-                                          "TRUE for the predicted categories, ",
-                                          "as category indices), or ",
-                                          "brms::posterior_epred(<fit>$engine, ",
-                                          "newdata = ) for the probabilities."))
+                            hint = .category_draws_hint)
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
     .log_warn("predict.bayesian_fit(): posterior draw failed: %s",
               if (inherits(draw_mat, "try-error")) .try_error_message(draw_mat)
