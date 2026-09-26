@@ -15,14 +15,21 @@ create_voronoi_polygons(
 )
 }
 \arguments{
-\item{points_sf}{An sf object with POINT/MULTIPOINT geometries.}
+\item{points_sf}{An sf object with POINT/MULTIPOINT geometries. Points with
+no CRS whose coordinates look like lon/lat (the heuristic
+\code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning) are taken as EPSG:4326
+and projected, as lon/lat points are.}
 
 \item{boundary}{Optional polygonal sf object. When exactly one of
-\code{points_sf} and \code{boundary} has a CRS, the other is interpreted in it as
-\code{\link[=harmonize_crs]{harmonize_crs()}} does, with a warning (lon/lat-looking coordinates are
-reprojected from EPSG:4326, others are stamped); CRS-less points that do
-not look like lon/lat cannot take a geographic boundary's CRS, and are
-refused with an error.}
+\code{points_sf} and \code{boundary} has a CRS, the other is interpreted in it, with
+a warning. CRS-less points, and a CRS-less boundary given with projected
+points, are read as \code{\link[=harmonize_crs]{harmonize_crs()}} does (lon/lat-looking coordinates
+are reprojected from EPSG:4326, others are stamped); CRS-less points that
+do not look like lon/lat cannot take a geographic boundary's CRS, and are
+refused with an error. A CRS-less boundary given with lon/lat points (or
+with CRS-less points taken as lon/lat) is read as lon/lat when its
+coordinates fit the lon/lat envelope, and refused with an error
+otherwise.}
 
 \item{expand}{Numeric; absolute distance, in the working CRS's units, by
 which the boundary (or the hull derived from the points) is grown before
@@ -37,8 +44,10 @@ boundary is the one returned as \code{boundary}.}
 points are merged before the diagram is built either way, so they share
 one cell and all of them are indexed to it.}
 
-\item{crs}{Optional target CRS. A projected CRS is the working CRS. A
-geographic one (EPSG:4326, say) is the CRS the result is returned in:
+\item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
+an sf or sfc layer, whose CRS is used. A projected CRS is the working
+CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
+in:
 the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
 picks for the points, so they are nearest-point cells on the ground, and
 are then transformed, with long edges densified.}

@@ -188,8 +188,8 @@ Four more things about the data, each handled without stopping you:
   before a fit, and the count is logged; `prep_model_data()` is the function
   that does it and `attr(x, "dropped")` says which rows.
 - Two observations at the same coordinates are fine for models and folds;
-  a Voronoi tessellation keeps one seed per location
-  (`build_tessellation(keep_duplicates = )` says what to do with the rest).
+  a Voronoi tessellation keeps one seed per location, and every point at
+  that location is indexed to its cell.
 - A point outside the boundary you tessellate gets no cell: `tess$index`
   is `NA` for it and `assign_features_to_polygons()` leaves it out unless
   you ask for it back with `keep_unassigned = TRUE`.

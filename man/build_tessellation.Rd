@@ -27,10 +27,17 @@ or build one from the points with \code{\link[=clip_target_for]{clip_target_for(
 \code{method = "voronoi"} and \code{method = "triangles"}, which derive their extent
 from the points themselves and use \code{boundary} only to clip the result when
 \code{clip = TRUE}. When exactly one of \code{points_sf} and \code{boundary} has a CRS,
-the other is interpreted in it as \code{\link[=harmonize_crs]{harmonize_crs()}} does, with a warning;
-CRS-less points that do not look like lon/lat cannot take a geographic
-boundary's CRS and are refused with an error. When neither has one, both
-stay in the same unnamed planar space.}
+the other is interpreted in it, with a warning. CRS-less points, and a
+CRS-less boundary given with projected points, are read as
+\code{\link[=harmonize_crs]{harmonize_crs()}} does; CRS-less points that do not look like lon/lat
+cannot take a geographic boundary's CRS and are refused with an error. A
+CRS-less boundary given with lon/lat points is read as lon/lat when its
+coordinates fit the lon/lat envelope, and refused with an error
+otherwise. When neither has one, both are read by the lon/lat heuristic
+of \code{\link[=ensure_projected]{ensure_projected()}}: taken as EPSG:4326 and projected when the points
+look like degrees (a boundary whose coordinates do not fit the lon/lat
+envelope is then refused with an error), otherwise left in the same
+unnamed planar space.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
@@ -82,14 +89,22 @@ coincident points are merged before a Voronoi diagram or a Delaunay
 triangulation is built either way, and every one of them is indexed to
 the cell they share.}
 
-\item{crs}{Optional target CRS. A projected CRS is the working CRS. A
-geographic one (EPSG:4326, say) is the CRS the result is returned in: the
-cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}} picks for
-the points, indexed there, and then transformed with long edges
+\item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
+an sf or sfc layer, whose CRS is used. A projected CRS is the working
+CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
+in: the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
+picks for the points, indexed there, and then transformed with long edges
 densified, so Voronoi cells are nearest-point cells on the ground and
 grid cells are laid in metres rather than degrees. The exception is a hex
 or square grid sized by \code{cellsize}, which is in degrees and so is laid in
-degrees.}
+degrees. Whenever that local CRS is picked for lon/lat points, or
+CRS-less ones taken as lon/lat (no \code{crs}, or a geographic one), a hex or
+square grid with a boundary is laid in it unless it
+distorts areas across the boundary by more than 1 percent (Web Mercator
+over a near-global extent, say); the grid is then laid, and the points
+indexed, in the equal-area CRS \code{ensure_projected(purpose = "area")} picks
+for the boundary, with a logged warning, as \code{\link[=create_grid_polygons]{create_grid_polygons()}}
+does, so the cells stay equal-area.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
