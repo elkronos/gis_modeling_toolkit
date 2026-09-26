@@ -76,16 +76,18 @@ test_that("25 k-means++ restarts leave the WSS curve monotone where 5 random one
 
 test_that("determine_optimal_levels warns before the sweep when no k can clear the floor", {
   pts <- rp_field(120, with_pred = TRUE)
-  lines <- capture_spatialkit_log(
+  # Uniform locations also have no WSS elbow, which is an R warning of its
+  # own; it is not the one under test here.
+  lines <- capture_spatialkit_log(suppressWarnings(
     out <- determine_optimal_levels(pts, max_levels = 6, response_var = "z",
-                                    predictor_vars = "w", criterion = "morans_i"))
+                                    predictor_vars = "w", criterion = "morans_i")))
   expect_true(log_has(lines, "nine cells or fewer"))
   expect_true(log_has(lines, "Raise max_levels"))
   expect_type(out, "integer")
   # With room above the floor the warning is not raised.
-  quiet <- capture_spatialkit_log(
+  quiet <- capture_spatialkit_log(suppressWarnings(
     determine_optimal_levels(pts, max_levels = 14, response_var = "z",
-                             predictor_vars = "w", criterion = "morans_i"))
+                             predictor_vars = "w", criterion = "morans_i")))
   expect_false(log_has(quiet, "nine cells or fewer"))
 })
 
@@ -277,8 +279,20 @@ test_that("resolution_profile is reproducible from its seed and subsamples large
   b <- resolution_profile(pts, n_levels = 5, seed = 11)
   expect_identical(a$wss, b$wss)
   sub <- resolution_profile(pts, n_levels = 5, sample_n = 120)
-  expect_identical(attr(sub, "bounds")$n, 120L)
-  expect_identical(attr(sub, "bounds")$ceiling, 13L)
+  # The fits run on 120 points, but the support ceiling is the layer's,
+  # floor(200 / 9) = 22, not the subsample's floor(120 / 9) = 13: sample_n
+  # is a speed setting, not a bound on the answer.
+  expect_identical(attr(sub, "bounds")$n, 200L)
+  expect_identical(attr(sub, "bounds")$n_sample, 120L)
+  expect_identical(attr(sub, "bounds")$ceiling, 22L)
+  expect_identical(attr(sub, "bounds")$ceiling_from, "min_cell_n")
+  expect_output(print(sub), "on 200 points \\(k-means fitted to a subsample of 120\\)")
+  # A subsample too small to fit that many cells holds the ceiling to two of
+  # its points per cell, and says which bound is choosing.
+  tiny <- resolution_profile(pts, n_levels = 4, sample_n = 30, min_cell_n = 3)
+  expect_identical(attr(tiny, "bounds")$ceiling, 15L)
+  expect_identical(attr(tiny, "bounds")$ceiling_from, "sample_n")
+  expect_output(print(tiny), "ceiling 15 from the 30-point subsample")
 })
 
 
@@ -303,8 +317,15 @@ test_that("select_resolution reads the optimum and the flat region off each crit
   expect_true(all(prof$reliability[prof$levels %in% s_rel$flat] >= max(prof$reliability) * 0.98))
   expect_identical(s_rel$at_floor, s_rel$best == min(prof$levels))
 
-  s_el <- select_resolution(prof, "elbow")
-  expect_identical(s_el$best, prof$levels[which.max(prof$elbow)])
+  # Uniform locations have no WSS elbow, and the column says so rather than
+  # offering the chord rule's sqrt(first x last level) as one ...
+  expect_true(all(is.na(prof$elbow)))
+  expect_error(select_resolution(prof, "elbow"), "no elbow")
+  # ... while clustered ones have one, and select_resolution() reads it.
+  cl <- resolution_profile(sf::st_as_sf(as.data.frame(rp_clustered(400)),
+                                        coords = 1:2, crs = 32632), n_levels = 8)
+  s_el <- select_resolution(cl, "elbow")
+  expect_identical(s_el$best, cl$levels[which.max(cl$elbow)])
 
   s_z <- select_resolution(prof, "moran_z", tol = 0.1)
   ok <- is.finite(prof$moran_z)
@@ -323,7 +344,8 @@ test_that("select_resolution refuses a criterion that is NA everywhere, and bad 
   expect_error(select_resolution(geo, "cp"), "NA at every level.*response")
   expect_error(select_resolution(geo, "reliability"), "NA at every level")
   expect_error(select_resolution(geo, "moran_z"), "NA at every level")
-  expect_s3_class(select_resolution(geo, "elbow"), "resolution_selection")
+  # Uniform locations: the WSS curve has no elbow either.
+  expect_error(select_resolution(geo, "elbow"), "NA at every level.*no elbow")
   expect_error(select_resolution(geo, "elbow", tol = -1), "non-negative")
   expect_error(select_resolution(data.frame(levels = 1:3), "elbow"), "must come from")
 })
@@ -407,8 +429,15 @@ test_that("summary() puts every criterion's pick in one table", {
 
 test_that("summary() reports only the criteria a profile can score", {
   skip_if_not_installed("gstat")
-  pts <- rp_field(n = 250)
+  # Clustered locations, so the WSS curve has an elbow: on uniform ones it
+  # has none, and a geometry-only profile then has no criterion at all.
+  set.seed(6)
+  pts <- sf::st_as_sf(data.frame(rp_clustered(250), z = rnorm(250)),
+                      coords = 1:2, crs = 32632)
   geo <- suppressWarnings(suppressMessages(resolution_profile(pts, n_levels = 6)))
+  flat <- suppressWarnings(suppressMessages(resolution_profile(rp_field(n = 250),
+                                                               n_levels = 6)))
+  expect_error(summary(flat), "elbow is NA when the WSS curve has no elbow")
 
   # No response: cp, reliability and moran_z are NA at every level, so the
   # default is the one criterion that is not.
@@ -438,8 +467,12 @@ test_that("summary() reports only the criteria a profile can score", {
   expect_error(summary(geo, criteria = factor("elbow")), "character vector")
   expect_error(summary(geo, criteria = c("elbow", "elbow")), "repeats")
 
+  vm  <- data.frame(model = c("Nug", "Exp"), psill = c(0.5, 1), range = c(0, 50),
+                    stringsAsFactors = FALSE)
+  sac <- structure(150, class = c("sac_range", "numeric"), variogram_model = vm,
+                   crs = sf::st_crs(pts))
   prof <- suppressWarnings(suppressMessages(
-    resolution_profile(rp_field(n = 250), response_var = "z", n_levels = 8)))
+    resolution_profile(pts, response_var = "z", sac = sac, n_levels = 8)))
   expect_identical(summary(prof, criteria = c("elbow", "cp"))$criterion,
                    c("elbow", "cp"))
   expect_output(print(summary(prof)), "^Resolution picks: ")
@@ -567,7 +600,10 @@ test_that("a band is read as a set everywhere it is reported", {
                        levels = unique(round(exp(seq(log(4), log(60),
                                                      length.out = 12)))))))
   expect_true(max(wide$levels) / min(wide$levels) > 8)
-  for (cn in c("cp", "reliability", "elbow", "moran_z")) {
+  # Every criterion the profile scored.  The fixture's locations are uniform,
+  # so its WSS curve has no elbow and `elbow` is NA throughout.
+  for (cn in Filter(function(cn) any(is.finite(wide[[cn]])),
+                    c("cp", "reliability", "elbow", "moran_z"))) {
     w <- drawn(wide, cn)
     sw <- select_resolution(wide, cn)
     expect_identical(nrow(w$rects),

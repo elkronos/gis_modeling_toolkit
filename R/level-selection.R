@@ -14,6 +14,49 @@
 }
 
 
+#' How far a WSS curve sags below a power law, and whether that is an elbow
+#'
+#' Points with no cluster structure have a WSS close to \eqn{c/k}: each of
+#' \eqn{k} cells covers about \eqn{1/k} of the extent, and a cell's mean
+#' squared distance to its centre scales with its area.  On linear axes that
+#' curve is convex everywhere, and the classical chord rule lands where
+#' \eqn{c/k} sags furthest below its own chord, \eqn{k = \sqrt{k_{min}
+#' k_{max}}}: the ladder chooses, whatever the data.  On log-log axes
+#' \eqn{c/k} is a straight line, and so is any power law.  The sag is
+#' therefore measured there: \eqn{\log} WSS against \eqn{\log k}, as the
+#' vertical distance below the straight line joining the first and last
+#' \eqn{k}, in natural-log units (0.22 means the WSS is a fifth below the
+#' power law through the ends).  Separated clusters fall faster than a power
+#' law until there is one cell per cluster and like \eqn{c/k} after, which is
+#' a bend at the cluster count.
+#'
+#' \code{.ELBOW_MIN_SAG} is the least sag reported as an elbow:
+#' \eqn{\log 1.25 \approx 0.22}.  Measured with 25 k-means++ restarts, 60 to
+#' 1500 points and ladders to 3--40: uniform layouts over squares, discs,
+#' triangles, a 1.5:1 rectangle, an L-shape, density gradients, jittered
+#' lattices and Gaussian blobs sagged at most 0.16; two to ten separated
+#' clusters at least 0.6 once the ladder passed the cluster count; four
+#' touching clusters 0.12--0.7, so a bend that weak can go unreported on a
+#' small sample.  An elongated extent also bends, at about its aspect ratio,
+#' because the first cuts go across its long axis (0.1--0.2 for a 2:1
+#' rectangle, 0.2--0.45 for 4:1, 0.19 for the county centroids of North
+#' Carolina): that is its shape, not clusters, and past the threshold it is
+#' reported as an elbow.
+#' @param k,wss Level counts (increasing, positive) and their WSS.
+#' @return The sag at each \code{k}; \code{NA} throughout when fewer than
+#'   three levels or a non-positive WSS leave no line to measure against.
+#' @keywords internal
+#' @noRd
+.ELBOW_MIN_SAG <- log(1.25)
+.elbow_sag <- function(k, wss) {
+  m <- length(k)
+  y <- suppressWarnings(log(as.numeric(wss)))
+  if (m < 3L || !all(is.finite(y))) return(rep(NA_real_, m))
+  x <- log(as.numeric(k))
+  y[1L] + (y[m] - y[1L]) * (x - x[1L]) / (x[m] - x[1L]) - y
+}
+
+
 #' Select an elbow (knee) from a WSS curve
 #'
 #' Heuristically selects the "elbow" from a vector of within-cluster sum of
@@ -29,11 +72,19 @@
 #' 300, 100, 60, 50, 45, 42, 40, 39, 38, 37, 36, 35, 34, 33 this rule answers
 #' k = 8 where Kneedle answers k = 2).
 #'
+#' The chord is drawn on log-log axes (see \code{.elbow_sag()}), where a
+#' curve with no cluster structure is straight.  When the sag there does not
+#' reach \code{.ELBOW_MIN_SAG} the curve has no elbow: \code{structured} is
+#' \code{FALSE} and \code{knee_k} is the linear-axis chord rule's answer,
+#' which on such a curve is set by \code{min_k} and \code{max_k}, not by the
+#' data.  The caller says so.
+#'
 #' @param wss Numeric vector of WSS indexed by k.
 #' @param max_k Integer upper bound on k.
 #' @param min_k Integer lower bound on k.
 #' @param return_neighbors Logical; return neighboring k values.
-#' @return A list with knee_k, candidates, diagnostics.
+#' @return A list with knee_k, candidates, structured (whether the curve has
+#'   an elbow) and diagnostics (with the log-log \code{sag} at each k).
 #' @keywords internal
 #' @noRd
 .elbow_from_wss <- function(wss, max_k = length(wss), min_k = 1L,
@@ -62,8 +113,9 @@
   if (length(wss_k) < 3L) {
     knee_k <- floor((min_k + max_k) / 2)
     return(list(
-      knee_k = knee_k, candidates = .make_candidates(knee_k),
-      diagnostics = list(wss = wss_k, d1 = diff(wss_k), d2 = numeric(0))
+      knee_k = knee_k, candidates = .make_candidates(knee_k), structured = FALSE,
+      diagnostics = list(wss = wss_k, d1 = diff(wss_k), d2 = numeric(0),
+                         sag = rep(NA_real_, length(wss_k)))
     ))
   }
   
@@ -88,12 +140,22 @@
     perp_dist <- .below_chord(k_norm, wss_norm, x1, y1, x2, y2, line_len)
     knee_k <- k_idx[which.max(perp_dist)]
   }
+  # The same rule on log-log axes decides.  On linear axes a curve with no
+  # cluster structure, WSS ~ c / k, still has a point furthest below its
+  # chord, near sqrt(min_k * max_k), and that is what used to be returned as
+  # the elbow: 4 at the default max_levels = 12, 13 at 160, on any uniform
+  # layer.  On log-log axes that curve is straight (see .elbow_sag()).  The
+  # linear answer is kept only as the fallback, flagged, when there is no
+  # bend there.
+  sag <- .elbow_sag(k_idx, wss_k)
+  structured <- any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG
+  if (structured) knee_k <- k_idx[which.max(sag)]
 
   d1 <- diff(wss_k)
   d2 <- diff(d1)
 
-  list(knee_k = knee_k, candidates = .make_candidates(knee_k),
-       diagnostics = list(wss = wss_k, d1 = d1, d2 = d2))
+  list(knee_k = knee_k, candidates = .make_candidates(knee_k), structured = structured,
+       diagnostics = list(wss = wss_k, d1 = d1, d2 = d2, sag = sag))
 }
 
 
@@ -319,6 +381,28 @@
 #' Computes a WSS curve over k=1..K_max using k-means on projected feature
 #' coordinates and selects candidate k values around the elbow.
 #'
+#' \strong{The elbow is read on log-log axes, and there may be none.}  Points
+#' with no cluster structure have a WSS curve close to \eqn{c/k}, and the
+#' classical rule, the point furthest below the chord from the first to the
+#' last k, still finds a "knee" on it on linear axes, at about
+#' \eqn{\sqrt{K_{max}}}: 4 at the default \code{max_levels = 12} and 13 at
+#' 160, whatever the data.  On \eqn{\log k} against \eqn{\log} WSS that curve
+#' is a straight line, while separated clusters fall faster than it until
+#' there is one cell per cluster and like it after, a bend at the cluster
+#' count.  The elbow is therefore the k whose \eqn{\log} WSS sags furthest
+#' below the straight line joining k = 1 and \eqn{K_{max}} on those axes, and
+#' it counts as one only when the sag is at least \eqn{\log 1.25} (the WSS a
+#' fifth below the power law through the ends).  Measured on 60 to 1500
+#' points with ladders to 3--40, uniform layouts over squares, discs,
+#' triangles, an L-shape, density gradients and jittered lattices sagged at
+#' most 0.16, and two to ten separated clusters at least 0.6 once
+#' \code{max_levels} passed the cluster count.  With no elbow the function
+#' warns and returns the linear-axis answer, which the ladder chose, not the
+#' data.  An elongated extent also bends, at about its aspect ratio, because
+#' the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
+#' past the threshold that bend is reported as an elbow, and it describes
+#' the extent's shape rather than clusters in it.
+#'
 #' When \code{response_var} and \code{predictor_vars} are provided, the
 #' geometric WSS elbow is supplemented with Moran's I computed on OLS
 #' residuals at each candidate k.  The Moran's I profile measures how much
@@ -417,10 +501,11 @@
 #'   \code{"geometric"} to \code{"combined"}: the selection then depends on
 #'   the response (see "Post-selection inference").
 #' @param select_on \code{"all"} (default) selects on every point;
-#'   \code{"split"} selects on one spatially blocked half of the points and
-#'   returns the other half as the set to estimate on, so that the standard
-#'   errors computed downstream on the chosen cells are not post-selection.
-#'   See "Post-selection inference".
+#'   \code{"split"} reads the response on one spatially blocked half of the
+#'   points only and returns the other half as the set to estimate on, so
+#'   that the standard errors computed downstream on the chosen cells are not
+#'   post-selection.  The count is still chosen for the whole layer.  See
+#'   "Post-selection inference".
 #' @section Post-selection inference:
 #' When the selection reads the response (here, whenever both
 #' \code{response_var} and \code{predictor_vars} are supplied), everything
@@ -436,12 +521,17 @@
 #'
 #' \code{select_on = "split"} is sample splitting: the layer is cut into two
 #' spatially blocked halves (\code{\link{make_folds}(k = 2, method =
-#' "block_kfold")}), the selection runs on the first half only, and the row
-#' positions of both halves come back in the \code{"split"} attribute
-#' (\code{selection} and \code{estimation}).  Build the tessellation on
+#' "block_kfold")}), the criteria that read the response (Moran's I on the
+#' cell means) read the first half only, and the row positions of both
+#' halves come back in the \code{"split"} attribute (\code{selection} and
+#' \code{estimation}).  The WSS curve and the k-means cells still use every
+#' point: they read coordinates alone, and the count is for a tessellation
+#' of every point, so it is chosen on that layer's extent and clusters
+#' rather than on half of them.  Build the tessellation on
 #' every point (cells are geometry), but aggregate and fit on
-#' \code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
-#' saw; that restores nominal coverage with no new theory.  The price is
+#' \code{data_sf[attr(x, "split")$estimation, ]}, whose response the
+#' selection never saw; that restores nominal coverage with no new theory.
+#' The price is
 #' precision: half the points estimate, and García Rasines and Young (2023)
 #' show a \emph{contiguous} spatial half is less efficient than the
 #' exchangeable split the i.i.d. theory assumes, because the two halves are
@@ -454,7 +544,9 @@
 #' attribute.
 #' @return An integer vector of candidate level counts, \strong{best first}:
 #'   under the geometric criterion the elbow, then its lower and upper
-#'   neighbours; under the model-aware criteria the candidates in rank order.
+#'   neighbours (with a warning when the WSS curve has no elbow and the first
+#'   is the ladder's choice; see Details); under the model-aware criteria the
+#'   candidates in rank order.
 #'   \code{k[1]} is therefore the top-ranked count on every path, and
 #'   \code{top_n = 1} returns it alone. When
 #'   \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
@@ -566,18 +658,21 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   }
   data_sf <- ensure_projected(data_sf)
 
-  # Sample splitting: select on one spatial half, hand the other back for
-  # estimation.  Done on the full layer, before the subsample, so the
-  # positions returned index `data_sf` as the caller passed it.
+  # Sample splitting: read the response on one spatial half, hand the other
+  # back for estimation.  Done on the full layer, before the subsample, so
+  # the positions returned index `data_sf` as the caller passed it.
   split <- NULL
   if (identical(select_on, "split")) {
     split <- .spatial_half_split(data_sf, seed = set_seed,
                                  caller = "determine_optimal_levels")
     # The split exists so that a selection made on the response can be
-    # estimated on points it never saw.  A geometric selection reads no
-    # response, so there is nothing for the other half to protect; it sees
-    # every point, as the page says, and only the attribute is added.
-    if (has_model_vars) data_sf <- data_sf[split$selection, , drop = FALSE]
+    # estimated on points it never saw, so only the Moran's I pass, which
+    # reads the response, is held to the selection half (`moran_rows` below).
+    # The WSS sweep and the k-means partitions read coordinates alone and
+    # keep every point: the count is for a tessellation of every point.  The
+    # whole selection used to run on the half, and a count chosen for the
+    # half's extent and clusters (2 where the layer has 4) was then applied
+    # to the whole layer.
   }
   .with_split <- function(out) {
     if (!is.null(split)) attr(out, "split") <- split
@@ -635,9 +730,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     storage.mode(pred_mat) <- "double"
   }
 
+  # The rows whose response the model-aware criteria may read.
+  moran_rows <- if (!is.null(split) && has_model_vars) seq_len(n) %in% split$selection
+                else rep(TRUE, n)
+
   if (n > sample_n) {
     idx <- sample(seq_len(n), sample_n)
     xy <- xy[idx, , drop = FALSE]
+    moran_rows <- moran_rows[idx]
     if (has_model_vars) {
       resp_vec <- resp_vec[idx]
       pred_mat <- pred_mat[idx, , drop = FALSE]
@@ -708,6 +808,20 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   }
 
   elbow <- .elbow_from_wss(wss, max_k = k_max, min_k = 1L, return_neighbors = TRUE)
+  # No bend on log-log axes: the points have no cluster structure the
+  # ladder can see, and the chord rule's answer is set by max_levels.  It is
+  # still returned, because a count is what this function is for, but not
+  # silently: it used to be handed on as if the data had chosen it.
+  if (!isTRUE(elbow$structured))
+    .warn_and_log(paste0("determine_optimal_levels(): the WSS curve has no elbow: on ",
+                         "log-log axes it falls in a straight line, as it does for ",
+                         "points with no cluster structure. k = %d is where the chord ",
+                         "rule lands on such a curve, set by the ladder (k = 1 to %d, ",
+                         "max_levels) rather than by the data%s. Choose the count on ",
+                         "other grounds, e.g. resolution_profile() with a response."),
+                  elbow$knee_k, k_max,
+                  if (criterion == "geometric") ""
+                  else "; the model-aware criteria are evaluated around it")
 
   # A WSS curve that rises anywhere is one where some k landed in a worse
   # optimum than its neighbour, and the elbow read from it is partly noise.
@@ -760,7 +874,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     if (is.null(kb)) next
     km <- kb$km
     wss_eval[k]   <- km$tot.withinss
-    mi            <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
+    # Cells of the whole layer, means of the rows the selection may read.
+    mi            <- .morans_i_for_k(xy[moran_rows, , drop = FALSE], resp_vec[moran_rows],
+                                     pred_mat[moran_rows, , drop = FALSE],
+                                     km$cluster[moran_rows])
     moran_vals[k] <- mi[["I"]]
     moran_z[k]    <- mi[["z"]]
   }

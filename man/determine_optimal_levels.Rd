@@ -52,15 +52,18 @@ both \code{response_var} and \code{predictor_vars} upgrades
 the response (see "Post-selection inference").}
 
 \item{select_on}{\code{"all"} (default) selects on every point;
-\code{"split"} selects on one spatially blocked half of the points and
-returns the other half as the set to estimate on, so that the standard
-errors computed downstream on the chosen cells are not post-selection.
-See "Post-selection inference".}
+\code{"split"} reads the response on one spatially blocked half of the
+points only and returns the other half as the set to estimate on, so
+that the standard errors computed downstream on the chosen cells are not
+post-selection.  The count is still chosen for the whole layer.  See
+"Post-selection inference".}
 }
 \value{
 An integer vector of candidate level counts, \strong{best first}:
 under the geometric criterion the elbow, then its lower and upper
-neighbours; under the model-aware criteria the candidates in rank order.
+neighbours (with a warning when the WSS curve has no elbow and the first
+is the ladder's choice; see Details); under the model-aware criteria the
+candidates in rank order.
 \code{k[1]} is therefore the top-ranked count on every path, and
 \code{top_n = 1} returns it alone. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
@@ -93,6 +96,28 @@ Computes a WSS curve over k=1..K_max using k-means on projected feature
 coordinates and selects candidate k values around the elbow.
 }
 \details{
+\strong{The elbow is read on log-log axes, and there may be none.}  Points
+with no cluster structure have a WSS curve close to \eqn{c/k}, and the
+classical rule, the point furthest below the chord from the first to the
+last k, still finds a "knee" on it on linear axes, at about
+\eqn{\sqrt{K_{max}}}: 4 at the default \code{max_levels = 12} and 13 at
+160, whatever the data.  On \eqn{\log k} against \eqn{\log} WSS that curve
+is a straight line, while separated clusters fall faster than it until
+there is one cell per cluster and like it after, a bend at the cluster
+count.  The elbow is therefore the k whose \eqn{\log} WSS sags furthest
+below the straight line joining k = 1 and \eqn{K_{max}} on those axes, and
+it counts as one only when the sag is at least \eqn{\log 1.25} (the WSS a
+fifth below the power law through the ends).  Measured on 60 to 1500
+points with ladders to 3--40, uniform layouts over squares, discs,
+triangles, an L-shape, density gradients and jittered lattices sagged at
+most 0.16, and two to ten separated clusters at least 0.6 once
+\code{max_levels} passed the cluster count.  With no elbow the function
+warns and returns the linear-axis answer, which the ladder chose, not the
+data.  An elongated extent also bends, at about its aspect ratio, because
+the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
+past the threshold that bend is reported as an elbow, and it describes
+the extent's shape rather than clusters in it.
+
 When \code{response_var} and \code{predictor_vars} are provided, the
 geometric WSS elbow is supplemented with Moran's I computed on OLS
 residuals at each candidate k.  The Moran's I profile measures how much
@@ -180,12 +205,17 @@ downstream standard errors are computed over.
 
 \code{select_on = "split"} is sample splitting: the layer is cut into two
 spatially blocked halves (\code{\link{make_folds}(k = 2, method =
-"block_kfold")}), the selection runs on the first half only, and the row
-positions of both halves come back in the \code{"split"} attribute
-(\code{selection} and \code{estimation}).  Build the tessellation on
+"block_kfold")}), the criteria that read the response (Moran's I on the
+cell means) read the first half only, and the row positions of both
+halves come back in the \code{"split"} attribute (\code{selection} and
+\code{estimation}).  The WSS curve and the k-means cells still use every
+point: they read coordinates alone, and the count is for a tessellation
+of every point, so it is chosen on that layer's extent and clusters
+rather than on half of them.  Build the tessellation on
 every point (cells are geometry), but aggregate and fit on
-\code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
-saw; that restores nominal coverage with no new theory.  The price is
+\code{data_sf[attr(x, "split")$estimation, ]}, whose response the
+selection never saw; that restores nominal coverage with no new theory.
+The price is
 precision: half the points estimate, and García Rasines and Young (2023)
 show a \emph{contiguous} spatial half is less efficient than the
 exchangeable split the i.i.d. theory assumes, because the two halves are
