@@ -338,8 +338,13 @@
       # caller did not ask for.
       .warn_and_log(paste0("gwr_model_selection(): an adaptive bandwidth of ",
                            "%d neighbours is too small for the full ",
-                           "%d-predictor model with the %s kernel; using %d."),
-                    bw, n_cand, kernel, min_bw)
+                           "%d-predictor model with the %s kernel; using %d.%s"),
+                    bw, n_cand, kernel, min_bw,
+                    if (kernel %in% c("bisquare", "tricube"))
+                      paste0(" That is enough unless several neighbours tie ",
+                             "at the kernel's edge (a regular grid), which ",
+                             "gives them weight 0 too; then use a larger ",
+                             "bandwidth.") else "")
       bw <- min_bw
     }
     # Capped at n, and said: a supplied count above n is most often a
@@ -364,6 +369,12 @@
       bw <- as.integer(n_obs)
     }
   }
+
+  # A supplied fixed bandwidth in the wrong units (degrees read as metres)
+  # empties every window, and the sweep then died on GWmodel's bare "inv():
+  # matrix is singular"; fit_gwr_model() says what is wrong, and so does this.
+  if (!isTRUE(adaptive) && identical(bandwidth_source, "supplied"))
+    .gwr_warn_tiny_fixed_bw(dat, bw, "gwr_model_selection")
 
   # A FIXED bandwidth needs the distance matrix.  Without one,
   # gwr.model.selection() sets dMat <- matrix(0, 0, 0) and then asserts
@@ -401,9 +412,12 @@
   if (!is.null(dMat)) ms_args$dMat <- dMat
   res <- tryCatch(
     .gwr_quietly(do.call(GWmodel::gwr.model.selection, ms_args), quiet),
-    error = function(e)
-      stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s",
-                   conditionMessage(e)), call. = FALSE)
+    error = function(e) {
+      msg <- conditionMessage(e)
+      stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s%s",
+                   msg, if (grepl("singular", msg, fixed = TRUE))
+                     .gwr_singular_hint() else ""), call. = FALSE)
+    }
   )
 
   if (!is.list(res) || length(res) < 2L)
@@ -477,10 +491,16 @@
 #'   \code{adaptive = TRUE}; otherwise a distance in the units of the
 #'   **projected** CRS the sweep runs in, which \code{prep_model_data()} may
 #'   have chosen for you.  Geographic input is projected before the bandwidth
-#'   is used, so a value in degrees would be read as metres.  An adaptive
+#'   is used, so a value in degrees would be read as metres; a fixed
+#'   bandwidth below a ten-thousandth of the data's extent raises a warning
+#'   saying so, as in \code{\link{fit_gwr_model}()}.  An adaptive
 #'   count too small for the full model is raised, with a warning, to the
 #'   number of candidates plus 3 for the bisquare and tricube kernels (which
 #'   give the farthest neighbour in a window weight 0), plus 2 for the others.
+#'   That floor is enough unless several neighbours tie at the kernel's edge
+#'   (a regular grid), which leaves a window fewer weighted points; then use
+#'   a larger bandwidth.  An adaptive count below 1 or above R's largest
+#'   integer is refused, as in \code{\link{fit_gwr_model}()}.
 #'   One above the number of observations is capped at it, with a warning;
 #'   below 20 observations that includes \code{bw.gwr()}'s choice, since its
 #'   adaptive search starts at 20 neighbours.
@@ -610,6 +630,16 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                  else
                    "a distance in the CRS units of `data_sf`"),
          call. = FALSE)
+  # The same range check fit_gwr_model() applies to an adaptive count.
+  # Without it a count above .Machine$integer.max (a distance passed with
+  # adaptive left at TRUE) became NA in the engine's as.integer() and the
+  # clamp stopped with a bare "missing value where TRUE/FALSE needed", and a
+  # count below 1 was rounded to "0 neighbours" and raised, where
+  # fit_gwr_model() refuses it.
+  if (!is.null(bandwidth) && isTRUE(adaptive))
+    .check_scalar(bandwidth, "bandwidth", "gwr_model_selection", min = 1,
+                  max = .Machine$integer.max,
+                  what = "a single number of nearest neighbours when adaptive = TRUE")
 
   candidate_vars <- unique(as.character(candidate_vars))
   missing_v <- setdiff(c(response_var, candidate_vars), names(data_sf))
@@ -678,16 +708,26 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
     undef <- !is.na(crit$values) & .gwr_aicc_undefined(aic, crit$values)
     if (any(undef)) {
       crit$values[undef] <- NA_real_
+      # No larger adaptive bandwidth exists once it is every observation.
+      at_n <- isTRUE(adaptive) &&
+        isTRUE(suppressWarnings(as.numeric(eng$bandwidth)) >= nrow(dat))
       .warn_and_log(paste0("gwr_model_selection(): AICc is undefined for %d ",
                            "of %d model(s) at bandwidth %s and they are ranked ",
                            "last: their effective number of parameters tr(S) ",
                            "is not below n - 2 = %d, so their local fits ",
                            "(nearly) interpolate the data. GWmodel chose its ",
                            "forward steps on the same values, so the sweep ",
-                           "past them may not follow the best path. Use a ",
-                           "larger bandwidth."),
+                           "past them may not follow the best path. %s"),
                     sum(undef), length(undef), format(eng$bandwidth),
-                    nrow(dat) - 2L)
+                    nrow(dat) - 2L,
+                    if (at_n)
+                      sprintf(paste0("Even the widest adaptive window (all %d ",
+                                     "observations) leaves too few residual ",
+                                     "degrees of freedom for them: use fewer ",
+                                     "candidates, more observations, or a ",
+                                     "gaussian or exponential kernel."),
+                              nrow(dat))
+                    else "Use a larger bandwidth.")
     }
   }
   tab     <- .gwr_ms_table(varsets, crit$values, minimise = TRUE)
