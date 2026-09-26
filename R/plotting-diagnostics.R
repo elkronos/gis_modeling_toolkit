@@ -559,14 +559,15 @@ plot_calibration <- function(cv, ...) {
 #'   library(sf)
 #'   # The same field as ?resolution_profile: an exponential covariance with
 #'   # range parameter 200 and a nugget of 0.6 on a unit sill.
-#'   set.seed(2)
+#'   set.seed(4)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
 #'   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) %*% rnorm(n))
 #'   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 #'   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
-#'   print(plot(prof))                     # all four criteria, one panel each
+#'   print(plot(prof))                     # one panel per criterion it scored: no
+#'                                         # elbow on these uniform points
 #'   plot(prof, criteria = c("cp", "wss")) # Cp beside the raw WSS curve
 #' }
 #' @export

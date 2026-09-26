@@ -29,8 +29,11 @@ if (!skip_without("ggplot2", "the variogram")) {
 
 step("02.2", "Candidate cell counts, cheapest first")
 # determine_optimal_levels() only looks at geometry: it clusters the points and
-# reports the level counts where the within-cluster spread stops improving.
-# Seconds, not minutes, and it is the right first move.
+# reads the elbow of the within-cluster spread on log-log axes. Seconds, not
+# minutes. These points are spread evenly, so there is no elbow to read, and
+# the call warns that the count it still returns was set by max_levels rather
+# than by the data. That warning is the finding: here the count has to come
+# from the profile in 02.3.
 lv <- determine_optimal_levels(pts, max_levels = 40)
 cat("  geometric candidates:", paste(lv, collapse = ", "), "\n")
 
@@ -57,10 +60,13 @@ for (cr in c("cp", "reliability", "elbow", "moran_z")) {
     cat(sprintf("  %-12s not available on this profile\n", cr))
     next
   }
-  # `at_floor` / `at_ceiling` mean the optimum is the end of the ladder, so the
-  # ladder chose and the criterion did not. Widen n_levels and run it again.
-  edge <- if (isTRUE(s$at_floor)) "  <- at the floor of the ladder"
-          else if (isTRUE(s$at_ceiling)) "  <- at the ceiling of the ladder" else ""
+  # `edge` names the bound an optimum sits on: the range floor, the support
+  # ceiling, or the first level the criterion can be computed at (above nine
+  # cells for moran_z). There the bound chose and the criterion did not.
+  # n_levels only sets how many rungs fall between the ends, so it cannot move
+  # them: lower min_cell_n to move the ceiling, or set range_floor = FALSE (or
+  # pass `levels`) to move the floor, and run it again.
+  edge <- if (!is.na(s$edge)) paste0("  <- at ", s$edge) else ""
   # The flat region is a SET: it can skip a rung, so printing its first two
   # members as "a to b" both truncated it and implied the levels between were
   # in it.  Name the others, or count them when there are too many to read.
@@ -75,8 +81,9 @@ cat("  Pick one before you look, and say which one you picked.\n")
 
 if (!skip_without("ggplot2", "the profile plot")) {
   look_for("where the curves stop moving. A criterion whose optimum sits at ",
-           "the first or last level of the ladder did not choose: the ladder ",
-           "did. Widen n_levels and run it again.")
+           "the first or last level it was scored at did not choose: the bound ",
+           "did, and the caption says which. Lower min_cell_n to move the ",
+           "ceiling, or set range_floor = FALSE to move the floor, and run it again.")
   show_plot(plot(prof), "02-profile.png", height = 7)
 }
 
@@ -88,22 +95,39 @@ prof_split <- resolution_profile(pts, response_var = "z", n_levels = 16,
                                  select_on = "split")
 sp <- attr(prof_split, "split")
 if (!is.null(sp)) print(sp)
-b_all   <- select_resolution(prof, "reliability")$best
-b_split <- select_resolution(prof_split, "reliability")$best
-cat(sprintf("  select_on = 'all'   -> %d cells\n", b_all))
-cat(sprintf("  select_on = 'split' -> %d cells\n", b_split))
-if (b_all == b_split) {
-  cat("  They agree, so the choice did not depend on the rows you will test on.\n")
+# Where each pick sits is computed, not assumed: a pick on the range floor
+# moves with the range, and the split estimates the range on half the points.
+s_all   <- select_resolution(prof, "reliability")
+s_split <- select_resolution(prof_split, "reliability")
+pick_line <- function(lab, s, p)
+  cat(sprintf("  select_on = %-7s -> %d cells (range floor %s)%s\n", lab, s$best,
+              format(attr(p, "bounds")$floor),
+              if (!is.na(s$edge)) paste0(", at ", s$edge) else ""))
+pick_line("'all'", s_all, prof)
+pick_line("'split'", s_split, prof_split)
+on_floor <- grepl("range floor", c(s_all$edge, s_split$edge), fixed = TRUE)
+if (s_all$best == s_split$best) {
+  cat("  They agree here.\n")
+} else if (all(on_floor)) {
+  cat("  Both picks sit on the range floor, and the floor moved because the\n",
+      "  split estimates the range on the selection half alone. The difference\n",
+      "  is that range estimate, not a sign that the choice was tuned.\n", sep = "")
 } else {
-  cat("  They disagree, so the resolution was tuned to rows you were planning\n",
-      "  to test on, and the test is no longer independent of the choice.\n",
-      sep = "")
+  cat("  They differ, partly because the split's criteria and range read half\n",
+      "  the points, so the difference alone does not measure the tuning.\n", sep = "")
 }
+cat("  What the split buys: the estimation half's response never enters the\n",
+    "  choice. What it does not: rows near the border between the halves are\n",
+    "  still correlated with the selection half, so the halves are not\n",
+    "  independent.\n", sep = "")
 
 step("02.6", "What the chosen resolution looks like")
 if (!skip_without("ggplot2", "the maps")) {
   bnd <- tour_boundary(pts)
-  chosen <- select_resolution(prof, "elbow")$best
+  # Cp, the default criterion: these evenly spread points have no elbow (see
+  # 02.2), so the elbow names no count to draw.
+  s_cp   <- select_resolution(prof, "cp")
+  chosen <- s_cp$best
   for (k in sort(unique(c(min(prof$levels), chosen, max(prof$levels))))) {
     seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = k,
                               sample_points = pts, set_seed = 1)
@@ -112,7 +136,8 @@ if (!skip_without("ggplot2", "the maps")) {
     cel   <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
                                "z", cells_sf = tess$cells, deff = 1)
     note <- if (k == chosen)
-      "the elbow pick: enough cells to show the field, few enough to fill."
+      paste0("the Cp pick", if (!is.na(s_cp$edge)) paste0(" (at ", s_cp$edge, ")") else "",
+             ": enough cells to show the field, few enough to fill.")
     else if (k == min(prof$levels))
       "the coarsest level: every cell is well filled, but there is barely a map left."
     else
