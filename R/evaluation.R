@@ -660,9 +660,13 @@
 #'   so the console shows the statistic and its null without printing the
 #'   \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 #'   \code{$}, \code{[[} and \code{unlist()} are unaffected.
+#'   A custom fit whose class has no \code{residuals()} method (which
+#'   \code{\link{new_spatial_fit}} calls optional) is scored on the
+#'   observed response minus \code{fitted()}, as \code{plot()} does for it.
 #'   Returns \code{NULL} with a warning if computation fails, saying why:
-#'   \code{residuals()} raised an error (its message is quoted) or returned
-#'   \code{NULL} (the fit's class has no method), fewer than 4 valid
+#'   \code{residuals()} raised an error (its message is quoted), or returned
+#'   \code{NULL} and the response minus \code{fitted()} could not be
+#'   formed either (the reason is quoted), fewer than 4 valid
 #'   residuals, or a residual vector whose length does not match the fit's
 #'   \code{data_sf}.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
@@ -722,6 +726,34 @@ residual_morans_i <- function(fit,
     .warn_and_log("residual_morans_i(): residuals() failed on this fit: %s",
                   conditionMessage(resid))
     return(NULL)
+  }
+  # A custom subclass without a residuals.<subclass>() method -- which
+  # ?new_spatial_fit calls optional -- gets residuals.default(), i.e.
+  # fit$residuals, i.e. NULL.  plot.spatial_fit() falls back to the observed
+  # response minus fitted() there, which is what the built-in backends'
+  # residuals are; this returned NULL instead, so compare_models() reported
+  # all-NA Moran's I columns for a fit whose residuals were strongly
+  # autocorrelated.  Only when that cannot be formed either is there nothing
+  # to test.
+  if (is.null(resid) && is.character(fit$response_var) &&
+      length(fit$response_var) == 1L && inherits(fit$data_sf, "sf")) {
+    resid <- tryCatch({
+      y <- sf::st_drop_geometry(fit$data_sf)[[fit$response_var]]
+      if (is.null(y))
+        stop(sprintf("the fit's data_sf has no column '%s'.", fit$response_var),
+             call. = FALSE)
+      as.numeric(y) -
+        as.numeric(.fitted_checked(fit, .caller = "residual_morans_i"))
+    }, error = function(e) e)
+    if (inherits(resid, "error")) {
+      .warn_and_log(paste0("residual_morans_i(): residuals() returned NULL for ",
+                           "a fit of class %s, which has no residuals() method, ",
+                           "and the observed response minus fitted() could not ",
+                           "be formed either: %s"),
+                    class(fit)[1L],
+                    sub("^residual_morans_i\\(\\): ", "", conditionMessage(resid)))
+      return(NULL)
+    }
   }
   if (is.null(resid)) {
     .warn_and_log(paste0("residual_morans_i(): residuals() returned NULL for a ",
@@ -1147,7 +1179,9 @@ print.morans_i <- function(x, ...) {
 #'   row's metrics were computed on, \code{"in-sample"} (fitted values),
 #'   \code{"out-of-bag"} (an \code{rf_fit}'s fitted values, see "What the
 #'   metrics are computed on") or \code{"newdata"}.  Rows with different
-#'   bases do not compare like for like.
+#'   bases do not compare like for like.  An element that is not a
+#'   \code{spatial_fit} is skipped, with a logged warning, and has no row;
+#'   a list in which no element is a \code{spatial_fit} is an error.
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1223,7 +1257,26 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
           data.frame(metric_basis = basis, stringsAsFactors = FALSE))
   })
 
-  do.call(rbind, Filter(Negate(is.null), rows))
+  # With every element skipped this returned NULL, not the documented
+  # data.frame, and said so only in the log, which spatialkit_quiet() and
+  # tryCatch(warning =) never see.
+  out <- do.call(rbind, Filter(Negate(is.null), rows))
+  if (is.null(out)) .stop_no_spatial_fit("evaluate_insample", "evaluate")
+  out
+}
+
+
+#' Refuse a list of fits in which nothing is a spatial_fit
+#'
+#' @param caller The exported function's name, for the message.
+#' @param verb What there is nothing to do ("evaluate", "compare").
+#' @keywords internal
+#' @noRd
+.stop_no_spatial_fit <- function(caller, verb) {
+  stop(sprintf(paste0("%s(): no element of `fits` is a spatial_fit, so there ",
+                      "is nothing to %s. Pass fits from fit_rf_model(), ",
+                      "fit_gwr_model(), fit_bayesian_spatial_model() or ",
+                      "new_spatial_fit()."), caller, verb), call. = FALSE)
 }
 
 
@@ -1251,7 +1304,9 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   (Bayesian) are sums over the rows a model was fitted to, so each column
 #'   is set to \code{NA}, with a warning, when the fits carrying it were
 #'   fitted to different rows (a predictor with missing values drops rows,
-#'   for example).  Alongside the metrics it carries
+#'   for example) or to different responses (a transformed response on the
+#'   same rows), and the warning says which.  Alongside the metrics it
+#'   carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 #'   \code{resid_morans_null}, the last of which names the null
 #'   \code{\link{residual_morans_i}} scored each model against, since that
@@ -1293,20 +1348,17 @@ compare_models <- function(fits, newdata = NULL, ...) {
     fits <- stats::setNames(list(fits), class(fits)[1L])
   if (!is.list(fits) || length(fits) == 0L)
     stop("compare_models(): `fits` must be a spatial_fit or a non-empty named list of them.")
+  # evaluate_insample() warns-and-skips any element that is not a spatial_fit,
+  # and when EVERY element is skipped it now stops -- in its own name.  Say it
+  # here in this function's, before the call.  (It used to return NULL, which
+  # `met_df$AICc <- NA_real_` turned into a bare list, and seq_len(nrow(NULL))
+  # aborted with "argument must be coercible to non-negative integer".)
+  if (!any(vapply(fits, inherits, logical(1), what = "spatial_fit")))
+    .stop_no_spatial_fit("compare_models", "compare")
 
   met_df <- evaluate_insample(fits, newdata = newdata, ...)
 
   # Append model-specific information criteria
-  # evaluate_insample() warns-and-skips any element that is not a spatial_fit
-  # and returns NULL when EVERY element was skipped.  `met_df$AICc <- NA_real_`
-  # then turns that NULL into a bare list, nrow() is NULL, and seq_len(NULL)
-  # aborts with "argument must be coercible to non-negative integer" -- the
-  # same failure the comment above records as fixed for the unnamed-list case.
-  if (is.null(met_df) || !is.data.frame(met_df) || nrow(met_df) == 0L)
-    stop(paste0("compare_models(): no element of `models` is a spatial_fit, ",
-                "so there is nothing to compare. Pass fits from fit_rf_model(), ",
-                "fit_gwr_model(), fit_bayesian_spatial_model() or ",
-                "new_spatial_fit()."), call. = FALSE)
   met_df$AICc  <- NA_real_
   met_df$LOOIC <- NA_real_
   met_df$bandwidth_is_fallback <- NA
@@ -1348,6 +1400,28 @@ compare_models <- function(fits, newdata = NULL, ...) {
     rs <- lapply(has, function(i) .fit_rowset(fits[[match(met_df$model[i], names(fits))]]))
     if (any(vapply(rs, is.null, logical(1)))) next
     if (all(vapply(rs[-1L], .same_rowset, logical(1), rs[[1L]]))) next
+    # The fingerprint includes the response, so two fits of the same rows with
+    # different responses (price and log(price)) fail it too.  Blanking is
+    # right there as well, but the warning said "different rows" and advised
+    # refitting on the same rows, which they already were.
+    if (all(vapply(rs[-1L], .same_rowset_xy, logical(1), rs[[1L]]))) {
+      resp <- vapply(has, function(i) {
+        rv <- fits[[match(met_df$model[i], names(fits))]]$response_var
+        if (is.character(rv) && length(rv) >= 1L) rv[1L] else NA_character_
+      }, character(1))
+      .warn_and_log(paste0(
+        "compare_models(): %s is a sum over the rows a model was fitted to, ",
+        "and the models carrying it were fitted to the same rows but to ",
+        "different responses (%s), so it is set to NA: an information ",
+        "criterion compares models of the same response only."),
+        ic,
+        if (length(unique(resp)) > 1L)
+          paste(sprintf("%s: %s", met_df$model[has], resp), collapse = ", ")
+        else sprintf("the values of '%s' differ between %s", resp[1L],
+                     paste(met_df$model[has], collapse = ", ")))
+      met_df[[ic]] <- NA_real_
+      next
+    }
     .warn_and_log(paste0(
       "compare_models(): %s is a sum over the rows a model was fitted to, and ",
       "the models carrying it were fitted to different rows (%s), so it is ",
@@ -1437,18 +1511,33 @@ compare_models <- function(fits, newdata = NULL, ...) {
 }
 
 #' Do two \code{.fit_rowset()} fingerprints describe the same rows?
+#'
+#' The same rows with the same response: \code{.same_rowset_xy()} compares
+#' the locations alone, so that a caller can tell a different response on the
+#' same rows from different rows.
 #' @keywords internal
 #' @noRd
 .same_rowset <- function(a, b) {
+  .same_rowset_xy(a, b) &&
+    .rowset_close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE))
+}
+
+#' Do two \code{.fit_rowset()} fingerprints sit at the same locations?
+#' @keywords internal
+#' @noRd
+.same_rowset_xy <- function(a, b) {
   if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
-  close <- function(u, v, tol) {
-    d <- abs(u - v)
-    all((is.na(u) & is.na(v)) | (!is.na(d) & d <= tol))
-  }
   tol_xy <- if (a$lonlat) 1e-6
             else 1e-9 * max(1, abs(c(a$x1, a$x2)), na.rm = TRUE)
-  close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE)) &&
-    close(a$x1, b$x1, tol_xy) && close(a$x2, b$x2, tol_xy)
+  .rowset_close(a$x1, b$x1, tol_xy) && .rowset_close(a$x2, b$x2, tol_xy)
+}
+
+#' Two sorted margins equal within \code{tol}, \code{NA} matching \code{NA}
+#' @keywords internal
+#' @noRd
+.rowset_close <- function(u, v, tol) {
+  d <- abs(u - v)
+  all((is.na(u) & is.na(v)) | (!is.na(d) & d <= tol))
 }
 
 
