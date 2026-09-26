@@ -1372,9 +1372,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   numeric vector, applied per fold and to each backend's pooled
 #'   predictions, whose names become columns of \code{by_fold} and
 #'   \code{overall} beside the built-in ones.  See \strong{Your own metrics}
-#'   on \code{\link{cv_spatial}()} for the contract.  Because the three
-#'   backends are scored on the same folds, the columns are comparable across
-#'   rows of \code{overall}.
+#'   on \code{\link{cv_spatial}()} for the contract.  Because the backends
+#'   are scored on the same folds and, in \code{overall}, on the same rows
+#'   (see Value), the columns are comparable across rows of \code{overall}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @section Coverage and CRPS in the overall table:
@@ -1394,9 +1394,21 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' overconfident, well above it is wider than it needs to be.
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
-#'   \code{overall} has one row per model with the pooled metrics, the
+#'   \code{overall} has one row per model with the pooled metrics,
+#'   \code{n_pred} (the rows they are computed on), the
 #'   coverage and CRPS columns described above when a Bayesian model ran, and
 #'   \code{model} as its last column.
+#'   Shared folds do not guarantee shared rows: a model that fails on a fold
+#'   (GWR with a fixed bandwidth across a gap in the data, say) or predicts
+#'   \code{NA} for some rows pools fewer rows, usually without the hardest
+#'   ones.  When the models predicted different rows, the function warns and
+#'   recomputes every model's pooled metrics, your own \code{metrics}
+#'   included, on the rows all of them predicted, so \code{n_pred} is the same
+#'   on every row that has predictions; a model that predicted nothing stays
+#'   an \code{NA} row.  Each model's metrics over all the rows it predicted
+#'   stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
+#'   a table of the same shape.  \code{by_fold} and the Bayesian coverage and
+#'   CRPS columns are per fold and are not recomputed.
 #'   Only the models that actually ran appear, so check which names are
 #'   present; there is not always one entry per requested model, because a
 #'   backend whose package is missing is dropped with a message.  When \strong{no} requested backend
@@ -1523,7 +1535,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(gwr_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     ov$model <- "GWR"
     comparison_rows[["GWR"]] <- ov
     bf <- try(as.data.frame(gwr_cv$fold_metrics), silent = TRUE)
@@ -1544,7 +1556,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(bayes_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     # The calibration of the one backend that has any: coverage at each level
     # and mean CRPS, already pooled across folds by cv_bayes().  bind_rows()
     # below leaves them NA on the point-prediction rows.
@@ -1577,7 +1589,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(rf_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     ov$model <- "RF"
     comparison_rows[["RF"]] <- ov
     bf <- try(as.data.frame(rf_cv$fold_metrics), silent = TRUE)
@@ -1586,10 +1598,53 @@ compare_models_cv <- function(
     }
   }
 
-  overall <- as.data.frame(dplyr::bind_rows(comparison_rows))
   # `model` last whatever order the backends ran in: a Bayesian row that came
   # after a GWR row would otherwise put its coverage columns after `model`.
-  overall <- overall[, c(setdiff(names(overall), "model"), "model"), drop = FALSE]
+  as_table <- function(rows) {
+    tab <- as.data.frame(dplyr::bind_rows(rows))
+    tab[, c(setdiff(names(tab), "model"), "model"), drop = FALSE]
+  }
+
+  # Shared folds are not shared rows.  Each backend's `overall` pools the rows
+  # IT predicted, and a backend that loses a fold -- GWR with a fixed
+  # bandwidth across a gap in the data, a factor level one block holds alone
+  # -- loses the hardest rows, the extrapolation block, and looks better for
+  # it: GWR RMSE 1.82 on 158 rows against RF 1.95 on 200, where RF scores 0.99
+  # on the same 158.  When the row sets differ, every backend that predicted
+  # anything is re-scored on the rows all of them predicted (an all-failed
+  # backend stays an NA row), and the table as each reported it is kept.
+  ids <- lapply(cv_results, function(r) {
+    pr <- r$predictions
+    if (!is.data.frame(pr) || !nrow(pr)) return(NULL)
+    pr$`..row_id`[is.finite(pr$y) & is.finite(pr$yhat)]
+  })
+  ids <- ids[lengths(ids) > 0L]
+  all_rows <- NULL
+  if (length(ids) >= 2L) {
+    common <- Reduce(intersect, ids)
+    if (!all(vapply(ids, setequal, logical(1), common))) {
+      lab <- c(gwr_cv = "GWR", bayes_cv = "Bayesian", rf_cv = "RF")[names(ids)]
+      all_rows <- as_table(comparison_rows)
+      .warn_and_log(paste0(
+        "compare_models_cv(): the models predicted different rows (%s), so ",
+        "`overall` scores each of them on the %d rows they all predicted: the ",
+        "rows a model fails on are usually the hardest, and leaving them out ",
+        "flatters it. Each model's own pooled metrics are in ",
+        "attr(overall, \"all_rows\") and its *_cv element; `by_fold` and the ",
+        "Bayesian coverage and CRPS columns are not re-scored."),
+        paste(sprintf("%s %d", lab, lengths(ids)), collapse = ", "),
+        length(common))
+      for (nm in names(ids)) {
+        pr <- cv_results[[nm]]$predictions
+        re <- .cv_overall_metrics(pr[pr$`..row_id` %in% common, , drop = FALSE],
+                                  metrics)
+        for (cn in names(re)) comparison_rows[[lab[[nm]]]][[cn]] <- re[[cn]]
+      }
+    }
+  }
+
+  overall <- as_table(comparison_rows)
+  if (!is.null(all_rows)) attr(overall, "all_rows") <- all_rows
   c(list(overall = overall,
          by_fold = dplyr::bind_rows(by_fold_rows)),
     cv_results)

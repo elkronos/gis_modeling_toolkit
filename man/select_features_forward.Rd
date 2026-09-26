@@ -97,10 +97,20 @@ A list of class \code{"feature_selection"} (so that
 final step: the \strong{selection-internal} optimum, optimistically
 biased because it was chosen as the best of many (see the section above),
 and \code{NA} when nothing was selected.  \code{history} is a data.frame
-with \code{step}, \code{variable} and \code{score}, holding every
-candidate evaluated at every step; when the null model could be scored it
-also carries a \code{step = 0} row named \code{"<none>"} giving that
-baseline, so the first variable's gain can be read off directly.
+with \code{step}, \code{variable}, \code{score} and \code{n_pred},
+holding every candidate evaluated at every step; when the null model
+could be scored it also carries a \code{step = 0} row named
+\code{"<none>"} giving that baseline, so the first variable's gain can be
+read off directly.  Every set is scored on the same rows: those the null
+model's cross-validation predicted or, when there is no null model,
+those any step-1 set predicted; \code{params$n_scored} counts them (a
+warning says so when that is fewer than all).  \code{n_pred} is how many
+rows the set's cross-validation predicted.  A set that left some of the
+scored rows unpredicted, because a fold failed for it, has \code{score}
+\code{NA}, with a warning naming it: scored on the rows it did predict
+it would be compared on fewer, usually easier, rows than its rivals.  A
+factor with a level found in one spatial block only is the usual case,
+and cannot be selected.
 \code{score_holdout} is \code{NA} unless \code{select_on = "split"}, and
 then the selected set's \code{metric} when fitted on the selection half
 and predicted on the estimation half (\eqn{R^2} against the selection
@@ -110,7 +120,7 @@ list with \code{selection} and \code{estimation}, integer row positions
 in \code{train_sf} after the completeness filter above.
 \code{params} records \code{metric}, \code{method}, \code{k},
 \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
-\code{n_candidates} and \code{estimated_fits}.
+\code{n_candidates}, \code{estimated_fits} and \code{n_scored}.
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a

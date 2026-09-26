@@ -100,10 +100,20 @@
 #'   final step: the \strong{selection-internal} optimum, optimistically
 #'   biased because it was chosen as the best of many (see the section above),
 #'   and \code{NA} when nothing was selected.  \code{history} is a data.frame
-#'   with \code{step}, \code{variable} and \code{score}, holding every
-#'   candidate evaluated at every step; when the null model could be scored it
-#'   also carries a \code{step = 0} row named \code{"<none>"} giving that
-#'   baseline, so the first variable's gain can be read off directly.
+#'   with \code{step}, \code{variable}, \code{score} and \code{n_pred},
+#'   holding every candidate evaluated at every step; when the null model
+#'   could be scored it also carries a \code{step = 0} row named
+#'   \code{"<none>"} giving that baseline, so the first variable's gain can be
+#'   read off directly.  Every set is scored on the same rows: those the null
+#'   model's cross-validation predicted or, when there is no null model,
+#'   those any step-1 set predicted; \code{params$n_scored} counts them (a
+#'   warning says so when that is fewer than all).  \code{n_pred} is how many
+#'   rows the set's cross-validation predicted.  A set that left some of the
+#'   scored rows unpredicted, because a fold failed for it, has \code{score}
+#'   \code{NA}, with a warning naming it: scored on the rows it did predict
+#'   it would be compared on fewer, usually easier, rows than its rivals.  A
+#'   factor with a level found in one spatial block only is the usual case,
+#'   and cannot be selected.
 #'   \code{score_holdout} is \code{NA} unless \code{select_on = "split"}, and
 #'   then the selected set's \code{metric} when fitted on the selection half
 #'   and predicted on the estimation half (\eqn{R^2} against the selection
@@ -113,7 +123,7 @@
 #'   in \code{train_sf} after the completeness filter above.
 #'   \code{params} records \code{metric}, \code{method}, \code{k},
 #'   \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
-#'   \code{n_candidates} and \code{estimated_fits}.
+#'   \code{n_candidates}, \code{estimated_fits} and \code{n_scored}.
 #' @references
 #' Cawley, G. C. and Talbot, N. L. C. (2010). On over-fitting in model
 #' selection and subsequent selection bias in performance evaluation.
@@ -260,14 +270,49 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
          trimws(conditionMessage(attr(folds, "condition"))),
          " Adjust `method`, `k` or `block_size`.", call. = FALSE)
 
-  score_set <- function(vars) {
+  # Every set is scored on ONE fixed row set, `ref_ids`: the rows the null
+  # model predicted, or, when there is no null model (RF and GWR refuse an
+  # empty predictor set), the rows any step-1 candidate predicted.
+  # cv_spatial()'s `overall` pools whichever folds survived, so a set whose
+  # fit or predict failed on a fold -- a factor level found in one block
+  # only, the ordinary case -- was scored on fewer rows, usually the easier
+  # ones, and could win for that alone: a noise factor was chosen over the
+  # true driver (RF RMSE 2.35 on 192 rows against 2.63 on 250).  A set that
+  # leaves a reference row unpredicted is scored NA instead, and said so.
+  # Rows the reference runs did not predict (a fold that fails for every set,
+  # from geometry rather than predictors) drop out of every score alike.
+  ref_ids <- NULL
+  run_set <- function(vars) {
     inner_fit <- function(tr) fit_fn(tr, vars)
-    res <- try(suppressMessages(
-      cv_spatial(train_sf, response_var, vars, fit_fn = inner_fit,
-                 folds = folds, seed = seed)), silent = TRUE)
-    if (inherits(res, "try-error") || is.null(res$overall)) return(NA_real_)
-    val <- res$overall[[metric]]
+    # cv_spatial()'s own partial-failure warning is muffled: the consequence
+    # for the sweep is reported below, once per step, in the sweep's terms.
+    res <- try(withCallingHandlers(
+      suppressMessages(
+        cv_spatial(train_sf, response_var, vars, fit_fn = inner_fit,
+                   folds = folds, seed = seed)),
+      warning = function(w)
+        if (.is_failed_folds_warning(w)) invokeRestart("muffleWarning")),
+      silent = TRUE)
+    if (inherits(res, "try-error") || !is.data.frame(res$predictions))
+      return(NULL)
+    pr <- res$predictions
+    pr[is.finite(pr$y) & is.finite(pr$yhat), , drop = FALSE]
+  }
+  n_pred_of <- function(pr) if (is.null(pr)) 0L else nrow(pr)
+  covers_ref <- function(pr) !is.null(pr) && all(ref_ids %in% pr$`..row_id`)
+  score_on <- function(pr) {
+    if (!length(ref_ids) || !covers_ref(pr)) return(NA_real_)
+    val <- .cv_overall_metrics(pr[pr$`..row_id` %in% ref_ids, , drop = FALSE])[[metric]]
     if (is.null(val) || !is.finite(val)) NA_real_ else as.numeric(val)
+  }
+  set_ref <- function(ids, from) {
+    ref_ids <<- ids
+    if (length(ids) && length(ids) < nrow(train_sf))
+      .warn_and_log(paste0(
+        "select_features_forward(): %s predicted only %d of the %d rows, so ",
+        "every candidate set is scored on those %d; the rest drop out of ",
+        "every score alike."),
+        from, length(ids), nrow(train_sf), length(ids))
   }
 
   selected  <- character(0)
@@ -291,10 +336,15 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   # LOGGER records, which no condition handler touches: every successful
   # RF/GWR run printed them, identical to a genuinely failed run's, even with
   # quiet = TRUE.  Raise the console threshold for the probe alone; the file
-  # trace (index 1) keeps the lines, where a diagnostic belongs.
-  null_score <- logger::with_log_threshold(
-    suppressWarnings(score_set(character(0))),
+  # trace (index 1) keeps the lines, where a diagnostic belongs.  The rows
+  # the null model predicts, when it can be fitted, are the rows every set
+  # is scored on.
+  null_run <- logger::with_log_threshold(
+    suppressWarnings(run_set(character(0))),
     threshold = logger::FATAL, namespace = "spatialkit", index = 2)
+  if (n_pred_of(null_run) > 0L)
+    set_ref(sort(unique(null_run$`..row_id`)), "the null (intercept-only) model")
+  null_score <- score_on(null_run)
   best <- if (is.finite(null_score)) null_score else worst
   if (!is.finite(null_score))
     .msg("select_features_forward(): the null (intercept-only) model could not ",
@@ -302,18 +352,38 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   else
     history[[length(history) + 1L]] <- data.frame(
       step = 0L, variable = "<none>", score = unname(null_score),
-      stringsAsFactors = FALSE
+      n_pred = n_pred_of(null_run), stringsAsFactors = FALSE
     )
 
   repeat {
     if (length(remaining) == 0L || length(selected) >= max_steps) break
 
-    step_scores <- vapply(remaining, function(v) score_set(c(selected, v)),
-                          numeric(1))
+    runs <- lapply(remaining, function(v) run_set(c(selected, v)))
+    if (is.null(ref_ids))
+      set_ref(sort(unique(unlist(lapply(runs, `[[`, "..row_id")))),
+              "the step-1 candidate sets together")
+    step_scores <- vapply(runs, score_on, numeric(1))
+    names(step_scores) <- remaining
+    n_pred <- vapply(runs, n_pred_of, integer(1))
     history[[length(history) + 1L]] <- data.frame(
       step = length(selected) + 1L, variable = remaining,
-      score = unname(step_scores), stringsAsFactors = FALSE
+      score = unname(step_scores), n_pred = n_pred, stringsAsFactors = FALSE
     )
+    # Sets that predicted some reference rows but not all.  One predicting
+    # none has already raised cv_spatial()'s "all folds failed" warning.
+    short <- which(n_pred > 0L & !vapply(runs, covers_ref, logical(1)))
+    if (length(short))
+      .warn_and_log(paste0(
+        "select_features_forward(): step %d: %s left some of the %d scored ",
+        "rows unpredicted (a fold failed: a factor level found in one block ",
+        "only, say), so %s scored NA rather than on fewer, easier rows."),
+        length(selected) + 1L,
+        paste(vapply(short, function(j) sprintf(
+          "{%s} (%d of them predicted)",
+          paste(c(selected, remaining[j]), collapse = ", "),
+          sum(ref_ids %in% runs[[j]]$`..row_id`)), character(1)),
+          collapse = ", "),
+        length(ref_ids), if (length(short) == 1L) "it is" else "they are")
 
     if (all(is.na(step_scores))) {
       .msg("select_features_forward(): every candidate failed to score at step ",
@@ -392,11 +462,13 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
     score    = if (length(selected) == 0L) NA_real_ else best,
     score_holdout = score_holdout,
     history  = if (length(history)) do.call(rbind, history) else
-      data.frame(step = integer(0), variable = character(0), score = numeric(0)),
+      data.frame(step = integer(0), variable = character(0), score = numeric(0),
+                 n_pred = integer(0)),
     params   = list(metric = metric, method = method, k = k, tol = tol,
                     seed = seed, auto_range = isTRUE(auto_range),
                     select_on = select_on,
-                    n_candidates = p, estimated_fits = est_fits),
+                    n_candidates = p, estimated_fits = est_fits,
+                    n_scored = length(ref_ids)),
     split    = split
   ), class = c("feature_selection", "list"))
 }
