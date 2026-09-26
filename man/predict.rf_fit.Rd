@@ -41,7 +41,8 @@ predictions; pass your own if you need one.}
 }
 \value{
 Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
-rows dropped as incomplete.  A failure inside \code{ranger}'s predict
+rows dropped as incomplete (so all \code{NA}, with a WARN line in the
+log, when every row is).  A failure inside \code{ranger}'s predict
 method is an error, not an all-\code{NA} vector.
 }
 \description{

@@ -58,7 +58,11 @@ different posteriors even on identical \code{folds}. A \code{seed} in
 A user-supplied \code{gp_k} is respected in every fold; when omitted, the
 GP rank is auto-selected per training fold.  \code{compute_loo},
 \code{boundary}, and \code{pointize} are always overridden by the CV
-internals.}
+internals.  A categorical or ordinal \code{family}
+(\code{brms::categorical()}, \code{cumulative}, \code{sratio},
+\code{cratio}, \code{acat}) is refused before anything is fitted: its
+prediction is a probability per response category, and every score
+here needs one number per row.}
 
 \item{summary}{"mean" or "median" for posterior predictions.}
 
@@ -187,8 +191,11 @@ be read as a rough summary rather than a score.
 For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
-\code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  When every fold fails, the
+\code{family} that predicts one number per row (a count, a rate, a binary
+or bounded outcome), and they are the numbers to compare when the response
+is not Gaussian.  A categorical or ordinal family predicts a probability
+per response category instead, so \code{cv_bayes()} refuses one before
+fitting anything.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.
