@@ -728,13 +728,18 @@ assign_features_to_polygons <- function(
 #'
 #' @section Spatial autocorrelation and standard-error bias:
 #' By default (`deff = 1`), the `..se_*` columns are computed as
-#' `sd / sqrt(n)`, which assumes observations within each cell are independent.
-#' When data are spatially autocorrelated (the common case for the spatial
-#' workflows this package supports), within-cell observations are typically
-#' positively correlated, so the effective sample size is smaller than `n`.
-#' The naive SE is therefore **anticonservative** (too small), and downstream
-#' weighted regressions using `cell_weight` or `..se_*` columns will produce
-#' overconfident standard errors for cells with strong intra-cell correlation.
+#' `sd / sqrt(n)`, which treats the observations within each cell as
+#' independent. When data are spatially autocorrelated (the common case for the
+#' spatial workflows this package supports), within-cell observations are
+#' typically positively correlated: they share the cell's departure from the
+#' population mean, so as an estimate of the **population (grand) mean** a cell
+#' mean has an effective sample size smaller than `n`. For that estimand the
+#' naive SE is **anticonservative** (too small), and a downstream weighted
+#' regression that uses `cell_weight` or the `..se_*` columns for population-level
+#' inference will produce overconfident standard errors for cells with strong
+#' intra-cell correlation. For the cell's **own** mean the naive SE is the right
+#' one when the cell's points are spread through it, and the corrected SE is too
+#' wide; see "What the standard error estimates" before setting `deff`.
 #'
 #' Setting `deff = "kish"` applies an approximate correction using Kish's
 #' design effect. Separate intra-class correlations (ICCs) are estimated for
@@ -770,7 +775,8 @@ assign_features_to_polygons <- function(
 #' values usually wants. For that quantity the naive `sd / sqrt(n)` is the
 #' better of the two on offer: measured coverage 0.95 under exchangeable
 #' within-cell correlation, against very nearly 1.00 for the
-#' design-effect-corrected SE, which is about five times too wide. That 0.95
+#' design-effect-corrected SE, which is too wide by the factor
+#' `sqrt(deff / (1 - rho))` (4.6 at 20 points a cell and `rho = 0.5`). That 0.95
 #' is exact under the exchangeable model and holds under a spatial covariance
 #' model only when the cell's points are spread through the cell; with
 #' *clustered* sampling inside a cell it is anticonservative for the block

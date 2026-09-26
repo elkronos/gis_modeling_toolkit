@@ -138,8 +138,11 @@ explained.
 ## 2. Standard errors on aggregated values
 
 Aggregate the points into cells and the naive standard error of each cell mean
-is \(s/\sqrt{n}\), which assumes the points in a cell are independent. On an
-autocorrelated field they are not, and the effective sample size is smaller than
+is \(s/\sqrt{n}\), which treats the points in a cell as independent. For the
+cell's own mean that is the right standard error when the points are spread
+through the cell. For the cell mean as an estimate of the population (grand)
+mean it is not: on an autocorrelated field the points in a cell share the
+cell's departure from that mean, and the effective sample size is smaller than
 the count.
 
 ```{r cells}
@@ -173,9 +176,12 @@ ik <- median(kish$..se_resp_z / iid$..se_resp_z, na.rm = TRUE)
 iv <- median(vgm$..se_resp_z  / iid$..se_resp_z, na.rm = TRUE)
 cat(sprintf(paste("The median cell's standard error is %.2f times wider under",
                   "`kish` and %.2f times wider under `variogram` than the",
-                  "independent-sampling one. A confidence interval built on the",
-                  "naive number is about half the width it should be on this",
-                  "field.\n"), ik, iv))
+                  "independent-sampling one. As an estimate of the population",
+                  "mean, a confidence interval built on the naive number is",
+                  "about half the width it should be on this field. For the",
+                  "cell's own mean the naive standard error is the right one,",
+                  "and section 3 (`kriging_adequacy()`) covers that",
+                  "quantity.\n"), ik, iv))
 ```
 
 `deff = "kish"` estimates an intra-class correlation from the within-cell and
