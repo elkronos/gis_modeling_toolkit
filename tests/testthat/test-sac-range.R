@@ -743,3 +743,131 @@ test_that("the directional variograms are attached only on request", {
                auto_range = TRUE, seed = 1)))
   expect_null(attr(fo$params$sac_range, "directional_fits"))
 })
+
+
+# ---------------------------------------------------------------------------
+# Round 2 of the review: what the estimate refuses, and what it says.
+# ---------------------------------------------------------------------------
+
+test_that("an all-pairs fit past the fitted lags is refused even when two directions reached a sill", {
+  # An exponential field of effective range 150 under an east-west trend: the
+  # pooled variogram rises past the fitted lags (3125 against 672), but the
+  # directions across the slope reach a sill.  Their maximum came back as the
+  # range, 430, with anisotropy_used = TRUE and nothing on the console --
+  # while the documentation said a trend is caught by the fitted-lag bound.
+  # Whether two directions happened to fit flipped the answer between NA and
+  # a finite range from draw to draw (12 of 30 went this way).
+  skip_if_not_installed("gstat")
+  set.seed(11)
+  n <- 300
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(0.2 + 1e-8, n))) %*% rnorm(n)) + 4 * x / 1000
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+  lines <- capture_spatialkit_log(r <- suppressWarnings(estimate_sac_range(pts, "z")))
+  st <- attr(r, "directional_status")
+  # The path under test needs two directions that reached a sill; that is a
+  # property of this draw on this platform's gstat, not of the code.
+  skip_if(sum(st == "ok") < 2L, "fewer than two directions reached a sill on this platform")
+  expect_true(is.na(r))
+  expect_s3_class(r, "sac_range")
+  expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+  expect_gt(attr(r, "rejected_range"), attr(r, "cutoff_dist"))
+  expect_false(attr(r, "anisotropy_used"))
+  # The directions are still reported, and so is their spread.
+  expect_equal(sum(is.finite(attr(r, "directional"))), sum(st == "ok"))
+  expect_true(is.finite(attr(r, "anisotropy")))
+  expect_true(log_has(lines, "exceeds the largest lag"))
+  expect_false(log_has(lines, "Using the maximum"))
+})
+
+test_that("a REML range shorter than the shortest lag is refused, not returned", {
+  # White noise, detrended by REML: the fit returned an effective range of
+  # 0.27 m with a nugget proportion of 0.99, on points whose closest pairs are
+  # metres apart and whose first variogram lag is about 30 m.  Passed as a
+  # block size it asked for a 3642 x 3676 grid, refused as a unit mistake.
+  skip_if_not_installed("gstat")
+  skip_if_not_installed("nlme")
+  set.seed(7)
+  n <- 300
+  d <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+                  z = rnorm(n), w = rnorm(n))
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  lines <- capture_spatialkit_log(
+    r <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml")))
+  expect_true(is.na(r))
+  expect_s3_class(r, "sac_range")
+  expect_identical(attr(r, "rejected_reason"), "fitted range is below the shortest lag fitted")
+  vg <- attr(r, "variogram")
+  expect_lt(attr(r, "rejected_range"), min(vg$dist[vg$np > 0]))
+  expect_identical(attr(r, "detrend_method"), "reml")
+  expect_true(log_has(lines, "shorter than the shortest lag"))
+  # And a field with a real range is untouched by the bound.
+  ok <- estimate_sac_range(sac_test_field(), "z", seed = 1)
+  expect_true(is.finite(ok))
+  vg_ok <- attr(ok, "variogram")
+  expect_gt(as.numeric(ok), min(vg_ok$dist[vg_ok$np > 0]))
+})
+
+test_that("print() says what the range is a length in, and of what", {
+  # A bare number: for lon/lat input the unit and CRS were chosen by the
+  # estimate, and a detrended range is of the residuals, and neither showed.
+  skip_if_not_installed("gstat")
+  fld <- sac_test_field()
+  r <- estimate_sac_range(fld, "z", seed = 1)
+  out <- utils::capture.output(print(r))
+  expect_match(out[1], "^[0-9]")                          # still leads with the number
+  expect_true(any(grepl("in metres of EPSG:3857; variogram of the response itself", out,
+                        fixed = TRUE)))
+  set.seed(2); fld$w <- rnorm(nrow(fld))
+  rd <- estimate_sac_range(fld, "z", "w", seed = 1)
+  expect_output(print(rd), "variogram of the residuals on predictor_vars (ols)", fixed = TRUE)
+  # A refusal says it too, and still dumps nothing.
+  rej <- suppressWarnings(estimate_sac_range(fld, "z", range_frac = 1e-6, seed = 1))
+  printed <- paste(utils::capture.output(print(rej)), collapse = "\n")
+  expect_match(printed, "^NA")
+  expect_match(printed, "EPSG:3857", fixed = TRUE)
+  expect_false(grepl("np|dist|gamma|psill", printed))
+})
+
+test_that("the anisotropy note points at the directional ranges that stay usable", {
+  # The note advised max(attr(range, "directional")), which is NA whenever
+  # any direction ran past the fitted lags -- on an anisotropic field, most
+  # often the major axis.
+  skip_if_not_installed("gstat")
+  set.seed(1)
+  n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y * 4)))
+  z <- as.numeric(t(chol(exp(-d / 100) + diag(0.2 + 1e-8, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+  lines <- capture_spatialkit_log(r <- estimate_sac_range(pts, "z", seed = 1))
+  skip_if(!(is.finite(attr(r, "anisotropy")) && attr(r, "anisotropy") > 1.5),
+          "the directional ranges did not vary by more than 1.5 on this platform")
+  expect_true(log_has(lines, "directional ranges vary"))
+  expect_true(log_has(lines, "directional_fitted"))
+  expect_true(log_has(lines, "directional_status"))
+  expect_false(log_has(lines, "max\\(attr\\(range, \"directional\"\\)\\)"))
+})
+
+test_that("a small sample refused as 'decreases with distance' says sampling noise can do it", {
+  # 30 points of an ordinary exponential field: the short-lag bins are noisy
+  # enough to fall by 15%, and the refusal named only a periodic structure or
+  # a cluster whose variance differs.
+  skip_if_not_installed("gstat")
+  set.seed(2)
+  n <- 30
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(0.2 + 1e-8, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+  lines <- capture_spatialkit_log(r <- suppressWarnings(estimate_sac_range(pts, "z")))
+  skip_if(!identical(attr(r, "rejected_reason"), "empirical variogram decreases with distance"),
+          "this draw's short lags did not fall on this platform")
+  expect_true(log_has(lines, "With 30 points the short-lag bins are noisy"))
+  # A large sample is not told that.
+  big <- capture_spatialkit_log(suppressWarnings(estimate_sac_range(sac_test_field(), "z",
+                                                                    range_frac = 1e-6)))
+  expect_false(log_has(big, "short-lag bins are noisy"))
+  expect_true(log_has(big, "flat from the first lag"))
+})
