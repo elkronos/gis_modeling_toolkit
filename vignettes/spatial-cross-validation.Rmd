@@ -203,7 +203,7 @@ prints the directional summary; `as.numeric()` above keeps the output to the two
 numbers.
 
 When the variogram identifies no range, `estimate_sac_range()` returns `NA` with
-the reason attached, `auto_range` logs that it is falling back to geometric
+the reason attached, `auto_range` warns that it is falling back to geometric
 blocks, and you are back to choosing a size yourself. An `NA` there is a finding
 about the data. `?estimate_sac_range` lists the five reasons and what each one
 means; `plot()` on the returned object draws the variogram that produced it.
