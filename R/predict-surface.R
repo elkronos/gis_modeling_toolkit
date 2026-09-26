@@ -77,7 +77,13 @@
   # were unreachable.  Build the axis explicitly instead.
   .axis <- function(lo, hi) {
     lo <- as.numeric(lo); hi <- as.numeric(hi)
-    n <- floor((hi - lo) / cell_size)
+    # A relative tolerance on the floor.  When the extent is an exact multiple
+    # of the cell size the ratio can land a hair below the integer -- 0.3 / 0.1
+    # is 2.9999999999999996 -- and a whole column went missing, leaving a
+    # cell-wide strip uncovered: 1197 of 10000 random squares at the default
+    # n_cells came out 99 columns wide instead of 100.
+    r <- (hi - lo) / cell_size
+    n <- floor(r + sqrt(.Machine$double.eps) * max(1, r))
     if (!is.finite(n) || n < 1L) return(lo + (hi - lo) / 2)   # one centred cell
     lo + cell_size / 2 + seq.int(0L, n - 1L) * cell_size
   }
@@ -115,7 +121,11 @@
 #'   is given the interpretation the training data got (the assumption recorded
 #'   on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 #'   grid can land thousands of kilometres from the covariates and every cell
-#'   takes the same nearest feature.
+#'   takes the same nearest feature.  A grid of polygons
+#'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
+#'   representative point per cell, as \code{\link{coerce_to_points}()} does,
+#'   so covariates are taken at the location predicted for; \code{boundary}
+#'   then keeps the cells whose point falls inside it.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
@@ -138,10 +148,20 @@
 #'   grow and predictions depend on which rows share the call; see
 #'   \code{\link{predict.bayesian_fit}}.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
-#'   backend supports it.  Default FALSE.
-#' @param ... Passed to \code{predict()}.
+#'   backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
+#'   the SD of the posterior draws \code{predict()} returns, and those are of
+#'   the expected value by default (\code{type = "epred"}): the uncertainty
+#'   of the mean surface, not of a new observation, which also carries the
+#'   observation noise.  For the predictive SD, the one that goes with
+#'   prediction intervals and \code{cv_bayes()}'s calibration, pass
+#'   \code{type = "predict"} as well.
+#' @param ... Passed to \code{predict()}, e.g. \code{type = "predict"} for a
+#'   \code{bayesian_fit}.  Not \code{draws}, which this function sets itself
+#'   and refuses here.
 #' @return An \code{sf} POINT layer with a \code{.pred} column (and
-#'   \code{.pred_se} when \code{se = TRUE} and available).  For an
+#'   \code{.pred_se} when \code{se = TRUE} and available; one a supplied
+#'   \code{grid} already carried, from an earlier surface, is removed
+#'   otherwise).  For an
 #'   auto-generated grid the resolution is attached as attribute
 #'   \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
 #'   \code{"cell_size"} attribute that object already carried.  That is usually
@@ -180,6 +200,20 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   if (!inherits(object, "spatial_fit"))
     stop("predict_surface(): `object` must be a spatial_fit.", call. = FALSE)
 
+  # `draws` is this function's to set: it asks for the draw matrix itself when
+  # se = TRUE.  Passed through `...` it reached predict() too, and a backend
+  # that honours it returned an n_draws x n matrix that as.numeric() flattened
+  # into .pred column by column -- cell 1's draws, then cell 2's -- with only
+  # a cryptic length warning; with se = TRUE the duplicated argument failed
+  # inside try() and was reported as a backend without draws.  A prefix
+  # counts, since R's argument matching would complete it.
+  dot_nms <- names(list(...))
+  if (!is.null(dot_nms) && any(nzchar(dot_nms) & startsWith("draws", dot_nms)))
+    stop("predict_surface(): `draws` cannot be passed through `...`; ",
+         "predict_surface() requests the posterior draws itself when se = TRUE ",
+         "and returns their SD as .pred_se. For the draw matrix, call ",
+         "predict(object, newdata = grid, draws = TRUE).", call. = FALSE)
+
   train <- object$data_sf
   if (!inherits(train, "sf"))
     stop("predict_surface(): the fit carries no training geometry.", call. = FALSE)
@@ -206,6 +240,17 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # to one constant -- silently, with no error anywhere.
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
     grid <- ensure_projected(grid, target_crs = .crs_or_null(target_crs))
+    # A polygon grid -- create_grid_polygons() output, say -- was used as it
+    # was.  st_nearest_feature() then gave each cell whichever covariate point
+    # inside it the spatial index returned first, not the one at its centre,
+    # while predict() pointized the cell by itself, so the covariates and the
+    # location predicted at no longer matched: predictions off by up to 2.6 on
+    # a 0-30 response, and a row shuffle of `covariates` moved them by up to
+    # 4.7.  Reduce it to representative points first, as
+    # area_of_applicability() does, so the surface is the POINT layer the
+    # manual promises.
+    if (!all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT"))
+      grid <- coerce_to_points(grid, "auto")
   }
   res <- attr(grid, "cell_size")
 
@@ -310,6 +355,14 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       if (inherits(p, "try-error"))
         stop("predict_surface(): prediction failed on rows ", s, "-", e, ": ",
              as.character(p), call. = FALSE)
+      # One value per row, or the assignment below recycles or truncates
+      # whatever came back into .pred without a word that means anything.
+      if (length(p) != length(idx))
+        stop(sprintf(paste0("predict_surface(): predict() returned %d value(s) ",
+                            "for the %d rows %d-%d; expected one per row. Check ",
+                            "what the backend's predict() returns for the ",
+                            "arguments passed through `...`."),
+                     length(p), length(idx), s, e), call. = FALSE)
       preds_vec[idx] <- as.numeric(p)
     }
   }
@@ -319,7 +372,10 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
                      "expose posterior draws; returning predictions only."))
 
   grid$.pred <- preds_vec
-  if (isTRUE(se) && se_ok) grid$.pred_se <- se_vec
+  # A grid that is an earlier surface carries that model's .pred_se.  It was
+  # kept whenever this call did not replace it -- beside the new .pred, and
+  # even after the log said "returning predictions only".
+  grid$.pred_se <- if (isTRUE(se) && se_ok) se_vec else NULL
 
   attr(grid, "cell_size") <- res
   grid
