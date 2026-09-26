@@ -15,7 +15,8 @@ resolution_profile(
   nstart = 25L,
   seed = 123L,
   sac = NULL,
-  select_on = c("all", "split")
+  select_on = c("all", "split"),
+  range_floor = TRUE
 )
 }
 \arguments{
@@ -35,9 +36,10 @@ on the predictors, the variogram is estimated from those residuals, and
 \code{moran_z} regresses the cell means on the cell-mean predictors.}
 
 \item{levels}{Optional integer vector of level counts to score, replacing
-the ladder; values below 2, or at or above the number of distinct
-locations, are dropped (k-means cannot place more centres than there are
-distinct points).}
+the ladder; values below 2, above the number of distinct locations, or
+at or above the number of points, are dropped (k-means cannot place more
+centres than there are distinct points, and \code{stats::kmeans()}
+refuses as many centres as points).}
 
 \item{n_levels}{Number of levels on the ladder.  Default 20.}
 
@@ -55,14 +57,28 @@ not change with \code{sample_n} except through the fits.}
 \item{nstart}{k-means++ restarts per level.  Default 25.}
 
 \item{seed}{RNG seed for the subsample and the restarts; restored
-afterwards.  Default 123.}
+afterwards.  Default 123.  The rows are put in coordinate order before
+either, so the profile does not depend on the order they come in.}
 
 \item{sac}{Optional \code{sac_range} object from
 \code{\link{estimate_sac_range}()} to take the range, nugget and
 correlation function from.  Pass one fitted with \code{detrend =
-  "reml"}, say, or on a residual field of your choosing.  When
+  "reml"}, say.  It must describe the variable the profile scores: the
+raw response without \code{predictor_vars}, the residuals on them with;
+a sac whose \code{detrended} attribute says otherwise is used with a
+warning.  Its range is read in its own CRS (\code{attr(sac, "crs")}),
+to which the points are transformed first, so the area, the floor and
+\code{cell_diam_median} are then in that CRS's units.  A sac whose
+range was rejected (\code{NA} with a \code{rejected_reason}) gives
+\code{cp} its nugget, with a warning, and leaves \code{reliability}
+\code{NA}, since that needs the range; one whose model did not converge
+gives neither.  Under \code{select_on = "split"} the sac must come from
+the selection half alone: run the profile once without it, fit the sac
+on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
+call with the same \code{seed}, which makes the same split.  When
 \code{NULL} and a response is given, one is estimated on the subsample
-with the same \code{predictor_vars}.}
+(its selection half under \code{"split"}) with the same
+\code{predictor_vars}.}
 
 \item{select_on}{\code{"all"} (default) profiles every point;
 \code{"split"} reads the response on one spatially blocked half only
@@ -76,22 +92,32 @@ cell counts for the whole layer, and the estimation half's response
 never touches them.  See the "Post-selection inference" section of
 \code{\link{determine_optimal_levels}}; the profile reads the response
 whenever \code{response_var} is given.}
+
+\item{range_floor}{\code{TRUE} (default) starts the ladder at the range
+floor when the data support it; \code{FALSE} starts it at 2 whatever
+the range, and the floor is only reported in the bounds and the print.
+Use \code{FALSE} to compare profiles whose range estimates differ (see
+"The ladder and its bounds").}
 }
 \value{
 A data.frame of class \code{resolution_profile} with one row per
 level and columns \code{levels}, \code{wss}, \code{wss_spread} (relative
 spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
 \code{cell_n_median}, \code{cell_diam_median} (twice the median RMS
-radius of the cells, in coordinate units), \code{rss}, \code{cp},
+radius of the cells, in coordinate units: about 0.8 of the side of a
+square cell of the same area, and less for finer cells, so a size to
+compare levels by rather than a width), \code{rss}, \code{cp},
 \code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
 input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
 with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"},
 \code{"distinct locations"} or \code{"sample_n"}, whichever bound it),
 \code{supported}, \code{area}, \code{range}, \code{n} (the points in the
 layer), \code{n_sample} (the points the k-means fits ran on),
-\code{n_distinct}, \code{min_cell_n}), \code{variogram} (a list with
-\code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
-when none was usable), \code{variable} (\code{"response"},
+\code{n_distinct}, \code{min_cell_n}, \code{range_floor}),
+\code{variogram} (a list with \code{nugget}, \code{psill}, \code{range}
+(\code{NA} when rejected), \code{model} and \code{detrended} (whether
+the sac says it is a variogram of residuals; \code{NA} when it does not
+say); \code{NULL} when none was usable), \code{variable} (\code{"response"},
 \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
 \code{sac} (the range object used) and, with \code{select_on =
   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
@@ -123,7 +149,9 @@ ladder runs from a floor to a ceiling the data impose.  The ceiling is
 \code{floor(n / min_cell_n)}, with \eqn{n} every point of the layer (not
 the subsample): cells with fewer than \code{min_cell_n} points
 on average have too little support, and Moran's z is not computable at
-nine cells or fewer in any case.  The floor is
+nine cells or fewer in any case.  It is also held to the number of
+distinct locations, one cell on each, and to one short of the number of
+points, which \code{stats::kmeans()} needs.  The floor is
 \code{ceiling(area / range^2)} when an autocorrelation range is available:
 cells wider than the range average over more than one patch of the field.
 When the floor exceeds the ceiling the data cannot support a tessellation
@@ -136,6 +164,16 @@ subsample points per cell, the least a fitted cell can be scored on);
 \code{ceiling_from} is then \code{"sample_n"}, a floor above that is logged
 with a request to raise \code{sample_n}, and it does not make
 \code{supported} \code{FALSE}.
+
+The floor moves with the range estimate, and the ceiling with \eqn{n}, so
+two profiles of similar data (the folds of a cross-validation, say) can
+sit on either side of the point where the floor applies: one ladder then
+starts at the floor and the other at 2, and the criteria that sit near
+the bottom of the ladder (\code{reliability}, which routinely peaks at the
+floor, and \code{elbow}) can differ between them by a factor of 10 or
+more.  To compare profiles, pass the same \code{levels} to each, or
+\code{range_floor = FALSE} to start every ladder at 2 while the floor is
+still reported.
 }
 
 \section{The criteria, and how each behaved when measured}{
@@ -174,7 +212,10 @@ approximation keeps improving as cells shrink and the penalty is too
 small to stop it, so \eqn{C_p} says "as fine as the support allows"
 and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 says so when that happens.  It becomes a genuine interior criterion
-only when the nugget is a large share of the sill.}
+only when the nugget is a large share of the sill.  With a nugget of 0
+(usually a fit clipped at its lower bound) the penalty is 0 and
+\eqn{C_p} descends to the ceiling whatever the field; the profile
+warns.}
 \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
@@ -193,7 +234,10 @@ reliability of true block means on simulated fields, the analytic and
 empirical optima agreed to within a level or two where the empirical
 estimate was stable, and the band within 2 percent of the maximum
 spanned a factor of 3--6 in \eqn{L}.  Read the flat region, not the
-argmax.  \code{NA} without a usable variogram.}
+argmax.  The domain term is taken over the convex hull the area is
+measured on, so rotating the layer does not move it.  \code{NA}
+without a usable variogram, and when the variogram's range was
+rejected (see \code{sac}).}
 }
 \code{cp} and \code{reliability} answer different questions: how well the
 cells represent the field, and whether the cell values are distinguishable
