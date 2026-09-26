@@ -18,11 +18,13 @@ coerce_to_points(
 "line_midpoint", "bbox_center".}
 
 \item{tmp_project}{Logical; temporarily project for line-based midpoints.
-When \code{x} has no CRS and its coordinates fall inside the lon/lat
-envelope, that temporary projection interprets them as EPSG:4326 (with a
-warning) and the midpoints returned are geodesic ones brought back to the
-input's numbers, not planar midpoints.  Set the CRS, or pass
-\code{tmp_project = FALSE}, for planar data.}
+When \code{x} has no CRS and the lon/lat heuristic of
+\code{\link{ensure_projected}()} takes its coordinates for degrees
+(inside the lon/lat envelope and more than one unit across, or with
+decimal-degree precision), that temporary projection interprets them as
+EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
+brought back to the input's numbers, not planar midpoints.  Set the CRS,
+or pass \code{tmp_project = FALSE}, for planar data.}
 }
 \value{
 An sf object with geometry coerced to POINTs, row for row with

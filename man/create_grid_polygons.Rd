@@ -23,9 +23,12 @@ create_grid_polygons(
 \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
 \code{area} is that of the boundary's bounding box, so square grids get
 square cells; for hex grids the count is adjusted for hexagonal packing
-density and the size rounded so that a whole number of hexagons spans
-the longer side of the box.  Neither depends on which way the boundary
-lies.  The word "approximate" is load bearing: a
+density and the size rounded so that a whole number of hexagon widths
+spans the longer side of the box.  The size does not depend on which way
+the boundary lies; the count can, because hexagon rows are 0.87
+\code{cellsize} apart while columns are \code{cellsize} apart (about 10
+percent on a moderately elongated box, up to 1.7 times on a strip
+narrower than one hexagon).  The word "approximate" is load bearing: a
 grid of square cells over an elongated bounding box needs more of them
 than a grid of rectangles would (a 1000 x 1 strip at
 \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
@@ -53,8 +56,9 @@ corner, covering only part of the boundary.}
 
 \item{clip}{Logical; clip grid to boundary.}
 
-\item{crs}{Optional target CRS. When \code{NULL} (default) a lon/lat boundary is
-projected with \code{\link[=ensure_projected]{ensure_projected()}}, which changes the CRS of the returned
+\item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
+an sf or sfc layer, whose CRS is used. When \code{NULL} (default) a lon/lat
+boundary is projected with \code{\link[=ensure_projected]{ensure_projected()}}, which changes the CRS of the returned
 grid; a message reports this unless \code{quiet = TRUE}. When that CRS would
 distort cell areas across the boundary by more than 1 percent (Web
 Mercator over a near-global extent, a UTM zone stretched well past its

@@ -92,7 +92,13 @@ get_voronoi_seeds <- function(boundary = NULL,
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
 
-  boundary_union <- function(b) sf::st_union(.safe_make_valid(b))
+  # On the sphere for a lon/lat boundary, whatever sf_use_s2() says: with it
+  # off, sf printed "although coordinates are longitude/latitude, st_union
+  # assumes that they are planar" on every random or k-means seeding.
+  boundary_union <- function(b) {
+    b <- .safe_make_valid(b)
+    if (.is_longlat(b)) .with_s2(sf::st_union(b)) else sf::st_union(b)
+  }
 
   out <- switch(
     method,
@@ -239,17 +245,28 @@ get_voronoi_seeds <- function(boundary = NULL,
   # seeding on a lon/lat boundary failed with "package lwgeom required".
   if (.is_longlat(geom) && !isTRUE(sf::sf_use_s2()))
     return(.with_s2(.robust_st_sample(geom, n)))
-  pts <- try(sf::st_sample(geom, size = n, type = "random", exact = TRUE),
+  # Without lwgeom (not a dependency) sf warns "coordinate ranges not computed
+  # along great circles; install package lwgeom to get rid of this warning"
+  # on every lon/lat draw, so every random or k-means seeding on a lon/lat
+  # boundary raised it, once or twice, in the ordinary case.  Only that
+  # warning is muffled; the draw is the same.
+  st_sample_quiet <- function(...) withCallingHandlers(
+    sf::st_sample(...),
+    warning = function(w)
+      if (grepl("coordinate ranges not computed along great circles",
+                conditionMessage(w), fixed = TRUE))
+        invokeRestart("muffleWarning"))
+  pts <- try(st_sample_quiet(geom, size = n, type = "random", exact = TRUE),
              silent = TRUE)
   if (inherits(pts, "try-error")) {
-    pts <- sf::st_sample(geom, size = n, type = "random")
+    pts <- st_sample_quiet(geom, size = n, type = "random")
   }
   # Pad or trim to exactly n
   max_attempts <- 10L
   attempt <- 0L
   while (length(pts) < n && attempt < max_attempts) {
     attempt <- attempt + 1L
-    extra <- sf::st_sample(geom, size = n - length(pts), type = "random")
+    extra <- st_sample_quiet(geom, size = n - length(pts), type = "random")
     pts <- c(pts, extra)
   }
   if (length(pts) > n) pts <- pts[seq_len(n)]
@@ -450,7 +467,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
-  geom <- sf::st_union(boundary)
+  # On the sphere for lon/lat, as in get_voronoi_seeds(): with s2 off sf
+  # otherwise printed its planar-union message on every call.
+  geom <- if (.is_longlat(boundary)) .with_s2(sf::st_union(boundary)) else
+    sf::st_union(boundary)
   pts <- .robust_st_sample(geom, k)
   out <- sf::st_sf(geometry = pts) |> sf::st_set_crs(sf::st_crs(boundary))
   # Same output contract as get_voronoi_seeds(), so the three seeding
