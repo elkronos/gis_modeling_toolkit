@@ -169,3 +169,66 @@ test_that("a split profile is bounded on the whole layer and reads one half's re
   spl_s <- suppressWarnings(prof(pts_s, select_on = "split"))
   expect_false(isTRUE(all.equal(spl_s$rss, spl$rss)))
 })
+
+
+test_that("a WSS curve that falls like c / k has no elbow", {
+  # The linear-axis chord rule answers sqrt(k_min * k_max) on c / k, here 4,
+  # and that used to be returned as the knee.
+  eb <- spatialkit:::.elbow_from_wss(1000 / (1:12))
+  expect_false(eb$structured)
+  expect_true(all(abs(eb$diagnostics$sag) < 1e-12))
+  # A bend at the cluster count on the same scale is one.
+  bent <- spatialkit:::.elbow_from_wss(c(1000, 400, 150, 60 * 4 / (4:12)))
+  expect_true(bent$structured)
+  expect_identical(bent$knee_k, 4L)
+})
+
+
+test_that("determine_optimal_levels() warns when uniform points have no elbow", {
+  set.seed(3)
+  n <- 400
+  pts <- sf::st_as_sf(data.frame(x = runif(n, 0, 10000), y = runif(n, 0, 10000)),
+                      coords = c("x", "y"), crs = 32632)
+  for (ml in c(12, 40)) {
+    expect_warning(k <- determine_optimal_levels(pts, max_levels = ml),
+                   "no elbow.*set by the ladder")
+    expect_type(k, "integer")
+  }
+})
+
+
+test_that("determine_optimal_levels() finds 2 to 8 separated clusters without a warning", {
+  # At the default max_levels = 12 the linear chord rule answered 3 or 4 for
+  # eight clusters: the fall of the between-cluster WSS outweighed the knee.
+  for (K in c(2L, 3L, 4L, 8L)) {
+    set.seed(K)
+    ctr <- expand.grid(x = seq(0, by = 2500, length.out = 4), y = c(0, 2500))[seq_len(K), ]
+    g <- rep(seq_len(K), each = 40)
+    pts <- sf::st_as_sf(data.frame(x = ctr$x[g] + rnorm(40 * K, sd = 100),
+                                   y = ctr$y[g] + rnorm(40 * K, sd = 100)),
+                        coords = c("x", "y"), crs = 32632)
+    expect_no_warning(k <- determine_optimal_levels(pts, max_levels = 12))
+    expect_identical(k[1], K, info = paste("K =", K))
+  }
+})
+
+
+test_that("a geometry-only profile of uniform points names no cell count", {
+  set.seed(5)
+  n <- 600
+  pts <- sf::st_as_sf(data.frame(x = runif(n, 0, 10000), y = runif(n, 0, 10000)),
+                      coords = c("x", "y"), crs = 32632)
+  prof <- resolution_profile(pts, n_levels = 8, nstart = 5)
+  expect_true(all(is.na(prof$elbow)))
+  expect_output(print(prof), "elbow       : none")
+  expect_error(select_resolution(prof, "elbow"), "no elbow")
+  # build_tessellation() used to read the chord rule's sqrt(first x last
+  # level) off this profile, 16 to 18 cells on any large uniform layer.
+  bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(pts)))
+  expect_error(build_tessellation(pts, boundary = bnd, method = "hex",
+                                  approx_n_cells = prof, quiet = TRUE),
+               "no cluster structure")
+  expect_error(get_voronoi_seeds(bnd, method = "kmeans", n = prof,
+                                 sample_points = pts, set_seed = 1),
+               "no cluster structure")
+})

@@ -141,9 +141,17 @@ with a request to raise \code{sample_n}, and it does not make
 \section{The criteria, and how each behaved when measured}{
 
 \describe{
-\item{\code{elbow}}{The signed distance of the WSS curve below the chord
-from its first to its last level, the classical elbow statistic
-(larger is better).  Geometry only; it knows nothing of the response.}
+\item{\code{elbow}}{How far the WSS curve sags below a power law: on
+log-log axes, \eqn{\log} WSS below the straight line from \eqn{k = 1}
+(the total sum of squares) to the last level, in natural-log units
+(larger is better).  Points with no cluster structure have a WSS close
+to \eqn{c/k}, which is straight on those axes, so the column is
+\code{NA} at every level unless the largest sag reaches
+\eqn{\log 1.25}, and the print says there is no elbow (the rule and its
+calibration are in \code{\link{determine_optimal_levels}}).  The
+classical chord on linear axes found a "knee" on such a layer anyway,
+at about \eqn{\sqrt{L_{first} L_{last}}}, where the ladder's ends put
+it.  Geometry only; it knows nothing of the response.}
 \item{\code{cp}}{Mallows' \eqn{C_p} of the piecewise-constant
 approximation of the response (or of its OLS residuals on
 \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},

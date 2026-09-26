@@ -55,8 +55,11 @@ test_that(".spatial_half_split makes two disjoint, exhaustive, spatially blocked
 
 test_that("determine_optimal_levels(select_on = 'split') reads one half's response and returns both", {
   pts <- so_field(300)
-  out <- determine_optimal_levels(pts, max_levels = 8, response_var = "z",
-                                  predictor_vars = "w", select_on = "split")
+  # The fixture's locations are uniform, so every call warns that the WSS
+  # curve has no elbow; that is not what this test is about.
+  dol <- function(...) suppressWarnings(determine_optimal_levels(...))
+  out <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w",
+             select_on = "split")
   sp <- attr(out, "split")
   expect_s3_class(sp, "spatialkit_split")
   expect_setequal(c(sp$selection, sp$estimation), seq_len(300))
@@ -65,19 +68,16 @@ test_that("determine_optimal_levels(select_on = 'split') reads one half's respon
   # With max_levels = 8 no candidate clears the nine-cell floor, the call
   # falls back to the geometric elbow, and that is the whole layer's elbow.
   # (It used to be the selection half's, chosen for half the extent.)
-  expect_identical(as.integer(out),
-                   as.integer(determine_optimal_levels(pts, max_levels = 8)))
+  expect_identical(as.integer(out), as.integer(dol(pts, max_levels = 8)))
   # The default path is unchanged and carries no split.
-  all_pts <- determine_optimal_levels(pts, max_levels = 8, response_var = "z",
-                                      predictor_vars = "w")
+  all_pts <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w")
   expect_null(attr(all_pts, "split"))
   # The geometric path with a split reads no response and sees every point:
   # same integer vector as without, plus the attribute.
-  geo <- determine_optimal_levels(pts, max_levels = 6, select_on = "split")
+  geo <- dol(pts, max_levels = 6, select_on = "split")
   expect_type(geo, "integer")
   expect_s3_class(attr(geo, "split"), "spatialkit_split")
-  expect_identical(as.integer(geo),
-                   as.integer(determine_optimal_levels(pts, max_levels = 6)))
+  expect_identical(as.integer(geo), as.integer(dol(pts, max_levels = 6)))
   expect_error(determine_optimal_levels(pts, select_on = "half"), "'arg' should be one of")
 })
 

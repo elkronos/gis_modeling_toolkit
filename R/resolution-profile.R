@@ -129,9 +129,17 @@
 #'
 #' @section The criteria, and how each behaved when measured:
 #' \describe{
-#'   \item{\code{elbow}}{The signed distance of the WSS curve below the chord
-#'     from its first to its last level, the classical elbow statistic
-#'     (larger is better).  Geometry only; it knows nothing of the response.}
+#'   \item{\code{elbow}}{How far the WSS curve sags below a power law: on
+#'     log-log axes, \eqn{\log} WSS below the straight line from \eqn{k = 1}
+#'     (the total sum of squares) to the last level, in natural-log units
+#'     (larger is better).  Points with no cluster structure have a WSS close
+#'     to \eqn{c/k}, which is straight on those axes, so the column is
+#'     \code{NA} at every level unless the largest sag reaches
+#'     \eqn{\log 1.25}, and the print says there is no elbow (the rule and its
+#'     calibration are in \code{\link{determine_optimal_levels}}).  The
+#'     classical chord on linear axes found a "knee" on such a layer anyway,
+#'     at about \eqn{\sqrt{L_{first} L_{last}}}, where the ladder's ends put
+#'     it.  Geometry only; it knows nothing of the response.}
 #'   \item{\code{cp}}{Mallows' \eqn{C_p} of the piecewise-constant
 #'     approximation of the response (or of its OLS residuals on
 #'     \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
@@ -587,17 +595,28 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                             vg$cor_fn, rbar_V)
   }
 
-  # Elbow distance over the ladder, and the bumps on it.
+  # The elbow over the ladder, and the bumps on it.  The sag of log WSS below
+  # the straight line from k = 1 to the last level on log-log axes (see
+  # .elbow_sag()); NA at every level when the curve has no elbow.  On linear
+  # axes the chord from the first level to the last always has a point
+  # furthest below it, at about sqrt(first x last level) on a layer with no
+  # cluster structure, so min_cell_n and the range floor chose the "elbow",
+  # and a geometry-only profile handed that count to build_tessellation().
+  # Anchored at k = 1, whose WSS is the total sum of squares and exact,
+  # rather than at the first level: the ladder often starts at the range
+  # floor, and a uniform square's WSS sits above c / k at k = 2 (two halves
+  # keep 5/8 of the total, not 1/2), so a chord from 2 finds a "knee" at its
+  # four quadrants.
   fin <- is.finite(out$wss)
-  if (sum(fin) >= 3L) {
-    k_norm   <- (levels[fin] - min(levels[fin])) / max(1, diff(range(levels[fin])))
-    w        <- out$wss[fin]
-    wss_norm <- (w - min(w)) / max(.Machine$double.eps, max(w) - min(w))
-    x1 <- k_norm[1L]; y1 <- wss_norm[1L]
-    x2 <- k_norm[length(k_norm)]; y2 <- wss_norm[length(wss_norm)]
-    line_len <- sqrt((x2 - x1)^2 + (y2 - y1)^2)
-    out$elbow[fin] <- if (line_len < .Machine$double.eps) 0 else
-      .below_chord(k_norm, wss_norm, x1, y1, x2, y2, line_len)
+  if (sum(fin) >= 2L) {
+    tss <- sum(sweep(xy, 2L, colMeans(xy))^2)
+    sag <- .elbow_sag(c(1L, levels[fin]), c(tss, out$wss[fin]))[-1L]
+    if (any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG)
+      out$elbow[fin] <- sag
+    else
+      .log_info(paste0("resolution_profile(): the WSS curve has no elbow (on log-log ",
+                       "axes it falls in a straight line, as it does for points with ",
+                       "no cluster structure); `elbow` is NA."))
   }
   wss_bumps <- .wss_bumps(out$wss[fin])
   if (wss_bumps > 0L)
@@ -672,6 +691,9 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   cat(sprintf("  scored on   : %s; %d k-means++ restarts per level; WSS rises at %d step(s)\n",
               if (is.na(attr(x, "variable"))) "geometry only" else attr(x, "variable"),
               attr(x, "nstart"), attr(x, "wss_bumps")))
+  if (all(c("elbow", "wss") %in% names(x)) && !any(is.finite(x$elbow)) &&
+      sum(is.finite(x$wss)) >= 2L)
+    cat("  elbow       : none; the WSS curve falls as it does with no cluster structure\n")
   sp <- attr(x, "split")
   if (!is.null(sp))
     cat(sprintf("  split       : response read on %d points; estimate on the other %d (attr \"split\")\n",
@@ -849,6 +871,10 @@ select_resolution <- function(profile,
                         cp = " (it needs a response and a usable variogram)",
                         reliability = " (it needs a usable variogram)",
                         moran_z = " (it needs a response and more than nine cells)",
+                        elbow = paste0(" (the WSS curve has no elbow: on log-log axes it ",
+                                       "falls in a straight line, as it does for points ",
+                                       "with no cluster structure, so the geometry names ",
+                                       "no cell count)"),
                         "")), call. = FALSE)
   maximise <- criterion %in% c("reliability", "elbow")
   lv <- profile$levels
@@ -1070,7 +1096,8 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
            "profile resolution_profile() returned.", call. = FALSE)
     stop("summary.resolution_profile(): no criterion is finite at any level. ",
          "cp and reliability need a usable variogram, moran_z a response and ",
-         "more than nine cells; a geometry-only profile carries elbow alone.",
+         "more than nine cells; a geometry-only profile carries elbow alone, ",
+         "and elbow is NA when the WSS curve has no elbow.",
          call. = FALSE)
   }
 
@@ -1234,10 +1261,18 @@ print.resolution_summary <- function(x, ...) {
     usable <- Filter(function(cn) cn %in% names(x) &&
                        any(is.finite(suppressWarnings(as.numeric(x[[cn]])))),
                      c("cp", "reliability", "elbow", "moran_z"))
+    # A geometry-only profile of a layer with no cluster structure lands here
+    # too: its elbow is NA rather than the sqrt(first x last level) the
+    # linear chord rule used to hand on as if the data had chosen it.
     if (!length(usable))
       stop(sprintf(paste0("%s(): `%s` is a resolution profile with no criterion finite at ",
-                          "any level, so no cell count can be read off it."),
-                   caller, arg), call. = FALSE)
+                          "any level, so no cell count can be read off it.%s"),
+                   caller, arg,
+                   if (is.na(attr(x, "variable") %||% NA_character_))
+                     paste0(" It is geometry-only, and its WSS curve has no elbow: the ",
+                            "points have no cluster structure to choose a count. Pass a ",
+                            "number, or profile with a `response_var`.")
+                   else ""), call. = FALSE)
     sel <- select_resolution(x, criterion = usable[[1L]])
     n <- sel$best
     from <- sprintf("resolution_profile() read with select_resolution(criterion = \"%s\")%s",
