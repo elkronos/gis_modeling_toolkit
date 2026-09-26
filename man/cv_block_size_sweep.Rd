@@ -31,8 +31,11 @@ as for \code{\link{cv_spatial}()}; see the example for wrapping a
 built-in backend.}
 
 \item{block_sizes}{Optional numeric vector of block edge lengths to sweep,
-in the CRS units the folds are built in.  Default \code{NULL}: the ladder
-described above.}
+in the CRS units the folds are built in (plain numbers; a \code{units}
+object is refused).  Default \code{NULL}: the ladder described above.
+A size at which the grid would hold fewer than \code{k} blocks is not
+run, with a warning naming it and the largest size that still gives
+\code{k} blocks; if no size is left, the call is an error.}
 
 \item{n_sizes}{Number of sizes in the default ladder.  Default 6.}
 
@@ -70,8 +73,10 @@ reference), \code{method}, \code{blocks_used}, \code{k} (the folds
 actually built), \code{n_folds_succeeded}, \code{value} (the pooled
 metric), \code{fold_min}, \code{fold_max} and \code{fold_sd} (its spread
 across folds).  Attributes: \code{metric}, \code{sac_range} (the
-effective range, or \code{NA}), \code{crs}, \code{n_fits}, and
-\code{results}, the full \code{cv_spatial()} result at every size.
+effective range, or \code{NA}), \code{crs}, \code{k} (the folds
+requested, which \code{print()} and \code{plot()} report),
+\code{n_fits}, \code{response_var}, and \code{results}, the full
+\code{cv_spatial()} result at every size.
 \code{plot()} draws it.
 }
 \description{
@@ -90,8 +95,9 @@ the model.
 
 Each block size is a full cross-validation, so the cost is
 \code{length(block_sizes) * k} fits, plus \code{k} for the random
-reference.  \code{max_fits} caps that (default 60: six sizes at
-\code{k = 5}, plus the reference).  A sweep that would run past the cap
+reference.  \code{max_fits} caps that (default 60: room for up to eleven
+sizes at \code{k = 5} plus the reference; the default six-size ladder at
+\code{k = 5} needs at most 35).  A sweep that would run past the cap
 refuses to start, naming the number of fits it would have needed.  Raise
 \code{max_fits} deliberately; the RF example below takes seconds, a Bayesian
 \code{fit_fn} takes minutes per fit.
@@ -100,11 +106,15 @@ refuses to start, naming the number of fits it would have needed.  Raise
 \section{The ladder}{
 
 When \code{block_sizes} is \code{NULL}, \code{n_sizes} values are
-log-spaced from a twenty-fifth to a half of the shorter side of the
-data's extent (of the longer side when the points lie on one line
-parallel to an axis), and any size at which the grid would hold fewer than
-\code{k} blocks, or more than the 1,000,000 \code{make_folds()} will
-build, is dropped.  The count is of grid cells: on clustered data a grid
+log-spaced from a twenty-fifth of the shorter side of the data's extent
+(of the longer side when the points lie on one line parallel to an axis)
+to the largest size, at most half that side, at which the grid still
+holds \code{k} blocks.  Half the side gives a grid two blocks across,
+enough for \code{k} up to 4 and, for larger \code{k}, on an extent long
+enough in the other direction; on a roughly square extent at the default
+\code{k = 5} the top is about a third of the side.  Any size at which the
+grid would hold more than the 1,000,000 \code{make_folds()} will build is
+dropped.  The count is of grid cells: on clustered data a grid
 of \code{k} or more cells can have fewer than \code{k} that hold points,
 and \code{make_folds()} then lowers \code{k} at that size, which the
 \code{k} column shows.  On an extent much longer than it is wide every
