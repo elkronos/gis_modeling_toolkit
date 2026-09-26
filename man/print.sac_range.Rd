@@ -19,7 +19,11 @@ Prints the effective range as a plain number, with the directional fit
 summarised beneath it when one is available.  A direction whose fit was
 unusable is labelled with why (\code{directional_status}) and the range
 its fit reported (\code{directional_fitted}) when the object carries
-them, and \code{unidentified} otherwise.
+them, and \code{unidentified} otherwise.  A last line names the unit and
+the CRS the range is a length in (\code{attr(x, "crs")}, which for
+lon/lat input is the projected CRS the estimate chose), and whether the
+variogram is of the response or of its residuals on
+\code{predictor_vars} (\code{detrended}, \code{detrend_method}).
 }
 \seealso{
 Other print methods: 
