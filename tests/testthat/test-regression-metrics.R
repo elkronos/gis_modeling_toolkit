@@ -1,9 +1,10 @@
 # ===========================================================================
 # .compute_reg_metrics(): the shared metric calculator behind summary(),
 # model_metrics() and every cross-validation path. The y_train_mean tests
-# matter because R-squared against the WRONG baseline is the classic way to
-# report a flattering number: out-of-sample R-squared must be measured
-# against the training mean, not the test fold's own mean.
+# pin the baseline: out-of-sample R-squared is measured against the training
+# mean, the only null prediction available at prediction time, not against
+# the test fold's own mean (which knows the test data, and so gives the
+# lower R-squared of the two).
 # ===========================================================================
 
 test_that(".compute_reg_metrics matches hand-computed values", {

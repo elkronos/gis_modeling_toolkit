@@ -146,7 +146,15 @@ fitted.  The \code{fold} column of
 \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 the fold's index in the \code{folds} object that was supplied, so it
 lines up with \code{make_folds()$assignment$fold} even when some folds
-were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the
+were unusable and dropped.  \code{R2} is out-of-sample \eqn{R^2}: the
+total sum of squares is taken about the mean of the \emph{training} rows
+(in \code{overall}, each held-out row about its own fold's training
+mean), the null prediction available when the fold is predicted, and
+not about the held-out rows' own mean, a null model that would know the
+test data.  On spatial blocks the two can differ widely; \code{R2} is
+below 0 when the model predicts worse than the training mean.
+\code{\link{model_metrics}(newdata = )} uses the same baseline.
+\code{overall$Adj_R2} is always \code{NA}: the
 pooled out-of-sample predictions come from \code{k} separately fitted
 models and have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
@@ -218,6 +226,9 @@ across the rows of its \code{overall}.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator within 100
+machine epsilons of the largest one counts as zero, so the rule does not
+depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

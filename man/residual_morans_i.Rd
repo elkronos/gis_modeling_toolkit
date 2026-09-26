@@ -52,8 +52,9 @@ it, \code{"randomisation"} otherwise.}
 \item{\code{"randomisation"}}{Always the exchangeable moments.}
 \item{\code{"residual"}}{Always the Cliff & Ord residual moments.  Falls
 back to \code{"randomisation"} with a logged warning if the design
-cannot be rebuilt, and warns (but proceeds) if the residuals are not
-the OLS residuals on it, in which case the moments are approximate.}
+cannot be rebuilt, and logs a warning (but proceeds) if the residuals
+are not the OLS residuals on it, in which case the moments are
+approximate.}
 }
 Both \code{"auto"} and \code{"residual"} also fall back to
 \code{"randomisation"} when the residual degrees of freedom
@@ -119,8 +120,11 @@ The list is classed \code{"morans_i"} and has a \code{print()} method,
 so the console shows the statistic and its null without printing the
 \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 \code{$}, \code{[[} and \code{unlist()} are unaffected.
-Returns \code{NULL} with a warning if computation fails (e.g. fewer
-than 4 valid residuals).
+Returns \code{NULL} with a warning if computation fails, saying why:
+\code{residuals()} raised an error (its message is quoted) or returned
+\code{NULL} (the fit's class has no method), fewer than 4 valid
+residuals, or a residual vector whose length does not match the fit's
+\code{data_sf}.
 }
 \description{
 Given a \code{spatial_fit} object, extracts the residuals and the
