@@ -719,10 +719,13 @@ test_that("the local collinearity check sees the intercept and singular windows"
                          adaptive = TRUE, bandwidth = 20)))))
 
   # And quiet where there is nothing to report: a bandwidth wide enough to span
-  # the clusters gives every window both values of `urban`.
+  # the clusters gives every window both values of `urban`.  .warns() swallows
+  # errors, so the fit is captured and checked: a fit that failed before the
+  # survey would also raise no warning, and pass for the wrong reason.
   expect_false(any(grepl("collinear local design",
-    .warns(fit_gwr_model(d, "z", c("a", "urban"),
-                         adaptive = TRUE, bandwidth = 199)))))
+    .warns(fit199 <- fit_gwr_model(d, "z", c("a", "urban"),
+                                   adaptive = TRUE, bandwidth = 199)))))
+  expect_s3_class(fit199, "gwr_fit")
 
   # The intercept is what makes the constant indicator collinear, so a check on
   # the predictors alone cannot see it -- assert the arithmetic directly rather
@@ -819,9 +822,13 @@ test_that("an implausible fixed bandwidth is called out", {
                         .warns(fit_gwr_model(d, "z", "a", bandwidth = 0.2,
                                              adaptive = FALSE)))))
   # A bandwidth in the units the fit actually runs in draws no such warning.
+  # Captured and checked, since .warns() swallows errors: a fit that failed
+  # before the check would also raise no warning.
   expect_false(any(grepl("ten-thousandth",
-                         .warns(fit_gwr_model(d, "z", "a", bandwidth = 5000,
-                                              adaptive = FALSE)))))
+                         .warns(fit5k <- fit_gwr_model(d, "z", "a",
+                                                       bandwidth = 5000,
+                                                       adaptive = FALSE)))))
+  expect_s3_class(fit5k, "gwr_fit")
 })
 
 
