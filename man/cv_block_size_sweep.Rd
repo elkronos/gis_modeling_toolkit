@@ -47,9 +47,12 @@ reference.  Default \code{TRUE}.}
 \item{max_fits}{The fit budget; see above.  Default 60.}
 
 \item{sac}{Optional \code{sac_range} from \code{\link{estimate_sac_range}()}
-to mark on the curve.  Default \code{NULL}: estimated here from the
-response, detrended on \code{predictor_vars}, when \pkg{gstat} is
-installed.}
+to mark on the curve, or a single number in the units of the CRS the
+folds are built in.  An \code{estimate_sac_range()} result records the
+CRS it was fitted in; when that is not the sweep's, the range is
+converted to the sweep's units, with a warning.  Default \code{NULL}:
+estimated here from the response, detrended on \code{predictor_vars},
+when \pkg{gstat} is installed.}
 
 \item{seed}{Seed for the fold construction at every size.}
 
@@ -98,11 +101,22 @@ refuses to start, naming the number of fits it would have needed.  Raise
 
 When \code{block_sizes} is \code{NULL}, \code{n_sizes} values are
 log-spaced from a twenty-fifth to a half of the shorter side of the
-data's extent, and any size at which the grid would hold fewer than
-\code{k} blocks is dropped, so every point on the curve is a \code{k}-fold
-cross-validation of the same shape.  Sizes are in the units of the CRS the
-folds are built in (\code{make_folds()}'s \code{params$crs}, metres for
-geographic input), and the returned table records that CRS.
+data's extent (of the longer side when the points lie on one line
+parallel to an axis), and any size at which the grid would hold fewer than
+\code{k} blocks, or more than the 1,000,000 \code{make_folds()} will
+build, is dropped.  The count is of grid cells: on clustered data a grid
+of \code{k} or more cells can have fewer than \code{k} that hold points,
+and \code{make_folds()} then lowers \code{k} at that size, which the
+\code{k} column shows.  On an extent much longer than it is wide every
+rung can fall below the autocorrelation range while longer blocks would
+still fit \code{k} times along the longer side; the sweep warns when
+that happens, and \code{block_sizes} is then the way to reach past the
+range.  Sizes are in the units of the CRS the folds are built in
+(\code{make_folds()}'s \code{params$crs}, metres for geographic input),
+and the returned table records that CRS.  Each is the \emph{minimum} block
+edge handed to \code{make_folds()}, which fits a whole number of cells
+across the extent, so the cells are somewhat longer than the size on the
+axis (up to twice as long).
 }
 
 \examples{

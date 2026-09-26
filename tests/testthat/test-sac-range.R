@@ -245,10 +245,13 @@ test_that("make_folds(auto_range) falls back when the range is unidentified", {
   skip_if_not_installed("gstat")
   pts <- sac_test_field()
 
-  lines <- capture_spatialkit_log(
-    f <- make_folds(pts, k = 4, method = "block_kfold", auto_range = TRUE,
-                    range_frac = 1e-6, response_var = "z", seed = 1)
-  )
+  # The fallback is an R warning as well as a log line.
+  expect_warning(
+    lines <- capture_spatialkit_log(
+      f <- make_folds(pts, k = 4, method = "block_kfold", auto_range = TRUE,
+                      range_frac = 1e-6, response_var = "z", seed = 1)
+    ),
+    "falling back to geometric blocks")
   expect_true(log_has(lines, "falling back to geometric blocks"))
 
   # ... and the grid is still a real grid, not one block.
