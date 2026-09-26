@@ -877,6 +877,8 @@
 #' parallel using \code{parallel::mclapply()}, which yields near-linear
 #' speedup on macOS and Linux.  On Windows, forked parallelism is not
 #' available and execution falls back to sequential with a message.
+#' \code{cv_gwr()} never asks for it: GWmodel's OpenMP code deadlocks in a
+#' forked worker (see the comment there).
 #'
 #' @param dat_sf Prepared sf data (projected, clean).
 #' @param response_var Character(1).
@@ -3884,11 +3886,13 @@ make_folds <- function(points_sf, k,
 #' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 #'   estimate the autocorrelation range and use it as the minimum block size.
 #'   Default \code{FALSE}.
-#' @param parallel Logical or positive integer.  If \code{TRUE},
-#'   auto-detect the number of cores and fit folds in parallel via
-#'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-#'   on Windows).  If an integer > 1, use that many cores.  Default
-#'   \code{FALSE} (sequential).
+#' @param parallel Accepted so that every \code{cv_*()} function takes the
+#'   same arguments, but the GWR folds always run one after another in this
+#'   R process.  GWmodel is built with OpenMP, and OpenMP (GNU libgomp)
+#'   deadlocks \code{parallel::mclapply()}'s forked workers once a GWR has
+#'   been fitted in the session, for example by \code{fit_gwr_model()}, so
+#'   forking would hang the call.  A value asking for more than one core
+#'   raises a warning saying so.  Default \code{FALSE}.
 #' @param metrics Optional scoring function of your own, a
 #'   \code{function(y, yhat)} returning a named numeric vector; its names
 #'   become columns of \code{fold_metrics} (per fold) and \code{overall}
@@ -3996,6 +4000,28 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   # Passing p here would yield a per-fold Adj_R² that drastically overstates
   # parsimony.  We set p = NULL so that per-fold Adj_R² is reported as NA,
   # consistent with the pooled metric and with cv_bayes().
+  #
+  # GWR folds never fork.  GWmodel is built with OpenMP, and GNU libgomp is
+  # not fork-safe: once any GWR has run in this session (fit_gwr_model(), a
+  # sequential cv_gwr(), select_gwr_variables(), a bare GWmodel::bw.gwr()) the
+  # parent holds an OpenMP thread pool that a forked child inherits without
+  # its threads, so the child's first parallel region waits on a futex for
+  # ever and parallel::mclapply() never returns.  That was the ordinary
+  # fit-then-cross-validate order, and it hung with no timeout.  Nothing
+  # visible from R says whether the pool exists, so the folds run here, one
+  # after another.  A PSOCK cluster would avoid the fork, but its workers
+  # need this same spatialkit installed, which pkgload::load_all() or any
+  # development copy does not give them, and they cannot see what a
+  # `metrics` closure reads from the global environment.  The other cv_*()
+  # keep mclapply(): ranger runs its own threads, not libgomp's.
+  if (.resolve_n_cores(parallel) > 1L) {
+    .warn_and_log(paste0(
+      "cv_gwr(): `parallel` is ignored and the %d folds run one after ",
+      "another. GWmodel runs OpenMP code, which deadlocks forked (mclapply) ",
+      "workers once a GWR has been fitted in the session."),
+      length(remapped_folds))
+    parallel <- FALSE
+  }
   res <- .cv_run_folds(
     dat_sf = dat_sf, response_var = response_var,
     predictor_vars = predictor_vars,
@@ -4433,7 +4459,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   auto-detect the number of cores and fit folds in parallel via
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
-#'   \code{FALSE} (sequential).
+#'   \code{FALSE} (sequential).  A learner that runs OpenMP code (GWmodel,
+#'   or an xgboost built with GNU libgomp) can hang the forked workers once
+#'   it has run in the session; keep such a \code{fit_fn} sequential, as
+#'   \code{\link{cv_gwr}()} does.
 #' @param metrics Optional scoring function of your own; see \strong{Your
 #'   own metrics} below.  Default \code{NULL}: the built-in metrics only.
 #' @param .caller Internal. The name the messages carry, so a wrapper such as
