@@ -114,7 +114,12 @@ exactly the setting the divergence warning tells you to raise.}
 
 \item{standardize_predictors}{Logical; center and scale numeric predictors
 before fitting. Default FALSE. When TRUE, the scaling parameters are
-stored in the return value so predictions can be computed correctly.}
+stored in the return value (\code{$info$predictor_scaling}, a
+\code{center} and \code{scale} per predictor) so predictions can be
+computed correctly.  The model is then fitted on the standardised
+predictors, so \code{coef()} reports a slope per standard deviation of
+each predictor and an intercept at the predictor means, not the raw-unit
+values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.}
 
 \item{check_convergence}{Logical; after fitting, check for divergent
 transitions, R-hat above 1.05, an effective-sample-size ratio below 0.1,
@@ -312,7 +317,12 @@ Ver Hoef 2022): the spatial coefficient is the effect \emph{net of} whatever
 the spatial field can explain, and the non-spatial one is not.  Which of the
 two a user wants depends on the question, so the honest diagnostic is to
 report both side by side and leave them unadjusted: fit the same formula
-with \code{stats::lm()} or \code{stats::glm()} and compare.
+with \code{stats::lm()} or \code{stats::glm()} and compare.  Compare like
+with like: under \code{standardize_predictors = TRUE} the coefficients here
+are per standard deviation of each predictor, so either fit the
+non-spatial model on the same standardised columns or divide these slopes
+by \code{$info$predictor_scaling[[name]]$scale} first (see
+\code{\link{coef.bayesian_fit}}).
 
 The literature on remedies is unsettled and this function takes no side.
 Restricted spatial regression (Hughes and Haran 2013) projects the spatial
