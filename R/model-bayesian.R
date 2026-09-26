@@ -280,8 +280,10 @@
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 #'   gp_S: the pooled centred range \code{brms::gp(c = )} multiplies;
+#'   gp_cmeans: the column means brms centred the scaled coordinates on;
 #'   gp_xy_range: the training extrema of the scaled coordinates, which
-#'   \code{predict()} uses to pin the GP boundary;
+#'   \code{predict()} uses, with gp_S and gp_cmeans, to hold the GP boundary
+#'   at its fitted value;
 #'   gp_lengthscale_bounds: the \code{c(lower, upper)} the length-scale prior
 #'   was calibrated over; gp_lscale_prior: the length-scale prior
 #'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
@@ -1003,20 +1005,23 @@ fit_bayesian_spatial_model <- function(
       gp_lscale_prior          = gp_lscale_prior_used,
       gp_n_basis               = gp_k^2,
       gp_ell_min               = gp_ell_min,
-      # The scaled-coordinate extrema of the training data, and the pooled
-      # centred range brms derived the boundary from.  predict() needs them:
-      # brms 2.x stores only Xgp/dmax/cmeans in the fit's GP basis, NOT the
+      # The scaled-coordinate extrema of the training data, the column means
+      # brms centred them on, and the pooled centred range it derived the
+      # boundary L = c * S from.  predict() needs them: brms 2.17 to 2.22
+      # store only Xgp/dmax/cmeans in the fit's GP basis, NOT the
       # Hilbert-space boundary L, so brms:::.data_gp() RECOMPUTES
       # L = c * range(centred newdata) from whatever rows predict() is handed.
-      # Without pinning, a point's prediction depends on which other points
+      # Unless L is held, a point's prediction depends on which other points
       # share the predict() call -- predict_surface()'s chunk_size changed the
       # surface, and every cv_bayes() fold was scored against a basis the model
-      # was not fitted with.  See .pin_gp_boundary_rows().
+      # was not fitted with.  brms >= 2.23.0 stores L and reuses it.  See
+      # .pin_gp_boundary_rows().
       gp_xy_range              = list(
         x = range(dat_df[["..x"]], na.rm = TRUE),
         y = range(dat_df[["..y"]], na.rm = TRUE)
       ),
       gp_S                     = gp_spec$S,
+      gp_cmeans                = gp_spec$cmeans,
       gp_lengthscale_bounds    = ls_bounds,
       convergence_ok           = convergence_ok,
       n_dropped                = n_dropped,
