@@ -375,7 +375,9 @@ test_that("the GWR coefficient subtitle is right with mask = FALSE", {
   d$z <- 2 * d$a + 3 * d$soil + rnorm(200, 0, 0.2)
   f70 <- suppressWarnings(fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 70))
   f70$engine$SDF@data$a[1:3] <- NaN
-  cn_bad <- with(f70$info$local_collinearity, !is.finite(cn) | cn > 30)
+  # A slope map is masked by the slope flag (cn_slopes, or cn above 1e6).
+  cn_bad <- with(f70$info$local_collinearity,
+                 !is.finite(cn_slopes) | cn_slopes > 30 | !is.finite(cn) | cn > 1e6)
   n_cn <- sum(cn_bad[-(1:3)])
   expect_gt(n_cn, 0L)
   s1 <- plot(f70, type = "coefficients", term = "a", mask = FALSE)$labels$subtitle

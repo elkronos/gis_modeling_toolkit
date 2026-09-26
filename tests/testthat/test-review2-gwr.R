@@ -52,8 +52,10 @@ test_that("a one-predictor GWR is surveyed for local collinearity", {
                         r$warnings)))
   expect_equal(r$value$info$n_local_collinear, 200L)
   expect_s3_class(r$value$info$local_collinearity, "data.frame")
+  # The global index is on the centred predictors: 1 for a single one.
   expect_equal(r$value$info$condition_index,
-               .condition_index(cbind(1, d$soil)))
+               .condition_index(cbind(1, d$soil - mean(d$soil))))
+  expect_equal(r$value$info$condition_index, 1)
 })
 
 

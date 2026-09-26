@@ -95,6 +95,71 @@
 }
 
 
+#' Warn when a fixed GWR bandwidth is tiny against the data's extent
+#'
+#' A fixed bandwidth is a length in the CRS the fit runs in, and that is not
+#' necessarily the CRS the caller was looking at: prep_model_data() projects
+#' geographic input, so 0.2 "degrees" becomes 0.2 metres and every local
+#' regression is empty.  Shared by \code{fit_gwr_model()} and
+#' \code{gwr_model_selection()}, whose sweep otherwise died on GWmodel's bare
+#' "inv(): matrix is singular" with nothing about the bandwidth.
+#'
+#' @param dat The prepared sf layer the fit runs on.
+#' @param bandwidth The supplied fixed bandwidth.
+#' @param fn Name of the calling function, for the message.
+#' @return Invisibly \code{NULL}; called for the warning.
+#' @keywords internal
+#' @noRd
+.gwr_warn_tiny_fixed_bw <- function(dat, bandwidth, fn) {
+  fit_units <- tryCatch(sf::st_crs(dat)$units_gdal, error = function(e) NULL)
+  extent_x  <- suppressWarnings(tryCatch({
+    bb <- sf::st_bbox(dat); as.numeric(bb[["xmax"]] - bb[["xmin"]])
+  }, error = function(e) NA_real_))
+  if (length(extent_x) == 1L && is.finite(extent_x) && extent_x > 0 &&
+      as.numeric(bandwidth) < extent_x / 1e4) {
+    .warn_and_log(paste0("%s(): a fixed bandwidth of %s is less ",
+                         "than a ten-thousandth of the data's extent (%s %s ",
+                         "across). The bandwidth is a distance in the CRS the ",
+                         "fit runs in (%s), which prep_model_data() may have ",
+                         "chosen -- geographic input is projected first, so a ",
+                         "value in degrees is read as metres. Every local ",
+                         "window is likely to be empty."),
+                  fn, format(as.numeric(bandwidth)), format(signif(extent_x, 4)),
+                  if (is.null(fit_units) || is.na(fit_units)) "unit"
+                  else fit_units,
+                  tryCatch(sf::st_crs(dat)$input, error = function(e) "unknown"))
+  }
+  invisible(NULL)
+}
+
+
+#' The explanation appended to GWmodel's "matrix is singular"
+#'
+#' One exactly singular window makes Armadillo's \code{inv()} throw and
+#' GWmodel stop the whole call; the bare message names neither the window nor
+#' the cause.  Used by \code{fit_gwr_model()} (with the survey's count of
+#' singular windows) and by \code{gwr_model_selection()} (without one).
+#'
+#' @param n_sing Number of singular windows the survey found, or 0 when
+#'   there was no survey.
+#' @return A character string starting with " -- ".
+#' @keywords internal
+#' @noRd
+.gwr_singular_hint <- function(n_sing = 0L) {
+  paste0(" -- at least one local window's design is singular, and ",
+         "GWmodel stops the whole fit rather than return that window. ",
+         if (isTRUE(n_sing > 0L))
+           sprintf("The collinearity survey found %d singular window(s). ",
+                   as.integer(n_sing)) else "",
+         "Typical causes are a predictor that is constant inside a ",
+         "window (a regional indicator, say), a bandwidth that leaves a ",
+         "window fewer observations than parameters (a fixed bandwidth in ",
+         "the wrong units, for one), and neighbours tied at the kernel's ",
+         "edge (a regular grid), which the bisquare and tricube kernels give ",
+         "weight 0; use a larger bandwidth or drop the predictor.")
+}
+
+
 #' Compute a sensible fallback bandwidth from spatial data
 #'
 #' For adaptive mode, returns an integer (number of nearest neighbours).
@@ -337,7 +402,10 @@
 #'   warning, to the smallest that gives every local regression more points
 #'   of non-zero weight than parameters: the number of predictors plus 3 for
 #'   the bisquare and tricube kernels (which give the farthest neighbour in a
-#'   window weight 0), plus 2 for the others.  A count above the number of
+#'   window weight 0), plus 2 for the others.  That floor is enough unless
+#'   several neighbours tie at the kernel's edge (a regular grid), which
+#'   leaves a window fewer weighted points; then use a larger bandwidth.
+#'   A count above the number of
 #'   observations is capped at it, with a warning (a distance meant for
 #'   \code{adaptive = FALSE}, most often).  \code{bw.gwr()} searches adaptive
 #'   bandwidths from 20 neighbours up, so below 20 observations its choice is
@@ -351,38 +419,62 @@
 #'   default \code{FALSE}.
 #'
 #' @section Collinearity diagnostics:
-#' The function computes the **scaled condition index** of the design and
-#' warns when it exceeds 30, the conventional threshold, which Wheeler &
-#' Tiefelsdorf (2005) carry over to the local designs of GWR.  The index is
+#' The function computes **scaled condition indices** of the design and
+#' warns when one exceeds 30, the conventional threshold, which Wheeler &
+#' Tiefelsdorf (2005) carry over to the local designs of GWR.  An index is
 #' the ratio of the largest to the smallest singular value (from an SVD) after
-#' each column is scaled to unit length (Belsley, Kuh & Welsch 1980); an
-#' exactly singular design gives `Inf`, which counts as the worst case, not an
-#' exempt one.  Scaling makes the index independent of the predictors' units;
+#' each column is scaled (Belsley, Kuh & Welsch 1980); an exactly singular
+#' design gives `Inf`, which counts as the worst case, not an exempt one.
+#' Scaling makes the index independent of the predictors' units;
 #' \code{kappa()} on the raw matrix is not, and a threshold on it is a
-#' threshold on nothing in particular.  The columns are scaled but not centred,
-#' so a predictor whose mean is large against its spread (a year, say) is
-#' collinear with the intercept and raises the index.
+#' threshold on nothing in particular.
 #'
-#' A **global** index is computed on the full design, the intercept plus every
-#' predictor, and kept as `info$condition_index`.  A **local** index is then
-#' computed at **every** location, on the design the local regression there
-#' inverts: the intercept plus the predictors, each row weighted by the square
-#' root of its kernel weight at the bandwidth the model is fitted with
-#' (supplied or selected), with rows of negligible weight dropped.  A window
-#' left with fewer rows than columns counts as singular.  The intercept has to
-#' be there: a predictor that is constant, or nearly so, inside a window is
-#' collinear with the intercept and with nothing else, so a single predictor
-#' is surveyed too.  The local indices are kept as `info$local_collinearity`
-#' and counted in `info$n_local_collinear`.
+#' A **global** index is computed on the predictors centred at their means
+#' (with the intercept, which centring makes orthogonal to them), and kept as
+#' `info$condition_index`.  It measures how nearly the predictors are
+#' collinear with one another over the whole study area; it is 1 for a single
+#' predictor, and a change of origin (degrees C or kelvin, a year or years
+#' since 2000) does not move it.
 #'
-#' A warning is issued whenever **any** location has a local index above 30
-#' or a singular window; the wording reports a percentage when more than 25%
-#' of locations are affected and a count otherwise.  Both are real R warnings,
-#' not log lines.  Coefficients at a near-singular window are unstable and can
-#' be implausibly large.  An **exactly** singular window (an indicator that is
-#' constant inside it, or fewer observations than parameters) makes GWmodel
-#' stop, so the fit fails with an error that says so; the window is not
-#' returned as `NaN`.
+#' **Local** indices are then computed at **every** location, on the design
+#' the local regression there inverts: each row weighted by the square root
+#' of its kernel weight at the bandwidth the model is fitted with (supplied or
+#' selected), with rows of negligible weight dropped.  A window left with
+#' fewer rows than columns counts as singular.  Two indices are kept for each
+#' window, as columns of `info$local_collinearity`:
+#' \describe{
+#'   \item{\code{cn}}{Belsley's index of the intercept plus the predictors,
+#'     scaled to unit length but not centred.  A predictor whose values in the
+#'     window are far from 0 against their spread (a year, a temperature in
+#'     kelvin) is collinear with the intercept and raises it: the local
+#'     intercept is then an extrapolation to 0 and is ill-determined, but the
+#'     slopes are not.  It is what GWmodel's own solve sees.}
+#'   \item{\code{cn_slopes}}{The index for the slopes: the predictors centred at
+#'     their weighted mean in the window and each divided by its standard
+#'     deviation over the whole study area.  It is 1 when the predictors vary
+#'     as much, and as independently, inside the window as they do across the
+#'     study area; it grows as a predictor becomes nearly constant inside the
+#'     window (a regional covariate) or two predictors move together there.
+#'     It does not depend on the predictors' origin or units.}
+#' }
+#' A window's slopes count as collinear when `cn_slopes` is above 30 or
+#' singular, or when `cn` is above 1e6, where GWmodel's uncentred solve starts
+#' to lose precision in the slopes too.  Those windows are counted in
+#' `info$n_local_collinear`.  A predictor that is constant, or nearly so,
+#' inside a window is caught this way whether it is alone or has company, so a
+#' single predictor is surveyed too.
+#'
+#' A warning is issued whenever **any** location has collinear slopes; the
+#' wording reports a percentage when more than 25% of locations are affected
+#' and a count otherwise.  Both are real R warnings, not log lines.
+#' Coefficients at a near-singular window are unstable and can be implausibly
+#' large.  An **exactly** singular window (an indicator that is constant
+#' inside it, or fewer observations than parameters) makes GWmodel stop, so
+#' the fit fails with an error that says so; the window is not returned as
+#' `NaN`.  A window with only `cn` above 30 raises no warning:
+#' `plot(fit, type = "coefficients", term = "Intercept")` masks it, and slope
+#' maps do not.  Centre such a predictor if you want an interpretable local
+#' intercept.
 #'
 #' After the fit, the local coefficient surfaces are scanned and a further
 #' warning counts local regressions that came back non-finite.  GWmodel
@@ -404,8 +496,12 @@
 #'   large negative value GWmodel reports would rank the fit above any
 #'   other), \code{bandwidth_is_fallback} (\code{TRUE} when automatic
 #'   selection failed and the arbitrary fallback was used),
-#'   \code{condition_index}, \code{local_collinearity},
-#'   \code{n_local_collinear}, \code{n_local_singular},
+#'   \code{condition_index} (the global index), \code{local_collinearity}
+#'   (one row per observation: \code{row}, \code{x}, \code{y},
+#'   \code{n_window}, \code{cn} and \code{cn_slopes}; see
+#'   \strong{Collinearity diagnostics}), \code{n_local_collinear} (the
+#'   locations whose slopes count as collinear), \code{n_local_singular}
+#'   (the locations whose local coefficients came back non-finite),
 #'   \code{nonfinite_coef} (a logical matrix, one row per observation and
 #'   one column per term, with \code{Intercept} first, \code{TRUE} where the
 #'   local coefficient came back non-finite, so the count in
@@ -576,6 +672,18 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # guard: it used to bypass it (the guard sat behind is.numeric()) and fit a
   # Gaussian GWR to a binary outcome without a word.
   if (is.logical(resp_vals)) resp_vals <- as.numeric(resp_vals)
+  # A factor or character response is refused here, as fit_rf_model() and
+  # fit_bayesian_spatial_model() refuse it.  Past this point it reached
+  # bw.gwr(), failed there twice with "Not compatible with requested type",
+  # drew the arbitrary-fallback warning, and then stopped in gwr.basic() with
+  # "'x' must contain finite values only", none of which names the column.
+  if (!is.numeric(resp_vals))
+    stop(sprintf(paste0("fit_gwr_model(): response '%s' is not numeric (it is ",
+                        "%s). GWR here is a Gaussian regression: convert a ",
+                        "number stored as text with as.numeric() first; for a ",
+                        "categorical outcome use GWmodel::ggwr.basic()."),
+                 response_var, class(resp_vals)[1L]),
+         call. = FALSE)
   if (is.numeric(resp_vals)) {
     usable   <- resp_vals[is.finite(resp_vals)]
     n_usable <- length(usable)
@@ -652,13 +760,21 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       # The scaled condition INDEX (Belsley), thresholded at the literature's
       # 30 -- not kappa() on the raw matrix at 1e6, which depends on the
       # predictors' units and let a design with condition index 1322 through.
-      # The global design includes the intercept, as the local windows do.
-      cn <- .condition_index(cbind(1, xmat))
+      # The predictors are CENTRED first.  Uncentred, a predictor far from 0
+      # against its spread (kelvin, a year) is collinear with the intercept,
+      # so the same field in kelvin warned "collinearity risk" (index 230)
+      # where in degrees C it did not, although every slope is the same.  The
+      # centred index is the standard one: 1 for a single predictor, and above
+      # 30 only when predictors move together over the study area.  A
+      # predictor constant over the whole data set is a zero column here
+      # (Inf).  Collinearity with the intercept INSIDE a window is the local
+      # survey's job.
+      cn <- .condition_index(cbind(1, sweep(xmat, 2L, colMeans(xmat))))
       # A non-finite condition number is an EXACTLY singular design -- the worst
       # case there is -- and `is.finite(cn) && ...` silently let it through.
       if (!is.finite(cn) || cn > 30) {
         .warn_and_log(
-          "fit_gwr_model(): global design (intercept + predictors) has scaled condition index %s, above the conventional 30 (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
+          "fit_gwr_model(): global predictors (centred) have scaled condition index %s, above the conventional 30 (collinearity risk). Note: local collinearity within bandwidth windows may be substantially worse than this global value.",
           if (is.finite(cn)) sprintf("%.0f", cn) else "infinite (exactly singular)"
         )
       }
@@ -697,26 +813,8 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # regression is empty -- all coefficients NaN, all fitted values NA,
   # summary() reporting n = 0 -- with nothing raised anywhere.  Say so at the
   # moment the mismatch is visible.
-  if (!is.null(bandwidth) && !adaptive) {
-    fit_units <- tryCatch(sf::st_crs(dat)$units_gdal, error = function(e) NULL)
-    extent_x  <- suppressWarnings({
-      bb <- sf::st_bbox(dat); as.numeric(bb[["xmax"]] - bb[["xmin"]])
-    })
-    if (is.finite(extent_x) && extent_x > 0 &&
-        as.numeric(bandwidth) < extent_x / 1e4) {
-      .warn_and_log(paste0("fit_gwr_model(): a fixed bandwidth of %s is less ",
-                           "than a ten-thousandth of the data's extent (%s %s ",
-                           "across). The bandwidth is a distance in the CRS the ",
-                           "fit runs in (%s), which prep_model_data() may have ",
-                           "chosen -- geographic input is projected first, so a ",
-                           "value in degrees is read as metres. Every local ",
-                           "window is likely to be empty."),
-                    format(as.numeric(bandwidth)), format(signif(extent_x, 4)),
-                    if (is.null(fit_units) || is.na(fit_units)) "unit"
-                    else fit_units,
-                    tryCatch(sf::st_crs(dat)$input, error = function(e) "unknown"))
-    }
-  }
+  if (!is.null(bandwidth) && !adaptive)
+    .gwr_warn_tiny_fixed_bw(dat, bandwidth, "fit_gwr_model")
   if (is.null(bandwidth)) {
     # .gwr_quietly(): bw.gwr() writes its golden-section search trace with bare
     # cat(), which neither suppressMessages() nor suppressWarnings() touches.
@@ -780,8 +878,13 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                              "neighbours is too small for %d parameters with ",
                              "the %s kernel (a local regression needs more ",
                              "points with non-zero weight than parameters); ",
-                             "using %d."),
-                      bw, n_params, kernel, min_bw)
+                             "using %d.%s"),
+                      bw, n_params, kernel, min_bw,
+                      if (kernel %in% c("bisquare", "tricube"))
+                        paste0(" That is enough unless several neighbours tie ",
+                               "at the kernel's edge (a regular grid), which ",
+                               "gives them weight 0 too; then use a larger ",
+                               "bandwidth.") else "")
       bw <- min_bw
     }
     # Capped at n, as before, but no longer in silence.  A supplied count
@@ -859,15 +962,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       msg <- conditionMessage(e)
       n_sing <- if (is.null(local_cn_df)) 0L else sum(is.infinite(local_cn_df$cn))
       hint <- if (!grepl("singular", msg, fixed = TRUE)) "" else
-        paste0(" -- at least one local window's design is singular, and ",
-               "GWmodel stops the whole fit rather than return that window. ",
-               if (n_sing > 0L)
-                 sprintf("The collinearity survey found %d singular window(s). ",
-                         n_sing) else "",
-               "Typical causes are a predictor that is constant inside a ",
-               "window (a regional indicator, say) and a bandwidth that ",
-               "leaves a window fewer observations than parameters; use a ",
-               "larger bandwidth or drop the predictor.")
+        .gwr_singular_hint(n_sing)
       stop(sprintf("fit_gwr_model(): GWR fit failed: %s%s", msg, hint),
            call. = FALSE)
     }
@@ -938,17 +1033,27 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
         isTRUE(.gwr_aicc_undefined(AIC_val, AICc_val))) {
       trS <- .gwr_trace_s(AIC_val, fit$GW.diagnostic$RSS.gw %||% NA_real_,
                           n_obs)
+      # "Use a larger bandwidth" cannot be followed once an adaptive one is
+      # already every observation: the remedy is then fewer parameters, more
+      # data, or a kernel that does not give the farthest point weight 0.
+      remedy <- if (isTRUE(adaptive) && bw >= n_obs)
+        sprintf(paste0("Even the widest adaptive window (all %d observations) ",
+                       "leaves too few residual degrees of freedom for %d ",
+                       "parameters: use fewer predictors, more observations, ",
+                       "or a gaussian or exponential kernel."),
+                n_obs, n_params)
+      else
+        sprintf("The bandwidth (%s%s) is too small for %d parameters; use a larger one.",
+                format(bw), if (adaptive) " neighbours" else "", n_params)
       .warn_and_log(paste0("fit_gwr_model(): AICc is undefined for this fit ",
                            "and is reported as NA. Its effective number of ",
                            "parameters, tr(S) = %s, is not below n - 2 = %d, ",
                            "so the local regressions (nearly) interpolate the ",
                            "data, and there GWmodel's AICc formula turns ",
                            "negative: its value (%s) would rank this fit above ",
-                           "better ones. The bandwidth (%s%s) is too small ",
-                           "for %d parameters; use a larger one."),
+                           "better ones. %s"),
                     if (is.na(trS)) "?" else format(round(trS, 2)),
-                    n_obs - 2L, format(signif(AICc_val, 6)), format(bw),
-                    if (adaptive) " neighbours" else "", n_params)
+                    n_obs - 2L, format(signif(AICc_val, 6)), remedy)
       AICc_val <- NA_real_
     }
   }
@@ -966,17 +1071,20 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
       kernel                = kernel,
       AICc                  = AICc_val,
       bandwidth_is_fallback = bandwidth_is_fallback,
-      # The global scaled condition index of the design (intercept +
-      # numeric predictors); the number to compare across candidate
+      # The global scaled condition index of the centred numeric predictors
+      # (with the intercept); the number to compare across candidate
       # predictor sets.  NA only when there is no numeric predictor, which
       # the non-numeric refusal above makes unreachable.
       condition_index       = global_cn,
-      # One row per observation: the scaled condition index of the
+      # One row per observation: the two condition indices (cn, with the
+      # intercept and uncentred; cn_slopes, for the slopes) of the
       # kernel-weighted local design at that location.  NULL only when
       # there is no numeric predictor to survey.
       local_collinearity    = local_cn_df,
+      # The locations whose SLOPES are collinear; an ill-determined
+      # intercept alone (cn > 30 only) is not counted.
       n_local_collinear     = if (is.null(local_cn_df)) NA_integer_ else
-        sum(!is.finite(local_cn_df$cn) | local_cn_df$cn > 30),
+        sum(.gwr_slopes_collinear(local_cn_df)),
       n_local_singular      = n_bad_local,
       # One row per observation, one column per term (Intercept first):
       # TRUE where GWmodel returned a non-finite local coefficient.
@@ -1030,29 +1138,52 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 
 #' Survey the local collinearity of every fitting window
 #'
-#' At each observation, forms the kernel-weighted local design
-#' \eqn{W^{1/2} X} (intercept included) that the local regression there
-#' inverts, and computes its scaled condition index.  Two things this
-#' deliberately does differently from the global check:
-#' \itemize{
-#'   \item The intercept column is included (\code{cbind(1, xmat)}).  GWmodel
-#'     fits an intercept, and the case this survey exists for (an indicator
-#'     that is constant inside a window) is collinear with the INTERCEPT and
-#'     with nothing else, so a check on the predictors alone cannot see it.
-#'   \item A non-finite condition number counts as extreme.  \code{kappa()}
-#'     returns \code{Inf} for an exactly singular matrix, and
-#'     \code{is.finite(cn) && cn > 1e6} discarded precisely the worst case.
+#' At each observation, forms the kernel-weighted local design that the local
+#' regression there inverts, and computes two condition indices of it.
+#' \describe{
+#'   \item{\code{cn}}{Belsley's scaled condition index of \eqn{W^{1/2} X},
+#'     intercept included (\code{cbind(1, xmat)}), columns scaled to unit
+#'     length but not centred.  This is the design GWmodel inverts, and the
+#'     literature's local index (Wheeler 2007;
+#'     \code{GWmodel::gwr.collin.diagno()} computes the same).  It is right
+#'     about the INTERCEPT: a predictor whose values in the window are far
+#'     from 0 against their spread makes the local intercept an extrapolation
+#'     to 0.  It is wrong about the slopes: a slope's precision,
+#'     \eqn{\sigma^2 / \sum w (x - \bar{x}_w)^2}, does not depend on where the
+#'     predictor's origin is, yet the same field in kelvin scored a median 454
+#'     where in degrees C it scored 27.}
+#'   \item{\code{cn_slopes}}{The index for the slopes.  The predictors are
+#'     centred at their weighted mean in the window, which makes them exactly
+#'     orthogonal to the intercept (so no origin enters), and each is divided
+#'     by its standard deviation over the whole data, so the reference scale
+#'     is the study area's own spread: \eqn{Z = \sqrt{w / \sum w}\,
+#'     (x - \bar{x}_w) / s}, row by row.  The index is
+#'     \code{max(1, d_max) / min(1, d_min)} over the singular values \code{d}
+#'     of \eqn{Z}: 1 when the window's predictors vary as much, and as
+#'     independently, as across the study area.  It is large when a predictor
+#'     is (nearly) constant inside the window -- a regional covariate,
+#'     collinear with the intercept and nothing else -- and when two
+#'     predictors move together there.  The centring has to be LOCAL: centred
+#'     at the global mean, a cluster whose covariate sits at the global mean
+#'     scored near 1 although its local slope was undetermined.  Over the
+#'     whole data the index reduces to the standard centred scaled condition
+#'     index.}
 #' }
+#' A non-finite index counts as extreme.  \code{kappa()} returns \code{Inf}
+#' for an exactly singular matrix, and \code{is.finite(cn) && cn > 1e6}
+#' discarded precisely the worst case.  See \code{.gwr_slopes_collinear()}
+#' for how the two indices are combined.
+#'
 #' The weights are the kernel's own (Wheeler and Tiefelsdorf 2005 diagnose
 #' GWR collinearity on the weighted design), so a bisquare window's edge
 #' points, which contribute almost nothing to the fit, contribute almost
 #' nothing here either; rows with negligible weight are dropped before the
 #' SVD.  So are rows whose weight is undefined (\code{NaN}, a zero-width
 #' adaptive kernel at co-located points), and a window left with fewer rows
-#' than columns counts as singular (\code{Inf}): GWmodel returns non-finite
-#' coefficients there.  Every location is surveyed, not a sample: the map of
-#' coefficients needs a value at each, and the survey's cost is the same
-#' order as the fit's.
+#' than columns counts as singular (\code{Inf}) in both indices: GWmodel
+#' returns non-finite coefficients there.  Every location is surveyed, not a
+#' sample: the map of coefficients needs a value at each, and the survey's
+#' cost is the same order as the fit's.
 #'
 #' @param coords Matrix of coordinates, one row per observation.
 #' @param xmat Numeric matrix of the numeric predictors.
@@ -1060,42 +1191,108 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
 #' @param bw The bandwidth the model is fitted with.
 #' @param kernel The kernel name.
 #' @return A data.frame with one row per observation: \code{row}, \code{x},
-#'   \code{y}, \code{n_window} (points with non-negligible weight) and
-#'   \code{cn} (the scaled condition index, \code{Inf} when singular).
+#'   \code{y}, \code{n_window} (points with non-negligible weight), \code{cn}
+#'   (the uncentred scaled condition index with the intercept) and
+#'   \code{cn_slopes} (the slope index), each \code{Inf} when singular.
 #' @keywords internal
 #' @noRd
 .gwr_local_collinearity <- function(coords, xmat, adaptive, bw, kernel) {
   n_obs <- nrow(coords)
   out <- data.frame(row = seq_len(n_obs), x = coords[, 1], y = coords[, 2],
-                    n_window = NA_integer_, cn = NA_real_)
+                    n_window = NA_integer_, cn = NA_real_, cn_slopes = NA_real_)
   # One predictor is enough: X below adds the intercept, and a predictor
   # constant inside a window is collinear with it.
   if (!is.matrix(xmat) || ncol(xmat) < 1L || n_obs < 1L) return(out)
   if (is.null(bw) || !is.finite(bw)) return(out)
   X <- cbind(1, xmat)
+  # The slope index's reference scale: each predictor's spread over the
+  # whole data.  A predictor with none has no slope to estimate anywhere.
+  s_glob <- apply(xmat, 2L, stats::sd)
+  s_ok   <- all(is.finite(s_glob) & s_glob > 0)
   for (i in seq_len(n_obs)) {
     d <- sqrt((coords[, 1] - coords[i, 1])^2 + (coords[, 2] - coords[i, 2])^2)
     w <- .gw_kernel_weights(d, bw, kernel, adaptive)
     keep <- which(is.finite(w) & w > 1e-8)
     out$n_window[i] <- length(keep)
-    out$cn[i] <- if (length(keep) < ncol(X)) Inf else
-      .condition_index(sqrt(w[keep]) * X[keep, , drop = FALSE])
+    if (length(keep) < ncol(X)) {
+      out$cn[i] <- Inf
+      out$cn_slopes[i] <- Inf
+      next
+    }
+    out$cn[i] <- .condition_index(sqrt(w[keep]) * X[keep, , drop = FALSE])
+    out$cn_slopes[i] <- .gwr_slope_index(w[keep], xmat[keep, , drop = FALSE],
+                                         s_glob, s_ok)
   }
   out
+}
+
+
+#' The origin-free condition index of a window's slopes
+#'
+#' See \code{.gwr_local_collinearity()}.  A predictor that is exactly
+#' constant inside the window is singular (\code{Inf}) outright: after
+#' centring its column is rounding noise, whose size depends on the value it
+#' is constant at.
+#'
+#' @param w Positive kernel weights of the window's rows.
+#' @param xk The window's rows of the predictor matrix.
+#' @param s_glob Each predictor's standard deviation over the whole data.
+#' @param s_ok Whether every \code{s_glob} is finite and positive.
+#' @return A number of at least 1, or \code{Inf}.
+#' @keywords internal
+#' @noRd
+.gwr_slope_index <- function(w, xk, s_glob,
+                             s_ok = all(is.finite(s_glob) & s_glob > 0)) {
+  if (!isTRUE(s_ok) || nrow(xk) < ncol(xk) + 1L) return(Inf)
+  if (any(apply(xk, 2L, function(v) max(v) == min(v)))) return(Inf)
+  ww <- w / sum(w)
+  z  <- sqrt(ww) * sweep(sweep(xk, 2L, colSums(ww * xk)), 2L, s_glob, "/")
+  sv <- tryCatch(svd(z, nu = 0, nv = 0)$d, error = function(e) NULL)
+  if (is.null(sv) || !length(sv) || any(!is.finite(sv))) return(Inf)
+  if (min(sv) <= .Machine$double.eps * max(1, sv)) return(Inf)
+  max(1, max(sv)) / min(1, min(sv))
+}
+
+
+#' Which windows' local slopes count as collinear
+#'
+#' A window's slopes are collinear when their own index (\code{cn_slopes}) is
+#' above 30 or singular, or when the uncentred index with the intercept
+#' (\code{cn}) is above 1e6.  The second condition is numerical, not
+#' statistical: GWmodel inverts the uncentred \eqn{X^\top W X}, whose
+#' condition number is about \code{cn^2}, and shifting a predictor's origin
+#' until \code{cn} reached 1.6e6 moved its local slopes by 0.4\% of their
+#' spread, 1.6e7 by 25\%, and 1.6e8 made GWmodel stop with "matrix is
+#' singular".  A survey without \code{cn_slopes} (a fit made before it
+#' existed) falls back to \code{cn > 30}.  \code{NA} (a survey that did not
+#' run) counts as collinear, as it always has.
+#'
+#' @param lc A survey, as \code{.gwr_local_collinearity()} returns it.
+#' @return Logical vector, one element per row of \code{lc}.
+#' @keywords internal
+#' @noRd
+.gwr_slopes_collinear <- function(lc) {
+  cn <- lc$cn
+  if (is.null(lc$cn_slopes)) return(!is.finite(cn) | cn > 30)
+  cs <- lc$cn_slopes
+  !is.finite(cs) | cs > 30 | !is.finite(cn) | cn > 1e6
 }
 
 
 #' Warn about the local collinearity survey's findings
 #'
 #' The two messages the sampled spot-check used to raise, now on the exact
-#' fraction of locations.
+#' fraction of locations, and about the slopes (\code{.gwr_slopes_collinear()}):
+#' a window whose only problem is an ill-determined intercept (\code{cn}
+#' above 30, slopes fine) is logged, not warned about.
 #' @keywords internal
 #' @noRd
 .gwr_local_collinearity_warn <- function(local_cn_df) {
   if (is.null(local_cn_df) || !nrow(local_cn_df) || all(is.na(local_cn_df$cn)))
     return(invisible(NULL))
   n <- nrow(local_cn_df)
-  n_extreme <- sum(!is.finite(local_cn_df$cn) | local_cn_df$cn > 30)
+  slope_bad <- .gwr_slopes_collinear(local_cn_df)
+  n_extreme <- sum(slope_bad)
   frac <- n_extreme / n
   # What happens at those windows is said as GWmodel does it: a near-singular
   # window returns implausibly large coefficients, an exactly singular one
@@ -1104,15 +1301,26 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   # the post-fit warning names that cause.
   if (frac > 0.25) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity: %.0f%% of %d locations have a collinear local design (scaled condition index of the kernel-weighted window > 30, or singular) at the bandwidth in use. Local regressions there are unstable and their coefficients may be implausibly large, and an exactly singular window makes GWmodel stop the fit; plot(fit, type = \"coefficients\") masks them.",
+      "fit_gwr_model(): local collinearity: %.0f%% of %d locations have a collinear local design (the predictors, centred in the kernel-weighted window, have scaled condition index > 30 against their spread over the study area, or the window is singular) at the bandwidth in use. Local regressions there are unstable and their coefficients may be implausibly large, and an exactly singular window makes GWmodel stop the fit; plot(fit, type = \"coefficients\") masks them.",
       frac * 100, n
     )
   } else if (n_extreme > 0L) {
     .warn_and_log(
-      "fit_gwr_model(): local collinearity: %d of %d locations have a collinear local design (scaled condition index of the kernel-weighted window > 30, or singular) at the bandwidth in use.",
+      "fit_gwr_model(): local collinearity: %d of %d locations have a collinear local design (the predictors, centred in the kernel-weighted window, have scaled condition index > 30 against their spread over the study area, or the window is singular) at the bandwidth in use.",
       n_extreme, n
     )
   }
+  # The intercept alone: a predictor far from 0 against its local spread.
+  # That says nothing about the slopes, so it is not a warning; the Intercept
+  # map masks those locations.
+  n_int <- sum(!slope_bad & (!is.finite(local_cn_df$cn) | local_cn_df$cn > 30))
+  if (n_int > 0L)
+    .log_info(paste0("fit_gwr_model(): the local intercept is an extrapolation ",
+                     "at %d of %d locations (a predictor's local values are far ",
+                     "from 0 against their spread: condition index with the ",
+                     "intercept > 30). The slopes there are not affected; centre ",
+                     "the predictor to map an interpretable intercept."),
+              n_int, n)
   invisible(NULL)
 }
 

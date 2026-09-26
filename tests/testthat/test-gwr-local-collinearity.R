@@ -59,7 +59,7 @@ test_that("the survey is the weighted condition index at every location", {
   xm <- as.matrix(sf::st_drop_geometry(pts)[, c("a", "b")])
   sv <- spatialkit:::.gwr_local_collinearity(xy, xm, adaptive = TRUE, bw = 40, kernel = "bisquare")
   expect_equal(nrow(sv), nrow(pts))
-  expect_equal(names(sv), c("row", "x", "y", "n_window", "cn"))
+  expect_equal(names(sv), c("row", "x", "y", "n_window", "cn", "cn_slopes"))
   expect_true(all(sv$n_window == 39L))       # the 40th neighbour has weight 0
   expect_true(all(is.finite(sv$cn) & sv$cn >= 1))
   for (i in c(1L, 77L, 200L)) {
@@ -89,8 +89,10 @@ test_that("fit_gwr_model() keeps the survey and the global index on the fit", {
   expect_equal(fit$info$n_local_collinear, 0L)
   expect_equal(fit$info$n_local_singular, 0L)
   expect_true(is.finite(fit$info$condition_index))
+  # The global index is on the centred predictors.
+  xab <- as.matrix(sf::st_drop_geometry(pts)[, c("a", "b")])
   expect_equal(fit$info$condition_index,
-               spatialkit:::.condition_index(cbind(1, as.matrix(sf::st_drop_geometry(pts)[, c("a", "b")]))))
+               spatialkit:::.condition_index(cbind(1, sweep(xab, 2L, colMeans(xab)))))
   # It is the survey at the bandwidth actually used.
   ref <- spatialkit:::.gwr_local_collinearity(sf::st_coordinates(pts),
                                               as.matrix(sf::st_drop_geometry(pts)[, c("a", "b")]),
@@ -104,7 +106,8 @@ test_that("fit_gwr_model() keeps the survey and the global index on the fit", {
                                                    as.matrix(sf::st_drop_geometry(pts)[, "a", drop = FALSE]),
                                                    TRUE, 60, "bisquare")$cn)
   expect_equal(fit1$info$condition_index,
-               spatialkit:::.condition_index(cbind(1, pts$a)))
+               spatialkit:::.condition_index(cbind(1, pts$a - mean(pts$a))))
+  expect_equal(fit1$info$condition_index, 1)
   expect_equal(fit1$info$n_local_collinear, 0L)
 })
 
