@@ -23,12 +23,15 @@ A \code{ggplot} object.
 of applicability; it does not say whether the rest sit comfortably inside
 or crowd against the threshold, nor how far outside the outsiders are.
 This draws the dissimilarity index of the prediction locations against
-that of the cross-validated training data, with the threshold marked, so
-the prediction set can be read as mostly inside, marginal or largely
-outside.  The training curve is the reference the threshold was derived
-from: the threshold is the largest cross-validated training DI inside an
-outlier fence, so the curve reaches it exactly when no training value was
-fenced off and runs past it, by the tail the fence removed, when some were.
+that of the training data, with the threshold marked, so the prediction
+set can be read as mostly inside, marginal or largely outside.  The
+training DI is cross-validated over the \code{folds} passed to
+\code{\link{area_of_applicability}()}, or without them is each training
+point's distance to its nearest other training point; the legend and the
+caption say which.  The training curve is the reference the threshold was
+derived from: the threshold is the largest training DI inside an outlier
+fence, so the curve reaches it exactly when no training value was fenced
+off and runs past it, by the tail the fence removed, when some were.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {

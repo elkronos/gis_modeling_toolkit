@@ -157,6 +157,102 @@ test_that("plot_folds' subtitle gives no unit for folds built without a CRS", {
 })
 
 
+# ---- plot.aoa() -----------------------------------------------------------
+
+test_that("plot.aoa's legend says what the training DI is", {
+  skip_if_not_installed("ggplot2")
+  set.seed(2); n <- 200
+  train <- sf::st_as_sf(data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
+                                   a = rnorm(n), b = rnorm(n)),
+                        coords = c("x", "y"), crs = 32632)
+  new <- sf::st_as_sf(data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000),
+                                 a = rnorm(100, mean = 2), b = rnorm(100)),
+                      coords = c("x", "y"), crs = 32632)
+  legend_of <- function(p) {
+    b <- ggplot2::ggplot_build(p)
+    sc <- b$plot$scales$get_scales("colour")
+    list(labels = sc$get_labels(), colours = unique(b$data[[1]]$colour))
+  }
+  # No folds: the training DI is the distance to the nearest other training
+  # point, and the caption already said so; the legend said "cross-validated".
+  a0 <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"))
+  l0 <- legend_of(plot(a0))
+  expect_true("Training (nearest other training point)" %in% l0$labels)
+  expect_false(any(grepl("cross-validated", l0$labels)))
+  # Both curves keep their colours (a manual scale keyed on a stale name
+  # would draw one of them in NA).
+  expect_setequal(l0$colours, c("grey45", "#2166AC"))
+  f <- make_folds(train, k = 5, method = "block_kfold", block_size = 300, seed = 1)
+  a1 <- area_of_applicability(new, train_sf = train, predictor_vars = c("a", "b"), folds = f)
+  l1 <- legend_of(plot(a1))
+  expect_true("Training (cross-validated)" %in% l1$labels)
+  expect_setequal(l1$colours, c("grey45", "#2166AC"))
+})
+
+
+# ---- plot_cv_metrics() -----------------------------------------------------
+
+test_that("plot_cv_metrics draws no pooled line for a model without per-fold values", {
+  skip_if_not_installed("ggplot2")
+  # factor(pooled$model, levels = ...) turned such a model into NA, and its
+  # line was drawn in another model's panel, or in a third panel labelled NA.
+  cmp <- list(
+    by_fold = data.frame(model = rep(c("GWR", "RF"), each = 4), fold = rep(1:4, 2),
+                         RMSE = c(NA, NA, NA, NA, 3.1, 3.9, 3.5, 4.0),
+                         n_pred = 25, stringsAsFactors = FALSE),
+    overall = data.frame(model = c("GWR", "RF"), RMSE = c(1.84, 3.66),
+                         stringsAsFactors = FALSE))
+  p <- plot_cv_metrics(cmp, "RMSE")
+  b <- ggplot2::ggplot_build(p)
+  hl <- b$data[[which(layer_geoms_r2(p) == "GeomHline")]]
+  expect_equal(hl$yintercept, 3.66)
+  expect_match(p$labels$caption, "Not drawn: GWR \\(no finite per-fold `RMSE`\\)")
+
+  # A pooled row for a model absent from the per-fold table: no NA panel.
+  cmp$by_fold$RMSE[1:4] <- c(1.5, 2, 1.9, 2.1)
+  cmp$overall <- rbind(cmp$overall, data.frame(model = "Extra", RMSE = 5))
+  p2 <- plot_cv_metrics(cmp, "RMSE")
+  b2 <- ggplot2::ggplot_build(p2)
+  expect_equal(nrow(b2$layout$layout), 2L)
+  expect_false(anyNA(b2$layout$layout$model))
+  hl2 <- b2$data[[which(layer_geoms_r2(p2) == "GeomHline")]]
+  expect_setequal(hl2$yintercept, c(1.84, 3.66))
+  expect_match(p2$labels$caption, "Not drawn: Extra")
+})
+
+
+# ---- plot.feature_selection() ---------------------------------------------
+
+test_that("the rejected last step is drawn hollow and labelled as not added", {
+  skip_if_not_installed("ggplot2")
+  # In the shape select_features_forward() returns: a and b accepted, and c,
+  # the best candidate at step 3, improved the score by less than tol.
+  sel <- structure(list(
+    selected = c("a", "b"),
+    history = data.frame(step = c(0L, 1L, 1L, 1L, 2L, 2L, 3L),
+                         variable = c("(intercept)", "a", "b", "c", "b", "c", "c"),
+                         score = c(3.0, 2.0, 2.6, 2.9, 1.50, 1.95, 1.49),
+                         stringsAsFactors = FALSE),
+    params = list(metric = "RMSE", k = 3, method = "block_kfold")),
+    class = c("feature_selection", "list"))
+  p <- plot(sel)
+  b <- ggplot2::ggplot_build(p)
+  geoms <- layer_geoms_r2(p)
+  txt <- b$data[[which(geoms == "GeomText")]]
+  expect_identical(txt$label[order(txt$x)], c("(intercept)", "a", "b", "c (not added)"))
+  # The path points: filled at the accepted steps, hollow at the rejected one,
+  # and each scored candidate still drawn once.
+  path_layer <- which(geoms == "GeomPoint")[2L]
+  path <- b$data[[path_layer]]
+  expect_equal(path$shape[order(path$x)], c(19, 19, 19, 21))
+  n_pts <- sum(vapply(b$data[which(geoms == "GeomPoint")], nrow, integer(1)))
+  expect_equal(n_pts, nrow(sel$history) + 1L)   # + the chosen marker
+  # The chosen step is still the last accepted one.
+  chosen <- b$data[[utils::tail(which(geoms == "GeomPoint"), 1L)]]
+  expect_equal(chosen$x, 2)
+})
+
+
 # ---- plot.spatial_fit() ---------------------------------------------------
 
 test_that("plot.spatial_fit draws a custom fit that has no residuals() method", {
