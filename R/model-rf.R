@@ -564,7 +564,10 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
   # session's mc.cores opt-in for itself, so parallel = 4 with mc.cores = 8
   # meant 32 threads.  One thread per worker unless the caller says otherwise.
   dots <- list(...)
-  n_workers <- .resolve_n_cores(parallel)
+  # Quietly: cv_spatial() resolves `parallel` again below and says what it
+  # does with it (a request above the machine's core count is capped, with a
+  # message), so resolving it here aloud printed that message twice.
+  n_workers <- suppressMessages(.resolve_n_cores(parallel))
   if (n_workers > 1L && !("num_threads" %in% names(dots)))
     dots$num_threads <- 1L
   fit_fn <- function(train_sf)

@@ -26,7 +26,9 @@ model name, all regression metrics, and \code{metric_basis}: what the
 row's metrics were computed on, \code{"in-sample"} (fitted values),
 \code{"out-of-bag"} (an \code{rf_fit}'s fitted values, see "What the
 metrics are computed on") or \code{"newdata"}.  Rows with different
-bases do not compare like for like.
+bases do not compare like for like.  An element that is not a
+\code{spatial_fit} is skipped, with a logged warning, and has no row;
+a list in which no element is a \code{spatial_fit} is an error.
 }
 \description{
 Accepts a single \code{spatial_fit} object or a named list of them.
@@ -64,9 +66,9 @@ magnitude, whatever its units).
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator within 100
-machine epsilons of the largest one counts as zero, so the rule does not
-depend on the units of the response.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

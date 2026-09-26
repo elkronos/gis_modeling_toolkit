@@ -135,7 +135,7 @@ test_that("compare_models() says so when nothing is a spatial_fit", {
   # `met_df$AICc <- NA_real_` turned that into a bare list, after which
   # seq_len(nrow(NULL)) aborted with "argument must be coercible to
   # non-negative integer".
-  expect_error(compare_models(list(a = 1, b = 2)), "no element of `models`")
+  expect_error(compare_models(list(a = 1, b = 2)), "no element of `fits`")
 })
 
 test_that("a fitted-value cache entry belongs to the engine that produced it", {

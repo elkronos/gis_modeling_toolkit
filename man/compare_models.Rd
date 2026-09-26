@@ -23,7 +23,9 @@ models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
 (Bayesian) are sums over the rows a model was fitted to, so each column
 is set to \code{NA}, with a warning, when the fits carrying it were
 fitted to different rows (a predictor with missing values drops rows,
-for example).  Alongside the metrics it carries
+for example) or to different responses (a transformed response on the
+same rows), and the warning says which.  Alongside the metrics it
+carries
 \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 \code{resid_morans_null}, the last of which names the null
 \code{\link{residual_morans_i}} scored each model against, since that
@@ -71,9 +73,9 @@ magnitude, whatever its units).
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator within 100
-machine epsilons of the largest one counts as zero, so the rule does not
-depend on the units of the response.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
