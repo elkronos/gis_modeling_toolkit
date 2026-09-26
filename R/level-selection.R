@@ -182,15 +182,32 @@
   idx <- integer(k)
   idx[1L] <- sample.int(n, 1L)
   if (k > 1L) {
-    d2 <- rowSums((xy - matrix(xy[idx[1L], ], n, ncol(xy), byrow = TRUE))^2)
+    # One vector per coordinate, and each draw by inverting the cumulative
+    # squared distance: sample.int(prob = ) sorts all n weights to draw one
+    # point, and the n x 2 matrices built for every distance update were the
+    # rest of the cost.  Seeding took 73 percent of a resolution profile's
+    # time; measured on 5000 points it fell from 0.63 s to 0.08 s at
+    # k = 1000, and a profile of 3000 points from 35 s to 10 s.  The draw
+    # has the same law, P(i) = d2[i] / sum(d2), but maps
+    # the random number to a different point, so it seeds different centres
+    # for the same seed than it did up to 2.0.0.
+    cols <- lapply(seq_len(ncol(xy)), function(j) xy[, j])
+    dist2 <- function(i) {
+      s <- 0
+      for (v in cols) s <- s + (v - v[i])^2
+      s
+    }
+    d2 <- dist2(idx[1L])
     for (j in 2:k) {
-      tot <- sum(d2)
+      cs  <- cumsum(d2)
+      tot <- cs[n]
       # Every remaining point coincides with a centre: fall back to a uniform
-      # draw among the points not yet chosen.
+      # draw among the points not yet chosen.  A point at distance 0 adds
+      # nothing to the cumulative sum, so the inversion never lands on one.
       idx[j] <- if (is.finite(tot) && tot > 0)
-        sample.int(n, 1L, prob = d2 / tot)
+        min(n, findInterval(stats::runif(1L) * tot, cs) + 1L)
       else sample(setdiff(seq_len(n), idx[seq_len(j - 1L)]), 1L)
-      d2 <- pmin(d2, rowSums((xy - matrix(xy[idx[j], ], n, ncol(xy), byrow = TRUE))^2))
+      d2 <- pmin(d2, dist2(idx[j]))
     }
   }
   xy[idx, , drop = FALSE]
@@ -510,7 +527,10 @@
 #'   immediate neighbours, so at most 3 values are ever returned no matter how
 #'   large \code{top_n} is; only the model-aware criteria can return more.
 #' @param sample_n Integer; subsample size for speed. Default 1500.
-#' @param set_seed Integer RNG seed. Default 123.
+#' @param set_seed Integer RNG seed for the subsample and the k-means++
+#'   restarts; restored afterwards. Default 123.  The rows are put in
+#'   coordinate order before either, so the answer does not depend on the
+#'   order they come in.
 #' @param response_var Optional response column name. When provided alongside
 #'   \code{predictor_vars}, enables model-aware level selection via Moran's I
 #'   on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
@@ -835,14 +855,21 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     moran_rows <- moran_rows & complete
   }
 
-  if (n > sample_n) {
-    idx <- sample(seq_len(n), sample_n)
-    xy <- xy[idx, , drop = FALSE]
-    moran_rows <- moran_rows[idx]
-    if (has_model_vars) {
-      resp_vec <- resp_vec[idx]
-      pred_mat <- pred_mat[idx, , drop = FALSE]
-    }
+  # Subsample from the rows in a canonical order, and hand k-means++ the
+  # points in that order even with no subsample to draw: both index rows, so
+  # the same layer with its rows permuted used to get different cells and a
+  # different count.  Coordinates first; the response and the predictors
+  # break ties between repeat visits to one location.
+  ord <- do.call(order, c(list(xy[, 1], xy[, 2]),
+                          if (has_model_vars)
+                            c(list(resp_vec),
+                              lapply(seq_len(ncol(pred_mat)), function(j) pred_mat[, j]))))
+  idx <- if (n > sample_n) ord[sample(seq_len(n), sample_n)] else ord
+  xy <- xy[idx, , drop = FALSE]
+  moran_rows <- moran_rows[idx]
+  if (has_model_vars) {
+    resp_vec <- resp_vec[idx]
+    pred_mat <- pred_mat[idx, , drop = FALSE]
   }
 
   k_max <- max(2L, min(as.integer(max_levels), nrow(xy) - 1L))

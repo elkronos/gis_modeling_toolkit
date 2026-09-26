@@ -57,7 +57,8 @@ not change with \code{sample_n} except through the fits.}
 \item{nstart}{k-means++ restarts per level.  Default 25.}
 
 \item{seed}{RNG seed for the subsample and the restarts; restored
-afterwards.  Default 123.}
+afterwards.  Default 123.  The rows are put in coordinate order before
+either, so the profile does not depend on the order they come in.}
 
 \item{sac}{Optional \code{sac_range} object from
 \code{\link{estimate_sac_range}()} to take the range, nugget and

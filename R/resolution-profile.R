@@ -280,7 +280,8 @@
 #'   not change with \code{sample_n} except through the fits.
 #' @param nstart k-means++ restarts per level.  Default 25.
 #' @param seed RNG seed for the subsample and the restarts; restored
-#'   afterwards.  Default 123.
+#'   afterwards.  Default 123.  The rows are put in coordinate order before
+#'   either, so the profile does not depend on the order they come in.
 #' @param sac Optional \code{sac_range} object from
 #'   \code{\link{estimate_sac_range}()} to take the range, nugget and
 #'   correlation function from.  Pass one fitted with \code{detrend =
@@ -532,15 +533,22 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   n_uniq_all <- sum(!duplicated(complex(real = round(xy[, 1], 8),
                                         imaginary = round(xy[, 2], 8))))
 
-  # Subsample, keeping everything aligned.
-  if (n_all > sample_n) {
-    idx <- sample(seq_len(n_all), sample_n)
-    xy <- xy[idx, , drop = FALSE]
-    data_sf <- data_sf[idx, , drop = FALSE]
-    if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
-    if (has_pred) pred <- pred[idx, , drop = FALSE]
-    if (!is.null(in_sel)) in_sel <- in_sel[idx]
-  }
+  # Subsample, keeping everything aligned, from the rows in a canonical order:
+  # the subsample and every k-means++ draw index rows, so the same layer with
+  # its rows permuted used to get different cells and a different count (a
+  # WSS 2.6 percent apart and Cp picks of 222, 173 and 135 cells over
+  # permutations of one 2000-point layer).  Coordinates first; the response
+  # and the predictors break ties between repeat visits to one location.
+  # Every point is reordered even with no subsample to draw.
+  ord <- do.call(order, c(list(xy[, 1], xy[, 2]),
+                          if (has_resp) list(resp),
+                          if (has_pred) lapply(seq_len(ncol(pred)), function(j) pred[, j])))
+  idx <- if (n_all > sample_n) ord[sample(seq_len(n_all), sample_n)] else ord
+  xy <- xy[idx, , drop = FALSE]
+  data_sf <- data_sf[idx, , drop = FALSE]
+  if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
+  if (has_pred) pred <- pred[idx, , drop = FALSE]
+  if (!is.null(in_sel)) in_sel <- in_sel[idx]
   n <- nrow(xy)
 
   # The variable the cells have to represent: the response, or what the
