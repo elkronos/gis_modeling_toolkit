@@ -19,7 +19,17 @@
   `within_range` (the share inside the range), and its `print()` method
   closes with what that share means for the score.  Nothing is estimated:
   the distances come from the geometry and the range is the one the folds
-  already carry or the one you pass.
+  already carry or the one you pass.  A range that records its CRS (the
+  folds' own `params$sac_range` and `params$crs`, or an
+  `estimate_sac_range()` result) is compared with distances measured in that
+  CRS, so a copy of the layer in other units gives the same answer (a
+  US-foot copy used to report 19 percent of the hold-out inside a metre
+  range where the metre layer reported 89); `sac` and the distances are in
+  the units of the CRS the `crs` attribute names, metres for lon/lat input.
+  `fold` is the `fold_id` a `cv_*()` result's `$folds` carries, so a join on
+  it pairs each fold's error with its own distances (it was the list
+  position, which after a dropped fold paired one fold's error with
+  another's distances).  A `units` object for `sac` is refused.
 
 * `summary()` on a `resolution_profile()` puts every criterion's pick in one
   table: the level each prefers, the flat region around it, whether a ladder
@@ -51,7 +61,11 @@
   does not have, and `n_dropped` the rows `prep_model_data()` removed before
   any fold was fitted.  The four together account for every row and every
   fold, so `n_folds_attempted - n_folds_succeeded` never has to be explained
-  from the log.
+  from the log.  A parallel worker that was killed outright (for lack of
+  memory, say) is a `"worker_error"` too and enters the first-error text; it
+  used to show as `"skipped"` ("no result returned") and was left out of
+  that text.  An `"ok"` row carries a `message` when the fold's
+  `fold_info_fn` failed.
 
 * `prep_model_data()` records what it removed.  `attr(x, "dropped")` is a
   list with `n`, `n_geometry`, `which` (positions in the input), `row_id`
@@ -63,7 +77,12 @@
   count with nothing saying how many rows were lost or why.  Every fit now
   carries the count as `$info$n_dropped`, and every `cv_*()` result as
   `n_dropped`.  Silently losing a third of the rows is a classic cause of a
-  suspiciously good score.
+  suspiciously good score.  The layer carries the class `"spatialkit_rows"`
+  after `"sf"` (`c("sf", "spatialkit_rows", "data.frame")`): `[` returns a
+  plain layer without the record, and `dplyr::bind_rows()`,
+  `vctrs::vec_rbind()` and `dplyr::union_all()` return a plain `sf` (with
+  the class ahead of `"sf"` they failed on two layers with the same record,
+  'attr(obj, "sf_column") does not point to a geometry column').
 
 * `make_folds(method = "block_kfold")` returns the block design it built the
   folds from.  `assignment` gains a third column, `block_id`; `params` gains
@@ -88,7 +107,11 @@
   could not draw the blocks over their data, see that 40 of 64 blocks were
   empty, or tell whether a fold is one contiguous region or several.
   `plot_folds()` now draws those outlines under the points when the folds
-  carry them, and takes `blocks = FALSE` to suppress them.
+  carry them, and takes `blocks = FALSE` to suppress them.  Its subtitle
+  states the parameter that decides whether the scheme leaks (the block
+  size, the buffer, the number of location groups or the median NNDM
+  exclusion), with the units of the folds' CRS; folds built from points
+  without a CRS get no units rather than "(NA units)".
 
 * `estimate_sac_range()`'s returns are uniform.  The four directional
   variograms and their fits run unconditionally on every call, and the
@@ -115,16 +138,23 @@
   case with no `"deff_applied"` is exactly the one where a user wants to
   know what the ICC came out as --- and the `"variogram"` path adds
   `deff_rows`, the per-cell design effect at the cell's row count that the
-  log line reduced to a median and a max.  `assign_features_to_polygons()`
-  reports the features that matched more than one polygon and had the
-  `tie_break` rule decide for them, as `attr(, "ties")` and a log line; a
-  tie-break firing on a third of the features means the polygon layer
-  overlaps and every cell count built from it is suspect.  `ensure_projected()`
-  attaches `crs_choice`, the projections it considered with each one's
-  measured worst-case distance error.  Every path that picks a local
-  projection reports what it picked, the two that compare nothing included:
-  a UTM zone on a local extent, and the equal-area projection chosen for a
-  layer straddling the antimeridian.
+  log line reduced to a median and a max.  A `summarize_by_cell()` call that
+  requests a design effect (any `deff` other than 1) also returns a logical
+  `deff_applied` column, `TRUE` on every row when the correction was applied
+  and `FALSE` when it fell back to the uncorrected standard errors; unlike
+  the `"deff_applied"` attribute it survives `rbind()` and
+  `dplyr::bind_rows()` of many results.  The default frame is unchanged.
+  `assign_features_to_polygons()` reports the features that matched more
+  than one polygon and had the `tie_break` rule decide for them, as
+  `attr(, "ties")` and a log line; a tie-break firing on a third of the
+  features means the polygon layer overlaps and every cell count built from
+  it is suspect.  The layer carries the `"spatialkit_rows"` class after
+  `"sf"`, as `prep_model_data()`'s does, so binding such layers returns a
+  plain `sf`.  `ensure_projected()` attaches `crs_choice`, the projections
+  it considered with each one's measured worst-case distance error.  Every
+  path that picks a local projection reports what it picked, the two that
+  compare nothing included: a UTM zone on a local extent, and the
+  equal-area projection chosen for a layer straddling the antimeridian.
   `residual_morans_i()` returns the residual `kurtosis` the randomisation
   variance conditions on, the design rank `p` behind the residual moments,
   `exact`, whether those moments are exact for these residuals, and
@@ -167,8 +197,9 @@
   `plot(estimate_sac_range(pts, "z"))` draws the empirical variogram, with
   the fitted model and the effective range overlaid where a range was
   identified, and a subtitle saying why not where it was not: the variogram
-  never reached a sill, both model fits were singular, or the optimiser
-  halted.  Nothing is recomputed --- the plot reads the attributes the
+  never reached a sill, both model fits were singular, the optimiser
+  halted, or a `range_frac` below 1 refused a range inside the fitted lags.
+  Nothing is recomputed --- the plot reads the attributes the
   estimate already carries --- and the same drawing routine now serves
   `plot.spatial_fit(type = "variogram")`, so the two pictures agree.  The
   "attached for inspection" messages `estimate_sac_range()` logs when it
@@ -196,6 +227,8 @@
   0.958 coverage at exponential ranges of 150 and 400 on a 1000-unit
   domain, against 0.931 and 0.918 with `n - 1`.  The help page's
   "Confidence intervals" section has the reasoning and the numbers.
+  `..neff_*`, like `..df_*` and the interval, is `NA` for a column with a
+  single non-missing value in the cell, where `cell_weight` still counts it.
 
 * `compare_models_cv()` gains `block_size` and `auto_range`, and now hands
   `response_var` and `predictor_vars` to `make_folds()` when it builds the
@@ -205,7 +238,12 @@
   that compares models, which until now was the one whose folds could never
   be checked against the range.  `select_features_forward()` gains
   `auto_range` for its inner folds for the same reason, and records it in
-  `$params`.
+  `$params`.  A shared fold set that cannot be built is an error.  It used
+  to be a log line and a fall-back to each backend's default blocks, which
+  were given neither argument: `block_size = 1e6` (one block, which
+  `cv_rf()` refuses) returned a five-fold comparison on geometric blocks,
+  and `auto_range = TRUE` the small blocks it exists to prevent, with no R
+  condition.
 * `compare_models_cv()$overall` carries the Bayesian backend's calibration
   when a Bayesian model ran: `coverage_50`, `coverage_80`, `coverage_95` and
   `mean_CRPS`, the same fold-weighted summary `cv_bayes()` returns as
@@ -220,7 +258,12 @@
   tree)").  The defaults are ranger's, so no forest changes.  The help page
   carries Strobl et al.'s (2007) case for `replace = FALSE`.  Passing the
   ranger spellings through `...` is now refused like the other arguments the
-  wrapper sets.
+  wrapper sets.  `replace = FALSE` with `sample_fraction = 1` grows every
+  tree on every row, so no row is out of bag, and the fit warns that
+  `fitted()`, the OOB error and the permutation importance are all `NaN`
+  (they were `NaN` in silence, and `area_of_applicability(weights =
+  pmax(imp, 0))` then failed with a hint to use the very `pmax()` it had
+  been given).
 * `area_of_applicability()` records the method of the folds its threshold
   came from as `$params$folds_method` (`"block_kfold"`, `"random_kfold"`,
   ... from a `make_folds()` result; `"labels"` or `"splits"` when the input
@@ -246,7 +289,14 @@
   help page's new section carries the numbers.  Iterating GLS trend fits
   against variogram refits (Neuman and Jacobson 1984) was measured too and
   recovers only part of the bias (0.80 in the quadratic case), so it was not
-  added.  `nlme` joins Suggests.
+  added.  `nlme` joins Suggests.  A fitted range shorter than the shortest
+  lag the empirical variogram resolves is refused, with
+  `rejected_reason = "fitted range is below the shortest lag fitted"`: on
+  white noise the REML fit returned ranges of 0.18--23.6 m in 19 of 30
+  draws (one of 0.27 m sized a 3642 x 3676 block grid, refused as a unit
+  mistake), and it now returns `NA` for those, finite in 10 of 30.  The
+  same bound applies to the least-squares fits, where it did not fire on
+  white noise or on fields with a 60 m range.
 * `sac_nugget()` returns the nugget variance behind an
   `estimate_sac_range()` result, and every classed result --- identified or
   rejected --- now carries it as a `nugget` attribute (`NA` when no model
@@ -305,7 +355,40 @@
   flat to within 2 percent over a factor of 3--6 in the number of cells.
   Read the flat region.
   `determine_optimal_levels()` is unchanged in shape and keeps its
-  integer-vector interface.
+  integer-vector interface.  A supplied `sac` whose range was refused (an
+  `NA` with a `rejected_reason`) is not read as accepted: `cp` keeps that
+  fit's nugget and warns, naming the reason, `reliability` is `NA` (it
+  needs the range), and a fit that did not converge gives neither (the
+  whole refused fit used to be used, and a correlation function whose range
+  could be many times the extent pinned the reliability optimum to the
+  first level, with no R warning).  A nugget of exactly 0 (C_p then has no
+  penalty and falls to the ceiling) is warned about, and so is a `sac` whose
+  `detrended` flag does not match the variable scored (a residual variogram
+  on the raw response moved the C_p pick from 2--4 cells to the ceiling of
+  44 in five of five simulated fields); `attr(x, "variogram")` records
+  `detrended`.  A supplied `sac` is read in its own CRS: the points are
+  transformed to `attr(sac, "crs")` first, as `summarize_by_cell()` does (a
+  range in US feet put the floor of a metre layer at 2 where the same range
+  in metres put it at 8).  Reliability's domain term is taken over the
+  convex hull the area is measured on, not the bounding box: on a 3000 x 120
+  strip the reliability pick is 6 cells whether the strip lies axis-aligned
+  or rotated by 45 degrees (it was 8 and 2), and 10 either way on a square
+  (it was 10 and 8), and reliability values shift slightly on every
+  profile.  Row order does not change the profile (see the
+  `determine_optimal_levels()` item under Bug fixes); over permutations of
+  one 2000-point layer, WSS used to move by up to 2.6 percent and the C_p
+  pick across its flat region (222, 173 and 135 cells).  The ceiling reaches
+  the number of distinct locations when locations repeat (and explicit
+  `levels` up to it are kept) instead of stopping one short.
+  `range_floor = FALSE` starts the ladder at 2 whatever the range and only
+  reports the floor, so profiles whose range estimates differ
+  (cross-validation folds) have comparable ladders; with the floor applying
+  on one fold and not the next, reliability and the elbow moved by a factor
+  of 10--15 between folds.  The default, `range_floor = TRUE`, keeps the
+  floor, and the help page describes that regime switch.  Under
+  `select_on = "split"` a supplied `sac` is flagged in the log, since it
+  must be fitted on the selection half, and the help page shows the
+  two-call workflow.
 
 * `select_on = c("all", "split")` on `determine_optimal_levels()`,
   `resolution_profile()` and `select_features_forward()`.  Whenever a
@@ -319,8 +402,21 @@
   response on the first only, and the row positions of both come back (as a
   `"split"` attribute on the first two functions, as `$split` on the third)
   so the estimation can be done on the half the selection never saw.  The
-  level-count functions still draw their cells on every point, so the count
-  they return is a count for the whole layer it will be applied to.
+  positions index the layer as passed, for all three functions
+  (`select_features_forward()`'s were positions after its completeness
+  filter, so with seven incomplete rows `pts[fs$split$estimation, ]` held 47
+  rows of the selection half and 4 of the dropped ones).  When the default
+  six-block split leaves fewer than 10 points in a half (a small layer, or a
+  small group far from the rest), it is retried on grids of about 16, 36
+  and 100 blocks, with a warning, instead of stopping, and the split records
+  `grid`, `n_blocks`, `balance` (a 2:1 split on clustered layers used to
+  pass silently) and each half's `extent`.  The halves are not independent:
+  blocking reduces the dependence across their shared border but does not
+  remove it (85 percent of the estimation points of the package's test
+  layer lie within the fitted range of a selection point), and the seed
+  decides only which side selects, not where the cut falls.  The level-count
+  functions still draw their cells on every point, so the count they return
+  is a count for the whole layer it will be applied to.
   `select_features_forward()` also returns `score_holdout`: the selected set
   fitted on the selection half and scored on the other, the honest number
   its selection-internal `score` is not.  The cost is precision --- half the
@@ -348,7 +444,8 @@
   millionth of the extent of a block --- an edge that reprojection moved by
   a rounding error; points inside more than one block take the first, with
   a warning when the blocks concerned overlap in area rather than share an
-  edge.  `params` gains `n_blocks` (before empties were dropped),
+  edge.  `params` gains `n_blocks` (before empties were dropped; for a grid,
+  `grid_nx * grid_ny`, the cells a `boundary` clips away included),
   `blocks_supplied` and `block_scale` on every `block_kfold` result;
   `grid_nx`/`grid_ny` are `NA` for supplied blocks.
 
@@ -386,11 +483,16 @@
   one number per name --- anything else is an error, because a scoring
   function of the wrong shape is a mistake to surface) and forgiving where
   it should be (a function that throws on a fold is logged and its columns
-  are `NA` there; a fold is never dropped for it).  The empty frames of a
-  run where every fold failed carry the columns, typed, when the function
-  can be called on zero-length input.  `compare_models_cv()` hands one
-  function to every backend and protects it like the fold arguments, so the
-  columns of its `overall` are comparable across rows.  `fold_info_fn` is
+  are `NA` there; a fold is never dropped for it).  Nor may a name reuse a
+  per-fold extra (`CRPS`, `coverage_*`, `gp_k`, `gp_n_basis`, `n_draws`,
+  `bandwidth`, or a name the `fold_info_fn` returns) or `mean_CRPS`: each
+  used to replace the package's value silently, and
+  `cv_bayes()$predictive_coverage` then reported the user's number.  The
+  empty frames of a run where every fold failed carry the columns, typed,
+  when the function can be called on zero-length input.
+  `compare_models_cv()` hands one function to every backend and protects it
+  like the fold arguments, so the columns of its `overall` are comparable
+  across rows.  `fold_info_fn` is
   documented as the per-fold half of the same mechanism, with access to the
   fitted object and the held-out layer.
 
@@ -409,7 +511,14 @@
   percent, the conterminous United States forced into one zone 14 percent,
   Web Mercator over 2.5 degrees of latitude at 48N 4 percent, an
   equal-area projection a few tenths of a percent (the sphere the geodesic
-  areas are computed on against the ellipsoid).
+  areas are computed on against the ellipsoid).  The measurement works
+  whether `sf_use_s2()` is on or off (with it off and no lwgeom it returned
+  `NA`, so `summarize_by_cell(area = TRUE)` refused every grid and
+  `purpose = "area"` skipped its warning), and its probe polygons are
+  densified before their geodesic area is taken, so an equal-area grid over
+  a near-global extent no longer measures 10 percent.  With
+  `purpose = "area"`, a single polygon's candidates are scored rather than
+  falling back to the Lambert azimuthal unmeasured.
 
 * `summarize_by_cell()` gains `area = TRUE`: with `cells_sf`, the result
   carries `cell_area` (planar, in the squared units of the cells' CRS) and
@@ -420,7 +529,9 @@
   comparison between cells and means nothing where the map scale differs
   from one cell to the next; the message names the CRS, the figure and the
   remedy.  A cell with no observations gets `NA`, not zero.  The measured
-  spread is attached as `attr(, "area_error")`.
+  spread is attached as `attr(, "area_error")`.  A `cells_sf` with no ID
+  column the summaries can be joined on is an error under `area = TRUE`,
+  since the area columns cannot be produced.
 
 * `build_tessellation(approx_n_cells = )` and `get_voronoi_seeds(n = )`
   accept what the level-selection step returned: the integer vector of
@@ -432,7 +543,12 @@
   `params$approx_n_cells` / `params$approx_n_cells_from` and as
   `attr(seeds, "n_from")`.  The two functions the pipeline documents as a
   pair are now connected: `get_voronoi_seeds(n = determine_optimal_levels(pts))`
-  needs no number carried between the calls by hand.
+  needs no number carried between the calls by hand.  A hex or square
+  lattice records `params$cells_occupied` and `params$cells_empty`, and a
+  count taken from a profile or a selection warns when fewer than three
+  quarters of it end up occupied: the count is of k-means cells, all of
+  them occupied, and on clustered points a lattice leaves about half its
+  cells empty.
 
 * Five diagnostic plots that show the curve behind a chosen point, the
   folds behind a pooled number, or the distribution behind a count.  None
@@ -446,35 +562,50 @@
     column that is `NA` in every fold is refused with the reason (`Adj_R2`
     without `p`, coverage without draws) rather than drawn empty, and a
     per-fold extra with no pooled counterpart draws without the line and
-    says so.
+    says so.  A model with no finite per-fold value gets no panel and no
+    pooled line, and the caption names it.
   - `plot.aoa()`: the dissimilarity index of the prediction locations
-    against the cross-validated training DI (ECDFs, or a histogram with the
-    training curve), threshold marked, with the share outside and how close
-    the inside ones run to the edge in the subtitle, and whether the
-    threshold came from cross-validated folds in the caption.
+    against the training DI --- cross-validated over the `folds` passed, or
+    else each point's distance to its nearest other training point; the
+    legend says which --- as ECDFs, or a histogram with the training curve,
+    threshold marked, with the share outside and how close the inside ones
+    run to the edge in the subtitle, and whether the threshold came from
+    cross-validated folds in the caption.
   - `plot.spatial_fit(type = "variogram")` overlays the response's own
     variogram (hollow points, dashed fit) on the residual variogram, on the
     same points and lags, so the structure the model absorbed is the gap
-    between the two curves.  The caption compares the sills only when both
-    ranges were identified; `response = FALSE` restores the residual curve
-    alone.
+    between the two curves.  The response curve is whichever variogram
+    `estimate_sac_range()` returns for the response, which is its widest
+    single direction when the all-pairs fit is unusable (a response with a
+    trend, whose residuals are fine).  A single-direction response curve is
+    labelled with its azimuth, and the caption compares the sills only when
+    both ranges were identified and the two curves cover the same point
+    pairs (such a curve used to be labelled plainly as the response, its
+    sill set against the all-pairs residual curve's: "Residual sill is 45%
+    of the response sill" from a quarter of the pairs).  `response = FALSE`
+    restores the residual curve alone.
   - `plot_calibration(cv)`: observed against nominal coverage of
     `cv_bayes()`'s posterior predictive intervals, pooled (blue) and per
-    fold (grey), with the diagonal and a one-line verdict.  The levels are
-    read off the `coverage_*` column names, so `coverage_levels =
+    fold (grey), with the diagonal and a one-line verdict.  Each level is
+    drawn at the nominal value `cv_bayes()` records in `coverage_levels`
+    (0.995 was drawn at 1.00), so `coverage_levels =
     seq(0.1, 0.9, by = 0.1)` gives a full curve; the default three levels
-    are unchanged.
+    are unchanged.  Its error for all-`NA` coverage names
+    `compute_pred_intervals = FALSE` as well as failed draws.
   - One sweep drawer behind three methods: `plot.resolution_profile()` (a
     panel per criterion, the level each selects marked, its flat region
     shaded, a note when a bound rather than the criterion is choosing);
     `plot.feature_selection()` (the accepted variable's score at each step
-    as the path, every other candidate faint, the stop in red, the
-    hold-out score as a separate mark when `select_on = "split"` computed
-    one --- and a caption saying whether the intercept-only model was
-    scored, since for the RF and GWR backends it usually is not, so the
-    path starts at the first variable); `plot.gwr_model_selection()` (every
-    model's AICc against its size, the best of each size joined, the winner
-    marked, its lead over the runner-up in the subtitle).
+    as the path, every other candidate faint, the stop in red, the best
+    candidate at the step after the stop, which was scored and not added,
+    hollow and labelled "not added" rather than drawn like the accepted
+    variables, the hold-out score as a separate mark when
+    `select_on = "split"` computed one --- and a caption saying whether the
+    intercept-only model was scored, since for the RF and GWR backends it
+    usually is not, so the path starts at the first variable);
+    `plot.gwr_model_selection()` (every model's AICc against its size, the
+    best of each size joined, the winner marked, its lead over the
+    runner-up in the subtitle).
     `select_features_forward()`'s result now carries class
     `"feature_selection"` so `plot()` finds the method; it is the same list
     otherwise.
@@ -489,9 +620,24 @@
   on simulated fields with a 100--130-unit range and a random forest with
   coordinates, the plateau begins at one to two times the estimated range.
   Each size is a full `cv_spatial()`, so a fit budget (`max_fits`, default
-  60) refuses to start rather than run past it, and the ladder drops sizes
-  at which the grid holds fewer than `k` blocks so every point on the curve
-  is a `k`-fold cross-validation of the same shape.
+  60) refuses to start rather than run past it.  The ladder drops sizes at
+  which the grid holds fewer than `k` cells; on clustered data
+  `make_folds()` can still lower `k` at the top sizes, which the `k` column
+  shows.  The default ladder also skips sizes whose grid would exceed the
+  1,000,000 blocks `make_folds()` builds (a 6 km x 2 m transect used to
+  abort with an error about `block_size`), runs along the line for points on
+  one axis-parallel line (they were refused as having "no extent"), and
+  warns when every rung is below the estimated range while longer blocks
+  would still fit `k` times along the longer side (a 10 km x 100 m
+  corridor: rungs of 4 to 50 m against a 1.7 km range, a flat curve that
+  read as no leakage).  User-supplied `block_sizes` over the grid cap are
+  refused before any fit, and a `sac` estimated in another CRS is converted
+  to the sweep's units with a warning (a metre range on a US-foot axis was
+  drawn 3.3 times too short).  The plot's caption reads every `coverage_*`
+  column as "closer to the nominal level is better" (only `coverage_50`,
+  `coverage_80` and `coverage_95` were known, as higher-is-better, so
+  `coverage_97.5` from `cv_bayes()`'s full-precision names was captioned
+  "lower is better").
 
 * `fit_gwr_model()` keeps its local collinearity survey.  Every fitting
   window --- not a sample of 30 --- has its kernel-weighted local design's
@@ -500,11 +646,19 @@
   (one row per observation: coordinates, window size, condition index),
   with `info$n_local_collinear`, `info$n_local_singular` and the global
   `info$condition_index` beside `AICc`.  The warning is now the exact
-  fraction of locations rather than a sampled one; its wording and its
-  thresholds (a quarter of the locations, or any) are unchanged.  The
-  weighted survey sees what the unweighted spot-check could not: a bisquare
-  window's edge points contribute almost nothing to the fit, so they
-  contribute almost nothing to its conditioning.
+  fraction of locations rather than a sampled one, and its thresholds (a
+  quarter of the locations, or any) are unchanged; above a quarter it now
+  says that an exactly singular window stops the fit, instead of promising
+  non-finite coefficients.  The weighted survey sees what the unweighted
+  spot-check could not: a bisquare window's edge points contribute almost
+  nothing to the fit, so they contribute almost nothing to its
+  conditioning.  The survey also runs with a single numeric predictor, and
+  its kernel weights equal `GWmodel::gw.weight()` exactly: a boxcar keeps a
+  point at the kernel's edge, and a zero-width adaptive kernel gives `NaN`,
+  counted as singular, instead of weight 1 at the co-located points.  (A
+  grid with a boxcar bandwidth equal to its spacing used to be reported
+  collinear at every location while GWmodel fitted windows of 3 to 5
+  points.)
 
 * `plot(fit, type = "coefficients")` for a GWR fit maps one local
   coefficient (`term`) at the training locations, which is the reason to
@@ -513,7 +667,9 @@
   singular) or a non-finite coefficient is drawn hollow and grey, counted
   in the subtitle, because the smooth surface a naive map draws over them
   is the picture of an unstable estimate.  `mask = FALSE` draws them
-  anyway and says how many it is drawing.
+  anyway and says how many it is drawing.  A fit with a duplicated
+  predictor name is drawn rather than refused as "every location is
+  masked".
 
 * `kriging_adequacy()`: what a block-kriging aggregator would deliver on a
   set of cells, computed beside the plain means and changing none of them.
@@ -541,7 +697,29 @@
   gstat still cannot solve is counted in a warning.  This is the first
   kriging path in the package (`gstat::krige()`); its model families are
   the ones the package interprets elsewhere, and any other is refused by
-  name.
+  name.  The cross-validation runs each `make_folds()` split on its own
+  training set, so `"buffered_loo"` and `"nndm"` keep their exclusion zones
+  (reduced to fold labels they ran as plain leave-one-out: with a 250 m
+  buffer, a standardised-error variance of 1.02 and RMSE 0.757, against
+  0.873 and 0.944 with the buffer kept), and `print()` names the scheme
+  instead of calling every one "blocked CV".  A cell holding locations that
+  the `nmax` nearest its centre leave out is kriged from all of its own
+  locations plus the `nmax` nearest outside it (a cell of 1,500 points was
+  otherwise estimated from its middle 50: 0.43 off against 0.07), and the
+  column `kr_n_used` says how many locations each cell was kriged from.
+  `max_neighbours` (default 2000) leaves out, with a warning, a cell that
+  would need a larger kriging system, and `max_box_ratio` (default 1000) a
+  cell whose bounding box exceeds its area that many times, because gstat
+  discretises over the whole box (+592 MB for one strip at 7,072); both are
+  counted in `attr(, "cells_left_out")` and by `print()`.  The points are
+  put in the CRS the variogram was fitted in (`attr(sac, "crs")`), as
+  `summarize_by_cell()` does: a `sac` fitted in metres used on points in km
+  gave a CV statistic of 3.05 against 0.85.  A `sac` whose variogram is of
+  residuals (`detrended = TRUE`) is used with a warning that the response is
+  kriged without its predictors and the variances come out too small
+  (4.3--5.2 against 0.67--1.53).  `attr(, "rejected_reason")` records why a
+  `sac`'s range was refused, and the warning and `print()` say it instead of
+  "sill never reached" for every refusal.
 
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
   metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
@@ -549,15 +727,20 @@
   `cv_bayes()`, `cv_spatial()`, `cv_rf()` and `compare_models_cv()` --- gains
   two trailing integer columns, `n_MAPE` and `n_SMAPE`: the rows each
   percentage error actually used once those where its denominator is zero
-  were dropped (`y == 0` for MAPE; `|y| + |yhat| == 0` for SMAPE).  They equal
+  were dropped (`y` for MAPE, `|y| + |yhat|` for SMAPE, zero meaning within
+  100 machine epsilons of the data's own magnitude).  They equal
   `n` (`n_pred` in the CV frames) when nothing was dropped, and are `0` in an
-  empty frame.  The values themselves are unchanged: a MAPE over 58 of 120
-  rows is the same number 2.0.0 reported, but it now arrives labelled, where
-  before nothing in the frame recorded that it was a subset average.
+  empty frame.  The values themselves are unchanged, apart from what now
+  counts as zero (see Bug fixes): a MAPE over 58 of 120 rows is the same
+  number 2.0.0 reported, but it now arrives labelled, where before nothing
+  in the frame recorded that it was a subset average.
   `print(summary(fit))` appends "(over k of n rows)" to its SMAPE line when
   the two differ.  The columns sit after `Adj_R2` so code addressing the seven
   metric columns by position is unaffected; code pinning the exact column set
   needs the two names added.
+
+* `voronoi_seeds_kmeans()` gains `nstart`, the number of `stats::kmeans()`
+  starts (default 10, as before).
 
 ## Bug fixes
 
@@ -718,9 +901,12 @@
   object return the other's numbers --- and `clear_fitted_cache()`, which the
   help page offers for exactly this case, could not fix it, because clearing
   through one copy cleared the one shared entry and the next call re-wrote it.
-  The entry now carries the engine it was computed from and is used only for
-  that engine (`identical()`, which settles the common case by pointer, so
-  nothing is slower and no memory is held that the fit did not already hold).
+  The entry now carries the environment rstan and brms create for each
+  sampling run (`@.MISC` on the stanfit), which tells engines apart as well
+  as the engine itself does and is written once, and is used only for the
+  engine it came from (`identical()`, which settles the common case by
+  pointer, so nothing is slower and no memory is held that the fit did not
+  already hold, in a session or on disk).
   A stale entry is no longer deleted on a miss either: the fit that wrote it
   still wants it.  `new_spatial_fit()` now always builds a fresh cache rather
   than adopting one that arrived in `info`, and `summary()` no longer carries
@@ -745,9 +931,17 @@
   in a different order under `C` than under `en_US`, so `fold_metrics$fold`,
   `predictions$fold` and `fold_status$fold` named different groups on
   different machines from the same data and the same seed.  The partition was
-  never affected, so pooled scores were right.  The levels are now sorted with
-  `method = "radix"`, which is always C collation, making the numbering a
-  property of the labels alone.
+  never affected, so pooled scores were right.  Character levels are now
+  sorted with `method = "radix"`, which is always C collation, making the
+  numbering a property of the labels alone.  The C order applies to
+  character labels only: numeric labels are numbered in numeric order, as in
+  2.0.0, and a factor by its own level order (an earlier development build
+  sorted numbers as strings too, so with ten or more numeric labels fold 2
+  was the user's label 10).  `area_of_applicability()` given a vector of
+  fold labels now numbers them by the same rule; it sorted character labels
+  with `as.factor()` under the session's collation, so a message could name
+  a different fold from the one `cv_*()` named for the same label.  Its
+  partition and threshold were never affected.
 
 * **`residual_morans_i(k = )` silently answered a different question.**  `k`
   reached the weight builder unvalidated, where `min()` collapses a vector:
@@ -832,7 +1026,10 @@
   on one of them aborted the call with "Loop 0 is not valid: Edge 1 is
   degenerate".  The sort copy is now repaired after the transform as well.  The
   geometry returned is still the caller's own, and the same cell gets the same
-  ID whether the layer arrives projected, in lon/lat or in Web Mercator.
+  ID whether the layer arrives projected, in lon/lat or in Web Mercator,
+  except where two fine cells' centres lie within the sort key's rounding
+  step of the same longitude (36 of 2,500 100 m cells straddling a UTM
+  central meridian changed ID via EPSG:3035); join such layers on geometry.
 * `select_features_forward()` now says when `fit_fn` is ignoring the
   variables it is handed.  The learner it takes is a function of
   `(train_sf, predictor_vars)`, but the one `cv_spatial()` takes is a function
@@ -883,7 +1080,12 @@
   cases that were wrong; a clean curve gives the same answer.  Under a
   model-aware criterion the function also now warns *before* the sweep when
   `max_levels` leaves no k above the nine-cell floor, rather than
-  fitting every k first and falling back afterwards.
+  fitting every k first and falling back afterwards.  The seeding draws each
+  centre by inverting the cumulative squared distance rather than with
+  `sample.int(prob = )`: the same law, and a `resolution_profile()` of 3000
+  points takes 10 s instead of 35 s (`determine_optimal_levels()` on 3000
+  points, 4 s instead of 13 s), but it gives different centres for the same
+  seed than earlier development builds did.
 
 * `make_folds(method = "block_kfold")` can now raise its "block dimension <
   autocorrelation range" warning.  The comparison was always there, but the
@@ -920,7 +1122,832 @@
   the caller's back.  Output from a call that succeeds is passed through
   unchanged, and when the stream is already diverted (under testthat, knitr or
   `capture.output(type = "message")`, where only one sink is permitted) the
-  call runs exactly as before.
+  call runs exactly as before.  So does a call made after the session temp
+  directory has been deleted, when there is nowhere to divert the stream to;
+  it used to fail with "cannot open the connection".
+
+* **One empty point made `determine_optimal_levels()` return 1.**  The
+  function reduced every feature to a point and projected it but never
+  dropped an empty or non-finite one, so a single `POINT EMPTY` made the
+  `k = 1` WSS `NA`, k-means failed at every `k`, and the failure handler
+  shrank the sweep to nothing: two well-separated clusters that gave
+  `2 1 3` gave `1` once one empty row was added, with only a log line about
+  interpolating the WSS.  Such rows are now dropped with a warning that
+  gives their number, and under `select_on = "split"` the returned
+  positions still index the layer as passed.
+
+* **A few missing predictor values took Moran's I away from
+  `determine_optimal_levels()`.**  A cell mean over a row with one missing
+  predictor was `NA` and dropped the whole cell, and how many cells that
+  removed depended on the points per cell, so `z` was computed on a
+  different subset of cells at each `k`.  Three missing values in 400 rows
+  made every `z` in the evaluated window `NA`, and the call fell back to the
+  geometric ranking with a warning that did not mention missing values.
+  Rows with a missing or non-finite response or predictor now stay in the
+  WSS sweep and the cells and are left out of Moran's I, with a logged
+  count, so every cell mean uses the same rows.
+
+* **A misspelt `response_var` or `predictor_vars` in
+  `determine_optimal_levels()` silently changed the criterion.**  A column
+  that was not there counted as "no model variables": with the default
+  criterion a typo kept `"geometric"` where supplying both variables
+  upgrades to `"combined"` (on one 400-point layer `7 6 8` instead of
+  `5 6 4`, with no warning and no diagnostics), and under `"morans_i"` or
+  `"combined"` the one log line said the variables were required although
+  both had been supplied.  A named column that is not in the layer is now
+  an error, as it is in `resolution_profile()`, and a model-aware criterion
+  given no `predictor_vars` (or no `response_var`) falls back with an R
+  warning that says which is missing, rather than a log line.
+
+* **`determine_optimal_levels()` stopped one level short when locations
+  repeat.**  The sweep was capped one short of the number of distinct
+  locations, the bound `stats::kmeans()` needs only when no location
+  repeats: five stations visited thirty times each could not reach `k = 5`.
+  The cap is now the number of distinct locations, and still one short of
+  the number of points.  A `k` whose WSS is 0 (a cell on every location) is
+  left out of the log-log elbow line rather than turning it into `NA`.
+
+* **The same layer with its rows in another order gave
+  `determine_optimal_levels()` another answer.**  The subsample and every
+  k-means start index rows, so a permutation of the input moved the WSS
+  curve and could move the count.  The rows are now put in coordinate order
+  (response and predictors breaking ties) before either, so any
+  permutation of a layer gives the same result.  Results for a given seed
+  differ from 2.0.0's for that reason too.
+
+* **`determine_optimal_levels()` blamed the wrong cause when its
+  model-aware criteria had nothing to score, and its help page understated
+  the fix.**  The model-aware pass scores only the elbow's neighbourhood,
+  and on points with no cluster structure the elbow sits near
+  `sqrt(max_levels)`, so every candidate stayed at or below the nine-cell
+  floor until `max_levels` was about 40 (measured on 1000 uniform points:
+  12, 20 and 30 all fell back, and 40 scored `k` = 10 and 11 alone).  The
+  help page said "above roughly 10", and the fallback was logged as "Moran's
+  I could not be computed".  The logged warning now names the window and
+  the floor and points to `resolution_profile()`, and the help page gives
+  the measured numbers.  Which candidates are scored is unchanged.
+
+* **`build_tessellation()` could not tessellate CRS-less planar points
+  inside a CRS-less boundary.**  `ensure_projected()` marks such points
+  `crs_assumed = "none"` ("planar, leave alone"), and `build_tessellation()`
+  read that mark as a CRS name: `st_crs("none")` failed with "invalid crs:
+  none" for every method, including the documented
+  `boundary = clip_target_for(pts)`, so CRS-less planar data could not be
+  gridded at all.  Only a real assumption (EPSG:4326) is now stamped on the
+  boundary; otherwise both stay in the same unnamed space.
+
+* **When only one of the points and the boundary had a CRS, the
+  tessellation builders stopped on sf's bare "st_crs(x) == st_crs(y) is not
+  TRUE".**  UTM points read from a CSV with a UTM boundary failed in all four
+  methods of `build_tessellation()` and in `create_voronoi_polygons()`;
+  projected points with a boundary that had lost its `.prj` failed in
+  `create_voronoi_polygons()` and `method = "triangles"`, and
+  `clip_target_for()` returned a target with no CRS --- for lon/lat points
+  with a CRS-less lon/lat boundary, in degrees, with `expand = 20` buffering
+  by 20 degrees.  The side without a CRS is now interpreted in the other's,
+  as `harmonize_crs()` does, with a warning: lon/lat-looking coordinates are
+  reprojected from EPSG:4326, others are stamped.  CRS-less points that do
+  not look like lon/lat are refused, with a message saying what to do, when
+  the boundary is geographic, because stamping degrees on them would be
+  wrong.
+
+* **A geographic `crs` made every tessellation method work in degrees.**
+  `build_tessellation()`, `create_voronoi_polygons()` and
+  `create_grid_polygons()` took `crs = 4326` as the CRS to compute in, so
+  Voronoi cells stopped being a nearest-point partition (150 points at
+  53-57N: 20 percent of sampled locations lay in another point's cell), grid
+  cells were neither square nor equal-area, and clipping them under s2
+  stopped with "Edge 0 is degenerate" (hex) or left a point inside the
+  boundary with an `NA` index (square).  A geographic `crs` is now the CRS
+  the result is returned in: the cells are built and indexed in the local
+  projected CRS `ensure_projected()` picks, then transformed with long edges
+  densified.  A hex or square grid sized by an explicit `cellsize` is still
+  laid in degrees, since that is the unit `cellsize` is in.
+
+* **`ensure_projected()` stopped on lon/lat polygons that s2 rejects, and
+  chose its UTM zone differently when `sf_use_s2()` was off.**  The centre
+  that places the zone was `st_centroid(st_union())`: with s2 on, a polygon
+  with a repeated vertex (valid for GEOS, common in shapefiles) stopped
+  `ensure_projected()`, `create_grid_polygons()` and
+  `prep_model_data(boundary =)` with "Edge 1 is degenerate (duplicate
+  vertex)"; with s2 off it was planar in degrees, so two clusters at 0N and
+  60N near -78 got UTM zone 17 in one session and zone 18 in another, and
+  sf's warning and message about it got past `quiet = TRUE`.  The centre is
+  now always taken on the sphere, a geometry s2 rejects is repaired first,
+  and a mean of unit vectors is the last resort.
+
+* **A single study-area polygon was never scored, so `ensure_projected()`
+  kept a UTM zone at any extent.**  A polygon layer is scored on one point
+  per feature, and one point makes no pair: every candidate scored `NA` and
+  the selector fell back to the zone.  A CONUS outline stayed in UTM zone 15
+  (12.8 percent worst-case distance error) where a Lambert azimuthal scores
+  2.1 percent, and `prep_model_data(boundary =)` moved the whole analysis
+  into the zone with it.  Layers with fewer than 40 features are now scored
+  on their outline's vertices too.
+
+* **`create_grid_polygons()` laid a grid over a near-global lon/lat boundary
+  in Web Mercator.**  The cells were equal on the map and not on the ground:
+  the true areas of whole cells differed nearly five-fold.  When the CRS
+  picked for distances distorts areas across the boundary by more than 1
+  percent, the grid is now laid in the equal-area CRS
+  `ensure_projected(purpose = "area")` picks (Equal Earth here), with a
+  logged warning; a local extent keeps its UTM zone.
+  `create_grid_polygons_cached()` makes the same choice.
+
+* **With `sf_use_s2(FALSE)` the package needed lwgeom, which it does not
+  depend on.**  The stable-ID sort key is measured in lon/lat, so every
+  Voronoi tessellation --- projected ones included, and the examples of
+  `create_voronoi_polygons()` and `build_tessellation()` --- failed with
+  "package lwgeom required", as did `ensure_stable_poly_id()`,
+  `create_grid_polygons_cached()` on a cache miss, and random and k-means
+  seeding on a lon/lat boundary.  These measurements now run on the sphere
+  (s2) whatever the session's setting, which is restored afterwards; the
+  IDs are the ones s2-on sessions always got.
+
+* **Hex cell size depended on which way the boundary lay.**
+  `st_make_grid()` builds hexagons from `cellsize[1]` alone, and that was the
+  box's width over a rounded column count: a 1 x 1000 strip at
+  `target_cells = 9` got 1734 hexagons where the same strip lying flat got
+  89.  The size is now counted along the longer side, which leaves every
+  boundary at least as wide as it is tall with exactly the grid it had.
+
+* **Voronoi with `expand > 0` returned the boundary before it was grown.**
+  The cells are clipped to the grown boundary, so they covered 1.93 km^2
+  against a returned `boundary` of 1 km^2, and points up to `expand` outside
+  it were indexed.  `create_voronoi_polygons()` and
+  `build_tessellation(method = "voronoi")` now return the grown boundary,
+  and the documentation says `expand` grows the study area too.
+
+* **Collinear points gave an empty Delaunay triangulation.**
+  `build_tessellation(method = "triangles")` on a transect returned no cells
+  and an index of `NA`s, after logging that `delaunayn()` had failed, which
+  it had not.  It now stops with a message that says the points are
+  collinear and points to `method = "voronoi"`; the fallback's log line
+  names the reason that applies.
+
+* **k-means seeding clustered CRS-less lon/lat points as if degrees were
+  metres.**  `voronoi_seeds_kmeans()` and `get_voronoi_seeds(method =
+  "kmeans")` projected only when a CRS said lon/lat, so 800 CRS-less points
+  89 km wide and 111 km tall were split east-west where the same points
+  tagged EPSG:4326 were split north-south.  They now apply the lon/lat
+  heuristic `ensure_projected()` applies (with its warning) and return the
+  seeds in the input's own coordinates.
+
+* **`voronoi_seeds_random()` returned the same seeding on every call.**  Its
+  default `set_seed = 456` reset the random-number stream inside the call,
+  so five calls under `set.seed(1)` to `set.seed(5)` gave one draw, and the
+  sensitivity comparison its help page recommends compared a seeding with
+  itself.  The default is now `NULL`, as in `get_voronoi_seeds()`: the draw
+  comes from the session's stream.  Pass `set_seed` for a fixed seeding.
+  This changes the default.
+
+* **`harmonize_crs()` refused a layer as `target_crs`.**  A multi-row sf
+  failed with "the condition has length > 1" and a one-row one with "cannot
+  create a crs from an object of class sf", where `ensure_projected()`
+  accepts both.  An sf or sfc target now means its CRS.
+
+* **`summarize_by_cell()` failed on `deff = NA` and mis-recorded
+  `deff = Inf`.**  The check on a numeric `deff` came out `NA` for
+  `NA_real_` and `NaN`, so the call stopped with "missing value where
+  TRUE/FALSE needed" instead of the documented warning and fallback to 1.
+  `Inf` passed the check: the standard errors were the uncorrected ones,
+  yet `cell_weight` was 0 in every cell and `deff_applied` recorded
+  `deff = Inf`.  Any `deff` that is not a single finite number of at least 1
+  now falls back to 1 with the warning.
+
+* **`summarize_by_cell(deff = "variogram")` fell back to uncorrected
+  standard errors with no R warning when no model could be fitted.**  With
+  predictors only and no `sac`, without gstat, or when
+  `estimate_sac_range()` returned no fit (fewer than 30 points), the only
+  signal was a log line: no `tryCatch()`, `withCallingHandlers()` or
+  `warnings()` saw it, and `spatialkit_quiet()` hid it, while the standard
+  errors came out about 5 times smaller than the corrected ones in one
+  check.  It is now a warning that names the reason.  Every design-effect
+  fallback (a refused `deff`, a rejected or unsupported variogram, no
+  model) is raised with class `"spatialkit_deff_fallback"`, so a loop over
+  many summaries can catch exactly that case.
+
+* **An empty point switched off `summarize_by_cell(deff = "variogram")` for
+  its cell.**  Its missing coordinates made the cell's mean correlation
+  `NA`, and the cell silently got a design effect of 1: the standard error
+  of that cell was a quarter of the corrected one in one check.  (In the
+  development version the same input stopped the call with "missing value
+  where TRUE/FALSE needed".)  Points with empty or non-finite coordinates
+  now count towards their cell's values but not towards its correlation,
+  with a warning.
+
+* **`summarize_by_cell(deff = "variogram")` read an anisotropic variogram
+  as isotropic.**  Only `model`, `psill` and `range` were read, so
+  `vgm(0.8, "Exp", 300, 0.2, anis = c(0, 0.2))` gave a correlation of 0.677
+  at 50 m east-west where gstat's is 0.348, and a median design effect of
+  14.1 against 7.7: standard errors too wide by a factor of 1.7.  A 2-D
+  geometric anisotropy (`ang1`, `anis1`) is now applied as gstat applies it.
+  (`resolution_profile()`, which uses the same correlation function on
+  distances alone, still reads the major range.)
+
+* **A misspelt or non-numeric `response_var` was dropped in silence.**
+  `summarize_by_cell()` reported it through a progress message, which the
+  default `quiet = TRUE` suppresses, and returned a frame with no `resp_*`
+  column and `cell_weight` equal to `n`.  A missing or non-numeric
+  `response_var` or predictor is now a warning, and a `response_var` of
+  more than one name is an error instead of "the condition has length > 1".
+
+* **A double cell ID of 100000 lost its cell in `summarize_by_cell(cells_sf
+  = )`.**  When the points' and the cells' ID columns had different classes
+  (an integer `poly_id` against a double from a GeoPackage Integer64 field
+  or a CSV), both were converted with `as.character()`, which writes
+  `1e+05` for the double and `100000` for the integer.  That cell came back
+  with `NA` summaries and its points left the result: 11 of 30 points in one
+  check, with no R warning.  Whole numbers are now written out in full, and
+  a summarised ID that matches no cell is reported with a warning.
+
+* **`summarize_by_cell(cells_sf = )` did not read the ID columns
+  `assign_features_to_polygons()` writes from.**  Cells keyed by `id` or
+  `grid_id` (common in shapefiles) were assigned cleanly and then summarised
+  to a plain table with no geometry, `cell_area` or `n_per_area`, and a
+  layer with `id` and a differently numbered `cell_id` was joined on
+  `cell_id`, putting 89 percent of the summaries on the wrong polygons in
+  one check.  The cells are now searched in the order the assignment used,
+  and a `cells_sf` that cannot be joined is a warning (an error with
+  `area = TRUE`) rather than a log line.  `agg_funs = median` or `"median"`
+  is honoured instead of being replaced by the mean.
+
+* **`assign_features_to_polygons(largest = TRUE)` assigned polygon features
+  that only touch the cells.**  sf keeps the largest intersection piece
+  without checking its area, so under GEOS a feature sharing only an edge or
+  a corner with the cell layer went to that cell with zero overlap, while
+  under s2 (lon/lat) the same feature was unassigned: sf's nc counties
+  against 50 of them as cells gave 70 rows projected and 50 in lon/lat.  A
+  feature with no overlap area is now unassigned in every CRS.
+
+* **`tie_break = "smallest_area"` depended on the row order after all.**
+  Candidates of equal area --- the cells of any regular grid, for a point on
+  a shared edge --- fell through to the first row, so reversing the cells'
+  rows moved every edge point to the neighbouring cell (points at x = 100
+  went to cells 1, 4 and 7, or to 2, 5 and 8), and on a cached grid, whose
+  IDs do not run row by row, one cell could take both of its edges.  Equal
+  areas (to 9 digits) are now decided by the lowest, then leftmost,
+  bounding-box centre.  On a `create_grid_polygons()` square grid that is the
+  cell row order already picked (1,681 of 1,681 lattice points unchanged); on
+  a hex grid 3 of 56 shared vertices move.
+
+* **`create_grid_polygons_cached()` could return another site's grid.**  The
+  cache key used the CRS's `input` name, which is `"unknown"` for any custom
+  CRS read back from a GeoPackage or shapefile, so two site-centred CRSs
+  with the same local boundary coordinates shared an entry, and the second
+  site received the first one's grid 11,000 km away.  The key now hashes the
+  CRS's WKT; the only cost is a rebuild when one CRS arrives written two
+  ways.  `target_cells` now defaults to `NULL`, as in
+  `create_grid_polygons()`, so `cellsize =` or `n =` work without it.
+
+* **`ensure_stable_poly_id()` could number cells differently with s2 off.**
+  The sort key's centroid was taken planar in degrees when
+  `sf::sf_use_s2(FALSE)`, which moves it by far more than the key's rounding
+  step, so near-tied cells swapped IDs between s2-on and s2-off sessions (4
+  of 2,000 Voronoi cells), and without lwgeom the s2-off call stopped at the
+  area.  The key is now taken on the sphere for the sort copy only, whatever
+  the session setting.
+
+* **`summarize_by_cell(deff = "variogram")` built each cell's correlation
+  matrix up to five times per column.**  The same call with two partly
+  missing columns and `conf_level` now builds 15 where it built 45.
+
+* **`estimate_sac_range()` returned the widest direction that reached a sill
+  when the all-pairs variogram had run past the fitted lags.**  Under an
+  unremoved trend the pooled variogram rises without a sill, which the help
+  page said the fitted-lag bound catches; but when two of the four
+  directional variograms (those across the slope) did reach one, their
+  maximum came back as the range with `anisotropy_used = TRUE` and nothing
+  on the console.  On an exponential field of range 150 with an east-west
+  trend, 12 of 30 draws returned 131--596 this way and 16 others `NA`, so
+  `make_folds(auto_range = TRUE)` switched between a 2 x 2 grid of 430 m and
+  geometric blocks from one draw to the next.  The directions that reach a
+  sill are the shorter ones, so their maximum is a lower bound, not an
+  estimate.  A converged all-pairs fit past the fitted lags is now refused
+  whatever the directions found (`rejected_reason = "fitted range exceeds
+  the largest lag fitted"`, the directional ranges still attached); the
+  directional maximum stands in only for an all-pairs fit that is singular
+  or did not converge.  On stationary fields whose range is close to the
+  cutoff this also turns a few draws from a directional maximum into `NA`
+  (3 of 30 at an effective range of 570 on a 1000 m square).
+
+* **`print()` on an `estimate_sac_range()` result showed a bare number.**
+  For lon/lat input the number is in metres of a CRS the estimate picked,
+  and with `predictor_vars` it is the range of the residuals rather than of
+  the response; neither showed, so a mismatch with the layer it was about
+  to be used on could not be seen.  A last line now names the unit and the
+  CRS (`in metres of EPSG:32617`) and whether the variogram is of the
+  response or of its residuals (and by which `detrend` method).
+
+* **`make_folds(drop_empty_blocks = FALSE)` could return folds with no test
+  points.**  `k` was lowered only when the highest block id holding a point
+  was below it, and with empty blocks kept that id says nothing about how
+  many blocks hold points: two clusters on a 4 x 4 grid gave id 16, so
+  `k = 5` was kept for 2 occupied blocks and three folds came back empty,
+  with no warning (the imbalance check skipped an empty fold).  The `cv_*()`
+  functions then ran on the two folds that had points and
+  `area_of_applicability(folds =)` failed.  `k` is now lowered to the number
+  of blocks that hold points, as `?make_folds` already said, the log line
+  names the numbers, and every point in a single one of several blocks is
+  the single-block error it always was with the default.
+
+* **The automatic block grid gave an east-west corridor more than twice as
+  many blocks as the same corridor running north-south.**  Only the row count
+  was capped, so a layer more than about `block_multiplier * k` times as
+  wide as it is tall got `round(sqrt(15 * w/h))` columns at `k = 5`: 39 x 1
+  on a 10 km x 100 m corridor against 1 x 15 turned on its side, blocks less
+  than half as long, and a scheme drifting towards random k-fold (1-NN CV
+  RMSE 0.77 against 0.94 on the same values; lower in 16 of 20 seeds).
+  Points on one horizontal line were treated as a square and got a 4 x 4
+  grid that collapsed onto the line, lowering `k` from 5 to 4.  The column
+  count is now capped at `block_multiplier * k` as the row count was, so
+  both orientations and both lines get 15 blocks at `k = 5`.  Folds change
+  only for extents more than about `block_multiplier * k + 1` times as wide
+  as they are tall.
+
+* **`make_folds()` ignored `block_nx` or `block_ny` given alone, and
+  accepted invalid ones.**  Giving one dimension sent the call to the
+  automatic grid without a word (`block_nx = 10` alone gave a 3 x 4 grid);
+  0, a negative, `NA` or a vector failed inside sf or base R, and 2.7 was
+  truncated to 2.  The dimension given is now used and the other derived
+  from the extent's aspect ratio (roughly square blocks), and each must be
+  a single whole number >= 1.
+
+* **With a non-rectangular `boundary`, `make_folds(block_kfold)` kept
+  zero-area slivers as blocks.**  Where the boundary only touches a grid
+  cell at a corner or along an edge, the clipped cell is a POINT or a
+  LINESTRING, and it was kept as a block: packed into a fold under
+  `drop_empty_blocks = FALSE` (3 of 13 blocks under a triangular boundary),
+  and able to catch a data point lying exactly on the boundary as a
+  one-point block of its own.  Only the areal part of the grid is kept now.
+
+* **`make_folds()` failed with R's own errors on a missing `k` or an
+  invalid `buffer`.**  `k = NULL` (or no `k`) reached `if (k < 2)` and failed
+  with "argument is of length zero"; a `buffer` of `NA`, `numeric(0)` or
+  length 2 failed with "missing value where TRUE/FALSE needed" or a length
+  error, and an `NA` is exactly what `estimate_sac_range()` returns when no
+  range is identified.  Both are now refused by name (the leave-one-out
+  methods still need no `k`), and so is a `units` object passed as
+  `buffer`, `block_size` or `block_nx`/`block_ny`, which used to fail inside
+  the units package without naming the argument.
+
+* **`make_folds(method = "buffered_loo")` said nothing when the buffer
+  excluded no neighbour.**  The buffer is in the units of the CRS the folds
+  are built in, which for lon/lat input is metres, so a buffer in degrees
+  (0.1) excluded nothing and the scheme was plain leave-one-out: 79 of 79
+  training points in every fold of an 80-point layer, no condition raised.
+  It now warns when no fold excludes any neighbour, and `?make_folds` says
+  what unit `buffer` is in.
+
+* **NNDM folds could be far more optimistic than their target with only a
+  log-file line to say so.**  When `min_train` stops the matching --- samples
+  clustered well inside the prediction domain, the layout NNDM is meant
+  for --- the realised distances stay short: one cluster predicted onto a
+  20 km grid kept a median of 1171 m against a target of 6704 m, 96 of 100
+  folds held at the floor, while `?make_folds` said the result is never more
+  optimistic than the target.  `make_folds()` now warns when the floor
+  leaves more than one point's worth of excess below `phi`, records
+  `params$n_at_min_train`, and the documentation states the guarantee only
+  where neither `phi` nor `min_train` binds.
+
+* **`make_folds(auto_range = TRUE)` fell back to geometric blocks with only
+  a log line.**  When no range was identified (an unremoved trend, a range
+  past the fitted lags, fewer than 30 points, gstat missing), the blocks the
+  caller asked to be sized from the data were not, and under knitr,
+  `spatialkit_quiet` or `tryCatch()` nothing showed it.  This is now a
+  warning that gives the rejection reason.
+
+* NNDM fold construction releases FNN's copy of the neighbour tables as soon
+  as it has them, so a second `n` x `n/2` pair is no longer held through the
+  sweep and the construction of the folds.  The peak inside `get.knn()` is
+  unchanged.
+
+* **`cv_bayes()` rounded coverage levels to a whole percent, so close levels
+  overwrote each other.**  Coverage columns were named
+  `sprintf("coverage_%.0f", 100 * level)`: `coverage_levels = c(0.5, 0.975,
+  0.985, 0.995)` gave three columns for four levels, `coverage_98` holding
+  the 0.985 value and the 0.975 value lost, with no condition raised.  Levels
+  given as percentages, `c(50, 80, 95)`, made every fold throw away its
+  CRPS, `n_draws` and coverage in silence.  Columns are now named at full
+  precision (`coverage_97.5`; the default 50/80/95 names are unchanged), a
+  level outside (0, 1) or given twice is an error that suggests dividing by
+  100 where that fits, and the result carries `coverage_levels`, the nominal
+  level of each column.
+
+* **An error in a `fold_info_fn` threw away all of that fold's extras
+  without a word.**  `cv_spatial()` caught it and dropped the whole list, so
+  the columns were `NA` with `fold_status` `"ok"` and nothing logged; in
+  `cv_bayes()` one failing quantile cost `gp_k`, `n_draws`, CRPS and every
+  coverage column.  The failure is now logged and named in
+  `fold_status$message`, and `cv_bayes()` computes coverage and CRPS in a
+  step of their own, so `gp_k`, `n_draws` and `yhat_sd` survive it.  A
+  `fold_info_fn` that returns the wrong shape (a vector where a value
+  belongs, an unnamed or duplicated element, or a name `fold_metrics`
+  already has, such as `RMSE`) is an error that says so; `RMSE = -5` used to
+  overwrite the fold's real RMSE.
+
+* **`cv_spatial()` failed after fitting every fold when `..per_row` came
+  back from some folds only.**  The prediction rows were stacked with
+  `rbind()`, which died on "numbers of columns of arguments do not match"
+  once every fold had been fitted, so the work was lost and the message did
+  not point at the cause.  A fold without `..per_row` (returned
+  conditionally, of the wrong length, or from a `fold_info_fn` that threw) now
+  gets `NA` in those columns, and one of the wrong length is logged.
+
+* **Parallel cross-validation discarded folds that shared a core with a
+  failure.**  `mclapply()` ran prescheduled, handing each core a chunk of
+  folds: an error that escaped one fold was copied to every fold of its
+  chunk, and a worker killed for lack of memory took all of its folds with
+  it.  With four folds on two cores, a failure on fold 2 lost fold 4 as
+  well, and `overall` pooled 40 of 80 rows.  Each fold now runs in its own
+  worker, so a failure costs that fold only, and an error that stops a
+  sequential run (a `metrics` or `fold_info_fn` return value of the wrong
+  shape) stops a parallel one too, naming the fold.  A run in which nothing
+  fails gives the same numbers as before, since the per-fold seeds are drawn
+  before forking.
+
+* **`model_metrics(newdata = )` measured R-squared against a different
+  baseline from every `cv_*()` function.**  It took the total sum of squares
+  about the new rows' own mean, where cross-validation takes it about the
+  training mean, so the same predictions on a split across a trend scored
+  R-squared -0.89 here and 0.35 from `cv_spatial()`.  `model_metrics()`,
+  `evaluate_insample()` and `compare_models()` with `newdata` now use the
+  training mean too, the out-of-sample convention, and the help pages say
+  which baseline R-squared uses.  In-sample numbers do not change.
+
+* **R-squared and MAPE depended on the units of the response.**  The
+  thresholds below which a total sum of squares or a percentage-error
+  denominator counted as zero were absolute, so a response with standard
+  deviation below about 1.5e-8 got R-squared `NA` while RMSE and MAE were
+  fine (and `select_features_forward(metric = "R2")` selected nothing), and
+  one on a 1e-15 scale lost MAPE and SMAPE as well.  "Zero" is now 100
+  machine epsilons of the data's own magnitude for every metric: a rescaled
+  response gets the same R-squared and MAPE, a constant one still gets `NA`,
+  and on a response spanning many orders of magnitude a row within 100
+  epsilons of the largest value (such as 1e-9 against 1e6) no longer enters
+  MAPE.
+
+* **`compare_models()` set out-of-bag random-forest metrics beside in-sample
+  ones without saying so.**  Without `newdata` an `rf_fit`'s fitted values
+  are out-of-bag and every other backend's are in-sample, and the table could
+  rank the models the wrong way round: GWR RMSE 0.77 in-sample against RF
+  0.82 out-of-bag, where the forest's in-sample RMSE was 0.40.
+  `evaluate_insample()` and `compare_models()` now carry a `metric_basis`
+  column (`"in-sample"`, `"out-of-bag"` or `"newdata"`), `compare_models()`
+  logs a note when a table mixes them, and both help pages say what the
+  metrics are computed on.
+
+* **`compare_models()` put LOOIC and AICc side by side for fits on different
+  rows.**  Both are sums over the rows a model was fitted to, so a model
+  that lost 20 rows to a predictor's missing values showed LOOIC 32.2
+  against 54.8 for the model on all 70, and looked 22.6 better while it was
+  worse on the rows they share.  A column whose models were fitted to
+  different rows is now set to `NA`, with a warning naming each model's `n`.
+
+* **`compare_models()` read significantly negative residual autocorrelation
+  as missed spatial structure.**  The caution fired on a two-sided p-value
+  whatever the sign, so the alternating in-sample residuals of a GP or a
+  small-bandwidth GWR (Moran's I -0.13, p = 0.02) were logged as "may not
+  fully capture the spatial structure", the opposite diagnosis.  A negative
+  z is now logged as what it usually means, a model tracking its data
+  closely.
+
+* **`compare_models_cv()` placed polygon rows in its shared blocks by a
+  different point than every model is fitted at.**  The shared folds reduced
+  polygons and lines to their point-on-surface whatever `pointize` said,
+  while each backend fitted them at the `pointize` point: with
+  `pointize = "centroid"`, 119 of 150 L-shaped parcels were in a different
+  fold from a standalone `cv_gwr()` run.  The shared blocks now use
+  `pointize`; with the default `"auto"` nothing changes.
+
+* **Saved folds on lon/lat polygons were refused after `sf_use_s2()` was
+  toggled.**  The provenance check located each probed row by its centroid,
+  which on a geographic CRS is spherical with s2 on and planar with it off;
+  the two differ by up to 5e-4 degrees on county polygons, 500 times the
+  tolerance.  Folds built before `sf_use_s2(FALSE)` (a common workaround for
+  invalid polygons), or saved and read in a session set the other way, were
+  rejected by every `cv_*()` as "built from different data".  The probe now
+  always takes the planar centroid; folds saved by an older version are
+  checked the way they were made.
+
+* **`residual_morans_i()` gave the wrong reason when it could not use a
+  fit's residuals.**  An error from `residuals()` was thrown away, and it and
+  a fit with no `residuals()` method (the `?new_spatial_fit` example has
+  none) were both reported as "could not extract enough residuals (n < 4)",
+  on a 100-row fit; a residual vector of the wrong length was reported as
+  "coordinate extraction failed".  Each now has its own warning, quoting the
+  error where there is one.
+
+* **A GWR whose local regressions interpolate the data won on AICc.**
+  GWmodel's AICc is defined only while the effective number of parameters,
+  tr(S), is below n - 2; past that its penalty turns negative.  A small
+  adaptive bandwidth reached it, and so did any bandwidth raised to the old
+  floor, which for the bisquare and tricube kernels (they give the farthest
+  neighbour in a window weight 0) fitted every window exactly.  On 100
+  points `compare_models()` listed R2 = 1 and an AICc of -15033 against 292
+  for the automatic bandwidth, and at n = 60 `gwr_model_selection()`
+  selected the real predictor plus three noise variables with -66689.
+  `fit_gwr_model()` now reports such an AICc as `NA` and
+  `gwr_model_selection()` ranks such models last, each with a warning giving
+  tr(S).  The adaptive floor is one neighbour higher for bisquare and
+  tricube, and raising a supplied bandwidth to it is now a warning, not a log
+  line.  `bandwidth = NULL` was not affected above 20 points.
+
+* **`fit_gwr_model()` never checked a one-predictor model for local
+  collinearity.**  The check ran only with two or more numeric predictors,
+  but every local design includes the intercept, and a predictor nearly
+  constant inside a window is collinear with it.  A regional covariate
+  nearly constant within each of four clusters gave local slopes from -97 to
+  221 around a true 3 with no warning, while adding a noise predictor to the
+  same data warned at every location.  One numeric predictor is now enough.
+  A single predictor whose mean is large against its spread (a year, say)
+  now draws the global warning it drew beside a second predictor.
+
+* **GWR said a singular window came back as `NaN` coefficients; it stops
+  the fit.**  GWmodel's matrix inverse throws on an exactly singular window,
+  so a 0/1 indicator constant within clusters failed the whole fit with a
+  bare "inv(): matrix is singular", while the help page and the collinearity
+  warning promised masked `NaN` coefficients.  The non-finite coefficients
+  GWmodel does return come from co-located points, where an adaptive
+  bandwidth no larger than the number of observations at a site gives the
+  kernel zero width (160 of 160 at 40 sites of 4 observations, 4
+  neighbours), and the warning blamed singular windows for those.  The fit
+  error now says a window is singular and how many the collinearity check
+  found, and the non-finite warning names co-located points when they are
+  the cause.
+
+* **An adaptive GWR bandwidth above the number of points was capped in
+  silence.**  `bandwidth = 1500`, meant as metres with `adaptive` left at
+  `TRUE`, became a 200-neighbour, near-global fit on 200 points without a
+  word; its local slopes varied less than half as much as the intended
+  fixed-distance fit's.  `fit_gwr_model()` and `gwr_model_selection()` now
+  warn, naming n and pointing to `adaptive = FALSE`.  `cv_gwr()` repeats the
+  warning in each fold whose training set is smaller than the bandwidth.
+
+* **Below 20 points, `bandwidth = NULL` did not fit at the bandwidth
+  `bw.gwr()` chose.**  GWmodel searches adaptive bandwidths from 20
+  neighbours up to n, so with fewer points its choice exceeds n (18 for 12
+  points) and was capped at n, a different kernel with a worse AICc (18.3
+  against 9.7), without a word.  The cap stays and now raises a warning in
+  `fit_gwr_model()` and `gwr_model_selection()`; supply `bandwidth` for data
+  this small.
+
+* **A GWR predictor named twice raised false collinearity warnings.**
+  `fit_gwr_model(predictor_vars = c("a", "b", "a"))` fitted correctly, but
+  its collinearity checks ran on the duplicated column and warned "exactly
+  singular" and "100% of locations collinear", once in every `cv_gwr()`
+  fold, and the doubled count raised the bandwidth floor.  Names are now
+  collapsed on entry, as `gwr_model_selection()` already did.
+
+* **A `gp_c` you set did not change the `gp_k` derived for it.**  The basis
+  count was always sized for the boundary factor the package would have
+  chosen, so a wider boundary got the same number of basis functions and
+  could no longer resolve the lower length-scale bound it was sized for.  The
+  advice under `gp_c` is to raise it for a long-range surface, which is
+  exactly the case that coarsened the basis.  On 200 uniform points,
+  `gp_c = 3` fitted with `gp_k = 23` where the rule gives 43, and `gp_c = 5`
+  with 23 where the rule gives 70 (capped at 50); the cap warning could never
+  fire on this path.  With `gp_k = NULL` the derived `gp_k` is now sized for
+  the `gp_c` actually used, and a capped value is logged.  An explicit `gp_k`
+  still passes through untouched.
+
+* **`fit_bayesian_spatial_model()` could not fit `brms::categorical()` or a
+  `mixture()` family.**  Those families give each distributional parameter
+  its own GP under the same coefficient names, and the automatic length-scale
+  prior kept only the names, so every coefficient got two identical rows and
+  brms stopped with "Duplicated prior specifications are not allowed" before
+  sampling.  A user's `lscale` prior restricted to one `dpar` failed the same
+  way, because it was copied onto every category's coefficients.  The prior
+  now carries each coefficient's `dpar`, `nlpar` and `resp`, and a global or
+  `dpar`-level `lscale` prior is expanded only onto the coefficients it
+  addresses and never over a coefficient-level one the user already gave.
+
+* **A two-level factor response under `brms::bernoulli()` fitted, and then
+  nothing could score it.**  The response check refused a non-numeric
+  response only under gaussian, and the gaussian refusal itself pointed at
+  `bernoulli()`.  brms fits the factor, but `residuals()` came back all `NA`,
+  `summary()`, `model_metrics()` and `compare_models()` stopped on "response
+  is factor", and `cv_bayes()` ran a full fold of MCMC before aborting in the
+  fold scoring (with `parallel = 2`, every fold ended as `worker_error`).  A
+  factor or character response is now refused, before anything is compiled,
+  under every family except `categorical()` and the ordinal ones (cumulative,
+  sratio, cratio, acat), with a message saying to convert it to 0/1.  Numeric
+  and logical 0/1 responses are unaffected.
+
+* **`predict()` on an ordinal or categorical `bayesian_fit` returned all
+  `NA` as a "posterior draw failed".**  brms returns `posterior_epred()` for
+  those families as a draws x rows x categories array, which the method took
+  for a failed draw: a real `cumulative()` fit returned `NA` for all five
+  new rows, with only a log line, while `fitted()`, `summary()` and
+  `model_metrics()` said merely that they got an array.  `predict()` under
+  its default `type = "epred"` and `fitted()` now stop, saying the family has
+  a probability per category and pointing at `type = "predict"` and
+  `brms::posterior_epred()`.  A genuinely failed draw still returns `NA` as
+  documented, and the log line now carries the cause.
+
+* **`predict()` on an `rf_fit` turned every ranger error into an all-`NA`
+  vector.**  `type = "quantiles"` on a forest grown without
+  `quantreg = TRUE`, and `type = "se"` without `keep.inbag = TRUE`, which the
+  help page says are rejected, returned ten `NA`s for ten rows with no R
+  condition, and `model_metrics(newdata =, type = "se")` then reported
+  `n = 0`.  A failure in ranger's predict method is now an error naming
+  ranger's reason; the `cv_*()` fold loop records it as the fold's cause and
+  `predict_surface()` stops naming the rows, as they already did for other
+  backends.
+
+* **`check_convergence = FALSE` returned `convergence_ok = TRUE`.**  The flag
+  started out `TRUE`, so a fit whose checks never ran (its max R-hat was 1.28)
+  claimed to have passed them over an empty diagnostics list, and `print()`
+  had nothing to caveat.  It is now `NA` when nothing was checked, and
+  `print()` on the fit and on its `summary()` says "Convergence: NOT
+  CHECKED"; `summary()`'s printout also repeats the "Convergence warnings
+  present" flag, which it carried and never showed.  A failed PSIS-LOO is now
+  logged with its cause instead of "LOO computation failed." alone, which had
+  left `compare_models()` showing `LOOIC` `NA` with nothing saying why.
+
+* **The convergence check raised dozens of "The ESS has been capped"
+  warnings.**  `brms::neff_ratio()` runs posterior's ESS over every GP basis
+  weight, and posterior warns once per well-mixed one: an `n = 80` fit raised
+  44 R warnings, 41 of them this one.  R keeps only the first 50 warnings, so
+  a warning that mattered and came later, loo's Pareto-k among them, could
+  be dropped.  That one message is now muffled around the R-hat and ESS
+  accessors; every other warning passes through, and the ratios are
+  unchanged.
+
+* **A saved `rf_fit` or `bayesian_fit` carried its engine twice.**  The
+  model formula was built in the fitting function's frame and so captured
+  it, and that frame holds the forest or the `brmsfit` itself; a formula
+  serialises its environment, so `saveRDS()` wrote the engine a second time
+  (1.62 MB for a 100-tree forest of 0.72 MB; about 80 MB for a 40 MB
+  `brmsfit`, which brms's own copy of the formula doubled even in
+  `saveRDS(fit$engine)`).  The formulas now carry the global environment, as
+  a formula typed at the console does.
+
+* **A forest with rows out of every tree's bag said nothing.**  ranger returns
+  `NaN` as the out-of-bag prediction of a row every tree sampled, so with
+  `num_trees = 5` 20 of 200 rows had `NaN` fitted values and `summary()`
+  printed "n = 200" over an R-squared computed on 180.  `fit_rf_model()` now
+  warns with the count, and `summary()` prints "(computed on 180 of 200
+  rows ...)" when its metrics use fewer rows than the fit has.
+
+* **`area_of_applicability()` counted rows that differ on a dropped
+  zero-variance predictor as inside the AOA.**  A predictor constant in the
+  training data --- a land-cover dummy absent from the training region --- is
+  dropped from the distance, so new rows taking another value there were
+  judged on the other predictors alone: 37 of 40 urban rows came out inside,
+  where a single urban training row would have kept the predictor and put 1
+  inside.  Such rows now get `DI = Inf` (their scaled distance along that
+  predictor is infinite), are counted outside, and a warning gives the count;
+  `print()` says how many.
+
+* **`area_of_applicability()` returned a threshold of 0 from duplicated
+  training rows without saying why.**  Each training row's reference is its
+  nearest other row, so exact duplicates in predictor space --- repeat visits
+  to a site with static covariates, covariates from a raster coarser than the
+  sampling --- have a training DI of 0; past about three quarters of the rows
+  the threshold is 0 and only exact copies count as inside (30 sites visited
+  four times: 0 of 200 new points inside, against 197 after deduplication).
+  The rule is unchanged; the result is now logged with the remedy
+  (leave-location-out folds, or deduplication) and `print()` shows the count
+  of zero training DI.
+
+* **`area_of_applicability()` refused all-zero weights, which the advice
+  `pmax(importance, 0)` produces whenever the model found no useful
+  predictor.**  A one-predictor forest gave all-zero weights in 9 fits of 20
+  when its predictor carried no signal, so the AOA was lost in the folds where
+  it mattered most.  With one predictor the weight cannot change the index
+  (it is scale-invariant) and zero is accepted silently; with several, all
+  are weighted equally, as `weights = NULL` would, with a warning.
+
+* **A fractional `chunk_size` in `area_of_applicability()` marked
+  extrapolation as inside the AOA.**  On the dense path (`use_fnn = FALSE`,
+  or FNN not installed) block starts became fractional and the rows between
+  blocks kept an initial DI of 0: with `chunk_size = 2.5`, 5 of 25 far-out
+  points were reported inside and 16 training DI of 0 moved the threshold.
+  `chunk_size` is now validated by name and truncated to whole rows.
+
+* **`predict_surface()` filled a polygon grid with covariates from an
+  arbitrary point inside each cell.**  `st_nearest_feature()` returns the
+  first zero-distance match the spatial index yields, so a
+  `create_grid_polygons()` grid got covariates that did not match the
+  location predicted at (predictions off by up to 2.6 on a 0-30 response) and
+  that changed with the row order of `covariates` (by up to 4.7), and the
+  result was a polygon layer where the manual promises points.  The grid is
+  now reduced to one representative point per cell first.
+
+* **`predict_surface(..., draws = TRUE)` flattened the draw matrix into
+  `.pred`.**  The argument was forwarded to `predict()`, and a backend that
+  honours it returned an `n_draws x n` matrix that became `.pred` column by
+  column (correlation with the right values: 0.03); with `se = TRUE` the
+  duplicated argument was reported as "backend does not expose posterior
+  draws".  `draws` is now refused by name, and a `predict()` returning the
+  wrong number of values is an error.
+
+* **`predict_surface()`'s automatic grid could lose a whole column or row.**
+  When the extent is an exact multiple of the cell size, `floor()` of the
+  ratio landed one short through rounding (0.3 / 0.1 gives 2 cells), leaving
+  a cell-wide strip uncovered; at the default `n_cells` this hit 1197 of
+  10000 random squares.  The floor now has a relative tolerance.
+
+* **`predict_surface()` kept a reused grid's old `.pred_se`.**  Passing an
+  earlier surface as `grid` left that model's `.pred_se` beside the new
+  `.pred` unless this call replaced it, even after logging "returning
+  predictions only".  It is now removed unless this call computes it.
+
+* **A `logger` configuration made before loading the package could still
+  abort its functions, and received its log lines.**  `logger` seeds a new
+  namespace by copying *every* index of the user's global configuration, and
+  2.0.0 pinned the formatter on index 1 only.  A user with two global indices
+  set up before `library(spatialkit)` got `formatter_sprintf` or
+  `formatter_glue` on the console echo, so a `%` or a `{` in a message
+  (`"fold 2 skipped: object 'cov_{x' not found"`) aborted the function that
+  logged it and the R warning the manual promises never arrived; a third
+  global index kept the user's own appender and received spatialkit's WARN and
+  INFO lines in the user's log file.  Both indices now have formatter, layout,
+  appender and threshold pinned, every message is marked
+  `logger::skip_formatter()`, and copied indices beyond the second are deleted
+  (on `logger` 0.2.2, which cannot delete one, switched off).  The global
+  configuration is still never touched.
+
+* **Deleting the session temp directory made every function that logs fail
+  until the package was reloaded.**  The trace file's path was fixed in
+  `tempdir()` at load time, so after an OS cleaner or `unlink(tempdir())`
+  every log call failed with "cannot open the connection", and a documented R
+  warning (`ensure_projected()`'s CRS assumption, say) became that error;
+  `tempdir(check = TRUE)`, R's own recovery, did not help.  The trace now
+  resolves its path when a line is written, recreates the directory if it has
+  gone, and drops a line it cannot write; no logging failure aborts the caller
+  any more, so the warning always arrives.
+
+* **Logged cautions were missing from knitted documents.**  The console echo
+  wrote to stderr, which knitr does not capture, so an R Markdown, Quarto or
+  pkgdown document showed the package's R warnings but none of its logged
+  cautions (`compare_models()`'s significant residual autocorrelation, for
+  one).  While knitr is running the line is now also sent as an R message, so
+  it appears in the output and `message = FALSE` hides it; a line that is
+  raised as a warning too is not repeated.  stderr gets exactly what it got
+  before, and nothing changes outside knitr.
+
+* **`plot_tessellation_map(labels = TRUE)` drew no labels on any layer this
+  package builds.**  `label_col` defaulted to `"grid_id"`, a column no
+  function produces: Voronoi and Delaunay cells carry `cell_id`, grids
+  `poly_id` and `cell_id`, and `summarize_by_cell()` output `poly_id`, so the
+  map came back unlabelled with only a log line to say why.  `label_col` now
+  defaults to `NULL`, which takes the first of `grid_id`, `cell_id`,
+  `poly_id`, `polygon_id` and `id` the layer has; `grid_id` stays first, so a
+  layer that has one is labelled as before, and naming a column still works.
+
+* **`plot_tessellation_map()` failed at print on a units, Date, POSIXct or
+  difftime fill column.**  The fill scale was chosen with `is.numeric()`, so
+  Date, POSIXct and difftime columns got a discrete scale ("Continuous value
+  supplied to a discrete scale"), and an `st_area()` column (class units)
+  passed the test and then broke the viridis scale's arithmetic.  The
+  function returned normally and the error came only when the plot was drawn.
+  Date and POSIXct now get the continuous scale on a date or time axis, and
+  units and difftime columns are drawn as numbers with the unit in the legend
+  title (`"area [m^2]"`) unless `legend_title` is given.
+
+* **`plot_folds()` failed at print when its layers disagreed on having a
+  CRS.**  A CRS-less boundary beside projected points, or the reverse,
+  aborted inside `coord_sf()` with sf's "cannot transform sfc object with
+  missing crs".  Since `plot_folds()` began drawing the block outlines it
+  also failed on the very layer the folds were built from: `make_folds()`
+  projects CRS-less lon/lat points to a UTM zone, and stamps CRS-less points
+  with a boundary's CRS, so the stored blocks carry a CRS the points do not.
+  A CRS-less layer is now brought into the points' CRS, or failing that the
+  folds' own, or the first layer's that has one: reprojected when its
+  coordinates look like lon/lat, and stamped with a warning otherwise, as
+  `make_folds()` does.
+
+* **`plot()` on a custom `spatial_fit` without a `residuals()` method
+  stopped with "could not extract residuals".**  `?new_spatial_fit` calls
+  that method optional, but `residuals.default()` returns `NULL` for a
+  `spatial_fit`, so the residual map, the observed-against-predicted plot and
+  the residual variogram all refused a backend that had the required
+  `fitted()` method.  The residuals are now the response minus `fitted()`,
+  which is what the built-in backends return; without a `fitted()` method the
+  error names the method to define.
+
+* **`citation("spatialkit")` gave the year it was called in, not the year of
+  the release.**  DESCRIPTION has no `Date` field, so `inst/CITATION` fell
+  back to `Sys.Date()`.  CRAN installs got the right year only by accident:
+  `meta$Date` partially matched `Date/Publication`.  The year is now looked
+  up the way `utils::citation()` does it, by exact field name: the CRAN
+  publication date, then `Date`, then the date `R CMD build` packaged the
+  source (which a GitHub install via remotes or pak has).  Only an install
+  straight from a source directory records none of these, and only then does
+  the current year appear.
+
+* **The plots' size arguments did nothing on ggplot2 older than 3.4.0.**
+  The line layers pass `linewidth =`, which ggplot2 3.4.0 introduced; older
+  versions warn "Ignoring unknown parameters" and draw at the default width,
+  so `outline_size`, `boundary_size` and the other size arguments were
+  silently ignored.  Suggests now asks for `ggplot2 (>= 3.4.0)`.
+
+* The test suite calls `local_mocked_bindings()`, which testthat added in
+  3.1.7, but Suggests allowed 3.1.5.  On 3.1.5 or 3.1.6 every test that mocks
+  a function failed with "could not find function".  Suggests now asks for
+  `testthat (>= 3.1.7)`.
 
 ## Documentation
 
@@ -999,10 +2026,12 @@
   and Talbot 2010) --- not a performance estimate of the selected model.
   The honest estimate comes from running the selection inside
   `cv_spatial()`'s `fit_fn`, which the page now spells out.
-* `fit_bayesian_spatial_model()` documents that `family =` accepts any
-  `brms` family --- zero-inflated and hurdle counts, negative binomial,
-  Bernoulli, beta and ordinal responses all reach `brms::brm()` with the
-  spatial GP term intact --- and gains a worked zero-inflated Poisson example.
+* `fit_bayesian_spatial_model()` documents which `brms` families `family =`
+  takes --- zero-inflated and hurdle counts, negative binomial, Bernoulli,
+  beta, ordinal, categorical and mixture families all reach `brms::brm()`
+  with the spatial GP term intact, and a factor response is taken only
+  under `categorical()` and the ordinal families --- and gains a worked
+  zero-inflated Poisson example.
   The same page now records a trap: a family object `brms` cannot name skips
   the response-type check entirely rather than falling back to the gaussian
   rule, so a malformed `family` buys less validation, not more.
@@ -1032,6 +2061,124 @@
 * `cv_spatial()` documents its name collision with `blockCV::cv_spatial()`,
   which builds folds where this one runs them, and that `blockCV`'s
   `$folds_ids` is accepted directly as `folds` everywhere.
+
+* `?determine_optimal_levels` no longer calls the Cliff and Ord moments
+  behind Moran's z exact: they assume cell means of equal variance, and with
+  single-point cells beside cells of 70 or more points `z` ran slightly high
+  (mean 0.2--0.34, 7--8% rejection at 5%); `resolution_profile()` says
+  `cell_diam_median` is about 0.8 of the side of an equal-area square cell,
+  not a width (and `vignette("resolution")` no longer calls it one); the
+  Post-selection inference section and the vignette say that the estimation
+  rows of a split leave cells in the selection half empty and cells across
+  the border estimated from part of their points (coverage 0.88 against
+  0.97 in simulations), and how to find the cells to trust; `sac_nugget()`
+  says the nugget is extrapolated from the first lag bin (about
+  `max_dist / 30` at the default cutoff), not observed below the closest
+  pair, and can be exactly 0 at the fit's bound.
+
+* The tessellation help pages are corrected: `clip_target_for()` returns
+  the points' bounding box, not their convex hull, and is not the target
+  `build_tessellation(method = "voronoi")` derives;
+  `create_voronoi_polygons()` and `build_tessellation()` say that a
+  multi-vertex MULTIPOINT feature gets one cell per vertex and that
+  `keep_duplicates` has no effect; `voronoi_seeds_random()` tops a short draw
+  up to exactly `k`; `voronoi_seeds_kmeans()` and `get_voronoi_seeds()` say
+  that their `stats::kmeans()` partition is not the k-means++ one
+  `resolution_profile()` scored, and no longer promise equal counts per
+  cell.
+
+* Documentation corrected: `summarize_by_cell()`'s `sac` no longer
+  identifies a rejected fit by a `status` attribute no `sac_range` carries
+  (it is an `NA` value with a `rejected_reason`), and says a rejected `sac`
+  is set aside and the variogram estimated as if none had been given;
+  `ensure_stable_poly_id()` and the reporting vignette say IDs are the same
+  across projections except for fine cells within the rounding step of one
+  longitude (36 of 2,500 100 m cells via EPSG:3035), not always;
+  `summarize_by_cell()`'s "Confidence intervals" says `..neff_*` is `NA` for
+  a single observation; the resolution vignette says the blocked split
+  reduces the leak between halves rather than removing it.
+
+* `?estimate_sac_range` now says that the exponential model is kept
+  whenever it converges and so overestimates the range on smoother fields
+  (about 1.8--2.1 times a Gaussian practical range, 1.3--1.4 times a
+  spherical one), and why the family is not chosen by fit (that biases
+  exponential fields low, to 0.82); that 15 lag bins make a range spanning
+  one or two of them come out long (60 m returned 89--102 m); that nothing
+  tests for spatial structure (white noise gave a finite range in 8 of 30
+  draws); that the "decreases with distance" refusal also fires on small
+  samples of ordinary fields (7--9 of 60 at n = 30, 0--1 at n = 100), which
+  its warning now says below 100 points; that the anisotropy note goes to
+  the log file at INFO, not the console, and that the longest directional
+  range is read from `directional_fitted` after checking
+  `directional_status`, not `max(attr(, "directional"))`, which is `NA`
+  exactly when the major axis ran past the fitted lags (the note itself, the
+  nc_demo vignette and the help now say so); that an accepted range can
+  still exceed half the width of the layer, leaving
+  `make_folds(auto_range = TRUE)` room for one block (`range_frac`); and a
+  flat variogram's refusal message no longer claims the data "never reached
+  a sill" without mentioning that a structureless variogram ends there too.
+  The README counts six refusals, not five.
+
+* `?make_folds`: the NNDM details now say how the procedure differs from
+  `CAST::nndm()` (a strict removal rule, one point more conservative per
+  distance value, and ties broken by coordinates rather than row index)
+  instead of calling it the same; the n > 5000 refusal gives the worst-case
+  cost, O(n^3) time where `min_train` binds (about nine minutes at
+  n = 3000), not O(n^2); `drop_empty_blocks`, `boundary` and
+  `block_multiplier` say what they do on the cases above.
+
+* `?cv_rf` no longer says a `seed` passed through `...` overrides the
+  per-fold forest seed (`seed` is the function's own argument and never
+  reaches `...`); `?cv_bayes` says `parallel = n` compiles `n` Stan models at
+  once, at several GB each, and what a fold killed for memory reports;
+  `?residual_morans_i` and `?compare_models` say their methodological
+  cautions are logged, not raised as warnings.
+
+* `?fit_gwr_model`'s "Collinearity diagnostics" section described the
+  30-location unweighted spot check the survey replaced, a global index on
+  the predictors alone, and a caveat that only a subset of locations is
+  examined; it now describes the code (every location, kernel-weighted, the
+  intercept in both indices).  `?fit_gwr_model` and `?gwr_model_selection`
+  now state the adaptive bandwidth's floor and cap.
+
+* `?fit_bayesian_spatial_model`: `check_convergence` says the checks write
+  WARN log lines and set `$info$convergence_ok` rather than "issue warnings",
+  and that under cmdstanr nothing is raised as an R warning; the basis
+  adequacy check is described as logged; the `family` argument and the
+  non-Gaussian section no longer promise that any response type brms can fit
+  works here; the spatial confounding section warns that coefficients under
+  `standardize_predictors = TRUE` are per standard deviation before comparing
+  with `lm()`.  `?coef.bayesian_fit` gains a section on standardised
+  predictors, and `print()` on such a fit names them.  `?fitted.bayesian_fit`
+  no longer says a failed posterior draw returns `NA` (it has been an error
+  since before this release).  `?gp_lengthscale_bounds` says its bounds are
+  the prior's calibration range and do not shrink with `n`.
+
+* `?area_of_applicability` states the outlier rule (type-7 quartiles) and how
+  the threshold differs from CAST's (the fence itself, capped at the largest
+  training DI, which is larger whenever `n_outliers > 0`), with the
+  `threshold =` value that reproduces it; the internal note that CAST uses
+  `boxplot.stats()` was out of date, and the package page no longer implies
+  the threshold matches CAST.  `n_new` is documented as every row of
+  `newdata` (`n_inside + n_outside + n_na`), not the rows that passed the
+  finite-value filter.  `?predict_surface` and the README say that
+  `se = TRUE` on a `bayesian_fit` gives the SD of the mean surface and that
+  `type = "predict"` gives the predictive SD.
+
+* The diagnostics vignette's area-of-applicability figure alt text no longer
+  calls the training curve cross-validated (no folds are passed there);
+  `?plot.aoa` and `?plot.feature_selection` describe the training DI and the
+  rejected last step as drawn.
+
+* The examples that stamp EPSG:32632 (UTM zone 32N) on simulated points now
+  put the points inside that zone.  The README quick start, the
+  `fold_separation()` example, the resolution, diagnostics and spatial
+  cross-validation vignettes, and the fixture the scripts in `inst/scripts/`
+  share placed them at x and y between 0 and 1000, which is on the equator
+  about 4.5 degrees east, outside the zone.  They are now offset by 500000 m
+  east and 5000000 m north, as the other examples already were.  Every
+  printed result is unchanged, since the package works in planar units; only
+  the coordinates themselves, and the graticule on the maps, differ.
 
 # spatialkit 2.0.0
 
