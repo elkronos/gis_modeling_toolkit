@@ -667,7 +667,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                  caller = "determine_optimal_levels")
     # The split exists so that a selection made on the response can be
     # estimated on points it never saw, so only the Moran's I pass, which
-    # reads the response, is held to the selection half (`in_sel` below).
+    # reads the response, is held to the selection half (`moran_rows` below).
     # The WSS sweep and the k-means partitions read coordinates alone and
     # keep every point: the count is for a tessellation of every point.  The
     # whole selection used to run on the half, and a count chosen for the
