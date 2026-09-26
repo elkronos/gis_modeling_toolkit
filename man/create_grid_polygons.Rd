@@ -20,9 +20,12 @@ create_grid_polygons(
 \item{boundary}{Polygonal sf or sfc object.}
 
 \item{target_cells}{Optional approximate desired number of cells.  The cell
-\emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
-square grids get square cells; for hex grids the count is adjusted for
-hexagonal packing density.  The word "approximate" is load bearing: a
+\emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
+\code{area} is that of the boundary's bounding box, so square grids get
+square cells; for hex grids the count is adjusted for hexagonal packing
+density and the size rounded so that a whole number of hexagons spans
+the longer side of the box.  Neither depends on which way the boundary
+lies.  The word "approximate" is load bearing: a
 grid of square cells over an elongated bounding box needs more of them
 than a grid of rectangles would (a 1000 x 1 strip at
 \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
@@ -57,7 +60,12 @@ distort cell areas across the boundary by more than 1 percent (Web
 Mercator over a near-global extent, a UTM zone stretched well past its
 width), \code{ensure_projected(purpose = "area")} is used instead, with a
 logged warning, so the cells stay equal-area; a local extent keeps its
-UTM zone.}
+UTM zone. A geographic \code{crs} (EPSG:4326, say) is the CRS the grid is
+returned in: a grid sized by \code{target_cells} or \code{n} is laid in that
+projected CRS and then transformed, with long edges densified. A
+\code{cellsize} is in the units of \code{crs}, so with a geographic \code{crs} it is in
+degrees and the grid is laid in degrees, as asked; such cells are not
+equal-area.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
