@@ -411,9 +411,12 @@
     # comparison recycled, R raised "longer object length is not a multiple of
     # shorter object length" at the caller, every candidate scored NA, and the
     # selection silently fell back to the UTM zone while the log line reported
-    # "NA% vs NA%".  Every county-polygon layer took that path.
+    # "NA% vs NA%".  Every county-polygon layer took that path.  The empty
+    # parts go first: one inside a line feature segfaults GEOS here (see
+    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
+    # lon/lat line layer with a null part took ensure_projected() down.
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-      g <- suppressWarnings(sf::st_point_on_surface(g))
+      g <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(g)))
     n <- length(g)
     if (n < 2L) return(NA_real_)
     if (n > max_n) g <- g[unique(round(seq(1, n, length.out = max_n)))]
@@ -1033,6 +1036,68 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   sf::st_sfc(pts, crs = sf::st_crs(x))
 }
 
+
+#' Drop the EMPTY parts of multi-part geometries
+#'
+#' Every call to [sf::st_point_on_surface()] in the package goes through this
+#' first.  GEOS (3.12.1, which sf 1.0.x links) SEGFAULTS computing the
+#' interior point of a non-empty geometry that holds an EMPTY line: a
+#' MULTILINESTRING with an empty part beside a real one, or a
+#' GEOMETRYCOLLECTION with an empty LINESTRING among its members.  The R
+#' session is lost, not merely the call.  An empty POLYGON member does not
+#' crash but is worse in its way: GEOS takes the interior point from the
+#' highest dimension present, finds that dimension empty, and returns
+#' POINT EMPTY for a geometry that has a line in it.
+#'
+#' An empty part adds no points to the geometry, so dropping it changes
+#' nothing but those two failures.  A feature left with no parts is EMPTY as
+#' a whole, which GEOS handles (it gives POINT EMPTY).  Features are never
+#' removed, so the result stays aligned row for row with the input, and a
+#' feature with no empty part is returned exactly as it was.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, with the empty parts removed from MULTILINESTRING,
+#'   MULTIPOLYGON and GEOMETRYCOLLECTION features (recursively for a
+#'   collection's members).
+#' @keywords internal
+#' @noRd
+.drop_empty_parts <- function(x) {
+  if (inherits(x, "sf")) {
+    g  <- sf::st_geometry(x)
+    g2 <- .drop_empty_parts(g)
+    return(if (identical(g2, g)) x else sf::st_set_geometry(x, g2))
+  }
+  multi <- c("MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION")
+  idx   <- which(as.character(sf::st_geometry_type(x, by_geometry = TRUE)) %in% multi)
+  if (!length(idx)) return(x)
+
+  # Emptiness read off the structure, without a GEOS call per part: a matrix
+  # with no rows (a LINESTRING or a ring; sf refuses NA in one), a POINT with
+  # no coordinates, or a list with no non-empty element (a POLYGON's rings,
+  # the parts of a multi-geometry, a collection's members).
+  is_empty <- function(s) {
+    if (is.list(s)) return(all(vapply(s, is_empty, logical(1))))
+    length(s) == 0L || (!is.matrix(s) && all(is.na(s)))
+  }
+  has_empty <- function(s) {
+    if (!inherits(s, multi)) return(FALSE)
+    for (k in unclass(s)) if (is_empty(k) || has_empty(k)) return(TRUE)
+    FALSE
+  }
+  strip <- function(s) {
+    if (!inherits(s, multi)) return(s)
+    kids <- unclass(s)
+    if (inherits(s, "GEOMETRYCOLLECTION")) kids <- lapply(kids, strip)
+    structure(kids[!vapply(kids, is_empty, logical(1))], class = class(s))
+  }
+
+  # Only features that hold an empty part are rebuilt; the rest, which is
+  # nearly always all of them, are left exactly as they were.
+  for (i in idx[vapply(unclass(x)[idx], has_empty, logical(1))])
+    x[[i]] <- strip(x[[i]])
+  x
+}
+
 # -----------------------------------------------------------------------------
 # Point Coercion
 # -----------------------------------------------------------------------------
@@ -1048,7 +1113,11 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' drop any other empty geometry.  Empty lines are never handed to
 #' [sf::st_line_sample()]: it yields no midpoint for them, which would
 #' misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
-#' empty part of one) crashed the R session.
+#' empty part of one) crashed the R session.  An empty part inside a
+#' non-empty feature is ignored, so the feature gets the point its other
+#' parts give; GEOS's interior point, used by `"point_on_surface"` and by
+#' the temporary projection's choice of CRS, segfaulted on an empty line
+#' part too.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
@@ -1096,7 +1165,9 @@ coerce_to_points <- function(
     return(sf::st_set_geometry(x, suppressWarnings(sf::st_centroid(g))))
   }
   if (mode == "point_on_surface") {
-    return(sf::st_set_geometry(x, sf::st_point_on_surface(g)))
+    # Empty parts dropped first: GEOS segfaults on an empty line inside a
+    # non-empty feature (see .drop_empty_parts()).
+    return(sf::st_set_geometry(x, sf::st_point_on_surface(.drop_empty_parts(g))))
   }
 
   is_ll <- .is_longlat(x)
@@ -1182,7 +1253,7 @@ coerce_to_points <- function(
   # --- POLYGON / MULTIPOLYGON: vectorized point_on_surface ---
   idx_poly <- which(gtypes %in% c("POLYGON", "MULTIPOLYGON"))
   if (length(idx_poly)) {
-    pos <- sf::st_point_on_surface(g[idx_poly])
+    pos <- sf::st_point_on_surface(.drop_empty_parts(g[idx_poly]))
     out[idx_poly] <- as.list(pos)
   }
 

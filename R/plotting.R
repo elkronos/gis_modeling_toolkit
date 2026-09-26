@@ -204,7 +204,7 @@ plot_tessellation_map <- function(tessellation_sf,
       .log_warn("plot_tessellation_map(): label_col '%s' not found; skipping labels.",
                 label_col)
     } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
-      centers <- suppressWarnings(sf::st_point_on_surface(tess))
+      centers <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(tess)))
       centers$`..__lab__` <- tess[[label_col]]
       p <- p + ggplot2::geom_sf_text(
         data = centers, ggplot2::aes(label = .data[["..__lab__"]]), size = label_size
