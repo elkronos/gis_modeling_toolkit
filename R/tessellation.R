@@ -859,7 +859,20 @@ build_tessellation <- function(
 
     tri_sfc <- NULL
     if (requireNamespace("geometry", quietly = TRUE)) {
-      tri_idx <- try(geometry::delaunayn(coords), silent = TRUE)
+      # Centre the points before qhull sees them.  It triangulates by lifting
+      # each point onto x^2 + y^2, and at projected magnitudes (a UTM
+      # northing near 5e6, or 9e6 south of the equator) the lift has no
+      # precision left to separate points a few metres apart: they were
+      # dropped as "coplanar" and never became vertices, with nothing said.
+      # 200 points over 100 m at (5e5, 5e6) gave 26 triangles instead of 386,
+      # yet every point still fell in one.  Translation does not change the
+      # Delaunay triangulation.  The shift is the bbox midpoint, not the
+      # mean: min and max do not depend on row order, so a permuted layer
+      # hands qhull bit-identical coordinates and gets the same triangles
+      # and cell_ids, as before.  Rings below use the original coordinates,
+      # so the output coordinates are untouched.
+      ctr <- (apply(coords, 2L, min) + apply(coords, 2L, max)) / 2
+      tri_idx <- try(geometry::delaunayn(sweep(coords, 2L, ctr)), silent = TRUE)
       if (!inherits(tri_idx, "try-error") && length(tri_idx)) {
         polys <- vector("list", nrow(tri_idx))
         for (i in seq_len(nrow(tri_idx))) {

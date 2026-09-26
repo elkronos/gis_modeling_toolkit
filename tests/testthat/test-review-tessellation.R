@@ -4,6 +4,9 @@
 #   * coerce_to_points(mode = "auto") segfaulted R on an EMPTY
 #     MULTILINESTRING (st_cast() gives one empty part, and st_line_sample()
 #     on it crashes in sf 1.0.x), and refused an EMPTY LINESTRING outright.
+#   * build_tessellation(method = "triangles") handed raw UTM-sized
+#     coordinates to qhull, which lost the precision to make nearby points
+#     vertices.
 # ===========================================================================
 
 
@@ -122,4 +125,81 @@ test_that("coerce_to_points turns empty lines into empty POINTs instead of crash
   expect_equal(res$prep$y, c(1, 3))
   expect_equal(attr(res$prep, "dropped")$n_geometry, 1L)
   expect_equal(attr(res$prep, "dropped")$which, 2L)
+})
+
+
+# ---------------------------------------------------------------------------
+# Delaunay triangles at UTM-sized coordinates
+# ---------------------------------------------------------------------------
+
+.rt_utm_points <- function(n, x0, y0, ext = 100, seed = 42) {
+  set.seed(seed)
+  sf::st_as_sf(data.frame(x = x0 + stats::runif(n, 0, ext),
+                          y = y0 + stats::runif(n, 0, ext)),
+               coords = c("x", "y"), crs = 32632)
+}
+
+# One key per triangle from its vertex coordinates, independent of the order
+# its vertices are listed in.
+.rt_tri_key <- function(cells) {
+  vapply(seq_len(nrow(cells)), function(i) {
+    m <- sf::st_coordinates(cells[i, ])[1:3, 1:2]
+    paste(sort(sprintf("%.17g_%.17g", m[, 1], m[, 2])), collapse = "|")
+  }, character(1))
+}
+
+
+test_that("triangles makes every point a vertex at UTM-sized coordinates", {
+  skip_if_not_installed("geometry")
+  # qhull lifts points onto x^2 + y^2; with raw northings near 5e6 (and 9e6
+  # south of the equator) points a few metres apart were dropped as coplanar.
+  # 200 points over 100 m gave a few dozen triangles instead of ~386, with
+  # every point still indexed into one, so nothing looked wrong.
+  n <- 200L
+  for (off in list(c(5e5, 5e6), c(5e5, 9.9e6))) {
+    pts <- .rt_utm_points(n, off[1], off[2])
+    res <- build_tessellation(pts, method = "triangles", quiet = TRUE)
+    lab <- sprintf("offset (%g, %g)", off[1], off[2])
+
+    # Euler: a Delaunay triangulation of n points in general position with h
+    # of them on the hull has 2n - h - 2 triangles.
+    h <- nrow(sf::st_coordinates(
+      sf::st_convex_hull(sf::st_union(sf::st_geometry(pts))))) - 1L
+    expect_equal(nrow(res$cells), 2L * n - h - 2L, info = lab)
+
+    # Every input point is a vertex, at its own coordinates exactly: the
+    # centring is undone by building rings from the original coordinates,
+    # not by adding the shift back.
+    key <- function(m) sprintf("%.17g_%.17g", m[, 1], m[, 2])
+    vtx <- key(sf::st_coordinates(res$cells)[, 1:2, drop = FALSE])
+    inp <- key(sf::st_coordinates(pts))
+    expect_true(all(inp %in% vtx), info = lab)
+    expect_true(all(vtx %in% inp), info = lab)
+
+    # The same points moved to the origin triangulate identically.
+    shifted <- sf::st_set_geometry(pts, sf::st_geometry(pts) - off)
+    sf::st_crs(shifted) <- sf::st_crs(pts)
+    ref <- build_tessellation(shifted, method = "triangles", quiet = TRUE)
+    expect_equal(nrow(res$cells), nrow(ref$cells), info = lab)
+    expect_equal(sum(as.numeric(sf::st_area(res$cells))),
+                 sum(as.numeric(sf::st_area(ref$cells))), tolerance = 1e-8,
+                 info = lab)
+  }
+})
+
+
+test_that("triangle cell_ids do not depend on the input row order", {
+  skip_if_not_installed("geometry")
+  # Not a regression of the old code (qhull's output order does not follow
+  # the input order for points in general position), but the centring must
+  # not break it: the shift is the bbox midpoint, which a permutation leaves
+  # bit-identical, where a mean could differ in its last bits.
+  pts  <- .rt_utm_points(150L, 5e5, 5e6, seed = 7)
+  set.seed(8)
+  perm <- sample(nrow(pts))
+  a <- build_tessellation(pts, method = "triangles", quiet = TRUE)
+  b <- build_tessellation(pts[perm, ], method = "triangles", quiet = TRUE)
+  expect_identical(.rt_tri_key(a$cells), .rt_tri_key(b$cells))
+  expect_identical(a$cells$cell_id, b$cells$cell_id)
+  expect_identical(a$index[perm], b$index)
 })
