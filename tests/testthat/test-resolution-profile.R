@@ -277,8 +277,20 @@ test_that("resolution_profile is reproducible from its seed and subsamples large
   b <- resolution_profile(pts, n_levels = 5, seed = 11)
   expect_identical(a$wss, b$wss)
   sub <- resolution_profile(pts, n_levels = 5, sample_n = 120)
-  expect_identical(attr(sub, "bounds")$n, 120L)
-  expect_identical(attr(sub, "bounds")$ceiling, 13L)
+  # The fits run on 120 points, but the support ceiling is the layer's,
+  # floor(200 / 9) = 22, not the subsample's floor(120 / 9) = 13: sample_n
+  # is a speed setting, not a bound on the answer.
+  expect_identical(attr(sub, "bounds")$n, 200L)
+  expect_identical(attr(sub, "bounds")$n_sample, 120L)
+  expect_identical(attr(sub, "bounds")$ceiling, 22L)
+  expect_identical(attr(sub, "bounds")$ceiling_from, "min_cell_n")
+  expect_output(print(sub), "on 200 points \\(k-means fitted to a subsample of 120\\)")
+  # A subsample too small to fit that many cells holds the ceiling to two of
+  # its points per cell, and says which bound is choosing.
+  tiny <- resolution_profile(pts, n_levels = 4, sample_n = 30, min_cell_n = 3)
+  expect_identical(attr(tiny, "bounds")$ceiling, 15L)
+  expect_identical(attr(tiny, "bounds")$ceiling_from, "sample_n")
+  expect_output(print(tiny), "ceiling 15 from the 30-point subsample")
 })
 
 

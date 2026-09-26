@@ -44,9 +44,13 @@ distinct points).}
 \item{min_cell_n}{Minimum average number of points per cell that a level
 must keep; sets the ceiling.  Default 9.}
 
-\item{sample_n}{Points are subsampled to this many before anything is
-fitted, as in \code{determine_optimal_levels()}.  Default 1500.  The
-support columns describe the subsample.}
+\item{sample_n}{Points are subsampled to this many before the k-means
+fits, as in \code{determine_optimal_levels()}.  Default 1500.  The
+columns read off the fitted cells (\code{wss}, the \code{cell_} columns,
+\code{rss}, \code{moran_i}, \code{moran_z}) describe the subsample; the
+bounds, \code{supported}, the variance term of \code{cp} and
+\code{reliability} describe every point of the layer, so the answer does
+not change with \code{sample_n} except through the fits.}
 
 \item{nstart}{k-means++ restarts per level.  Default 25.}
 
@@ -75,10 +79,11 @@ spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
 radius of the cells, in coordinate units), \code{rss}, \code{cp},
 \code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
 input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
-with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"}
-or \code{"distinct locations"}, whichever bound it), \code{supported},
-\code{area}, \code{range}, \code{n}, \code{n_distinct},
-\code{min_cell_n}), \code{variogram} (a list with
+with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"},
+\code{"distinct locations"} or \code{"sample_n"}, whichever bound it),
+\code{supported}, \code{area}, \code{range}, \code{n} (the points in the
+layer), \code{n_sample} (the points the k-means fits ran on),
+\code{n_distinct}, \code{min_cell_n}), \code{variogram} (a list with
 \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 when none was usable), \code{variable} (\code{"response"},
 \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
@@ -109,7 +114,8 @@ level as the best of \code{nstart} k-means++ restarts (see
 logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
 step wastes fits at large \eqn{L} and starves resolution at small.  The
 ladder runs from a floor to a ceiling the data impose.  The ceiling is
-\code{floor(n / min_cell_n)}: cells with fewer than \code{min_cell_n} points
+\code{floor(n / min_cell_n)}, with \eqn{n} every point of the layer (not
+the subsample): cells with fewer than \code{min_cell_n} points
 on average have too little support, and Moran's z is not computable at
 nine cells or fewer in any case.  The floor is
 \code{ceiling(area / range^2)} when an autocorrelation range is available:
@@ -118,7 +124,12 @@ When the floor exceeds the ceiling the data cannot support a tessellation
 that respects their own correlation structure; that is reported as a
 finding (a logged warning, and \code{attr(x, "bounds")$supported} is
 \code{FALSE}) and the ladder runs from 2 to the ceiling anyway, so the
-profile still shows what each level costs.
+profile still shows what each level costs.  On a layer larger than
+\code{sample_n} the ceiling is also held to half the subsample (two
+subsample points per cell, the least a fitted cell can be scored on);
+\code{ceiling_from} is then \code{"sample_n"}, a floor above that is logged
+with a request to raise \code{sample_n}, and it does not make
+\code{supported} \code{FALSE}.
 }
 
 \section{The criteria, and how each behaved when measured}{
@@ -131,6 +142,15 @@ from its first to its last level, the classical elbow statistic
 approximation of the response (or of its OLS residuals on
 \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
 with \eqn{\tau^2} the nugget of the fitted variogram (lower is better).
+It estimates the error of predicting a new observation by the mean of
+its cell.  When the cells are fitted to a subsample of \eqn{m} of the
+\eqn{N} points with a response, the penalty is split between the two:
+\eqn{RSS(L)/m + \tau^2 L_m / m + \tau^2 L / N}, where the first two
+terms estimate the approximation error from the subsample (adding back
+the optimism of its own cell means, over the \eqn{L_m} cells its scored
+points fall in) and the last is the variance of cell means built from
+all \eqn{N}, which is what the tessellation will carry.  With no
+subsample it is the formula above.
 \strong{Measured on simulated exponential fields (600 points on a
 1000-unit extent, sill 1, 20 replicates): with a nugget of 0.3 its
 minimum sat at the support ceiling in every replicate at effective
@@ -151,7 +171,8 @@ where structure remains.  \code{NA} at nine cells or fewer.}
 \item{\code{reliability}}{The between-cell signal's share of the spread
 in the cell means, from the fitted variogram alone via Krige's
 additivity relation (Cressie 1996), for square cells of the level's
-average area with the level's average point count (larger is better).
+average area holding the level's average share of the layer's points
+with a response (larger is better).
 This is the shrinkage factor of Fay and Herriot (1979).  It has an
 interior optimum, and a broad one: validated against the empirical
 reliability of true block means on simulated fields, the analytic and

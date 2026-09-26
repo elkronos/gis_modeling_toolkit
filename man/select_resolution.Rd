@@ -29,7 +29,8 @@ which can skip a rung), \code{criterion}, \code{value} (the optimum),
 \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
 or first of the levels this criterion was scored at, which for
 \code{moran_z} starts above nine cells), \code{edge} (which bound that
-is, in words: the support ceiling, the range floor, the ladder's own end,
+is, in words: the support ceiling, the subsample's ceiling, the range
+floor, the ladder's own end,
 or the first or last level the criterion is computable at; \code{NA} for
 an interior optimum), \code{n_levels} and \code{values} (the criterion
 at every level, \code{NA} where it could not be computed).
