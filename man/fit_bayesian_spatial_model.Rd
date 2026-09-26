@@ -122,16 +122,21 @@ each predictor and an intercept at the predictor means, not the raw-unit
 values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.}
 
 \item{check_convergence}{Logical; after fitting, check for divergent
-transitions, R-hat above 1.05, an effective-sample-size ratio below 0.1,
-and a GP basis too coarse for the posterior length-scale.  Each problem
-found is written to the log as a WARN line (shown on the console unless
-\code{\link{spatialkit_quiet}()} is on), sets
+transitions, R-hat above 1.05 and an effective-sample-size ratio below
+0.1.  Each problem found is written to the log as a WARN line (shown on
+the console unless \code{\link{spatialkit_quiet}()} is on), sets
 \code{$info$convergence_ok} to \code{FALSE}, and is detailed in
 \code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
-They are not raised as R warnings.  Under \pkg{rstan} the sampler raises
-its own R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so
-read \code{$info$convergence_ok}.  \code{FALSE} skips the checks and
-leaves \code{convergence_ok} \code{NA} (not checked).  Default TRUE.}
+The GP basis is also checked against the posterior length-scale (see
+Details): a basis too coarse for it is logged as a WARN line, and the
+share of draws it cannot resolve is recorded as
+\code{$info$convergence_diagnostics$gp_lscale_below_resolution}, but it
+does not change \code{convergence_ok} and \code{print()} does not flag
+it.  None of these are raised as R warnings.  Under \pkg{rstan} the
+sampler raises its own R-hat and ESS warnings; under \pkg{cmdstanr}
+nothing does, so read \code{$info$convergence_ok}.  \code{FALSE} skips
+the checks and leaves \code{convergence_ok} \code{NA} (not checked).
+Default TRUE.}
 
 \item{pointize}{Strategy for non-point geometry coercion.}
 
@@ -281,9 +286,12 @@ An ordinal or categorical fit has a probability per response category, not
 one expected value per row.  \code{predict()} with its default
 \code{type = "epred"}, \code{fitted()}, \code{residuals()},
 \code{summary()} and \code{model_metrics()} therefore stop with a message
-saying so.  \code{predict(type = "predict", draws = TRUE)} returns the
-posterior predicted categories, as category indices, and
-\code{brms::posterior_epred(fit$engine)} the probabilities.
+saying so, and \code{\link{cv_bayes}()} refuses the family before fitting
+anything.  \code{predict(type = "predict", draws = TRUE)} returns the
+posterior predicted categories, as category indices, for new rows as well
+as the training ones (the share of draws in each category estimates its
+probability), and \code{brms::posterior_epred(fit$engine)} the
+probabilities for the training rows.
 
 For the numeric families two things follow.  First, the metrics that come
 back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are

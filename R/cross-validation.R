@@ -4894,7 +4894,11 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   A user-supplied \code{gp_k} is respected in every fold; when omitted, the
 #'   GP rank is auto-selected per training fold.  \code{compute_loo},
 #'   \code{boundary}, and \code{pointize} are always overridden by the CV
-#'   internals.
+#'   internals.  A categorical or ordinal \code{family}
+#'   (\code{brms::categorical()}, \code{cumulative}, \code{sratio},
+#'   \code{cratio}, \code{acat}) is refused before anything is fitted: its
+#'   prediction is a probability per response category, and every score
+#'   here needs one number per row.
 #' @param summary "mean" or "median" for posterior predictions.
 #' @param compute_pred_intervals Logical; compute predictive intervals.
 #' @param coverage_levels Numeric vector of the nominal coverage levels to
@@ -4989,6 +4993,21 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                      parallel = FALSE, metrics = NULL) {
   summary <- match.arg(summary)
   if (!inherits(data_sf, "sf")) stop("cv_bayes(): `data_sf` must be an sf object.")
+  # A categorical or ordinal family predicts a probability per response
+  # category, and every score here needs one number per row: predict(type =
+  # "epred") stops for these families, so each fold compiled and sampled a
+  # full model and was then discarded (k = 2 on 50 rows: 4.35 minutes for an
+  # empty result).  Refused before anything is fitted, as
+  # fit_bayesian_spatial_model() refuses a factor under bernoulli().
+  fam <- .brms_family_name(if (is.list(fit_args)) fit_args$family)
+  if (!is.na(fam) && fam %in% .brms_category_families)
+    stop(sprintf(paste0("cv_bayes(): the %s family gives a probability per ",
+                        "response category, not one predicted number per row, ",
+                        "and cross-validation here scores one number per row ",
+                        "(RMSE, CRPS, interval coverage). Every fold would run ",
+                        "its MCMC and then fail to be scored, so nothing is ",
+                        "fitted. For a two-level outcome, code it as 0/1 and use ",
+                        "brms::bernoulli()."), sQuote(fam)), call. = FALSE)
   metrics <- .check_metrics_fn(metrics, "cv_bayes")
   # Named by column: the nominal level travels with the result from here on,
   # instead of being read back from a column name.

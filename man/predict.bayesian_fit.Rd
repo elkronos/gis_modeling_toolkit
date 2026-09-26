@@ -37,8 +37,13 @@ posterior draw fails the result is all \code{NA} (a 1-row matrix for
 \code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
 family is not a failed draw and is an error under
 \code{type = "epred"}: its expected value is a probability per response
-category, not one number per row; use \code{type = "predict"}.  With
-\code{newdata = NULL} the cached \code{fitted()} values are returned only
+category, not one number per row.  Use \code{type = "predict",
+draws = TRUE} for posterior draws of the predicted category, as category
+indices; the share of draws in each category estimates its probability.
+Without \code{draws = TRUE}, \code{type = "predict"} returns the mean (or
+median) category index, an expected rank for an ordinal family and an
+error for \code{brms::categorical()}, whose categories have no order.
+With \code{newdata = NULL} the cached \code{fitted()} values are returned only
 for the default \code{summary = "mean"}, \code{type = "epred"},
 \code{draws = FALSE} combination; any other combination is recomputed
 against the training data, because the cache holds epred column means and

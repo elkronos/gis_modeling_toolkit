@@ -201,6 +201,45 @@
 }
 
 
+#' The weakly informative slope prior, one row per distributional parameter
+#'
+#' \code{set_prior(spec, class = "b")} with no \code{dpar} addresses only the
+#' slopes of the main parameter.  A \code{brms::categorical()} or
+#' \code{brms::mixture()} family has none of those -- its slopes belong to
+#' \code{muhi}/\code{mumid} or \code{mu1}/\code{mu2} -- so brms refused the
+#' whole model with "The following priors do not correspond to any model
+#' parameter: b ~ normal(0, 5)", a prior the user never wrote.  The
+#' class-level \code{b} rows are therefore read back from
+#' \code{brms::get_prior()}, as for the length-scale prior, and the prior is
+#' set on each.  A family with one \code{mu} gets the single dpar-less row it
+#' always had.
+#'
+#' @param spec The prior, as a Stan distribution string.
+#' @param fml,data,family As handed to \code{brms::brm()}.
+#' @return A \code{brmsprior}; the global \code{class = "b"} row when
+#'   \code{brms::get_prior()} fails or reports no class-level \code{b} row.
+#' @keywords internal
+#' @noRd
+.b_prior_rows <- function(spec, fml, data, family) {
+  gp_def <- tryCatch(brms::get_prior(fml, data = data, family = family),
+                     error = function(e) NULL)
+  keep <- if (!is.null(gp_def) && all(c("class", "coef") %in% names(gp_def)))
+    gp_def$class == "b" & !nzchar(gp_def$coef) else FALSE
+  if (!any(keep)) return(brms::set_prior(spec, class = "b"))
+  field <- function(nm) {
+    v <- if (nm %in% names(gp_def)) as.character(gp_def[[nm]][keep])
+         else rep("", sum(keep))
+    v[is.na(v)] <- ""
+    v
+  }
+  rows <- unique(data.frame(resp = field("resp"), dpar = field("dpar"),
+                            nlpar = field("nlpar"), stringsAsFactors = FALSE))
+  Reduce(`+`, lapply(seq_len(nrow(rows)), function(i)
+    brms::set_prior(spec, class = "b", resp = rows$resp[[i]],
+                    dpar = rows$dpar[[i]], nlpar = rows$nlpar[[i]])))
+}
+
+
 #' Label lscale coefficients for a log line, with their dpar/nlpar/resp
 #' @keywords internal
 #' @noRd
@@ -308,16 +347,21 @@
 #'   each predictor and an intercept at the predictor means, not the raw-unit
 #'   values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.
 #' @param check_convergence Logical; after fitting, check for divergent
-#'   transitions, R-hat above 1.05, an effective-sample-size ratio below 0.1,
-#'   and a GP basis too coarse for the posterior length-scale.  Each problem
-#'   found is written to the log as a WARN line (shown on the console unless
-#'   \code{\link{spatialkit_quiet}()} is on), sets
+#'   transitions, R-hat above 1.05 and an effective-sample-size ratio below
+#'   0.1.  Each problem found is written to the log as a WARN line (shown on
+#'   the console unless \code{\link{spatialkit_quiet}()} is on), sets
 #'   \code{$info$convergence_ok} to \code{FALSE}, and is detailed in
 #'   \code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
-#'   They are not raised as R warnings.  Under \pkg{rstan} the sampler raises
-#'   its own R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so
-#'   read \code{$info$convergence_ok}.  \code{FALSE} skips the checks and
-#'   leaves \code{convergence_ok} \code{NA} (not checked).  Default TRUE.
+#'   The GP basis is also checked against the posterior length-scale (see
+#'   Details): a basis too coarse for it is logged as a WARN line, and the
+#'   share of draws it cannot resolve is recorded as
+#'   \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, but it
+#'   does not change \code{convergence_ok} and \code{print()} does not flag
+#'   it.  None of these are raised as R warnings.  Under \pkg{rstan} the
+#'   sampler raises its own R-hat and ESS warnings; under \pkg{cmdstanr}
+#'   nothing does, so read \code{$info$convergence_ok}.  \code{FALSE} skips
+#'   the checks and leaves \code{convergence_ok} \code{NA} (not checked).
+#'   Default TRUE.
 #' @param pointize Strategy for non-point geometry coercion.
 #' @param boundary Optional polygonal sf/sfc for CRS harmonization.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
@@ -441,9 +485,12 @@
 #' one expected value per row.  \code{predict()} with its default
 #' \code{type = "epred"}, \code{fitted()}, \code{residuals()},
 #' \code{summary()} and \code{model_metrics()} therefore stop with a message
-#' saying so.  \code{predict(type = "predict", draws = TRUE)} returns the
-#' posterior predicted categories, as category indices, and
-#' \code{brms::posterior_epred(fit$engine)} the probabilities.
+#' saying so, and \code{\link{cv_bayes}()} refuses the family before fitting
+#' anything.  \code{predict(type = "predict", draws = TRUE)} returns the
+#' posterior predicted categories, as category indices, for new rows as well
+#' as the training ones (the share of draws in each category estimates its
+#' probability), and \code{brms::posterior_epred(fit$engine)} the
+#' probabilities for the training rows.
 #'
 #' For the numeric families two things follow.  First, the metrics that come
 #' back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are
@@ -878,8 +925,10 @@ fit_bayesian_spatial_model <- function(
   if (is.null(prior)) {
     prior_parts <- list()
     if (isTRUE(standardize_predictors) && length(predictor_vars) > 0L) {
+      # One row per distributional parameter's slopes (.b_prior_rows()): a
+      # dpar-less row matches no slope of a categorical or mixture model.
       prior_parts <- c(prior_parts, list(
-        brms::set_prior("normal(0, 5)", class = "b")
+        .b_prior_rows("normal(0, 5)", fml, dat_df, family)
       ))
       .log_info("fit_bayesian_spatial_model(): using weakly informative normal(0,5) priors on standardized coefficients.")
     }
