@@ -26,7 +26,11 @@ at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
 on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
-takes the same nearest feature.}
+takes the same nearest feature.  A grid of polygons
+(\code{\link{create_grid_polygons}()} output, say) is reduced to one
+representative point per cell, as \code{\link{coerce_to_points}()} does,
+so covariates are taken at the location predicted for; \code{boundary}
+then keeps the cells whose point falls inside it.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
@@ -53,13 +57,23 @@ GP boundary is held at its fitted value whatever the chunk holds; see
 \code{\link{predict.bayesian_fit}}.}
 
 \item{se}{Logical; also return a standard-error/posterior-SD column where the
-backend supports it.  Default FALSE.}
+backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
+the SD of the posterior draws \code{predict()} returns, and those are of
+the expected value by default (\code{type = "epred"}): the uncertainty
+of the mean surface, not of a new observation, which also carries the
+observation noise.  For the predictive SD, the one that goes with
+prediction intervals and \code{cv_bayes()}'s calibration, pass
+\code{type = "predict"} as well.}
 
-\item{...}{Passed to \code{predict()}.}
+\item{...}{Passed to \code{predict()}, e.g. \code{type = "predict"} for a
+\code{bayesian_fit}.  Not \code{draws}, which this function sets itself
+and refuses here.}
 }
 \value{
 An \code{sf} POINT layer with a \code{.pred} column (and
-\code{.pred_se} when \code{se = TRUE} and available).  For an
+\code{.pred_se} when \code{se = TRUE} and available; one a supplied
+\code{grid} already carried, from an earlier surface, is removed
+otherwise).  For an
 auto-generated grid the resolution is attached as attribute
 \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
 \code{"cell_size"} attribute that object already carried.  That is usually
