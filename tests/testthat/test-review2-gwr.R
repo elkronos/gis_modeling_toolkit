@@ -276,3 +276,28 @@ test_that("below 20 points, capping bw.gwr()'s choice at n is said", {
   expect_identical(rs$value$bandwidth, 14L)
   expect_true(any(grepl("empty for 14 observations", rs$warnings)))
 })
+
+
+# ---------------------------------------------------------------------------
+# A predictor named twice is one term, and the collinearity checks and the
+# coefficient map treated it as two perfectly collinear ones.
+# ---------------------------------------------------------------------------
+
+test_that("a predictor named twice is fitted, surveyed and mapped once", {
+  set.seed(1)
+  n <- 120
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- sf::st_as_sf(data.frame(x = x, y = y, a = rnorm(n), b = rnorm(n)),
+                    coords = c("x", "y"), crs = 32617)
+  d$z <- 1 + (x / 1000) * d$a + 0.5 * d$b + rnorm(n, 0, 0.3)
+  dup <- .r2_catch(fit_gwr_model(d, "z", c("a", "b", "a"), bandwidth = 40))
+  ok  <- .r2_catch(fit_gwr_model(d, "z", c("a", "b"), bandwidth = 40))
+  expect_identical(dup$warnings, ok$warnings)
+  expect_false(any(grepl("singular|collinear", dup$warnings)))
+  expect_identical(dup$value$predictor_vars, c("a", "b"))
+  expect_equal(dup$value$info$condition_index, ok$value$info$condition_index)
+  expect_equal(dup$value$info$n_local_collinear, 0L)
+  expect_identical(coef(dup$value), coef(ok$value))
+  skip_if_not_installed("ggplot2")
+  expect_s3_class(plot(dup$value, type = "coefficients"), "ggplot")
+})

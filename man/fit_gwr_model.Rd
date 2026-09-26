@@ -19,7 +19,8 @@ fit_gwr_model(
 
 \item{response_var}{Response column name.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Predictor column names (numeric columns; a name given
+twice counts once).}
 
 \item{adaptive}{Logical; use adaptive bandwidth. Default TRUE. When TRUE,
 bandwidth is an integer number of nearest neighbours. When FALSE,

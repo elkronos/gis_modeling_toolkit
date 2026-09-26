@@ -346,7 +346,8 @@
 #'
 #' @param data_sf An sf object with response, predictors, and geometries.
 #' @param response_var Response column name.
-#' @param predictor_vars Predictor column names.
+#' @param predictor_vars Predictor column names (numeric columns; a name given
+#'   twice counts once).
 #' @param adaptive Logical; use adaptive bandwidth. Default TRUE. When TRUE,
 #'   bandwidth is an integer number of nearest neighbours. When FALSE,
 #'   bandwidth is a fixed distance in CRS units.
@@ -490,6 +491,13 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     stop("fit_gwr_model(): `predictor_vars` must name at least one predictor; ",
          "there are no local coefficients to estimate otherwise.",
          call. = FALSE)
+  # A name given twice is one term: the formula collapses it, so the fit was
+  # right, but the collinearity checks ran on the duplicated matrix and warned
+  # "exactly singular" and "100% of locations collinear" (Inf condition
+  # index), plot(type = "coefficients") then masked every location, and
+  # n_params counted the name twice.  gwr_model_selection() already collapses
+  # its candidates the same way.
+  predictor_vars <- unique(predictor_vars)
 
   # `bandwidth` is used unchecked below (twice: in the local-collinearity
   # spot-check and as the fitted bandwidth), and the clamping block further
