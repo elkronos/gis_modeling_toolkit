@@ -275,11 +275,16 @@
   scored on every criterion at once.  `resolution_profile()` runs a
   log-spaced ladder of level counts from a floor the autocorrelation range
   implies (`ceiling(area / range^2)`) to a ceiling the support implies
-  (`floor(n / min_cell_n)`), fits each level as the best of 25 k-means++
-  restarts, and returns a data.frame with the WSS elbow statistic, Mallows'
+  (`floor(n / min_cell_n)`, where `n` is every point in the layer, not the
+  `sample_n` subsample the k-means runs on), fits each level as the best of
+  25 k-means++ restarts, and returns a data.frame with the WSS elbow
+  statistic (read on log-log axes, and `NA` when the points have no cluster
+  structure to bend the curve), Mallows'
   C_p of the piecewise-constant approximation of the response (or of
-  its residuals on the predictors, with the nugget from the fitted
-  variogram as the noise variance), the standardised residual Moran's
+  its residuals on the predictors, fitted on the rows with a complete
+  response and predictors, with the nugget from the fitted variogram as the
+  noise variance and the penalty set for the whole layer), the
+  standardised residual Moran's
   z of the cell means, and an analytic reliability of the cell means
   --- the share of their spread that is between-cell signal rather than
   sampling noise, from the variogram alone via Krige's additivity relation
@@ -310,10 +315,12 @@
   post-selection, and its standard errors are descriptive rather than at
   nominal coverage (Gao, Bien and Witten 2022).  `select_on = "split"` is
   sample splitting: the layer is cut into two spatially blocked halves
-  (`make_folds(k = 2, method = "block_kfold")`), the selection runs on the
-  first, and the row positions of both come back (as a `"split"` attribute
-  on the first two functions, as `$split` on the third) so the estimation
-  can be done on the half the selection never saw.
+  (`make_folds(k = 2, method = "block_kfold")`), the selection reads the
+  response on the first only, and the row positions of both come back (as a
+  `"split"` attribute on the first two functions, as `$split` on the third)
+  so the estimation can be done on the half the selection never saw.  The
+  level-count functions still draw their cells on every point, so the count
+  they return is a count for the whole layer it will be applied to.
   `select_features_forward()` also returns `score_holdout`: the selected set
   fitted on the selection half and scored on the other, the honest number
   its selection-internal `score` is not.  The cost is precision --- half the
@@ -609,6 +616,23 @@
   on the rows all of them predicted, with a warning, `overall` carries
   `n_pred`, and the all-rows numbers stay in `attr(overall, "all_rows")`.
   The per-fold table and the Bayesian coverage columns are not rescored.
+
+* **`determine_optimal_levels()` read an elbow into points that have none.**
+  The elbow was the level furthest below the chord of the WSS curve on linear
+  axes.  For points with no cluster structure WSS falls like `c / k`, and the
+  furthest point below that chord is exactly `sqrt(a * b)` for a ladder from
+  `a` to `b`, so the answer was set by the ladder's ends: 1,500 uniform points
+  gave 4, 4, 7, 9 and 13 for `max_levels` of 12, 20, 40, 80 and 160.  At the
+  default `max_levels = 12` it also missed well-separated clusters (four
+  clusters came back as 3).  The elbow is now read on log-log axes, where
+  `c / k` is a straight line, and counts only when the curve sags clearly
+  below it.  Two, three, four, five, eight and ten well-separated clusters are
+  now recovered at the default on every seed tried (six came back as five on
+  one seed in five).  With
+  no elbow the function still returns its linear-axis answer, but warns that
+  the ladder chose it; `build_tessellation()` and `get_voronoi_seeds()` refuse
+  a geometry-only `resolution_profile()` with no elbow instead of drawing a
+  count from it.
 
 * **One invalid polygon changed the assignment rule for the whole layer.**
   `assign_features_to_polygons()` wrapped `st_join(largest = TRUE)` in a

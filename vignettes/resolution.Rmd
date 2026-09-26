@@ -67,9 +67,11 @@ runs on the hard dependencies; it is the quick answer and the one
 cell count on a ladder against four criteria at once and needs gstat for two
 of them. `select_resolution()` reads one criterion off that profile, and
 `summary()` on the profile reads all four side by side. If the cells will feed
-a model, the profile is the one to use; if you need a count now and the data
-are all you have, the elbow is defensible and this article says where it
-falls short.
+a model, the profile is the one to use. If you need a count now and the data
+are all you have, the elbow is defensible when the points cluster, and this
+article says where it falls short. On points spread evenly there is no elbow
+to read, and both functions say so rather than hand back a count the ladder's
+ends chose.
 
 The argument that says "how many" is spelled differently by the function it
 belongs to: `max_levels` bounds the elbow's ladder, `n_levels` sets the
@@ -105,6 +107,12 @@ pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 lv <- determine_optimal_levels(pts, max_levels = 40)
 lv
 ```
+
+This fixture's points are uniform, so their within-cluster sum of squares falls
+like `c / k` all the way down and bends nowhere of its own. The call warns that
+it found no elbow and that `max_levels` chose `lv`: a larger `max_levels` would
+give a larger answer. Read an elbow only off points that cluster; here the
+profile below is the better guide.
 
 `lv[1]` is what `get_voronoi_seeds()` takes as `n`, and what
 `build_tessellation()` takes as `approx_n_cells` for its `"hex"` and `"square"`
@@ -157,7 +165,7 @@ the field, and whether the cell values can be told apart from noise. `moran_z`
 is the diagnostic, and a large deviate says the cells are still leaving spatial
 pattern on the table.
 
-```{r plot-profile, fig.height=8, fig.alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, the elbow statistic peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all four."}
+```{r plot-profile, fig.height=8, fig.alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all three."}
 plot(prof)
 ```
 
@@ -307,16 +315,19 @@ produced it. A random half would put neighbours of every selection point in the
 estimation set, and on an autocorrelated field that leaks the structure you are
 choosing against.
 
-Choose from `prof_split`, then aggregate the rows in `sp$estimation`. The cost is
-power: half the data gives a noisier profile and a wider band, and the ladder
-itself gets shorter because the ceiling scales with `n`.
+Choose from `prof_split`, then aggregate the rows in `sp$estimation`. The cells
+on the ladder are still drawn on every point, so the count it picks is a count
+for the whole layer, and the ladder is as long as the full profile's. Only the
+steps that read the response (the variogram, `cp`, `moran_z`) use the
+selection half. The cost is power: those criteria see half the data, so the
+profile is noisier and the band wider.
 
 ```{r split-ladder}
 unlist(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])
 ```
 
-On a layer of a few hundred points that shortening can leave very little ladder,
-which is a useful answer in itself.
+The floor can differ from the full profile's, because it comes from the range
+estimated on the selection half.
 
 ## Next
 
