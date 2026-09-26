@@ -332,6 +332,40 @@ test_that("gwr_model_selection keeps partially-failed sweeps but ranks failures 
   expect_true(all(is.na(sel$table$criterion[3:6])))
 })
 
+test_that("gwr_model_selection ranks a model whose AICc is below its AIC last", {
+  # GWmodel's AICc exceeds its AIC exactly when tr(S) < n - 2, the formula's
+  # domain; outside it an interpolating model scores a huge negative AICc.
+  # The table is GWmodel's unlabelled c(bandwidth, AIC, AICc, RSS).
+  aicc <- c(120, 118, 125, 110, 119, -5000)
+  aic  <- c(100, 100, 100, 100, 100, 60)
+  eng <- function(...) {
+    ml <- list(list("z", "a"), list("z", "b"), list("z", "cc"),
+               list("z", c("a", "b")), list("z", c("a", "cc")),
+               list("z", c("a", "b", "cc")))
+    m <- cbind(30, aic, aicc, 1)
+    colnames(m) <- NULL
+    list(model_list = ml, gwr_df = m, bandwidth = 30,
+         bandwidth_source = "supplied", used_dmat = FALSE,
+         raw = list(ml, m))
+  }
+  pts <- mk_sel_pts()
+  expect_warning(
+    sel <- gwr_model_selection(pts, "z", c("a", "b", "cc"), bandwidth = 30,
+                               .engine = eng),
+    "AICc is undefined for 1 of 6 model\\(s\\) at bandwidth 30")
+  expect_identical(sel$best, c("a", "b"))
+  expect_true(is.na(sel$table$criterion[6]))
+  expect_identical(sel$table$variables[6], "a + b + cc")
+  # A table whose AIC column cannot be located is left as it is; a labelled
+  # one is read by name.
+  two <- unname(cbind(aic, aicc))
+  expect_null(.gwr_ms_aic_column(two, .gwr_ms_criterion(two)))
+  lab <- cbind(bw = 30, AIC = aic, AICc = aicc)
+  expect_identical(.gwr_ms_aic_column(lab, .gwr_ms_criterion(lab)), aic)
+  expect_identical(.gwr_aicc_undefined(c(1, 5, NA, 2, 3), c(2, 5, 9, -Inf, NA)),
+                   c(FALSE, TRUE, FALSE, TRUE, FALSE))
+})
+
 test_that("print.gwr_model_selection shows the ranking and states the caveats", {
   pts <- mk_sel_pts()
   sel <- gwr_model_selection(pts, "z", c("a", "b", "cc"), bandwidth = 30,

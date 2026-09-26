@@ -62,6 +62,70 @@
 }
 
 
+#' Is GWmodel's AICc outside its domain?
+#'
+#' GWmodel's AICc (Hurvich et al. 1998, its C++ \code{gwr_diag1()} and
+#' \code{AICc_rss1()}) is
+#' \deqn{n \log(RSS/n) + n \log(2\pi) + n (n + tr S) / (n - 2 - tr S),}
+#' defined only for \eqn{tr S < n - 2}.  Past that point the penalty changes
+#' sign, and a (near-)interpolating fit scores a huge NEGATIVE AICc that ranks
+#' it first everywhere it is compared.  GWmodel's AIC from the same fit is
+#' \eqn{n \log(RSS/n) + n \log(2\pi) + n + tr S}, so
+#' \eqn{AICc - AIC = (n + tr S)(2 + tr S) / (n - 2 - tr S)}: AICc exceeds AIC
+#' exactly when the denominator is positive.  The domain is therefore read off
+#' GWmodel's own two numbers, without the hat-matrix trace (which gwr.basic()
+#' does not return, and which \code{enp = 2 tr S - tr S'S} is not).  An
+#' infinite AICc (a residual sum of squares of exactly 0, or
+#' \eqn{tr S = n - 2}) is outside the domain too.
+#'
+#' @param aic,aicc Numeric vectors of equal length, GWmodel's AIC and AICc.
+#' @return Logical vector: \code{TRUE} where AICc is known to be undefined,
+#'   \code{FALSE} where it is defined or cannot be checked (\code{NA} AIC).
+#' @keywords internal
+#' @noRd
+.gwr_aicc_undefined <- function(aic, aicc) {
+  aic  <- suppressWarnings(as.numeric(aic))
+  aicc <- suppressWarnings(as.numeric(aicc))
+  is.infinite(aicc) | (is.finite(aic) & is.finite(aicc) & aicc <= aic)
+}
+
+
+#' GWmodel's hat-matrix trace, recovered from its AIC
+#'
+#' \code{AIC - (n log(RSS/n) + n log(2 pi) + n)}; see
+#' \code{.gwr_aicc_undefined()}.  For messages only: it loses precision when
+#' the residual sum of squares is tiny, and is \code{NA} when it is zero.
+#' @keywords internal
+#' @noRd
+.gwr_trace_s <- function(aic, rss, n) {
+  tr <- suppressWarnings(as.numeric(aic) -
+                           (n * log(as.numeric(rss) / n) + n * log(2 * pi) + n))
+  if (length(tr) == 1L && is.finite(tr)) tr else NA_real_
+}
+
+
+#' Smallest adaptive bandwidth that leaves every local fit a residual df
+#'
+#' GWmodel's bisquare and tricube kernels give the k-th nearest neighbour,
+#' which sets the adaptive distance, a weight of exactly zero, so an adaptive
+#' bandwidth of k fits each window on k - 1 points.  A floor of
+#' \code{n_params + 1} therefore made every window an exact interpolator for
+#' those two kernels (tr S = n, R2 = 1, AICc near -n^2/2).  The boxcar keeps
+#' the k-th neighbour and the Gaussian and exponential kernels weight every
+#' point, so \code{n_params + 1} leaves them one residual degree of freedom.
+#' No floor keeps tr S below n - 2 at small n; \code{.gwr_aicc_undefined()}
+#' is the guard for that.
+#'
+#' @param n_params Parameters in the local model, the intercept included.
+#' @param kernel The kernel name.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+.gwr_min_adaptive_bw <- function(n_params, kernel) {
+  as.integer(n_params) + if (kernel %in% c("bisquare", "tricube")) 2L else 1L
+}
+
+
 #' Compute a sensible fallback bandwidth from spatial data
 #'
 #' For adaptive mode, returns an integer (number of nearest neighbours).
@@ -298,7 +362,12 @@
 #'   smaller than a ten-thousandth of the data's extent raises a warning naming
 #'   the extent and the CRS the fit runs in: every local window is then likely
 #'   to be empty, which used to produce a fit whose coefficients were all
-#'   \code{NaN} with nothing raised anywhere.
+#'   \code{NaN} with nothing raised anywhere.  With \code{adaptive = TRUE}
+#'   the count is rounded, and one too small for the model is raised, with a
+#'   warning, to the smallest that gives every local regression more points
+#'   of non-zero weight than parameters: the number of predictors plus 3 for
+#'   the bisquare and tricube kernels (which give the farthest neighbour in a
+#'   window weight 0), plus 2 for the others.
 #' @param kernel Kernel function type. One of "bisquare" (default),
 #'   "gaussian", "tricube", "boxcar", "exponential".
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
@@ -355,7 +424,11 @@
 #'   Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 #'   \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 #'   Model-specific metadata lives in \code{$info}: bandwidth, adaptive,
-#'   kernel, AICc, \code{bandwidth_is_fallback} (\code{TRUE} when automatic
+#'   kernel, AICc (\code{NA}, with a warning, where GWmodel's AICc is
+#'   undefined: its effective number of parameters \eqn{tr(S)} is not below
+#'   \eqn{n - 2}, the local regressions all but interpolate the data, and the
+#'   large negative value GWmodel reports would rank the fit above any
+#'   other), \code{bandwidth_is_fallback} (\code{TRUE} when automatic
 #'   selection failed and the arbitrary fallback was used),
 #'   \code{condition_index}, \code{local_collinearity},
 #'   \code{n_local_collinear}, \code{n_local_singular},
@@ -709,11 +782,27 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                   max = .Machine$integer.max,
                   what = "a single number of nearest neighbours when adaptive = TRUE")
     bw <- as.integer(round(bw))
-    min_bw <- n_params + 1L
+    # n_params + 1 left bisquare and tricube windows with n_params points
+    # (their bw-th neighbour has weight 0), so a small supplied bandwidth was
+    # clamped onto an exact interpolator: R2 = 1 and an AICc of -15033 that
+    # compare_models() ranked first.  See .gwr_min_adaptive_bw().  Capped at
+    # n_obs: with n = p + 2 there is no larger window, and the AICc guard
+    # below reports what is left.
+    min_bw <- min(.gwr_min_adaptive_bw(n_params, kernel), n_obs)
     max_bw <- n_obs
     if (bw < min_bw) {
-      .log_warn("fit_gwr_model(): adaptive bandwidth %d too small for %d params; clamping to %d.",
-                bw, n_params, min_bw)
+      # A warning, not a log line: the fit is not at the bandwidth the caller
+      # asked for.  The fallback's own warning already names its clamp.
+      if (bandwidth_is_fallback)
+        .log_warn("fit_gwr_model(): adaptive bandwidth %d too small for %d params; clamping to %d.",
+                  bw, n_params, min_bw)
+      else
+        .warn_and_log(paste0("fit_gwr_model(): an adaptive bandwidth of %d ",
+                             "neighbours is too small for %d parameters with ",
+                             "the %s kernel (a local regression needs more ",
+                             "points with non-zero weight than parameters); ",
+                             "using %d."),
+                      bw, n_params, kernel, min_bw)
       bw <- min_bw
     }
     if (bw > max_bw) bw <- max_bw
@@ -837,6 +926,27 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
   AICc_val <- NA_real_
   if (!is.null(fit$GW.diagnostic) && !is.null(fit$GW.diagnostic$AICc)) {
     AICc_val <- suppressWarnings(as.numeric(fit$GW.diagnostic$AICc))
+    # Outside its domain (tr S >= n - 2) GWmodel's AICc is a large negative
+    # number, -15033 for a 100-point fit whose windows interpolate, and
+    # compare_models() and print() took it as the best fit there is.  Report
+    # NA and say why; see .gwr_aicc_undefined().
+    AIC_val <- suppressWarnings(as.numeric(fit$GW.diagnostic$AIC %||% NA_real_))
+    if (length(AICc_val) == 1L && length(AIC_val) == 1L &&
+        isTRUE(.gwr_aicc_undefined(AIC_val, AICc_val))) {
+      trS <- .gwr_trace_s(AIC_val, fit$GW.diagnostic$RSS.gw %||% NA_real_,
+                          n_obs)
+      .warn_and_log(paste0("fit_gwr_model(): AICc is undefined for this fit ",
+                           "and is reported as NA. Its effective number of ",
+                           "parameters, tr(S) = %s, is not below n - 2 = %d, ",
+                           "so the local regressions (nearly) interpolate the ",
+                           "data and GWmodel's AICc (%s) would rank it above ",
+                           "any other fit. The bandwidth (%s%s) is too small ",
+                           "for %d parameters; use a larger one."),
+                    if (is.na(trS)) "?" else format(round(trS, 2)),
+                    n_obs - 2L, format(signif(AICc_val, 6)), format(bw),
+                    if (adaptive) " neighbours" else "", n_params)
+      AICc_val <- NA_real_
+    }
   }
   
   new_spatial_fit(
