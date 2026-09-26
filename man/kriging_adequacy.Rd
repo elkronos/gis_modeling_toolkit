@@ -59,7 +59,8 @@ and a variance for every cell, thin or empty.  Whether that is worth
 having on a given layer is a question with a measurable answer, and this
 function measures it, changing no cell value: for every cell it reports
 the block-kriging estimate and variance implied by a fitted variogram,
-that variance as a share of the total sill, and, where the cell has points,
+that variance as a share of the variance the cell's mean would have with
+no data at all, and, where the cell has points,
 whether it exceeds the design-based variance of the plain mean,
 \eqn{s^2/n}; and it scores the variogram itself by blocked
 cross-validation.
@@ -67,12 +68,23 @@ cross-validation.
 \section{Reading the columns}{
 
 \describe{
-\item{\code{kr_ratio}}{The block-kriging variance over the total sill,
-in \eqn{[0, 1]}.  It is the coverage score, and it needs no hand-set
-threshold in metres or point counts: as it approaches 1 the estimate
-carries almost no information from the data and is reverting to
-the global mean.  A cell at 0.05 is well determined; a cell at 0.8 is
-mostly prior.}
+\item{\code{kr_ratio}}{The block-kriging variance over the cell's prior
+variance, in \eqn{[0, 1]}.  The prior variance is the variance the
+cell's mean would have with no data at all, \eqn{\bar C(B,B)}: the
+covariance averaged over pairs of points in the cell, on the
+discretisation \pkg{gstat} block-kriges with, and without the nugget,
+which averages out over a block (\pkg{gstat} leaves it out of the
+block variance too).  Each cell has its own: a cell's mean varies less
+than a single point does, and far less once the cell is wider than the
+range, so the point sill is not the scale.  It is the coverage score,
+and it needs no hand-set threshold in metres or point counts: as it
+approaches 1 the estimate carries almost no information from the data
+about the cell and is reverting to the estimated mean.  Ordinary
+kriging adds the variance of that estimated mean, so a cell the data do
+not reach comes out at or above its prior variance and reads 1.  A
+cell at 0.05 is well determined; a cell at 0.8 is mostly prior.
+\code{NA} when the model is a pure nugget, where a cell mean has no
+prior variance to be a share of.}
 \item{\code{kr_exceeds_design}}{\code{TRUE} where the kriging variance is
 larger than \eqn{s^2/n} from the cell's own points: kriging is not
 earning its keep there, and that is said per cell instead of

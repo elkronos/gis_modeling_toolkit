@@ -1,8 +1,8 @@
 # tests/testthat/test-kriging-adequacy.R
 # ---------------------------------------------------------------------------
 # kriging_adequacy(): per-cell block-kriging variance from a fitted
-# variogram, its ratio to the sill, the comparison with s^2/n, and the
-# blocked cross-validation statistic of the kriging variance.
+# variogram, its ratio to the cell's no-data variance, the comparison with
+# s^2/n, and the blocked cross-validation statistic of the kriging variance.
 # ---------------------------------------------------------------------------
 
 ka_field <- function(n = 240, seed = 1, psill = 0.8, nugget = 0.2, a = 100) {
@@ -35,7 +35,7 @@ test_that("the diagnostics are computed per cell and the CV statistic is near 1 
   expect_true(all(is.finite(df$kr_pred)))
   expect_true(all(df$kr_var >= 0))
   expect_true(all(df$kr_ratio >= 0 & df$kr_ratio <= 1))
-  # A well-sampled cell's block variance is a small share of the sill.
+  # A well-sampled cell's block variance is a small share of its no-data variance.
   expect_lt(stats::median(df$kr_ratio), 0.2)
   # The plain means agree with summarize_by_cell()'s.
   sm <- summarize_by_cell(asg, response_var = "z")
@@ -151,5 +151,69 @@ test_that("print() survives a subset that no longer carries the fitted summary",
   bare <- ka
   attr(bare, "cv") <- list()
   expect_output(print(bare), "blocked CV: not computed")
+})
+
+
+# gstat's own variance of a cell mean with no data, C(B,B) on its own
+# discretisation and nugget handling: simple kriging from one datum so far
+# away that its covariance with every cell is exactly zero.
+ka_gstat_prior <- function(cells, vm) {
+  far <- sf::st_sf(z = 0, geometry = sf::st_sfc(sf::st_point(c(1e9, 1e9)),
+                                                crs = sf::st_crs(cells)))
+  as.numeric(gstat::krige(z ~ 1, far, cells, model = vm, beta = 0, debug.level = 0)$var1.var)
+}
+
+test_that("kr_ratio is over each cell's no-data variance, so a cell the data do not reach reads 1", {
+  skip_if_not_installed("gstat")
+  # kr_var is the variance of a cell MEAN; it was divided by the point sill,
+  # which a cell mean never reaches, so empty cells 130-410 m beyond a 90 m
+  # effective range read about 0.1 and print() said no cell was above 0.5.
+  set.seed(11); n <- 240
+  x <- runif(n, 0, 500); y <- runif(n, 0, 1000)        # the western half only
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(0.8 * exp(-d / 30) + diag(0.2 + 1e-8, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+  cells <- create_grid_polygons(ka_bnd, target_cells = 16, type = "square")
+  asg <- assign_features_to_polygons(pts, cells)
+  vm <- gstat::vgm(psill = 0.8, "Exp", range = 30, nugget = 0.2)
+  ka <- kriging_adequacy(asg, "z", cells, sac = structure(90, class = "sac_range",
+                                                          variogram_model = vm),
+                         k = 4, seed = 1)
+  df <- sf::st_drop_geometry(ka)
+  empty <- df$n == 0L
+  expect_equal(sum(empty), 8L)
+  expect_true(all(df$kr_var[empty] < 0.2))              # far below the point sill of 1
+  expect_true(all(df$kr_ratio[empty] > 0.99))
+  expect_true(all(df$kr_ratio[!empty] < min(df$kr_ratio[empty])))
+  # The denominator is the cell's C(B,B) as gstat block-kriges it.
+  prior <- ka_gstat_prior(cells, vm)
+  expect_equal(df$kr_ratio, pmin(df$kr_var / prior, 1), tolerance = 1e-5)
+  expect_output(print(ka), sprintf("no-data variance of the cell mean .* %d cell\\(s\\) above 0.5",
+                                   sum(df$kr_ratio > 0.5)))
+  expect_gte(sum(df$kr_ratio > 0.5), 8L)
+})
+
+test_that("a large empty cell ranks above small populated ones on kr_ratio", {
+  skip_if_not_installed("gstat")
+  # With unequal cells, as Voronoi and Delaunay tessellations make them, the
+  # ratio over the sill ranked a 600 x 1000 m cell with no data below
+  # populated 100 m cells, because a big cell's mean varies little.
+  set.seed(4); n <- 300
+  x <- runif(n, 0, 400); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(0.8 * exp(-d / 100) + diag(0.2 + 1e-8, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
+  sq <- function(x0, x1, y0, y1) sf::st_polygon(list(rbind(c(x0, y0), c(x1, y0), c(x1, y1),
+                                                           c(x0, y1), c(x0, y0))))
+  small <- sf::st_make_grid(sf::st_sfc(sq(0, 400, 0, 1000), crs = 32632), cellsize = 100)
+  cells <- sf::st_sf(poly_id = seq_len(length(small) + 1L),
+                     geometry = c(small, sf::st_sfc(sq(400, 1000, 0, 1000), crs = 32632)))
+  asg <- assign_features_to_polygons(pts, cells)
+  df <- sf::st_drop_geometry(kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), k = 4, seed = 1))
+  big <- df$poly_id == nrow(cells)
+  expect_equal(df$n[big], 0L)
+  expect_gt(df$kr_ratio[big], 0.99)
+  expect_true(all(df$kr_ratio[!big] < 0.5))
+  expect_gt(df$kr_ratio[big], max(df$kr_ratio[!big]))
 })
 

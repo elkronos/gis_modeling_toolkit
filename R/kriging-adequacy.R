@@ -13,19 +13,31 @@
 #' having on a given layer is a question with a measurable answer, and this
 #' function measures it, changing no cell value: for every cell it reports
 #' the block-kriging estimate and variance implied by a fitted variogram,
-#' that variance as a share of the total sill, and, where the cell has points,
+#' that variance as a share of the variance the cell's mean would have with
+#' no data at all, and, where the cell has points,
 #' whether it exceeds the design-based variance of the plain mean,
 #' \eqn{s^2/n}; and it scores the variogram itself by blocked
 #' cross-validation.
 #'
 #' @section Reading the columns:
 #' \describe{
-#'   \item{\code{kr_ratio}}{The block-kriging variance over the total sill,
-#'     in \eqn{[0, 1]}.  It is the coverage score, and it needs no hand-set
-#'     threshold in metres or point counts: as it approaches 1 the estimate
-#'     carries almost no information from the data and is reverting to
-#'     the global mean.  A cell at 0.05 is well determined; a cell at 0.8 is
-#'     mostly prior.}
+#'   \item{\code{kr_ratio}}{The block-kriging variance over the cell's prior
+#'     variance, in \eqn{[0, 1]}.  The prior variance is the variance the
+#'     cell's mean would have with no data at all, \eqn{\bar C(B,B)}: the
+#'     covariance averaged over pairs of points in the cell, on the
+#'     discretisation \pkg{gstat} block-kriges with, and without the nugget,
+#'     which averages out over a block (\pkg{gstat} leaves it out of the
+#'     block variance too).  Each cell has its own: a cell's mean varies less
+#'     than a single point does, and far less once the cell is wider than the
+#'     range, so the point sill is not the scale.  It is the coverage score,
+#'     and it needs no hand-set threshold in metres or point counts: as it
+#'     approaches 1 the estimate carries almost no information from the data
+#'     about the cell and is reverting to the estimated mean.  Ordinary
+#'     kriging adds the variance of that estimated mean, so a cell the data do
+#'     not reach comes out at or above its prior variance and reads 1.  A
+#'     cell at 0.05 is well determined; a cell at 0.8 is mostly prior.
+#'     \code{NA} when the model is a pure nugget, where a cell mean has no
+#'     prior variance to be a share of.}
 #'   \item{\code{kr_exceeds_design}}{\code{TRUE} where the kriging variance is
 #'     larger than \eqn{s^2/n} from the cell's own points: kriging is not
 #'     earning its keep there, and that is said per cell instead of
@@ -214,6 +226,11 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   kr_pred <- suppressWarnings(as.numeric(bk$var1.pred))
   kr_var  <- suppressWarnings(as.numeric(bk$var1.var))
   kr_var[is.finite(kr_var) & kr_var < 0] <- 0
+  # The scale for kr_ratio.  kr_var is the variance of a cell MEAN, and with
+  # no data it levels off at the cell's own C(B,B), not at the point sill:
+  # divided by the sill, an empty cell far from every datum read about 0.1,
+  # and a large empty cell ranked below small populated ones.
+  prior_var <- .block_prior_var(cells, vm)
 
   # --- the plain means and their design-based variance, per cell ---
   ids_pts <- as.character(sf::st_drop_geometry(kp)[[id_pts]])
@@ -231,7 +248,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   out$se <- se_c
   out$kr_pred <- kr_pred
   out$kr_var <- kr_var
-  out$kr_ratio <- pmin(pmax(kr_var / sill, 0), 1)
+  out$kr_ratio <- ifelse(prior_var > 0, pmin(pmax(kr_var / prior_var, 0), 1), NA_real_)
   out$kr_exceeds_design <- ifelse(is.finite(s2_n), kr_var > s2_n, NA)
   out$kr_shift <- ifelse(is.finite(se_c) & se_c > 0, (kr_pred - out$mean) / se_c, NA_real_)
 
@@ -281,6 +298,34 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
 }
 
 
+#' The variance each cell's mean has with no data, \eqn{\bar C(B,B)}
+#'
+#' The covariance averaged over all pairs of points of the cell, on the
+#' discretisation gstat's predict() gives a polygon (its default `sps.args`:
+#' spsample(n = 500, type = "regular", offset = c(0.5, 0.5))), and without
+#' the nugget, which gstat leaves out of block-to-block covariances.  This is
+#' the block-kriging variance of a cell no datum informs, before ordinary
+#' kriging adds the variance of the estimated mean.  0 for a pure nugget.
+#' @keywords internal
+#' @noRd
+.block_prior_var <- function(cells, vm) {
+  sv <- vm[as.character(vm$model) != "Nug", , drop = FALSE]
+  c0 <- sum(sv$psill)
+  if (!nrow(sv) || !(c0 > 0)) return(rep(0, nrow(cells)))
+  geo <- sf::as_Spatial(sf::st_set_crs(sf::st_geometry(cells), sf::NA_crs_))
+  vapply(seq_along(geo), function(i) {
+    g <- sp::coordinates(sp::spsample(geo[i], n = 500, type = "regular",
+                                      offset = c(0.5, 0.5)))
+    m <- nrow(g)
+    if (m < 2L) return(c0)
+    # Each pair once from dist(), both orders, plus the m zero-distance pairs.
+    cv <- gstat::variogramLine(sv, dist_vector = as.numeric(stats::dist(g)),
+                               covariance = TRUE)$gamma
+    (2 * sum(cv) + m * c0) / m^2
+  }, numeric(1))
+}
+
+
 #' Fold labels for a layer, from any of the fold shapes the package accepts
 #' @keywords internal
 #' @noRd
@@ -327,7 +372,8 @@ print.kriging_adequacy <- function(x, ...) {
                 sprintf("%.1f", attr(x, "range")) else "not identified"))
   r <- df$kr_ratio[is.finite(df$kr_ratio)]
   if (length(r))
-    cat(sprintf("  kriging variance / sill: median %.3f, range %.3f-%.3f; %d cell(s) above 0.5\n",
+    cat(sprintf(paste0("  kriging variance / no-data variance of the cell mean (1 = nothing ",
+                       "from the data): median %.3f, range %.3f-%.3f; %d cell(s) above 0.5\n"),
                 stats::median(r), min(r), max(r), sum(r > 0.5)))
   pop <- df[is.finite(df$kr_exceeds_design), , drop = FALSE]
   if (nrow(pop))
