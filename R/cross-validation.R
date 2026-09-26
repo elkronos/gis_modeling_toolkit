@@ -1060,6 +1060,61 @@
 }
 
 
+#' Warn when some folds, but not all, produced no predictions
+#'
+#' \code{overall} is pooled over the folds that succeeded, so a run that lost
+#' a fold reports a score over fewer rows -- and not a random few: in spatial
+#' block CV the fold that fails is usually the hardest extrapolation block
+#' (the only rows of a factor level, a region no training fold covers).  This
+#' used to be a log line only, which \code{tryCatch()},
+#' \code{expect_warning()} and \code{options(warn = 2)} never see.  Folds
+#' dropped before fitting are left out of the warning: \code{.remap_folds()}
+#' has already raised one for them.  The all-folds-failed case is the
+#' callers' own, louder warning.
+#'
+#' @param caller Function name the message carries.
+#' @param res The list \code{.cv_run_folds()} returned.
+#' @param preds The stacked prediction rows \code{overall} is pooled from.
+#' @param n_rows Rows in the prepared data.
+#' @param n_attempted,n_succeeded The fold counts the caller returns.
+#' @keywords internal
+#' @noRd
+.cv_warn_failed_folds <- function(caller, res, preds, n_rows,
+                                  n_attempted, n_succeeded) {
+  st  <- res$fold_status
+  bad <- if (is.data.frame(st)) st[st$status != "ok", , drop = FALSE] else NULL
+  if (is.null(bad) || nrow(bad) == 0L) {
+    if (n_succeeded < n_attempted)
+      .log_warn("%s(): %d of %d folds produced predictions.",
+                caller, n_succeeded, n_attempted)
+    return(invisible(NULL))
+  }
+  .warn_and_log(paste0(
+    "%s(): %d of %d fold(s) failed (%s), so `overall` pools the other folds ",
+    "only and covers %d of the %d rows. A fold that fails is often the ",
+    "hardest to predict (a region or a factor level no training fold ",
+    "covers), so `overall` may flatter the model; `fold_status` gives each ",
+    "fold's cause."),
+    caller, nrow(bad), n_attempted,
+    paste(sprintf("fold %s: %s", bad$fold, bad$status), collapse = ", "),
+    sum(is.finite(preds$y) & is.finite(preds$yhat)), n_rows)
+}
+
+
+#' Is this the warning \code{.cv_warn_failed_folds()} raises for \code{caller}?
+#'
+#' For a caller that runs \code{cv_spatial()} many times and reports the
+#' consequence in its own terms (\code{select_features_forward()}), so the
+#' two cannot drift apart.
+#' @keywords internal
+#' @noRd
+.is_failed_folds_warning <- function(w, caller = "cv_spatial") {
+  startsWith(conditionMessage(w), paste0(caller, "(): ")) &&
+    grepl("^[^:]+: [0-9]+ of [0-9]+ fold\\(s\\) failed \\(",
+          conditionMessage(w))
+}
+
+
 #' The fold list without \code{.remap_folds()}'s bookkeeping attributes
 #'
 #' The dropped-fold frame, the orphan IDs and the unknown-ID count ride on the
@@ -4047,8 +4102,9 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
               n_attempted, why)
     warning("cv_gwr(): all folds failed; cross-validation results contain no predictions.",
             why, call. = FALSE)
-  } else if (n_succeeded < n_attempted) {
-    .log_warn("cv_gwr(): %d of %d folds produced predictions.", n_succeeded, n_attempted)
+  } else {
+    .cv_warn_failed_folds("cv_gwr", res, preds, length(keep_idx),
+                          n_attempted, n_succeeded)
   }
 
   list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
@@ -4351,8 +4407,9 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
               n_attempted, why)
     warning("cv_bayes(): all folds failed; cross-validation results contain no predictions.",
             why, call. = FALSE)
-  } else if (n_succeeded < n_attempted) {
-    .log_warn("cv_bayes(): %d of %d folds produced predictions.", n_succeeded, n_attempted)
+  } else {
+    .cv_warn_failed_folds("cv_bayes", res, preds, length(keep_idx),
+                          n_attempted, n_succeeded)
   }
 
   list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,
@@ -4517,7 +4574,13 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   once incomplete rows were removed, so the fold never reached the fitter);
 #'   or \code{"worker_error"} (a parallel worker died).  Every fold missing
 #'   from \code{fold_metrics} has its reason there, which matters most when
-#'   the console output of a long run is gone.  \code{orphan_rows} holds the
+#'   the console output of a long run is gone.  When some folds, but not
+#'   all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
+#'   the function warns, naming them and how many rows \code{overall}
+#'   covers: it is pooled over the folds that produced predictions, and the
+#'   fold that fails is often the hardest to predict, so it may flatter the
+#'   model.  (A \code{"dropped"} fold has its own warning.)
+#'   \code{orphan_rows} holds the
 #'   \code{..row_id}s of rows in the data that no fold names (they enter no
 #'   training set and are never scored; non-empty only when the folds were
 #'   built on a different or subsetted layer), and \code{n_unknown_ids}
@@ -4654,9 +4717,9 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
               .caller, n_attempted, why)
     warning(.caller, "(): all folds failed; cross-validation results contain ",
             "no predictions.", why, call. = FALSE)
-  } else if (n_succeeded < n_attempted) {
-    .log_warn("%s(): %d of %d folds produced predictions.",
-              .caller, n_succeeded, n_attempted)
+  } else {
+    .cv_warn_failed_folds(.caller, res, preds, length(keep_idx),
+                          n_attempted, n_succeeded)
   }
 
   list(overall = .cv_overall_metrics(preds, metrics),
