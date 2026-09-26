@@ -17,10 +17,16 @@
 #'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 #'   them.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
+#'   Not used when \code{largest} applies: sf then assigns polygon features by
+#'   overlap area and never calls the predicate.
 #' @param largest Logical; when \code{features_sf} is itself polygonal, keep
 #'   the polygon with the largest overlap. Default TRUE. Ignored for point and
-#'   line features, and silently dropped if the \code{predicate} does not
-#'   support it (\code{sf::st_intersects} does).
+#'   line features. Invalid geometries (usually a self-intersecting ring),
+#'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
+#'   for the join, with a warning, and returned as they arrived. If the
+#'   overlap still cannot be computed the function stops: falling back to
+#'   \code{predicate} and \code{tie_break} would change the rule for every
+#'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area, \code{"first"} keeps the first match (original order-dependent
@@ -105,21 +111,66 @@ assign_features_to_polygons <- function(
   }
 
   f$`..pre_join_row_id` <- seq_len(nrow(f))
-  
+  # The join may run on repaired copies (below); the rows returned carry the
+  # geometry the features arrived with.
+  f_geom <- sf::st_geometry(f)
+
   f_gtypes <- unique(as.character(sf::st_geometry_type(f, by_geometry = TRUE)))
   use_largest <- isTRUE(largest) &&
     all(f_gtypes %in% c("POLYGON", "MULTIPOLYGON"))
 
+  if (use_largest) {
+    # sf measures the overlap with st_intersection(), which GEOS cannot do on
+    # an invalid ring: one bow-tie parcel threw a TopologyException, and a
+    # catch-all retry without `largest` used to swallow it and reassign EVERY
+    # straddling feature in the layer by `tie_break` (95 of 200 changed cell),
+    # with no R warning.  An invalid ring has no well-defined overlap anyway
+    # (a bow-tie's two lobes cancel to zero area), so the copies used for the
+    # join are repaired, and the caller is told how many.
+    bad_f <- !(sf::st_is_valid(f) %in% TRUE)
+    bad_p <- !(sf::st_is_valid(p_sel) %in% TRUE)
+    if (any(bad_f) || any(bad_p)) {
+      .warn_and_log(paste0(
+        "assign_features_to_polygons(): %d of %d feature(s) and %d of %d ",
+        "polygon(s) have invalid geometry (usually a self-intersecting ring), ",
+        "so their overlap areas are undefined; they were repaired with ",
+        "sf::st_make_valid() for the largest-overlap join. The features are ",
+        "returned with the geometry they arrived with; repair them yourself ",
+        "to silence this."),
+        sum(bad_f), nrow(f), sum(bad_p), nrow(p_sel))
+      if (any(bad_f)) {
+        g <- sf::st_geometry(f)
+        g[bad_f] <- .safe_make_valid(g[bad_f])
+        f <- sf::st_set_geometry(f, g)
+      }
+      if (any(bad_p)) {
+        g <- sf::st_geometry(p_sel)
+        g[bad_p] <- .safe_make_valid(g[bad_p])
+        p_sel <- sf::st_set_geometry(p_sel, g)
+      }
+    }
+  }
+
   join_args <- list(x = f, y = p_sel, join = predicate, left = TRUE)
-  join_ok <- tryCatch({
-    if (use_largest) join_args$largest <- TRUE
-    do.call(sf::st_join, join_args)
-  }, error = function(e) {
-    # Fall back without `largest` if the predicate doesn't support it
-    join_args$largest <- NULL
-    do.call(sf::st_join, join_args)
-  })
-  joined <- join_ok
+  if (use_largest) {
+    # With `largest = TRUE` sf never calls `predicate` (it intersects the
+    # layers and keeps the biggest piece), so no predicate can reject it: an
+    # error here is a geometry failure.  Falling back to `tie_break` would
+    # change the rule for every feature in the layer, so stop instead.
+    joined <- tryCatch(
+      do.call(sf::st_join, c(join_args, largest = TRUE)),
+      error = function(e) stop(sprintf(paste0(
+        "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
+        "Pass largest = FALSE to assign every feature by `predicate` and ",
+        "`tie_break` instead%s."),
+        conditionMessage(e),
+        if (isTRUE(sf::st_is_longlat(f)))
+          ", or project both layers first (see ensure_projected())" else ""),
+        call. = FALSE))
+  } else {
+    joined <- do.call(sf::st_join, join_args)
+  }
+  joined <- sf::st_set_geometry(joined, f_geom[joined[["..pre_join_row_id"]]])
 
   if (!identical(id_col, polygon_id_col)) {
     names(joined)[names(joined) == id_col] <- polygon_id_col

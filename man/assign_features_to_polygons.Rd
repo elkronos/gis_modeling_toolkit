@@ -25,12 +25,18 @@ assign_features_to_polygons(
 polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 them.}
 
-\item{predicate}{Binary spatial predicate function. Default sf::st_intersects.}
+\item{predicate}{Binary spatial predicate function. Default sf::st_intersects.
+Not used when \code{largest} applies: sf then assigns polygon features by
+overlap area and never calls the predicate.}
 
 \item{largest}{Logical; when \code{features_sf} is itself polygonal, keep
 the polygon with the largest overlap. Default TRUE. Ignored for point and
-line features, and silently dropped if the \code{predicate} does not
-support it (\code{sf::st_intersects} does).}
+line features. Invalid geometries (usually a self-intersecting ring),
+whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
+for the join, with a warning, and returned as they arrived. If the
+overlap still cannot be computed the function stops: falling back to
+\code{predicate} and \code{tie_break} would change the rule for every
+feature in the layer, so pass \code{largest = FALSE} to ask for that.}
 
 \item{tie_break}{Strategy for resolving features that match multiple
 polygons: \code{"smallest_area"} (default) keeps the polygon with the
