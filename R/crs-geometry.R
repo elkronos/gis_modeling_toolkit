@@ -24,8 +24,15 @@
 #'
 #' Data straddling the antimeridian are detected from the one very large gap in
 #' the sorted longitudes and given an equal-area projection centred on the true
-#' extent; only truly global coverage falls back to Web Mercator
-#' (EPSG:3857), which would otherwise SPLIT a wrapped layer.
+#' extent, since Web Mercator (EPSG:3857) would SPLIT a wrapped layer.  Data
+#' that span more than 180 degrees of longitude with no such gap surround a
+#' pole; when every point also lies on one side of the equator, the layer
+#' circles that pole (Antarctic stations, a pan-Arctic network) and gets a
+#' Lambert azimuthal equal-area centred on it, provided that measures a
+#' smaller distance error than the global fallback.  Only coverage that is
+#' left -- spanning both hemispheres, or a low-latitude belt the polar
+#' projection fits worse -- falls back to Web Mercator (Equal Earth for
+#' \code{purpose = "area"}).
 #'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
@@ -35,9 +42,11 @@
 #'   over sampled pairs, \code{NA} where it could not be measured) and
 #'   \code{chosen}.  Where only one projection was in play (a zone kept on
 #'   a local extent, the equal-area projection for a wrapped layer), that
-#'   one is measured and reported alone.  \code{candidates} is \code{NULL}
-#'   only where no local projection was chosen: non-geographic input, no
-#'   finite centroid, or an extent that falls back to the global projection.
+#'   one is measured and reported alone; a layer circling a pole reports the
+#'   polar projection and the global one it was measured against.
+#'   \code{candidates} is \code{NULL} only where no local projection was
+#'   chosen: non-geographic input, no finite centroid, or an extent that
+#'   falls back to the global projection.
 #' @keywords internal
 #' @noRd
 .pick_local_projected_crs <- function(x, purpose = c("distance", "area")) {
@@ -169,6 +178,50 @@
                     sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)",
                             lon_ctr, lat),
                     list(wrap_crs), .crs_distance_error(x_ll, wrap_crs), 1L))
+    }
+
+    # No gap of 180 deg or more means the longitudes surround a pole.  With
+    # every point on one side of the equator the layer circles THAT pole --
+    # Antarctic stations, a pan-Arctic network -- and is not global coverage.
+    # Web Mercator splits such a layer at +/-180 and stretches it towards the
+    # pole: rings of Antarctic stations measured worst-case distance errors
+    # of 15,000-20,000% in it (a 111 km pair came out 445 km, the South Pole
+    # at y = -2.4e8 m), where a Lambert azimuthal centred on the pole gave
+    # about 2%.  That projection is equal-area, so it serves purpose = "area"
+    # too.  Its distortion grows away from the pole (about 40% for a belt
+    # reaching the equator), so it is measured against the global fallback
+    # and used only when it does better; data spanning both hemispheres never
+    # get here and keep the global fallback as before.
+    lat_min <- as.numeric(bb["ymin"]); lat_max <- as.numeric(bb["ymax"])
+    if (is.finite(lat_min) && is.finite(lat_max) && (lat_min >= 0 || lat_max <= 0)) {
+      north     <- lat_min >= 0
+      polar_crs <- sf::st_crs(sprintf(
+        "+proj=laea +lat_0=%d +lon_0=0 +datum=WGS84 +units=m +no_defs",
+        if (north) 90L else -90L))
+      glob      <- global_crs()
+      glob_name <- if (purpose != "area") "Web Mercator (EPSG:3857)" else
+        if (grepl("eqearth", glob$input, fixed = TRUE)) "Equal Earth" else "Mollweide"
+      cands     <- list(
+        list(name = sprintf("Lambert azimuthal equal-area centred on the %s Pole",
+                            if (north) "North" else "South"),
+             crs = polar_crs),
+        list(name = glob_name, crs = glob))
+      err <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs), numeric(1))
+      if (is.finite(err[1L]) && (!is.finite(err[2L]) || err[1L] < err[2L])) {
+        .log_warn(
+          paste0(".pick_local_projected_crs(): longitude extent spans %.1f deg ",
+                 "without straddling the antimeridian, and every point lies %s ",
+                 "of the equator (latitude %.1f to %.1f): the layer circles the ",
+                 "%s Pole. Using %s: measured worst-case distance error %.2f%% ",
+                 "against %s for %s. Pass target_crs to ensure_projected() to ",
+                 "override."),
+          span_lon, if (north) "north" else "south", lat_min, lat_max,
+          if (north) "North" else "South", cands[[1L]]$name, 100 * err[1L],
+          if (is.finite(err[2L])) sprintf("%.2f%%", 100 * err[2L]) else "not measurable",
+          cands[[2L]]$name)
+        return(scored(polar_crs, vapply(cands, `[[`, character(1), "name"),
+                      lapply(cands, `[[`, "crs"), err, 1L))
+      }
     }
 
     .log_warn(
@@ -613,8 +666,18 @@
 #'   \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 #'     hemisphere. The wrap is detected from the coordinates (one very large
 #'     gap in the sorted longitudes) and an equal-area projection centred on
-#'     the true extent is used. Only truly global coverage falls back to
-#'     EPSG:3857.}
+#'     the true extent is used.}
+#'   \item{Around a pole}{Data spanning more than 180 degrees of longitude
+#'     with no such gap surround a pole. When every point also lies on one
+#'     side of the equator (Antarctic stations, a pan-Arctic network), a
+#'     Lambert azimuthal equal-area centred on that pole is used, provided it
+#'     measures a smaller distance error than the global fallback. Web
+#'     Mercator splits such a layer at +/-180 degrees and stretches it
+#'     towards the pole: a ring of Antarctic stations measured a worst-case
+#'     distance error near 20,000 percent in it, against about 2 percent in
+#'     the polar projection. Only the coverage left over, spanning both
+#'     hemispheres or a low-latitude belt the polar projection fits worse,
+#'     falls back to EPSG:3857 (Equal Earth for `purpose = "area"`).}
 #'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
 #'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 #'     then apply; coordinates the heuristic declines are left exactly as they
