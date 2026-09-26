@@ -110,7 +110,8 @@
 #' logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
 #' step wastes fits at large \eqn{L} and starves resolution at small.  The
 #' ladder runs from a floor to a ceiling the data impose.  The ceiling is
-#' \code{floor(n / min_cell_n)}: cells with fewer than \code{min_cell_n} points
+#' \code{floor(n / min_cell_n)}, with \eqn{n} every point of the layer (not
+#' the subsample): cells with fewer than \code{min_cell_n} points
 #' on average have too little support, and Moran's z is not computable at
 #' nine cells or fewer in any case.  The floor is
 #' \code{ceiling(area / range^2)} when an autocorrelation range is available:
@@ -119,7 +120,12 @@
 #' that respects their own correlation structure; that is reported as a
 #' finding (a logged warning, and \code{attr(x, "bounds")$supported} is
 #' \code{FALSE}) and the ladder runs from 2 to the ceiling anyway, so the
-#' profile still shows what each level costs.
+#' profile still shows what each level costs.  On a layer larger than
+#' \code{sample_n} the ceiling is also held to half the subsample (two
+#' subsample points per cell, the least a fitted cell can be scored on);
+#' \code{ceiling_from} is then \code{"sample_n"}, a floor above that is logged
+#' with a request to raise \code{sample_n}, and it does not make
+#' \code{supported} \code{FALSE}.
 #'
 #' @section The criteria, and how each behaved when measured:
 #' \describe{
@@ -130,6 +136,15 @@
 #'     approximation of the response (or of its OLS residuals on
 #'     \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
 #'     with \eqn{\tau^2} the nugget of the fitted variogram (lower is better).
+#'     It estimates the error of predicting a new observation by the mean of
+#'     its cell.  When the cells are fitted to a subsample of \eqn{m} of the
+#'     \eqn{N} points with a response, the penalty is split between the two:
+#'     \eqn{RSS(L)/m + \tau^2 L_m / m + \tau^2 L / N}, where the first two
+#'     terms estimate the approximation error from the subsample (adding back
+#'     the optimism of its own cell means, over the \eqn{L_m} cells its scored
+#'     points fall in) and the last is the variance of cell means built from
+#'     all \eqn{N}, which is what the tessellation will carry.  With no
+#'     subsample it is the formula above.
 #'     \strong{Measured on simulated exponential fields (600 points on a
 #'     1000-unit extent, sill 1, 20 replicates): with a nugget of 0.3 its
 #'     minimum sat at the support ceiling in every replicate at effective
@@ -150,7 +165,8 @@
 #'   \item{\code{reliability}}{The between-cell signal's share of the spread
 #'     in the cell means, from the fitted variogram alone via Krige's
 #'     additivity relation (Cressie 1996), for square cells of the level's
-#'     average area with the level's average point count (larger is better).
+#'     average area holding the level's average share of the layer's points
+#'     with a response (larger is better).
 #'     This is the shrinkage factor of Fay and Herriot (1979).  It has an
 #'     interior optimum, and a broad one: validated against the empirical
 #'     reliability of true block means on simulated fields, the analytic and
@@ -183,9 +199,13 @@
 #' @param n_levels Number of levels on the ladder.  Default 20.
 #' @param min_cell_n Minimum average number of points per cell that a level
 #'   must keep; sets the ceiling.  Default 9.
-#' @param sample_n Points are subsampled to this many before anything is
-#'   fitted, as in \code{determine_optimal_levels()}.  Default 1500.  The
-#'   support columns describe the subsample.
+#' @param sample_n Points are subsampled to this many before the k-means
+#'   fits, as in \code{determine_optimal_levels()}.  Default 1500.  The
+#'   columns read off the fitted cells (\code{wss}, the \code{cell_} columns,
+#'   \code{rss}, \code{moran_i}, \code{moran_z}) describe the subsample; the
+#'   bounds, \code{supported}, the variance term of \code{cp} and
+#'   \code{reliability} describe every point of the layer, so the answer does
+#'   not change with \code{sample_n} except through the fits.
 #' @param nstart k-means++ restarts per level.  Default 25.
 #' @param seed RNG seed for the subsample and the restarts; restored
 #'   afterwards.  Default 123.
@@ -208,10 +228,11 @@
 #'   radius of the cells, in coordinate units), \code{rss}, \code{cp},
 #'   \code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
 #'   input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
-#'   with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"}
-#'   or \code{"distinct locations"}, whichever bound it), \code{supported},
-#'   \code{area}, \code{range}, \code{n}, \code{n_distinct},
-#'   \code{min_cell_n}), \code{variogram} (a list with
+#'   with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"},
+#'   \code{"distinct locations"} or \code{"sample_n"}, whichever bound it),
+#'   \code{supported}, \code{area}, \code{range}, \code{n} (the points in the
+#'   layer), \code{n_sample} (the points the k-means fits ran on),
+#'   \code{n_distinct}, \code{min_cell_n}), \code{variogram} (a list with
 #'   \code{nugget}, \code{psill}, \code{range}, \code{model}; \code{NULL}
 #'   when none was usable), \code{variable} (\code{"response"},
 #'   \code{"residuals"} or \code{NA}), \code{wss_bumps}, \code{nstart},
@@ -352,8 +373,26 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                 if (has_pred) "response or predictor" else "response")
   }
 
+  # The bounds describe the layer the cells will be built on and aggregated
+  # over, so they are read off every point: the extent, the distinct
+  # locations and the number of points that carry a response.  Only the
+  # k-means work below runs on the subsample.  The support ceiling, the
+  # verdict, Cp's penalty and the reliability used to take n from the
+  # subsample, which capped every layer larger than sample_n at
+  # floor(sample_n / min_cell_n) cells and made the answer depend on sample_n.
+  n_all  <- nrow(xy)
+  n_resp <- if (has_resp) sum(resp_ok) else n_all
+  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(data_sf)))
+  area <- suppressWarnings(as.numeric(sf::st_area(hull)))
+  bb   <- sf::st_bbox(data_sf)
+  bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
+  if (!is.finite(area) || area <= 0) area <- bbw * bbh
+  # duplicated() on a complex vector, because unique() on an n x 2 matrix
+  # pastes every row into a string: 0.01 s against 5 s at a million points.
+  n_uniq_all <- sum(!duplicated(complex(real = round(xy[, 1], 8),
+                                        imaginary = round(xy[, 2], 8))))
+
   # Subsample, keeping everything aligned.
-  n_all <- nrow(xy)
   if (n_all > sample_n) {
     idx <- sample(seq_len(n_all), sample_n)
     xy <- xy[idx, , drop = FALSE]
@@ -421,26 +460,32 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       .log_info("resolution_profile(): the variogram carries no usable model; `cp` and `reliability` are NA.")
   }
 
-  # Bounds.
-  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(data_sf)))
-  area <- suppressWarnings(as.numeric(sf::st_area(hull)))
-  bb   <- sf::st_bbox(data_sf)
-  bbw  <- as.numeric(bb["xmax"] - bb["xmin"]); bbh <- as.numeric(bb["ymax"] - bb["ymin"])
-  if (!is.finite(area) || area <= 0) area <- bbw * bbh
+  # Bounds.  `area`, `n_uniq_all` and `n_all` are the layer's (see above);
+  # `n_uniq` is the subsample's, the locations k-means can place centres on.
   n_uniq  <- nrow(unique(round(xy, 8)))
-  by_support <- floor(n / min_cell_n)
-  # The ceiling is the smaller of what the point count supports and what the
-  # distinct locations allow (k-means cannot place more centres than there
-  # are distinct points).  Which one bound it is recorded, because the print
-  # and the "bound is choosing" notes name it.
-  ceiling_L    <- max(2L, as.integer(min(by_support, n_uniq - 1L)))
-  ceiling_from <- if (by_support <= n_uniq - 1L) "min_cell_n" else "distinct locations"
+  if (n == n_all) n_uniq_all <- n_uniq
+  by_support <- floor(n_all / min_cell_n)
+  # The ceiling is the smallest of what the layer's point count supports,
+  # what its distinct locations allow (k-means cannot place more centres than
+  # there are distinct points) and, when the fits run on a subsample, what the
+  # subsample can fit: two of its points per cell, and one short of its
+  # distinct locations.  Which one bound it is recorded, because the print and
+  # the "bound is choosing" notes name it.
+  data_ceiling <- min(by_support, n_uniq_all - 1L)
+  fit_cap      <- if (n < n_all) min(floor(n / 2), n_uniq - 1L) else Inf
+  ceiling_L    <- max(2L, as.integer(min(data_ceiling, fit_cap)))
+  ceiling_from <- if (fit_cap < data_ceiling) "sample_n"
+                  else if (by_support <= n_uniq_all - 1L) "min_cell_n"
+                  else "distinct locations"
   # Kept as a double until the comparison: a short range on a continental
   # extent puts area / range^2 past .Machine$integer.max, and as.integer() of
   # that is NA, which turned the "not supported" branch into an abort.
   floor_raw <- if (is.finite(range_eff) && range_eff > 0)
     max(2, ceiling(area / range_eff^2)) else 2
-  supported <- floor_raw <= ceiling_L
+  # The verdict is about the data, so it is taken against the layer's
+  # ceiling; a subsample too small to reach the floor is a setting to change,
+  # and is said separately.
+  supported <- floor_raw <= max(2, data_ceiling)
   floor_L   <- if (floor_raw <= .Machine$integer.max) as.integer(floor_raw) else NA_integer_
   if (!supported)
     .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
@@ -449,8 +494,15 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                      "support a tessellation that respects their own ",
                      "correlation structure; the profile runs from 2 to %d so ",
                      "the cost of each level is still visible."),
-              range_eff, floor_raw, n, min_cell_n, ceiling_L, ceiling_L)
-  lo <- if (supported) floor_L else 2L
+              range_eff, floor_raw, n_all, min_cell_n,
+              max(2L, as.integer(data_ceiling)), ceiling_L)
+  else if (floor_raw > ceiling_L)
+    .log_warn(paste0("resolution_profile(): cells no wider than the autocorrelation ",
+                     "range (%.0f) need at least %.0f of them, which the %d points ",
+                     "support, but k-means on the %d-point subsample can fit at ",
+                     "most %d; raise `sample_n`. The profile runs from 2 to %d."),
+              range_eff, floor_raw, n_all, n, ceiling_L, ceiling_L)
+  lo <- if (supported && floor_raw <= ceiling_L) floor_L else 2L
   if (is.null(levels)) {
     levels <- unique(as.integer(round(exp(seq(log(lo), log(ceiling_L),
                                               length.out = max(2L, as.integer(n_levels)))))))
@@ -462,8 +514,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       stop("resolution_profile(): no usable value in `levels`.", call. = FALSE)
   }
   bounds <- list(floor = floor_L, ceiling = ceiling_L, ceiling_from = ceiling_from,
-                 supported = supported, area = area, range = range_eff, n = n,
-                 n_distinct = n_uniq, min_cell_n = min_cell_n)
+                 supported = supported, area = area, range = range_eff, n = n_all,
+                 n_sample = n, n_distinct = n_uniq_all, min_cell_n = min_cell_n)
 
   rbar_V <- if (!is.null(vg)) .rbar_rect(vg$cor_fn, bbw, bbh) else NA_real_
   pred_for_moran <- if (has_pred) pred else matrix(numeric(0), nrow = n, ncol = 0L)
@@ -492,19 +544,29 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     out$cell_diam_median[i] <- 2 * stats::median(rad[sizes >= 2L])
     if (!is.null(y)) {
       okr <- is.finite(y)
-      if (sum(okr) > L) {
+      m_ok <- sum(okr)
+      L_ok <- length(unique(km$cluster[okr]))     # cells holding a scored row
+      if (m_ok > L_ok) {
         cm  <- stats::ave(y[okr], km$cluster[okr])
         out$rss[i] <- sum((y[okr] - cm)^2)
+        # Cp for the cells of the whole layer, estimated from the subsample.
+        # RSS / m + tau^2 L_ok / m estimates the approximation error plus
+        # tau^2 (it adds back the optimism of the subsample's own cell means,
+        # tau^2 per cell); tau^2 L / N is the sampling variance of cell means
+        # built from the layer's N rows with a response.  With no subsample
+        # (m = N, L_ok = L) it is Mallows' RSS / n + 2 tau^2 L / n.
         if (!is.null(vg))
-          out$cp[i] <- out$rss[i] / sum(okr) + 2 * vg$nugget * L / sum(okr)
+          out$cp[i] <- out$rss[i] / m_ok + vg$nugget * (L_ok / m_ok + L / n_resp)
       }
       mi <- .morans_i_for_k(xy[okr, , drop = FALSE], y[okr],
                             pred_for_moran[okr, , drop = FALSE], km$cluster[okr])
       out$moran_i[i] <- mi[["I"]]
       out$moran_z[i] <- mi[["z"]]
     }
+    # The layer's point count: the cell means are built from every point,
+    # not from the subsample the partition was fitted on.
     if (!is.null(vg))
-      out$reliability[i] <- .reliability_at(L, area, n, vg$nugget, vg$psill,
+      out$reliability[i] <- .reliability_at(L, area, n_resp, vg$nugget, vg$psill,
                                             vg$cor_fn, rbar_V)
   }
 
@@ -566,7 +628,11 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     print(as.data.frame(unclass(x)), row.names = FALSE)
     return(invisible(x))
   }
-  cat("Resolution profile:", nrow(x), "levels on", b$n, "points\n")
+  # `n` is the layer; the k-means fits may have run on a subsample of it.
+  n_fit <- b$n_sample %||% b$n
+  cat("Resolution profile:", nrow(x), "levels on", b$n,
+      if (isTRUE(n_fit < b$n)) sprintf("points (k-means fitted to a subsample of %d)\n", n_fit)
+      else "points\n")
   cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d from %s)%s\n",
               min(x$levels), max(x$levels),
               if (!is.finite(b$range)) "2 (no range)"
@@ -575,8 +641,12 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               b$ceiling,
               if (identical(b$ceiling_from, "distinct locations"))
                 sprintf("%d distinct locations", b$n_distinct %||% NA_integer_)
+              else if (identical(b$ceiling_from, "sample_n"))
+                sprintf("the %d-point subsample", n_fit)
               else sprintf("min_cell_n = %d", b$min_cell_n),
-              if (isTRUE(b$supported)) "" else "  -- floor above ceiling: not supported"))
+              if (!isTRUE(b$supported)) "  -- floor above ceiling: not supported"
+              else if (isTRUE(b$floor > b$ceiling)) "  -- floor above ceiling: raise sample_n"
+              else ""))
   vg <- attr(x, "variogram", exact = TRUE)
   cat(sprintf("  variogram   : %s\n",
               if (is.null(vg)) "none usable (cp and reliability are NA)" else
@@ -695,7 +765,8 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
 #'   or first of the levels this criterion was scored at, which for
 #'   \code{moran_z} starts above nine cells), \code{edge} (which bound that
-#'   is, in words: the support ceiling, the range floor, the ladder's own end,
+#'   is, in words: the support ceiling, the subsample's ceiling, the range
+#'   floor, the ladder's own end,
 #'   or the first or last level the criterion is computable at; \code{NA} for
 #'   an interior optimum), \code{n_levels} and \code{values} (the criterion
 #'   at every level, \code{NA} where it could not be computed).
@@ -806,6 +877,8 @@ select_resolution <- function(profile,
     if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
       return(if (identical(bounds$ceiling_from, "distinct locations"))
                "the support ceiling (one short of the distinct locations)"
+             else if (identical(bounds$ceiling_from, "sample_n"))
+               "the subsample's ceiling (two subsample points per cell; raise sample_n)"
              else "the support ceiling (n / min_cell_n)")
     return("the last level of the ladder")
   }
@@ -831,6 +904,8 @@ print.resolution_selection <- function(x, ...) {
   if (!is.na(edge)) {
     hint <- if (grepl("min_cell_n", edge, fixed = TRUE))
       " Lower min_cell_n to see whether the criterion keeps going."
+    else if (grepl("raise sample_n", edge, fixed = TRUE))
+      " Raise sample_n to see whether the criterion keeps going."
     else if (grepl("range floor", edge, fixed = TRUE))
       " Fewer cells would be wider than the range and average over more than one patch of the field."
     else ""
