@@ -82,9 +82,14 @@
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 #'       of one \code{term} mapped at the training locations, which is the
 #'       reason to fit GWR at all.  Locations where the local design is
-#'       collinear (the kernel-weighted window's scaled condition index is
-#'       above 30, or the window is singular) are drawn hollow and grey
-#'       (\code{mask = TRUE}), because the smooth surface a naive map draws
+#'       collinear for that term are drawn hollow and grey
+#'       (\code{mask = TRUE}): for a slope, where the kernel-weighted
+#'       window's slope condition index (\code{cn_slopes}, predictors
+#'       centred in the window) is above 30 or the window is singular, or
+#'       where the index with the intercept (\code{cn}) is above 1e6; for
+#'       the Intercept, where \code{cn} is above 30 (a predictor far from 0
+#'       against its local spread makes the local intercept an
+#'       extrapolation).  They are masked because the smooth surface a naive map draws
 #'       over them is the picture of an unstable estimate, not of a
 #'       relationship; the subtitle counts them.  The condition indices are
 #'       the fit's \code{info$local_collinearity}, computed for every
@@ -99,8 +104,8 @@
 #'   map, one of the names \code{coef(x)} returns.  Default \code{NULL}: the
 #'   first predictor.  Ignored by the other types.
 #' @param mask For \code{type = "coefficients"}: whether to draw locations
-#'   whose local design is collinear (scaled condition index of the
-#'   kernel-weighted window above 30, or singular) as hollow grey points
+#'   whose local design is collinear for that term (see
+#'   \code{type = "coefficients"}) as hollow grey points
 #'   instead of colouring them by a coefficient that is not to be believed
 #'   there.  Default \code{TRUE}.  Locations whose coefficient is non-finite
 #'   are masked either way.
@@ -270,14 +275,30 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
                  paste(sQuote(names(cf)), collapse = ", ")), call. = FALSE)
   vals <- suppressWarnings(as.numeric(cf[[term]]))
   lc <- x$info$local_collinearity
-  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat))
-    (!is.finite(lc$cn) | lc$cn > 30) else rep(FALSE, nrow(dat))
+  # Each term is masked by the index that speaks for it.  The intercept by
+  # Belsley's uncentred index with the intercept (`cn`): a predictor far from
+  # 0 against its local spread makes the local intercept an extrapolation.  A
+  # slope by the slope index (see .gwr_slopes_collinear()), which does not
+  # depend on the predictor's origin: masking slopes on `cn` hid the whole
+  # map of a temperature in kelvin, identical to the one in degrees C that
+  # was drawn.  A fit made before `cn_slopes` existed falls back to `cn`.
+  is_intercept <- identical(term, "Intercept") && !("Intercept" %in% x$predictor_vars)
+  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat)) {
+    if (is_intercept) (!is.finite(lc$cn) | lc$cn > 30)
+    else .gwr_slopes_collinear(lc)
+  } else rep(FALSE, nrow(dat))
   non_finite <- !is.finite(vals)
   masked <- non_finite | (isTRUE(mask) & cn_bad)
   if (all(masked))
     stop("plot.spatial_fit(type = \"coefficients\"): every location is masked ",
          "(non-finite coefficient, or a collinear local design at all of them); ",
-         "there is no surface to draw.", call. = FALSE)
+         "there is no surface to draw.",
+         if (is_intercept && !all(non_finite))
+           paste0(" The local intercept is an extrapolation to predictor values ",
+                  "of 0 wherever a predictor's local values are far from 0 ",
+                  "against their spread; centre the predictors to map it, or ",
+                  "pass mask = FALSE.") else "",
+         call. = FALSE)
 
   dat$.coef   <- vals
   dat$.masked <- masked
@@ -308,7 +329,10 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
     sprintf("mask = FALSE: %d location(s) with a collinear local design are drawn as if reliable", n_cn)
   subtitle <- if (any(masked))
     paste(c(sprintf("%d of %d locations masked (hollow):\n%s", sum(masked), nrow(dat),
-                    paste(c(if (isTRUE(mask) && n_cn) sprintf("%d with a collinear local design (condition index > 30)", n_cn),
+                    paste(c(if (isTRUE(mask) && n_cn)
+                              sprintf("%d with a collinear local design (%s > 30)", n_cn,
+                                      if (is_intercept) "condition index with the intercept"
+                                      else "slope condition index"),
                             if (n_nf) sprintf("%d with a non-finite coefficient", n_nf)),
                           collapse = "; ")),
             unmasked_cn), collapse = "\n")

@@ -80,7 +80,7 @@ test_that("print.spatial_fit labels and details a gwr_fit", {
 
   txt <- .s3_printed(gwr)
   expect_match(txt, "<GWR (GWmodel)> spatial model fit", fixed = TRUE)
-  expect_match(txt, "Bandwidth: 37.5 (adaptive, gaussian kernel)", fixed = TRUE)
+  expect_match(txt, "Bandwidth: 37.5 neighbours (adaptive, gaussian kernel)", fixed = TRUE)
   expect_match(txt, "AICc    : 412.25", fixed = TRUE)
 
   # A fixed bandwidth says "fixed", and the kernel defaults to bisquare.

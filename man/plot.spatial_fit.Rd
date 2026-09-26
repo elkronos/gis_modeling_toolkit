@@ -57,9 +57,14 @@ Requires 'gstat'.}
 \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 of one \code{term} mapped at the training locations, which is the
 reason to fit GWR at all.  Locations where the local design is
-collinear (the kernel-weighted window's scaled condition index is
-above 30, or the window is singular) are drawn hollow and grey
-(\code{mask = TRUE}), because the smooth surface a naive map draws
+collinear for that term are drawn hollow and grey
+(\code{mask = TRUE}): for a slope, where the kernel-weighted
+window's slope condition index (\code{cn_slopes}, predictors
+centred in the window) is above 30 or the window is singular, or
+where the index with the intercept (\code{cn}) is above 1e6; for
+the Intercept, where \code{cn} is above 30 (a predictor far from 0
+against its local spread makes the local intercept an
+extrapolation).  They are masked because the smooth surface a naive map draws
 over them is the picture of an unstable estimate, not of a
 relationship; the subtitle counts them.  The condition indices are
 the fit's \code{info$local_collinearity}, computed for every
@@ -77,8 +82,8 @@ map, one of the names \code{coef(x)} returns.  Default \code{NULL}: the
 first predictor.  Ignored by the other types.}
 
 \item{mask}{For \code{type = "coefficients"}: whether to draw locations
-whose local design is collinear (scaled condition index of the
-kernel-weighted window above 30, or singular) as hollow grey points
+whose local design is collinear for that term (see
+\code{type = "coefficients"}) as hollow grey points
 instead of colouring them by a coefficient that is not to be believed
 there.  Default \code{TRUE}.  Locations whose coefficient is non-finite
 are masked either way.}
