@@ -292,6 +292,21 @@
 }
 
 
+# Fold labels are numbered by the rule cv_*() uses (.folds_from_labels()):
+# numbers in numeric order, a factor by its own levels, anything else in C
+# (radix) order.  as.factor() sorted character labels under the session's
+# LC_COLLATE, so "north"/"North" came out in a different order under en_US
+# than under C, and fold k here need not be fold k in a cv_*() result built
+# from the same labels.  The partition, and so the threshold, never depended
+# on it; which fold a message names did.
+.aoa_label_factor <- function(folds) {
+  if (is.factor(folds)) return(folds)
+  if (is.numeric(folds)) return(factor(folds, levels = sort(unique(folds))))
+  x <- as.character(folds)
+  factor(x, levels = sort(unique(x), method = "radix"))
+}
+
+
 #' Normalise a fold specification into train/test position lists
 #'
 #' Accepts a \code{make_folds()} result, a bare list of \code{train}/\code{test}
@@ -320,7 +335,7 @@
     # unused levels, and each one would otherwise become an empty fold that
     # inflates the reported fold count and reaches .aoa_min_dist() with no
     # test rows.
-    f <- droplevels(as.factor(folds))
+    f <- droplevels(.aoa_label_factor(folds))
     if (anyNA(f))
       stop("area_of_applicability(): `folds` contains missing labels.",
            call. = FALSE)

@@ -160,3 +160,38 @@ test_that("all-zero importance weights give an AOA instead of an error", {
                                      weights = c(a = -1)),
                "pmax\\(importance, 0\\)")
 })
+
+
+test_that("fold labels are numbered by the rule cv_*() uses", {
+  splits <- spatialkit:::.aoa_fold_splits
+  tests_of <- function(sp) lapply(sp, `[[`, "test")
+
+  # Numbers in numeric order: fold 3 is label 10.
+  expect_identical(tests_of(splits(rep(c(10, 2, 1), each = 3), 9)),
+                   list(7:9, 4:6, 1:3))
+  # A factor by its own levels, even when they are not sorted.
+  expect_identical(tests_of(splits(factor(c("s", "s", "n", "n"),
+                                          levels = c("s", "n")), 4)),
+                   list(1:2, 3:4))
+  # Anything else in C (radix) order, whatever the session's collation.
+  lab <- c("north", "North", "south", "South")
+  expect_identical(tests_of(splits(lab, 4)), list(2L, 4L, 1L, 3L))
+  # ... which is how cv_*() numbers the same labels.
+  cv <- spatialkit:::.folds_from_labels(lab, data.frame(..row_id = 1:4),
+                                        "cv_spatial")
+  expect_identical(tests_of(cv), tests_of(splits(lab, 4)))
+})
+
+
+test_that("character fold labels do not follow the session's collation", {
+  # as.factor() sorted under LC_COLLATE, which puts "north" before "North"
+  # in en_US and after it in C.  Only testable where en_US is installed.
+  ok <- suppressWarnings(tryCatch({
+    withr::local_collate("en_US.UTF-8")
+    grepl("en_US", Sys.getlocale("LC_COLLATE"))
+  }, error = function(e) FALSE))
+  skip_if_not(ok, "the en_US.UTF-8 collation is not available")
+  lab <- c("north", "North", "south", "South")
+  expect_identical(lapply(spatialkit:::.aoa_fold_splits(lab, 4), `[[`, "test"),
+                   list(2L, 4L, 1L, 3L))
+})
