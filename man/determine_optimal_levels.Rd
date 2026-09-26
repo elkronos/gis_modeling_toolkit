@@ -52,10 +52,11 @@ both \code{response_var} and \code{predictor_vars} upgrades
 the response (see "Post-selection inference").}
 
 \item{select_on}{\code{"all"} (default) selects on every point;
-\code{"split"} selects on one spatially blocked half of the points and
-returns the other half as the set to estimate on, so that the standard
-errors computed downstream on the chosen cells are not post-selection.
-See "Post-selection inference".}
+\code{"split"} reads the response on one spatially blocked half of the
+points only and returns the other half as the set to estimate on, so
+that the standard errors computed downstream on the chosen cells are not
+post-selection.  The count is still chosen for the whole layer.  See
+"Post-selection inference".}
 }
 \value{
 An integer vector of candidate level counts, \strong{best first}:
@@ -180,12 +181,17 @@ downstream standard errors are computed over.
 
 \code{select_on = "split"} is sample splitting: the layer is cut into two
 spatially blocked halves (\code{\link{make_folds}(k = 2, method =
-"block_kfold")}), the selection runs on the first half only, and the row
-positions of both halves come back in the \code{"split"} attribute
-(\code{selection} and \code{estimation}).  Build the tessellation on
+"block_kfold")}), the criteria that read the response (Moran's I on the
+cell means) read the first half only, and the row positions of both
+halves come back in the \code{"split"} attribute (\code{selection} and
+\code{estimation}).  The WSS curve and the k-means cells still use every
+point: they read coordinates alone, and the count is for a tessellation
+of every point, so it is chosen on that layer's extent and clusters
+rather than on half of them.  Build the tessellation on
 every point (cells are geometry), but aggregate and fit on
-\code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
-saw; that restores nominal coverage with no new theory.  The price is
+\code{data_sf[attr(x, "split")$estimation, ]}, whose response the
+selection never saw; that restores nominal coverage with no new theory.
+The price is
 precision: half the points estimate, and García Rasines and Young (2023)
 show a \emph{contiguous} spatial half is less efficient than the
 exchangeable split the i.i.d. theory assumes, because the two halves are

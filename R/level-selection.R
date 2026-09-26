@@ -417,10 +417,11 @@
 #'   \code{"geometric"} to \code{"combined"}: the selection then depends on
 #'   the response (see "Post-selection inference").
 #' @param select_on \code{"all"} (default) selects on every point;
-#'   \code{"split"} selects on one spatially blocked half of the points and
-#'   returns the other half as the set to estimate on, so that the standard
-#'   errors computed downstream on the chosen cells are not post-selection.
-#'   See "Post-selection inference".
+#'   \code{"split"} reads the response on one spatially blocked half of the
+#'   points only and returns the other half as the set to estimate on, so
+#'   that the standard errors computed downstream on the chosen cells are not
+#'   post-selection.  The count is still chosen for the whole layer.  See
+#'   "Post-selection inference".
 #' @section Post-selection inference:
 #' When the selection reads the response (here, whenever both
 #' \code{response_var} and \code{predictor_vars} are supplied), everything
@@ -436,12 +437,17 @@
 #'
 #' \code{select_on = "split"} is sample splitting: the layer is cut into two
 #' spatially blocked halves (\code{\link{make_folds}(k = 2, method =
-#' "block_kfold")}), the selection runs on the first half only, and the row
-#' positions of both halves come back in the \code{"split"} attribute
-#' (\code{selection} and \code{estimation}).  Build the tessellation on
+#' "block_kfold")}), the criteria that read the response (Moran's I on the
+#' cell means) read the first half only, and the row positions of both
+#' halves come back in the \code{"split"} attribute (\code{selection} and
+#' \code{estimation}).  The WSS curve and the k-means cells still use every
+#' point: they read coordinates alone, and the count is for a tessellation
+#' of every point, so it is chosen on that layer's extent and clusters
+#' rather than on half of them.  Build the tessellation on
 #' every point (cells are geometry), but aggregate and fit on
-#' \code{data_sf[attr(x, "split")$estimation, ]}, which the selection never
-#' saw; that restores nominal coverage with no new theory.  The price is
+#' \code{data_sf[attr(x, "split")$estimation, ]}, whose response the
+#' selection never saw; that restores nominal coverage with no new theory.
+#' The price is
 #' precision: half the points estimate, and García Rasines and Young (2023)
 #' show a \emph{contiguous} spatial half is less efficient than the
 #' exchangeable split the i.i.d. theory assumes, because the two halves are
@@ -566,18 +572,21 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   }
   data_sf <- ensure_projected(data_sf)
 
-  # Sample splitting: select on one spatial half, hand the other back for
-  # estimation.  Done on the full layer, before the subsample, so the
-  # positions returned index `data_sf` as the caller passed it.
+  # Sample splitting: read the response on one spatial half, hand the other
+  # back for estimation.  Done on the full layer, before the subsample, so
+  # the positions returned index `data_sf` as the caller passed it.
   split <- NULL
   if (identical(select_on, "split")) {
     split <- .spatial_half_split(data_sf, seed = set_seed,
                                  caller = "determine_optimal_levels")
     # The split exists so that a selection made on the response can be
-    # estimated on points it never saw.  A geometric selection reads no
-    # response, so there is nothing for the other half to protect; it sees
-    # every point, as the page says, and only the attribute is added.
-    if (has_model_vars) data_sf <- data_sf[split$selection, , drop = FALSE]
+    # estimated on points it never saw, so only the Moran's I pass, which
+    # reads the response, is held to the selection half (`in_sel` below).
+    # The WSS sweep and the k-means partitions read coordinates alone and
+    # keep every point: the count is for a tessellation of every point.  The
+    # whole selection used to run on the half, and a count chosen for the
+    # half's extent and clusters (2 where the layer has 4) was then applied
+    # to the whole layer.
   }
   .with_split <- function(out) {
     if (!is.null(split)) attr(out, "split") <- split
@@ -635,9 +644,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     storage.mode(pred_mat) <- "double"
   }
 
+  # The rows whose response the model-aware criteria may read.
+  moran_rows <- if (!is.null(split) && has_model_vars) seq_len(n) %in% split$selection
+                else rep(TRUE, n)
+
   if (n > sample_n) {
     idx <- sample(seq_len(n), sample_n)
     xy <- xy[idx, , drop = FALSE]
+    moran_rows <- moran_rows[idx]
     if (has_model_vars) {
       resp_vec <- resp_vec[idx]
       pred_mat <- pred_mat[idx, , drop = FALSE]
@@ -760,7 +774,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     if (is.null(kb)) next
     km <- kb$km
     wss_eval[k]   <- km$tot.withinss
-    mi            <- .morans_i_for_k(xy, resp_vec, pred_mat, km$cluster)
+    # Cells of the whole layer, means of the rows the selection may read.
+    mi            <- .morans_i_for_k(xy[moran_rows, , drop = FALSE], resp_vec[moran_rows],
+                                     pred_mat[moran_rows, , drop = FALSE],
+                                     km$cluster[moran_rows])
     moran_vals[k] <- mi[["I"]]
     moran_z[k]    <- mi[["z"]]
   }

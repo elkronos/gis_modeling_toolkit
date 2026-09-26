@@ -216,9 +216,15 @@
 #'   \code{NULL} and a response is given, one is estimated on the subsample
 #'   with the same \code{predictor_vars}.
 #' @param select_on \code{"all"} (default) profiles every point;
-#'   \code{"split"} profiles one spatially blocked half and returns the other
-#'   half as the set to estimate on, in the \code{"split"} attribute.  See
-#'   the "Post-selection inference" section of
+#'   \code{"split"} reads the response on one spatially blocked half only
+#'   (the OLS fit, the variogram, \code{rss}, \code{cp} and \code{moran_z})
+#'   and returns the other half as the set to estimate on, in the
+#'   \code{"split"} attribute.  The cells, \code{wss}, \code{elbow}, and the
+#'   extent and point counts behind the bounds, \code{cp}'s variance term and
+#'   \code{reliability} still come from every point, because the
+#'   tessellation the count is for is built on every point: the levels are
+#'   cell counts for the whole layer, and the estimation half's response
+#'   never touches them.  See the "Post-selection inference" section of
 #'   \code{\link{determine_optimal_levels}}; the profile reads the response
 #'   whenever \code{response_var} is given.
 #' @return A data.frame of class \code{resolution_profile} with one row per
@@ -318,18 +324,23 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
 
   # Sample splitting, on the full layer before the subsample, so the
   # positions index `data_sf` as passed (rows dropped above excepted).
+  # The cells are geometry, and the tessellation the count is for is built on
+  # every point, so the partitions, the WSS and the bounds keep the whole
+  # layer; only what reads the response is held to the selection half
+  # (`in_sel`, below).  The profile used to run on the half alone, and the
+  # count it chose for the half's extent, point count and clusters was then
+  # applied to the whole layer.
   split <- NULL
+  in_sel <- NULL
   if (identical(select_on, "split")) {
     split <- .spatial_half_split(data_sf, seed = seed, caller = "resolution_profile")
+    in_sel <- seq_len(nrow(xy)) %in% split$selection
     if (!all(ok_xy)) {
       # Positions refer to the layer after the drop; map them back.
       kept <- which(ok_xy)
       split$selection  <- kept[split$selection]
       split$estimation <- kept[split$estimation]
-      keep_sel <- match(split$selection, kept)
-    } else keep_sel <- split$selection
-    data_sf <- data_sf[keep_sel, , drop = FALSE]
-    xy <- xy[keep_sel, , drop = FALSE]
+    }
   }
 
   resp <- NULL; pred <- NULL
@@ -399,42 +410,48 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     data_sf <- data_sf[idx, , drop = FALSE]
     if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
     if (has_pred) pred <- pred[idx, , drop = FALSE]
+    if (!is.null(in_sel)) in_sel <- in_sel[idx]
   }
   n <- nrow(xy)
 
   # The variable the cells have to represent: the response, or what the
   # predictors leave of it.  Rows with a non-finite value drop out of the RSS
-  # and the Moran statistic but stay in the geometry.
+  # and the Moran statistic but stay in the geometry, and so, under
+  # select_on = "split", do the rows of the estimation half.
   variable <- NA_character_
   y <- NULL
   if (has_resp) {
+    use <- if (is.null(in_sel)) resp_ok else resp_ok & in_sel
     y <- rep(NA_real_, n)
-    y[resp_ok] <- resp[resp_ok]
+    y[use] <- resp[use]
     variable <- "response"
     if (has_pred) {
       # Fitted on the complete rows only.  lm.fit() refuses any NA, and a
       # first fit on every row turned one missing value into "the OLS fit
       # failed": the raw response, trend and all, was then scored against a
       # variogram estimate_sac_range() had fitted to the residuals.
-      fit <- if (sum(resp_ok) > ncol(pred) + 1L)
-        try(stats::lm.fit(x = cbind(1, pred[resp_ok, , drop = FALSE]), y = resp[resp_ok]),
+      fit <- if (sum(use) > ncol(pred) + 1L)
+        try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use]),
             silent = TRUE)
       if (!is.null(fit) && !inherits(fit, "try-error")) {
-        y[resp_ok] <- fit$residuals
+        y[use] <- fit$residuals
         variable <- "residuals"
       } else {
         .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",
                          "on the %d complete row(s); scoring the raw response."),
-                  sum(resp_ok))
+                  sum(use))
       }
     }
   }
 
-  # Variogram: supplied, or estimated on the subsample.
+  # Variogram: supplied, or estimated on the subsample (its selection half
+  # under select_on = "split": the range reads the response).
   vg <- NULL
   if (is.null(sac) && has_resp && requireNamespace("gstat", quietly = TRUE)) {
     sac <- tryCatch(
-      suppressWarnings(estimate_sac_range(data_sf, response_var,
+      suppressWarnings(estimate_sac_range(if (is.null(in_sel)) data_sf
+                                          else data_sf[in_sel, , drop = FALSE],
+                                          response_var,
                                           predictor_vars = if (has_pred) predictor_vars else NULL,
                                           seed = seed)),
       error = function(e) {
@@ -657,7 +674,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               attr(x, "nstart"), attr(x, "wss_bumps")))
   sp <- attr(x, "split")
   if (!is.null(sp))
-    cat(sprintf("  split       : selected on %d points; estimate on the other %d (attr \"split\")\n",
+    cat(sprintf("  split       : response read on %d points; estimate on the other %d (attr \"split\")\n",
                 length(sp$selection), length(sp$estimation)))
   cat("\n")
   tab <- as.data.frame(unclass(x))
