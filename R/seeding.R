@@ -31,8 +31,13 @@
 #'   not join the distance calculation and dominate it; rows with empty or
 #'   non-finite coordinates are dropped with a warning, so they never reach
 #'   `stats::kmeans()`, which fails on them without naming a cause. A lon/lat
-#'   cloud is projected before clustering.
-#' @param kmeans_nstart Integer; nstart for kmeans(). Default 10.
+#'   cloud, or one with no CRS whose coordinates look like lon/lat (the
+#'   heuristic [ensure_projected()] applies, with its warning), is projected
+#'   before clustering.
+#' @param kmeans_nstart Integer; nstart for kmeans(). Default 10. The
+#'   partition is [stats::kmeans()], not the best-of-25 k-means++ run that
+#'   [resolution_profile()] scored a count on, so it is not that partition;
+#'   see [voronoi_seeds_kmeans()].
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100.
 #' @param set_seed Optional integer RNG seed.
 #' @return An sf POINT object with seed_id and method columns. With
@@ -126,8 +131,16 @@ get_voronoi_seeds <- function(boundary = NULL,
       # If cloud is in lon/lat, project to a local CRS before k-means so
       # that clustering is distance-faithful (k-means in degrees is
       # distorted except in very small areas).
+      # A cloud with no CRS gets the lon/lat heuristic every other entry point
+      # applies (ensure_projected() warns when it fires).  .is_longlat() alone
+      # is FALSE for a missing CRS, so CRS-less degrees were clustered as if
+      # they were metres -- 800 points 89 km wide and 111 km tall were split
+      # east-west instead of north-south -- while build_tessellation()
+      # projected the very same points.
+      cloud_crs   <- sf::st_crs(cloud)
       cloud_for_km <- cloud
-      cloud_is_ll <- .is_longlat(cloud)
+      cloud_is_ll <- .is_longlat(cloud) ||
+        (is.na(cloud_crs) && isTRUE(.looks_like_lonlat(cloud)$lonlat))
       if (cloud_is_ll) {
         cloud_for_km <- ensure_projected(cloud)
         .log_info("get_voronoi_seeds(kmeans): projecting cloud from lon/lat before k-means clustering.")
@@ -175,10 +188,12 @@ get_voronoi_seeds <- function(boundary = NULL,
         crs = sf::st_crs(cloud_for_km)
       )
       s <- sf::st_sf(seed_id = seq_len(k_use), method = "kmeans", geometry = centers_sfc)
-      # Transform back to original cloud CRS if we projected for k-means
-      if (cloud_is_ll && !identical(sf::st_crs(s), sf::st_crs(cloud))) {
-        s <- sf::st_transform(s, sf::st_crs(cloud))
-      }
+      # Back to the cloud's own coordinates if we projected for k-means: its
+      # CRS, or for a CRS-less cloud the degrees it was given in, CRS-less
+      # again (st_transform() to a missing CRS is an error).
+      if (cloud_is_ll)
+        sf::st_geometry(s) <- .back_to_input_crs(sf::st_geometry(s), cloud_for_km,
+                                                 cloud_crs)
       # Which cloud points fed which seed, and how tight each cluster is:
       # `cluster` is one seed_id per clustered cloud row (`rows` gives those
       # rows' positions in the cloud, since unusable rows were dropped).
@@ -250,15 +265,28 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' Places `k` seed points at k-means cluster centres of the observed
 #' coordinates, so seeds (and the Voronoi cells built from them) follow the
 #' sampling density: clusters of observations attract seeds, empty ground gets
-#' none. Reach for this when you want cells that each carry a comparable number
-#' of observations, which is what makes per-cell aggregates in
-#' [summarize_by_cell()] similarly precise. Use [voronoi_seeds_random()]
-#' instead when you want coverage of the study area rather than of the data,
-#' and [get_voronoi_seeds()] to pick between them by name.
+#' none. Reach for this when you want cells that follow the data, so that
+#' counts per cell vary far less than on a fixed grid over clustered points
+#' (k-means does not equalise them, it minimises the spread of points around
+#' each centre), which is what keeps per-cell aggregates in
+#' [summarize_by_cell()] from resting on one or two observations. Use
+#' [voronoi_seeds_random()] instead when you want coverage of the study area
+#' rather than of the data, and [get_voronoi_seeds()] to pick between them by
+#' name.
 #'
 #' Lon/lat input is projected first so the k-means distances are metric and not
-#' degrees. Rows with empty or non-finite coordinates are dropped with a
-#' warning, and `k` is clamped to the number of distinct positions.
+#' degrees; so is input with no CRS whose coordinates look like lon/lat (the
+#' heuristic [ensure_projected()] applies, with its warning), and the seeds
+#' come back in the input's own coordinates. Rows with empty or non-finite
+#' coordinates are dropped with a warning, and `k` is clamped to the number of
+#' distinct positions.
+#'
+#' The partition is [stats::kmeans()] (Hartigan-Wong) with `nstart` random
+#' starts. [resolution_profile()] and [determine_optimal_levels()] score each
+#' count on a different run, by default the best of 25 k-means++ restarts,
+#' which usually reaches a lower within-cluster sum of squares; the seeds for
+#' a chosen count are therefore not the partition that count was scored on.
+#' Raising `nstart` narrows the gap but does not close it.
 #'
 #' @param points_sf An sf object with POINT geometries.
 #' @param k Integer; requested number of clusters, treated as an upper bound
@@ -266,7 +294,13 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   of distinct point positions and `nrow(points_sf) - 1`, because k-means can
 #'   produce neither more centres than there are distinct points nor as many
 #'   centres as there are rows. Check `nrow()` on the result.
-#' @param set_seed Optional integer RNG seed. Default 456.
+#' @param set_seed Optional integer RNG seed. Default 456, so a call gives the
+#'   same seeds every time whatever the session's random-number state; an
+#'   outer [set.seed()] does not change them, and the caller's random-number
+#'   stream is left as it was. Pass `NULL` to draw the k-means starts from
+#'   the session's stream instead (the default of [get_voronoi_seeds()]).
+#' @param nstart Number of random starts for [stats::kmeans()]; the best is
+#'   kept. Default 10.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()].
@@ -282,7 +316,7 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' nrow(seeds)   # at most 8: one seed per non-empty cluster
 #' seeds         # the cluster centres, as an sf POINT layer in the points' CRS
 #' @export
-voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
+voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10) {
   .assert_sf(points_sf, "POINT", "points_sf")
   # `k` was never validated here, unlike get_voronoi_seeds(), which routes
   # `n` through .resolve_cell_count(): k = NA or a length-2 vector aborted on
@@ -293,9 +327,18 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
                 max = .Machine$integer.max,
                 what = "a single positive number of seeds")
 
-  # Project to metric CRS if lon/lat to make k-means distance-faithful
+  .check_scalar(nstart, "nstart", "voronoi_seeds_kmeans", min = 1,
+                max = .Machine$integer.max,
+                what = "a single positive number of k-means restarts")
+
+  # Project to metric CRS if lon/lat to make k-means distance-faithful.  A
+  # CRS-less layer gets the lon/lat heuristic ensure_projected() applies
+  # everywhere else (with its warning); .is_longlat() is FALSE for a missing
+  # CRS, so CRS-less degrees used to be clustered as if they were metres.
+  crs_in     <- sf::st_crs(points_sf)
   pts_for_km <- points_sf
-  pts_is_ll <- .is_longlat(points_sf)
+  pts_is_ll  <- .is_longlat(points_sf) ||
+    (is.na(crs_in) && isTRUE(.looks_like_lonlat(points_sf)$lonlat))
   if (pts_is_ll) {
     pts_for_km <- ensure_projected(points_sf)
   }
@@ -331,12 +374,16 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
-  km <- stats::kmeans(coords, centers = k_use, iter.max = 50, nstart = 10)
+  km <- stats::kmeans(coords, centers = k_use, iter.max = 50,
+                      nstart = as.integer(nstart))
   cent <- as.data.frame(km$centers); names(cent) <- c("x", "y")
   result <- sf::st_as_sf(cent, coords = c("x", "y"), crs = sf::st_crs(pts_for_km))
-  # Transform back to original CRS if we projected
+  # Back to the input's own coordinates if we projected: its CRS, or for a
+  # CRS-less layer the degrees it was given in, CRS-less again
+  # (st_transform() to a missing CRS is an error).
   if (pts_is_ll) {
-    result <- sf::st_transform(result, sf::st_crs(points_sf))
+    sf::st_geometry(result) <- .back_to_input_crs(sf::st_geometry(result),
+                                                  pts_for_km, crs_in)
   }
   # Same output contract as get_voronoi_seeds(), so the three seeding
   # functions are drop-in interchangeable.
@@ -357,16 +404,22 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #' sensitivity comparison: re-running an analysis over several random seedings
 #' shows how much of a result depends on one particular tessellation.
 #'
-#' Sampling is by rejection inside the polygon, so an awkward geometry can
-#' return fewer than `k` seeds; that shortfall is warned about rather than
-#' silently padded.
+#' Seeds are drawn uniformly inside the polygon. When a draw falls short of `k`
+#' it is topped up with further uniform draws from the same polygon, so the
+#' result has exactly `k` seeds; only a geometry that still yields too few
+#' after ten top-ups returns fewer, and that shortfall is logged.
 #'
 #' @param boundary An sf or sfc polygonal object.
 #' @param k Integer; number of random seeds.
-#' @param set_seed Integer RNG seed. Default 456.
-#' @return An sf object of **at most** `k` random POINTs (rejection sampling
-#'   inside an awkward geometry can fall short of `k`, which is warned about),
-#'   with `seed_id` and `method = "random"` columns matching
+#' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
+#'   drawn from the session's random-number stream, so consecutive calls give
+#'   different seedings and [set.seed()] before a call makes it reproducible.
+#'   Pass a number to get the same seeds whatever that stream holds; the
+#'   caller's stream is then left as it was. The default used to be 456,
+#'   which made every call return the same "random" seeding, even inside a
+#'   loop over [set.seed()].
+#' @return An sf object of `k` random POINTs (fewer only in the degenerate
+#'   case above), with `seed_id` and `method = "random"` columns matching
 #'   [get_voronoi_seeds()].
 #' @family tessellation
 #' @examples
@@ -374,11 +427,15 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456) {
 #' bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
+#' set.seed(1)
 #' seeds <- voronoi_seeds_random(bnd, k = 10)
-#' nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
+#' nrow(seeds)   # 10
 #' seeds
+#' # Another call is another seeding; set_seed pins one.
+#' identical(st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)),
+#'           st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)))
 #' @export
-voronoi_seeds_random <- function(boundary, k, set_seed = 456) {
+voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # `k` was never validated here, unlike get_voronoi_seeds(), which routes
   # `n` through .resolve_cell_count(): k = NA or a length-2 vector aborted on
   # the clamp below, k above .Machine$integer.max became NA through

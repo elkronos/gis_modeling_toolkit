@@ -47,9 +47,14 @@ the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows with empty or
 non-finite coordinates are dropped with a warning, so they never reach
 \code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
-cloud is projected before clustering.}
+cloud, or one with no CRS whose coordinates look like lon/lat (the
+heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
+before clustering.}
 
-\item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10.}
+\item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. The
+partition is \code{\link[stats:kmeans]{stats::kmeans()}}, not the best-of-25 k-means++ run that
+\code{\link[=resolution_profile]{resolution_profile()}} scored a count on, so it is not that partition;
+see \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}.}
 
 \item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100.}
 
