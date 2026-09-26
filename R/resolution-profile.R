@@ -168,7 +168,10 @@
 #'   representative points).
 #' @param response_var Optional response column name (numeric or logical).
 #'   Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
-#'   sets the floor of the ladder and \code{reliability}.
+#'   sets the floor of the ladder and \code{reliability}.  Rows where it, or a
+#'   predictor, is missing or non-finite stay in the geometry and are left out
+#'   of the OLS fit, the RSS, \code{cp} and \code{moran_z}; a logged warning
+#'   gives their number.
 #' @param predictor_vars Optional predictor column names (numeric or
 #'   logical).  With them, \code{cp} scores the OLS residuals of the response
 #'   on the predictors, the variogram is estimated from those residuals, and
@@ -335,13 +338,27 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   cleanup <- .with_seed(seed)
   on.exit(cleanup(), add = TRUE)
 
+  # Rows the response criteria can read: a finite response and, with
+  # predictors, finite predictors.  The rest stay in the geometry.
+  resp_ok <- NULL
+  if (has_resp) {
+    resp_ok <- is.finite(resp)
+    if (has_pred) resp_ok <- resp_ok & apply(is.finite(pred), 1L, all)
+    if (!all(resp_ok))
+      .log_warn(paste0("resolution_profile(): %d of %d row(s) have a missing or ",
+                       "non-finite %s; they stay in the geometry but are left out ",
+                       "of the OLS fit, the RSS, Cp and Moran's z."),
+                sum(!resp_ok), length(resp_ok),
+                if (has_pred) "response or predictor" else "response")
+  }
+
   # Subsample, keeping everything aligned.
   n_all <- nrow(xy)
   if (n_all > sample_n) {
     idx <- sample(seq_len(n_all), sample_n)
     xy <- xy[idx, , drop = FALSE]
     data_sf <- data_sf[idx, , drop = FALSE]
-    if (has_resp) resp <- resp[idx]
+    if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
     if (has_pred) pred <- pred[idx, , drop = FALSE]
   }
   n <- nrow(xy)
@@ -352,17 +369,24 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   variable <- NA_character_
   y <- NULL
   if (has_resp) {
-    y <- resp
+    y <- rep(NA_real_, n)
+    y[resp_ok] <- resp[resp_ok]
     variable <- "response"
     if (has_pred) {
-      fit <- try(stats::lm.fit(x = cbind(1, pred), y = resp), silent = TRUE)
-      ok_rows <- is.finite(resp) & apply(is.finite(pred), 1L, all)
-      if (!inherits(fit, "try-error") && sum(ok_rows) > ncol(pred) + 1L) {
-        fit <- stats::lm.fit(x = cbind(1, pred[ok_rows, , drop = FALSE]), y = resp[ok_rows])
-        y <- rep(NA_real_, n); y[ok_rows] <- fit$residuals
+      # Fitted on the complete rows only.  lm.fit() refuses any NA, and a
+      # first fit on every row turned one missing value into "the OLS fit
+      # failed": the raw response, trend and all, was then scored against a
+      # variogram estimate_sac_range() had fitted to the residuals.
+      fit <- if (sum(resp_ok) > ncol(pred) + 1L)
+        try(stats::lm.fit(x = cbind(1, pred[resp_ok, , drop = FALSE]), y = resp[resp_ok]),
+            silent = TRUE)
+      if (!is.null(fit) && !inherits(fit, "try-error")) {
+        y[resp_ok] <- fit$residuals
         variable <- "residuals"
       } else {
-        .log_warn("resolution_profile(): the OLS fit on `predictor_vars` failed; scoring the raw response.")
+        .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",
+                         "on the %d complete row(s); scoring the raw response."),
+                  sum(resp_ok))
       }
     }
   }
