@@ -6,6 +6,8 @@
 #' backend can use.  All non-POINT geometries (including MULTIPOINT) are
 #' coerced to representative points via \code{coerce_to_points()}, so
 #' downstream coordinate extraction always aligns one row per observation.
+#' Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+#' dropped, because every backend works in 2-D map distance.
 #'
 #' The response may not appear in \code{predictor_vars}.  Using it as its own
 #' predictor is leakage no backend catches: an out-of-bag R^2 near 1 in the
@@ -34,8 +36,9 @@
 #' @param require_response Logical; if FALSE the response column is not
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
-#' @return An sf object with POINT geometry, cleaned of rows carrying missing
-#'   or non-finite values in the modelling columns or in the coordinates.  What
+#' @return An sf object with 2-D (XY) POINT geometry, cleaned of rows
+#'   carrying missing or non-finite values in the modelling columns or in the
+#'   coordinates.  What
 #'   was removed is recorded on the attribute \code{"dropped"}, a list with
 #'   \code{n} (rows dropped), \code{n_geometry} (how many of them for an
 #'   empty or non-finite geometry), \code{which} (their positions in
@@ -140,6 +143,16 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     data_sf <- coerce_to_points(data_sf, pointize)
   }
 
+  # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but
+  # POINT Z is ordinary input (GPS and GeoPackage elevations, KML's altitude,
+  # PointZ shapefiles) and the sf -> sp coercion GWmodel needs keeps the third
+  # column.  GWmodel then refused the data ("Please input correct coordinates
+  # of data points"), fitted on 3-D distances above 2500 rows, and in
+  # predict() on POINT Z newdata reshaped XYZ with matrix(, ncol = 2) into the
+  # wrong prediction locations, with no error.  make_folds(),
+  # estimate_sac_range() and the fold-separation check already drop ZM.
+  data_sf <- .drop_zm(data_sf)
+
   if (!is.null(boundary)) {
     bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
     if (!inherits(bnd, "sf"))
@@ -218,6 +231,28 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
                               ifelse(!ok_cc[drop_idx], "missing", "non_finite")))
   ))
   out
+}
+
+
+#' Drop the Z and M coordinates of a POINT layer, when it has any
+#'
+#' Tested on the coordinates themselves.  A POINT is a numeric vector of two
+#' values (XY), three (XYZ or XYM) or four (XYZM), so a third coordinate on
+#' any row shows as more than two values per feature.  sf's
+#' \code{z_range}/\code{m_range} attributes are not enough: sf does not set
+#' them on points built with \code{st_as_sf(coords = c("x", "y", "z"))}.  And
+#' \code{sf::st_zm()} rebuilds every geometry with an R call each, too slow to
+#' spend on every 2-D layer a \code{predict()} call prepares.
+#'
+#' @param x An sf object with POINT geometry.
+#' @return \code{x}, with XY geometry.
+#' @keywords internal
+#' @noRd
+.drop_zm <- function(x) {
+  g <- sf::st_geometry(x)
+  if (length(unlist(g, use.names = FALSE)) > 2L * length(g))
+    x <- sf::st_zm(x, drop = TRUE, what = "ZM")
+  x
 }
 
 
