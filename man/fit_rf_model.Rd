@@ -55,7 +55,10 @@ the setting is recorded in \code{$info} and printed with the fit.}
 \item{sample_fraction}{Fraction of rows drawn for each tree.  \code{NULL}
 (default) uses ranger's rule: all rows when \code{replace = TRUE},
 0.632 (the expected share of distinct rows in a bootstrap sample)
-when \code{replace = FALSE}.  A single number in (0, 1] overrides it.}
+when \code{replace = FALSE}.  A single number in (0, 1] overrides it.
+\code{replace = FALSE} with \code{sample_fraction = 1} grows every tree
+on every row, so nothing is out of bag: the fit warns, and see
+\strong{What fitted() returns}.}
 
 \item{seed}{Seed passed to ranger. Default 123.}
 
@@ -136,6 +139,14 @@ consequence is that \code{summary()} means something different here than for
 a \code{gwr_fit} or \code{bayesian_fit}, whose fitted values are in-sample:
 do not compare the two directly. \code{\link{compare_models_cv}} exists for
 that.
+
+A row that every tree sampled has no out-of-bag prediction, and ranger
+reports \code{NaN} for it.  That is every row under \code{replace = FALSE}
+with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
+The fit warns with the count; \code{fitted()} and \code{residuals()} are
+\code{NaN} on those rows, and \code{summary()} says how many rows its
+metrics were computed on.  With no row out of bag at all, the OOB error and
+the permutation importance are \code{NaN} too.
 }
 
 \examples{

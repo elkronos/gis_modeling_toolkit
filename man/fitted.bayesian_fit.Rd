@@ -12,8 +12,9 @@
 \item{...}{Ignored.}
 }
 \value{
-Numeric vector of length \code{object$n} (all \code{NA} if the
-posterior draw failed).
+Numeric vector of length \code{object$n}.  A posterior that cannot
+be drawn is an error, as is a family with a probability per response
+category (ordinal, categorical), which has no single fitted value per row.
 }
 \description{
 Posterior expectation at the training locations: the column means of
@@ -48,8 +49,12 @@ Two consequences of the shared environment remain and cannot be removed from
 here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
 share (harmless, since the other simply recomputes), and \code{identical()}
 cannot distinguish two fits by their caches.  The digest covers
-\code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
-what \code{\link{clear_fitted_cache}} is for.
+\code{data_sf} only.  The entry is also tied to the engine that computed
+it -- a refit or \code{update()} of the \code{brmsfit} is a different
+sampling run and recomputes -- but a \code{brmsfit} edited by hand in place
+is what \code{\link{clear_fitted_cache}} is for.  The entry holds only the
+values and a small identifier of the sampling run, so a fit saved with
+\code{saveRDS()} after \code{fitted()} is no larger for it.
 }
 
 \seealso{

@@ -46,9 +46,11 @@ as \code{brms::zero_inflated_poisson()}, \code{brms::negbinomial()},
 \code{brms::hurdle_poisson()}, \code{brms::bernoulli()} or
 \code{brms::Beta()}.  Default \code{NULL}, resolved to
 \code{stats::gaussian()}.  The family reaches \code{brms::brm()}
-unchanged with the spatial GP term still in the formula, so any response
-type brms can fit, this function can fit; see the section on
-non-Gaussian responses and the count example below.}
+unchanged with the spatial GP term still in the formula.  A factor
+response is accepted only under \code{brms::categorical()} or an ordinal
+family, and those fits have no single expected value per row, so several
+methods cannot use them; see the section on non-Gaussian responses for
+what each family supports, and the count example below.}
 
 \item{gp_k}{Positive integer giving the number of GP basis functions
 \emph{per dimension}, or NULL (default) to derive it from the
@@ -59,7 +61,11 @@ length-scale/domain ratio.  The fitted model carries
 NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
 wide enough to contain the longest plausible correlation range; a value
 that is too small truncates the domain and degrades the approximation for
-smooth, long-range surfaces.}
+smooth, long-range surfaces.  When you set \code{gp_c} and leave
+\code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
+wider boundary needs more basis functions to resolve the same
+length-scale, so raising \code{gp_c} raises the derived \code{gp_k} with
+it, up to the cap of 50 per dimension (a capped value is logged).}
 
 \item{gp_iso}{Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
 (the default) fits a separate length-scale per coordinate axis, letting the
@@ -108,10 +114,24 @@ exactly the setting the divergence warning tells you to raise.}
 
 \item{standardize_predictors}{Logical; center and scale numeric predictors
 before fitting. Default FALSE. When TRUE, the scaling parameters are
-stored in the return value so predictions can be computed correctly.}
+stored in the return value (\code{$info$predictor_scaling}, a
+\code{center} and \code{scale} per predictor) so predictions can be
+computed correctly.  The model is then fitted on the standardised
+predictors, so \code{coef()} reports a slope per standard deviation of
+each predictor and an intercept at the predictor means, not the raw-unit
+values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.}
 
-\item{check_convergence}{Logical; after fitting, check for divergences,
-low ESS, and high R-hat and issue warnings. Default TRUE.}
+\item{check_convergence}{Logical; after fitting, check for divergent
+transitions, R-hat above 1.05, an effective-sample-size ratio below 0.1,
+and a GP basis too coarse for the posterior length-scale.  Each problem
+found is written to the log as a WARN line (shown on the console unless
+\code{\link{spatialkit_quiet}()} is on), sets
+\code{$info$convergence_ok} to \code{FALSE}, and is detailed in
+\code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
+They are not raised as R warnings.  Under \pkg{rstan} the sampler raises
+its own R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so
+read \code{$info$convergence_ok}.  \code{FALSE} skips the checks and
+leaves \code{convergence_ok} \code{NA} (not checked).  Default TRUE.}
 
 \item{pointize}{Strategy for non-point geometry coercion.}
 
@@ -141,7 +161,9 @@ was calibrated over; gp_lscale_prior: the length-scale prior
 \code{brms::validate_prior()} reports the model will \emph{actually} use,
 which is not necessarily the one this function requested (several entries,
 semicolon-separated, if brms resolved the axes differently); loo, looic,
-convergence_ok, convergence_diagnostics: \code{n_divergent},
+convergence_ok (\code{TRUE} or \code{FALSE}, and \code{NA} when nothing
+was checked, as under \code{check_convergence = FALSE}),
+convergence_diagnostics: \code{n_divergent},
 \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
 \code{neff_failed}, the parameters that failed each check by name with
 their values (empty when none failed), which is what makes a failed
@@ -205,9 +227,12 @@ normalisation would leave every length-scale quantity in the wrong units.
 
 After fitting, the posterior length-scale is compared against the smallest
 scale the chosen basis can resolve
-(\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); a
-warning is issued when more than 10\% of the posterior mass falls below it,
-which is the signal that \code{gp_k} should be raised.
+(\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); when
+more than 10\% of the posterior mass falls below it a WARN line is logged
+and the share is recorded as
+\code{$info$convergence_diagnostics$gp_lscale_below_resolution}, which is
+the signal that \code{gp_k} should be raised.  This runs with the other
+checks, so only under \code{check_convergence = TRUE}.
 
 \strong{Coordinate scaling and anisotropy.}
 Before fitting the GP, X and Y coordinates are each centred and divided by
@@ -234,16 +259,35 @@ strategy, and \code{$info$gp_iso} records which kernel was used.
 }
 \section{Non-Gaussian responses}{
 
-Nothing in this function is Gaussian-specific except its default.  The
-response check is family-aware: a non-numeric response is refused only when
-the family resolves to gaussian, so a count, binary or bounded response
-passes straight through to brms under the family you name.  Zero-inflated
-and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
-have all been verified to reach \code{brms::brm()} with the GP term intact.
+Nothing in this function is Gaussian-specific except its default.  A
+numeric count, binary (0/1 or logical) or bounded response passes straight
+through to brms under the family you name; zero-inflated and hurdle
+counts, negative binomial, Bernoulli, beta, ordinal, categorical and
+mixture families have all been verified to reach \code{brms::brm()} with
+the GP term intact, the length-scale prior attached to each
+distributional parameter's GP.
 
-Two things follow.  First, the metrics that come back from
-\code{\link{model_metrics}()} and the \code{cv_*()} functions are not all
-meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+The response check is family-aware.  A factor or character response is
+accepted only under \code{brms::categorical()} or an ordinal family
+(\code{cumulative}, \code{sratio}, \code{cratio}, \code{acat}), and refused
+under every other family before anything is compiled; under gaussian a
+logical response is refused too.  The case to watch is a two-level factor
+under \code{brms::bernoulli()}: brms would fit it, but
+\code{residuals()}, \code{summary()}, \code{model_metrics()} and
+\code{\link{cv_bayes}()} could not score a factor, so convert it to 0/1
+first.
+
+An ordinal or categorical fit has a probability per response category, not
+one expected value per row.  \code{predict()} with its default
+\code{type = "epred"}, \code{fitted()}, \code{residuals()},
+\code{summary()} and \code{model_metrics()} therefore stop with a message
+saying so.  \code{predict(type = "predict", draws = TRUE)} returns the
+posterior predicted categories, as category indices, and
+\code{brms::posterior_epred(fit$engine)} the probabilities.
+
+For the numeric families two things follow.  First, the metrics that come
+back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are
+not all meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
 are Gaussian-shaped, and for this backend \code{\link{cv_bayes}()}'s CRPS
 and interval coverage are the proper scores to read.  See
 \code{\link{model_metrics}()}, section "Which metrics survive a
@@ -254,10 +298,10 @@ for a Gaussian response, and its help page says how.
 
 One trap.  The response check reads the family's name through
 \code{brms}'s own accessor; a family object it cannot name is treated as
-"not gaussian" and the check is skipped entirely, without falling back
-to the gaussian rule.  A malformed \code{family} therefore buys less
-validation, not more, and a wrong response type will surface as a Stan
-error, with no message from this function.
+unknown and the check is skipped entirely, without falling back to either
+rule above.  A malformed \code{family} therefore buys less validation, not
+more, and a wrong response type will surface as a Stan error, with no
+message from this function.
 }
 
 \section{Spatial confounding}{
@@ -273,7 +317,12 @@ Ver Hoef 2022): the spatial coefficient is the effect \emph{net of} whatever
 the spatial field can explain, and the non-spatial one is not.  Which of the
 two a user wants depends on the question, so the honest diagnostic is to
 report both side by side and leave them unadjusted: fit the same formula
-with \code{stats::lm()} or \code{stats::glm()} and compare.
+with \code{stats::lm()} or \code{stats::glm()} and compare.  Compare like
+with like: under \code{standardize_predictors = TRUE} the coefficients here
+are per standard deviation of each predictor, so either fit the
+non-spatial model on the same standardised columns or divide these slopes
+by \code{$info$predictor_scaling[[name]]$scale} first (see
+\code{\link{coef.bayesian_fit}}).
 
 The literature on remedies is unsettled and this function takes no side.
 Restricted spatial regression (Hughes and Haran 2013) projects the spatial

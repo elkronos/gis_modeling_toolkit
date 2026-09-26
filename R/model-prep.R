@@ -266,6 +266,15 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #'
 #' Subsamples large datasets to avoid O(n^2) memory and time cost.
 #'
+#' These are the bounds a length-scale \emph{prior} is calibrated over, not
+#' the scales a fitted model can resolve: that depends on the basis size
+#' (\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
+#' it as \code{$info$gp_ell_min}).  Both bounds are fixed fractions of the
+#' spread of pairwise distances, so they do not shrink as points are added to
+#' the same area.  A surface whose range sits below what the basis resolves
+#' needs a larger \code{gp_k}: more points help the data identify a short
+#' range, but they make neither these bounds nor the derived basis finer.
+#'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
 #'   before the distance quantiles are taken.  \code{brms::gp()} defaults to
@@ -389,7 +398,13 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @param max_basis Integer cap on the TOTAL basis count (\code{k^2}).  The
 #'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
 #'   so there is a single cap, with no second one to contradict it.
-#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
+#' @param c Optional boundary factor, already validated, that \code{k} must be
+#'   sized for; \code{NULL} (default) derives it here.  \code{k} grows with
+#'   \code{c}, so a caller that fixes the boundary must size the basis for
+#'   \emph{that} boundary: the \code{k} derived for the default \code{c} cannot
+#'   resolve the lower bound inside a wider one.
+#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric;
+#'   the \code{c} argument when one was given),
 #'   \code{S} (numeric; the pooled full range of the column-centred coordinates
 #'   AFTER collapsing replicated rows, i.e. exactly what \code{brms::gp(c = )}
 #'   multiplies under its default \code{gr = TRUE}), \code{capped}
@@ -399,7 +414,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
-                           k_min = 10L, max_basis = 2500L) {
+                           k_min = 10L, max_basis = 2500L, c = NULL) {
   # Reproduce brms::choose_L()'s domain measure exactly: centre each column,
   # then take the range over the POOLED matrix.  na.rm mirrors brms.
   xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]
@@ -425,7 +440,11 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 
   # 1.25, not 1.2: the floor is stated on the half-range convention by
   # Riutort-Mayol et al., and 5/4 is brms's own default on this one.
-  c_val <- max(3.2 * r_hi, 1.25)
+  # A caller's own c replaces the derived one BEFORE k is sized from it: k was
+  # once always sized for the derived c, so gp_c = 3 on a layer whose derived
+  # c was 1.63 kept k = 23 where the rule gives 43, and the basis could not
+  # resolve the lower length-scale bound it was supposed to.
+  c_val <- if (is.null(c)) max(3.2 * r_hi, 1.25) else as.numeric(c)
   k_raw <- ceiling(1.75 * c_val / r_lo)
 
   k_max  <- as.integer(floor(sqrt(max_basis)))

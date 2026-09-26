@@ -212,7 +212,19 @@ print.spatial_fit <- function(x, ...) {
                 x$info$gp_n_basis %||% NA_integer_))
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
-    if (!isTRUE(x$info$convergence_ok))
+    # The coefficients of a standardised fit are per SD of each predictor, and
+    # nothing coef() returns says so.
+    if (length(x$info$predictor_scaling) > 0L)
+      cat(sprintf(paste0("  Predictors standardised: %s (coef() is per SD; ",
+                         "see $info$predictor_scaling)\n"),
+                  paste(names(x$info$predictor_scaling), collapse = ", ")))
+    # NA is "not checked" (check_convergence = FALSE, or no diagnostic could be
+    # read), which is neither a pass nor a failure; NULL (nothing recorded)
+    # still reads as a failure.
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
       cat("  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
@@ -318,6 +330,14 @@ print.summary.spatial_fit <- function(x, ...) {
   else
     cat("\n  In-sample metrics:\n")
   m <- x$in_sample
+  # The metrics use the rows with a finite fitted value, which is not always
+  # all of them: an rf_fit has no out-of-bag prediction for a row every tree
+  # sampled (ranger returns NaN), so a 5-tree forest printed "n = 200" above
+  # an R^2 computed on 180 rows.
+  n_m <- m$n %||% NA_integer_
+  if (length(n_m) == 1L && is.finite(n_m) && is.finite(x$n) && n_m < x$n)
+    cat(sprintf("    (computed on %d of %d rows; the rest have no finite fitted value)\n",
+                n_m, x$n))
   # ASCII on purpose: a superscript two rendered as R<U+00B2> on every
   # non-UTF-8 console, and the labels were not aligned.
   cat(sprintf("    RMSE    = %.4f\n", m$RMSE))
@@ -332,6 +352,16 @@ print.summary.spatial_fit <- function(x, ...) {
     sub <- if (is.finite(n_s) && is.finite(m$n) && n_s < m$n)
       sprintf("  (over %d of %d rows)", n_s, m$n) else ""
     cat(sprintf("    SMAPE   = %.2f%%%s\n", m$SMAPE, sub))
+  }
+  # The same convergence verdict print() on the fit gives.  The summary carried
+  # it in $info and never showed it, so metrics from a posterior that had not
+  # converged printed exactly like metrics from one that had.
+  if (identical(x$class, "bayesian_fit") && "convergence_ok" %in% names(x$info)) {
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("\n  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
+      cat("\n  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
 }
@@ -876,6 +906,36 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 }
 
 
+#' Refuse a per-category posterior_epred() with a message that says why
+#'
+#' For an ordinal or categorical family \code{brms::posterior_epred()} returns
+#' a draws x rows x categories \emph{array}: a probability per category, not
+#' one expected value per row.  \code{predict.bayesian_fit()} took anything
+#' that was not a matrix for a failed draw, so a real \code{cumulative()} fit
+#' returned all-\code{NA} predictions under "posterior draw failed", and
+#' \code{fitted()} said only that it got an array where it wanted a matrix --
+#' though the fit's own documentation listed ordinal families as supported.
+#'
+#' @param draws What \code{posterior_epred()} returned.
+#' @param engine The \code{brmsfit}, to name its family.
+#' @param caller Method name for the message.
+#' @param hint What to do instead, appended to the message.
+#' @return \code{NULL}, invisibly, when \code{draws} is not a 3-D array.
+#' @keywords internal
+#' @noRd
+.stop_if_category_epred <- function(draws, engine, caller, hint) {
+  if (!is.array(draws) || length(dim(draws)) != 3L) return(invisible(NULL))
+  fam <- .brms_family_name(tryCatch(engine$family, error = function(e) NULL))
+  stop(sprintf(paste0("%s(): %s gives a probability per response category, ",
+                      "so brms::posterior_epred() returned a %s array (draws x ",
+                      "rows x categories), not one expected value per row. %s"),
+               caller,
+               if (is.na(fam)) "this fit's family"
+               else sprintf("the %s family", sQuote(fam)),
+               paste(dim(draws), collapse = " x "), hint), call. = FALSE)
+}
+
+
 #' Predict from a Bayesian spatial GP model
 #'
 #' @section The GP boundary is held at its fitted value:
@@ -922,8 +982,12 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE} (a 1-row
-#'   all-\code{NA} matrix if the posterior draw fails).  With
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  If the
+#'   posterior draw fails the result is all \code{NA} (a 1-row matrix for
+#'   \code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
+#'   family is not a failed draw and is an error under
+#'   \code{type = "epred"}: its expected value is a probability per response
+#'   category, not one number per row; use \code{type = "predict"}.  With
 #'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
 #'   for the default \code{summary = "mean"}, \code{type = "epred"},
 #'   \code{draws = FALSE} combination; any other combination is recomputed
@@ -1022,8 +1086,20 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   if (is.matrix(draw_mat) && ncol(draw_mat) == length(pinned$beyond))
     draw_mat[, pinned$beyond] <- NA_real_
 
+  # Not a failed draw: an ordinal or categorical family's epred.  Raised, not
+  # returned as NA, because no retry will produce one number per row.
+  if (type == "epred")
+    .stop_if_category_epred(draw_mat, model_obj, "predict.bayesian_fit",
+                            hint = paste0("Use type = \"predict\" (with draws = ",
+                                          "TRUE for the predicted categories, ",
+                                          "as category indices), or ",
+                                          "brms::posterior_epred(<fit>$engine, ",
+                                          "newdata = ) for the probabilities."))
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
-    .log_warn("predict.bayesian_fit(): posterior draw failed.")
+    .log_warn("predict.bayesian_fit(): posterior draw failed: %s",
+              if (inherits(draw_mat, "try-error")) .try_error_message(draw_mat)
+              else sprintf("brms returned a %s, not a draws x rows matrix",
+                           class(draw_mat)[1L]))
     # Honour the documented return shape: a matrix when draws = TRUE, so a
     # caller that indexes columns is not handed a vector on the failure path.
     return(if (draws) matrix(NA_real_, nrow = 1L, ncol = n_orig)
@@ -1106,13 +1182,18 @@ fitted.gwr_fit <- function(object, ...) {
 #' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
 #' share (harmless, since the other simply recomputes), and \code{identical()}
 #' cannot distinguish two fits by their caches.  The digest covers
-#' \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
-#' what \code{\link{clear_fitted_cache}} is for.
+#' \code{data_sf} only.  The entry is also tied to the engine that computed
+#' it -- a refit or \code{update()} of the \code{brmsfit} is a different
+#' sampling run and recomputes -- but a \code{brmsfit} edited by hand in place
+#' is what \code{\link{clear_fitted_cache}} is for.  The entry holds only the
+#' values and a small identifier of the sampling run, so a fit saved with
+#' \code{saveRDS()} after \code{fitted()} is no larger for it.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n} (all \code{NA} if the
-#'   posterior draw failed).
+#' @return Numeric vector of length \code{object$n}.  A posterior that cannot
+#'   be drawn is an error, as is a family with a probability per response
+#'   category (ordinal, categorical), which has no single fitted value per row.
 #' @family methods on a fitted model
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
@@ -1133,12 +1214,13 @@ fitted.bayesian_fit <- function(object, ...) {
     # SAME data hash identically however different their engines are -- and
     # because the cache is shared by every copy of a fit, `refit <- fit;
     # refit$engine <- <re-estimated>` then read the original engine's fitted
-    # values back out.  identical() is cheap here: for the common case it is
-    # the same object, which R settles by pointer.  Holding the reference
-    # costs no memory -- the fit already holds the engine.
+    # values back out.  It holds .fitted_engine_token(), not necessarily the
+    # engine itself: see there for why holding the engine doubled saveRDS().
+    # identical() is cheap here: for the common case it is the same object,
+    # which R settles by pointer.
     if (is.list(hit) && identical(hit$n, object$n) &&
         identical(hit$key, key) &&
-        identical(hit$engine, object$engine) &&
+        identical(hit$engine, .fitted_engine_token(object$engine)) &&
         is.numeric(hit$values) && length(hit$values) == object$n)
       return(hit$values)
     # Stale: a copy carrying different data or a different engine, or an entry
@@ -1159,11 +1241,20 @@ fitted.bayesian_fit <- function(object, ...) {
   # An error here is an error: a posterior that cannot be drawn used to come
   # back as all-NA fitted values with nothing said, and summary() and
   # model_metrics() then reported n = 0 as though the data were missing.
-  # predict.bayesian_fit() has always raised; this matches it.
+  # (predict.bayesian_fit() differs on purpose: it documents an all-NA result
+  # for a failed draw on newdata, and logs the cause.)
   if (inherits(draws, "try-error"))
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() failed ",
                         "on the training data: %s"),
                  conditionMessage(attr(draws, "condition"))), call. = FALSE)
+  .stop_if_category_epred(draws, model_obj, "fitted.bayesian_fit",
+                          hint = paste0("fitted(), residuals(), summary() and ",
+                                        "model_metrics() need one number per ",
+                                        "row; use predict(<fit>, type = ",
+                                        "\"predict\", draws = TRUE) for ",
+                                        "predicted categories, or ",
+                                        "brms::posterior_epred(<fit>$engine) ",
+                                        "for the probabilities."))
   if (!is.matrix(draws) || ncol(draws) != object$n)
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() returned ",
                         "%s where a draws x %d matrix was expected."),
@@ -1176,12 +1267,41 @@ fitted.bayesian_fit <- function(object, ...) {
   # data cannot read it back.  A wrong-length result is never cached.
   if (!is.null(cache) && length(fitted_vals) == object$n) {
     assign(".fitted_values",
-           list(n = object$n, key = key, engine = object$engine,
+           list(n = object$n, key = key,
+                engine = .fitted_engine_token(object$engine),
                 values = fitted_vals),
            envir = cache)
   }
 
   fitted_vals
+}
+
+
+#' What a fitted() cache entry keeps to tell one engine from another
+#'
+#' The entry must belong to the engine that produced it (see
+#' \code{fitted.bayesian_fit}), and it used to hold the engine itself.  That
+#' costs nothing in memory, but \code{serialize()} tracks environments by
+#' reference and lists not at all, so \code{saveRDS()} on a fit whose cache was
+#' warm -- after any \code{summary()}, \code{residuals()} or
+#' \code{model_metrics()} -- wrote the whole brmsfit a second time: a 40 MB
+#' engine saved as 80 MB before \code{fitted()} and 120 MB after.
+#'
+#' A brmsfit carries a stanfit, and every stanfit carries an environment
+#' (\code{@.MISC}) that rstan's sampler, and brms's reader for CmdStan output,
+#' create afresh for each run.  Copies of the engine share it, a refit or an
+#' \code{update()} gets a new one, and it is serialised once however many
+#' references point at it, so it tells engines apart as well as the engine
+#' does and adds nothing to a saved fit.  Any other engine (a custom backend,
+#' a test double) is its own token, as before.
+#'
+#' @param engine The fit's \code{$engine}.
+#' @return An environment, or \code{engine}.
+#' @keywords internal
+#' @noRd
+.fitted_engine_token <- function(engine) {
+  misc <- tryCatch(engine$fit@.MISC, error = function(e) NULL)
+  if (is.environment(misc)) misc else engine
 }
 
 
@@ -1380,10 +1500,29 @@ coef.gwr_fit <- function(object, ...) {
 #' already absorbed the spatially structured part of the signal, so these are
 #' effects net of location.
 #'
+#' @section Standardised predictors:
+#' The summaries are on the scale the model was fitted on.  A fit made with
+#' \code{standardize_predictors = TRUE} was fitted on centred and scaled
+#' numeric predictors, so each slope is the change in the linear predictor per
+#' \emph{standard deviation} of its predictor and the intercept is its value
+#' at the predictor \emph{means}, not the raw-unit numbers \code{stats::lm()}
+#' reports on the same formula.  Nothing on the returned matrix says so;
+#' \code{print()} on the fit does, and the centre and scale of each predictor
+#' are in \code{object$info$predictor_scaling}.  To put a slope back in raw
+#' units divide its \code{Estimate}, \code{Est.Error} and interval bounds by
+#' that predictor's \code{scale}.  The intercept's \code{Estimate} follows by
+#' linearity (subtract each raw-unit slope times its predictor's
+#' \code{center}), but its \code{Est.Error} and interval depend on the
+#' posterior covariance of the coefficients: transform the draws from
+#' \code{brms::as_draws_df(object$engine)} for those, or refit without
+#' standardising.
+#'
 #' @param object A \code{bayesian_fit} object.
 #' @param ... Ignored.
 #' @return A matrix of fixed-effect posterior summaries, as returned by
-#'   \code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
+#'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
+#'   predictor under \code{standardize_predictors = TRUE}; see above).  Never
+#'   \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
 #' @family methods on a fitted model
