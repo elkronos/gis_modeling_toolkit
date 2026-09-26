@@ -97,6 +97,12 @@ tour_points <- function(n = 400, a = 80, seed = 42) {
   # applicability in script 07 have something to find. Scripts 01 to 06 ignore
   # the column.
   xy$slope <- 2 * xy$x / 1000 + stats::rnorm(n, sd = 0.2)
+  # Move the square into UTM zone 32N, the CRS it is stamped with: x from
+  # 500000 and y from 5000000. At 0 to 1000 it would sit on the equator west
+  # of the zone. Every result is computed in planar units, so the shift only
+  # changes the coordinates the scripts print.
+  xy$x <- xy$x + 5e5
+  xy$y <- xy$y + 5e6
   sf::st_as_sf(xy[, c("x", "y", "elev", "noise", "slope", "z")],
                coords = c("x", "y"), crs = 32632)
 }
