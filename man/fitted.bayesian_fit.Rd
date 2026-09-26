@@ -12,8 +12,9 @@
 \item{...}{Ignored.}
 }
 \value{
-Numeric vector of length \code{object$n} (all \code{NA} if the
-posterior draw failed).
+Numeric vector of length \code{object$n}.  A posterior that cannot
+be drawn is an error, as is a family with a probability per response
+category (ordinal, categorical), which has no single fitted value per row.
 }
 \description{
 Posterior expectation at the training locations: the column means of

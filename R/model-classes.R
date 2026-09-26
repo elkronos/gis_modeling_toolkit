@@ -847,6 +847,36 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 }
 
 
+#' Refuse a per-category posterior_epred() with a message that says why
+#'
+#' For an ordinal or categorical family \code{brms::posterior_epred()} returns
+#' a draws x rows x categories \emph{array}: a probability per category, not
+#' one expected value per row.  \code{predict.bayesian_fit()} took anything
+#' that was not a matrix for a failed draw, so a real \code{cumulative()} fit
+#' returned all-\code{NA} predictions under "posterior draw failed", and
+#' \code{fitted()} said only that it got an array where it wanted a matrix --
+#' though the fit's own documentation listed ordinal families as supported.
+#'
+#' @param draws What \code{posterior_epred()} returned.
+#' @param engine The \code{brmsfit}, to name its family.
+#' @param caller Method name for the message.
+#' @param hint What to do instead, appended to the message.
+#' @return \code{NULL}, invisibly, when \code{draws} is not a 3-D array.
+#' @keywords internal
+#' @noRd
+.stop_if_category_epred <- function(draws, engine, caller, hint) {
+  if (!is.array(draws) || length(dim(draws)) != 3L) return(invisible(NULL))
+  fam <- .brms_family_name(tryCatch(engine$family, error = function(e) NULL))
+  stop(sprintf(paste0("%s(): %s gives a probability per response category, ",
+                      "so brms::posterior_epred() returned a %s array (draws x ",
+                      "rows x categories), not one expected value per row. %s"),
+               caller,
+               if (is.na(fam)) "this fit's family"
+               else sprintf("the %s family", sQuote(fam)),
+               paste(dim(draws), collapse = " x "), hint), call. = FALSE)
+}
+
+
 #' Predict from a Bayesian spatial GP model
 #'
 #' @section The GP boundary is held at its fitted value:
@@ -893,8 +923,12 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE} (a 1-row
-#'   all-\code{NA} matrix if the posterior draw fails).  With
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  If the
+#'   posterior draw fails the result is all \code{NA} (a 1-row matrix for
+#'   \code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
+#'   family is not a failed draw and is an error under
+#'   \code{type = "epred"}: its expected value is a probability per response
+#'   category, not one number per row; use \code{type = "predict"}.  With
 #'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
 #'   for the default \code{summary = "mean"}, \code{type = "epred"},
 #'   \code{draws = FALSE} combination; any other combination is recomputed
@@ -993,8 +1027,20 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   if (is.matrix(draw_mat) && ncol(draw_mat) == length(pinned$beyond))
     draw_mat[, pinned$beyond] <- NA_real_
 
+  # Not a failed draw: an ordinal or categorical family's epred.  Raised, not
+  # returned as NA, because no retry will produce one number per row.
+  if (type == "epred")
+    .stop_if_category_epred(draw_mat, model_obj, "predict.bayesian_fit",
+                            hint = paste0("Use type = \"predict\" (with draws = ",
+                                          "TRUE for the predicted categories, ",
+                                          "as category indices), or ",
+                                          "brms::posterior_epred(<fit>$engine, ",
+                                          "newdata = ) for the probabilities."))
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
-    .log_warn("predict.bayesian_fit(): posterior draw failed.")
+    .log_warn("predict.bayesian_fit(): posterior draw failed: %s",
+              if (inherits(draw_mat, "try-error")) .try_error_message(draw_mat)
+              else sprintf("brms returned a %s, not a draws x rows matrix",
+                           class(draw_mat)[1L]))
     # Honour the documented return shape: a matrix when draws = TRUE, so a
     # caller that indexes columns is not handed a vector on the failure path.
     return(if (draws) matrix(NA_real_, nrow = 1L, ncol = n_orig)
@@ -1082,8 +1128,9 @@ fitted.gwr_fit <- function(object, ...) {
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n} (all \code{NA} if the
-#'   posterior draw failed).
+#' @return Numeric vector of length \code{object$n}.  A posterior that cannot
+#'   be drawn is an error, as is a family with a probability per response
+#'   category (ordinal, categorical), which has no single fitted value per row.
 #' @family methods on a fitted model
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
@@ -1130,11 +1177,20 @@ fitted.bayesian_fit <- function(object, ...) {
   # An error here is an error: a posterior that cannot be drawn used to come
   # back as all-NA fitted values with nothing said, and summary() and
   # model_metrics() then reported n = 0 as though the data were missing.
-  # predict.bayesian_fit() has always raised; this matches it.
+  # (predict.bayesian_fit() differs on purpose: it documents an all-NA result
+  # for a failed draw on newdata, and logs the cause.)
   if (inherits(draws, "try-error"))
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() failed ",
                         "on the training data: %s"),
                  conditionMessage(attr(draws, "condition"))), call. = FALSE)
+  .stop_if_category_epred(draws, model_obj, "fitted.bayesian_fit",
+                          hint = paste0("fitted(), residuals(), summary() and ",
+                                        "model_metrics() need one number per ",
+                                        "row; use predict(<fit>, type = ",
+                                        "\"predict\", draws = TRUE) for ",
+                                        "predicted categories, or ",
+                                        "brms::posterior_epred(<fit>$engine) ",
+                                        "for the probabilities."))
   if (!is.matrix(draws) || ncol(draws) != object$n)
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() returned ",
                         "%s where a draws x %d matrix was expected."),
