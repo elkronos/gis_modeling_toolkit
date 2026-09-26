@@ -8,7 +8,11 @@
 #' @param seeds_sf Optional sf/sfc point layer of seed locations.
 #' @param features_sf Optional sf/sfc layer of additional features.
 #' @param fill_col Name of the COLUMN in \code{tessellation_sf} to map to fill;
-#'   \code{NULL} for no fill.  \code{fill_col} and \code{label_col} name
+#'   \code{NULL} for no fill.  A numeric column gets a continuous scale, as
+#'   does a Date or POSIXct column (on a date or time axis) and a
+#'   \code{units} or \code{difftime} column (drawn as numbers, with the unit
+#'   in the legend title); anything else a discrete one.
+#'   \code{fill_col} and \code{label_col} name
 #'   columns, while \code{outline_col}, \code{features_col},
 #'   \code{seeds_col} and \code{boundary_col} are colours.
 #' @param palette Viridis palette name. Default "viridis".
@@ -22,8 +26,12 @@
 #' @param boundary_col,boundary_size Colour and line width of the boundary
 #'   outline.
 #' @param labels Logical; draw per-cell labels. Default FALSE.
-#' @param label_col Name of the COLUMN holding the label text. Default
-#'   \code{"grid_id"}.
+#' @param label_col Name of the COLUMN holding the label text.  Default
+#'   \code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
+#'   \code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
+#'   the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
+#'   output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
+#'   labelled without naming one.
 #' @param label_size Label text size. Default 2.7.
 #' @param legend Logical; show fill legend. Default TRUE.
 #' @param legend_title Optional legend title.
@@ -81,7 +89,7 @@ plot_tessellation_map <- function(tessellation_sf,
                                   boundary_col = "#111111",
                                   boundary_size = 0.6,
                                   labels = FALSE,
-                                  label_col = "grid_id",
+                                  label_col = NULL,
                                   label_size = 2.7,
                                   legend = TRUE,
                                   legend_title = NULL,
@@ -169,8 +177,19 @@ plot_tessellation_map <- function(tessellation_sf,
   if (!is.null(fill_col) && !has_fill)
     .log_warn("plot_tessellation_map(): fill_col '%s' not found; drawing an unfilled outline map.",
               paste(as.character(fill_col), collapse = ", "))
+  fill_unit <- NULL
   if (has_fill) {
-    tess$`..__fill__` <- tess[[fill_col]]
+    fill_vals <- tess[[fill_col]]
+    # An st_area() column (class units) passed is.numeric() below and then
+    # broke the viridis scale's arithmetic, and a difftime failed it and was
+    # given a discrete scale -- both only when the plot was printed.  Both are
+    # numbers with a unit: drawn as numbers, the unit goes in the legend.
+    if (inherits(fill_vals, c("units", "difftime"))) {
+      fill_unit <- tryCatch(as.character(units(fill_vals))[1L],
+                            error = function(e) NULL)
+      fill_vals <- as.numeric(fill_vals)
+    }
+    tess$`..__fill__` <- fill_vals
     p <- p + ggplot2::geom_sf(
       data = tess,
       mapping = ggplot2::aes(fill = .data[["..__fill__"]]),
@@ -200,7 +219,18 @@ plot_tessellation_map <- function(tessellation_sf,
 
   # Labels
   if (isTRUE(labels)) {
-    if (!label_col %in% names(tess)) {
+    # The default used to be "grid_id", a column nothing in the package
+    # produces: Voronoi and triangle cells carry cell_id, grids poly_id and
+    # cell_id, and summarize_by_cell() output poly_id, so labels = TRUE drew
+    # no labels on any of them.  "grid_id" stays first so a layer that has
+    # one is labelled as before.
+    id_candidates <- c("grid_id", "cell_id", "poly_id", "polygon_id", "id")
+    if (is.null(label_col))
+      label_col <- id_candidates[id_candidates %in% names(tess)][1L]
+    if (is.na(label_col)) {
+      .log_warn("plot_tessellation_map(): no ID column (%s) to label and no `label_col` given; skipping labels.",
+                paste(id_candidates, collapse = ", "))
+    } else if (!label_col %in% names(tess)) {
       .log_warn("plot_tessellation_map(): label_col '%s' not found; skipping labels.",
                 label_col)
     } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
@@ -214,13 +244,24 @@ plot_tessellation_map <- function(tessellation_sf,
 
   # Fill scale
   if (has_fill) {
-    lab <- legend_title %||% fill_col
-    is_cont <- is.numeric(tess$`..__fill__`)
+    lab <- legend_title %||%
+      if (length(fill_unit) == 1L && !is.na(fill_unit) && nzchar(fill_unit))
+        sprintf("%s [%s]", fill_col, fill_unit) else fill_col
+    # A Date or POSIXct column is continuous but not numeric, so it used to get
+    # the discrete scale and fail at print with "Continuous value supplied to
+    # a discrete scale".  It needs the continuous scale on a date or time axis.
+    fill_trans <- if (inherits(tess$`..__fill__`, "Date")) "date"
+      else if (inherits(tess$`..__fill__`, "POSIXct")) "time" else NULL
+    is_cont <- is.numeric(tess$`..__fill__`) || !is.null(fill_trans)
     if (is_cont) {
-      p <- p + ggplot2::scale_fill_viridis_c(
-        option = palette, na.value = na_fill, name = lab,
-        guide = if (legend) "colourbar" else "none"
-      )
+      sc_args <- list(option = palette, na.value = na_fill, name = lab,
+                      guide = if (legend) "colourbar" else "none")
+      # ggplot2 3.5.0 renamed continuous_scale()'s `trans` to `transform` and
+      # deprecates the old name.
+      if (!is.null(fill_trans))
+        sc_args[[if ("transform" %in% names(formals(ggplot2::continuous_scale)))
+          "transform" else "trans"]] <- fill_trans
+      p <- p + do.call(ggplot2::scale_fill_viridis_c, sc_args)
     } else {
       p <- p + ggplot2::scale_fill_viridis_d(
         option = palette, na.value = na_fill, name = lab,
