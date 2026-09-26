@@ -35,7 +35,7 @@
 
 #' Coerce an sf object to SpatialPointsDataFrame for GWmodel
 #'
-#' GWmodel's core functions (gwr.basic, bw.gwr, gwr.predict) currently
+#' GWmodel's core functions (gwr.basic, bw.gwr, gwr.model.selection) currently
 #' require Spatial* inputs.  Unlike the archived spgwr package, GWmodel is
 #' actively maintained and may gain native sf support in the future;
 #' centralizing the coercion here makes a future migration trivial.
@@ -98,9 +98,11 @@
 #' Extract fitted or predicted values from a GWmodel GWR result
 #'
 #' **Unified extraction function** used by \code{fitted.gwr_fit()} (in-sample
-#' evaluation) and \code{predict.gwr_fit()} (prediction at new locations), both
-#' in R/model-classes.R.  Replaces the previously duplicated
-#' .extract_gwr_fitted() and .extract_gwr_predictions() functions.
+#' evaluation, R/model-classes.R).  \code{predict.gwr_fit()} used it too, on
+#' a \code{gwr.predict()} result (\code{mode = "predict"}); it now computes
+#' its predictions itself (see \code{.gwr_predict_at()}).  Replaces the
+#' previously duplicated .extract_gwr_fitted() and .extract_gwr_predictions()
+#' functions.
 #'
 #' Implements four strategies in order:
 #'   1. Look for a direct prediction/fitted column in the SDF.
@@ -461,23 +463,23 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     stop("fit_gwr_model(): geometry must be POINT after prep. ",
          "Run prep_model_data() (or coerce_to_points()) first.", call. = FALSE)
 
-  # GWmodel fits and predicts through two different code paths, and only one
-  # of them expands contrasts: gwr.basic() builds its design with
-  # model.matrix(), so a factor predictor fits cleanly, while gwr.predict()
-  # indexes the prediction frame by the raw variable names and multiplies the
-  # result, which for a factor column is "non-numeric argument to binary
-  # operator".  predict.gwr_fit() catches that and returns all NA, so the
-  # model appears to fit and then silently predicts nothing.  Reject the
-  # column here instead, where it can be named.
+  # A factor or character predictor is refused.  This began as a guard for
+  # predict(): gwr.basic() builds its design with model.matrix(), so a factor
+  # fits cleanly, while GWmodel's gwr.predict() indexes the prediction frame
+  # by the raw variable names and failed with "non-numeric argument to binary
+  # operator", which predict.gwr_fit() turned into all NA.  predict.gwr_fit()
+  # no longer calls gwr.predict(), but the refusal stays: gwr_model_selection()
+  # refuses the same columns on this function's account, and accepting them
+  # is a change of its own.  Reject the column here, where it can be named.
   non_num <- predictor_vars[
     !vapply(sf::st_drop_geometry(dat)[, predictor_vars, drop = FALSE],
             is.numeric, logical(1))]
   if (length(non_num) > 0L)
     stop(sprintf(paste0("fit_gwr_model(): predictor(s) %s are not numeric. ",
-                        "GWmodel fits a factor or character predictor (via ",
-                        "model.matrix contrasts) but cannot predict from it ",
-                        "-- gwr.predict() does not expand contrasts and would ",
-                        "return all NA. Encode the column as numeric indicator ",
+                        "GWmodel would fit a factor or character predictor as ",
+                        "one local coefficient per contrast column; this ",
+                        "package's GWR functions take numeric predictors only. ",
+                        "Encode the column as numeric indicator ",
                         "column(s) yourself, and pass those as predictors."),
                  paste(sQuote(non_num), collapse = ", ")),
          call. = FALSE)
@@ -936,6 +938,98 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     )
   }
   invisible(NULL)
+}
+
+
+#' GWR predictions at new locations, one local regression each
+#'
+#' Estimates the local coefficients at every row of \code{rp} and returns
+#' \eqn{x^\top\hat\beta(u)}.  The coefficients are GWmodel's own and are
+#' bit-identical to those \code{GWmodel::gwr.predict()} computed: the same
+#' \code{gw.dist()} distances, the same kernel weights (an adaptive bandwidth
+#' counts neighbours among the TRAINING points) and the same Armadillo
+#' \code{inv(X'WX) X'Wy}.  They come from
+#' \code{gwr.basic(regression.points = )}, which stops at the coefficients,
+#' in chunks.  One empty or singular window makes Armadillo's \code{inv()}
+#' throw and takes its whole call with it, so a chunk that throws is redone
+#' one location at a time with the call \code{gwr.predict()} made per point,
+#' \code{gw_reg_1()}, and only the windows that really are singular come back
+#' \code{NA}.
+#'
+#' @param formula The fitted model formula.
+#' @param sp_train SpatialPointsDataFrame of the training data, 2-D.
+#' @param newdata_df data.frame of the new rows, with the predictors.
+#' @param rp Two-column numeric matrix of the new rows' coordinates, in the
+#'   training CRS.
+#' @param bw,kernel,adaptive The fit's bandwidth settings.
+#' @param max_cells Largest training-by-chunk distance matrix, in cells.
+#' @return Numeric vector, one value per row of \code{rp}: \code{NA} where
+#'   the local regression cannot be estimated.
+#' @keywords internal
+#' @noRd
+.gwr_predict_at <- function(formula, sp_train, newdata_df, rp, bw, kernel,
+                            adaptive, max_cells = 4e6) {
+  mf <- stats::model.frame(formula, data = sp_train@data,
+                           drop.unused.levels = TRUE)
+  tt <- stats::terms(mf)
+  X  <- stats::model.matrix(tt, mf)
+  y  <- as.numeric(stats::model.response(mf))
+  k  <- ncol(X)
+
+  # The design at the new rows, from the fitted terms and factor levels, so
+  # that its columns are the coefficients' columns in the same order (a
+  # duplicated predictor name, for one, gives one column, not two).  na.pass
+  # keeps the rows aligned with `rp`.
+  tt_new <- stats::delete.response(tt)
+  X_new  <- stats::model.matrix(tt_new, stats::model.frame(
+    tt_new, newdata_df, na.action = stats::na.pass,
+    xlev = stats::.getXlevels(tt, mf)))
+  if (nrow(X_new) != nrow(rp) || ncol(X_new) != k)
+    stop(sprintf(paste0("the design matrix for newdata is %d x %d, but the ",
+                        "model has %d term(s) for %d location(s)."),
+                 nrow(X_new), ncol(X_new), k, nrow(rp)), call. = FALSE)
+
+  dp   <- sp::coordinates(sp_train)
+  n_rp <- nrow(rp)
+  beta <- matrix(NA_real_, n_rp, k)
+  # The distance matrix is computed here with gw.dist(), as gwr.predict() did,
+  # and passed in: above 5000 training plus new points gwr.basic() switches to
+  # computing distances inside its C++ loop, and its coefficients then differ
+  # from gwr.predict()'s in the last bit.  Chunks are sized to keep the
+  # matrix under `max_cells`.
+  chunk <- max(1L, min(1000L, as.integer(max_cells %/% nrow(dp))))
+  for (s in seq.int(1L, n_rp, by = chunk)) {
+    idx  <- s:min(s + chunk - 1L, n_rp)
+    rp_i <- rp[idx, , drop = FALSE]
+    d_i  <- GWmodel::gw.dist(dp.locat = dp, rp.locat = rp_i)
+    g <- tryCatch(
+      suppressWarnings(GWmodel::gwr.basic(
+        formula, data = sp_train, regression.points = rp_i, bw = bw,
+        kernel = kernel, adaptive = adaptive, dMat = d_i)),
+      error = function(e) NULL)
+    if (!is.null(g)) {
+      beta[idx, ] <- as.matrix(g$SDF@data[, seq_len(k), drop = FALSE])
+      next
+    }
+    # The matrix form of gw.weight() sorts each column once; the vector form
+    # re-sorts the distances for every element.
+    w_i <- GWmodel::gw.weight(d_i, bw, kernel, adaptive)
+    for (j in seq_along(idx)) {
+      b <- tryCatch(GWmodel::gw_reg_1(X, y, w_i[, j])$beta,
+                    error = function(e) NULL)
+      if (!is.null(b)) beta[idx[j], ] <- b
+    }
+  }
+
+  # Summed term by term in double precision, the order GWmodel's gw_fitted()
+  # uses, so the values equal gwr.predict()'s and, at the training locations,
+  # fitted()'s to the bit.  rowSums() accumulates in long double and differs
+  # from both in the last place.
+  yhat <- X_new[, 1L] * beta[, 1L]
+  for (j in seq_len(k)[-1L]) yhat <- yhat + X_new[, j] * beta[, j]
+  yhat <- unname(yhat)
+  yhat[!is.finite(yhat)] <- NA_real_
+  yhat
 }
 
 

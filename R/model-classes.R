@@ -513,7 +513,14 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' Predict from a GWR spatial model
 #'
 #' When \code{newdata} is NULL, returns the in-sample fitted values.
-#' Otherwise uses \code{GWmodel::gwr.predict()} on the new locations.
+#' Otherwise estimates the local coefficients at each new location with
+#' \code{GWmodel::gwr.basic(regression.points = )}, with the fit's kernel and
+#' bandwidth (an adaptive bandwidth counts neighbours among the training
+#' points), and returns \eqn{x^\top\hat\beta(u)}{x'beta(u)}.  These are the
+#' values \code{GWmodel::gwr.predict()} returns, without its prediction
+#' variance, which this method never returned and which costs time cubic in
+#' the number of training points.  Each location stands alone: one that cannot
+#' be estimated does not affect the others.
 #' \code{newdata} is first transformed to the CRS used during fitting
 #' (via \code{ensure_projected()}), so predictions are computed in a
 #' single coordinate system regardless of the CRS newdata arrives in.
@@ -524,8 +531,11 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   is supported).  NULL = fitted values.
 #' @param ... Ignored.
 #' @return Numeric vector aligned to \code{nrow(newdata)}, with \code{NA} for
-#'   rows dropped as missing or non-finite.  If \code{GWmodel::gwr.predict()}
-#'   fails, every value is \code{NA} and a warning says why.  CRS-less
+#'   rows dropped as missing or non-finite, and for locations whose local
+#'   regression cannot be estimated (too few training points within a fixed
+#'   bandwidth, or a singular local design); a warning counts those.  If the
+#'   design matrix for \code{newdata} cannot be built, every value is
+#'   \code{NA} and a warning says why.  CRS-less
 #'   \code{newdata} first receives the interpretation the training data got, so
 #'   the same rows land where they did at fit time.
 #' @family methods on a fitted model
@@ -546,7 +556,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   # Align newdata to the CRS used during fitting BEFORE prep_model_data().
   # prep's own ensure_projected() call has no target and would leave
   # already-projected newdata in *its* CRS (or auto-pick a UTM zone for
-  # lon/lat input independent of training), after which gwr.predict()
+  # lon/lat input independent of training), after which the local regressions
   # would silently mix coordinates from two different systems.  This
   # mirrors predict.bayesian_fit().
   # CRS-less newdata first gets the interpretation the TRAINING data got
@@ -571,54 +581,57 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   newdata$..orig_row_id.. <- NULL
 
   # Degrade to an all-NA vector when nothing survived cleaning, matching
-  # predict.rf_fit() and predict.bayesian_fit().  Without this the .to_sp()
-  # call below -- which sits outside the tryCatch -- would surface a raw
-  # sf-to-Spatial coercion error instead.
+  # predict.rf_fit() and predict.bayesian_fit().  Without this a zero-row
+  # layer would reach the chunk loop below and come back as a warning about
+  # the local regressions, which are not what went wrong.
   if (n_new == 0L) {
     .log_warn(paste0("predict.gwr_fit(): every row of newdata was dropped as ",
                      "missing or non-finite; returning %d NA(s)."), n_orig)
     return(rep(NA_real_, n_orig))
   }
 
-  # .to_sp() uses intersect() internally, so it gracefully handles newdata
-  # that lacks the response column (true out-of-sample prediction).
   needed_cols <- unique(c(object$response_var, object$predictor_vars))
   sp_train <- .to_sp(object$data_sf, needed_cols)
-  sp_new   <- .to_sp(newdata, needed_cols)
 
   bw <- object$info$bandwidth
-  if (isTRUE(object$info$adaptive)) bw <- as.integer(round(bw))
+  adaptive <- object$info$adaptive %||% TRUE
+  if (isTRUE(adaptive)) bw <- as.integer(round(bw))
 
-  pred_obj <- tryCatch(
-    suppressWarnings(
-      GWmodel::gwr.predict(
-        object$formula, data = sp_train, predictdata = sp_new,
-        bw = bw, kernel = object$info$kernel %||% "bisquare",
-        adaptive = object$info$adaptive %||% TRUE
-      )
-    ),
-    error = function(e) {
-      # A real warning(), not only a logger line.  A logger line is invisible
-      # to tryCatch(warning = ), to withCallingHandlers(), to
-      # testthat::expect_warning() and to R CMD check, so a predict() that
-      # returns nothing but NA left no trace a caller could act on.  The
-      # commonest cause is a factor or character predictor: gwr.basic() expands
-      # contrasts via model.matrix() and fits, gwr.predict() does not and fails
-      # here.  fit_gwr_model() now rejects those at fit time, so reaching this
-      # generally means the fit was built by other means.
-      .log_warn("predict.gwr_fit(): gwr.predict() failed: %s", conditionMessage(e))
-      warning(sprintf(paste0("predict.gwr_fit(): GWmodel::gwr.predict() ",
-                             "failed, so every prediction is NA. Cause: %s"),
-                      conditionMessage(e)), call. = FALSE)
-      NULL
-    }
+  # One local regression per new location (see .gwr_predict_at()), not
+  # GWmodel::gwr.predict(), which returned every prediction as NA in three
+  # common cases: one location with an empty or singular window (a grid cell
+  # beyond a fixed bandwidth, a point inside a held-out block) threw inv()'s
+  # error for all of them; more than 10000 training plus new rows failed on
+  # "object 'DM3.given' not found", and more than 5000 training rows on "No
+  # regression point is fixed".  It also built the n_train x n_train hat
+  # matrix for a prediction variance this method never returned, cubic in the
+  # training size, on every call and so on every cv_gwr() fold.
+  preds_clean <- tryCatch(
+    .gwr_predict_at(object$formula, sp_train,
+                    newdata_df = sf::st_drop_geometry(newdata),
+                    rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
+                    bw = bw, kernel = object$info$kernel %||% "bisquare",
+                    adaptive = adaptive),
+    error = function(e) e
   )
-
-  preds_clean <- if (is.null(pred_obj)) {
-    rep(NA_real_, n_new)
-  } else {
-    .extract_gwr_values(pred_obj, newdata, object$formula, n_new,
-                         object$response_var, mode = "predict")
+  if (inherits(preds_clean, "error")) {
+    # A real warning(), not only a logger line.  A logger line is invisible
+    # to tryCatch(warning = ), to withCallingHandlers(), to
+    # testthat::expect_warning() and to R CMD check, so a predict() that
+    # returns nothing but NA left no trace a caller could act on.
+    .warn_and_log(paste0("predict.gwr_fit(): the local regressions could not ",
+                         "be evaluated, so every prediction is NA. Cause: %s"),
+                  conditionMessage(preds_clean))
+    preds_clean <- rep(NA_real_, n_new)
+  } else if (anyNA(preds_clean)) {
+    n_na <- sum(is.na(preds_clean))
+    .warn_and_log(paste0("predict.gwr_fit(): %d of %d location(s) have no ",
+                         "estimable local regression, so their predictions are ",
+                         "NA; the other %d are unaffected. Too few training ",
+                         "points carry weight within the %s bandwidth (%s) ",
+                         "there, or the local design is singular."),
+                  n_na, n_new, n_new - n_na,
+                  if (isTRUE(adaptive)) "adaptive" else "fixed", format(bw))
   }
 
   # Expand back to original length, filling dropped rows with NA.
