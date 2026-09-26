@@ -389,7 +389,13 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @param max_basis Integer cap on the TOTAL basis count (\code{k^2}).  The
 #'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
 #'   so there is a single cap, with no second one to contradict it.
-#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
+#' @param c Optional boundary factor, already validated, that \code{k} must be
+#'   sized for; \code{NULL} (default) derives it here.  \code{k} grows with
+#'   \code{c}, so a caller that fixes the boundary must size the basis for
+#'   \emph{that} boundary: the \code{k} derived for the default \code{c} cannot
+#'   resolve the lower bound inside a wider one.
+#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric;
+#'   the \code{c} argument when one was given),
 #'   \code{S} (numeric; the pooled full range of the column-centred coordinates
 #'   AFTER collapsing replicated rows, i.e. exactly what \code{brms::gp(c = )}
 #'   multiplies under its default \code{gr = TRUE}), \code{capped}
@@ -399,7 +405,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
-                           k_min = 10L, max_basis = 2500L) {
+                           k_min = 10L, max_basis = 2500L, c = NULL) {
   # Reproduce brms::choose_L()'s domain measure exactly: centre each column,
   # then take the range over the POOLED matrix.  na.rm mirrors brms.
   xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]
@@ -425,7 +431,11 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 
   # 1.25, not 1.2: the floor is stated on the half-range convention by
   # Riutort-Mayol et al., and 5/4 is brms's own default on this one.
-  c_val <- max(3.2 * r_hi, 1.25)
+  # A caller's own c replaces the derived one BEFORE k is sized from it: k was
+  # once always sized for the derived c, so gp_c = 3 on a layer whose derived
+  # c was 1.63 kept k = 23 where the rule gives 43, and the basis could not
+  # resolve the lower length-scale bound it was supposed to.
+  c_val <- if (is.null(c)) max(3.2 * r_hi, 1.25) else as.numeric(c)
   k_raw <- ceiling(1.75 * c_val / r_lo)
 
   k_max  <- as.integer(floor(sqrt(max_basis)))
