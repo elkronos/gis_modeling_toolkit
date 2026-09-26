@@ -1422,7 +1422,11 @@ coerce_to_points <- function(
       ctr <- suppressWarnings(sf::st_centroid(g[idx_mls]))
       out[idx_mls] <- as.list(ctr)
     } else {
-      g_mls     <- g[idx_mls]
+      # Empty parts are stripped before anything else sees them (see
+      # .drop_empty_parts()): how st_transform() and st_cast() treat an empty
+      # part varies across sf, GDAL and GEOS versions -- on macOS builds a
+      # feature holding one came back EMPTY as a whole, losing its real part.
+      g_mls     <- .drop_empty_parts(g[idx_mls])
       g_mls_sf  <- sf::st_sf(geometry = g_mls)
       g_mls_proj <- if (tmp_project) ensure_projected(g_mls_sf) else g_mls_sf
       proj_geom  <- sf::st_geometry(g_mls_proj)
@@ -1436,11 +1440,14 @@ coerce_to_points <- function(
         # GeoPackage and st_read()'s promote_to_multi return as
         # MULTILINESTRING EMPTY).  Sample only parts that have a midpoint; a
         # feature with none gets an EMPTY POINT, as an empty LINESTRING does.
-        parts <- suppressWarnings(sf::st_cast(proj_geom[j], "LINESTRING"))
-        parts <- parts[!sf::st_is_empty(parts)]
-        if (length(parts) == 0L) {
+        # The parts are read off the structure rather than st_cast(), for the
+        # same reason as above.
+        mats  <- Filter(function(m) is.matrix(m) && nrow(m) > 0L,
+                        unclass(proj_geom[[j]]))
+        if (length(mats) == 0L) {
           out[[idx_mls[j]]] <- sf::st_point()
         } else {
+          parts <- sf::st_sfc(lapply(mats, sf::st_linestring), crs = proj_crs)
           lens <- as.numeric(sf::st_length(parts))
           k    <- if (length(lens)) which.max(lens) else 1L
           mp   <- sf::st_line_sample(parts[k], sample = 0.5)
