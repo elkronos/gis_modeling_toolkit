@@ -2966,8 +2966,9 @@ print.sac_range <- function(x, ...) {
 
 #' Create spatial cross-validation folds
 #'
-#' Builds train/test splits using random K-fold, spatial block K-fold, or
-#' buffered leave-one-out strategies.
+#' Builds train/test splits by random k-fold, spatial block k-fold,
+#' leave-location-out, buffered leave-one-out or nearest-neighbour distance
+#' matching (NNDM) leave-one-out.
 #'
 #' For \code{block_kfold}, the default grid sizing is purely geometric and
 #' unrelated to the autocorrelation range of the data.  When blocks are
@@ -2992,8 +2993,11 @@ print.sac_range <- function(x, ...) {
 #'   leave-one-out schemes and always return \code{k = n} regardless of what
 #'   was asked for; \code{"block_kfold"} lowers it when the grid yields fewer
 #'   than \code{k} non-empty blocks, and \code{"leave_location_out"} lowers it
-#'   when there are fewer than \code{k} distinct groups.  Read the \code{k}
-#'   element of the returned list, and do not assume the requested value.  A
+#'   when there are fewer than \code{k} distinct groups.  \code{k = 1} is
+#'   raised to 2 by \code{"random_kfold"}, \code{"block_kfold"} and
+#'   \code{"leave_location_out"}, since one fold has no training set.  Read
+#'   the \code{k} element of the returned list, and do not assume the
+#'   requested value.  A
 #'   reduction is written to the package log and raises no R warning, so
 #'   \code{tryCatch(warning = )} will not see it and \code{suppressWarnings()}
 #'   will not hide it.
@@ -3006,8 +3010,9 @@ print.sac_range <- function(x, ...) {
 #'   derived from the extent's aspect ratio so that the blocks are roughly
 #'   square.  Ignored when \code{block_size} or \code{auto_range} override
 #'   them.
-#' @param block_multiplier Numeric, default 3.  When neither \code{block_size}
-#'   nor \code{block_nx}/\code{block_ny} is given, the automatic grid aims for
+#' @param block_multiplier A single positive number, default 3.  When
+#'   neither \code{block_size} nor \code{block_nx}/\code{block_ny} is given,
+#'   the automatic grid aims for
 #'   \code{block_multiplier * k} blocks over the extent (aspect-preserving),
 #'   so each fold holds out about \code{block_multiplier} blocks.  An extent
 #'   more than about \code{block_multiplier * k} times as wide as it is tall
@@ -3039,8 +3044,12 @@ print.sac_range <- function(x, ...) {
 #'   request above 1,000,000 blocks is refused with an error naming the grid
 #'   dimensions, the extent and the CRS's units.
 #' @param auto_range Logical.  If \code{TRUE}, the spatial autocorrelation
-#'   range is estimated via \code{estimate_sac_range()} (which fits
-#'   directional variograms to account for anisotropy) and used as the
+#'   range is estimated via \code{estimate_sac_range()} (the omnidirectional,
+#'   all-pairs range; the directional ranges it also fits are a diagnostic
+#'   only, so on a field known to be anisotropic pass
+#'   \code{block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)}
+#'   yourself after checking \code{attr(r, "directional_status")}, see
+#'   \code{\link{estimate_sac_range}}) and used as the
 #'   minimum \code{block_size}.  Requires \code{response_var}.  An explicit
 #'   \code{block_size} takes precedence.  Default \code{FALSE}.  Sizing
 #'   blocks from the autocorrelation range is the recommendation of Roberts
@@ -3051,15 +3060,22 @@ print.sac_range <- function(x, ...) {
 #'   times that parameter for an exponential fit), so its blocks are larger
 #'   than \pkg{blockCV}'s from the same variogram.  When no range is
 #'   identified, the geometric grid is used instead, with a warning that
-#'   gives the reason.
+#'   gives the reason.  An identified range above half the extent in both
+#'   directions leaves room for a single block, and \code{make_folds()} then
+#'   stops with an error naming the size, rather than return one fold with
+#'   an empty training set: pass a smaller \code{block_size}, or use
+#'   \code{method = "nndm"}.
 #' @param range_frac Passed through to \code{estimate_sac_range()} when
 #'   \code{auto_range = TRUE}.  A fitted range beyond the longest lag the
 #'   empirical variogram was fitted over is rejected as unidentified, and block
-#'   sizing falls back to geometry (with a warning), so the grid does not
-#'   collapse to a single block.
+#'   sizing falls back to geometry (with a warning).  A range within that
+#'   bound can still be too wide for two blocks; see \code{auto_range}.
 #'   Default 1.0.
 #' @param response_var Character(1) response column name.  Required when
-#'   \code{auto_range = TRUE}.
+#'   \code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a
+#'   column of \code{points_sf} is an error, whether or not
+#'   \code{auto_range} is set: with it off the response still feeds the
+#'   leakage warning, which a misspelt name would silently disable.
 #' @param predictor_vars Optional character vector of predictor column names.
 #'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
 #' @param boundary Optional polygonal sf/sfc for block_kfold.  The grid is
@@ -3095,8 +3111,11 @@ print.sac_range <- function(x, ...) {
 #'   see \strong{Details}.
 #' @param phi For \code{method = "nndm"}: the distance up to which the two
 #'   nearest-neighbour distance distributions are matched, in the CRS the
-#'   folds are built in; the exclusion never pushes a held-out point's
-#'   nearest neighbour beyond it.  In Mila et al. (2022), and in
+#'   folds are built in.  Matching is attempted only while a held-out
+#'   point's nearest-neighbour distance is at most \code{phi}; the exclusion
+#'   that takes it past \code{phi} is the last one, so a realised distance
+#'   can exceed \code{phi} by up to one neighbour step, as in
+#'   \code{CAST::nndm()}.  In Mila et al. (2022), and in
 #'   \code{CAST::nndm()}, \eqn{\phi} is the autocorrelation range of the
 #'   outcome: beyond it observations are effectively independent, so
 #'   matching is unnecessary.  \code{\link{estimate_sac_range}()} gives such
@@ -3125,10 +3144,12 @@ print.sac_range <- function(x, ...) {
 #' plain leave-one-out, the point with the smallest \eqn{G_j^*} at which the
 #' realised distribution exceeds the target (\eqn{G_j^*(r) > G_{ij}(r)}) has
 #' its nearest training neighbour removed, and this repeats until no such
-#' point remains, subject to two limits: a point's nearest-neighbour distance
-#' is never pushed beyond \code{phi} (default: the largest prediction distance,
-#' since a training point already further than every prediction distance has
-#' nothing to match), and no fold's training set is stripped below
+#' point remains, subject to two limits: a point is matched only while its
+#' nearest-neighbour distance is at most \code{phi} (default: the largest
+#' prediction distance, since a training point already further than every
+#' prediction distance has nothing to match), so the exclusion that takes it
+#' past \code{phi} is its last and a realised distance can exceed \code{phi}
+#' by up to one neighbour step; and no fold's training set is stripped below
 #' \code{min_train} of the data.
 #'
 #' It differs from \code{CAST::nndm()} in two details, so the folds agree
@@ -3302,12 +3323,12 @@ print.sac_range <- function(x, ...) {
 #'   several, and the blocks can be drawn over the data
 #'   (\code{\link{plot_folds}()} does so).
 #'
-#'   For the methods that work in projected space (\code{"block_kfold"},
-#'   \code{"buffered_loo"} and \code{"nndm"}), \code{params} carries a
+#'   For \code{"block_kfold"}, \code{params} carries a
 #'   \code{params$blocks_supplied} that says whether the blocks came from
 #'   \code{blocks} or from a grid built here, and
-#'   \code{params$boundary_supplied} whether a \code{boundary} was given;
-#'   \code{params$row_probe} is a small sample of row IDs and coordinates
+#'   \code{params$boundary_supplied} whether a \code{boundary} was given.
+#'   Every method's \code{params} carries
+#'   \code{params$row_probe}, a small sample of row IDs and coordinates
 #'   that every \code{cv_*()} compares against the data it is handed, so
 #'   folds built from a different layer of the same size are refused, never
 #'   applied silently.
@@ -3423,6 +3444,15 @@ make_folds <- function(points_sf, k,
       stop(sprintf("make_folds(): `%s` must be a single whole number >= 1; got %s.",
                    nm, paste(format(v), collapse = ", ")), call. = FALSE)
   }
+  # block_multiplier was never validated: NA died inside st_make_grid() on
+  # 'length.out', a vector silently used its largest element, and a `units`
+  # value was silently taken as a plain count.
+  if (inherits(block_multiplier, "units") || !is.numeric(block_multiplier) ||
+      length(block_multiplier) != 1L || !is.finite(block_multiplier) ||
+      block_multiplier <= 0)
+    stop("make_folds(): `block_multiplier` must be a single positive number; got ",
+         if (length(block_multiplier)) paste(format(block_multiplier), collapse = ", ")
+         else "a value of length 0", ".", call. = FALSE)
   # A supplied block design is refused for the other methods rather than
   # ignored: hexagons that silently became random folds would be the worst
   # outcome.  The polygon check reuses .assert_sf(), which already recognises
@@ -3585,7 +3615,21 @@ make_folds <- function(points_sf, k,
     }
 
     # --- Autocorrelation-aware block sizing ---
+    # A misspelt response_var was an error under auto_range = TRUE (from
+    # estimate_sac_range()), but with auto_range off the diagnostic-only
+    # estimate below swallowed it and the leakage check silently never ran.
+    if (!is.null(response_var)) {
+      if (!is.character(response_var) || length(response_var) != 1L ||
+          is.na(response_var))
+        stop("make_folds(block_kfold): `response_var` must be a single column ",
+             "name; got ", paste(format(response_var), collapse = ", "), ".",
+             call. = FALSE)
+      if (!(response_var %in% names(points_sf)))
+        stop(sprintf("make_folds(block_kfold): `response_var` '%s' is not a column of `points_sf`.",
+                     response_var), call. = FALSE)
+    }
     sac_range <- NA_real_
+    size_from_range <- FALSE
     if (isTRUE(auto_range) && !is.null(response_var)) {
       # `seed` here is make_folds()'s own, whose default is NULL -- meaning
       # "do not seed the FOLD assignment".  Forwarding that NULL re-opened the
@@ -3614,6 +3658,7 @@ make_folds <- function(points_sf, k,
         # auto_range sets block_size only if the caller didn't supply one
         if (is.null(block_size)) {
           block_size <- sac_range
+          size_from_range <- TRUE
         } else if (block_size < sac_range) {
           .log_warn(
             "make_folds(block_kfold): supplied block_size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Spatial CV may still leak correlated information.",
@@ -3632,14 +3677,26 @@ make_folds <- function(points_sf, k,
         # knitr, spatialkit_quiet or tryCatch() a CV result could not show
         # that its blocks were never sized from the data.
         why <- attr(sac_range, "rejected_reason")
+        # A bare NA carries no reason: estimate_sac_range() returns one before
+        # fitting anything, and only its log line said why -- which
+        # spatialkit_quiet(), knitr and tryCatch() never see.  Name the two
+        # floors that are cheap to test here, and the rest of the short list.
+        if (!(is.character(why) && length(why) == 1L && !is.na(why)))
+          why <- if (!requireNamespace("gstat", quietly = TRUE))
+            "package 'gstat', which the variogram needs, is not installed"
+          else if (nrow(pts) < 30L)
+            sprintf("%d points, fewer than the 30 a variogram range is estimated from",
+                    nrow(pts))
+          else paste0("estimate_sac_range() returned NA before fitting: fewer ",
+                      "than 30 finite values to model, a variable with no ",
+                      "variance, or points with no extent; its log line says ",
+                      "which")
         .warn_and_log(paste0("make_folds(block_kfold): auto_range = TRUE, but ",
                              "no autocorrelation range was identified (%s); ",
                              "falling back to geometric blocks, which are not ",
                              "sized from the data. See ?estimate_sac_range, or ",
                              "pass `block_size`."),
-                      if (is.character(why) && length(why) == 1L && !is.na(why))
-                        why
-                      else "estimate_sac_range() returned NA")
+                      why)
       }
     } else if (isTRUE(auto_range) && is.null(response_var)) {
       .log_warn("make_folds(block_kfold): auto_range = TRUE but response_var is NULL; cannot estimate range. Falling back to geometric blocks.")
@@ -3694,8 +3751,9 @@ make_folds <- function(points_sf, k,
         nx <- size_dims$nx
         ny <- size_dims$ny
 
-        # Ensure at least k blocks so each fold can get one
-        if (nx * ny < k) {
+        # Ensure at least k blocks so each fold can get one.  A single block
+        # is refused further down, so do not announce a k it will never use.
+        if (nx * ny < k && nx * ny >= 2) {
           .log_warn(
             "make_folds(block_kfold): block_size produces only %d blocks (< k = %d). Reducing k to match.",
             nx * ny, k
@@ -3718,11 +3776,16 @@ make_folds <- function(points_sf, k,
         nx <- min(target_blocks, max(1L, round(sqrt(target_blocks * ratio))))
         ny <- max(1L, round(max(1, target_blocks / nx)))
 
-        # Diagnostic: warn if resulting block size is small relative to SAC range
-        if (is.finite(sac_range) && sac_range > 0) {
-          cell_w <- w / nx
-          cell_h <- h / ny
-          min_cell <- min(cell_w, cell_h)
+        # Diagnostic: warn if resulting block size is small relative to SAC range.
+        # Only a dimension that is split has blocks bordering each other
+        # across it: a single row spans the whole height and leaks to no
+        # other block that way.  Taking the minimum over both compared the
+        # range with 0 on points on a line (and with the width of a
+        # corridor), and the advice to pass block_size = <range> then gave
+        # SHORTER blocks along it.
+        split_cells <- c(if (nx > 1) w / nx, if (ny > 1) h / ny)
+        if (is.finite(sac_range) && sac_range > 0 && length(split_cells)) {
+          min_cell <- min(split_cells)
           if (min_cell < sac_range) {
             .log_warn(
               "make_folds(block_kfold): geometric block size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Consider setting block_size >= %.0f or auto_range = TRUE to avoid information leakage.",
@@ -3754,9 +3817,10 @@ make_folds <- function(points_sf, k,
         }
 
         # Diagnostic: warn if user-supplied nx/ny yield blocks smaller than SAC
-        if (is.finite(sac_range) && sac_range > 0) {
-          cell_w <- w / nx; cell_h <- h / ny
-          min_cell <- min(cell_w, cell_h)
+        # (over the dimensions that are split; see the automatic grid above).
+        split_cells <- c(if (nx > 1) w / nx, if (ny > 1) h / ny)
+        if (is.finite(sac_range) && sac_range > 0 && length(split_cells)) {
+          min_cell <- min(split_cells)
           if (min_cell < sac_range) {
             .log_warn(
               "make_folds(block_kfold): user-supplied grid (%dx%d) yields blocks of ~%.1f units, smaller than estimated autocorrelation range (%.1f).",
@@ -3779,7 +3843,10 @@ make_folds <- function(points_sf, k,
       # guards exactly this mistake with max_cells and names the CRS units;
       # blocked CV is the sibling that did not.
       n_cells_est <- as.numeric(nx) * as.numeric(ny)
-      if (is.finite(n_cells_est) && n_cells_est > .block_max_cells) {
+      # A block_size hundreds of orders of magnitude too small overflows the
+      # product to Inf, which the old `is.finite() &&` let past the guard and
+      # into st_make_grid()'s "result would be too long a vector".
+      if (!is.finite(n_cells_est) || n_cells_est > .block_max_cells) {
         unit_lbl <- tryCatch({
           u <- sf::st_crs(reg)$units_gdal
           if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
@@ -3787,18 +3854,42 @@ make_folds <- function(points_sf, k,
         # %s, not %d: nx and ny are doubles from floor(), and a block_size in
         # the wrong unit -- the very mistake this guard exists to explain --
         # gives counts past 2^31 that %d refuses with "invalid format".
+        fmt_count <- function(v, big = "") {
+          if (!is.finite(v)) "more than 1e308"
+          else if (v >= 1e15) format(v, digits = 3, scientific = TRUE)
+          else format(v, big.mark = big, scientific = FALSE)
+        }
+        extent_lbl <- sprintf("%s x %s",
+                              format(signif(as.numeric(bb["xmax"] - bb["xmin"]), 4)),
+                              format(signif(as.numeric(bb["ymax"] - bb["ymin"]), 4)))
+        # Name what produced the grid.  This always blamed `block_size`,
+        # printing "unset" when block_nx/block_ny or the automatic grid had
+        # sized it -- an argument the caller never passed.
+        check <- if (!is.null(block_size) && size_from_range)
+          sprintf(paste0("The block size is the estimated autocorrelation range ",
+                         "(%s %s) over an extent of %s; pass `block_size` ",
+                         "yourself, or set auto_range = FALSE."),
+                  format(as.numeric(block_size)), unit_lbl, extent_lbl)
+        else if (!is.null(block_size))
+          sprintf(paste0("Check that `block_size` (%s) is expressed in the ",
+                         "data's CRS units (%s) over an extent of %s; a value ",
+                         "in the wrong unit is the usual cause."),
+                  format(as.numeric(block_size)), unit_lbl, extent_lbl)
+        else if (!is.null(block_nx) || !is.null(block_ny))
+          sprintf(paste0("The grid is the one `block_nx`/`block_ny` ask for over ",
+                         "an extent of %s (%s); ask for fewer blocks."),
+                  extent_lbl, unit_lbl)
+        else
+          sprintf(paste0("The automatic grid aims for `block_multiplier` (%s) ",
+                         "x k (%d) blocks over an extent of %s (%s); pass a ",
+                         "smaller `block_multiplier`."),
+                  format(block_multiplier), k, extent_lbl, unit_lbl)
         stop(sprintf(paste0("make_folds(block_kfold): the requested grid is %s x ",
                             "%s = %s cells, above the %s this function will ",
-                            "build. Check that `block_size` (%s) is expressed in ",
-                            "the data's CRS units (%s) over an extent of %s x %s; ",
-                            "a value in the wrong unit is the usual cause."),
-                    format(nx, scientific = FALSE), format(ny, scientific = FALSE),
-                    format(n_cells_est, big.mark = ",", scientific = FALSE),
+                            "build. %s"),
+                    fmt_count(nx), fmt_count(ny), fmt_count(n_cells_est, ","),
                     format(.block_max_cells, big.mark = ",", scientific = FALSE),
-                    if (is.null(block_size)) "unset" else format(block_size),
-                    unit_lbl,
-                    format(signif(as.numeric(bb["xmax"] - bb["xmin"]), 4)),
-                    format(signif(as.numeric(bb["ymax"] - bb["ymin"]), 4))),
+                    check),
              call. = FALSE)
       }
 
@@ -4280,14 +4371,19 @@ make_folds <- function(points_sf, k,
       stop("make_folds(nndm): could not compute prediction-to-training ",
            "distances.", call. = FALSE)
 
-    if (!is.numeric(min_train) || length(min_train) != 1L ||
-        !is.finite(min_train) || min_train <= 0 || min_train >= 1)
+    # A `units` object passes is.numeric() and then fails the comparison
+    # inside the units package with a message that names no argument.
+    if (inherits(min_train, "units") || !is.numeric(min_train) ||
+        length(min_train) != 1L || !is.finite(min_train) || min_train <= 0 ||
+        min_train >= 1)
       stop("make_folds(nndm): `min_train` must be a single number in (0, 1).",
            call. = FALSE)
     if (is.null(phi)) phi <- max(g_target)
-    if (!is.numeric(phi) || length(phi) != 1L || !is.finite(phi) || phi < 0)
-      stop("make_folds(nndm): `phi` must be a single non-negative number.",
-           call. = FALSE)
+    if (inherits(phi, "units") || !is.numeric(phi) || length(phi) != 1L ||
+        !is.finite(phi) || phi < 0)
+      stop("make_folds(nndm): `phi` must be a single non-negative number, in ",
+           "the units of the CRS the folds are built in (a plain number, not a ",
+           "units object).", call. = FALSE)
 
     # ---- The paper's procedure (Mila et al. 2022) ----------------------------
     # Deterministic: no radii are drawn.  Starting from plain LOO, the held-out
