@@ -39,9 +39,10 @@ support materially different conclusions under different boundaries.
 
 `spatialkit` lets the data draw the boundaries. `get_voronoi_seeds()`
 places seeds by k-means on the point cloud, so cell density follows
-sampling density. `determine_optimal_levels()` and
-`resolution_profile()` read a cell count out of the spatial structure of
-the observations. `build_tessellation()` produces Voronoi, hex, square
+sampling density. `resolution_profile()` scores every candidate cell
+count against the spatial structure of the observations, and
+`determine_optimal_levels()` reads one off their clustering when they
+have any. `build_tessellation()` produces Voronoi, hex, square
 or Delaunay cells clipped to your study area, with IDs that stay stable
 when the input row order changes. `summarize_by_cell()` aggregates onto
 them and corrects the cell-level standard errors for within-cell
@@ -67,17 +68,21 @@ methods aggregating it over North Carolina</figcaption>
 How many cells is a decision with visible consequences. The same field
 below is cut at three resolutions beside the raw observations: too
 coarse blurs the hotspot, too fine chases noise with near-empty cells,
-and the selected count keeps the trend without tracing the sampling
-pattern. `vignette("resolution")` covers how that number is chosen and
-the four criteria that disagree about it.
+and the middle count, the one `resolution_profile()` rates most
+reliable, keeps the trend without tracing the sampling pattern. It is a
+reading, not a verdict: the reliability of the cell means stays within 2
+percent of its best from 3 to 25 cells here, and the sites are spread
+evenly, so there is no elbow for `determine_optimal_levels()` to find.
+`vignette("resolution")` covers how that number is chosen and the four
+criteria that disagree about it.
 
 <figure>
 <img
 src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png"
-alt="Raw observations and the same spatial field tessellated at three resolutions, including the automatically selected one" />
+alt="Raw observations and the same spatial field tessellated at three resolutions, including the count resolution_profile() rates most reliable" />
 <figcaption aria-hidden="true">Raw observations and the same spatial
-field tessellated at three resolutions, including the automatically
-selected one</figcaption>
+field tessellated at three resolutions, including the count
+resolution_profile() rates most reliable</figcaption>
 </figure>
 
 The number a random fold reports on autocorrelated data is the reason
@@ -452,10 +457,19 @@ and `plot()` on the returned object draws the variogram behind it.
 `vignette("spatial-cross-validation")` covers what an `NA` there leaves
 you to decide about the block size.
 
-**`determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.`**
-Every candidate resolution sat below the nine-cell floor where Moran’s I
-is arithmetically degenerate. Expected at small `max_levels`; see
-`vignette("resolution")`.
+**`determine_optimal_levels(): the model-aware criteria score only the elbow's neighbourhood, k = ... to ..., and carry no information at nine cells or fewer`**
+(or, before the sweep, `max_levels leaves k_max = ...`). Every candidate
+around the elbow sat at nine cells or fewer, where Moran’s I is
+arithmetically degenerate, so the call fell back to the geometric
+ranking. On points with no cluster structure that is the usual outcome
+below about `max_levels = 40`; `resolution_profile()` scores Moran’s z
+at every level of its ladder. See `vignette("resolution")`.
+
+**`determine_optimal_levels(): Moran's I could not be computed at any k from ... to ... in the elbow's neighbourhood`**
+The candidates did pass nine cells, but too few of the cells hold a row
+with a response and every predictor, or the regression of the cell
+means on the predictors is singular (a predictor constant or collinear
+across cells). Check for missing values first.
 
 **Distances, bandwidths or block sizes look absurd.** Check the working
 CRS first: `st_crs(x)$units_gdal`. A block size that made sense in
@@ -579,9 +593,9 @@ reproduces them.
 
 The README figures are generated from actual package output; regenerate
 them with `Rscript dev/make_readme_figures.R`. `readme-resolution.png`
-labels the cell count `determine_optimal_levels()` chose for that data,
-so it goes stale whenever that function’s answer changes and must be
-rebuilt alongside it.
+labels the cell count `resolution_profile()` rates most reliable on that
+data, so it goes stale whenever that criterion’s answer changes and must
+be rebuilt alongside it.
 
 The test suite covers the geometry/tessellation pipeline, every exported
 function, and targeted regression tests for the statistical internals

@@ -107,10 +107,12 @@ test_that("repeat visits let the ladder reach one cell per location", {
   # Without repeats the cap stays one short of the points, which
   # stats::kmeans() needs.
   expect_identical(resolution_profile(r2_pts(20), levels = 2:20, nstart = 2)$levels, 2:19)
-  # determine_optimal_levels() reaches k = 5 as well.
-  lines <- capture_spatialkit_log(suppressWarnings(
-    determine_optimal_levels(pp, max_levels = 12)))
-  expect_true(log_has(lines, "k = 1 to 5"))
+  # determine_optimal_levels() reaches k = 5 as well, and reads the fall of
+  # the WSS to zero there as the elbow: one cell per station, where it used
+  # to warn that the stations had no cluster structure.
+  out <- r2_warnings(determine_optimal_levels(pp, max_levels = 12))
+  expect_identical(out$value[1L], 5L)
+  expect_false(any(grepl("no elbow", out$warnings)))
 })
 
 

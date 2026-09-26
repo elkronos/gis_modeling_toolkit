@@ -57,6 +57,66 @@
 }
 
 
+#' The elbow of a WSS ladder, including a fall to zero
+#'
+#' \code{.elbow_sag()} on the levels whose WSS is positive, and the reading
+#' both callers take from it.  A level whose WSS is zero has a cell on every
+#' distinct location, which a ladder reaches when locations repeat (stations
+#' visited many times).  It has no place on log axes, and log(0) would take
+#' the line with it, so it is left out of the line.  But the fall to zero is
+#' the sharpest bend a WSS curve can make: when the positive levels have no
+#' elbow, the first zero level is the elbow, one cell per location.  Its sag
+#' is measured with its WSS floored at \code{.ELBOW_ZERO_TOL} of the first
+#' level's, below the line through the first level and the last positive one
+#' (the power law \eqn{c/k} through the first level when there is no other
+#' positive one).  Leaving the zero out and reading the rest used to say
+#' "no cluster structure" and answer 3 on five stations visited thirty times
+#' each, where one metre of jitter answered 5.
+#'
+#' Zero is relative: at most \code{.ELBOW_ZERO_TOL} (\eqn{10^{-12}}) of the
+#' first level's WSS.  k-means leaves floating-point residue where the exact
+#' value is 0 (7.8e-17 at the station count of one layer of repeat visits),
+#' and the log of that dragged the line down as far as log(0) would.
+#'
+#' @param k Levels, increasing, with \code{k[1]} the anchor of the line (1 in
+#'   both callers).
+#' @param wss Their WSS, \code{wss[1]} the anchor's (the total sum of
+#'   squares at \code{k = 1}).
+#' @return A list with \code{sag} (at every level; \code{NA} at a zero level
+#'   unless it is the elbow), \code{structured}, \code{knee} (the level of
+#'   greatest sag, \code{NA} when not structured) and \code{zero} (which
+#'   levels count as zero).
+#' @keywords internal
+#' @noRd
+.ELBOW_ZERO_TOL <- 1e-12
+.elbow_read <- function(k, wss) {
+  m  <- length(k)
+  wss <- as.numeric(wss)
+  w1 <- wss[1L]
+  zero <- if (is.finite(w1) && w1 > 0)
+    is.finite(wss) & wss >= 0 & wss <= .ELBOW_ZERO_TOL * w1
+  else rep(FALSE, m)
+  sag <- rep(NA_real_, m)
+  sag[!zero] <- .elbow_sag(k[!zero], wss[!zero])
+  structured <- any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG
+  if (!structured && any(zero)) {
+    z  <- which(zero)[1L]
+    p  <- which(!zero)
+    lw <- suppressWarnings(log(wss[p]))
+    lk <- log(as.numeric(k[p]))
+    if (all(is.finite(lw))) {
+      np <- length(p)
+      slope <- if (np >= 2L) (lw[np] - lw[1L]) / (lk[np] - lk[1L]) else -1
+      sag[z] <- lw[1L] + slope * (log(as.numeric(k[z])) - lk[1L]) -
+        log(.ELBOW_ZERO_TOL * w1)
+      structured <- sag[z] >= .ELBOW_MIN_SAG
+    }
+  }
+  list(sag = sag, structured = structured,
+       knee = if (structured) k[which.max(sag)] else NA, zero = zero)
+}
+
+
 #' Select an elbow (knee) from a WSS curve
 #'
 #' Heuristically selects the "elbow" from a vector of within-cluster sum of
@@ -73,7 +133,8 @@
 #' k = 8 where Kneedle answers k = 2).
 #'
 #' The chord is drawn on log-log axes (see \code{.elbow_sag()}), where a
-#' curve with no cluster structure is straight.  When the sag there does not
+#' curve with no cluster structure is straight, and a fall to a WSS of zero
+#' counts as a bend (see \code{.elbow_read()}).  When the sag there does not
 #' reach \code{.ELBOW_MIN_SAG} the curve has no elbow: \code{structured} is
 #' \code{FALSE} and \code{knee_k} is the linear-axis chord rule's answer,
 #' which on such a curve is set by \code{min_k} and \code{max_k}, not by the
@@ -110,12 +171,17 @@
     unique(pmin(max_k, pmax(min_k, c(knee, knee - 1L, knee + 1L))))
   }
 
+  # Read on log-log axes, with a fall to zero counted as a bend (see
+  # .elbow_read()).  Two levels are too few for a line, but not for a fall
+  # to zero: two stations visited many times have their elbow at 2.
+  rd <- .elbow_read(k_idx, wss_k)
   if (length(wss_k) < 3L) {
-    knee_k <- floor((min_k + max_k) / 2)
+    knee_k <- if (rd$structured) rd$knee else floor((min_k + max_k) / 2)
     return(list(
-      knee_k = knee_k, candidates = .make_candidates(knee_k), structured = FALSE,
+      knee_k = knee_k, candidates = .make_candidates(knee_k),
+      structured = rd$structured,
       diagnostics = list(wss = wss_k, d1 = diff(wss_k), d2 = numeric(0),
-                         sag = rep(NA_real_, length(wss_k)))
+                         sag = rd$sag)
     ))
   }
   
@@ -147,15 +213,17 @@
   # layer.  On log-log axes that curve is straight (see .elbow_sag()).  The
   # linear answer is kept only as the fallback, flagged, when there is no
   # bend there.
-  # A k with a WSS of 0 has a cell on every distinct location (the sweep can
-  # reach that k when locations repeat): no geometry is left to bend there,
-  # and log(0) would take the whole line with it, so it is left out.
-  # Anything else that is not positive still leaves no line at all.
-  pos <- !(is.finite(wss_k) & wss_k == 0)
-  sag <- rep(NA_real_, length(k_idx))
-  sag[pos] <- .elbow_sag(k_idx[pos], wss_k[pos])
-  structured <- any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG
-  if (structured) knee_k <- k_idx[which.max(sag)]
+  # A k with a WSS of 0 (to within 1e-12 of the total) has a cell on every
+  # distinct location, which the sweep reaches when locations repeat.  It is
+  # left out of the line, since log(0) would take the whole line with it,
+  # and when the rest of the curve has no elbow it is the elbow: the WSS
+  # falling to zero is the sharpest bend there is.  It used to be only left
+  # out, and five stations visited thirty times each then had "no cluster
+  # structure" and got 3.  Anything else that is not positive still leaves
+  # no line at all.
+  sag <- rd$sag
+  structured <- rd$structured
+  if (structured) knee_k <- rd$knee
 
   d1 <- diff(wss_k)
   d2 <- diff(d1)
@@ -430,7 +498,12 @@
 #' data.  An elongated extent also bends, at about its aspect ratio, because
 #' the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
 #' past the threshold that bend is reported as an elbow, and it describes
-#' the extent's shape rather than clusters in it.
+#' the extent's shape rather than clusters in it.  When locations repeat
+#' (stations visited many times), the sweep can reach one cell per distinct
+#' location, where the WSS is zero (to within \eqn{10^{-12}} of the total).
+#' That \code{k} has no place on log axes and is left out of the line, but
+#' the fall to zero is the sharpest bend there is: when the rest of the
+#' curve has no elbow, the number of distinct locations is the elbow.
 #'
 #' When \code{response_var} and \code{predictor_vars} are provided, the
 #' geometric WSS elbow is supplemented with Moran's I computed on OLS
@@ -513,9 +586,12 @@
 #' \code{max_levels} of 12, 20 and 30 all fell back, and 40 scored
 #' \code{k} = 10 and 11 alone.  On such a layer
 #' \code{\link{resolution_profile}()}, which scores Moran's z at every level of
-#' its ladder, is the model-aware view.  Under \code{criterion = "combined"}, a candidate below the
-#' floor that sits alongside candidates above it is ranked last on the Moran's
-#' I axis while still competing on the geometric axis.
+#' its ladder, is the model-aware view.  Under \code{criterion = "combined"},
+#' the candidates below the floor that sit alongside candidates above it all
+#' take the last place on the Moran's I axis, after every candidate it
+#' scored, while still competing on the geometric axis.  That axis is the
+#' elbow's own log-log sag at each candidate; when the WSS curve has no elbow
+#' it is flat, every candidate tied, and Moran's I alone orders them.
 #'
 #' @param data_sf An sf object.  Features with empty or non-finite
 #'   coordinates are dropped with a warning.
@@ -544,8 +620,9 @@
 #'   error.
 #' @param criterion One of \code{"geometric"} (default when no response given),
 #'   \code{"morans_i"} (select the k whose residual Moran's I is least
-#'   \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
-#'   distance and that same quantity).  Falls back to \code{"geometric"},
+#'   \emph{significant}), or \code{"combined"} (rank-average of the WSS
+#'   curve's log-log sag, the quantity the elbow is read from, and that same
+#'   significance).  Falls back to \code{"geometric"},
 #'   with a warning, when \code{response_var} or \code{predictor_vars} is not
 #'   given, and with a logged warning when no candidate clears the
 #'   nine-cell resolution floor described in \strong{Details}.  A
@@ -876,7 +953,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     pred_mat <- pred_mat[idx, , drop = FALSE]
   }
 
-  k_max <- max(2L, min(as.integer(max_levels), nrow(xy) - 1L))
+  ml    <- as.integer(max_levels)
+  k_max <- max(2L, min(ml, nrow(xy) - 1L))
 
   # One centre per distinct location at most, which with repeat visits is
   # below nrow(xy) - 1 (stats::kmeans() refuses as many centres as points).
@@ -885,6 +963,15 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   n_uniq <- nrow(unique(round(xy, 8)))
   k_max <- min(k_max, n_uniq)
   if (k_max < 2L) return(.with_split(1L))
+  # Which bound ended the ladder, for the messages below: they used to name
+  # max_levels whatever did, and on five stations at max_levels = 12 it was
+  # the stations.
+  k_max_from <- if (k_max < max(2L, ml) && k_max == n_uniq)
+    sprintf("the %d distinct locations", n_uniq)
+  else if (k_max < max(2L, ml))
+    sprintf("one short of the %d points", nrow(xy))
+  else if (ml < 2L) sprintf("max_levels = %d, raised to 2", ml)
+  else "max_levels"
 
   # Say it BEFORE the sweep: the model-aware criteria carry no information at
   # nine cells or fewer (see the resolution floor in Details), so with
@@ -936,6 +1023,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       while (hi %in% failed_k && hi < k_max) hi <- hi + 1L
       if (hi %in% failed_k) {
         k_max <- lo
+        k_max_from <- sprintf("k-means failing from k = %d", lo + 1L)
         break
       }
       wss[fk] <- (wss[lo] + wss[hi]) / 2
@@ -948,14 +1036,25 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # ladder can see, and the chord rule's answer is set by max_levels.  It is
   # still returned, because a count is what this function is for, but not
   # silently: it used to be handed on as if the data had chosen it.
-  if (!isTRUE(elbow$structured))
+  # A ladder of two levels has no line to test, and used to be told it fell
+  # in one.
+  if (!isTRUE(elbow$structured) && k_max < 3L)
+    .warn_and_log(paste0("determine_optimal_levels(): a ladder of k = 1 to %d (ended ",
+                         "by %s) is too short to read an elbow from: it takes three ",
+                         "levels to see a bend. k = %d is not a finding about the ",
+                         "data; %s"),
+                  k_max, k_max_from, elbow$knee_k,
+                  if (identical(k_max_from, "max_levels") || ml < 2L)
+                    "raise max_levels to 3 or more."
+                  else "choose the count on other grounds.")
+  else if (!isTRUE(elbow$structured))
     .warn_and_log(paste0("determine_optimal_levels(): the WSS curve has no elbow: on ",
                          "log-log axes it falls in a straight line, as it does for ",
                          "points with no cluster structure. k = %d is where the chord ",
                          "rule lands on such a curve, set by the ladder (k = 1 to %d, ",
-                         "max_levels) rather than by the data%s. Choose the count on ",
+                         "%s) rather than by the data%s. Choose the count on ",
                          "other grounds, e.g. resolution_profile() with a response."),
-                  elbow$knee_k, k_max,
+                  elbow$knee_k, k_max, k_max_from,
                   if (criterion == "geometric") ""
                   else "; the model-aware criteria are evaluated around it")
 
@@ -1083,34 +1182,44 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     return(.with_split(out))
   }
 
-  # --- Combined: rank-average of WSS elbow distance and |z| of Moran's I ---
+  # --- Combined: rank-average of the elbow's sag and |z| of Moran's I ---
   # |z|, not |I|: I's attainable range is set by the eigenvalues of the weights
   # matrix, which is rebuilt at every k, so |I| is not comparable across k.
   # Only rank over the evaluated neighbourhood to keep dimensions aligned;
   # use wss_eval so both criteria reflect the same clustering per k.
-  k_norm   <- (eval_ks - min(eval_ks)) / max(1, max(eval_ks) - min(eval_ks))
-  wss_sub  <- wss_eval[eval_ks]
-  wss_norm <- (wss_sub - min(wss_sub)) / max(.Machine$double.eps, max(wss_sub) - min(wss_sub))
-  x1 <- k_norm[1]; y1 <- wss_norm[1]
-  x2 <- k_norm[length(k_norm)]; y2 <- wss_norm[length(wss_norm)]
-  line_len <- sqrt((x2 - x1)^2 + (y2 - y1)^2)
-  if (line_len < .Machine$double.eps) {
-    perp_dist <- rep(0, length(eval_ks))
+  #
+  # The geometric axis is the log-log sag the elbow itself is read from
+  # (.elbow_read()), below the line from k = 1 to k_max.  It was the chord
+  # on linear axes across the window, the rule the elbow stopped using
+  # because on a curve like c / k it lands near sqrt(first x last) whatever
+  # the data: on eight separated clusters it ranked 6 or 7 first where the
+  # elbow is 8.  With no elbow the axis is flat, every candidate tied, and
+  # Moran's z alone orders the window.
+  n_eval <- length(eval_ks)
+  if (isTRUE(elbow$structured)) {
+    w <- wss[seq_len(k_max)]
+    w[eval_ks] <- wss_eval[eval_ks]
+    sag_w <- .elbow_read(seq_len(k_max), w)$sag[eval_ks]
+    rank_elbow <- rank(-sag_w, na.last = TRUE, ties.method = "average")  # more sag = better
   } else {
-    # Signed (positive below the chord), as in .select_elbow(); see there.
-    perp_dist <- .below_chord(k_norm, wss_norm, x1, y1, x2, y2, line_len)
+    rank_elbow <- rep((n_eval + 1) / 2, n_eval)
   }
-
-  # Rank both criteria (lower rank = better)
-  rank_elbow <- rank(-perp_dist, ties.method = "average")  # higher distance = better
   # |z|, not |I|: the two rank candidates differently and only |z| is
-  # comparable across k.  See .morans_i_for_k().
+  # comparable across k.  See .morans_i_for_k().  A candidate with no z
+  # (below the nine-cell floor) takes the last place on this axis, all of
+  # them together: an average-rank tie gave a block of seven unscored
+  # candidates the mean of places 3 to 9, 6 of 9, so the more candidates
+  # went unscored, the lighter their penalty.
   abs_moran_sub <- abs(moran_z[eval_ks])
-  abs_moran_sub[!is.finite(abs_moran_sub)] <- max(abs_moran_sub[is.finite(abs_moran_sub)], 1) + 1
-  rank_moran <- rank(abs_moran_sub, ties.method = "average")  # lower |z| = better
+  scored_z <- is.finite(abs_moran_sub)
+  rank_moran <- rep(as.numeric(n_eval), n_eval)
+  rank_moran[scored_z] <- rank(abs_moran_sub[scored_z], ties.method = "average")  # lower |z| = better
 
   combined_rank <- (rank_elbow + rank_moran) / 2
-  best_idx <- order(combined_rank)
+  # Exact ties (with a flat geometric axis, every unscored candidate) go to
+  # the k nearest the elbow the window was drawn around; order() alone hands
+  # them over smallest first, 2 and 3 on uniform points.
+  best_idx <- order(combined_rank, abs(eval_ks - knee_k))
   out <- as.integer(eval_ks[head(best_idx, max(1L, as.integer(top_n)))])
   out[out < 1L] <- 1L; out[out > k_max] <- k_max
   out <- unique(out)

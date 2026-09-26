@@ -73,7 +73,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
   # noise for Mallows' Cp to have an interior optimum rather than descend
   # to the ceiling.
-  set.seed(2)
+  set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))

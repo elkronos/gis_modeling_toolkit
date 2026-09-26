@@ -21,7 +21,8 @@ resolution_profile(
 }
 \arguments{
 \item{data_sf}{An sf object of points (other geometries are reduced to
-representative points).}
+representative points).  Features with empty or non-finite coordinates
+are dropped with a warning.}
 
 \item{response_var}{Optional response column name (numeric or logical).
 Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
@@ -71,7 +72,9 @@ to which the points are transformed first, so the area, the floor and
 \code{cell_diam_median} are then in that CRS's units.  A sac whose
 range was rejected (\code{NA} with a \code{rejected_reason}) gives
 \code{cp} its nugget, with a warning, and leaves \code{reliability}
-\code{NA}, since that needs the range; one whose model did not converge
+\code{NA}, since that needs the range; one whose model did not converge,
+or whose range is below the shortest lag fitted (a structure that
+cannot be told from a nugget, so the nugget is not identified either),
 gives neither.  Under \code{select_on = "split"} the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
@@ -189,7 +192,13 @@ to \eqn{c/k}, which is straight on those axes, so the column is
 calibration are in \code{\link{determine_optimal_levels}}).  The
 classical chord on linear axes found a "knee" on such a layer anyway,
 at about \eqn{\sqrt{L_{first} L_{last}}}, where the ladder's ends put
-it.  Geometry only; it knows nothing of the response.}
+it.  A level whose WSS is 0 (to within \eqn{10^{-12}} of the total),
+one cell on every distinct location, which the ladder reaches when
+locations repeat, is left out of the line; when the other levels have
+no elbow, that fall to zero is the elbow, and its sag is measured with
+the WSS floored at \eqn{10^{-12}} of the total, which puts it far
+above any other level's.  Geometry only; it knows nothing of the
+response.}
 \item{\code{cp}}{Mallows' \eqn{C_p} of the piecewise-constant
 approximation of the response (or of its OLS residuals on
 \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
@@ -213,9 +222,9 @@ small to stop it, so \eqn{C_p} says "as fine as the support allows"
 and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 says so when that happens.  It becomes a genuine interior criterion
 only when the nugget is a large share of the sill.  With a nugget of 0
-(usually a fit clipped at its lower bound) the penalty is 0 and
-\eqn{C_p} descends to the ceiling whatever the field; the profile
-warns.}
+(under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
+bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
+the field; the profile warns.}
 \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
@@ -252,7 +261,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
   # noise for Mallows' Cp to have an interior optimum rather than descend
   # to the ceiling.
-  set.seed(2)
+  set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
