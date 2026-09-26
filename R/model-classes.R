@@ -199,8 +199,18 @@ print.spatial_fit <- function(x, ...) {
   cat(sprintf("  CRS     : %s\n", .fold_crs_label(x$data_sf)))
 
   if (subclass == "gwr_fit") {
-    cat(sprintf("  Bandwidth: %.4g (%s, %s kernel)\n",
-                x$info$bandwidth,
+    # "%.4g" printed a fixed bandwidth of 122372 m as "1.224e+05", rounded and
+    # without the unit the help page tells the reader to check.  A count of
+    # neighbours for adaptive, a distance with the CRS's unit for fixed.
+    bw <- suppressWarnings(as.numeric(x$info$bandwidth %||% NA_real_))[1L]
+    bw_txt <- if (!is.finite(bw)) "unknown"
+      else if (isTRUE(x$info$adaptive)) sprintf("%s neighbours", format(bw))
+      else {
+        u <- tryCatch(sf::st_crs(x$data_sf)$units_gdal, error = function(e) NULL)
+        sprintf("%s %s", format(signif(bw, 6), big.mark = ",", scientific = FALSE),
+                if (length(u) != 1L || is.na(u) || !nzchar(u)) "CRS units" else u)
+      }
+    cat(sprintf("  Bandwidth: %s (%s, %s kernel)\n", bw_txt,
                 if (isTRUE(x$info$adaptive)) "adaptive" else "fixed",
                 x$info$kernel %||% "bisquare"))
     if (is.finite(x$info$AICc %||% NA_real_))

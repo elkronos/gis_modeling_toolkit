@@ -4532,6 +4532,12 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   # match.arg() is the whole of kernel validation: it refuses a wrong case,
   # NA or a vector, so a separate repair step after it could never run.
   kernel <- match.arg(kernel)
+  # An adaptive count fit_gwr_model() would refuse is refused once, here,
+  # instead of in every fold (which returned "all folds failed").
+  if (!is.null(bandwidth) && isTRUE(adaptive))
+    .check_scalar(bandwidth, "bandwidth", "cv_gwr", min = 1,
+                  max = .Machine$integer.max,
+                  what = "a single number of nearest neighbours when adaptive = TRUE")
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_gwr")
