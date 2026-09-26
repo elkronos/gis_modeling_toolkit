@@ -19,10 +19,14 @@ fits were all singular, or an object that is not a \code{sac_range}).
 The nugget variance of the variogram model behind a
 \code{\link{estimate_sac_range}()} result: the semivariance at zero
 separation, i.e. measurement error plus variation at scales shorter than
-the closest pair.  It is carried as the \code{nugget} attribute of every
-classed result, identified or rejected, because it is the number a
-resolution criterion for a tessellation needs (the short-lag variance that
-no cell can average away).
+the first lag bin of the empirical variogram (gstat's bins are
+\code{cutoff / 15} wide, about \code{max_dist / 30} at the default
+\code{cutoff}), which can be far wider than the spacing of close pairs.
+It is extrapolated to zero from that bin, not observed, and a fit that
+runs into its lower bound reports exactly 0.  It is carried as the
+\code{nugget} attribute of every classed result, identified or rejected,
+because it is the number a resolution criterion for a tessellation needs
+(the short-lag variance that no cell can average away).
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {

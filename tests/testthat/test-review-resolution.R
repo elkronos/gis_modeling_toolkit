@@ -77,8 +77,9 @@ test_that("a layer larger than sample_n is bounded, judged and scored on all its
   # Reliability is for cells holding the layer's points, not the subsample's.
   vm  <- attr(sac, "variogram_model")
   cf  <- spatialkit:::.vgm_correlation_fn(vm)
-  bb  <- sf::st_bbox(pts)
-  rbV <- spatialkit:::.rbar_rect(cf, bb[["xmax"]] - bb[["xmin"]], bb[["ymax"]] - bb[["ymin"]])
+  # The domain term over the hull the area is measured on (review round 2).
+  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(pts)))
+  rbV <- spatialkit:::.rbar_domain(cf, hull, b$area)
   expect_equal(prof$reliability,
                vapply(prof$levels, spatialkit:::.reliability_at, numeric(1),
                       area = b$area, n_total = 1200, nugget = 0.5, psill = 1,
@@ -135,7 +136,9 @@ test_that("select_on = 'split' reads the selection half's response on the whole 
     criterion = "morans_i", select_on = "split", set_seed = 2))
   sel <- attr(out, "split")$selection
   expect_true(length(seen) > 0L)
-  for (s in seen) expect_identical(s$resp, pts$z[sel])
+  # The rows arrive in the canonical (coordinate) order the sweep uses, so
+  # compare them as a set.
+  for (s in seen) expect_identical(sort(s$resp), sort(pts$z[sel]))
   ks <- vapply(seen, function(s) max(s$cl), integer(1))
   used <- vapply(seen, function(s) length(unique(s$cl)), integer(1))
   expect_true(any(used < ks))

@@ -84,11 +84,15 @@ test_that("determine_optimal_levels warns before the sweep when no k can clear t
   expect_true(log_has(lines, "nine cells or fewer"))
   expect_true(log_has(lines, "Raise max_levels"))
   expect_type(out, "integer")
-  # With room above the floor the warning is not raised.
+  # With room above the floor the warning before the sweep is not raised.
+  # These points have no cluster structure, so the elbow sits near
+  # sqrt(14) and its neighbourhood still ends below ten cells: the fallback
+  # is then said with that reason, not as "could not be computed".
   quiet <- capture_spatialkit_log(suppressWarnings(
     determine_optimal_levels(pts, max_levels = 14, response_var = "z",
                              predictor_vars = "w", criterion = "morans_i")))
-  expect_false(log_has(quiet, "nine cells or fewer"))
+  expect_false(log_has(quiet, "max_levels leaves k_max"))
+  expect_true(log_has(quiet, "score only the elbow's neighbourhood"))
 })
 
 test_that("determine_optimal_levels reports the restart budget and bumps in its diagnostics", {

@@ -17,9 +17,12 @@ determine_optimal_levels(
 )
 }
 \arguments{
-\item{data_sf}{An sf object.}
+\item{data_sf}{An sf object.  Features with empty or non-finite
+coordinates are dropped with a warning.}
 
-\item{max_levels}{Integer upper bound on levels. Default 12.}
+\item{max_levels}{Integer upper bound on levels. Default 12.  The sweep
+also stops at the number of distinct locations (k-means cannot place
+more centres) and one short of the number of points.}
 
 \item{top_n}{Integer; how many candidates to return. Default 3. Under
 \code{criterion = "geometric"} the candidate set is the elbow and its two
@@ -28,14 +31,19 @@ large \code{top_n} is; only the model-aware criteria can return more.}
 
 \item{sample_n}{Integer; subsample size for speed. Default 1500.}
 
-\item{set_seed}{Integer RNG seed. Default 123.}
+\item{set_seed}{Integer RNG seed for the subsample and the k-means++
+restarts; restored afterwards. Default 123.  The rows are put in
+coordinate order before either, so the answer does not depend on the
+order they come in.}
 
 \item{response_var}{Optional response column name. When provided alongside
 \code{predictor_vars}, enables model-aware level selection via Moran's I
 on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
 a factor or character response raises an error and is never coerced,
 because the residuals of an OLS fit to arbitrary level codes carry no
-meaning to test for autocorrelation.}
+meaning to test for autocorrelation.  Rows where it, or a predictor, is
+missing or non-finite stay in the WSS sweep and the cells and are left
+out of Moran's I; a logged warning gives their number.}
 
 \item{predictor_vars}{Optional predictor column names. Must be numeric or
 logical (logicals are read as 0/1); factor/character columns raise an
@@ -44,9 +52,12 @@ error.}
 \item{criterion}{One of \code{"geometric"} (default when no response given),
 \code{"morans_i"} (select the k whose residual Moran's I is least
 \emph{significant}), or \code{"combined"} (rank-average of WSS elbow
-distance and that same quantity).  Falls back to \code{"geometric"} if
-response/predictors are unavailable, and also when no candidate clears the
-nine-cell resolution floor described in \strong{Details}.  Supplying
+distance and that same quantity).  Falls back to \code{"geometric"},
+with a warning, when \code{response_var} or \code{predictor_vars} is not
+given, and with a logged warning when no candidate clears the
+nine-cell resolution floor described in \strong{Details}.  A
+\code{response_var} or \code{predictor_vars} naming a column that is not
+in \code{data_sf} is an error.  Supplying
 both \code{response_var} and \code{predictor_vars} upgrades
 \code{"geometric"} to \code{"combined"}: the selection then depends on
 the response (see "Post-selection inference").}
@@ -163,11 +174,19 @@ from 0.114 at \code{k = 10} to 0.050 at \code{k = 60} (\eqn{-56\%}), which
 made an \eqn{|I|} ranking prefer the largest candidate for arithmetic
 reasons alone.  Candidates are therefore ordered by
 \eqn{|z| = |I - E[I]| / \mathrm{sd}(I)} using the Cliff & Ord regression
-residual moments, which are exact here because the cell-level residuals
-are OLS residuals by construction.  Over the same runs \eqn{z} had mean
-\eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1} and a two-sided 5\% rejection
-rate of 0.040--0.057 at every \code{k}.  Both quantities are reported in
-the \code{"diagnostics"} attribute, as \code{moran_i} and \code{moran_z}.
+residual moments.  The cell-level residuals are OLS residuals by
+construction, which is the case those moments are derived for, but the
+derivation also assumes errors of equal variance, and a cell mean over
+\eqn{n_j} points has a variance proportional to \eqn{1/n_j}.  Over the
+same runs \eqn{z} had mean \eqn{\approx 0}, \eqn{\mathrm{sd} \approx 1}
+and a two-sided 5\% rejection rate of 0.040--0.057 at every \code{k}, and
+it stayed calibrated on gradient and moderately clustered layouts; with
+single-point cells next to cells of 70 or more points its mean rose to
+0.2--0.34 and its rejection rate to 7--8\% at 20 cells.  Where structure
+remains, \eqn{|z|} mixes its size with the number of cells it is measured
+on, since \eqn{\mathrm{sd}(I)} shrinks as cells are added.  Both
+quantities are reported in the \code{"diagnostics"} attribute, as
+\code{moran_i} and \code{moran_z}.
 
 \strong{Resolution floor on the model-aware criteria.}  Moran's I is
 computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
@@ -182,10 +201,16 @@ deviate is \eqn{0/0}: it carries no information about the tessellation, and
 whichever way rounding noise resolves it those candidates would rank first
 or last on nothing.  They therefore return \code{NA} and are excluded from
 the model-aware ranking.  When no candidate in the elbow neighbourhood
-clears the floor, which is the usual outcome for small \code{max_levels},
-the whole call falls back to the geometric ranking and logs a warning; raise
-\code{max_levels} above roughly 10 if you want the model-aware criteria to
-contribute.  Under \code{criterion = "combined"}, a candidate below the
+clears the floor, the whole call falls back to the geometric ranking and
+logs a warning that says so.  That is the usual outcome well past
+\code{max_levels = 10}: the neighbourhood is the elbow plus or minus
+\code{max(4, top_n)}, and on points with no cluster structure the elbow
+sits near \eqn{\sqrt{K_{max}}}, so the neighbourhood reaches ten cells only
+from about \code{max_levels = 40}.  Measured on 1000 uniform points,
+\code{max_levels} of 12, 20 and 30 all fell back, and 40 scored
+\code{k} = 10 and 11 alone.  On such a layer
+\code{\link{resolution_profile}()}, which scores Moran's z at every level of
+its ladder, is the model-aware view.  Under \code{criterion = "combined"}, a candidate below the
 floor that sits alongside candidates above it is ranked last on the Moran's
 I axis while still competing on the geometric axis.
 }
@@ -226,6 +251,16 @@ the split needs no distributional assumption, which is why it comes first.
 Selection on coordinates alone (\code{"geometric"} with no response) is
 not exposed in this way, and \code{"split"} then changes nothing but the
 attribute.
+
+The estimation rows cover only the estimation half's blocks, while the
+cells cover the whole layer, so the estimation rows do not fill every
+cell.  A cell inside the selection half gets none and comes back
+\code{NA}; a cell across the border between the halves is estimated from
+its estimation-half points alone, and its standard error describes that
+part, not the cell (on 400 simulated fields a nominal 95\% interval covered
+0.97 in cells inside the estimation half and 0.88 in cells across the
+border).  Count, per cell, how many of its points are estimation rows,
+and read inferential results only off cells whose points all are.
 }
 
 \examples{
