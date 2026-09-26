@@ -132,8 +132,10 @@ Model-specific metadata lives in \code{$info} (coords: the names of the
 scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 gp_S: the pooled centred range \code{brms::gp(c = )} multiplies;
+gp_cmeans: the column means brms centred the scaled coordinates on;
 gp_xy_range: the training extrema of the scaled coordinates, which
-\code{predict()} uses to pin the GP boundary;
+\code{predict()} uses, with gp_S and gp_cmeans, to hold the GP boundary
+at its fitted value;
 gp_lengthscale_bounds: the \code{c(lower, upper)} the length-scale prior
 was calibrated over; gp_lscale_prior: the length-scale prior
 \code{brms::validate_prior()} reports the model will \emph{actually} use,

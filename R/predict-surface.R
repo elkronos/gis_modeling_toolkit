@@ -132,10 +132,8 @@
 #'   Required when the model has predictors and \code{grid} does not already
 #'   contain them.  Values are taken from the nearest feature.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
-#'   performance knob for the GWR and random-forest backends, whose rows do not
-#'   interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
-#'   grid stays inside the training extent.  Beyond it the GP boundary has to
-#'   grow and predictions depend on which rows share the call; see
+#'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
+#'   GP boundary is held at its fitted value whatever the chunk holds; see
 #'   \code{\link{predict.bayesian_fit}}.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
 #'   backend supports it.  Default FALSE.
