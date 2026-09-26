@@ -116,7 +116,13 @@ of the wrong length, or no finite observed/predicted pair);
 once incomplete rows were removed, so the fold never reached the fitter);
 or \code{"worker_error"} (a parallel worker died).  Every fold missing
 from \code{fold_metrics} has its reason there, which matters most when
-the console output of a long run is gone.  \code{orphan_rows} holds the
+the console output of a long run is gone.  When some folds, but not
+all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
+the function warns, naming them and how many rows \code{overall}
+covers: it is pooled over the folds that produced predictions, and the
+fold that fails is often the hardest to predict, so it may flatter the
+model.  (A \code{"dropped"} fold has its own warning.)
+\code{orphan_rows} holds the
 \code{..row_id}s of rows in the data that no fold names (they enter no
 training set and are never scored; non-empty only when the folds were
 built on a different or subsetted layer), and \code{n_unknown_ids}
