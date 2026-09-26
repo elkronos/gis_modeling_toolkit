@@ -313,7 +313,10 @@ test_that("plot_folds' subtitle describes the scheme that was built", {
   expect_false(grepl("[Bb]lock", sub(fr)))
   fb <- make_folds(pts, k = 4, method = "block_kfold", block_size = 300, seed = 1)
   expect_match(sub(fb), "Block size 300")
-  expect_match(sub(fb), as.character(fb$params$crs), fixed = TRUE)
+  # The unit of the CRS the folds were built in, not its identifier
+  # ("EPSG:3857 units", or a whole WKT for a CRS with no EPSG code).
+  expect_match(sub(fb), "Block size 300 (metre)", fixed = TRUE)
+  expect_false(grepl(as.character(fb$params$crs), sub(fb), fixed = TRUE))
   # Two lines: one long one is clipped at the width these are drawn at, and
   # neither line is long enough to clip on its own.
   lines <- strsplit(sub(fb), "\n", fixed = TRUE)[[1]]

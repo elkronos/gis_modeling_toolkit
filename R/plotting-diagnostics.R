@@ -29,7 +29,11 @@
 #' \code{overall} when it carries the metric, from
 #' \code{predictive_coverage} for \code{cv_bayes()}'s coverage and CRPS
 #' columns, and not at all for a per-fold extra that has no pooled
-#' counterpart (a bandwidth), in which case the caption says so.
+#' counterpart (a bandwidth) or for a count (\code{n_pred},
+#' \code{n_MAPE}, \code{n_SMAPE}), whose \code{overall} value is the
+#' total over the folds; the caption says which.  A model with no finite
+#' per-fold value gets no panel and no pooled line, and the caption
+#' names it.
 #'
 #' @param cv The list returned by \code{\link{cv_spatial}()},
 #'   \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()}, \code{\link{cv_rf}()}
@@ -111,9 +115,11 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   # A model with no finite per-fold value has no panel.  factor() turned its
   # pooled row into NA, which the finite-value filter kept, so its line was
   # drawn in another model's panel or in a third panel labelled NA.
+  # A model is named as not drawn whether or not it has a pooled value: RF's
+  # `bandwidth` is NA in every fold and in `overall`, and it vanished
+  # unmentioned.
   pooled$model <- as.character(pooled$model)
-  no_folds <- unique(pooled$model[is.finite(pooled$value) &
-                                    !(pooled$model %in% levels(df$model))])
+  no_folds <- unique(pooled$model[!(pooled$model %in% levels(df$model))])
   pooled$model <- factor(pooled$model, levels = levels(df$model))
   pooled <- pooled[!is.na(pooled$model) & is.finite(pooled$value), , drop = FALSE]
 
@@ -121,6 +127,8 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   title <- sprintf("%s by fold", metric)
   caption <- if (nrow(pooled))
     "Dashed line: the pooled value from `overall`"
+  else if (metric %in% .cv_count_metrics)
+    sprintf("No pooled value: `%s` is a count per fold; `overall` holds the total", metric)
   else
     sprintf("No pooled value: `%s` is a per-fold quantity with no counterpart in `overall`", metric)
   if (length(no_folds))
@@ -136,7 +144,9 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
     ggplot2::scale_size_continuous(name = "Held-out rows", range = c(1.5, 5)) +
     ggplot2::labs(title = title, x = "Fold", y = metric, caption = caption) +
     ggplot2::theme_minimal()
-  if (n_models > 1L)
+  # A compare_models_cv() result is faceted even when one model is left, so
+  # the strip still says which model the points are.
+  if (n_models > 1L || identical(what, "compare_models_cv()"))
     # One panel per model, stacked on a shared fold axis, with room between
     # the panels and a full-size strip label (see .plot_sweep() for why).
     p <- p + ggplot2::facet_wrap(~ model, ncol = 1L, scales = "fixed") +
@@ -145,10 +155,17 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   p
 }
 
+# Count columns of `overall` that are totals over the folds: overall$n_pred,
+# n_MAPE and n_SMAPE count the pooled prediction rows, so each is the SUM of
+# the per-fold counts, not a pooled value on the per-fold scale.  Drawn as
+# the pooled line, n_pred sat at 150 against folds of 30.
+.cv_count_metrics <- c("n_pred", "n_MAPE", "n_SMAPE")
+
 #' The pooled value of a metric for a single cv_*() result
 #' @keywords internal
 #' @noRd
 .pooled_metric_one <- function(cv, ov, metric) {
+  if (metric %in% .cv_count_metrics) return(NA_real_)
   if (nrow(ov) >= 1L && metric %in% names(ov)) {
     val <- suppressWarnings(as.numeric(ov[[metric]][1L]))
     if (is.finite(val)) return(val)
@@ -167,6 +184,7 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 .pooled_metric_by_model <- function(cmp, ov, metric) {
   models <- as.character(ov$model)
   vals <- vapply(seq_along(models), function(i) {
+    if (metric %in% .cv_count_metrics) return(NA_real_)
     if (metric %in% names(ov)) {
       v <- suppressWarnings(as.numeric(ov[[metric]][i]))
       if (is.finite(v)) return(v)
@@ -203,6 +221,11 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' derived from: the threshold is the largest training DI inside an outlier
 #' fence, so the curve reaches it exactly when no training value was fenced
 #' off and runs past it, by the tail the fence removed, when some were.
+#' A prediction location outside on a predictor dropped for having no
+#' training variance has \code{DI = Inf}: it counts in the prediction curve,
+#' which then tops out below 1, and the caption says how many are off the
+#' axis.  A location with a missing predictor (\code{DI = NA}) is neither
+#' inside nor outside; it is left out of the curve and the caption counts it.
 #'
 #' @param x An \code{aoa} object from \code{\link{area_of_applicability}()}.
 #' @param type \code{"ecdf"} (default), the two empirical distribution
@@ -238,14 +261,32 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   if (!inherits(x, "aoa") || is.null(x$aoa) || !("DI" %in% names(x$aoa)))
     stop("plot.aoa(): `x` must be the object returned by area_of_applicability().",
          call. = FALSE)
-  di_new <- suppressWarnings(as.numeric(sf::st_drop_geometry(x$aoa)$DI))
+  di_all <- suppressWarnings(as.numeric(sf::st_drop_geometry(x$aoa)$DI))
   di_tr  <- suppressWarnings(as.numeric(x$train_DI))
   thr    <- as.numeric(x$threshold)
-  di_new <- di_new[is.finite(di_new)]
+  # DI = Inf is a row outside on a predictor dropped for having no training
+  # variance: definitively outside, but not on any axis.  Filtering it out
+  # with the NA rows made the prediction curve reach 1 over the finite rows,
+  # so it read as nearly everything inside while the subtitle counted those
+  # rows outside.  They stay in the curve's denominator and the caption
+  # names them; NA rows (a missing predictor) are neither inside nor outside.
+  n_inf  <- sum(is.infinite(di_all))
+  n_na   <- sum(is.na(di_all))
+  di_new <- di_all[is.finite(di_all)]
   di_tr  <- di_tr[is.finite(di_tr)]
-  if (!length(di_new))
-    stop("plot.aoa(): no finite dissimilarity index at any prediction location ",
-         "(every row had a missing or non-finite predictor).", call. = FALSE)
+  n_all  <- x$n_new %||% length(di_all)
+  if (!length(di_new)) {
+    if (n_inf == 0L)
+      stop("plot.aoa(): no finite dissimilarity index at any prediction location ",
+           "(every row had a missing or non-finite predictor).", call. = FALSE)
+    stop(sprintf(paste0("plot.aoa(): no finite dissimilarity index to plot: %d of ",
+                        "%d prediction locations are outside on a predictor dropped ",
+                        "for having no training variance (DI = Inf)%s."),
+                 n_inf, n_all,
+                 if (n_na) sprintf(" and %d %s a missing predictor (DI = NA)", n_na,
+                                   if (n_na == 1L) "has" else "have")
+                 else ""), call. = FALSE)
+  }
 
   # Without folds the training DI is each point's distance to its nearest
   # other training point, not a cross-validated one; a legend hard-coded to
@@ -259,8 +300,6 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   )
   df$set <- factor(df$set, levels = c(tr_set, "Prediction locations"))
 
-  n_all <- x$n_new %||% length(di_new)
-  share_out <- if (length(di_new)) mean(di_new > thr) else NA_real_
   # Where the prediction set sits relative to the threshold: the fraction
   # inside, and how close the inside ones run to the edge.
   q_in <- if (any(di_new <= thr)) stats::quantile(di_new[di_new <= thr], 0.9) / thr else NA_real_
@@ -272,17 +311,58 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
     if (is.finite(q_in))
       sprintf("\n90%% of those inside sit below %.0f%% of the threshold", 100 * q_in)
     else "")
+  # .aoa_folds_label() is phrased for print()'s parenthesis ("from fold
+  # labels; method unknown"), which read "over from fold labels; method
+  # unknown folds" spliced in here.  Without folds each training point's
+  # reference is its nearest neighbour among ALL other training rows, never
+  # farther than the nearest outside its own fold, so the threshold is small
+  # and the AOA conservative (?area_of_applicability), not optimistic.
+  fm <- x$params$folds_method
+  cv_line <- if (!isTRUE(x$params$folds_supplied)) {
+    if (isTRUE(x$params$threshold_supplied))
+      "Training DI not cross-validated (no folds)"
+    else paste("Training DI not cross-validated (no folds),",
+               "so the threshold is small\nand the AOA conservative")
+  } else if (!is.character(fm) || length(fm) != 1L || is.na(fm))
+    "Training DI cross-validated (fold method unknown)"
+  else if (identical(fm, "labels"))
+    "Training DI cross-validated over folds given as labels (method unknown)"
+  else if (identical(fm, "splits"))
+    "Training DI cross-validated over folds given as train/test splits (method unknown)"
+  else sprintf("Training DI cross-validated over %s folds", fm)
   caption <- sprintf("Threshold %s\n%s",
                      if (isTRUE(x$params$threshold_supplied)) "supplied" else "from the training DI",
-                     if (isTRUE(x$params$folds_supplied))
-                       sprintf("Training DI cross-validated over %s folds",
-                               .aoa_folds_label(x$params$folds_method))
-                     else paste("Training DI not cross-validated (no folds),",
-                                "so the threshold is optimistic"))
+                     cv_line)
+  if (n_inf)
+    caption <- paste0(caption, sprintf(paste0(
+      "\n%d prediction location%s outside on a dropped predictor (DI = Inf) ",
+      "%s off the axis"), n_inf, if (n_inf == 1L) "" else "s",
+      if (n_inf == 1L) "is" else "are"))
+  if (n_na)
+    caption <- paste0(caption, sprintf(
+      "\n%d with a missing predictor (DI = NA) %s not drawn", n_na,
+      if (n_na == 1L) "is" else "are"))
 
   if (type == "ecdf") {
-    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$DI, colour = .data$set)) +
-      ggplot2::stat_ecdf(geom = "step", linewidth = 0.8) +
+    # The curves are computed here rather than by stat_ecdf(), which drops
+    # non-finite x: the prediction curve counts the DI = Inf rows in its
+    # denominator (they sit at +Inf), so it tops out at the finite share and
+    # its height at the threshold is n_inside / (n_new - n_na).  The padding
+    # at -Inf and Inf is stat_ecdf()'s, so the steps still run edge to edge.
+    ecdf_steps <- function(v, denom, set) {
+      at <- c(-Inf, sort(unique(v)), Inf)
+      data.frame(set = set, DI = at,
+                 share = stats::ecdf(v)(at) * length(v) / denom,
+                 stringsAsFactors = FALSE)
+    }
+    steps <- rbind(
+      ecdf_steps(di_new, length(di_new) + n_inf, "Prediction locations"),
+      if (length(di_tr)) ecdf_steps(di_tr, length(di_tr), tr_set)
+    )
+    steps$set <- factor(steps$set, levels = levels(df$set))
+    p <- ggplot2::ggplot(steps, ggplot2::aes(x = .data$DI, y = .data$share,
+                                             colour = .data$set)) +
+      ggplot2::geom_step(linewidth = 0.8) +
       ggplot2::geom_vline(xintercept = thr, linetype = "dashed", colour = "#B2182B") +
       ggplot2::scale_colour_manual(values = stats::setNames(c("grey45", "#2166AC"),
                                                             c(tr_set, "Prediction locations")),

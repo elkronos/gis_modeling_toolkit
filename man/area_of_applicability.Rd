@@ -43,8 +43,12 @@ mean of the weights you did supply, so location counts about as much as a
 typical predictor. Naming them explicitly overrides that. An unnamed
 vector may have one value per predictor either with or without the two
 coordinate columns. Weights must be finite and non-negative, so pass
-permutation importance as \code{pmax(importance, 0)}. That is all zero
-when the model found no predictor useful, and then the weights cannot say
+permutation importance as \code{pmax(importance, 0)}. (A forest with no
+out-of-bag rows, \code{replace = FALSE} with \code{sample_fraction = 1},
+has \code{NaN} importance, which \code{pmax()} keeps and which is
+refused; refit it with out-of-bag rows or use \code{weights = NULL}.)
+\code{pmax(importance, 0)} is all zero when the model found no
+predictor useful, and then the weights cannot say
 anything: with a single predictor any weight gives the same index and zero
 is accepted; with several, all of them are weighted equally, as with
 \code{weights = NULL}, and a warning says so. The coordinate default

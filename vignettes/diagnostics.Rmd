@@ -263,9 +263,10 @@ c(inside = sum(inside), outside_or_unknown = sum(!inside))
 
 **Coordinates as predictors.** A model given `x` and `y` can reproduce the
 training surface by memorising location, and random folds will not detect it.
-`fit_rf_model(include_coords = TRUE)` warns for this reason. Score any such
-model with blocked folds, and read `vignette("spatial-cross-validation")` for
-what the blocking has to be wide enough to do.
+`fit_rf_model(include_coords = TRUE)` logs a caution (once per session) for
+this reason. Score any such model with blocked folds, and read
+`vignette("spatial-cross-validation")` for what the blocking has to be wide
+enough to do.
 
 **Selection outside the fold.** Choosing predictors on the whole data set and
 then cross-validating the chosen set gives the selection a look at every test
@@ -283,7 +284,7 @@ sel$selected
 ```
 
 Its inner folds default to the scheme you pass. Passing `random_kfold` there
-produces a warning, because a leaky inner loop can select a variable for being
+logs a caution, because a leaky inner loop can select a variable for being
 spatially close to the response and an honest outer loop will then report a
 respectable number for a dishonestly chosen feature set.
 
