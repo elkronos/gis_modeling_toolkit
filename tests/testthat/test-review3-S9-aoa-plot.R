@@ -7,7 +7,7 @@
 # and subtitles that said something the data did not.
 # ---------------------------------------------------------------------------
 
-r3_layer_geoms <- function(p) vapply(p$layers, function(l) class(l$geom)[1L], character(1))
+r3_layer_geoms <- function(p) unname(vapply(p$layers, function(l) class(l$geom)[1L], character(1)))
 
 # 60 training rows with a zero-variance land-cover dummy, and 40 prediction
 # rows of which the last 10 take a value the training data never has on it.
