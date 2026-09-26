@@ -2,7 +2,8 @@
 # ---------------------------------------------------------------------------
 # kriging_adequacy(): per-cell block-kriging variance from a fitted
 # variogram, its ratio to the cell's no-data variance, the comparison with
-# s^2/n, and the blocked cross-validation statistic of the kriging variance.
+# s^2/n, the blocked cross-validation statistic of the kriging variance, and
+# repeat measurements at one location.
 # ---------------------------------------------------------------------------
 
 ka_field <- function(n = 240, seed = 1, psill = 0.8, nugget = 0.2, a = 100) {
@@ -215,5 +216,96 @@ test_that("a large empty cell ranks above small populated ones on kr_ratio", {
   expect_gt(df$kr_ratio[big], 0.99)
   expect_true(all(df$kr_ratio[!big] < 0.5))
   expect_gt(df$kr_ratio[big], max(df$kr_ratio[!big]))
+})
+
+
+# Stations visited three times: a smooth field sampled at 80 sites, each visit
+# with its own measurement error of variance `me_var`.
+ka_revisits <- function(me_var, seed = 5) {
+  st <- ka_field(n = 80, seed = seed, nugget = 0)
+  set.seed(seed + 1)
+  v <- rbind(st, st, st)
+  v$z <- v$z + stats::rnorm(nrow(v), sd = sqrt(me_var))
+  v
+}
+
+test_that("repeat visits to a station are kriged from their means instead of coming back NA", {
+  skip_if_not_installed("gstat")
+  # Two observations at one location get the full sill as their covariance in
+  # gstat, so every kriging system holding a pair was singular: 80 stations x
+  # 3 visits gave NA in all 16 cells and no CV prediction, with no warning.
+  rv <- ka_revisits(me_var = 0.4)        # visits differ by more than the 0.2 nugget
+  cells <- create_grid_polygons(ka_bnd, target_cells = 16, type = "square")
+  asg <- assign_features_to_polygons(rv, cells)
+  vm <- attr(ka_true_sac(), "variogram_model")
+  expect_warning(ka <- kriging_adequacy(asg, "z", cells, sac = ka_true_sac(), k = 4,
+                                        seed = 1, nmax = 1000),
+                 "240 point\\(s\\) share a location .* 80 distinct locations")
+  df <- sf::st_drop_geometry(ka)
+  expect_true(all(is.finite(df$kr_pred)) && all(is.finite(df$kr_var)))
+  expect_equal(sum(df$n), 240L)                           # plain means use every visit
+  expect_equal(attr(ka, "n_points"), 240L)
+  expect_equal(attr(ka, "n_locations"), 80L)
+  expect_equal(attr(ka, "cv")$n_pred, 80L)
+  expect_true(is.finite(attr(ka, "cv")$zscore_var))
+  # With the whole nugget differing between visits, kriging the 80 means is
+  # kriging all 240 visits with the nugget as their measurement error.
+  bk <- gstat::krige(z ~ 1, rv, cells, model = vm[vm$model != "Nug", ],
+                     weights = rep(1 / 0.2, nrow(rv)), debug.level = 0)
+  expect_equal(df$kr_pred, as.numeric(bk$var1.pred), tolerance = 1e-8)
+  expect_equal(df$kr_var, as.numeric(bk$var1.var), tolerance = 1e-8)
+  expect_output(print(ka), "240 points at 80 distinct locations")
+  expect_output(print(ka), "4 folds, 80 locations")
+})
+
+test_that("identical repeat records change nothing the kriging reports", {
+  skip_if_not_installed("gstat")
+  # A mean of identical replicates is one observation, nugget and all.
+  pts <- ka_field(n = 120, seed = 7)
+  cells <- create_grid_polygons(ka_bnd, target_cells = 16, type = "square")
+  lab <- rep(1:4, length.out = nrow(pts))
+  one <- kriging_adequacy(assign_features_to_polygons(pts, cells), "z", cells,
+                          sac = ka_true_sac(), folds = lab)
+  expect_warning(two <- kriging_adequacy(assign_features_to_polygons(rbind(pts, pts), cells),
+                                         "z", cells, sac = ka_true_sac(), folds = c(lab, lab)),
+                 "share a location")
+  a <- sf::st_drop_geometry(one); b <- sf::st_drop_geometry(two)
+  expect_equal(b$n, 2L * a$n)
+  # To 1e-6: gstat's block variance from a model nugget and from the same
+  # variance passed as a measurement error agree to about 1e-7, not to 1e-15.
+  expect_equal(b[c("mean", "kr_pred", "kr_var", "kr_ratio")], a[c("mean", "kr_pred", "kr_var", "kr_ratio")],
+               tolerance = 1e-6)
+  expect_equal(attr(two, "cv")[c("zscore_var", "zscore_mean", "rmse", "n_pred")],
+               attr(one, "cv")[c("zscore_var", "zscore_mean", "rmse", "n_pred")], tolerance = 1e-6)
+})
+
+test_that("a kriging system gstat cannot solve raises a warning and print() counts it", {
+  skip_if_not_installed("gstat")
+  # gstat answers a singular system with NA, and at debug.level 0 says
+  # nothing; print() then claimed an estimate for every empty cell.  Points a
+  # micrometre from ten others under a nugget-free Gaussian model are singular
+  # without sharing a location.
+  pts <- ka_field(n = 60, seed = 3)
+  xy <- sf::st_coordinates(pts)
+  twin <- sf::st_as_sf(data.frame(x = xy[1:10, 1] + 1e-6, y = xy[1:10, 2], z = pts$z[1:10] + 0.1),
+                       coords = c("x", "y"), crs = 32632)
+  cells <- create_grid_polygons(ka_bnd, target_cells = 64, type = "square")
+  asg <- assign_features_to_polygons(rbind(pts, twin), cells)
+  sac <- structure(170, class = "sac_range", variogram_model = gstat::vgm(1, "Gau", 100))
+  w <- character()
+  ka <- withCallingHandlers(
+    kriging_adequacy(asg, "z", cells, sac = sac, k = 4, seed = 1),
+    warning = function(cnd) {
+      w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning")
+    })
+  df <- sf::st_drop_geometry(ka)
+  n_na <- sum(!is.finite(df$kr_pred))
+  expect_gt(n_na, 0L)
+  expect_true(any(grepl(sprintf("returned no estimate for %d of 64 cell", n_na), w)))
+  expect_true(any(grepl("no cross-validation prediction it could use", w)))
+  expect_output(print(ka), sprintf("no kriged estimate for %d of the 64 cells", n_na))
+  n_empty_kr <- sum(df$n == 0L & is.finite(df$kr_pred))
+  expect_lt(n_empty_kr, sum(df$n == 0L))
+  expect_output(print(ka), sprintf("available for %d of them", n_empty_kr))
 })
 
