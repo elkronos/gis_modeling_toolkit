@@ -131,9 +131,12 @@ test_that(".remap_folds drops folds left with fewer than two training rows", {
 # ---------------------------------------------------------------------------
 
 test_that("cv R-squared is scored against the training-fold mean, not the pooled one", {
-  # Out-of-sample R^2 measured against the test data's OWN mean is the classic
-  # flattering number: it credits the model for knowing where the held-out
-  # block sits, which at prediction time it does not.  cv_spatial() therefore
+  # Out-of-sample R^2 is measured against the TRAINING mean, the null
+  # prediction available when the fold is predicted.  The held-out data's
+  # OWN mean is a null model that knows where the held-out block sits; it
+  # fits those rows at least as well as any other constant, so it gives the
+  # LOWER R^2 -- the training baseline is chosen for using training
+  # information only, not for being the conservative one.  cv_spatial()
   # carries a per-observation y_train_mean through to .compute_reg_metrics().
   #
   # Three explicit west-to-east strips over a steep x-gradient, so the two

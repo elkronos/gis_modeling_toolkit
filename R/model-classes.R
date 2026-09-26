@@ -360,16 +360,32 @@ print.summary.spatial_fit <- function(x, ...) {
 #' That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
 #' but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
 #' returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
-#' returned data.frame carries no label distinguishing the two, so check
-#' \code{object$info$fitted_are_oob} before comparing numbers across backends,
-#' or use \code{\link{compare_models_cv}}, which scores every backend the
-#' same way.
+#' data.frame \code{model_metrics()} returns carries no label distinguishing
+#' the two, so check \code{object$info$fitted_are_oob} before comparing
+#' numbers across backends; \code{\link{evaluate_insample}()} and
+#' \code{\link{compare_models}()} record it per model in a
+#' \code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
+#' backend the same way.
+#'
+#' \eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
+#' the mean of the response the model was \emph{fitted} to.  In sample that
+#' is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
+#' \eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
+#' measured against the prediction it had to beat, the training mean, not
+#' against the new rows' own mean, which it could not have known.  It is
+#' below 0 when the model predicts the new rows worse than the training mean
+#' does, and it is \code{NA} when the response does not vary about that
+#' baseline by more than rounding error (100 machine epsilons of its
+#' magnitude, whatever its units).
 #'
 #' @section Percentage errors on responses with zeros:
 #' \code{MAPE} divides by the observed value and \code{SMAPE} by
 #' \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 #' Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 #' whose denominator is non-zero, and are \code{NA} when no row qualifies.
+#' Non-zero is judged at the scale of the data: a denominator within 100
+#' machine epsilons of the largest one counts as zero, so the rule does not
+#' depend on the units of the response.
 #' The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 #' the \code{n} column counts finite observation/prediction pairs.  Read a
 #' percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
@@ -462,10 +478,23 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
   y_obs <- .checked_response(y_obs, object$response_var, "model_metrics")
+  # R² on newdata is measured against the TRAINING mean, as every cv_*()
+  # measures it: the null prediction the model had to beat.  It used the
+  # held-out rows' own mean, so the same predictions scored R² -0.89 here and
+  # 0.35 from cv_spatial() on a trend split.  In sample the two means are the
+  # same number.  A fit whose data_sf lacks a usable response keeps the
+  # held-out mean.
+  ytm <- NULL
+  if (!is.null(newdata)) {
+    y_tr <- tryCatch(suppressWarnings(as.numeric(
+      sf::st_drop_geometry(object$data_sf)[[object$response_var]])),
+      error = function(e) NULL)
+    if (length(y_tr) && any(is.finite(y_tr))) ytm <- mean(y_tr[is.finite(y_tr)])
+  }
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
-  .compute_reg_metrics(y_obs, y_hat, p = NULL)
+  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm)
 }
 
 # ---------------------------------------------------------------------------

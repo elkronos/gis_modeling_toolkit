@@ -117,7 +117,8 @@ and predicted on the estimation half (\eqn{R^2} against the selection
 half's mean, the out-of-sample convention); \code{NA} when nothing was
 selected or the prediction failed.  \code{split} is \code{NULL} or a
 list with \code{selection} and \code{estimation}, integer row positions
-in \code{train_sf} after the completeness filter above.
+in \code{train_sf} as passed; rows the completeness filter above dropped
+are in neither.
 \code{params} records \code{metric}, \code{method}, \code{k},
 \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
 \code{n_candidates}, \code{estimated_fits} and \code{n_scored}.

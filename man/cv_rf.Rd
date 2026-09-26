@@ -66,8 +66,9 @@ fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
 and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
 and \code{.already_prepped} are set by this function and must not be
 passed here (every fold would fail with "matched by multiple actual
-arguments").  A \code{seed} given here overrides the per-fold draw
-described above.}
+arguments").  \code{seed} is this function's own argument and never
+reaches \code{fit_rf_model()} through here; see \code{seed} above for
+growing every fold's forest from one fixed seed.}
 }
 \value{
 The \code{\link{cv_spatial}} result.
@@ -84,6 +85,9 @@ the training set.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator within 100
+machine epsilons of the largest one counts as zero, so the rule does not
+depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

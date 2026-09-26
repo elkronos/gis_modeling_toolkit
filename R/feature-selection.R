@@ -120,7 +120,8 @@
 #'   half's mean, the out-of-sample convention); \code{NA} when nothing was
 #'   selected or the prediction failed.  \code{split} is \code{NULL} or a
 #'   list with \code{selection} and \code{estimation}, integer row positions
-#'   in \code{train_sf} after the completeness filter above.
+#'   in \code{train_sf} as passed; rows the completeness filter above dropped
+#'   are in neither.
 #'   \code{params} records \code{metric}, \code{method}, \code{k},
 #'   \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
 #'   \code{n_candidates}, \code{estimated_fits} and \code{n_scored}.
@@ -207,8 +208,8 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   }
 
   # Sample splitting: the sweep sees the selection half only; the estimation
-  # half scores the chosen set afterwards.  Positions index train_sf as it
-  # stands here, after the completeness filter.
+  # half scores the chosen set afterwards.  .spatial_half_split()'s positions
+  # index train_sf as it stands here, after the completeness filter.
   split <- NULL
   holdout_sf <- NULL
   if (identical(select_on, "split")) {
@@ -218,6 +219,15 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                                  caller = "select_features_forward")
     holdout_sf <- train_sf[split$estimation, , drop = FALSE]
     train_sf   <- train_sf[split$selection, , drop = FALSE]
+    # Returned as positions in the layer the CALLER passed, as print() says
+    # and as determine_optimal_levels() returns them.  They were positions
+    # after the completeness filter, so with 7 incomplete rows
+    # pts[fs$split$estimation, ] held 47 selection-half rows and 4 of the
+    # dropped ones: the one use of the split, estimating on rows the
+    # selection never saw, got rows it had seen.
+    kept <- which(keep)
+    split$selection  <- kept[split$selection]
+    split$estimation <- kept[split$estimation]
     .msg(sprintf("select_features_forward(): selecting on %d points, scoring the result on the other %d.",
                  nrow(train_sf), nrow(holdout_sf)))
   }

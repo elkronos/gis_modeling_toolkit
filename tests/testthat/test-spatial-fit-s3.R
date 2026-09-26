@@ -248,8 +248,10 @@ test_that("model_metrics scores fitted values or newdata predictions", {
   # The out-of-sample numbers really come from predict() on newdata.
   yh <- predict(fit, newdata = test)
   expect_equal(oos$RMSE, sqrt(sum((test$z - yh)^2) / nrow(test)))
+  # Out-of-sample R2 is measured against the TRAINING mean, as in every
+  # cv_*() (see test-review2-cv.R).
   expect_equal(oos$R2, 1 - sum((test$z - yh)^2) /
-                 sum((test$z - mean(test$z))^2))
+                 sum((test$z - mean(train$z))^2))
   expect_false(isTRUE(all.equal(ins$RMSE, oos$RMSE)))
 
   # newdata without the response cannot be scored, and says why.
