@@ -119,7 +119,7 @@ ensure_stable_poly_id <- function(polygons_sf,
   # Representative points — all paths produce an sfc_POINT vector
   rep_sfc <- switch(method,
     centroid      = suppressWarnings(sf::st_geometry(sf::st_centroid(sort_sf))),
-    surface_point = sf::st_geometry(sf::st_point_on_surface(sort_sf)),
+    surface_point = sf::st_geometry(sf::st_point_on_surface(.drop_empty_parts(sort_sf))),
     bbox_center   = {
       geoms <- sf::st_geometry(sort_sf)
       sf::st_sfc(
