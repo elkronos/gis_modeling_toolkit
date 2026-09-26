@@ -674,15 +674,16 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 }
 
 
-#' Pin the GP boundary by appending the training coordinate extrema
+#' Hold the GP boundary at the value the model was fitted with
 #'
-#' brms 2.x stores \code{Xgp}, \code{dmax} and \code{cmeans} in a fit's GP
-#' basis but \strong{not} the Hilbert-space boundary \code{L}, so
+#' brms 2.17 to 2.22 store \code{Xgp}, \code{dmax} and \code{cmeans} in a fit's
+#' GP basis but \strong{not} the Hilbert-space boundary \code{L}, so
 #' \code{brms:::.data_gp()} recomputes
 #' \code{L = c * max(1, diff(range(centred Xgp)))} from whatever rows
 #' \code{predict()} is handed.  Every eigenfunction and eigenvalue of the
 #' approximation therefore moves with the newdata bounding box while the fitted
-#' basis coefficients stay put.
+#' basis coefficients stay put.  brms 2.23.0 stores \code{L} in the basis and
+#' reuses it, so there the two repairs below are unnecessary and harmless.
 #'
 #' Measured on a fitted model: \code{L} was 5.57 at fit time, 4.02 for a
 #' five-row \code{newdata} and 3.63 for one row; \code{predict_surface()} on the
@@ -691,41 +692,58 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #' predicts each test fold separately, scored every fold against a basis the
 #' model was never fitted with.
 #'
-#' The repair is to make the pooled centred range of the rows brms sees equal
-#' the training one: append two synthetic rows at the training extrema, predict,
-#' then drop their columns.  \code{cmeans} already comes from the stored basis,
-#' so pinning the range reproduces the fitted \code{L} exactly for any newdata
-#' inside the training envelope.
+#' The first repair makes the pooled centred range of the rows brms sees at
+#' least the training one: append two synthetic rows at the training extrema,
+#' predict, then drop their columns.  \code{cmeans} already comes from the
+#' stored basis, so for newdata inside the training envelope that reproduces
+#' the fitted \code{L} exactly.  Appending rows cannot narrow the range,
+#' though: one row past the pooled extremes still widened \code{L}, and with it
+#' the prediction of EVERY row in the call (on brms 2.20.4 one row 100 m past
+#' the bbox moved interior predictions by up to 0.08, and a grid padded 15\%
+#' past it moved in-bbox cells by 0.31 on average).  The second repair is for
+#' that case: \code{c_scale = S_fit / S_new} (\code{.gp_c_scale()}), by which
+#' \code{predict()} multiplies the \code{c} of the gp() term
+#' (\code{.scale_gp_c()}), so brms rebuilds
+#' \code{L = c * c_scale * S_new = c * S_fit}, the fitted value.
+#'
+#' Rows further than \code{L} from the training centre on either axis are
+#' flagged in \code{beyond}.  The Dirichlet eigenfunctions vanish at
+#' \code{+/- L} and continue past it as an odd reflection of the fitted
+#' surface, so a prediction there means nothing on any brms version.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param pred_df The prediction data.frame from
 #'   \code{.prepare_brms_pred_df()}.
-#' @return A list with \code{df} (possibly with rows appended) and \code{n_pad}
-#'   (how many were appended, to be dropped from the draw matrix).
+#' @return A list with \code{df} (possibly with rows appended), \code{n_pad}
+#'   (how many were appended, to be dropped from the draw matrix),
+#'   \code{c_scale} (the factor for the gp() term's \code{c}; 1 when the rows
+#'   do not widen the range or the fit lacks what computing it needs) and
+#'   \code{beyond} (logical, one per row of \code{pred_df}).
 #' @keywords internal
 #' @noRd
 .pin_gp_boundary_rows <- function(object, pred_df) {
+  none <- list(df = pred_df, n_pad = 0L, c_scale = 1,
+               beyond = rep(FALSE, nrow(pred_df)))
   rng <- object$info$gp_xy_range
   if (is.null(rng) || !all(c("..x", "..y") %in% names(pred_df)) ||
       !nrow(pred_df))
-    return(list(df = pred_df, n_pad = 0L))
+    return(none)
   xr <- suppressWarnings(as.numeric(rng$x))
   yr <- suppressWarnings(as.numeric(rng$y))
   if (length(xr) != 2L || length(yr) != 2L || !all(is.finite(c(xr, yr))))
-    return(list(df = pred_df, n_pad = 0L))
+    return(none)
 
-  # Warn when newdata reaches outside the training envelope: the boundary then
-  # has to grow past the fitted one whatever we do, and the predictions there
-  # are extrapolation from a basis that was not built for them.
+  # Say when newdata reaches outside the training envelope: with the boundary
+  # held, those predictions no longer depend on the other rows, but they are
+  # still extrapolation from a basis fitted without data there.
   ox <- range(pred_df[["..x"]], na.rm = TRUE)
   oy <- range(pred_df[["..y"]], na.rm = TRUE)
   if (any(is.finite(c(ox, oy))) &&
       (ox[1L] < xr[1L] || ox[2L] > xr[2L] ||
        oy[1L] < yr[1L] || oy[2L] > yr[2L]))
     .log_info(paste0("predict.bayesian_fit(): `newdata` reaches outside the ",
-                     "training coordinate envelope, so the GP basis is ",
-                     "evaluated beyond the boundary it was fitted with; those ",
-                     "predictions are extrapolation."))
+                     "training coordinate envelope; those predictions are ",
+                     "extrapolation."))
 
   pad <- pred_df[c(1L, 1L), , drop = FALSE]
   pad[["..x"]] <- xr
@@ -733,28 +751,115 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   rownames(pad) <- NULL
   out <- rbind(pred_df, pad)
   rownames(out) <- NULL
-  list(df = out, n_pad = 2L)
+  res <- list(df = out, n_pad = 2L, c_scale = 1, beyond = none$beyond)
+
+  # The centre brms uses.  A fit saved before gp_cmeans was stored gets it the
+  # way brms got it: from the unique training rows it was fitted on.
+  cm <- object$info$gp_cmeans
+  ed <- object$engine$data
+  if (is.null(cm) && is.data.frame(ed) && all(c("..x", "..y") %in% names(ed)))
+    cm <- colMeans(unique(cbind(ed[["..x"]], ed[["..y"]])))
+  cm    <- suppressWarnings(as.numeric(cm))
+  S_fit <- suppressWarnings(as.numeric(object$info$gp_S))
+  c_fit <- suppressWarnings(as.numeric(object$info$gp_c))
+  if (length(cm) != 2L || !all(is.finite(cm)) ||
+      length(S_fit) != 1L || !isTRUE(S_fit > 0) ||
+      length(c_fit) != 1L || !isTRUE(c_fit > 0))
+    return(res)
+
+  L_fit <- c_fit * S_fit
+  res$beyond  <- abs(pred_df[["..x"]] - cm[1L]) > L_fit |
+                 abs(pred_df[["..y"]] - cm[2L]) > L_fit
+  res$c_scale <- .gp_c_scale(cbind(out[["..x"]], out[["..y"]]), cm, S_fit)
+  res
+}
+
+
+#' The factor that makes brms rebuild the fitted GP boundary from new rows
+#'
+#' brms 2.17 to 2.22 build \code{L = c * S_new} at predict time, where
+#' \code{S_new = max(1, pooled range)} of the unique newdata rows centred on
+#' the training \code{cmeans} (\code{brms:::.data_gp()},
+#' \code{brms:::choose_L()}).  Handing brms \code{c * S_fit / S_new} in place
+#' of \code{c} therefore gives back \code{L = c * S_fit}.  Pure arithmetic, so
+#' it is tested without Stan.
+#'
+#' @param xy Numeric matrix; its first two columns are the scaled coordinates
+#'   of every row brms will be handed.
+#' @param cmeans Length-2 training column means.
+#' @param S_fit The pooled centred training range (\code{$info$gp_S}).
+#' @return \code{S_fit / S_new}; 1 when no coordinate is finite.
+#' @keywords internal
+#' @noRd
+.gp_c_scale <- function(xy, cmeans, S_fit) {
+  xy <- unique(as.matrix(xy)[, 1:2, drop = FALSE])
+  Xc <- sweep(xy, 2L, cmeans)
+  if (!any(is.finite(Xc))) return(1)
+  S_new <- max(1, max(Xc[is.finite(Xc)]) - min(Xc[is.finite(Xc)]))
+  S_fit / S_new
+}
+
+
+#' Scale the boundary factor of the gp() term in a brmsfit's formula
+#'
+#' brms re-reads \code{c} from the gp() term of \code{$formula} at every
+#' predict call, so a copy of the fit with a rescaled \code{c} is how
+#' \code{predict()} holds the boundary on brms < 2.23.0; see
+#' \code{.pin_gp_boundary_rows()}.  Only the terms of the right-hand-side sum
+#' are searched, which is where \code{fit_bayesian_spatial_model()} puts it.
+#'
+#' @param model_obj A \code{brmsfit}, or anything with \code{$formula$formula}.
+#' @param c_scale Positive factor.
+#' @return \code{model_obj} with the gp() term's \code{c} multiplied by
+#'   \code{c_scale}, or \code{NULL} when there is no such term.
+#' @keywords internal
+#' @noRd
+.scale_gp_c <- function(model_obj, c_scale) {
+  found <- FALSE
+  rw <- function(e) {
+    if (is.call(e) && identical(e[[1L]], as.name("gp")) && !is.null(e[["c"]])) {
+      e[["c"]] <- eval(e[["c"]], baseenv()) * c_scale
+      found <<- TRUE
+    } else if (is.call(e) && identical(e[[1L]], as.name("+"))) {
+      for (i in seq_along(e)[-1L]) e[[i]] <- rw(e[[i]])
+    }
+    e
+  }
+  f <- model_obj$formula$formula
+  if (!inherits(f, "formula") || length(f) != 3L) return(NULL)
+  f[[3L]] <- rw(f[[3L]])
+  if (!found) return(NULL)
+  model_obj$formula$formula <- f
+  model_obj
 }
 
 
 #' Predict from a Bayesian spatial GP model
 #'
-#' @section The GP boundary is pinned:
-#' brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
-#' basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
-#' \code{predict()} is handed, which moved every eigenfunction of the
+#' @section The GP boundary is held at its fitted value:
+#' brms 2.17 to 2.22 do not store the Hilbert-space boundary \eqn{L} in a
+#' fitted GP basis, so \code{brms:::.data_gp()} recomputes it from whatever
+#' rows \code{predict()} is handed, which moved every eigenfunction of the
 #' approximation with the newdata bounding box while the fitted basis
 #' coefficients stayed put.  Two synthetic rows at the training coordinate
-#' extrema are therefore appended before the posterior draw and dropped from the
-#' result, reproducing the boundary the model was fitted with, so chunked,
-#' fold-wise and single-call predictions agree.
+#' extrema are therefore appended before the posterior draw and dropped from
+#' the result, and when \code{newdata} reaches past the training range the
+#' \code{c} of the \code{gp()} term is scaled down by as much as the range
+#' grew, so brms rebuilds exactly the boundary the model was fitted with.  A
+#' prediction therefore does not depend on which other rows share the call:
+#' chunked, fold-wise and single-call predictions agree, and
+#' \code{\link{predict_surface}()} does not depend on \code{chunk_size}.
+#' brms 2.23.0 and later store \eqn{L} and reuse it, so there \code{c} is left
+#' alone and the two extra rows change nothing.
 #'
-#' That is exact only for \code{newdata} \strong{inside} the training
-#' coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
-#' predictions there are extrapolation from a basis that was not built for them
-#' \emph{and} depend on which other rows share the call, including on
-#' \code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
-#' the log (not raised as a warning) when it happens.
+#' Predictions outside the training coordinate envelope are extrapolation (a
+#' notice is written to the log).  A row further than \eqn{L} from the centre
+#' of the training coordinates on either axis is past the edge of the basis,
+#' where the approximate GP is an odd reflection of the fitted surface rather
+#' than an estimate of anything, so it is returned as \code{NA} (a column of
+#' \code{NA} with \code{draws = TRUE}) with a warning.  The default boundary
+#' factor puts that edge well outside the training data, so only
+#' \code{newdata} reaching far past it is affected.
 #'
 #' @description
 #' Applies the same newdata preparation pipeline as \code{predict.gwr_fit()}:
@@ -845,15 +950,35 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # Build prediction data.frame with scaled coordinates & standardised predictors
   pred_df <- .prepare_brms_pred_df(object, newdata)
 
-  # Draw from posterior.  The two padding rows pin the GP boundary to the one
-  # the model was fitted with -- see .pin_gp_boundary_rows() -- and their
-  # columns are dropped again immediately.
-  pinned   <- .pin_gp_boundary_rows(object, pred_df)
+  # Draw from posterior.  The two padding rows and, on brms < 2.23.0, the
+  # rescaled gp(c = ) hold the GP boundary at the one the model was fitted
+  # with -- see .pin_gp_boundary_rows() -- and the padding columns are dropped
+  # again immediately.  brms >= 2.23.0 reuses the fitted boundary itself.
+  pinned <- .pin_gp_boundary_rows(object, pred_df)
+  if (pinned$c_scale < 1 && utils::packageVersion("brms") < "2.23.0") {
+    held <- .scale_gp_c(model_obj, pinned$c_scale)
+    if (is.null(held))
+      .warn_and_log(paste0("predict.bayesian_fit(): `newdata` widens the GP ",
+                           "boundary and the engine's formula has no gp(c = ) ",
+                           "term to hold it with, so these predictions depend ",
+                           "on which rows share the call."))
+    else model_obj <- held
+  }
+  if (any(pinned$beyond))
+    .warn_and_log(paste0("predict.bayesian_fit(): %d of %d row(s) of `newdata` ",
+                         "lie beyond the GP boundary the model was fitted with ",
+                         "(further than L = %.3g scaled units from the centre ",
+                         "of the training coordinates), where the approximate ",
+                         "GP means nothing; they are returned as NA."),
+                  sum(pinned$beyond), length(pinned$beyond),
+                  object$info$gp_c * object$info$gp_S)
   draw_fn <- if (type == "epred") brms::posterior_epred else brms::posterior_predict
   draw_mat <- try(draw_fn(model_obj, newdata = pinned$df), silent = TRUE)
   if (is.matrix(draw_mat) && pinned$n_pad > 0L &&
       ncol(draw_mat) == nrow(pinned$df))
     draw_mat <- draw_mat[, seq_len(ncol(draw_mat) - pinned$n_pad), drop = FALSE]
+  if (is.matrix(draw_mat) && ncol(draw_mat) == length(pinned$beyond))
+    draw_mat[, pinned$beyond] <- NA_real_
 
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
     .log_warn("predict.bayesian_fit(): posterior draw failed.")

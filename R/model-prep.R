@@ -357,8 +357,10 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
 #'   \code{S} (numeric; the pooled full range of the column-centred coordinates
 #'   AFTER collapsing replicated rows, i.e. exactly what \code{brms::gp(c = )}
-#'   multiplies under its default \code{gr = TRUE}) and \code{capped}
-#'   (logical).
+#'   multiplies under its default \code{gr = TRUE}), \code{capped}
+#'   (logical) and \code{cmeans} (the column means the coordinates were
+#'   centred on, which brms stores in the fit's GP basis and centres every
+#'   later \code{newdata} on).
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
@@ -376,7 +378,8 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   # same factor.  Mirror the reduction.
   xy <- xy[!duplicated(xy), , drop = FALSE]
   if (!nrow(xy)) xy <- matrix(0, nrow = 1L, ncol = 2L)
-  Xc <- sweep(xy, 2L, colMeans(xy, na.rm = TRUE))
+  cmeans <- colMeans(xy, na.rm = TRUE)
+  Xc <- sweep(xy, 2L, cmeans)
   S  <- suppressWarnings(
     max(1, max(Xc, na.rm = TRUE) - min(Xc, na.rm = TRUE)))
   if (!is.finite(S) || S <= 0) S <- 1
@@ -395,7 +398,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   capped <- k_raw > k_max
 
   list(k = as.integer(k_val), c = as.numeric(c_val),
-       S = as.numeric(S), capped = capped)
+       S = as.numeric(S), capped = capped, cmeans = as.numeric(cmeans))
 }
 
 

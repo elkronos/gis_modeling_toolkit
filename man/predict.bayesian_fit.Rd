@@ -48,23 +48,31 @@ missing or non-finite values are dropped.  Coordinate scaling and predictor
 standardisation stored at fit time are then applied before delegating to
 \code{brms::posterior_epred()} or \code{brms::posterior_predict()}.
 }
-\section{The GP boundary is pinned}{
+\section{The GP boundary is held at its fitted value}{
 
-brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
-basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
-\code{predict()} is handed, which moved every eigenfunction of the
+brms 2.17 to 2.22 do not store the Hilbert-space boundary \eqn{L} in a
+fitted GP basis, so \code{brms:::.data_gp()} recomputes it from whatever
+rows \code{predict()} is handed, which moved every eigenfunction of the
 approximation with the newdata bounding box while the fitted basis
 coefficients stayed put.  Two synthetic rows at the training coordinate
-extrema are therefore appended before the posterior draw and dropped from the
-result, reproducing the boundary the model was fitted with, so chunked,
-fold-wise and single-call predictions agree.
+extrema are therefore appended before the posterior draw and dropped from
+the result, and when \code{newdata} reaches past the training range the
+\code{c} of the \code{gp()} term is scaled down by as much as the range
+grew, so brms rebuilds exactly the boundary the model was fitted with.  A
+prediction therefore does not depend on which other rows share the call:
+chunked, fold-wise and single-call predictions agree, and
+\code{\link{predict_surface}()} does not depend on \code{chunk_size}.
+brms 2.23.0 and later store \eqn{L} and reuse it, so there \code{c} is left
+alone and the two extra rows change nothing.
 
-That is exact only for \code{newdata} \strong{inside} the training
-coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
-predictions there are extrapolation from a basis that was not built for them
-\emph{and} depend on which other rows share the call, including on
-\code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
-the log (not raised as a warning) when it happens.
+Predictions outside the training coordinate envelope are extrapolation (a
+notice is written to the log).  A row further than \eqn{L} from the centre
+of the training coordinates on either axis is past the edge of the basis,
+where the approximate GP is an odd reflection of the fitted surface rather
+than an estimate of anything, so it is returned as \code{NA} (a column of
+\code{NA} with \code{draws = TRUE}) with a warning.  The default boundary
+factor puts that edge well outside the training data, so only
+\code{newdata} reaching far past it is affected.
 }
 
 \seealso{
