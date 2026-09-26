@@ -155,3 +155,139 @@ test_that("plot_folds' subtitle gives no unit for folds built without a CRS", {
   sub_l <- plot_folds(fl, pts_na)$labels$subtitle
   expect_identical(sub_l, "Leave-one-out with a 150 buffer")
 })
+
+
+# ---- plot.spatial_fit() ---------------------------------------------------
+
+test_that("plot.spatial_fit draws a custom fit that has no residuals() method", {
+  skip_if_not_installed("ggplot2")
+  # ?new_spatial_fit calls residuals() methods optional; without one,
+  # residuals.default() returned NULL and every type but "coefficients"
+  # stopped with "could not extract residuals".
+  pts <- surf_test_points(n = 70)
+  engine <- stats::lm(z ~ w, sf::st_drop_geometry(pts))
+  # With neither method, the error names the one a custom subclass must have.
+  bare <- new_spatial_fit("r2nomethods_fit", engine, z ~ w, "z", "w", pts)
+  expect_error(plot(bare, type = "residuals"), "Define a fitted.r2nomethods_fit\\(\\) method")
+  fit <- new_spatial_fit("r2noresid_fit", engine, z ~ w, "z", "w", pts)
+  registerS3method("fitted", "r2noresid_fit",
+                   function(object, ...) as.numeric(stats::fitted(object$engine)))
+  expect_null(stats::residuals(fit))
+  p <- plot(fit, type = "residuals")
+  expect_no_error(b <- ggplot2::ggplot_build(p))
+  expect_equal(nrow(b$data[[1]]), 70L)
+  expect_equal(p$data$.resid, as.numeric(stats::residuals(engine)), tolerance = 1e-10)
+  po <- plot(fit, type = "observed_predicted")
+  bo <- ggplot2::ggplot_build(po)
+  expect_equal(sort(bo$data[[2]]$x), sort(pts$z), tolerance = 1e-8)
+})
+
+test_that("the residual and response variograms are compared only over the same pairs", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  # estimate_sac_range() returns the widest single direction when the
+  # all-pairs fit is unusable -- as it often is for a response with a trend
+  # whose residuals are fine -- and that overlay was labelled plainly as the
+  # response, its sill set against the all-pairs residual curve's.
+  set.seed(5); n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
+  d <- as.matrix(stats::dist(cbind(x, y)))
+  z <- as.numeric(t(chol(exp(-d / 50) + diag(1e-4, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 3857)
+  sac <- estimate_sac_range(pts, "z")
+  expect_true(is.finite(sac))
+  expect_false(isTRUE(attr(sac, "anisotropy_used")))
+  one_dir <- function(s, widest) {
+    attr(s, "anisotropy_used") <- TRUE
+    attr(s, "directional") <- c(`0` = 40, `45` = NA, `90` = 40, `135` = 40)
+    attr(s, "directional")[widest] <- 60
+    s
+  }
+  deg <- "\u00b0 \u00b1 22.5\u00b0"
+  draw <- function(main, ov) .draw_sac_variogram(main, what = "Residual variogram",
+                                                  overlay = ov, overlay_label = "Response (z)")
+  cap <- function(p) gsub("\n", " ", p$labels$caption)
+
+  # All-pairs residuals, one-direction response.
+  p1 <- draw(sac, one_dir(sac, "90"))
+  expect_no_error(ggplot2::ggplot_build(p1))
+  expect_match(cap(p1), paste0("Response \\(z\\), the 90", deg, " direction only"))
+  expect_match(cap(p1), "Sills not compared: the two variograms are not over the same point pairs")
+  expect_false(grepl("Residual sill is", cap(p1)))
+  # One-direction residuals, all-pairs response.
+  p2 <- draw(one_dir(sac, "0"), sac)
+  expect_match(p2$labels$title, paste0("Residual variogram, 0", deg))
+  expect_match(cap(p2), "Sills not compared: the two variograms are not over the same point pairs")
+  # Different directions are not the same pairs either; the same direction is.
+  expect_match(cap(draw(one_dir(sac, "0"), one_dir(sac, "90"))), "Sills not compared")
+  expect_match(cap(draw(one_dir(sac, "90"), one_dir(sac, "90"))), "Residual sill is [0-9]+% of the response sill")
+  # Both all-pairs: compared, as before.
+  expect_match(cap(draw(sac, sac)), "Residual sill is 100% of the response sill")
+})
+
+test_that("the no-sill subtitle does not claim a range range_frac refused ran past the lags", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("gstat")
+  # range_frac < 1 refuses a range below the largest lag fitted; the subtitle
+  # printed that lag as the bound and said the variogram never reached a sill.
+  set.seed(3); n <- 250
+  xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
+  D  <- as.matrix(stats::dist(xy))
+  xy$z <- as.numeric(t(chol(exp(-D / 150) + diag(0.5, n))) %*% rnorm(n))
+  pts <- sf::st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  r <- suppressWarnings(estimate_sac_range(pts, "z", range_frac = 0.1))
+  expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
+  expect_true(attr(r, "rejected_range") <= attr(r, "cutoff_dist"))
+  sub <- gsub("\n", " ", plot(r)$labels$subtitle)
+  expect_false(grepl("never reached a sill", sub))
+  expect_match(sub, "within the largest lag fitted .* `range_frac` accepts")
+  # A range past the largest lag keeps the sill wording.
+  r_over <- r
+  attr(r_over, "rejected_range") <- 2 * attr(r, "cutoff_dist")
+  expect_match(gsub("\n", " ", plot(r_over)$labels$subtitle),
+               "exceeds the largest lag fitted .* never reached a sill")
+})
+
+
+# ---- plot(type = "coefficients") on a GWR fit ------------------------------
+
+test_that("the GWR coefficient subtitle is right with mask = FALSE", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
+  # A clean survey is not a missing one.
+  set.seed(3); n <- 200
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000); a <- rnorm(n); b <- rnorm(n)
+  pts <- sf::st_as_sf(data.frame(x = x, y = y, a = a, b = b,
+                                 z = (1 + 2 * x / 1000) * a - b + rnorm(n, 0, 0.3)),
+                      coords = c("x", "y"), crs = 32632)
+  fit <- suppressWarnings(fit_gwr_model(pts, "z", c("a", "b"), adaptive = TRUE, bandwidth = 60))
+  expect_true(is.data.frame(fit$info$local_collinearity))
+  expect_identical(fit$info$n_local_collinear, 0L)
+  s0 <- plot(fit, type = "coefficients", mask = FALSE)$labels$subtitle
+  expect_false(grepl("not surveyed", s0))
+  expect_match(s0, "every local design is well conditioned")
+
+  # Collinear windows and a non-finite coefficient: mask = FALSE still says
+  # the collinear windows are drawn as if reliable.
+  set.seed(5); cl <- rep(1:4, each = 50)
+  d <- sf::st_as_sf(data.frame(
+    x = c(runif(50, 0, 100), runif(50, 400, 500), runif(50, 0, 100), runif(50, 400, 500)),
+    y = c(runif(50, 0, 100), runif(50, 0, 100), runif(50, 400, 500), runif(50, 400, 500)),
+    a = rnorm(200), soil = c(0.5, 1.5, 0.5, 1.5)[cl] + rnorm(200, 0, 0.01)),
+    coords = c("x", "y"), crs = 32632)
+  d$z <- 2 * d$a + 3 * d$soil + rnorm(200, 0, 0.2)
+  f70 <- suppressWarnings(fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE, bandwidth = 70))
+  f70$engine$SDF@data$a[1:3] <- NaN
+  cn_bad <- with(f70$info$local_collinearity, !is.finite(cn) | cn > 30)
+  n_cn <- sum(cn_bad[-(1:3)])
+  expect_gt(n_cn, 0L)
+  s1 <- plot(f70, type = "coefficients", term = "a", mask = FALSE)$labels$subtitle
+  expect_match(s1, "^3 of 200 locations masked")
+  expect_match(s1, "3 with a non-finite coefficient")
+  expect_match(s1, sprintf("mask = FALSE: %d location\\(s\\) with a collinear local design are drawn as if reliable", n_cn))
+  # mask = TRUE is unchanged.
+  s2 <- plot(f70, type = "coefficients", term = "a")$labels$subtitle
+  expect_match(s2, sprintf("^%d of 200 locations masked", n_cn + 3L))
+  expect_false(grepl("mask = FALSE", s2))
+})
