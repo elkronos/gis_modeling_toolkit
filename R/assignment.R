@@ -10,6 +10,13 @@
 #' duplicating rows, so the assigned layer keeps one row per input feature
 #' and cell-level counts mean what they say.
 #'
+#' The join runs in the CRS of `polygons_sf` whenever that CRS is projected,
+#' so cell edges are the straight lines the cells were drawn with and overlap
+#' areas are planar. A copy of `features_sf` is transformed for it, and the
+#' features come back with the coordinates they arrived with. Otherwise (the
+#' polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
+#' `features_sf`.
+#'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
 #' @param polygon_id_col Name of the polygon identifier column. Default "poly_id".
@@ -84,8 +91,22 @@ assign_features_to_polygons <- function(
   tie_break <- match.arg(tie_break)
 
   orig_crs <- sf::st_crs(features_sf)
-  hh <- harmonize_crs(features_sf, polygons_sf)
+  # The join runs in the polygons' CRS whenever that is projected: it is the
+  # CRS the cells are drawn in, so their edges are straight and overlap areas
+  # planar there.  Keeping the features' CRS instead pulled the package's own
+  # projected cells into lon/lat, bending every edge into a great-circle arc,
+  # and with s2 the largest-overlap join failed on a degenerate intersection
+  # piece -- on sf's nc counties against a 36-cell grid, 55 of 100 counties
+  # ended up outside their largest-overlap cell.
+  crs_p <- sf::st_crs(polygons_sf)
+  join_in_p <- !is.na(crs_p) && !isTRUE(sf::st_is_longlat(crs_p))
+  hh <- harmonize_crs(features_sf, polygons_sf,
+                      prefer = if (join_in_p) "b" else "a")
   f <- hh$a; p <- hh$b
+  # `f` is only the join's copy.  The rows returned keep the geometry the
+  # features arrived with; a CRS-less layer is resolved into the polygons'
+  # CRS and returned there, as before.
+  f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
 
   id_candidates <- c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id")
   id_col <- id_candidates[id_candidates %in% names(p)][1]
@@ -111,9 +132,6 @@ assign_features_to_polygons <- function(
   }
 
   f$`..pre_join_row_id` <- seq_len(nrow(f))
-  # The join may run on repaired copies (below); the rows returned carry the
-  # geometry the features arrived with.
-  f_geom <- sf::st_geometry(f)
 
   f_gtypes <- unique(as.character(sf::st_geometry_type(f, by_geometry = TRUE)))
   use_largest <- isTRUE(largest) &&
@@ -170,6 +188,9 @@ assign_features_to_polygons <- function(
   } else {
     joined <- do.call(sf::st_join, join_args)
   }
+  # The join ran on copies (moved into the polygons' CRS, repaired); hand
+  # back the geometry the caller passed, in the CRS it arrived in, rather
+  # than a transform round trip of it.
   joined <- sf::st_set_geometry(joined, f_geom[joined[["..pre_join_row_id"]]])
 
   if (!identical(id_col, polygon_id_col)) {
@@ -240,7 +261,6 @@ assign_features_to_polygons <- function(
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
   }
 
-  if (!is.na(orig_crs)) joined <- sf::st_transform(joined, orig_crs)
   # Stamped and classed: the record names row positions, so it must not
   # survive a subset that renumbers or removes them.
   joined <- .set_row_record(joined, "ties",
