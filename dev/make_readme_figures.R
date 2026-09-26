@@ -12,18 +12,26 @@
 # Run from the package root:
 #   Rscript dev/make_readme_figures.R
 #
-# Requires: sf, ggplot2 (and devtools if spatialkit is not installed).
+# Requires: sf, ggplot2, and pkgload (or an installed spatialkit).
+#
+# The figures are drawn by the working tree, loaded with pkgload::load_all(),
+# as the other dev scripts are; an installed spatialkit is used only when
+# pkgload is missing, and then the figures show that release, not the code
+# in front of you.
 # ---------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
-  if (requireNamespace("spatialkit", quietly = TRUE)) {
-    library(spatialkit)
+  if (file.exists("DESCRIPTION") && requireNamespace("pkgload", quietly = TRUE)) {
+    pkgload::load_all(".", quiet = TRUE)
   } else {
-    devtools::load_all(".", quiet = TRUE)
+    library(spatialkit)
   }
   library(sf)
   library(ggplot2)
 })
+cat("spatialkit loaded from: ",
+    tryCatch(getNamespaceInfo(asNamespace("spatialkit"), "path"),
+             error = function(e) NA_character_), "\n", sep = "")
 
 dir.create("man/figures", showWarnings = FALSE, recursive = TRUE)
 set.seed(42)
