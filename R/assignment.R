@@ -196,8 +196,8 @@ assign_features_to_polygons <- function(
     # any area, so under GEOS a feature that only shares an edge or a corner
     # with the cells was assigned to one of them with zero overlap, while
     # under s2 (lon/lat, s2 on) the same feature had no piece and came back
-    # unassigned: sf's nc counties beside 50 of them as cells gave 70 rows
-    # projected and 50 in lon/lat.  A feature with no overlap has no largest
+    # unassigned: sf's 100 nc counties against 50 of them as cells gave 70
+    # rows projected and 50 in lon/lat.  A feature with no overlap has no largest
     # overlap, so it is unassigned whatever the CRS.  s2 already does this.
     if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
       hit <- which(!is.na(joined[[id_col]]))
@@ -970,7 +970,8 @@ assign_features_to_polygons <- function(
 #'   applied (exactly when the `"deff_applied"` attribute below is attached)
 #'   and `FALSE` when it fell back to the uncorrected standard errors: a
 #'   refused `deff`, a `"variogram"` request with no usable model, or a
-#'   `"kish"` ICC of 0. Unlike the attribute it survives `rbind()` and
+#'   `"kish"` ICC of 0 (and `NA` on a `cells_sf` row no point fell in).
+#'   Unlike the attribute it survives `rbind()` and
 #'   `dplyr::bind_rows()` of many results. A fallback is also signalled by a
 #'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 is
 #'   reported on `attr(, "icc")` instead), which
