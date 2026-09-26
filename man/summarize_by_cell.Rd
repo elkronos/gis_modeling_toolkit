@@ -164,7 +164,8 @@ the count.
 applied (exactly when the \code{"deff_applied"} attribute below is attached)
 and \code{FALSE} when it fell back to the uncorrected standard errors: a
 refused \code{deff}, a \code{"variogram"} request with no usable model, or a
-\code{"kish"} ICC of 0. Unlike the attribute it survives \code{rbind()} and
+\code{"kish"} ICC of 0 (and \code{NA} on a \code{cells_sf} row no point fell in).
+Unlike the attribute it survives \code{rbind()} and
 \code{dplyr::bind_rows()} of many results. A fallback is also signalled by a
 warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 is
 reported on \code{attr(, "icc")} instead), which
