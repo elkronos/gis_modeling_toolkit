@@ -66,8 +66,9 @@ fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
 and so on.  \code{data_sf}, \code{response_var}, \code{predictor_vars}
 and \code{.already_prepped} are set by this function and must not be
 passed here (every fold would fail with "matched by multiple actual
-arguments").  A \code{seed} given here overrides the per-fold draw
-described above.}
+arguments").  \code{seed} is this function's own argument and never
+reaches \code{fit_rf_model()} through here; see \code{seed} above for
+growing every fold's forest from one fixed seed.}
 }
 \value{
 The \code{\link{cv_spatial}} result.

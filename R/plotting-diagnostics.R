@@ -312,8 +312,9 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
 #' systematic over-confidence (points below the line) or intervals wider than
 #' they need to be (above it) are read at a glance.  Three levels is a thin
 #' curve; pass \code{coverage_levels = seq(0.1, 0.9, by = 0.1)} to
-#' \code{cv_bayes()} for a full one.  The levels are read off the column
-#' names, so whatever was computed is drawn.
+#' \code{cv_bayes()} for a full one.  Each level is drawn at the nominal value
+#' \code{cv_bayes()} records in \code{coverage_levels}, so whatever was
+#' computed is drawn where it belongs (0.975 at 0.975, not rounded).
 #'
 #' @param cv The list returned by \code{\link{cv_bayes}()}, or a
 #'   \code{\link{compare_models_cv}()} result that ran the Bayesian backend
@@ -347,12 +348,24 @@ plot_calibration <- function(cv, ...) {
     stop("plot_calibration(): `cv` must be the list returned by cv_bayes(), or a ",
          "compare_models_cv() result whose Bayesian backend ran.", call. = FALSE)
   fm <- as.data.frame(cv$fold_metrics)
-  cov_cols <- grep("^coverage_[0-9]+$", names(fm), value = TRUE)
+  # The nominal levels come from cv_bayes()'s `coverage_levels`, named by
+  # column.  They used to be read back from the column names, which were
+  # rounded to a whole percent (0.995 was drawn at 1.00); the names are the
+  # fallback, for a result from before that element existed, now read at
+  # whatever precision they carry.
+  lv <- cv$coverage_levels
+  if (is.numeric(lv) && length(lv) && !is.null(names(lv))) {
+    lv <- lv[names(lv) %in% names(fm)]
+    cov_cols <- names(lv)
+    nominal  <- unname(as.numeric(lv))
+  } else {
+    cov_cols <- grep("^coverage_[0-9]+(\\.[0-9]+)?$", names(fm), value = TRUE)
+    nominal  <- as.numeric(sub("^coverage_", "", cov_cols)) / 100
+  }
   if (!length(cov_cols))
     stop("plot_calibration(): the result carries no coverage_* columns; ",
          "cv_bayes() computes them when compute_pred_intervals = TRUE and at ",
          "least one fold produced posterior predictive draws.", call. = FALSE)
-  nominal <- as.numeric(sub("^coverage_", "", cov_cols)) / 100
 
   per_fold <- do.call(rbind, lapply(seq_along(cov_cols), function(j) {
     data.frame(fold = fm$fold, nominal = nominal[j],
@@ -361,10 +374,14 @@ plot_calibration <- function(cv, ...) {
                stringsAsFactors = FALSE)
   }))
   per_fold <- per_fold[is.finite(per_fold$observed), , drop = FALSE]
+  # cv_bayes() creates the columns whether or not it computes them, so an
+  # all-NA set has two causes, and naming only the draws sent a user who had
+  # passed compute_pred_intervals = FALSE looking for a sampler failure.
   if (!nrow(per_fold))
-    stop("plot_calibration(): coverage is NA in every fold (the posterior ",
-         "predictive draws failed everywhere), so there is nothing to draw.",
-         call. = FALSE)
+    stop("plot_calibration(): coverage is NA in every fold, so there is ",
+         "nothing to draw: either cv_bayes() ran with compute_pred_intervals = ",
+         "FALSE, or the posterior predictive draws failed in every fold (see ",
+         "the log).", call. = FALSE)
 
   pc <- cv$predictive_coverage
   pooled <- data.frame(nominal = nominal, observed = vapply(cov_cols, function(cn) {
