@@ -22,7 +22,7 @@ plot_tessellation_map(
   boundary_col = "#111111",
   boundary_size = 0.6,
   labels = FALSE,
-  label_col = "grid_id",
+  label_col = NULL,
   label_size = 2.7,
   legend = TRUE,
   legend_title = NULL,
@@ -46,7 +46,11 @@ plot_tessellation_map(
 \item{features_sf}{Optional sf/sfc layer of additional features.}
 
 \item{fill_col}{Name of the COLUMN in \code{tessellation_sf} to map to fill;
-\code{NULL} for no fill.  \code{fill_col} and \code{label_col} name
+\code{NULL} for no fill.  A numeric column gets a continuous scale, as
+does a Date or POSIXct column (on a date or time axis) and a
+\code{units} or \code{difftime} column (drawn as numbers, with the unit
+in the legend title); anything else a discrete one.
+\code{fill_col} and \code{label_col} name
 columns, while \code{outline_col}, \code{features_col},
 \code{seeds_col} and \code{boundary_col} are colours.}
 
@@ -69,8 +73,12 @@ outline.}
 
 \item{labels}{Logical; draw per-cell labels. Default FALSE.}
 
-\item{label_col}{Name of the COLUMN holding the label text. Default
-\code{"grid_id"}.}
+\item{label_col}{Name of the COLUMN holding the label text.  Default
+\code{NULL}: the first of \code{"grid_id"}, \code{"cell_id"},
+\code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
+the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
+output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
+labelled without naming one.}
 
 \item{label_size}{Label text size. Default 2.7.}
 

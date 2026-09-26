@@ -108,8 +108,14 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
   df <- df[is.finite(df$value), , drop = FALSE]
   df$fold <- factor(df$fold, levels = sort(unique(df$fold)))
   df$model <- factor(df$model, levels = unique(df$model))
+  # A model with no finite per-fold value has no panel.  factor() turned its
+  # pooled row into NA, which the finite-value filter kept, so its line was
+  # drawn in another model's panel or in a third panel labelled NA.
+  pooled$model <- as.character(pooled$model)
+  no_folds <- unique(pooled$model[is.finite(pooled$value) &
+                                    !(pooled$model %in% levels(df$model))])
   pooled$model <- factor(pooled$model, levels = levels(df$model))
-  pooled <- pooled[is.finite(pooled$value), , drop = FALSE]
+  pooled <- pooled[!is.na(pooled$model) & is.finite(pooled$value), , drop = FALSE]
 
   n_models <- nlevels(df$model)
   title <- sprintf("%s by fold", metric)
@@ -117,6 +123,9 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
     "Dashed line: the pooled value from `overall`"
   else
     sprintf("No pooled value: `%s` is a per-fold quantity with no counterpart in `overall`", metric)
+  if (length(no_folds))
+    caption <- paste0(caption, sprintf("\nNot drawn: %s (no finite per-fold `%s`)",
+                                       paste(no_folds, collapse = ", "), metric))
 
   size_aes <- if (any(is.finite(df$n_pred))) ggplot2::aes(size = .data$n_pred) else NULL
   p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$fold, y = .data$value))
@@ -185,12 +194,15 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' of applicability; it does not say whether the rest sit comfortably inside
 #' or crowd against the threshold, nor how far outside the outsiders are.
 #' This draws the dissimilarity index of the prediction locations against
-#' that of the cross-validated training data, with the threshold marked, so
-#' the prediction set can be read as mostly inside, marginal or largely
-#' outside.  The training curve is the reference the threshold was derived
-#' from: the threshold is the largest cross-validated training DI inside an
-#' outlier fence, so the curve reaches it exactly when no training value was
-#' fenced off and runs past it, by the tail the fence removed, when some were.
+#' that of the training data, with the threshold marked, so the prediction
+#' set can be read as mostly inside, marginal or largely outside.  The
+#' training DI is cross-validated over the \code{folds} passed to
+#' \code{\link{area_of_applicability}()}, or without them is each training
+#' point's distance to its nearest other training point; the legend and the
+#' caption say which.  The training curve is the reference the threshold was
+#' derived from: the threshold is the largest training DI inside an outlier
+#' fence, so the curve reaches it exactly when no training value was fenced
+#' off and runs past it, by the tail the fence removed, when some were.
 #'
 #' @param x An \code{aoa} object from \code{\link{area_of_applicability}()}.
 #' @param type \code{"ecdf"} (default), the two empirical distribution
@@ -235,12 +247,17 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
     stop("plot.aoa(): no finite dissimilarity index at any prediction location ",
          "(every row had a missing or non-finite predictor).", call. = FALSE)
 
+  # Without folds the training DI is each point's distance to its nearest
+  # other training point, not a cross-validated one; a legend hard-coded to
+  # "cross-validated" contradicted the caption beneath it.
+  tr_set <- if (isTRUE(x$params$folds_supplied)) "Training (cross-validated)"
+    else "Training (nearest other training point)"
   df <- rbind(
     data.frame(set = "Prediction locations", DI = di_new, stringsAsFactors = FALSE),
-    if (length(di_tr)) data.frame(set = "Training (cross-validated)", DI = di_tr,
+    if (length(di_tr)) data.frame(set = tr_set, DI = di_tr,
                                   stringsAsFactors = FALSE)
   )
-  df$set <- factor(df$set, levels = c("Training (cross-validated)", "Prediction locations"))
+  df$set <- factor(df$set, levels = c(tr_set, "Prediction locations"))
 
   n_all <- x$n_new %||% length(di_new)
   share_out <- if (length(di_new)) mean(di_new > thr) else NA_real_
@@ -267,8 +284,8 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
     p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$DI, colour = .data$set)) +
       ggplot2::stat_ecdf(geom = "step", linewidth = 0.8) +
       ggplot2::geom_vline(xintercept = thr, linetype = "dashed", colour = "#B2182B") +
-      ggplot2::scale_colour_manual(values = c("Training (cross-validated)" = "grey45",
-                                              "Prediction locations" = "#2166AC"),
+      ggplot2::scale_colour_manual(values = stats::setNames(c("grey45", "#2166AC"),
+                                                            c(tr_set, "Prediction locations")),
                                    name = NULL) +
       ggplot2::labs(title = "Dissimilarity index: prediction locations against training",
                     subtitle = subtitle, caption = caption,
@@ -425,7 +442,7 @@ plot_calibration <- function(cv, ...) {
 #' @param df Data frame with columns \code{x}, \code{y}, \code{panel}
 #'   (facet; one level for a single panel) and optionally \code{label}
 #'   (text at the point) and \code{role} (\code{"candidate"} points are drawn
-#'   faint, everything else full).
+#'   faint, \code{"rejected"} ones hollow on the path, everything else full).
 #' @param chosen Data frame with \code{panel}, \code{x}, \code{y}: the point
 #'   the rule picked in each panel (may have zero rows).
 #' @param flat Optional data frame with \code{panel}, \code{xmin},
@@ -458,9 +475,15 @@ plot_calibration <- function(cv, ...) {
   if (connect && nrow(main))
     p <- p + ggplot2::geom_line(data = main, ggplot2::aes(x = .data$x, y = .data$y),
                                 colour = "grey30")
-  if (nrow(main))
-    p <- p + ggplot2::geom_point(data = main, ggplot2::aes(x = .data$x, y = .data$y),
-                                 colour = "grey30", size = 2)
+  # A "rejected" point (scored and on the path, but not taken) is drawn
+  # hollow, in the same layer, so every scored point is still drawn once.
+  if (nrow(main)) {
+    main$shape <- ifelse(main$role == "rejected", 21, 19)
+    p <- p + ggplot2::geom_point(data = main,
+                                 ggplot2::aes(x = .data$x, y = .data$y, shape = .data$shape),
+                                 colour = "grey30", fill = "white", size = 2) +
+      ggplot2::scale_shape_identity()
+  }
   if (!is.null(main$label) && any(nzchar(main$label)))
     p <- p + ggplot2::geom_text(data = main[nzchar(main$label), , drop = FALSE],
                                 ggplot2::aes(x = .data$x, y = .data$y, label = .data$label),
@@ -627,7 +650,10 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #' step and keeps the best; its \code{history} holds all of them.  This draws
 #' the accepted variable's score at each step as the path, every other
 #' candidate's score at that step as a faint point, and the step at which the
-#' selection stopped in red.  The picture then says whether the last variable
+#' selection stopped in red.  When it stopped because no candidate cleared
+#' \code{tol}, the path runs one step further to the best of the rejected
+#' candidates, drawn hollow and labelled "not added", so the stop reads as a
+#' flattening rather than a cut.  The picture then says whether the last variable
 #' was a clear gain or the first that happened to clear \code{tol}, and
 #' whether the runner-up would have done as well.  The scores are the
 #' selection's own cross-validated criterion, optimistically biased by the
@@ -675,7 +701,9 @@ plot.feature_selection <- function(x, ...) {
   # The accepted variable at step s is selected[s]; the path runs through
   # its score.  Steps past n_sel were scored and rejected (nothing cleared
   # tol), and their best candidate is drawn as part of the path too, so the
-  # stop is visible as a flattening rather than as a cut.
+  # stop is visible as a flattening rather than as a cut -- but hollow and
+  # labelled "not added": drawn and named like the others, a candidate that
+  # improved the score by less than tol read as a variable in the model.
   h$role  <- "candidate"
   h$label <- ""
   path_rows <- integer(0)
@@ -686,8 +714,11 @@ plot.feature_selection <- function(x, ...) {
     else { pick <- idx[if (minimise) which.min(h$score[idx]) else which.max(h$score[idx])] }
     if (length(pick) == 1L && !is.na(pick)) path_rows <- c(path_rows, pick)
   }
+  rejected <- path_rows[h$step[path_rows] > n_sel]
   h$role[path_rows]  <- "path"
+  h$role[rejected]   <- "rejected"
   h$label[path_rows] <- h$variable[path_rows]
+  h$label[rejected]  <- paste(h$variable[rejected], "(not added)")
   df <- data.frame(panel = metric, x = h$step, y = as.numeric(h$score),
                    role = h$role, label = h$label, stringsAsFactors = FALSE)
   chosen <- if (n_sel > 0L && n_sel %in% h$step) {
