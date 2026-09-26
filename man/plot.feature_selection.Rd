@@ -19,7 +19,10 @@ A \code{ggplot} object.
 step and keeps the best; its \code{history} holds all of them.  This draws
 the accepted variable's score at each step as the path, every other
 candidate's score at that step as a faint point, and the step at which the
-selection stopped in red.  The picture then says whether the last variable
+selection stopped in red.  When it stopped because no candidate cleared
+\code{tol}, the path runs one step further to the best of the rejected
+candidates, drawn hollow and labelled "not added", so the stop reads as a
+flattening rather than a cut.  The picture then says whether the last variable
 was a clear gain or the first that happened to clear \code{tol}, and
 whether the runner-up would have done as well.  The scores are the
 selection's own cross-validated criterion, optimistically biased by the
