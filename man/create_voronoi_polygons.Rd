@@ -17,15 +17,31 @@ create_voronoi_polygons(
 \arguments{
 \item{points_sf}{An sf object with POINT/MULTIPOINT geometries.}
 
-\item{boundary}{Optional polygonal sf object.}
+\item{boundary}{Optional polygonal sf object. When exactly one of
+\code{points_sf} and \code{boundary} has a CRS, the other is interpreted in it as
+\code{\link[=harmonize_crs]{harmonize_crs()}} does, with a warning (lon/lat-looking coordinates are
+reprojected from EPSG:4326, others are stamped); CRS-less points that do
+not look like lon/lat cannot take a geographic boundary's CRS, and are
+refused with an error.}
 
-\item{expand}{Numeric; absolute buffer distance for the envelope.}
+\item{expand}{Numeric; absolute distance, in the working CRS's units, by
+which the boundary (or the hull derived from the points) is grown before
+the diagram is built. With \code{clip = TRUE} the cells are clipped to the
+grown boundary, so they reach \code{expand} beyond the study area, and a point
+up to \code{expand} outside it gets a cell and an \code{index} value. The grown
+boundary is the one returned as \code{boundary}.}
 
 \item{clip}{Logical; intersect cells with boundary.}
 
-\item{keep_duplicates}{Logical; keep coincident points for graph construction.}
+\item{keep_duplicates}{Logical. Has no effect on the result: coincident
+points are merged before the diagram is built either way, so they share
+one cell and all of them are indexed to it.}
 
-\item{crs}{Optional target CRS.}
+\item{crs}{Optional target CRS. A projected CRS is the working CRS. A
+geographic one (EPSG:4326, say) is the CRS the result is returned in:
+the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
+picks for the points, so they are nearest-point cells on the ground, and
+are then transformed, with long edges densified.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -35,8 +51,11 @@ It does not silence R warnings, nor the package's console log echo
 A list with \code{cells}, \code{index}, \code{boundary},
 \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 per row of \code{points_sf}, and \code{NA} for a point that falls outside
-every cell, which means outside the study area, so a summary built from it
-counts only the points the tessellation actually covers.
+every cell, which means outside the study area (grown by \code{expand}
+when it is positive), so a summary built from it counts only the points
+the tessellation actually covers.  \code{boundary} is the boundary the
+cells were built in: the one supplied or derived, grown by
+\code{expand}.
 }
 \description{
 Assigns every location in the study area to its nearest input point, giving
@@ -54,6 +73,14 @@ bookkeeping: projecting lon/lat input, building and buffering an envelope
 so edge cells are bounded, clipping to \code{boundary}, restoring the
 point-to-cell correspondence that \code{st_voronoi()} scrambles, and stamping
 stable \code{cell_id} values.
+
+The generators are the points' vertices, not the features. A MULTIPOINT
+feature with several vertices therefore gets one cell per vertex, and its
+\code{index} entry is the smallest \code{cell_id} among the cells it touches; the
+others are referenced by no feature. Other functions in the package
+(\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}) reduce such a feature to its
+centroid instead, so cast to POINT, or take centroids, first if one cell
+per feature is what you want.
 }
 \examples{
 library(sf)
