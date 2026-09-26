@@ -55,7 +55,17 @@ variogram never reaches a sill, and such a value extrapolates past the
 observed lags instead of measuring a long autocorrelation range.  Passing
 it to \code{make_folds(auto_range = TRUE)} would collapse the block grid to
 a single block.  Default 1.0; raise it to accept ranges extrapolated
-beyond the fitted lags.}
+beyond the fitted lags.  The bound does not guarantee room for two
+blocks: at the defaults it is half the farthest-pair distance, about
+0.71 of the side of a square layer, and a block grid needs a range below
+half the width of the bounding box in one direction or the other.  An
+accepted range between the two leaves
+\code{make_folds(auto_range = TRUE)} room for a single block of that
+size (see its \code{auto_range} argument for what it does then).  On a
+1000 m square with an exponential field of effective range 570 (n = 300),
+9 of 30 draws were accepted in that band.  Lowering \code{range_frac} to fit the
+grid would turn those estimates into \code{NA} and the blocks into
+geometric ones smaller than the range.}
 
 \item{seed}{RNG seed for the \code{n_max} subsample, restored afterwards so
 the caller's random stream is untouched.  Default \code{123L}: the
@@ -105,8 +115,9 @@ with the fit attached as attributes \code{directional} (the 0°, 45°,
 90° and 135° ranges, named by azimuth; \code{NA} where that
 direction's fit was unusable), \code{anisotropy} (largest
 over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
-the all-pairs fit was unusable and the directional maximum stands in
-for it), \code{directional_status} (per azimuth, why a direction is
+the all-pairs fit was singular or did not converge and the
+directional maximum stands in for it), \code{directional_status}
+(per azimuth, why a direction is
 \code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
 (its range ran past the largest lag fitted), \code{"not_converged"}
 or \code{"no_fit"}), \code{directional_fitted} (the range each
@@ -134,20 +145,31 @@ parameters) and \code{nugget} (that model's nugget variance; see
 be taken on trust.}
 \item{Rejected range}{\code{NA_real_} when a range was fitted but is
 not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
-\code{range_frac}); or the model did not converge; or the empirical
+\code{range_frac}), which applies to the all-pairs fit even when some
+directions reached a sill; or it is shorter than the shortest lag the
+empirical variogram resolves (the mean separation in its first
+bin), below which a structure cannot be told from a nugget; or the
+model did not converge; or the empirical
 variogram \emph{decreases} with distance over its shorter lags (a
 net fall of more than 15 percent of the mean semivariance there,
 weighted by pairs), which is the shape of a periodic, hole-effect
 structure or of a variance that differs between a dense cluster and
-the rest of the layer (an unremoved trend instead makes the variogram
-rise without a sill, and the first test catches that); or
-the fitted range is non-positive.  It is classed \code{sac_range} as
-well, so it prints as a bare \code{NA} without dumping its
+the rest of the layer.  Sampling noise in the short-lag bins of a
+small sample can make that fall too: on exponential fields it
+refused 7--9 of 60 draws at n = 30, 3--6 at n = 50 and 0--1 at
+n = 100 (effective range 300 on a 1000 m square), and 15--16 of 60
+at n = 30 with a range of 150.  An unremoved trend makes the
+variogram rise instead; when it rises past the fitted lags the first
+test catches it, but a milder trend only lengthens the fitted range
+and passes, which is what \code{predictor_vars} is for.  Last, the
+fitted range can be non-positive.  It is classed \code{sac_range} as
+well, so it prints as \code{NA} without dumping its
 attributes, and it carries \code{max_dist}, \code{cutoff_dist},
 \code{variogram}, \code{variogram_model} and \code{nugget} (the
 evidence for the rejection), plus \code{rejected_range} (the value
 that was refused), \code{rejected_reason} (one of
 \code{"fitted range exceeds the largest lag fitted"},
+\code{"fitted range is below the shortest lag fitted"},
 \code{"variogram model did not converge"},
 \code{"empirical variogram decreases with distance"},
 \code{"fitted range is non-positive or non-finite"},
@@ -165,7 +187,8 @@ past the fitted lags alike.  The same shape, with
 \code{rejected_range = NA}, \code{variogram_model = NULL} and
 \code{nugget = NA}, is returned when no variogram model could be
 fitted at all (both the exponential and the spherical fit singular,
-which is what a flat, nugget-only variogram produces);
+which a flat, nugget-only variogram can produce, though on white
+noise it was the outcome in only 1 of 30 draws: see above);
 \code{rejected_reason} says so and the empirical variogram is still
 attached.}
 \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
@@ -183,10 +206,21 @@ Fits exponential (or spherical) variogram models and returns the
 \emph{effective range}: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 \% of the
 sill; for the spherical model (fitted only when the exponential fit is
-singular) the fitted range itself, which is where the spherical
-semivariance reaches its sill exactly.  Both are the distance beyond which
-two observations are (near) uncorrelated, which is what a block or a
-buffer has to exceed.
+singular or does not converge) the fitted range itself, which is where the
+spherical semivariance reaches its sill exactly.  Both are the distance
+beyond which two observations are (near) uncorrelated, which is what a
+block or a buffer has to exceed.
+
+The exponential model is kept whenever it converges, without comparing it
+with the spherical fit, and on fields smoother than exponential that makes
+the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+30 draws each): about 1.8--2.1 times the practical range of a Gaussian
+covariance, and 1.3--1.4 times the range of a spherical one, while an
+exponential field came back at 0.97 of its effective range.  The error is
+on the safe side (blocks too large, cross-validation pessimistic), and it
+is kept on purpose: choosing the family by the smaller weighted sum of
+squares corrects the spherical case but sends exponential fields low, to
+about 0.82 of the truth, which is the direction that leaks.
 }
 \details{
 The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
@@ -208,11 +242,25 @@ rotation.
 
 Where a field is \emph{known} to be anisotropic, blocks must be at least
 as large as the longest autocorrelation range to avoid leakage, and the
-conservative choice is to size them from
-\code{max(attr(range, "directional"))} explicitly.  A ratio above 1.5 is
-logged so the case is not missed, with that advice.  Only when the
-omnidirectional fit is itself unusable is the directional maximum returned
-in its place, and \code{anisotropy_used} is \code{TRUE} in that case alone.
+conservative choice is to size them from the longest directional range
+explicitly.  Read it from \code{directional_fitted}, not
+\code{directional}: on a strongly anisotropic field the major axis is the
+direction most likely to run past the fitted lags, which leaves it
+\code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
+with \code{na.rm = TRUE} the second-longest range.  Check
+\code{directional_status} first: a major axis marked \code{"over_cutoff"}
+has no identified range at all, and a longer \code{cutoff} or
+\code{\link{make_folds}(method = "nndm")} is the way on.  A ratio above
+1.5 is written to the package log at INFO level with that advice, which
+reaches the session log file but not the console (the ratio passes 1.5 on
+most isotropic fields too); \code{print()} shows the directional ranges
+and the ratio, and \code{attr(range, "anisotropy")} holds it.  Only when
+the omnidirectional fit is singular or did not converge is the directional
+maximum returned in its place, and \code{anisotropy_used} is \code{TRUE}
+in that case alone.  An omnidirectional fit that converged to a range past
+the fitted lags is refused (see the Value section) whatever the directions
+found: the directions that reached a sill are the shorter ones, so their
+maximum is a lower bound, not an estimate.
 
 A direction whose fit fails, does not converge, or reports a range beyond
 the longest fitted lag is excluded and recorded as \code{NA} in the
@@ -224,6 +272,25 @@ one) \pkg{gstat}'s default N/h² weights buy that constraint by collapsing
 the range: with a 50\% nugget the fitted range came back at about 0.45 of the
 truth, so \code{make_folds(auto_range = TRUE)} built blocks less than half
 the correlation length it reported.
+
+The lags are binned the way \pkg{gstat} bins them by default, 15 bins out
+to the cutoff, each \code{cutoff * max_dist / 15} wide (about 47 m on a
+1000 m square at the defaults).  A range spanning only one or two bins is
+resolved coarsely and comes out long: exponential fields with an effective
+range of 60 m (n = 300 on a 1000 m square, 30 draws) returned a median of
+89--102 m, where the same fields binned over a 200 m cutoff gave 65--68,
+and at a range of 300 m there was no bias.  When the estimate is within a
+few bin widths of zero, run it again with a smaller \code{cutoff}.
+
+Nothing tests whether the layer has spatial structure at all.  On white
+noise (n = 300 on a 1000 m square, 30 draws) the estimate was a finite,
+spurious range (57--533 m) in 8 draws and a refusal in the rest, mostly
+as past the fitted lags or not converged, and only once as no model
+fitted; with \code{detrend = "reml"} it was finite in 10 of 30.  A
+spurious range errs towards larger blocks, so the harm is mostly lost
+training data, but a caller who needs to know whether there is any
+structure should look at the variogram (\code{plot()} on the result)
+rather than at whether the answer is \code{NA}.
 
 A log warning is emitted when the directional maximum is used; where the
 all-pairs estimate is available it names both the ratio and that estimate.  A
