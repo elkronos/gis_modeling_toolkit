@@ -324,6 +324,32 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
 }
 
 
+#' Which direction is better for a swept metric
+#'
+#' Read by the plot's caption.  R-squared is better higher, and the error
+#' metrics lower.  An interval coverage is neither: one that covers more
+#' than its nominal level is as miscalibrated as one that covers less, so a
+#' \code{coverage_*} column is read by its closeness to the level in its
+#' name.  The name is parsed rather than matched, because the level can be
+#' written at any precision (\code{coverage_97.5} for 0.975); only
+#' \code{coverage_50}, \code{coverage_80} and \code{coverage_95} were
+#' recognised, and as higher-is-better.
+#'
+#' @param metric Column name of \code{overall}.
+#' @return A phrase, e.g. \code{"lower is better"}.
+#' @keywords internal
+#' @noRd
+.sweep_better <- function(metric) {
+  if (grepl("^coverage_", metric)) {
+    lvl <- suppressWarnings(as.numeric(sub("^coverage_", "", metric))) / 100
+    return(if (length(lvl) == 1L && is.finite(lvl) && lvl > 0 && lvl < 1)
+      sprintf("closer to %s is better", format(lvl))
+    else "closer to the nominal level is better")
+  }
+  if (metric %in% c("R2", "Adj_R2")) "higher is better" else "lower is better"
+}
+
+
 #' Re-express a length measured in one projected CRS in another
 #'
 #' Transforms two unit segments of length \code{r} (east-west and
@@ -387,7 +413,11 @@ print.block_size_sweep <- function(x, ...) {
 #' reference as a dashed line, and the estimated autocorrelation range as a
 #' vertical marker.  Blocks smaller than the range leak, so the curve rises
 #' from the reference towards the range and plateaus beyond it; the height
-#' of the rise is what the random-fold number overstated.
+#' of the rise is what the random-fold number overstated.  The caption says
+#' which way is better: higher for \code{R2} and \code{Adj_R2}, closer to
+#' the nominal level for a \code{coverage_*} column (0.975 for
+#' \code{coverage_97.5}), since over-coverage is miscalibration too, and
+#' lower for everything else.
 #'
 #' @param x A \code{block_size_sweep}.
 #' @param ... Ignored.
@@ -439,7 +469,6 @@ plot.block_size_sweep <- function(x, ...) {
                                  colour = "grey40")
   if (is.finite(r))
     p <- p + ggplot2::geom_vline(xintercept = r, linetype = "dotted", colour = "#B2182B")
-  minimise <- !(metric %in% c("R2", "Adj_R2", "coverage_50", "coverage_80", "coverage_95"))
   p + ggplot2::scale_x_log10() +
     ggplot2::labs(
       title = sprintf("Cross-validated %s against block size", metric),
@@ -448,8 +477,8 @@ plot.block_size_sweep <- function(x, ...) {
       else "Autocorrelation range not identified; no marker drawn",
       caption = paste(c(
         if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g (the leaky reference)", metric, rnd$value[1L]),
-        sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s is better",
-                attr(x, "k"), attr(x, "n_fits"), if (minimise) "lower" else "higher")),
+        sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s",
+                attr(x, "k"), attr(x, "n_fits"), .sweep_better(metric))),
         collapse = "\n"),
       x = sprintf("Block edge length (%s, log scale)", unit), y = metric) +
     ggplot2::theme_minimal()

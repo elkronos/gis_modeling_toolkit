@@ -76,3 +76,25 @@ test_that("a sac estimated in another CRS is converted to the sweep's units", {
                                    sac = units::set_units(600, m), quiet = TRUE),
                "`sac` must be a plain number")
 })
+
+test_that("the plot reads every coverage column by closeness to its nominal level", {
+  skip_if_not_installed("ggplot2")
+  # cv_bayes() names coverage columns at full precision (coverage_97.5), and
+  # a `metrics` function can add any; only coverage_50/80/95 were
+  # recognised, and as higher-is-better, so every other level was captioned
+  # "lower is better".  Over-coverage is miscalibration too.
+  set.seed(1)
+  p <- r2_sweep_layer(runif(60, 0, 1000), runif(60, 0, 1000))
+  cov <- function(y, yhat) c(coverage_97.5 = mean(abs(y - yhat) < 2 * stats::sd(y)),
+                             coverage_95 = mean(abs(y - yhat) < 1.96 * stats::sd(y)))
+  caption <- function(metric) {
+    sw <- r2_quiet(cv_block_size_sweep(p, "z", "a", fit_fn = r2_fit, k = 3, n_sizes = 2,
+                                       sac = NA, quiet = TRUE, metric = metric,
+                                       metrics = cov))
+    plot(sw)$labels$caption
+  }
+  expect_match(caption("coverage_97.5"), "closer to 0.975 is better")
+  expect_match(caption("coverage_95"), "closer to 0.95 is better")
+  expect_match(caption("RMSE"), "lower is better")
+  expect_match(caption("R2"), "higher is better")
+})
