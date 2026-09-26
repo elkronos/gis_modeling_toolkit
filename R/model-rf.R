@@ -192,8 +192,12 @@
 #' with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
 #' The fit warns with the count; \code{fitted()} and \code{residuals()} are
 #' \code{NaN} on those rows, and \code{summary()} says how many rows its
-#' metrics were computed on.  With no row out of bag at all, the OOB error and
-#' the permutation importance are \code{NaN} too.
+#' metrics were computed on.  With no row out of bag at all, the OOB error
+#' (\code{NA} in \code{$info$oob_rmse} and \code{$info$oob_r_squared}) and
+#' the permutation importance (\code{NaN}) are undefined too, and
+#' \code{print()} says so.  \code{\link{cv_rf}()} scores its fold forests on
+#' the held-out rows, never out of bag, so it warns once with the number of
+#' folds affected rather than once per fold.
 #'
 #' @param data_sf An sf object with response, predictors and geometry.
 #' @param response_var Response column name.
@@ -416,10 +420,17 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   # importance are NaN as well -- all with nothing said.  The forest itself is
   # sound and predict(newdata =) and cv_rf() are unaffected, so warn rather
   # than refuse.
+  #
+  # Not for a cv_rf() fold forest (.already_prepped = TRUE): cv_rf() scores
+  # predict() on the held-out rows and never reads a fold forest's out-of-bag
+  # predictions, so this fired once per fold about nothing the run used --
+  # and told the user to score the forest with cv_rf() from inside cv_rf().
+  # cv_rf() counts the folds itself and says it once (.rf_cv_oob_note()).
   oob_pred <- fit$predictions
   n_no_oob <- if (is.numeric(oob_pred) && length(oob_pred) == nrow(X))
     sum(!is.finite(oob_pred)) else 0L
-  if (n_no_oob == nrow(X)) {
+  fold_fit <- isTRUE(.already_prepped)
+  if (!fold_fit && n_no_oob == nrow(X)) {
     .warn_and_log(paste0("fit_rf_model(): no row is out of bag for any tree ",
                          "(%s), so fitted(), residuals(), the out-of-bag error%s ",
                          "are undefined (NaN) and summary() and model_metrics() ",
@@ -431,7 +442,7 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
                   else sprintf("%d tree(s)", as.integer(num_trees)),
                   if (identical(importance, "permutation"))
                     " and the permutation importance" else "")
-  } else if (n_no_oob > 0L) {
+  } else if (!fold_fit && n_no_oob > 0L) {
     .warn_and_log(paste0("fit_rf_model(): %d of %d rows were sampled by every ",
                          "one of the %d tree(s) and so have no out-of-bag ",
                          "prediction: fitted() and residuals() are NaN there, ",
@@ -474,6 +485,86 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       n_dropped        = n_dropped
     )
   )
+}
+
+
+#' Out-of-bag coverage of the cv_rf() fold forests, reported once per run
+#'
+#' \code{fit_rf_model()} does not warn about rows no tree left out of bag
+#' when it grows a fold forest (\code{.already_prepped = TRUE}): cv_rf()
+#' scores \code{predict()} on the held-out rows and never reads a fold
+#' forest's out-of-bag predictions.  It warned once per fold, and told the
+#' user to score the forest with cv_rf() from inside cv_rf().  What the folds
+#' share is still worth one warning, because a forest grown on all the data
+#' with the same settings has the same gap.
+#'
+#' The counts travel back through \code{cv_spatial()}'s \code{fold_info_fn}
+#' as two \code{fold_metrics} columns, which \code{.rf_cv_oob_note()} takes
+#' out again.  Warnings cannot carry them: one raised in a forked worker
+#' reaches the parent only once per distinct text, so under
+#' \code{parallel = TRUE} the folds could not be counted.
+#'
+#' @param fit_obj A fold's \code{rf_fit}.
+#' @param res The \code{cv_spatial()} result.
+#' @param dots The arguments cv_rf() passes to \code{fit_rf_model()}.
+#' @return \code{.rf_fold_oob_info()}: a list of two counts.
+#'   \code{.rf_cv_oob_note()}: \code{res} without the two columns.
+#' @keywords internal
+#' @noRd
+.rf_fold_oob_info <- function(fit_obj, ...) {
+  p <- fit_obj$engine$predictions
+  n <- if (is.numeric(p) && is.null(dim(p))) length(p) else 0L
+  list(..rf_n_no_oob = if (n > 0L) as.integer(sum(!is.finite(p))) else 0L,
+       ..rf_n_fit = as.integer(n))
+}
+
+# The run's half of .rf_fold_oob_info(): see there.
+.rf_cv_oob_note <- function(res, dots) {
+  fm <- res$fold_metrics
+  if (!is.data.frame(fm) ||
+      !all(c("..rf_n_no_oob", "..rf_n_fit") %in% names(fm)))
+    return(res)
+  none <- fm$..rf_n_no_oob
+  n    <- fm$..rf_n_fit
+  fm$..rf_n_no_oob <- NULL
+  fm$..rf_n_fit    <- NULL
+  res$fold_metrics <- fm
+  ok     <- is.finite(none) & is.finite(n) & n > 0
+  n_all  <- sum(ok & none == n)
+  n_some <- sum(ok & none > 0 & none < n)
+  if (n_all > 0L) {
+    # The one cause fit_rf_model() can name; anything else (an `inbag`
+    # through `...`, say) is the caller's own doing.
+    sf    <- dots[["sample_fraction"]]
+    whole <- isFALSE(dots[["replace"]]) && is.numeric(sf) && isTRUE(sf >= 1)
+    imp   <- dots[["importance"]]
+    .warn_and_log(paste0("cv_rf(): no training row was out of bag for any ",
+                         "tree in %d of %d fold forest(s)%s. The ",
+                         "cross-validation is unaffected, because it scores ",
+                         "each forest on its held-out fold; but a forest grown ",
+                         "on all the data with the same settings has no ",
+                         "%s.%s"),
+                  n_all, nrow(fm),
+                  if (whole) paste0(" (replace = FALSE with sample_fraction = ",
+                                    "1 grows every tree on every row)") else "",
+                  if (is.null(imp) || identical(imp, "permutation"))
+                    paste0("out-of-bag error, fitted() values or permutation ",
+                           "importance")
+                  else "out-of-bag error or fitted() values",
+                  if (whole) paste0(" Use replace = TRUE or a sample_fraction ",
+                                    "below 1 for those.") else "")
+  } else if (n_some > 0L) {
+    .warn_and_log(paste0("cv_rf(): in %d of %d fold forest(s) some training ",
+                         "rows were sampled by every tree and have no ",
+                         "out-of-bag prediction. The cross-validation is ",
+                         "unaffected, because it scores each forest on its ",
+                         "held-out fold; but a forest grown on all the data ",
+                         "with the same num_trees may leave rows without one ",
+                         "too. Raise num_trees if you will read its out-of-bag ",
+                         "error or fitted() values."),
+                  n_some, nrow(fm))
+  }
+  res
 }
 
 
@@ -577,12 +668,16 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
   # cv_spatial(), and through `...` it reached ranger() as an unused argument.
   # `metrics` is named for the same reason as `pointize`: it belongs to
   # cv_spatial(), and through `...` it would reach ranger().
-  cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
-             .caller = "cv_rf",
-             folds = folds, k = k, seed = seed, boundary = boundary,
-             pointize = pointize,
-             block_size = block_size, auto_range = auto_range,
-             parallel = parallel, metrics = metrics)
+  # fold_info_fn carries each fold forest's out-of-bag count back, for one
+  # warning per run in place of one per fold; see .rf_fold_oob_info().
+  res <- cv_spatial(data_sf, response_var, predictor_vars, fit_fn = fit_fn,
+                    .caller = "cv_rf",
+                    folds = folds, k = k, seed = seed, boundary = boundary,
+                    pointize = pointize,
+                    block_size = block_size, auto_range = auto_range,
+                    parallel = parallel, metrics = metrics,
+                    fold_info_fn = .rf_fold_oob_info)
+  .rf_cv_oob_note(res, dots)
 }
 
 
@@ -625,7 +720,8 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   shift every later random draw. It does not affect a regression forest's
 #'   predictions; pass your own if you need one.
 #' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
-#'   rows dropped as incomplete.  A failure inside \code{ranger}'s predict
+#'   rows dropped as incomplete (so all \code{NA}, with a WARN line in the
+#'   log, when every row is).  A failure inside \code{ranger}'s predict
 #'   method is an error, not an all-\code{NA} vector.
 #' @family methods on a fitted model
 #' @export
@@ -651,6 +747,17 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   clean_idx <- seq_len(n_orig) %in% newdata$..orig_row_id..
   newdata$..orig_row_id.. <- NULL
   n_new <- nrow(newdata)
+
+  # Nothing survived cleaning: every row is NA, as for any other dropped row
+  # (and as predict.gwr_fit() and predict.bayesian_fit() do).  ranger would
+  # otherwise be handed a zero-row frame and fail with a reason about
+  # `sample_fraction`, which predict_surface() turns into an abort for a chunk
+  # that merely lies outside the covariates' coverage.
+  if (n_new == 0L) {
+    .log_warn(paste0("predict.rf_fit(): every row of newdata was dropped as ",
+                     "missing or non-finite; returning %d NA(s)."), n_orig)
+    return(rep(NA_real_, n_orig))
+  }
 
   include_coords <- isTRUE(object$info$include_coords)
   X <- .rf_frame(newdata, object$predictor_vars, include_coords,
@@ -815,14 +922,27 @@ print.rf_fit <- function(x, ...) {
   # which is not NULL, so is.finite() would error and sprintf() would print
   # nothing at all.
   oob_rmse <- .num1(x$info$oob_rmse)
-  if (is.finite(oob_rmse))
+  # A forest with no row out of bag (replace = FALSE, sample_fraction = 1)
+  # has no OOB error and NaN permutation importance.  The OOB line used to
+  # vanish and the importance line to print empty, because sort() drops NaN.
+  oob_p   <- x$engine$predictions
+  no_oob  <- is.numeric(oob_p) && length(oob_p) > 0L && !any(is.finite(oob_p))
+  if (is.finite(oob_rmse)) {
     cat(sprintf("  OOB RMSE: %.4f   OOB R^2: %.4f\n",
                 oob_rmse, .num1(x$info$oob_r_squared)))
+  } else if (no_oob) {
+    cat("  OOB RMSE: undefined (no row is out of bag)\n")
+  }
   imp <- x$info$importance
   if (!is.null(imp) && length(imp) > 0L) {
-    top <- utils::head(sort(imp, decreasing = TRUE), 5L)
+    imp_ok <- imp[is.finite(imp)]
     cat(sprintf("  Importance (%s): %s\n", x$info$importance_type,
-                paste(sprintf("%s=%.4g", names(top), top), collapse = ", ")))
+                if (!length(imp_ok)) {
+                  if (no_oob) "undefined (no row is out of bag)" else "undefined"
+                } else {
+                  top <- utils::head(sort(imp_ok, decreasing = TRUE), 5L)
+                  paste(sprintf("%s=%.4g", names(top), top), collapse = ", ")
+                }))
   }
   cat("\n  OOB is a random hold-out and is optimistic under spatial\n")
   cat("  autocorrelation; use cv_rf() for a spatial estimate.\n")
