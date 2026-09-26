@@ -52,13 +52,13 @@ Suggests:
     tibble,
     geometry,
     gstat,
-    ggplot2,
+    ggplot2 (>= 3.4.0),
     patchwork,
     FNN,
     Matrix,
     nlme,
     spdep,
-    testthat (>= 3.1.5),
+    testthat (>= 3.1.7),
     knitr,
     rmarkdown
 Additional_repositories: https://stan-dev.r-universe.dev
