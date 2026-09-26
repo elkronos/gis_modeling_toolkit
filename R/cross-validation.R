@@ -1411,8 +1411,11 @@
 #' @param extent A length scale of the layer, used to pick starting ranges.
 #' @return \code{NULL} when no fit converged, else a list with \code{beta}
 #'   (named trend coefficients), \code{range} (the exponential range
-#'   parameter), \code{nugget_prop}, \code{sigma2}, \code{n_used} and
-#'   \code{subsampled}.
+#'   parameter), \code{nugget_prop}, \code{sigma2}, \code{n_used},
+#'   \code{subsampled} and \code{pair_floor}: the 30th-shortest distance
+#'   between the rows the fit used (after the de-duplication and the
+#'   subsample), the distance a range has to reach for 30 pairs of those
+#'   points to lie inside it.
 #' @keywords internal
 #' @noRd
 .reml_trend <- function(mf, fml, extent, max_n = 400L, seed = 123L) {
@@ -1430,6 +1433,12 @@
     subsampled <- TRUE
   }
   if (nrow(d) < 30L) return(NULL)
+  # The REML range is fitted to these point pairs, not to a binned variogram,
+  # so the shortest range it can identify is set by how many of them are
+  # close: 30 pairs is the usual minimum per lag (Journel and Huijbregts).
+  pd <- as.numeric(stats::dist(d[, c(".sac_x", ".sac_y")]))
+  pair_floor <- if (length(pd) >= 30L) sort(pd, partial = 30L)[30L] else NA_real_
+  rm(pd)
   starts <- unique(pmax(extent * c(1 / 10, 1 / 30, 1 / 3), sqrt(.Machine$double.eps)))
   for (r0 in starts) {
     fit <- tryCatch(
@@ -1453,7 +1462,8 @@
     s2  <- as.numeric(fit$sigma)^2
     if (!is.finite(rng) || rng <= 0 || !is.finite(s2) || s2 <= 0) next
     return(list(beta = stats::coef(fit), range = rng, nugget_prop = nug,
-                sigma2 = s2, n_used = nrow(d), subsampled = subsampled))
+                sigma2 = s2, n_used = nrow(d), subsampled = subsampled,
+                pair_floor = pair_floor))
   }
   NULL
 }
@@ -1623,23 +1633,34 @@ sac_nugget <- function(x) {
 #' resolved coarsely and comes out long: exponential fields with an effective
 #' range of 60 m (n = 300 on a 1000 m square, 30 draws) returned a median of
 #' 89--102 m, where the same fields binned over a 200 m cutoff gave 65--68,
-#' and at a range of 300 m there was no bias.  When the estimate is within a
-#' few bin widths of zero, run it again with a smaller \code{cutoff}.
+#' and at a range of 300 m there was no bias.  A range shorter than the
+#' first bin cannot be resolved at all and can come back several times too
+#' long: an effective range of 24 m (n = 1500 on a 1000 m square, 8 draws)
+#' returned 93--479 m, five of them as the directional maximum, against
+#' 19--32 m at \code{cutoff = 0.1}; the first bin's semivariance was 92--99
+#' percent of the fitted sill in all eight.  So whenever the empirical
+#' variogram is already at its sill in the first one or two bins
+#' (\code{plot()} the result), run it again with a smaller \code{cutoff},
+#' whatever range was fitted.
 #'
 #' Nothing tests whether the layer has spatial structure at all.  On white
 #' noise (n = 300 on a 1000 m square, 30 draws) the estimate was a finite,
 #' spurious range (57--533 m) in 8 draws and a refusal in the rest, mostly
 #' as past the fitted lags or not converged, and only once as no model
-#' fitted; with \code{detrend = "reml"} it was finite in 10 of 30.  A
+#' fitted; with \code{detrend = "reml"} it was finite in 13 of 30 (21--453
+#' m), and 16 of the refusals were ranges of 0.18--12.5 m, too short for 30
+#' pairs of points to lie inside them.  A
 #' spurious range errs towards larger blocks, so the harm is mostly lost
 #' training data, but a caller who needs to know whether there is any
 #' structure should look at the variogram (\code{plot()} on the result)
 #' rather than at whether the answer is \code{NA}.
 #'
-#' A log warning is emitted when the directional maximum is used; where the
-#' all-pairs estimate is available it names both the ratio and that estimate.  A
-#' log note is emitted instead when the directional ranges vary but the spread
-#' is consistent with sampling noise.
+#' When the all-pairs fit is singular or did not converge and two or more
+#' directions reached a sill, the directional maximum is returned in its
+#' place (\code{anisotropy_used = TRUE}), and a log warning names the
+#' directional ranges when their ratio exceeds 1.5.  When the all-pairs
+#' estimate is used and the directional ranges vary by more than 1.5, a log
+#' note (INFO) names them instead.
 #'
 #' The returned range is in the coordinate units of the (projected) data and
 #' can be passed directly to \code{make_folds(block_size = ...)} so that CV
@@ -1815,9 +1836,15 @@ sac_nugget <- function(x) {
 #'     \item{Rejected range}{\code{NA_real_} when a range was fitted but is
 #'       not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
 #'       \code{range_frac}), which applies to the all-pairs fit even when some
-#'       directions reached a sill; or it is shorter than the shortest lag the
+#'       directions reached a sill; or too few pairs of points lie inside
+#'       it to identify it, because it is shorter than the shortest lag the
 #'       empirical variogram resolves (the mean separation in its first
-#'       bin), below which a structure cannot be told from a nugget; or the
+#'       bin) or, with \code{detrend = "reml"}, than the distance within
+#'       which 30 pairs of the points the REML fit used lie, when that is
+#'       shorter (the REML range is fitted to the point pairs, not to the
+#'       bins).  A structure that short cannot be told from a nugget, and
+#'       the bound is about identification, not a test for spatial
+#'       structure (see above).  Or the
 #'       model did not converge; or the empirical
 #'       variogram \emph{decreases} with distance over its shorter lags (a
 #'       net fall of more than 15 percent of the mean semivariance there,
@@ -1844,8 +1871,11 @@ sac_nugget <- function(x) {
 #'       \code{"fitted range is non-positive or non-finite"},
 #'       \code{"no variogram model could be fitted (singular fits)"}), \code{crs}
 #'       (so the units the rejected number was in stay recoverable, which is
-#'       what \code{plot()} labels its axis from) and
-#'       \code{detrend_method}.  It carries \code{directional},
+#'       what \code{plot()} labels its axis from),
+#'       \code{detrend_method}, \code{reml} (as on success) and, for
+#'       \code{"fitted range is below the shortest lag fitted"},
+#'       \code{range_floor} (the distance the refused range fell short of).
+#'       It carries \code{directional},
 #'       \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
 #'       \code{directional_fitted} and, with
 #'       \code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
@@ -2569,6 +2599,12 @@ estimate_sac_range <- function(points_sf, response_var,
   # the semivariance at zero separation, which a resolution criterion needs
   # and which used to be reachable only by reading gstat's row layout.
   nugget_val <- .vgm_nugget_of(vgm_used)
+  # The REML fit's own numbers, on the refusals as on the success: a refused
+  # REML range is exactly where how many points it used and how much of the
+  # variance it put in the nugget are worth reading.
+  reml_attr <- if (is.null(reml_fit)) NULL else
+    list(n_used = reml_fit$n_used, subsampled = isTRUE(reml_fit$subsampled),
+         nugget_prop = reml_fit$nugget_prop, sigma2 = reml_fit$sigma2)
 
   if (!is.finite(effective_range) || effective_range <= 0) {
     # Classed like every other refusal, so the evidence travels with the NA;
@@ -2586,6 +2622,7 @@ estimate_sac_range <- function(points_sf, response_var,
       directional_fits   = dir_detail_out,
       detrended       = isTRUE(detrended),
       detrend_method  = detrend_method,
+      reml            = reml_attr,
       max_dist        = as.numeric(max_dist),
       cutoff_dist     = as.numeric(cutoff_dist),
       crs             = sf::st_crs(pts),
@@ -2621,27 +2658,50 @@ estimate_sac_range <- function(points_sf, response_var,
   # a variance that differs between a dense cluster and the rest of the layer
   # (see .variogram_decreasing() for the measured rates).
   decreasing    <- .variogram_decreasing(vg_used)
-  # The mirror of `over_cutoff` at the other end of the lags.  A range shorter
-  # than the shortest lag the variogram resolves (the mean separation in its
-  # first non-empty bin) describes a structure that has died out before the
-  # closest pairs of points, which the data cannot tell from a nugget.  It is
-  # what white noise gives the REML fit, which is not fitted to the binned
-  # variogram at all: on 30 draws of iid noise (n = 300, 1000 m square) it
-  # returned ranges of 0.18-23.6 m in 19, against a first lag of about 30 m,
-  # and one of 0.27 m sized a 3642 x 3676 block grid.  The weighted fit to
-  # the bins did not go below the first lag on those draws, so nothing it
-  # identified before is refused.
+  # The mirror of `over_cutoff` at the other end of the lags: a range too
+  # short for enough pairs of points to lie inside it is not identified, and
+  # the data cannot tell it from a nugget.  For the variogram fits the bound
+  # is the shortest lag the variogram resolves (the mean separation in its
+  # first non-empty bin): a range below it was fitted to no bin inside it.
+  # The REML range is fitted to the point pairs themselves, not to the bins,
+  # so its bound is the distance within which the points it used have 30
+  # pairs (the usual minimum per lag), capped at that first lag so that it
+  # never refuses what the bin bound accepts.  Against the first lag alone the
+  # REML answer depended on a `cutoff` it never uses: 10 of 20 REML estimates
+  # of a true 30 m range (n = 400, 1000 m square) were refused at 14.5-28.8
+  # m, and all ten came back at cutoff = 0.1; now none is refused at either.
+  # The cap keeps some of that dependence where the first lag is the shorter
+  # (a small cutoff, or a sparse layer).  The bound is about identification,
+  # not a test for structure: iid noise can put 30 pairs inside a spurious
+  # range (3 of the 19 white-noise REML ranges below the first lag, n = 300,
+  # now pass at 21-24 m), and a true short range can fall below it.
   first_lag <- if (is.data.frame(vg_used) && all(c("dist", "np") %in% names(vg_used))) {
     d1 <- vg_used$dist[is.finite(vg_used$dist) & is.finite(vg_used$np) & vg_used$np > 0]
     if (length(d1)) min(d1) else NA_real_
   } else NA_real_
-  under_lag <- is.finite(first_lag) && effective_range < first_lag
+  range_floor <- first_lag
+  floor_is_pairs <- FALSE
+  if (!is.null(reml_fit) && is.finite(reml_fit$pair_floor %||% NA_real_) &&
+      !isTRUE(reml_fit$pair_floor >= first_lag)) {
+    range_floor    <- reml_fit$pair_floor
+    floor_is_pairs <- TRUE
+  }
+  under_lag <- is.finite(range_floor) && effective_range < range_floor
   # Non-convergence is refused on the same terms and for the same reason: the
   # number is not a fitted parameter.  gstat signals it with a warning and
   # returns anyway, which is why it needs its own test rather than riding on
   # the cutoff bound -- a non-converged range can land inside the bound and
   # would otherwise have sized a block.
   if (over_cutoff || !fit_converged || decreasing || under_lag) {
+    # What to try next.  "Supply `predictor_vars`" was said of a range that
+    # was already of the residuals on them.  REML is suggested only where it
+    # was not asked for (a REML fit that failed has fallen back to OLS).
+    detrend_advice <- if (isTRUE(detrended))
+      paste0("try predictors that carry the trend (coordinate terms, for ",
+             "instance)",
+             if (identical(detrend_method, "ols") && !identical(detrend, "reml"))
+               " or `detrend = \"reml\"`" else "")
+    else "supply `predictor_vars` to detrend"
     if (decreasing) {
       .log_warn(
         paste0("estimate_sac_range(): the empirical variogram decreases with ",
@@ -2668,21 +2728,36 @@ estimate_sac_range <- function(points_sf, response_var,
                "lag the variogram was fitted over (%.4g = %s x cutoff %.0f); the ",
                "empirical variogram never reached a sill, so the range is ",
                "unidentified rather than long. Returning NA. Raise `cutoff` to ",
-               "fit longer lags, supply `predictor_vars` to detrend, or set a ",
-               "block size explicitly. (A variogram that is flat from the ",
-               "first lag, with no spatial structure to find, can end here ",
-               "too: plot() the returned value to tell the two apart.)"),
-        effective_range, max_supported, format(range_frac), cutoff_dist
+               "fit longer lags, %s, or set a block size explicitly. (A ",
+               "variogram that is flat from the first lag, with no spatial ",
+               "structure to find, can end here too: plot() the returned value ",
+               "to tell the two apart.)"),
+        effective_range, max_supported, format(range_frac), cutoff_dist,
+        detrend_advice
+      )
+    } else if (fit_converged && !is.null(reml_fit)) {
+      .log_warn(
+        paste0("estimate_sac_range(): the REML range (%.3g) is shorter than ",
+               "%s (%.3g): fewer than 30 pairs of the %d points the REML fit ",
+               "used lie inside it, too few to identify a range, and a ",
+               "structure that short cannot be told from a nugget. Returning ",
+               "NA."),
+        effective_range,
+        if (floor_is_pairs) "the distance within which 30 of its point pairs lie"
+        else paste0("the shortest lag the variogram of the residuals resolves ",
+                    "(the mean separation in its first bin)"),
+        range_floor, as.integer(reml_fit$n_used)
       )
     } else if (fit_converged) {
       .log_warn(
         paste0("estimate_sac_range(): the fitted range (%.3g) is shorter than ",
                "the shortest lag the variogram resolves (%.3g, the mean ",
-               "separation in its first bin), so the structure it describes ",
-               "dies out before the closest pairs of points and cannot be told ",
-               "from a nugget. That is what a layer with no spatial structure ",
-               "at the lags resolved gives. Returning NA."),
-        effective_range, first_lag
+               "separation in its first bin), so no lag inside it was fitted ",
+               "and it cannot be told from a nugget. Returning NA. If the ",
+               "empirical variogram is at its sill from the first bin, re-run ",
+               "with a smaller `cutoff` (the bins are cutoff * max_dist / 15 ",
+               "wide); plot() the returned value to see it."),
+        effective_range, range_floor
       )
     } else {
       .log_warn(
@@ -2690,10 +2765,10 @@ estimate_sac_range <- function(points_sf, response_var,
                "(gstat stopped at its iteration limit), so the range it ",
                "reports (%.0f) is where the optimiser halted rather than a ",
                "fitted parameter. Returning NA. Raise `cutoff` to fit longer ",
-               "lags, supply `predictor_vars` to detrend, or set a block size ",
-               "explicitly. The empirical variogram is attached for ",
-               "inspection: call plot() on the returned value."),
-        effective_range
+               "lags, %s, or set a block size explicitly. The empirical ",
+               "variogram is attached for inspection: call plot() on the ",
+               "returned value."),
+        effective_range, detrend_advice
       )
     }
     # The VALUE is NA -- the range is genuinely unidentified and must not be
@@ -2718,6 +2793,7 @@ estimate_sac_range <- function(points_sf, response_var,
       directional_fits   = dir_detail_out,
       detrended       = isTRUE(detrended),
       detrend_method  = detrend_method,
+      reml            = reml_attr,
       max_dist        = as.numeric(max_dist),
       cutoff_dist     = as.numeric(cutoff_dist),
       crs             = sf::st_crs(pts),
@@ -2731,7 +2807,10 @@ estimate_sac_range <- function(points_sf, response_var,
         "fitted range exceeds the largest lag fitted"
       else if (fit_converged)
         "fitted range is below the shortest lag fitted"
-      else "variogram model did not converge"
+      else "variogram model did not converge",
+      # The distance the refused range fell short of, for that refusal only.
+      range_floor     = if (!decreasing && !over_cutoff && fit_converged)
+        as.numeric(range_floor) else NULL
     ))
   }
 
@@ -2759,9 +2838,7 @@ estimate_sac_range <- function(points_sf, response_var,
     # numbers when it was used, so the caller can see how much of the layer
     # the trend was estimated on.
     detrend_method  = detrend_method,
-    reml            = if (is.null(reml_fit)) NULL else
-      list(n_used = reml_fit$n_used, subsampled = isTRUE(reml_fit$subsampled),
-           nugget_prop = reml_fit$nugget_prop, sigma2 = reml_fit$sigma2),
+    reml            = reml_attr,
     max_dist        = as.numeric(max_dist),
     cutoff_dist     = as.numeric(cutoff_dist),
     # The CRS the variogram was fitted in.  Its range is a length in these
@@ -2793,8 +2870,9 @@ estimate_sac_range <- function(points_sf, response_var,
 #' its fit reported (\code{directional_fitted}) when the object carries
 #' them, and \code{unidentified} otherwise.  A last line names the unit and
 #' the CRS the range is a length in (\code{attr(x, "crs")}, which for
-#' lon/lat input is the projected CRS the estimate chose), and whether the
-#' variogram is of the response or of its residuals on
+#' lon/lat input is the projected CRS the estimate chose; for a layer with
+#' no CRS, it says the range is in that layer's own coordinate units), and
+#' whether the variogram is of the response or of its residuals on
 #' \code{predictor_vars} (\code{detrended}, \code{detrend_method}).
 #'
 #' @param x An object of class \code{sac_range}.
@@ -2845,19 +2923,23 @@ print.sac_range <- function(x, ...) {
   # own data, so they are shown where a mismatch can be seen before the
   # object is passed on.
   cr <- attr(x, "crs")
+  dm <- attr(x, "detrend_method")
+  what <- if (isTRUE(attr(x, "detrended")))
+    sprintf("; variogram of the residuals on predictor_vars (%s)",
+            if (is.character(dm) && length(dm) == 1L && !is.na(dm)) dm else "detrended")
+  else if (isFALSE(attr(x, "detrended"))) "; variogram of the response itself"
+  else ""
   if (inherits(cr, "crs") && !is.na(cr)) {
     u <- tryCatch(cr$units_gdal, error = function(e) NULL)
     unit <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
       switch(u, metre = "metres", kilometre = "kilometres", foot = "feet",
              "US survey foot" = "US survey feet", degree = "degrees", u)
     else "CRS units"
-    dm <- attr(x, "detrend_method")
-    what <- if (isTRUE(attr(x, "detrended")))
-      sprintf("; variogram of the residuals on predictor_vars (%s)",
-              if (is.character(dm) && length(dm) == 1L && !is.na(dm)) dm else "detrended")
-    else if (isFALSE(attr(x, "detrended"))) "; variogram of the response itself"
-    else ""
     cat(sprintf("  in %s of %s%s\n", unit, .fold_crs_label(cr), what))
+  } else if (inherits(cr, "crs")) {
+    # A layer with no CRS: the range is in its own, unnamed coordinate units,
+    # and whether it is of residuals matters as much as with one.
+    cat(sprintf("  in the coordinate units of a layer with no CRS%s\n", what))
   }
   invisible(x)
 }
