@@ -232,3 +232,63 @@ test_that("predict() and fitted() on an ordinal fit say why they cannot answer",
   p <- .r2b_quiet(predict(fit, newdata = nd, type = "predict"))
   expect_equal(p, rep(2, 5))
 })
+
+
+# ---------------------------------------------------------------------------
+# models MED-3 (RF): a failing ranger predict is an error, not NA
+# ---------------------------------------------------------------------------
+
+.r2b_rf_pts <- function(n = 200, seed = 1) {
+  set.seed(seed)
+  d <- sf::st_as_sf(
+    data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
+               a = rnorm(n), b = rnorm(n)),
+    coords = c("x", "y"), crs = 32632)
+  d$z <- 2 * d$a - d$b + rnorm(n, 0, 0.3)
+  d
+}
+
+test_that("predict.rf_fit() raises ranger's reason instead of returning NA", {
+  skip_if_not_installed("ranger")
+  d   <- .r2b_rf_pts()
+  fit <- fit_rf_model(d, "z", c("a", "b"), num_trees = 50)
+  nd  <- d[1:10, ]
+  expect_error(predict(fit, nd, type = "se"),
+               "predict.rf_fit\\(\\): ranger's predict\\(\\) failed: .*keep.inbag")
+  expect_error(predict(fit, nd, type = "quantiles"),
+               "predict.rf_fit\\(\\): ranger's predict\\(\\) failed: .*quantreg")
+  # model_metrics() used to report n = 0 from the NA vector.
+  expect_error(model_metrics(fit, newdata = nd, type = "se"), "keep.inbag")
+  # The documented matrix rejection is unchanged.
+  fq <- fit_rf_model(d, "z", c("a", "b"), num_trees = 50, quantreg = TRUE)
+  expect_error(predict(fq, nd, type = "quantiles"), "matrix rather than one value")
+  # And an ordinary prediction still works.
+  expect_true(all(is.finite(predict(fit, nd))))
+})
+
+
+# ---------------------------------------------------------------------------
+# models LOW-5: a forest with rows out of no tree's bag says so
+# ---------------------------------------------------------------------------
+
+test_that("fit_rf_model() warns when rows have no out-of-bag prediction", {
+  skip_if_not_installed("ranger")
+  d <- .r2b_rf_pts()
+  expect_warning(
+    f0 <- fit_rf_model(d, "z", c("a", "b"), num_trees = 30, replace = FALSE,
+                       sample_fraction = 1),
+    "no row is out of bag.*replace = FALSE with sample_fraction = 1.*permutation importance")
+  expect_true(all(is.nan(fitted(f0))))
+
+  expect_warning(f5 <- fit_rf_model(d, "z", c("a", "b"), num_trees = 5),
+                 "rows were sampled by every one of the 5 tree")
+  n_bad <- sum(!is.finite(fitted(f5)))
+  expect_gt(n_bad, 0L)
+  # summary() heads its output with the fit's n; the metric count now follows.
+  txt <- paste(utils::capture.output(print(summary(f5))), collapse = "\n")
+  expect_match(txt, sprintf("computed on %d of %d rows", nrow(d) - n_bad, nrow(d)),
+               fixed = TRUE)
+
+  # A forest that covers every row is silent.
+  expect_no_warning(fit_rf_model(d, "z", c("a", "b"), num_trees = 100))
+})

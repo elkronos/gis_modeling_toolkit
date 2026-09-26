@@ -28,7 +28,11 @@ as 0/1, so either form is accepted for one.)}
 \code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
 are rejected, because this method's contract is one number per row of
 \code{newdata}. Call \code{predict(fit$engine, data = ...)} directly for
-those. \code{seed} defaults to a constant: an unset \code{seed} makes
+those.  So is anything \code{ranger}'s predict method itself refuses,
+such as \code{type = "quantiles"} on a forest grown without
+\code{quantreg = TRUE} or \code{type = "se"} without
+\code{keep.inbag = TRUE}: the error names ranger's reason.
+\code{seed} defaults to a constant: an unset \code{seed} makes
 \code{ranger} draw one uniform from the global RNG stream per call, so the
 number of \code{predict()} calls a script happens to make (via
 \code{\link{predict_surface}}'s \code{chunk_size}, say) would otherwise
@@ -37,7 +41,8 @@ predictions; pass your own if you need one.}
 }
 \value{
 Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
-rows dropped as incomplete.
+rows dropped as incomplete.  A failure inside \code{ranger}'s predict
+method is an error, not an all-\code{NA} vector.
 }
 \description{
 With \code{newdata = NULL} this returns \strong{out-of-bag} predictions, not
