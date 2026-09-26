@@ -20,7 +20,9 @@ determine_optimal_levels(
 \item{data_sf}{An sf object.  Features with empty or non-finite
 coordinates are dropped with a warning.}
 
-\item{max_levels}{Integer upper bound on levels. Default 12.}
+\item{max_levels}{Integer upper bound on levels. Default 12.  The sweep
+also stops at the number of distinct locations (k-means cannot place
+more centres) and one short of the number of points.}
 
 \item{top_n}{Integer; how many candidates to return. Default 3. Under
 \code{criterion = "geometric"} the candidate set is the elbow and its two
