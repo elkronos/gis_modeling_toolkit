@@ -14,6 +14,8 @@ kriging_adequacy(
   k = 5L,
   seed = 123L,
   nmax = 50L,
+  max_neighbours = 2000L,
+  max_box_ratio = 1000,
   quiet = TRUE
 )
 }
@@ -35,8 +37,22 @@ with \code{block_kfold} when \code{NULL}.}
 
 \item{k, seed}{Folds and seed for that construction.}
 
-\item{nmax}{The largest number of neighbours each kriging system uses
-(\code{gstat}'s \code{nmax}).  Default 50.}
+\item{nmax}{The number of neighbours each kriging system uses
+(\code{gstat}'s \code{nmax}): the locations nearest the cell's centre,
+or, for a cell those leave some of its own locations out of, all of its
+own plus this many outside it (see "The kriging neighbourhood").  The
+cross-validation kriges each held-out point from its \code{nmax} nearest
+training locations.  Default 50.}
+
+\item{max_neighbours}{The largest kriging system a cell is given when its
+neighbourhood has to grow to hold all its own locations; a cell that
+would need more is left out (\code{kr_} columns \code{NA}) with a
+warning.  Never below \code{nmax}.  Default 2000.}
+
+\item{max_box_ratio}{A cell whose bounding box is more than this many
+times its area is left out (\code{kr_} columns \code{NA}) with a
+warning, because \pkg{gstat}'s discretisation of it costs memory in
+proportion.  Default 1000.}
 
 \item{quiet}{Suppress progress messages.  Default \code{TRUE}.}
 }
@@ -45,13 +61,19 @@ An \code{sf} object of class \code{"kriging_adequacy"}, one row
 per cell with the cell geometry and: the ID column, \code{n} (points in
 the cell), \code{mean} (the plain mean), \code{se} (its naive standard
 error), \code{kr_pred}, \code{kr_var}, \code{kr_ratio},
-\code{kr_exceeds_design} and \code{kr_shift}.  Attributes:
+\code{kr_exceeds_design}, \code{kr_shift} and \code{kr_n_used} (how many
+locations the cell was kriged from; \code{NA} for a cell left out).
+Attributes:
 \code{variogram} (the model frame), \code{sill}, \code{nugget},
-\code{range}, \code{range_identified}, \code{cv} (a list:
+\code{range}, \code{range_identified}, \code{rejected_reason} (why the
+range was refused, from \code{sac}; \code{NA} when it was identified),
+\code{cv} (a list:
 \code{zscore_var}, \code{zscore_mean}, \code{rmse}, \code{n_pred},
 \code{k}, \code{method}), \code{nmax}, \code{n_points} (the points
-used) and \code{n_locations} (the distinct locations among them, which
-the kriging used).
+used), \code{n_locations} (the distinct locations among them, which
+the kriging used) and \code{cells_left_out} (counts of cells left out,
+named \code{shape} for \code{max_box_ratio} and \code{size} for
+\code{max_neighbours}).
 }
 \description{
 \code{\link{summarize_by_cell}()} aggregates by plain means inside cell
@@ -119,8 +141,13 @@ range.  To check the nugget, pass random folds
 (\code{make_folds(method = "random_kfold")}) as \code{folds}: the
 held-out points are then close to their neighbours, where the nugget
 decides the variance.  The statistic is computed fold by fold with
-\code{gstat::krige()} on the fold labels \code{\link{make_folds}()} built,
-so the folds carry the same separation the package uses everywhere else.
+\code{gstat::krige()} on the splits \code{\link{make_folds}()} built, each
+held-out point kriged from that split's own training set, so the folds
+carry the same separation the package uses everywhere else:
+\code{"buffered_loo"} and \code{"nndm"} keep the points they exclude
+around each held-out one out of its kriging, and \code{print()} names the
+scheme that ran.  A vector of fold labels is run as k-fold, each fold
+kriged from all the others.
 }
 
 \section{What it said about block kriging as an aggregator}{
@@ -146,9 +173,50 @@ result carrying one (\code{attr(, "variogram_model")}); when \code{NULL}
 it is estimated here from the response.  The model families are the ones
 the package interprets elsewhere: exponential, spherical and Gaussian
 components with a nugget.  Anything else is refused by name.  A
-model whose range was not identified (a bare \code{NA} estimate with the
-model attached) is used with a warning: its sill was never reached by the
-data, so the ratios rest on an extrapolation.  Requires \pkg{gstat}.
+model whose range was not identified (an \code{NA} estimate with the
+model attached) is used with a warning that says why it was refused, and
+the reason is kept as \code{attr(, "rejected_reason")}: a range past the
+fitted lags means the sill was never reached and the ratios rest on an
+extrapolation; a fit that did not converge stopped wherever the optimiser
+halted; a variogram that falls with distance, or a range below the
+shortest lag, describes the data poorly at some lags.
+
+The model has to be of the response itself.  A variogram of residuals
+(\code{estimate_sac_range(predictor_vars = ...)}, \code{attr(,
+"detrended")} \code{TRUE}) leaves out the variance the predictors
+explain, while the response is kriged here without them, so
+\code{kr_var}, \code{kr_ratio} and the cross-validation statistic come out
+too small (the statistic at 4.3--5.2 against 0.67--1.53 with a spatially
+structured covariate); it is used with a warning.  The points are put in
+the CRS the variogram was fitted in (\code{attr(sac, "crs")}), because
+its range is a length in that CRS's units.  Requires \pkg{gstat}.
+}
+
+\section{The kriging neighbourhood}{
+
+\pkg{gstat} kriges a cell from the \code{nmax} locations nearest its
+centre.  A cell holding more locations than that would be estimated from
+its middle alone, which describes the middle rather than the cell (in one
+simulated case a cell of 1,500 points came out 0.43 off at
+\code{nmax = 50}, against 0.07 from all of them and 0.02 for its plain
+mean).  So wherever the \code{nmax} locations nearest a cell's centre
+leave out any of the cell's own locations, the cell is kriged from all of
+its own locations plus the \code{nmax} nearest outside it;
+\code{kr_n_used} says how many locations each cell was kriged from.  The
+cost of a kriging system grows with the cube of its size (about 1 s at
+2,000 locations and 17 s at 5,000), so a cell that would need more than
+\code{max_neighbours} is left out with a warning, its \code{kr_} columns
+\code{NA}.
+
+\pkg{gstat} also discretises each cell into 500 points on a regular grid
+laid over the cell's whole bounding box, keeping those inside, so the
+memory a cell takes grows with the ratio of that box to its area: about
+54 MB more for a thin diagonal strip at a ratio of 708, and 592 MB at
+7,072.  A cell whose bounding box exceeds its area more than
+\code{max_box_ratio} times (a sliver, parts far apart, a cell that is
+mostly hole) is left out the same way.  \code{attr(, "cells_left_out")}
+counts both kinds, and \code{print()} says how many cells have no
+estimate and why.
 }
 
 \section{Repeat measurements at one location}{
