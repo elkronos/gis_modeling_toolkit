@@ -212,6 +212,12 @@ print.spatial_fit <- function(x, ...) {
                 x$info$gp_n_basis %||% NA_integer_))
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
+    # The coefficients of a standardised fit are per SD of each predictor, and
+    # nothing coef() returns says so.
+    if (length(x$info$predictor_scaling) > 0L)
+      cat(sprintf(paste0("  Predictors standardised: %s (coef() is per SD; ",
+                         "see $info$predictor_scaling)\n"),
+                  paste(names(x$info$predictor_scaling), collapse = ", ")))
     # NA is "not checked" (check_convergence = FALSE, or no diagnostic could be
     # read), which is neither a pass nor a failure; NULL (nothing recorded)
     # still reads as a failure.
@@ -1465,10 +1471,29 @@ coef.gwr_fit <- function(object, ...) {
 #' already absorbed the spatially structured part of the signal, so these are
 #' effects net of location.
 #'
+#' @section Standardised predictors:
+#' The summaries are on the scale the model was fitted on.  A fit made with
+#' \code{standardize_predictors = TRUE} was fitted on centred and scaled
+#' numeric predictors, so each slope is the change in the linear predictor per
+#' \emph{standard deviation} of its predictor and the intercept is its value
+#' at the predictor \emph{means}, not the raw-unit numbers \code{stats::lm()}
+#' reports on the same formula.  Nothing on the returned matrix says so;
+#' \code{print()} on the fit does, and the centre and scale of each predictor
+#' are in \code{object$info$predictor_scaling}.  To put a slope back in raw
+#' units divide its \code{Estimate}, \code{Est.Error} and interval bounds by
+#' that predictor's \code{scale}.  The intercept's \code{Estimate} follows by
+#' linearity (subtract each raw-unit slope times its predictor's
+#' \code{center}), but its \code{Est.Error} and interval depend on the
+#' posterior covariance of the coefficients: transform the draws from
+#' \code{brms::as_draws_df(object$engine)} for those, or refit without
+#' standardising.
+#'
 #' @param object A \code{bayesian_fit} object.
 #' @param ... Ignored.
 #' @return A matrix of fixed-effect posterior summaries, as returned by
-#'   \code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
+#'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
+#'   predictor under \code{standardize_predictors = TRUE}; see above).  Never
+#'   \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
 #' @family methods on a fitted model

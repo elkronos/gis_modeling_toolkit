@@ -433,3 +433,22 @@ test_that("a warm fitted() cache does not write the engine a second time", {
   fitted(cp)
   expect_identical(calls, 2L)
 })
+
+
+# ---------------------------------------------------------------------------
+# models LOW-6: a standardised fit says its coefficients are per SD
+# ---------------------------------------------------------------------------
+
+test_that("print() on a standardised bayesian_fit names the scaled predictors", {
+  d <- .r2b_pts(n = 20)
+  fit <- new_spatial_fit(
+    "bayesian_fit", engine = list(), formula = z ~ a, response_var = "z",
+    predictor_vars = "a", data_sf = d,
+    info = list(gp_k = 10L, gp_n_basis = 100L, convergence_ok = TRUE,
+                predictor_scaling = list(a = list(center = 0.1, scale = 0.9))))
+  txt <- paste(utils::capture.output(print(fit)), collapse = "\n")
+  expect_match(txt, "Predictors standardised: a (coef() is per SD", fixed = TRUE)
+  fit$info$predictor_scaling <- NULL
+  txt <- paste(utils::capture.output(print(fit)), collapse = "\n")
+  expect_false(grepl("standardised", txt, fixed = TRUE))
+})
