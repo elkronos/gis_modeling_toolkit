@@ -46,9 +46,11 @@ as \code{brms::zero_inflated_poisson()}, \code{brms::negbinomial()},
 \code{brms::hurdle_poisson()}, \code{brms::bernoulli()} or
 \code{brms::Beta()}.  Default \code{NULL}, resolved to
 \code{stats::gaussian()}.  The family reaches \code{brms::brm()}
-unchanged with the spatial GP term still in the formula, so any response
-type brms can fit, this function can fit; see the section on
-non-Gaussian responses and the count example below.}
+unchanged with the spatial GP term still in the formula.  A factor
+response is accepted only under \code{brms::categorical()} or an ordinal
+family, and those fits have no single expected value per row, so several
+methods cannot use them; see the section on non-Gaussian responses for
+what each family supports, and the count example below.}
 
 \item{gp_k}{Positive integer giving the number of GP basis functions
 \emph{per dimension}, or NULL (default) to derive it from the
@@ -238,16 +240,35 @@ strategy, and \code{$info$gp_iso} records which kernel was used.
 }
 \section{Non-Gaussian responses}{
 
-Nothing in this function is Gaussian-specific except its default.  The
-response check is family-aware: a non-numeric response is refused only when
-the family resolves to gaussian, so a count, binary or bounded response
-passes straight through to brms under the family you name.  Zero-inflated
-and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
-have all been verified to reach \code{brms::brm()} with the GP term intact.
+Nothing in this function is Gaussian-specific except its default.  A
+numeric count, binary (0/1 or logical) or bounded response passes straight
+through to brms under the family you name; zero-inflated and hurdle
+counts, negative binomial, Bernoulli, beta, ordinal, categorical and
+mixture families have all been verified to reach \code{brms::brm()} with
+the GP term intact, the length-scale prior attached to each
+distributional parameter's GP.
 
-Two things follow.  First, the metrics that come back from
-\code{\link{model_metrics}()} and the \code{cv_*()} functions are not all
-meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+The response check is family-aware.  A factor or character response is
+accepted only under \code{brms::categorical()} or an ordinal family
+(\code{cumulative}, \code{sratio}, \code{cratio}, \code{acat}), and refused
+under every other family before anything is compiled; under gaussian a
+logical response is refused too.  The case to watch is a two-level factor
+under \code{brms::bernoulli()}: brms would fit it, but
+\code{residuals()}, \code{summary()}, \code{model_metrics()} and
+\code{\link{cv_bayes}()} could not score a factor, so convert it to 0/1
+first.
+
+An ordinal or categorical fit has a probability per response category, not
+one expected value per row.  \code{predict()} with its default
+\code{type = "epred"}, \code{fitted()}, \code{residuals()},
+\code{summary()} and \code{model_metrics()} therefore stop with a message
+saying so.  \code{predict(type = "predict", draws = TRUE)} returns the
+posterior predicted categories, as category indices, and
+\code{brms::posterior_epred(fit$engine)} the probabilities.
+
+For the numeric families two things follow.  First, the metrics that come
+back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are
+not all meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
 are Gaussian-shaped, and for this backend \code{\link{cv_bayes}()}'s CRPS
 and interval coverage are the proper scores to read.  See
 \code{\link{model_metrics}()}, section "Which metrics survive a
@@ -258,10 +279,10 @@ for a Gaussian response, and its help page says how.
 
 One trap.  The response check reads the family's name through
 \code{brms}'s own accessor; a family object it cannot name is treated as
-"not gaussian" and the check is skipped entirely, without falling back
-to the gaussian rule.  A malformed \code{family} therefore buys less
-validation, not more, and a wrong response type will surface as a Stan
-error, with no message from this function.
+unknown and the check is skipped entirely, without falling back to either
+rule above.  A malformed \code{family} therefore buys less validation, not
+more, and a wrong response type will surface as a Stan error, with no
+message from this function.
 }
 
 \section{Spatial confounding}{

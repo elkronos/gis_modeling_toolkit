@@ -92,6 +92,13 @@
 }
 
 
+# The brms families whose response is a category rather than a number, and so
+# the only ones fit_bayesian_spatial_model() lets a factor or character
+# response through for.
+.brms_category_families <- c("categorical", "cumulative", "sratio", "cratio",
+                             "acat")
+
+
 #' Build the brms gp() term for the spatial GP
 #'
 #' Kept separate from \code{fit_bayesian_spatial_model()} so the formula text
@@ -113,6 +120,68 @@
 .gp_formula_term <- function(gp_k, gp_c, gp_iso = FALSE) {
   sprintf("gp(..x, ..y, k = %s, c = %s, scale = FALSE, iso = %s)",
           gp_k, gp_c, if (isTRUE(gp_iso)) "TRUE" else "FALSE")
+}
+
+
+#' The coefficient-level length-scale parameters brms creates for a model
+#'
+#' One row per \code{lscale} coefficient, with everything that addresses it:
+#' \code{coef}, \code{resp}, \code{dpar} and \code{nlpar}.  The address is more
+#' than the \code{coef} name.  A family with several distributional parameters
+#' gives each its own GP -- \code{brms::categorical()} one per non-reference
+#' category (\code{muhi}, \code{mumid}), a \code{brms::mixture()} one per
+#' component -- under the SAME \code{coef} names, so a prior built from
+#' \code{coef} alone lands every row on \code{dpar = ""} twice, and brms
+#' refuses the whole model with "Duplicated prior specifications are not
+#' allowed" before sampling.
+#'
+#' @param fml,data,family As handed to \code{brms::brm()}.
+#' @return A data.frame with character columns \code{coef}, \code{resp},
+#'   \code{dpar}, \code{nlpar}, or \code{NULL} when brms reports none (or
+#'   \code{brms::get_prior()} fails).
+#' @keywords internal
+#' @noRd
+.lscale_coef_rows <- function(fml, data, family) {
+  gp_def <- tryCatch(brms::get_prior(fml, data = data, family = family),
+                     error = function(e) NULL)
+  if (is.null(gp_def) || !all(c("class", "coef") %in% names(gp_def)))
+    return(NULL)
+  keep <- gp_def$class == "lscale" & nzchar(gp_def$coef)
+  if (!any(keep)) return(NULL)
+  field <- function(nm) {
+    v <- if (nm %in% names(gp_def)) as.character(gp_def[[nm]][keep])
+         else rep("", sum(keep))
+    v[is.na(v)] <- ""
+    v
+  }
+  unique(data.frame(coef = field("coef"), resp = field("resp"),
+                    dpar = field("dpar"), nlpar = field("nlpar"),
+                    stringsAsFactors = FALSE))
+}
+
+
+#' One coefficient-level lscale prior per row of .lscale_coef_rows()
+#'
+#' @param spec The prior, as a Stan distribution string.
+#' @param rows A (non-empty) return value of \code{.lscale_coef_rows()}.
+#' @return A \code{brmsprior}.
+#' @keywords internal
+#' @noRd
+.lscale_prior_rows <- function(spec, rows) {
+  Reduce(`+`, lapply(seq_len(nrow(rows)), function(i)
+    brms::set_prior(spec, class = "lscale", coef = rows$coef[[i]],
+                    resp = rows$resp[[i]], dpar = rows$dpar[[i]],
+                    nlpar = rows$nlpar[[i]])))
+}
+
+
+#' Label lscale coefficients for a log line, with their dpar/nlpar/resp
+#' @keywords internal
+#' @noRd
+.lscale_row_labels <- function(rows) {
+  where <- paste(rows$resp, rows$dpar, rows$nlpar, sep = "/")
+  where <- gsub("^/+|/+$", "", gsub("/{2,}", "/", where))
+  paste0(sQuote(rows$coef), ifelse(nzchar(where), paste0(" (", where, ")"), ""))
 }
 
 
@@ -151,9 +220,11 @@
 #'   \code{brms::hurdle_poisson()}, \code{brms::bernoulli()} or
 #'   \code{brms::Beta()}.  Default \code{NULL}, resolved to
 #'   \code{stats::gaussian()}.  The family reaches \code{brms::brm()}
-#'   unchanged with the spatial GP term still in the formula, so any response
-#'   type brms can fit, this function can fit; see the section on
-#'   non-Gaussian responses and the count example below.
+#'   unchanged with the spatial GP term still in the formula.  A factor
+#'   response is accepted only under \code{brms::categorical()} or an ordinal
+#'   family, and those fits have no single expected value per row, so several
+#'   methods cannot use them; see the section on non-Gaussian responses for
+#'   what each family supports, and the count example below.
 #' @param gp_k Positive integer giving the number of GP basis functions
 #'   \emph{per dimension}, or NULL (default) to derive it from the
 #'   length-scale/domain ratio.  The fitted model carries
@@ -303,16 +374,35 @@
 #'   The raw brmsfit is in \code{$engine}.
 #' @family model fitting
 #' @section Non-Gaussian responses:
-#' Nothing in this function is Gaussian-specific except its default.  The
-#' response check is family-aware: a non-numeric response is refused only when
-#' the family resolves to gaussian, so a count, binary or bounded response
-#' passes straight through to brms under the family you name.  Zero-inflated
-#' and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
-#' have all been verified to reach \code{brms::brm()} with the GP term intact.
+#' Nothing in this function is Gaussian-specific except its default.  A
+#' numeric count, binary (0/1 or logical) or bounded response passes straight
+#' through to brms under the family you name; zero-inflated and hurdle
+#' counts, negative binomial, Bernoulli, beta, ordinal, categorical and
+#' mixture families have all been verified to reach \code{brms::brm()} with
+#' the GP term intact, the length-scale prior attached to each
+#' distributional parameter's GP.
 #'
-#' Two things follow.  First, the metrics that come back from
-#' \code{\link{model_metrics}()} and the \code{cv_*()} functions are not all
-#' meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+#' The response check is family-aware.  A factor or character response is
+#' accepted only under \code{brms::categorical()} or an ordinal family
+#' (\code{cumulative}, \code{sratio}, \code{cratio}, \code{acat}), and refused
+#' under every other family before anything is compiled; under gaussian a
+#' logical response is refused too.  The case to watch is a two-level factor
+#' under \code{brms::bernoulli()}: brms would fit it, but
+#' \code{residuals()}, \code{summary()}, \code{model_metrics()} and
+#' \code{\link{cv_bayes}()} could not score a factor, so convert it to 0/1
+#' first.
+#'
+#' An ordinal or categorical fit has a probability per response category, not
+#' one expected value per row.  \code{predict()} with its default
+#' \code{type = "epred"}, \code{fitted()}, \code{residuals()},
+#' \code{summary()} and \code{model_metrics()} therefore stop with a message
+#' saying so.  \code{predict(type = "predict", draws = TRUE)} returns the
+#' posterior predicted categories, as category indices, and
+#' \code{brms::posterior_epred(fit$engine)} the probabilities.
+#'
+#' For the numeric families two things follow.  First, the metrics that come
+#' back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are
+#' not all meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
 #' are Gaussian-shaped, and for this backend \code{\link{cv_bayes}()}'s CRPS
 #' and interval coverage are the proper scores to read.  See
 #' \code{\link{model_metrics}()}, section "Which metrics survive a
@@ -323,10 +413,10 @@
 #'
 #' One trap.  The response check reads the family's name through
 #' \code{brms}'s own accessor; a family object it cannot name is treated as
-#' "not gaussian" and the check is skipped entirely, without falling back
-#' to the gaussian rule.  A malformed \code{family} therefore buys less
-#' validation, not more, and a wrong response type will surface as a Stan
-#' error, with no message from this function.
+#' unknown and the check is skipped entirely, without falling back to either
+#' rule above.  A malformed \code{family} therefore buys less validation, not
+#' more, and a wrong response type will surface as a Stan error, with no
+#' message from this function.
 #'
 #' @section Spatial confounding:
 #' A fixed-effect coefficient estimated alongside a spatial random effect is a
@@ -517,13 +607,37 @@ fit_bayesian_spatial_model <- function(
   if (nrow(dat_sf) < 2L)
     stop(sprintf("fit_bayesian_spatial_model(): %d usable row(s) after cleaning; at least two are needed to fit a spatial GP.",
                  nrow(dat_sf)), call. = FALSE)
-  if (identical(.brms_family_name(family), "gaussian") &&
-      !is.numeric(dat_cols[[response_var]]))
+  fam_name <- .brms_family_name(family)
+  y_resp   <- dat_cols[[response_var]]
+  if (identical(fam_name, "gaussian") && !is.numeric(y_resp))
     stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' is %s, ",
                         "not numeric, but the family is gaussian. Convert it ",
                         "to numeric, or pass a `family` that matches it (e.g. ",
-                        "brms::bernoulli() for a 0/1 outcome)."),
-                 response_var, class(dat_cols[[response_var]])[1L]),
+                        "brms::bernoulli() for an outcome coded 0/1)."),
+                 response_var, class(y_resp)[1L]),
+         call. = FALSE)
+  # A factor or character response under any other family that is not
+  # categorical or ordinal.  brms fits a two-level factor under bernoulli(), so
+  # this used to pass, and then residuals() came back all NA, summary(),
+  # model_metrics() and compare_models() stopped on "response is factor", and
+  # cv_bayes() ran a whole fold of MCMC before aborting in the fold scoring.
+  # Refused here, before anything is compiled.  A family whose name cannot be
+  # read (NA) is not checked, as documented.
+  if (!is.na(fam_name) && !identical(fam_name, "gaussian") &&
+      !(is.numeric(y_resp) || is.logical(y_resp)) &&
+      !(fam_name %in% .brms_category_families))
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' is %s, ",
+                        "not numeric, and the family is %s. Only ",
+                        "brms::categorical() and the ordinal families (%s) ",
+                        "take a categorical response here; convert it first, ",
+                        "e.g. to 0/1 for brms::bernoulli() with as.integer(",
+                        "%s == \"<the level to model>\"). residuals(), ",
+                        "summary(), model_metrics() and cv_bayes() all need a ",
+                        "numeric response to score the fit."),
+                 response_var, class(y_resp)[1L], fam_name,
+                 paste(setdiff(.brms_category_families, "categorical"),
+                       collapse = ", "),
+                 response_var),
          call. = FALSE)
 
   # NOTE: prep_model_data() coerces geometry to points and drops incomplete
@@ -777,14 +891,13 @@ fit_bayesian_spatial_model <- function(
     # The coefficient names are read back from brms rather than hard-coded:
     # they embed the covariate names ("gp..x..y..x", "gp..x..y..y") and the
     # count depends on `iso`, so deriving them is the only version-safe way.
-    ls_coefs <- tryCatch({
-      gp_def <- brms::get_prior(fml, data = dat_df, family = family)
-      gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
-    }, error = function(e) character(0))
+    # So is each one's dpar/nlpar/resp: a categorical or mixture family repeats
+    # the same names once per distributional parameter (see
+    # .lscale_coef_rows()), and dropping that address made every such fit fail.
+    ls_rows <- .lscale_coef_rows(fml, dat_df, family)
 
-    ls_prior <- if (length(ls_coefs) > 0L) {
-      Reduce(`+`, lapply(ls_coefs, function(k)
-        brms::set_prior(lscale_prior_spec, class = "lscale", coef = k)))
+    ls_prior <- if (!is.null(ls_rows)) {
+      .lscale_prior_rows(lscale_prior_spec, ls_rows)
     } else {
       # No lscale coefficient to attach to (a brms that names them
       # differently, or a formula with no GP term).  Fall back to the global
@@ -810,24 +923,46 @@ fit_bayesian_spatial_model <- function(
     # does what it says.
     is_global_ls <- prior$class == "lscale" & !nzchar(prior$coef)
     if (any(is_global_ls)) {
-      ls_coefs <- tryCatch({
-        gp_def <- brms::get_prior(fml, data = dat_df, family = family)
-        gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
-      }, error = function(e) character(0))
-      if (length(ls_coefs) > 0L) {
-        expanded <- NULL
-        for (i in which(is_global_ls)) {
-          for (k in ls_coefs) {
-            row <- brms::set_prior(prior$prior[i], class = "lscale", coef = k)
-            expanded <- if (is.null(expanded)) row else expanded + row
-          }
+      ls_rows <- .lscale_coef_rows(fml, dat_df, family)
+      if (!is.null(ls_rows)) {
+        # Each global row is expanded only onto the coefficients it addresses
+        # -- those with its own resp/dpar/nlpar, which is how brms resolves a
+        # global prior itself -- and never onto one the user already gave a
+        # coefficient-level prior.  Expanding every row onto every coef name
+        # turned a dpar-level prior (dpar = "mumid" on a categorical fit) into
+        # rows for every category at once, duplicates brms refuses.
+        pcol <- function(nm) {
+          v <- if (nm %in% names(prior)) as.character(prior[[nm]])
+               else rep("", nrow(prior))
+          v[is.na(v)] <- ""
+          v
         }
-        kept  <- prior[!is_global_ls, , drop = FALSE]
-        prior <- if (nrow(kept) > 0L) kept + expanded else expanded
-        .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
-                         "'lscale' prior was attached to %s so that brms uses ",
-                         "it (a global lscale prior is otherwise discarded)."),
-                  paste(sQuote(ls_coefs), collapse = ", "))
+        p_resp <- pcol("resp"); p_dpar <- pcol("dpar"); p_nlpar <- pcol("nlpar")
+        row_keys  <- paste(ls_rows$coef, ls_rows$resp, ls_rows$dpar,
+                           ls_rows$nlpar, sep = "\r")
+        user_keys <- paste(prior$coef, p_resp, p_dpar, p_nlpar, sep = "\r")[
+          prior$class == "lscale" & nzchar(prior$coef)]
+        expanded <- NULL
+        done     <- rep(FALSE, nrow(prior))
+        targets  <- character(0)
+        for (i in which(is_global_ls)) {
+          hit <- ls_rows$resp == p_resp[[i]] & ls_rows$dpar == p_dpar[[i]] &
+            ls_rows$nlpar == p_nlpar[[i]] & !(row_keys %in% user_keys)
+          if (!any(hit)) next
+          tgt  <- ls_rows[hit, , drop = FALSE]
+          part <- .lscale_prior_rows(prior$prior[[i]], tgt)
+          expanded <- if (is.null(expanded)) part else expanded + part
+          done[i]  <- TRUE
+          targets  <- c(targets, .lscale_row_labels(tgt))
+        }
+        if (any(done)) {
+          kept  <- prior[!done, , drop = FALSE]
+          prior <- if (nrow(kept) > 0L) kept + expanded else expanded
+          .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
+                           "'lscale' prior was attached to %s so that brms uses ",
+                           "it (a global lscale prior is otherwise discarded)."),
+                    paste(targets, collapse = ", "))
+        }
       } else {
         .log_warn(paste0("fit_bayesian_spatial_model(): the supplied prior has a ",
                          "GLOBAL 'lscale' entry, which brms discards because ",
