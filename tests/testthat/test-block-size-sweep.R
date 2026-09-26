@@ -52,21 +52,25 @@ test_that("the ladder respects the fit budget and the k-block floor", {
   expect_error(cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, k = 4, n_sizes = 20,
                                    quiet = TRUE),
                "20 block sizes x 4 folds \\+ 4 for the random reference = 84")
-  # With k = 5 the two-by-two grid at the top of the ladder holds too few
-  # blocks and is dropped before the budget is counted.
+  # With k = 5 the ladder tops out at the largest size whose grid still holds
+  # five cells (a 3 x 3 grid on this square), not at a 2 x 2 grid that would
+  # be dropped, so every one of the 20 sizes counts against the budget.
   expect_error(cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, k = 5, n_sizes = 20,
                                    quiet = TRUE),
-               "17 block sizes x 5 folds")
-  # Sizes whose grid holds fewer than k blocks are dropped (logged), and a
-  # ladder with nothing left is an error naming the extent.
+               "20 block sizes x 5 folds")
+  # Sizes the caller passed whose grid holds fewer than k blocks are not run,
+  # with a warning (and a log line), and a ladder with nothing left is an
+  # error naming the extent.
   lines <- capture_spatialkit_log(
-    sw <- cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, k = 4,
-                              block_sizes = c(150, 600), include_random = FALSE,
-                              sac = NA, quiet = TRUE),
+    expect_warning(
+      sw <- cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, k = 4,
+                                block_sizes = c(150, 600), include_random = FALSE,
+                                sac = NA, quiet = TRUE),
+      "`block_sizes` 600 give fewer than k = 4 blocks"),
     level = logger::INFO)
   expect_equal(nrow(sw), 1L)
   expect_equal(sw$block_size, 150)
-  expect_true(log_has(lines, "dropping 1 block size"))
+  expect_true(log_has(lines, "`block_sizes` 600 give fewer than k = 4 blocks"))
   expect_error(cv_block_size_sweep(pts, "z", "a", fit_fn = sweep_fit, k = 4,
                                    block_sizes = 600, quiet = TRUE),
                "no block size leaves at least k = 4 blocks")
