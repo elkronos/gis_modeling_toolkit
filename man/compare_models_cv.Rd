@@ -55,7 +55,9 @@ the folds came from other data when they were not).}
 
 \item{boundary}{Optional polygon sf/sfc.}
 
-\item{pointize}{Geometry coercion strategy.}
+\item{pointize}{Geometry coercion strategy.  It also decides where a
+polygon or line row falls in the shared blocks, so each row is placed by
+the point every model is fitted at.}
 
 \item{gwr_args}{Extra arguments for \code{\link{cv_gwr}}.  Only names that
 are formal arguments of \code{cv_gwr()} are forwarded (it has no
@@ -88,7 +90,10 @@ the autocorrelation range of the response (detrended on
 \code{predictor_vars}) is estimated and used as the minimum block size of
 the shared folds, as in \code{\link{make_folds}()}.  Default
 \code{FALSE}: geometric blocks, as before this argument existed.  Either
-way the fold set is built once and every backend is scored on it.}
+way the fold set is built once and every backend is scored on it.  When
+it cannot be built (a \code{block_size} or estimated range that leaves a
+single block, say) the call is an error, as it is for each backend on
+its own; no model is scored on a design other than the one asked for.}
 
 \item{metrics}{Optional scoring function of your own, handed to every
 backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
@@ -153,6 +158,9 @@ overconfident, well above it is wider than it needs to be.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator within 100
+machine epsilons of the largest one counts as zero, so the rule does not
+depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

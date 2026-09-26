@@ -15,26 +15,65 @@ unique; see \code{\link{evaluate_insample}}.}
 \item{...}{Extra arguments passed to predict().}
 }
 \value{
-A data.frame comparing all models.  Alongside the metrics it carries
+A data.frame comparing all models.  Its \code{metric_basis}
+column says what each row's metrics were computed on (see
+\code{\link{evaluate_insample}}); a table that mixes
+\code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
+models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
+(Bayesian) are sums over the rows a model was fitted to, so each column
+is set to \code{NA}, with a warning, when the fits carrying it were
+fitted to different rows (a predictor with missing values drops rows,
+for example).  Alongside the metrics it carries
 \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 \code{resid_morans_null}, the last of which names the null
 \code{\link{residual_morans_i}} scored each model against, since that
-choice is per-fit and governs how much the p-value is worth.  The
-significant-autocorrelation warning below is driven by that p-value, so
-read its caveats in \code{?residual_morans_i} before treating silence as
-evidence of no residual structure.
+choice is per-fit and governs how much the p-value is worth.  A
+significant p-value is noted in the log (not raised as an R warning):
+positive autocorrelation as structure the model may have missed,
+negative (\code{resid_morans_z < 0}) as the alternating residuals of a
+model that tracks its data closely.  Read the caveats in
+\code{?residual_morans_i} before treating silence as evidence of no
+residual structure.
 }
 \description{
 Takes a named list of already-fit \code{spatial_fit} objects and produces
-a tidy comparison table including in-sample metrics and model-specific
-information criteria (AICc, LOOIC).
+a tidy comparison table including in-sample (for a forest, out-of-bag)
+metrics and model-specific information criteria (AICc, LOOIC).
 }
+\section{What the metrics are computed on}{
+
+With \code{newdata = NULL} the metrics come from \code{fitted(object)}.
+That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
+but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
+returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
+data.frame \code{model_metrics()} returns carries no label distinguishing
+the two, so check \code{object$info$fitted_are_oob} before comparing
+numbers across backends; \code{\link{evaluate_insample}()} and
+\code{\link{compare_models}()} record it per model in a
+\code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
+backend the same way.
+
+\eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
+the mean of the response the model was \emph{fitted} to.  In sample that
+is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
+\eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
+measured against the prediction it had to beat, the training mean, not
+against the new rows' own mean, which it could not have known.  It is
+below 0 when the model predicts the new rows worse than the training mean
+does, and it is \code{NA} when the response does not vary about that
+baseline by more than rounding error (100 machine epsilons of its
+magnitude, whatever its units).
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator within 100
+machine epsilons of the largest one counts as zero, so the rule does not
+depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

@@ -770,10 +770,12 @@
                                length(y_hat), length(y_true))))
   }
 
-  # Training-set mean: the correct null-model baseline for out-of-sample
-  # R².  Using the test-set mean instead would give the null model credit
-  # for knowing information that was not available at prediction time,
-  # systematically inflating CV R².
+  # Training-set mean: the baseline out-of-sample R² is measured against,
+  # because it is the only null prediction available at prediction time.
+  # (The held-out rows' own mean would be a null model that knows the test
+  # data.  It fits them at least as well as any other constant, so it gives
+  # the LOWER R², not a higher one; the choice is about using training
+  # information only.)  model_metrics(newdata =) uses the same baseline.
   y_train <- train_df[[response_var]]
   y_train_mean <- mean(y_train[is.finite(y_train)], na.rm = TRUE)
 
@@ -4812,7 +4814,15 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 #'   the fold's index in the \code{folds} object that was supplied, so it
 #'   lines up with \code{make_folds()$assignment$fold} even when some folds
-#'   were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the
+#'   were unusable and dropped.  \code{R2} is out-of-sample \eqn{R^2}: the
+#'   total sum of squares is taken about the mean of the \emph{training} rows
+#'   (in \code{overall}, each held-out row about its own fold's training
+#'   mean), the null prediction available when the fold is predicted, and
+#'   not about the held-out rows' own mean, a null model that would know the
+#'   test data.  On spatial blocks the two can differ widely; \code{R2} is
+#'   below 0 when the model predicts worse than the training mean.
+#'   \code{\link{model_metrics}(newdata = )} uses the same baseline.
+#'   \code{overall$Adj_R2} is always \code{NA}: the
 #'   pooled out-of-sample predictions come from \code{k} separately fitted
 #'   models and have no single parameter count to adjust for.  The per-fold
 #'   \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is

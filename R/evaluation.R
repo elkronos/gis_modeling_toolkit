@@ -595,8 +595,9 @@
 #'     \item{\code{"randomisation"}}{Always the exchangeable moments.}
 #'     \item{\code{"residual"}}{Always the Cliff & Ord residual moments.  Falls
 #'       back to \code{"randomisation"} with a logged warning if the design
-#'       cannot be rebuilt, and warns (but proceeds) if the residuals are not
-#'       the OLS residuals on it, in which case the moments are approximate.}
+#'       cannot be rebuilt, and logs a warning (but proceeds) if the residuals
+#'       are not the OLS residuals on it, in which case the moments are
+#'       approximate.}
 #'   }
 #'   Both \code{"auto"} and \code{"residual"} also fall back to
 #'   \code{"randomisation"} when the residual degrees of freedom
@@ -659,8 +660,11 @@
 #'   so the console shows the statistic and its null without printing the
 #'   \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 #'   \code{$}, \code{[[} and \code{unlist()} are unaffected.
-#'   Returns \code{NULL} with a warning if computation fails (e.g. fewer
-#'   than 4 valid residuals).
+#'   Returns \code{NULL} with a warning if computation fails, saying why:
+#'   \code{residuals()} raised an error (its message is quoted) or returned
+#'   \code{NULL} (the fit's class has no method), fewer than 4 valid
+#'   residuals, or a residual vector whose length does not match the fit's
+#'   \code{data_sf}.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 #'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
@@ -709,8 +713,24 @@ residual_morans_i <- function(fit,
   }
 
   # --- Extract residuals & coordinates ---
-  resid <- tryCatch(residuals(fit), error = function(e) NULL)
-  if (is.null(resid) || length(resid) < 4L) {
+  # Three failures told apart, each with its own reason.  They all used to
+  # read "could not extract enough residuals (n < 4)" -- on a 100-row fit --
+  # or, for a residual vector of the wrong length, "coordinate extraction
+  # failed", and the error residuals() raised was thrown away.
+  resid <- tryCatch(residuals(fit), error = function(e) e)
+  if (inherits(resid, "error")) {
+    .warn_and_log("residual_morans_i(): residuals() failed on this fit: %s",
+                  conditionMessage(resid))
+    return(NULL)
+  }
+  if (is.null(resid)) {
+    .warn_and_log(paste0("residual_morans_i(): residuals() returned NULL for a ",
+                         "fit of class %s, which has no residuals() method; see ",
+                         "?new_spatial_fit for the methods a custom fit needs."),
+                  class(fit)[1L])
+    return(NULL)
+  }
+  if (length(resid) < 4L) {
     .warn_and_log("residual_morans_i(): could not extract enough residuals (n < 4).")
     return(NULL)
   }
@@ -720,8 +740,15 @@ residual_morans_i <- function(fit,
     sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   }, error = function(e) NULL)
 
-  if (is.null(coords) || nrow(coords) != length(resid)) {
+  if (is.null(coords)) {
     .warn_and_log("residual_morans_i(): coordinate extraction failed.")
+    return(NULL)
+  }
+  if (nrow(coords) != length(resid)) {
+    .warn_and_log(paste0("residual_morans_i(): residuals() returned %d value(s) ",
+                         "for the %d row(s) of the fit's data_sf, so they cannot ",
+                         "be matched to locations."),
+                  length(resid), nrow(coords))
     return(NULL)
   }
 
@@ -1113,9 +1140,14 @@ print.morans_i <- function(x, ...) {
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics What the metrics are computed on
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A data.frame with one row per model and columns for
-#'   model name and all regression metrics.
+#'   model name, all regression metrics, and \code{metric_basis}: what the
+#'   row's metrics were computed on, \code{"in-sample"} (fitted values),
+#'   \code{"out-of-bag"} (an \code{rf_fit}'s fitted values, see "What the
+#'   metrics are computed on") or \code{"newdata"}.  Rows with different
+#'   bases do not compare like for like.
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1179,7 +1211,16 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
       return(NULL)
     }
     met <- model_metrics(obj, newdata = newdata, ...)
-    cbind(data.frame(model = nm, stringsAsFactors = FALSE), met)
+    # What the numbers were computed on, per row.  Without newdata a forest's
+    # fitted() values are out-of-bag and every other backend's are in-sample,
+    # and a table that set the two side by side unlabelled could rank the
+    # models the wrong way round (GWR 0.77 in-sample against RF 0.82
+    # out-of-bag, where RF's in-sample RMSE was 0.40).
+    basis <- if (!is.null(newdata)) "newdata"
+             else if (isTRUE(obj$info$fitted_are_oob)) "out-of-bag"
+             else "in-sample"
+    cbind(data.frame(model = nm, stringsAsFactors = FALSE), met,
+          data.frame(metric_basis = basis, stringsAsFactors = FALSE))
   })
 
   do.call(rbind, Filter(Negate(is.null), rows))
@@ -1193,22 +1234,34 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #' Side-by-side comparison of fitted spatial models
 #'
 #' Takes a named list of already-fit \code{spatial_fit} objects and produces
-#' a tidy comparison table including in-sample metrics and model-specific
-#' information criteria (AICc, LOOIC).
+#' a tidy comparison table including in-sample (for a forest, out-of-bag)
+#' metrics and model-specific information criteria (AICc, LOOIC).
 #'
 #' @param fits A named list of \code{spatial_fit} objects.  Names must be
 #'   unique; see \code{\link{evaluate_insample}}.
 #' @param newdata Optional sf for out-of-sample evaluation.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics What the metrics are computed on
 #' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return A data.frame comparing all models.  Alongside the metrics it carries
+#' @return A data.frame comparing all models.  Its \code{metric_basis}
+#'   column says what each row's metrics were computed on (see
+#'   \code{\link{evaluate_insample}}); a table that mixes
+#'   \code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
+#'   models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
+#'   (Bayesian) are sums over the rows a model was fitted to, so each column
+#'   is set to \code{NA}, with a warning, when the fits carrying it were
+#'   fitted to different rows (a predictor with missing values drops rows,
+#'   for example).  Alongside the metrics it carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 #'   \code{resid_morans_null}, the last of which names the null
 #'   \code{\link{residual_morans_i}} scored each model against, since that
-#'   choice is per-fit and governs how much the p-value is worth.  The
-#'   significant-autocorrelation warning below is driven by that p-value, so
-#'   read its caveats in \code{?residual_morans_i} before treating silence as
-#'   evidence of no residual structure.
+#'   choice is per-fit and governs how much the p-value is worth.  A
+#'   significant p-value is noted in the log (not raised as an R warning):
+#'   positive autocorrelation as structure the model may have missed,
+#'   negative (\code{resid_morans_z < 0}) as the alternating residuals of a
+#'   model that tracks its data closely.  Read the caveats in
+#'   \code{?residual_morans_i} before treating silence as evidence of no
+#'   residual structure.
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1283,27 +1336,119 @@ compare_models <- function(fits, newdata = NULL, ...) {
       met_df$LOOIC[i] <- obj$info$looic %||% NA_real_
   }
 
+  # AICc and LOOIC are sums over the observations a model was fitted to, so
+  # they compare only between fits of the SAME rows: a predictor with missing
+  # values drops rows, and model B on 50 rows showed LOOIC 32.2 against A's
+  # 54.8 on 70, where on B's 50 rows A scored 30.9 -- the better model read as
+  # 22.6 worse.  loo::loo_compare() refuses that comparison; here a column
+  # whose fits differ in their rows is blanked, with a warning.
+  for (ic in c("AICc", "LOOIC")) {
+    has <- which(is.finite(met_df[[ic]]))
+    if (length(has) < 2L) next
+    rs <- lapply(has, function(i) .fit_rowset(fits[[match(met_df$model[i], names(fits))]]))
+    if (any(vapply(rs, is.null, logical(1)))) next
+    if (all(vapply(rs[-1L], .same_rowset, logical(1), rs[[1L]]))) next
+    .warn_and_log(paste0(
+      "compare_models(): %s is a sum over the rows a model was fitted to, and ",
+      "the models carrying it were fitted to different rows (%s), so it is ",
+      "set to NA: compared across different rows it can rank the models the ",
+      "wrong way round. Refit them on the same rows to compare them."),
+      ic, paste(sprintf("%s: n = %d", met_df$model[has],
+                        vapply(rs, `[[`, integer(1), "n")), collapse = ", "))
+    met_df[[ic]] <- NA_real_
+  }
+
+  # A table mixing out-of-bag and in-sample rows (a forest beside anything
+  # else, without newdata) compares unlike numbers; metric_basis says which is
+  # which, and this says that it matters.
+  if (length(unique(met_df$metric_basis)) > 1L)
+    .log_warn(paste0("compare_models(): the metrics mix bases (%s); ",
+                     "out-of-bag and in-sample errors are not comparable, so ",
+                     "use newdata or compare_models_cv() to rank these models."),
+              paste(sprintf("%s: %s", met_df$model, met_df$metric_basis),
+                    collapse = ", "))
+
   # --- Post-fit residual spatial autocorrelation check ---
   moran_df <- .residual_morans_table(fits)
   met_df   <- merge(met_df, moran_df, by = "model", all.x = TRUE, sort = FALSE)
 
-  # Emit warnings for models whose residuals still show significant
-
-  # spatial autocorrelation (alpha = 0.05)
+  # Log a caution for models whose residuals still show significant spatial
+  # autocorrelation (alpha = 0.05, two-sided).  The direction decides what it
+  # means, and it is read from z, not from I: E[I] is negative, so an I just
+  # below 0 can still be positive autocorrelation.  Negative z -- residuals
+  # anti-correlated with their neighbours -- is what in-sample residuals of a
+  # GP or GWR fit that tracks the data closely look like, the opposite of
+  # structure the model missed, and was reported as the latter.
   for (i in seq_len(nrow(met_df))) {
     p_val <- met_df$resid_morans_p[i]
     I_val <- met_df$resid_morans_I[i]
+    z_val <- met_df$resid_morans_z[i]
     if (is.finite(p_val) && p_val < 0.05) {
-      .log_warn(
-        paste0("compare_models(): residuals of '%s' show significant ",
-               "spatial autocorrelation (Moran's I = %.4f, p = %.4g). ",
-               "The model may not fully capture the spatial structure."),
-        met_df$model[i], I_val, p_val
-      )
+      if (is.finite(z_val) && z_val < 0)
+        .log_warn(
+          paste0("compare_models(): residuals of '%s' show significant ",
+                 "negative spatial autocorrelation (Moran's I = %.4f, ",
+                 "p = %.4g): neighbouring residuals alternate in sign, as ",
+                 "in-sample residuals of a model that tracks the data closely ",
+                 "(a GP, a small-bandwidth GWR) do. That points to ",
+                 "over-fitting, not to missed spatial structure."),
+          met_df$model[i], I_val, p_val)
+      else
+        .log_warn(
+          paste0("compare_models(): residuals of '%s' show significant ",
+                 "spatial autocorrelation (Moran's I = %.4f, p = %.4g). ",
+                 "The model may not fully capture the spatial structure."),
+          met_df$model[i], I_val, p_val
+        )
     }
   }
 
   met_df
+}
+
+
+#' The rows a fit was fitted to, as a comparable fingerprint
+#'
+#' For \code{compare_models()}'s information-criterion check.  Fits do not
+#' reliably carry \code{..row_id}, so the fingerprint is the row count, the
+#' sorted response and the sorted coordinates (in EPSG:4326 when the data
+#' has a CRS).  Sorting each margin separately keeps the comparison stable
+#' under the last-digit noise of a reprojection.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @return A list, or \code{NULL} when the fit's data cannot be read.
+#' @keywords internal
+#' @noRd
+.fit_rowset <- function(fit) {
+  tryCatch({
+    d <- fit$data_sf
+    y <- as.numeric(sf::st_drop_geometry(d)[[fit$response_var]])
+    g <- sf::st_geometry(d)
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
+      g <- suppressWarnings(sf::st_centroid(g))
+    lonlat <- !is.na(sf::st_crs(g))
+    if (lonlat) g <- suppressWarnings(sf::st_transform(g, 4326))
+    xy <- sf::st_coordinates(g)
+    if (!length(y) || nrow(xy) != length(y)) return(NULL)
+    list(n = length(y), y = sort(y, na.last = TRUE),
+         x1 = sort(xy[, 1L], na.last = TRUE), x2 = sort(xy[, 2L], na.last = TRUE),
+         lonlat = lonlat)
+  }, error = function(e) NULL)
+}
+
+#' Do two \code{.fit_rowset()} fingerprints describe the same rows?
+#' @keywords internal
+#' @noRd
+.same_rowset <- function(a, b) {
+  if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
+  close <- function(u, v, tol) {
+    d <- abs(u - v)
+    all((is.na(u) & is.na(v)) | (!is.na(d) & d <= tol))
+  }
+  tol_xy <- if (a$lonlat) 1e-6
+            else 1e-9 * max(1, abs(c(a$x1, a$x2)), na.rm = TRUE)
+  close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE)) &&
+    close(a$x1, b$x1, tol_xy) && close(a$x2, b$x2, tol_xy)
 }
 
 
@@ -1340,7 +1485,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
 #' @param boundary Optional polygon sf/sfc.
-#' @param pointize Geometry coercion strategy.
+#' @param pointize Geometry coercion strategy.  It also decides where a
+#'   polygon or line row falls in the shared blocks, so each row is placed by
+#'   the point every model is fitted at.
 #' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
 #'   are formal arguments of \code{cv_gwr()} are forwarded (it has no
 #'   \code{...}), so entries meant for \code{fit_gwr_model()} alone (e.g.
@@ -1366,7 +1513,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \code{predictor_vars}) is estimated and used as the minimum block size of
 #'   the shared folds, as in \code{\link{make_folds}()}.  Default
 #'   \code{FALSE}: geometric blocks, as before this argument existed.  Either
-#'   way the fold set is built once and every backend is scored on it.
+#'   way the fold set is built once and every backend is scored on it.  When
+#'   it cannot be built (a \code{block_size} or estimated range that leaves a
+#'   single block, say) the call is an error, as it is for each backend on
+#'   its own; no model is scored on a design other than the one asked for.
 #' @param metrics Optional scoring function of your own, handed to every
 #'   backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
 #'   numeric vector, applied per fold and to each backend's pooled
@@ -1501,21 +1651,35 @@ compare_models_cv <- function(
   # the leakage diagnostic that compares the blocks to the estimated range.
   # Before they were forwarded, this -- the one function that compares models
   # -- was also the one whose folds could never be checked against the range.
+  #
+  # A failure to build them is an error.  It used to be a log line and a
+  # fall-back to each backend's own DEFAULT folds, which none of them was
+  # handed block_size or auto_range for: block_size = 1e6 (a single block,
+  # which cv_rf() refuses) came back as a five-fold comparison on geometric
+  # blocks, and auto_range = TRUE as the small, leaky blocks it exists to
+  # prevent, with no R condition either way.  The backends would fail on the
+  # same design, so say so once, here.
+  #
+  # Blocks are assigned to the points the models are fitted at.  make_folds()
+  # reduces polygons and lines with pointize = "auto", so under another
+  # `pointize` it placed rows by a different point than every backend fits
+  # them at (119 of 150 L-shaped parcels changed fold against a standalone
+  # cv_gwr(pointize = "centroid")).  The provenance probe stays on the geometry
+  # as supplied, which is what each cv_*() checks it against.
   if (is.null(folds)) {
+    pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
+    fold_src  <- if (pointized) coerce_to_points(data_sf, pointize) else data_sf
     folds <- tryCatch(
-      make_folds(data_sf, k = k, method = "block_kfold",
+      make_folds(fold_src, k = k, method = "block_kfold",
                  seed = if (is.null(seed)) 123L else seed,
                  boundary = boundary, block_size = block_size,
                  auto_range = auto_range, response_var = response_var,
                  predictor_vars = predictor_vars),
-      error = function(e) {
-        .log_warn(paste0("compare_models_cv(): could not build a shared fold ",
-                         "set (%s); each backend will build its own, so the ",
-                         "models may not be scored on identical splits."),
-                  conditionMessage(e))
-        NULL
-      }
-    )
+      error = function(e)
+        stop("compare_models_cv(): could not build the shared fold set, so no ",
+             "model can be scored on the design asked for: ",
+             conditionMessage(e), call. = FALSE))
+    if (pointized) folds$params$row_probe <- .fold_row_probe(data_sf)
   }
 
   comparison_rows <- list(); by_fold_rows <- list(); cv_results <- list()
