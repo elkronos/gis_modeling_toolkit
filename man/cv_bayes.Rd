@@ -64,7 +64,11 @@ internals.}
 
 \item{compute_pred_intervals}{Logical; compute predictive intervals.}
 
-\item{coverage_levels}{Numeric vector of coverage levels.}
+\item{coverage_levels}{Numeric vector of the nominal coverage levels to
+score, as proportions strictly between 0 and 1 (\code{0.95}, not
+\code{95}), each given once; anything else is an error.  Each becomes a
+column \code{coverage_<percent>} of \code{fold_metrics}, named at full
+precision (\code{0.975} gives \code{coverage_97.5}).}
 
 \item{block_size}{Optional minimum block edge length for spatial CV blocks
 (projected CRS units).}
@@ -78,7 +82,12 @@ auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
-are the primary beneficiary of this option.}
+are the primary beneficiary of this option.  Mind the memory: every
+fold compiles its own Stan model, and one compilation can take several
+GB (3.6 GB was measured), so \code{parallel = n} runs \code{n} of them
+at once.  A compiler killed for lack of memory fails its fold with
+rstan's \code{"invalid connection"} error, which \code{fold_status}
+records; use fewer cores if you see it.}
 
 \item{metrics}{Optional scoring function of your own, a
 \code{function(y, yhat)} returning a named numeric vector; its names
@@ -93,8 +102,9 @@ and \code{CRPS}, which this function computes itself.}
 A list with \code{overall}, \code{fold_metrics},
 \code{predictions}, \code{folds}, \code{n_folds_attempted},
 \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-\code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
-\code{predictive_coverage}.
+\code{n_unknown_ids}, \code{n_dropped}, \code{formula},
+\code{predictive_coverage} and \code{coverage_levels} (the nominal
+levels, named by their \code{coverage_*} column).
 The two fold counts make a run where every fold failed visible in the
 return value itself, beyond the warning, and \code{fold_status} (one
 row per fold: \code{fold}, \code{status}, \code{message}) keeps the
@@ -139,6 +149,9 @@ has settled.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator within 100
+machine epsilons of the largest one counts as zero, so the rule does not
+depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

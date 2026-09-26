@@ -345,7 +345,12 @@
 #'   `MAPE` and `SMAPE` were averaged over: both have a denominator that can be
 #'   zero, and each drops the rows where its own denominator vanishes (`MAPE`
 #'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
-#'   when no row qualifies. `n_MAPE` and `n_SMAPE` are the row counts each was
+#'   when no row qualifies. "Zero" is relative to the data, as for every
+#'   metric here: a denominator within `100 * .Machine$double.eps` of the
+#'   largest one, and, for `R2`, a total sum of squares whose RMS deviation
+#'   is within that fraction of the RMS of `y` (then `R2` is `NA`). The
+#'   result therefore does not depend on the response's units.
+#'   `n_MAPE` and `n_SMAPE` are the row counts each was
 #'   actually averaged over, so that a percentage error over a subset is
 #'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
 #'   in the empty frame. They sit last so that code addressing the first seven
@@ -383,16 +388,28 @@
   rmse <- sqrt(rss / n)
   mae  <- mean(abs(y - yhat))
 
-  nz <- abs(y) > .Machine$double.eps * 100
+  # "Zero" means zero at the scale of the data, 100 machine epsilons of its
+  # magnitude, for every metric.  The thresholds were absolute (1e-14 for a
+  # denominator, var(y) > 2.2e-16 for R2), so a response in small units --
+  # sd below about 1.5e-8 -- lost its R2 while RMSE and MAE were fine, and
+  # select_features_forward(metric = "R2") then selected nothing.  A constant
+  # response still has a TSS of exactly 0 (or of rounding noise, below the
+  # threshold), so its R2 stays NA.
+  tol <- 100 * .Machine$double.eps
+  nz <- abs(y) > tol * max(abs(y))
   mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / y[nz])) * 100 else NA_real_
 
   denom <- abs(y) + abs(yhat)
-  smape_ok <- denom > .Machine$double.eps * 100
+  smape_ok <- denom > tol * max(denom)
   smape <- if (any(smape_ok)) {
     mean(2 * abs(y[smape_ok] - yhat[smape_ok]) / denom[smape_ok]) * 100
   } else NA_real_
 
-  r2 <- if (tss > .Machine$double.eps * n) 1 - rss / tss else NA_real_
+  # TSS against the squared magnitude of y: R2 needs the spread about the
+  # baseline to exceed rounding, i.e. an RMS deviation above tol times the
+  # RMS of y.  (Relative to sum(y^2) itself, not squared tol, it would turn
+  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)
+  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss else NA_real_
 
   adj_r2 <- NA_real_
   if (!is.null(p) && is.finite(r2) && n > (p + 1L)) {

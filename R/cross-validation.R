@@ -279,12 +279,17 @@
 #'
 #' A user metric may not reuse one of these names: it would silently
 #' overwrite the built-in value, and \code{compare_models_cv()} reads several
-#' of them by name.
+#' of them by name.  \code{mean_CRPS} is here because
+#' \code{compare_models_cv()} writes it into the Bayesian row of
+#' \code{overall} over a user column of that name.  The per-fold extras
+#' (\code{CRPS}, \code{coverage_*}, \code{bandwidth}, ...) depend on the
+#' backend and its arguments, so \code{.cv_fit_one_fold()} checks those as it
+#' writes them.
 #' @keywords internal
 #' @noRd
 .cv_reserved_metric_cols <- c("fold", "n_train", "n_test", "n_pred", "RMSE",
                               "MAE", "MAPE", "SMAPE", "R2", "Adj_R2", "n_MAPE",
-                              "n_SMAPE", "model")
+                              "n_SMAPE", "model", "mean_CRPS")
 
 #' Validate the `metrics` argument of the cv_*() functions
 #'
@@ -500,19 +505,31 @@
 #'   \item \strong{Tolerant of dropped rows.}  Per-row values, so the
 #'     comparison is made over whichever probe rows survived the complete-case
 #'     filter.
+#'   \item \strong{Independent of \code{sf_use_s2()}.}  On a lon/lat layer
+#'     \code{st_centroid()} is spherical with s2 on and planar with it off,
+#'     and the two differ by up to 5e-4 degrees on county polygons, far past
+#'     the tolerance: folds built before \code{sf_use_s2(FALSE)} (a common
+#'     workaround for invalid polygons), or saved and read in a session set
+#'     the other way, were refused as "built from different data".  The
+#'     centroid is now always the planar one, which is also the one that
+#'     does not fail on invalid geometry.  Probes of this kind carry
+#'     \code{kind = "planar_centroid"}; one without \code{kind} was taken
+#'     under whatever setting was current, and is checked the same way.
 #' }
 #'
 #' @param x An sf object carrying a \code{..row_id} column.
 #' @param max_probe Maximum number of rows to record.  64 keeps the folds
 #'   object small while making a same-size different-dataset collision
 #'   effectively impossible.
+#' @param legacy Take the centroid under the current \code{sf_use_s2()}
+#'   setting, as probes without a \code{kind} were taken, to check one.
 #' @return A list with \code{row_id} (the IDs as supplied), numeric \code{x}
-#'   and \code{y}, and \code{lonlat} (whether the coordinates are in
-#'   EPSG:4326, i.e. the input carried a CRS), or \code{NULL} when no probe
-#'   can be taken.
+#'   and \code{y}, \code{lonlat} (whether the coordinates are in EPSG:4326,
+#'   i.e. the input carried a CRS) and \code{kind}, or \code{NULL} when no
+#'   probe can be taken.
 #' @keywords internal
 #' @noRd
-.fold_row_probe <- function(x, max_probe = 64L) {
+.fold_row_probe <- function(x, max_probe = 64L, legacy = FALSE) {
   tryCatch({
     if (!inherits(x, "sf") || !("..row_id" %in% names(x)) || nrow(x) == 0L)
       return(NULL)
@@ -520,7 +537,8 @@
     take <- unique(round(seq(1, nrow(x), length.out = min(nrow(x), max_probe))))
     g    <- sf::st_geometry(x)[take]
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-      g <- suppressWarnings(sf::st_centroid(g))
+      g <- if (isTRUE(legacy)) suppressWarnings(sf::st_centroid(g))
+           else .planar_centroid(g)
     cr     <- suppressWarnings(sf::st_crs(x))
     lonlat <- FALSE
     if (!is.na(cr)) {
@@ -530,8 +548,24 @@
     xy <- suppressWarnings(sf::st_coordinates(g))
     if (is.null(xy) || nrow(xy) != length(take)) return(NULL)
     list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
-         lonlat = lonlat)
+         lonlat = lonlat,
+         kind = if (isTRUE(legacy)) "session_centroid" else "planar_centroid")
   }, error = function(e) NULL)
+}
+
+
+#' The planar centroid of a geometry set, whatever \code{sf_use_s2()} says
+#'
+#' For \code{.fold_row_probe()}: s2 is switched off for the one call on a
+#' lon/lat set and restored on exit.
+#' @keywords internal
+#' @noRd
+.planar_centroid <- function(g) {
+  if (isTRUE(sf::st_is_longlat(g)) && isTRUE(sf::sf_use_s2())) {
+    suppressMessages(sf::sf_use_s2(FALSE))
+    on.exit(suppressMessages(sf::sf_use_s2(TRUE)), add = TRUE)
+  }
+  suppressWarnings(sf::st_centroid(g))
 }
 
 
@@ -559,8 +593,18 @@
   # partition is unaffected; the numbering was not reproducible.  sort() with
   # method = "radix" is always C-collation, so the numbering is now a property
   # of the labels alone.
-  f <- factor(as.character(folds),
-              levels = sort(unique(as.character(folds)), method = "radix"))
+  # That order is for character labels only.  Numbers sorted as strings run
+  # "1", "10", "11", "12", "2", ..., so with ten or more numeric labels (site
+  # IDs for leave-location-out) output fold 2 was the user's label 10, and
+  # area_of_applicability(), which numbers the same vector numerically,
+  # disagreed.  Numbers are ordered as numbers -- unique() after
+  # as.character() because two doubles can print alike -- and a factor keeps
+  # the level order its owner gave it.
+  lv <- if (is.factor(folds)) levels(droplevels(folds))
+        else if (is.numeric(folds) || is.logical(folds))
+          unique(as.character(sort(unique(folds))))
+        else sort(unique(as.character(folds)), method = "radix")
+  f <- factor(as.character(folds), levels = lv)
   f <- droplevels(f)
   if (anyNA(f))
     stop(caller, "(): `folds` contains missing labels.", call. = FALSE)
@@ -596,7 +640,11 @@
   if (is.null(probe) || is.null(probe$row_id) || length(probe$row_id) == 0L ||
       is.null(probe$x) || anyNA(probe$row_id))
     return(invisible(NULL))
-  now <- .fold_row_probe(data_sf, max_probe = nrow(data_sf))
+  # A probe with no `kind` predates the planar centroid and was taken under
+  # the sf_use_s2() setting of its day; recompute the same way, so folds
+  # saved by an older version are not refused for the change of method.
+  now <- .fold_row_probe(data_sf, max_probe = nrow(data_sf),
+                         legacy = is.null(probe$kind))
   if (is.null(now)) return(invisible(NULL))
   if (!identical(isTRUE(probe$lonlat), isTRUE(now$lonlat))) {
     .log_info(paste0("%s(): the supplied `folds` were built on data %s a CRS ",
@@ -722,10 +770,12 @@
                                length(y_hat), length(y_true))))
   }
 
-  # Training-set mean: the correct null-model baseline for out-of-sample
-  # R².  Using the test-set mean instead would give the null model credit
-  # for knowing information that was not available at prediction time,
-  # systematically inflating CV R².
+  # Training-set mean: the baseline out-of-sample R² is measured against,
+  # because it is the only null prediction available at prediction time.
+  # (The held-out rows' own mean would be a null model that knows the test
+  # data.  It fits them at least as well as any other constant, so it gives
+  # the LOWER R², not a higher one; the choice is about using training
+  # information only.)  model_metrics(newdata =) uses the same baseline.
   y_train <- train_df[[response_var]]
   y_train_mean <- mean(y_train[is.finite(y_train)], na.rm = TRUE)
 
@@ -747,24 +797,53 @@
   # A `..per_row` element is the exception: a data frame with one row per
   # test observation (cv_bayes() puts the posterior predictive SD there),
   # which goes into the prediction rows below rather than the fold stats.
+  # A fold_info_fn that THROWS gets what a throwing user `metrics` function
+  # gets: logged, its columns NA for this fold, the fold kept.  Its extras
+  # used to be dropped without a word -- cv_bayes() given coverage_levels =
+  # c(50, 80, 95) lost gp_k, n_draws, CRPS and every coverage column on every
+  # fold with fold_status "ok" -- so the cause now also rides back as a note
+  # for fold_status$message.  One that returns the wrong SHAPE is an error,
+  # again as for `metrics`: a vector where a scalar belongs died later in
+  # `fs[[cn]] <-` with R's "replacement has 0 rows".
   per_row <- NULL
+  note    <- NULL
   if (!is.null(fold_info_fn)) {
     extra <- try(fold_info_fn(fit_obj, test_sf, y_true, y_hat), silent = TRUE)
-    if (!inherits(extra, "try-error") && is.list(extra)) {
-      if (is.data.frame(extra$..per_row) &&
-          nrow(extra$..per_row) == length(y_true))
-        per_row <- extra$..per_row
+    if (inherits(extra, "try-error")) {
+      note <- sprintf("fold_info_fn failed: %s", .try_error_message(extra))
+      .log_warn("cross-validation: fold %s: %s. Its columns are NA there.",
+                format(fold_lab), note)
+    } else if (is.list(extra)) {
+      if (is.data.frame(extra$..per_row)) {
+        if (nrow(extra$..per_row) == length(y_true))
+          per_row <- extra$..per_row
+        else
+          .log_warn(paste0("cross-validation: fold %s: fold_info_fn's `..per_row` ",
+                           "has %d rows for %d test rows and was dropped."),
+                    format(fold_lab), nrow(extra$..per_row), length(y_true))
+      }
       extra$..per_row <- NULL
+      .check_fold_extras(extra, names(fs))
       for (cn in names(extra)) fs[[cn]] <- extra[[cn]]
     }
   }
 
   # The user's scoring function, on the same finite pairs the built-in
   # metrics used.  Its pooled counterpart is applied in .cv_overall_metrics().
+  # Its names are checked against the columns this fold already has, not only
+  # against the static built-in list: the extras (CRPS, coverage_*, gp_k,
+  # n_draws, bandwidth, or whatever a fold_info_fn returns) are only known
+  # here, and a user metric of the same name overwrote them silently --
+  # cv_bayes()'s predictive_coverage then reported the user's number.
   if (!is.null(metrics)) {
     um <- .apply_user_metrics(metrics, y_true, y_hat,
                               where = sprintf("fold %s", format(fold_lab)))
     if (is.null(um)) um <- .na_user_metrics(metrics)
+    clash <- intersect(names(um), names(fs))
+    if (length(clash))
+      stop("`metrics` returned names that are already columns of the metrics ",
+           "frames: ", paste(clash, collapse = ", "), ". Use other names.",
+           call. = FALSE)
     for (cn in names(um)) fs[[cn]] <- um[[cn]]
   }
 
@@ -779,7 +858,42 @@
   )
   if (!is.null(per_row)) pr <- cbind(pr, per_row)
 
-  list(pred_row = pr, fold_stat = fs)
+  list(pred_row = pr, fold_stat = fs, note = note)
+}
+
+
+#' Validate what a \code{fold_info_fn} returned, before it is written
+#'
+#' Every element (\code{..per_row} already removed) becomes one cell of the
+#' fold's row of \code{fold_metrics}, so each must be named, once, with a
+#' name that is not already a column, and hold one value.
+#'
+#' @param extra The list, without \code{..per_row}.
+#' @param taken The column names the fold's row already has.
+#' @return \code{invisible(NULL)}; called for the error.
+#' @keywords internal
+#' @noRd
+.check_fold_extras <- function(extra, taken) {
+  if (!length(extra)) return(invisible(NULL))
+  nm <- names(extra)
+  if (is.null(nm) || anyNA(nm) || !all(nzchar(nm)))
+    stop("cross-validation: `fold_info_fn` must return a list whose every ",
+         "element is named.", call. = FALSE)
+  if (anyDuplicated(nm))
+    stop("cross-validation: `fold_info_fn` returned duplicated names: ",
+         paste(unique(nm[duplicated(nm)]), collapse = ", "), ".", call. = FALSE)
+  clash <- intersect(nm, union(taken, .cv_reserved_metric_cols))
+  if (length(clash))
+    stop("cross-validation: `fold_info_fn` returned names that are already ",
+         "columns of fold_metrics: ", paste(clash, collapse = ", "),
+         ". Use other names.", call. = FALSE)
+  bad <- nm[!vapply(extra, function(v) is.atomic(v) && length(v) == 1L,
+                    logical(1))]
+  if (length(bad))
+    stop("cross-validation: `fold_info_fn` must return one value per name ",
+         "(a data frame with one row per test row goes in `..per_row`); ",
+         "element '", bad[1L], "' is not a single value.", call. = FALSE)
+  invisible(NULL)
 }
 
 
@@ -964,25 +1078,47 @@
     # integer-response warning, raised in every fold, reached nobody under
     # parallel = 2 while the sequential run showed all four.  Collect them in
     # the worker and re-raise in the parent, once per distinct message.
+    # An error that escapes .cv_fit_one_fold() -- the documented shape errors
+    # of `metrics` and `fold_info_fn` -- aborts a sequential run.  In a worker
+    # it became that fold's try-error, and the run carried on without it.  It
+    # is caught here, carried back, and raised again in the parent below.
     caught_worker <- function(i) {
       msgs <- character(0)
-      res  <- withCallingHandlers(
-        fold_worker(i),
-        warning = function(w) {
-          msgs <<- c(msgs, conditionMessage(w))
-          invokeRestart("muffleWarning")
-        })
+      res  <- tryCatch(
+        withCallingHandlers(
+          fold_worker(i),
+          warning = function(w) {
+            msgs <<- c(msgs, conditionMessage(w))
+            invokeRestart("muffleWarning")
+          }),
+        error = function(e) list(escaped = conditionMessage(e)))
       # .cv_fit_one_fold() returns NULL for an unusable fold; NULL cannot
       # carry an attribute, so wrap the pair instead.
       list(res = res, fold_warnings = msgs)
     }
+    # mc.preschedule = FALSE: one fork per fold.  Prescheduled, mclapply()
+    # hands each core a chunk of folds, copies one fold's try-error to every
+    # fold of its chunk and returns NULL for every fold of a core that dies,
+    # so a fold that succeeded was discarded, or reported with another
+    # fold's error, for sharing a core with a failure.  k forks cost little
+    # next to k model fits, and the per-fold seeds are drawn above, so the
+    # results do not change.
     results <- parallel::mclapply(
-      seq_along(remapped_folds), caught_worker, mc.cores = cores
+      seq_along(remapped_folds), caught_worker, mc.cores = cores,
+      mc.preschedule = FALSE
     )
     relayed <- unique(unlist(lapply(results, function(z)
       if (!inherits(z, "try-error")) z$fold_warnings), use.names = FALSE))
     for (m in relayed) warning(m, call. = FALSE)
     results <- lapply(results, function(z) if (inherits(z, "try-error")) z else z$res)
+    esc <- which(vapply(results, function(z)
+      is.list(z) && !inherits(z, "try-error") && !is.null(z$escaped), logical(1)))
+    if (length(esc)) {
+      j <- esc[1L]
+      stop(sprintf("%s (fold %s, raised in a parallel worker)",
+                   results[[j]]$escaped,
+                   format(remapped_folds[[j]]$fold_id %||% j)), call. = FALSE)
+    }
   } else {
     results <- lapply(seq_along(remapped_folds), fold_worker)
   }
@@ -990,11 +1126,14 @@
   # One status per fold, in the folds' own order, before anything is filtered:
   # what each fold did is the diagnosis a caller needs when "3 of 5 folds
   # produced predictions" is all the console kept.  mclapply() hands back a
-  # try-error OBJECT (not NULL) when a child errors or is killed; a fold that
-  # threw comes back as list(error = <message>); one skipped before fitting
-  # or after predicting as list(skip = <reason>); a successful one carries
-  # pred_row and fold_stat.  `$` (not `[[`) throughout, because a successful
-  # fold's list has no "error" element and `[[` would abort.
+  # try-error OBJECT when a child errors, and NULL for a child that was killed
+  # (out of memory, a segfault) -- a worker error, not a skip, and it was
+  # reported as "skipped" and left out of fit_errors; a fold that threw comes
+  # back as list(error = <message>); one skipped before fitting or after
+  # predicting as list(skip = <reason>); a successful one carries pred_row and
+  # fold_stat, and a note when its fold_info_fn failed.  `$` (not `[[`)
+  # throughout, because a successful fold's list has no "error" element and
+  # `[[` would abort.
   labels <- vapply(remapped_folds, function(f) as.integer(f$fold_id %||% NA), integer(1))
   labels[is.na(labels)] <- seq_along(remapped_folds)[is.na(labels)]
   status <- character(n_folds); msg <- character(n_folds)
@@ -1003,13 +1142,15 @@
     if (inherits(z, "try-error")) {
       status[i] <- "worker_error"; msg[i] <- .try_error_message(z)
     } else if (is.null(z)) {
-      status[i] <- "skipped"; msg[i] <- "no result returned"
+      status[i] <- "worker_error"
+      msg[i] <- paste0("the parallel worker delivered no result (it was ",
+                       "killed or crashed, for example for lack of memory)")
     } else if (!is.null(z$error)) {
       status[i] <- "error"; msg[i] <- z$error
     } else if (!is.null(z$skip)) {
       status[i] <- "skipped"; msg[i] <- z$skip
     } else {
-      status[i] <- "ok"; msg[i] <- ""
+      status[i] <- "ok"; msg[i] <- z$note %||% ""
     }
   }
   fold_status <- data.frame(fold = labels, status = status, message = msg,
@@ -4002,8 +4143,9 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   if (!requireNamespace("sp", quietly = TRUE))
     stop("cv_gwr(): package 'sp' is required (for GWmodel interop).", call. = FALSE)
 
+  # match.arg() alone: it already refuses every value .validate_kernel() could
+  # repair (wrong case, NA, length > 1), so calling that after it was dead code.
   kernel <- match.arg(kernel)
-  kernel <- .validate_kernel(kernel)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_gwr")
@@ -4174,7 +4316,11 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   internals.
 #' @param summary "mean" or "median" for posterior predictions.
 #' @param compute_pred_intervals Logical; compute predictive intervals.
-#' @param coverage_levels Numeric vector of coverage levels.
+#' @param coverage_levels Numeric vector of the nominal coverage levels to
+#'   score, as proportions strictly between 0 and 1 (\code{0.95}, not
+#'   \code{95}), each given once; anything else is an error.  Each becomes a
+#'   column \code{coverage_<percent>} of \code{fold_metrics}, named at full
+#'   precision (\code{0.975} gives \code{coverage_97.5}).
 #' @param block_size Optional minimum block edge length for spatial CV blocks
 #'   (projected CRS units).
 #' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
@@ -4185,7 +4331,12 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 #'   on Windows).  If an integer > 1, use that many cores.  Default
 #'   \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
-#'   are the primary beneficiary of this option.
+#'   are the primary beneficiary of this option.  Mind the memory: every
+#'   fold compiles its own Stan model, and one compilation can take several
+#'   GB (3.6 GB was measured), so \code{parallel = n} runs \code{n} of them
+#'   at once.  A compiler killed for lack of memory fails its fold with
+#'   rstan's \code{"invalid connection"} error, which \code{fold_status}
+#'   records; use fewer cores if you see it.
 #' @param metrics Optional scoring function of your own, a
 #'   \code{function(y, yhat)} returning a named numeric vector; its names
 #'   become columns of \code{fold_metrics} (per fold) and \code{overall}
@@ -4199,8 +4350,9 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #' @return A list with \code{overall}, \code{fold_metrics},
 #'   \code{predictions}, \code{folds}, \code{n_folds_attempted},
 #'   \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
-#'   \code{predictive_coverage}.
+#'   \code{n_unknown_ids}, \code{n_dropped}, \code{formula},
+#'   \code{predictive_coverage} and \code{coverage_levels} (the nominal
+#'   levels, named by their \code{coverage_*} column).
 #'   The two fold counts make a run where every fold failed visible in the
 #'   return value itself, beyond the warning, and \code{fold_status} (one
 #'   row per fold: \code{fold}, \code{status}, \code{message}) keeps the
@@ -4257,6 +4409,9 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   summary <- match.arg(summary)
   if (!inherits(data_sf, "sf")) stop("cv_bayes(): `data_sf` must be an sf object.")
   metrics <- .check_metrics_fn(metrics, "cv_bayes")
+  # Named by column: the nominal level travels with the result from here on,
+  # instead of being read back from a column name.
+  cov_lv  <- .check_coverage_levels(coverage_levels)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_bayes")
@@ -4323,9 +4478,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
     # Pre-initialise coverage columns so every fold emits the same schema
     # even when the posterior-draw step fails for some folds; heterogeneous
     # per-fold columns would otherwise break row-binding of fold_metrics.
-    for (cl in coverage_levels) {
-      extras[[sprintf("coverage_%.0f", cl * 100)]] <- NA_real_
-    }
+    for (cn in names(cov_lv)) extras[[cn]] <- NA_real_
 
     # Full posterior predictive draws for intervals + CRPS
     if (isTRUE(compute_pred_intervals)) {
@@ -4333,6 +4486,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
         predict(fit_obj, newdata = test_sf, type = "predict", draws = TRUE),
         silent = TRUE
       )
+      if (inherits(ppred_draws, "try-error"))
+        .log_warn(paste0("cv_bayes(): the posterior predictive draws failed on a ",
+                         "fold (%s); its coverage and CRPS are NA."),
+                  .try_error_message(ppred_draws))
       if (!inherits(ppred_draws, "try-error") && is.matrix(ppred_draws)) {
         extras$n_draws <- nrow(ppred_draws)
         # Per-row posterior predictive SD, for $predictions$yhat_sd.  The
@@ -4343,19 +4500,28 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
             yhat_sd = apply(ppred_draws, 2L, stats::sd),
             stringsAsFactors = FALSE)
 
-        # Coverage at each level
-        for (cl in coverage_levels) {
-          alpha <- (1 - cl) / 2
-          lwr <- apply(ppred_draws, 2L, stats::quantile, probs = alpha)
-          upr <- apply(ppred_draws, 2L, stats::quantile, probs = 1 - alpha)
-          in_interval <- y_true >= lwr & y_true <= upr
-          extras[[sprintf("coverage_%.0f", cl * 100)]] <- mean(in_interval, na.rm = TRUE)
+        # Coverage at each level, and the empirical CRPS via the NRG (energy)
+        # form (see .crps_energy()).  In a try of their own, so that one
+        # failure here -- quantile() refuses a draw matrix holding an NA --
+        # costs these columns and not gp_k, n_draws and yhat_sd with them.
+        scores <- try({
+          cov <- vapply(cov_lv, function(cl) {
+            alpha <- (1 - cl) / 2
+            lwr <- apply(ppred_draws, 2L, stats::quantile, probs = alpha)
+            upr <- apply(ppred_draws, 2L, stats::quantile, probs = 1 - alpha)
+            mean(y_true >= lwr & y_true <= upr, na.rm = TRUE)
+          }, numeric(1))
+          list(cov = cov,
+               crps = mean(.crps_energy(ppred_draws, y_true), na.rm = TRUE))
+        }, silent = TRUE)
+        if (inherits(scores, "try-error")) {
+          .log_warn(paste0("cv_bayes(): coverage and CRPS could not be computed ",
+                           "from a fold's draws (%s); they are NA there."),
+                    .try_error_message(scores))
+        } else {
+          for (cn in names(cov_lv)) extras[[cn]] <- scores$cov[[cn]]
+          extras$CRPS <- scores$crps
         }
-
-        # Empirical CRPS via the NRG (energy) form, vectorised over
-        # observations — see .crps_energy() for the formula and reference.
-        crps_per_obs <- .crps_energy(ppred_draws, y_true)
-        extras$CRPS  <- mean(crps_per_obs, na.rm = TRUE)
       }
     }
 
@@ -4438,10 +4604,49 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
            if (!any(ok)) return(NA_real_)
            sum(v[ok] * w_all[ok]) / sum(w_all[ok])
          }
-         cov_cols  <- grep("^coverage_", names(folds_df), value = TRUE)
+         cov_cols  <- intersect(names(cov_lv), names(folds_df))
          cov_means <- vapply(cov_cols, function(cn) wm(folds_df[[cn]]), numeric(1))
          c(as.list(cov_means), mean_CRPS = wm(folds_df$CRPS))
-       } else NULL)
+       } else NULL,
+       # The nominal level behind each coverage column, named by column.  The
+       # names used to be the only record, rounded to a whole percent: 0.995
+       # was drawn at 1.00 by plot_calibration(), and 0.975 and 0.985 were
+       # both "coverage_98", one overwriting the other.
+       coverage_levels = cov_lv)
+}
+
+
+#' Validate cv_bayes()'s coverage_levels and name their columns
+#'
+#' Every level must lie strictly between 0 and 1.  The column is named from
+#' the level in percent at full precision (\code{coverage_95},
+#' \code{coverage_97.5}), so no two distinct levels share a column; a level
+#' given twice is an error.
+#'
+#' @param x The \code{coverage_levels} argument.
+#' @return A numeric vector of the levels, named by column.
+#' @keywords internal
+#' @noRd
+.check_coverage_levels <- function(x) {
+  if (is.null(x) || (is.numeric(x) && !length(x)))
+    return(stats::setNames(numeric(0), character(0)))
+  if (!is.numeric(x) || any(!is.finite(x)) || any(x <= 0 | x >= 1)) {
+    hint <- if (is.numeric(x) && all(is.finite(x)) && all(x > 1 & x < 100))
+      sprintf(" For percentages, divide by 100: c(%s).",
+              paste(as.character(x / 100), collapse = ", ")) else ""
+    stop(sprintf(paste0("cv_bayes(): `coverage_levels` must be numbers strictly ",
+                        "between 0 and 1 (0.95 for a 95%% interval); got %s.%s"),
+                 paste(as.character(x), collapse = ", "), hint),
+         call. = FALSE)
+  }
+  cols <- paste0("coverage_", vapply(as.numeric(x), function(cl)
+    format(round(cl * 100, 6), scientific = FALSE, trim = TRUE, digits = 15),
+    character(1)))
+  if (anyDuplicated(cols))
+    stop(sprintf("cv_bayes(): `coverage_levels` gives the level %s more than once.",
+                 paste(unique(as.character(x[duplicated(cols)])),
+                       collapse = ", ")), call. = FALSE)
+  stats::setNames(as.numeric(x), cols)
 }
 
 
@@ -4503,7 +4708,12 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{metrics} does not; it is applied per fold only, and its values
 #'   are not pooled.  An element \code{..per_row} that is a data frame with
 #'   one row per held-out observation is spliced into \code{predictions}
-#'   instead.
+#'   instead (\code{NA} in the rows of a fold that returned none; one of the
+#'   wrong length is dropped and logged).  Every other element must be named,
+#'   hold one value, and not reuse a column \code{fold_metrics} already has;
+#'   anything else is an error.  A \code{fold_info_fn} that throws on a fold
+#'   is logged, its columns are \code{NA} for that fold, and
+#'   \code{fold_status$message} says so; the fold is kept.
 #' @param p Number of predictors for Adj R² (NULL to skip).  Only meaningful
 #'   for models with a fixed global parameter count; pass NULL for models
 #'   with spatially varying coefficients (e.g. GWR).
@@ -4541,7 +4751,12 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' \code{RMSE}, and \code{n_pred} counts them.
 #'
 #' The contract: every element named, names unique and not one of the
-#' built-in column names, one number per name.  Anything else is an error,
+#' built-in column names, one number per name.  The built-in names include
+#' the per-fold extras of the backend or of your \code{fold_info_fn}
+#' (\code{bandwidth} for \code{cv_gwr()}; \code{CRPS}, \code{coverage_*},
+#' \code{gp_k}, \code{gp_n_basis} and \code{n_draws} for \code{cv_bayes()}),
+#' and \code{mean_CRPS}, which \code{compare_models_cv()} writes.  Anything
+#' else is an error,
 #' because a scoring function that returns the wrong shape is a mistake to
 #' surface instead of a fold to skip.  A function that \emph{throws} on a
 #' fold is logged and its columns are \code{NA} for that fold (and for
@@ -4566,13 +4781,18 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   run that happened to score \code{NA}, so compare them before trusting
 #'   \code{overall}.  \code{fold_status} is a data.frame with one row per
 #'   fold supplied (\code{fold}, \code{status} and \code{message}), where
-#'   \code{status} is \code{"ok"}; \code{"error"} (the fit or its
+#'   \code{status} is \code{"ok"} (\code{message} is empty unless
+#'   \code{fold_info_fn} failed on the fold); \code{"error"} (the fit or its
 #'   \code{predict()} threw; \code{message} is the error text);
 #'   \code{"skipped"} (nothing scorable: too few matched rows, a prediction
 #'   of the wrong length, or no finite observed/predicted pair);
 #'   \code{"dropped"} (an empty test set, or fewer than two training rows,
 #'   once incomplete rows were removed, so the fold never reached the fitter);
-#'   or \code{"worker_error"} (a parallel worker died).  Every fold missing
+#'   or \code{"worker_error"} (a parallel worker died, for example killed for
+#'   lack of memory).  Each fold runs in its own worker, so a failure costs
+#'   that fold only, and an error that stops a sequential run (a
+#'   \code{metrics} or \code{fold_info_fn} return value of the wrong shape)
+#'   stops a parallel one too, naming the fold.  Every fold missing
 #'   from \code{fold_metrics} has its reason there, which matters most when
 #'   the console output of a long run is gone.  When some folds, but not
 #'   all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
@@ -4594,7 +4814,15 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 #'   the fold's index in the \code{folds} object that was supplied, so it
 #'   lines up with \code{make_folds()$assignment$fold} even when some folds
-#'   were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the
+#'   were unusable and dropped.  \code{R2} is out-of-sample \eqn{R^2}: the
+#'   total sum of squares is taken about the mean of the \emph{training} rows
+#'   (in \code{overall}, each held-out row about its own fold's training
+#'   mean), the null prediction available when the fold is predicted, and
+#'   not about the held-out rows' own mean, a null model that would know the
+#'   test data.  On spatial blocks the two can differ widely; \code{R2} is
+#'   below 0 when the model predicts worse than the training mean.
+#'   \code{\link{model_metrics}(newdata = )} uses the same baseline.
+#'   \code{overall$Adj_R2} is always \code{NA}: the
 #'   pooled out-of-sample predictions come from \code{k} separately fitted
 #'   models and have no single parameter count to adjust for.  The per-fold
 #'   \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
@@ -4693,7 +4921,12 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
     parallel = parallel, seed = seed, metrics = metrics
   )
 
-  preds <- if (length(res$pred_rows)) do.call(rbind, res$pred_rows) else
+  # bind_rows(), as for fold_stats below: a fold whose fold_info_fn returned
+  # no `..per_row` (conditionally, with the wrong row count, or because it
+  # threw) has fewer columns, and rbind() died on that with "numbers of
+  # columns of arguments do not match" after every fold had been fitted.
+  # The missing cells are NA.
+  preds <- if (length(res$pred_rows)) as.data.frame(dplyr::bind_rows(res$pred_rows)) else
     data.frame(`..row_id` = integer(), fold = integer(),
                y = numeric(), yhat = numeric(), y_train_mean = numeric())
   # Typed even when empty: cv_gwr() and cv_bayes() return a 0-row frame with
