@@ -9,6 +9,9 @@
 #     vertices.
 #   * .pick_local_projected_crs() sent circumpolar lon/lat data to Web
 #     Mercator as if they were global coverage.
+#   * st_point_on_surface() segfaulted R (GEOS 3.12.1) on a non-empty feature
+#     holding an EMPTY line part, which ensure_projected() reached for any
+#     lon/lat line layer.
 # ===========================================================================
 
 
@@ -290,4 +293,114 @@ test_that("global coverage and low-latitude belts keep the global fallback", {
                                   lat = stats::runif(60, 0, 20)),
                        coords = c("lon", "lat"), crs = 4326)
   expect_equal(sf::st_crs(ensure_projected(belt))$epsg, 3857L)
+})
+
+
+# ---------------------------------------------------------------------------
+# Empty parts inside non-empty features
+# ---------------------------------------------------------------------------
+
+test_that("an empty part inside a line feature no longer crashes the interior point", {
+  # GEOS segfaults computing the interior point of a non-empty feature that
+  # holds an EMPTY line: a MULTILINESTRING with an empty part beside a real
+  # one, or a GEOMETRYCOLLECTION with an empty LINESTRING member.
+  # .crs_distance_error() reduces every lon/lat line layer to such points, so
+  # plain ensure_projected() took the session down, and with it
+  # coerce_to_points(mode = "auto") at its default tmp_project = TRUE.  Run
+  # in a child process for the same reason as the empty-line test above.
+  child <- .rt_run_child(c(
+    "e2  <- matrix(numeric(0), 0, 2)",
+    "try_ <- function(expr) tryCatch(expr, error = function(e) conditionMessage(e))",
+    "ln  <- function(x0, y0, d) rbind(c(x0, y0), c(x0 + d, y0), c(x0 + 2 * d, y0))",
+    "res <- list()",
+    # lon/lat: reached through .crs_distance_error().
+    "ll <- sf::st_sf(id = 1:3, geometry = sf::st_sfc(",
+    "  sf::st_multilinestring(list(ln(-80, 35, 0.1))),",
+    "  sf::st_multilinestring(list(e2, ln(-79, 35.5, 0.1))),",
+    "  sf::st_multilinestring(list(ln(-78, 36, 0.1))), crs = 4326))",
+    "res$ep_mls <- try_(ensure_projected(ll))",
+    "res$ctp_mls <- try_(coerce_to_points(ll, 'auto'))",
+    "gc_ll <- sf::st_sf(id = 1:3, geometry = sf::st_sfc(",
+    "  sf::st_geometrycollection(list(sf::st_point(c(-80, 35)))),",
+    "  sf::st_geometrycollection(list(sf::st_linestring(), sf::st_point(c(-79, 35.5)))),",
+    "  sf::st_geometrycollection(list(sf::st_point(c(-78, 36)))), crs = 4326))",
+    "res$ep_gc <- try_(ensure_projected(gc_ll))",
+    # coerce_to_points(mode = 'point_on_surface'), projected.
+    "pr <- sf::st_sf(id = 1:4, geometry = sf::st_sfc(",
+    "  sf::st_multilinestring(list(e2, ln(0, 0, 5))),",
+    "  sf::st_geometrycollection(list(sf::st_linestring(), sf::st_point(c(3, 4)))),",
+    "  sf::st_geometrycollection(list(sf::st_multilinestring(list(e2, ln(0, 10, 5))))),",
+    # No crash here, but GEOS read the empty POLYGON as the feature's
+    # dimension and returned POINT EMPTY for a feature with a line in it.
+    "  sf::st_geometrycollection(list(sf::st_polygon(), sf::st_linestring(ln(0, 20, 5)))),",
+    "  crs = 32617))",
+    "res$pos <- try_(coerce_to_points(pr, 'point_on_surface'))"
+  ))
+
+  expect_equal(child$status, 0L,
+               info = paste(utils::tail(child$output, 25), collapse = "\n"))
+  res <- child$res
+  expect_type(res, "list")
+  if (!is.list(res)) return(invisible())
+  for (nm in c("ep_mls", "ctp_mls", "ep_gc", "pos")) expect_s3_class(res[[nm]], "sf")
+  if (!all(vapply(res, inherits, logical(1), "sf"))) return(invisible())
+
+  # The projection was measured on the real parts, not given up on.
+  for (nm in c("ep_mls", "ep_gc")) {
+    expect_false(sf::st_is_longlat(res[[nm]]), info = nm)
+    expect_equal(nrow(res[[nm]]), 3L, info = nm)
+    ch <- attr(res[[nm]], "crs_choice")
+    expect_true(is.data.frame(ch) && all(is.finite(ch$distance_error)), info = nm)
+  }
+
+  # Row for row, and the empty part changes nothing: the midpoint of the
+  # longest (only real) part, back in lon/lat.
+  ctp <- res$ctp_mls
+  expect_equal(ctp$id, 1:3)
+  expect_false(any(sf::st_is_empty(ctp)))
+  expect_equal(unname(sf::st_coordinates(ctp)[2, ]), c(-78.9, 35.5), tolerance = 1e-4)
+
+  # The interior point of each feature is the one it has without its empty
+  # parts: the middle vertex of a three-vertex line, the point itself.
+  pos <- res$pos
+  expect_equal(pos$id, 1:4)
+  expect_false(any(sf::st_is_empty(pos)))
+  expect_equal(unname(sf::st_coordinates(pos)),
+               rbind(c(5, 0), c(3, 4), c(5, 10), c(5, 20)))
+})
+
+
+test_that(".drop_empty_parts removes empty parts only, and keeps every row", {
+  e2  <- matrix(numeric(0), 0, 2)
+  ln  <- rbind(c(0, 0), c(1, 1))
+  sq  <- rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0, 0))
+  g <- sf::st_sfc(
+    sf::st_multilinestring(list(e2, ln)),
+    sf::st_geometrycollection(list(sf::st_linestring(), sf::st_point(c(2, 2)))),
+    sf::st_geometrycollection(list(sf::st_multilinestring(list(e2, ln)))),
+    sf::st_multipolygon(list(list(), list(sq))),
+    sf::st_multilinestring(list(e2, e2)),
+    sf::st_point(c(5, 5)),
+    crs = 32632)
+  out <- .drop_empty_parts(g)
+
+  expect_length(out, length(g))
+  expect_equal(sf::st_crs(out), sf::st_crs(g))
+  expect_equal(as.character(sf::st_geometry_type(out)),
+               as.character(sf::st_geometry_type(g)))
+  expect_equal(sf::st_as_text(out),
+               c("MULTILINESTRING ((0 0, 1 1))",
+                 "GEOMETRYCOLLECTION (POINT (2 2))",
+                 "GEOMETRYCOLLECTION (MULTILINESTRING ((0 0, 1 1)))",
+                 "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)))",
+                 "MULTILINESTRING EMPTY",
+                 "POINT (5 5)"))
+
+  # Nothing to drop: the very same object back, sf or sfc, so the polygon
+  # callers (stable ids, plot labels) see no change at all.
+  clean <- sf::st_sfc(sf::st_multilinestring(list(ln)), sf::st_polygon(list(sq)),
+                      crs = 4326)
+  expect_identical(.drop_empty_parts(clean), clean)
+  clean_sf <- sf::st_sf(a = 1:2, geometry = clean)
+  expect_identical(.drop_empty_parts(clean_sf), clean_sf)
 })
