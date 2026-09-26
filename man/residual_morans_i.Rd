@@ -120,9 +120,13 @@ The list is classed \code{"morans_i"} and has a \code{print()} method,
 so the console shows the statistic and its null without printing the
 \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 \code{$}, \code{[[} and \code{unlist()} are unaffected.
+A custom fit whose class has no \code{residuals()} method (which
+\code{\link{new_spatial_fit}} calls optional) is scored on the
+observed response minus \code{fitted()}, as \code{plot()} does for it.
 Returns \code{NULL} with a warning if computation fails, saying why:
-\code{residuals()} raised an error (its message is quoted) or returned
-\code{NULL} (the fit's class has no method), fewer than 4 valid
+\code{residuals()} raised an error (its message is quoted), or returned
+\code{NULL} and the response minus \code{fitted()} could not be
+formed either (the reason is quoted), fewer than 4 valid
 residuals, or a residual vector whose length does not match the fit's
 \code{data_sf}.
 }

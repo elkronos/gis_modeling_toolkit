@@ -63,15 +63,19 @@ Built via \code{block_kfold} when \code{NULL}.}
 \item{predict_args}{Extra arguments for predict().}
 
 \item{fold_info_fn}{Optional \code{function(fit, test_sf, y, yhat)}
-returning a named list of per-fold extras (a bandwidth, a tuning value,
-anything read off the fitted object), added as columns of
-\code{fold_metrics}.  It sees the fit and the held-out layer, which
+returning a named list (or a named vector) of per-fold extras (a
+bandwidth, a tuning value, anything read off the fitted object), added
+as columns of \code{fold_metrics}.  It sees the fit and the held-out
+layer, which
 \code{metrics} does not; it is applied per fold only, and its values
 are not pooled.  An element \code{..per_row} that is a data frame with
 one row per held-out observation is spliced into \code{predictions}
 instead (\code{NA} in the rows of a fold that returned none; one of the
-wrong length is dropped and logged).  Every other element must be named,
-hold one value, and not reuse a column \code{fold_metrics} already has;
+wrong length is dropped and logged); its columns must be named, once,
+and not reuse a column \code{predictions} already has (\code{..row_id},
+\code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
+other element must be named, hold one value, and not reuse a column
+\code{fold_metrics} already has;
 anything else is an error.  A \code{fold_info_fn} that throws on a fold
 is logged, its columns are \code{NA} for that fold, and
 \code{fold_status$message} says so; the fold is kept.}
@@ -146,7 +150,11 @@ fitted.  The \code{fold} column of
 \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 the fold's index in the \code{folds} object that was supplied, so it
 lines up with \code{make_folds()$assignment$fold} even when some folds
-were unusable and dropped.  \code{R2} is out-of-sample \eqn{R^2}: the
+were unusable and dropped.  Splits that already carry a \code{fold_id},
+as the \code{folds} of a \code{cv_*()} result do, keep it: handing
+one run's \code{folds} to another labels each fold as the first run
+and \code{\link{fold_separation}()} do, a dropped fold's gap
+included.  \code{R2} is out-of-sample \eqn{R^2}: the
 total sum of squares is taken about the mean of the \emph{training} rows
 (in \code{overall}, each held-out row about its own fold's training
 mean), the null prediction available when the fold is predicted, and
@@ -226,9 +234,9 @@ across the rows of its \code{overall}.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
-Non-zero is judged at the scale of the data: a denominator within 100
-machine epsilons of the largest one counts as zero, so the rule does not
-depend on the units of the response.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

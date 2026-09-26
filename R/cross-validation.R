@@ -27,7 +27,9 @@
 #'   \code{keep_idx}.  \code{fold_id} is the fold's index in the ORIGINAL
 #'   \code{folds} object, carried through so that dropping an unusable fold
 #'   does not renumber the survivors: downstream \code{fold} columns then still
-#'   agree with \code{make_folds()$assignment$fold}.
+#'   agree with \code{make_folds()$assignment$fold}.  Splits that already
+#'   carry a \code{fold_id} (the \code{$folds} of a \code{cv_*()} result)
+#'   keep it, when every one is a distinct whole number of at least 1.
 #' @keywords internal
 #' @noRd
 .remap_folds <- function(folds, keep_idx, k = 5L, seed = 123L) {
@@ -103,6 +105,23 @@
   # fold below removes an element from the list, and without this every later
   # fold would be silently renumbered, so fold_metrics$fold and
   # predictions$fold would no longer line up with make_folds()$assignment$fold.
+  # A split that already carries a fold_id keeps it.  A cv_*() result's $folds
+  # holds the splits that survived, each with the fold_id it was reported
+  # under, so a dropped fold leaves a gap (1, 2, 4, 5).  Numbering those by
+  # position relabelled every fold after the gap when the same splits were
+  # handed to a second cv_*() -- its fold 3 was the first run's fold 4 --
+  # while fold_separation() labels them by the fold_id they carry.  Carried
+  # ids are kept when every split has a usable, distinct one; anything else
+  # is numbered by position.
+  fold_ids <- vapply(folds, function(f) {
+    v <- f$fold_id
+    if (is.numeric(v) && length(v) == 1L && is.finite(v) && v >= 1 &&
+        v == round(v) && v <= .Machine$integer.max) as.integer(v)
+    else NA_integer_
+  }, integer(1))
+  if (anyNA(fold_ids) || anyDuplicated(fold_ids))
+    fold_ids <- seq_along(folds)
+
   # A hand-built `folds` list is documented as accepted by every cv_*(), and
   # two ways of getting it wrong went entirely unremarked.  Train and test
   # overlapping is not cross-validation at all -- the model is fitted and
@@ -127,7 +146,7 @@
                           "trains on its own test rows is not a ",
                           "cross-validation split; rebuild the folds with ",
                           "make_folds()."),
-                   j, length(ov),
+                   fold_ids[j], length(ov),
                    paste(utils::head(format(ov), 3L), collapse = ", ")),
            call. = FALSE)
     ent <- c(f$train, f$test)
@@ -146,7 +165,7 @@
     list(
       train = keep_idx[stats::na.omit(match(f$train, keep_idx))],
       test  = keep_idx[stats::na.omit(match(f$test, keep_idx))],
-      fold_id = j
+      fold_id = fold_ids[j]
     )
   })
 
@@ -525,8 +544,10 @@
 #'   setting, as probes without a \code{kind} were taken, to check one.
 #' @return A list with \code{row_id} (the IDs as supplied), numeric \code{x}
 #'   and \code{y}, \code{lonlat} (whether the coordinates are in EPSG:4326,
-#'   i.e. the input carried a CRS) and \code{kind}, or \code{NULL} when no
-#'   probe can be taken.
+#'   i.e. the input carried a CRS), \code{kind}, and \code{points} (whether
+#'   every geometry of \code{x} is a POINT, so that a refusal can say when
+#'   folds built on a pointized copy meet the polygons they came from), or
+#'   \code{NULL} when no probe can be taken.
 #' @keywords internal
 #' @noRd
 .fold_row_probe <- function(x, max_probe = 64L, legacy = FALSE) {
@@ -535,6 +556,7 @@
       return(NULL)
     ids  <- x[["..row_id"]]
     take <- unique(round(seq(1, nrow(x), length.out = min(nrow(x), max_probe))))
+    all_points <- all(sf::st_geometry_type(x, by_geometry = TRUE) == "POINT")
     g    <- sf::st_geometry(x)[take]
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
       g <- if (isTRUE(legacy)) suppressWarnings(sf::st_centroid(g))
@@ -549,7 +571,8 @@
     if (is.null(xy) || nrow(xy) != length(take)) return(NULL)
     list(row_id = ids[take], x = as.numeric(xy[, 1L]), y = as.numeric(xy[, 2L]),
          lonlat = lonlat,
-         kind = if (isTRUE(legacy)) "session_centroid" else "planar_centroid")
+         kind = if (isTRUE(legacy)) "session_centroid" else "planar_centroid",
+         points = all_points)
   }, error = function(e) NULL)
 }
 
@@ -627,6 +650,8 @@
 #' version of this package carries no probe and is passed through unchecked,
 #' as is one whose IDs cannot be matched (\code{NA} IDs) or whose coordinate
 #' space cannot be compared (one side carried a CRS and the other did not).
+#' When the probe was taken on POINT geometry and the data is not, or the
+#' reverse, a mismatch is refused as that, not as folds from different data.
 #'
 #' @param folds A \code{make_folds()} return value, or \code{NULL}.
 #' @param data_sf The sf being cross-validated, as the caller supplied it,
@@ -677,6 +702,26 @@
   cmp <- is.finite(dx) & is.finite(dy)
   bad <- sum(cmp & !(dx <= tol & dy <= tol))
   ok[ok] <- cmp
+  # Folds built on coerce_to_points() of this very layer (or on the polygons,
+  # handed a pointized copy) name the same rows, but each polygon's probe
+  # point is its centroid while the pointized copy's is whatever point
+  # `pointize` chose -- st_point_on_surface() under "auto" -- so every
+  # non-convex feature "moved", and the refusal said the folds came from a
+  # different dataset.  The locations cannot be compared across that change;
+  # say that, and what to do.  A probe without `points` predates the field.
+  if (bad > 0L && is.logical(probe$points) && length(probe$points) == 1L &&
+      !is.na(probe$points) && !identical(probe$points, now$points))
+    stop(sprintf(paste0("%s(): the supplied `folds` were built on %s geometry ",
+                        "and this data has %s geometry, so their row locations ",
+                        "cannot be matched (%d of %d checked row IDs sit at a ",
+                        "different point): the point coerce_to_points() gives ",
+                        "a polygon is in general not the centroid compared ",
+                        "here. Build the folds with make_folds() on the layer ",
+                        "passed here; it reduces polygons to points itself."),
+                 caller,
+                 if (probe$points) "POINT" else "non-POINT",
+                 if (isTRUE(now$points)) "POINT" else "non-POINT",
+                 bad, sum(ok)), call. = FALSE)
   if (bad > 0L)
     stop(sprintf(paste0("%s(): the supplied `folds` were built from different ",
                         "data -- %d of %d checked row IDs sit at a different ",
@@ -809,12 +854,19 @@
   note    <- NULL
   if (!is.null(fold_info_fn)) {
     extra <- try(fold_info_fn(fit_obj, test_sf, y_true, y_hat), silent = TRUE)
+    # A named vector -- the shape `metrics` accepts -- is taken as the list it
+    # stands for.  It used to fall through every branch below: its columns
+    # never appeared and fold_status said "ok".  as.list(NULL) is list(), so
+    # a NULL return stays a no-op; an unnamed vector fails the naming check.
+    if (!inherits(extra, "try-error") && (is.null(extra) || is.atomic(extra)))
+      extra <- as.list(extra)
     if (inherits(extra, "try-error")) {
       note <- sprintf("fold_info_fn failed: %s", .try_error_message(extra))
       .log_warn("cross-validation: fold %s: %s. Its columns are NA there.",
                 format(fold_lab), note)
     } else if (is.list(extra)) {
       if (is.data.frame(extra$..per_row)) {
+        .check_fold_per_row(extra$..per_row)
         if (nrow(extra$..per_row) == length(y_true))
           per_row <- extra$..per_row
         else
@@ -825,6 +877,10 @@
       extra$..per_row <- NULL
       .check_fold_extras(extra, names(fs))
       for (cn in names(extra)) fs[[cn]] <- extra[[cn]]
+    } else {
+      stop("cross-validation: `fold_info_fn` must return a named list (or a ",
+           "named vector) of per-fold values; it returned an object of class ",
+           class(extra)[1L], ".", call. = FALSE)
     }
   }
 
@@ -860,6 +916,43 @@
 
   list(pred_row = pr, fold_stat = fs, note = note)
 }
+
+
+#' Validate the \code{..per_row} a \code{fold_info_fn} returned
+#'
+#' Its columns are bound onto the fold's prediction rows, so each must be
+#' named, once, with a name \code{predictions} does not already have.  A
+#' clash was not caught: \code{dplyr::bind_rows()} renamed both copies
+#' (\code{yhat...4}, \code{yhat...6}) with only a message, and
+#' \code{overall} then found no \code{yhat} and came back all \code{NA}
+#' with \code{n_pred = 0}, beside finite per-fold scores.
+#'
+#' @param per_row The \code{..per_row} data frame.
+#' @return \code{invisible(NULL)}; called for the error.
+#' @keywords internal
+#' @noRd
+.check_fold_per_row <- function(per_row) {
+  nm <- names(per_row)
+  if (!length(nm)) return(invisible(NULL))
+  if (anyNA(nm) || !all(nzchar(nm)))
+    stop("cross-validation: `fold_info_fn`'s `..per_row` must have a name ",
+         "for every column.", call. = FALSE)
+  if (anyDuplicated(nm))
+    stop("cross-validation: `fold_info_fn`'s `..per_row` has duplicated ",
+         "column names: ", paste(unique(nm[duplicated(nm)]), collapse = ", "),
+         ".", call. = FALSE)
+  clash <- intersect(nm, .cv_prediction_cols)
+  if (length(clash))
+    stop("cross-validation: `fold_info_fn`'s `..per_row` has columns that ",
+         "`predictions` already has: ", paste(clash, collapse = ", "),
+         ". Use other names.", call. = FALSE)
+  invisible(NULL)
+}
+
+#' The columns every fold's prediction rows carry before any \code{..per_row}
+#' @keywords internal
+#' @noRd
+.cv_prediction_cols <- c("..row_id", "fold", "y", "yhat", "y_train_mean")
 
 
 #' Validate what a \code{fold_info_fn} returned, before it is written
@@ -5088,15 +5181,19 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #' @param pointize Geometry coercion strategy.
 #' @param predict_args Extra arguments for predict().
 #' @param fold_info_fn Optional \code{function(fit, test_sf, y, yhat)}
-#'   returning a named list of per-fold extras (a bandwidth, a tuning value,
-#'   anything read off the fitted object), added as columns of
-#'   \code{fold_metrics}.  It sees the fit and the held-out layer, which
+#'   returning a named list (or a named vector) of per-fold extras (a
+#'   bandwidth, a tuning value, anything read off the fitted object), added
+#'   as columns of \code{fold_metrics}.  It sees the fit and the held-out
+#'   layer, which
 #'   \code{metrics} does not; it is applied per fold only, and its values
 #'   are not pooled.  An element \code{..per_row} that is a data frame with
 #'   one row per held-out observation is spliced into \code{predictions}
 #'   instead (\code{NA} in the rows of a fold that returned none; one of the
-#'   wrong length is dropped and logged).  Every other element must be named,
-#'   hold one value, and not reuse a column \code{fold_metrics} already has;
+#'   wrong length is dropped and logged); its columns must be named, once,
+#'   and not reuse a column \code{predictions} already has (\code{..row_id},
+#'   \code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
+#'   other element must be named, hold one value, and not reuse a column
+#'   \code{fold_metrics} already has;
 #'   anything else is an error.  A \code{fold_info_fn} that throws on a fold
 #'   is logged, its columns are \code{NA} for that fold, and
 #'   \code{fold_status$message} says so; the fold is kept.
@@ -5200,7 +5297,11 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 #'   the fold's index in the \code{folds} object that was supplied, so it
 #'   lines up with \code{make_folds()$assignment$fold} even when some folds
-#'   were unusable and dropped.  \code{R2} is out-of-sample \eqn{R^2}: the
+#'   were unusable and dropped.  Splits that already carry a \code{fold_id},
+#'   as the \code{folds} of a \code{cv_*()} result do, keep it: handing
+#'   one run's \code{folds} to another labels each fold as the first run
+#'   and \code{\link{fold_separation}()} do, a dropped fold's gap
+#'   included.  \code{R2} is out-of-sample \eqn{R^2}: the
 #'   total sum of squares is taken about the mean of the \emph{training} rows
 #'   (in \code{overall}, each held-out row about its own fold's training
 #'   mean), the null prediction available when the fold is predicted, and
