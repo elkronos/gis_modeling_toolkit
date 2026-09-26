@@ -447,3 +447,60 @@ test_that("stable IDs do not depend on whether s2 is switched on", {
   expect_identical(off_ids$name, on_ids$name)
   expect_identical(off_ids$poly_id, on_ids$poly_id)
 })
+
+
+# --- the spatial half-split --------------------------------------------------
+
+# A town of 250 points and a village of 8, 20 km away.
+.r2_town <- function() {
+  set.seed(2)
+  d <- rbind(data.frame(x = rnorm(250, 3000, 400), y = rnorm(250, 3000, 400)),
+             data.frame(x = c(20000, 20500, 21000, 19800, 20200, 20900, 20400, 19900),
+                        y = c(15000, 15300, 14800, 15500, 15100, 14900, 15200, 15400)))
+  sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+}
+
+test_that("a small remote group no longer stops the split", {
+  pts <- .r2_town()
+  # The village always sat alone in a block of the default grid, and the
+  # call stopped: "left 250 and 8 points in the two halves".
+  res <- .r2_warnings(spatialkit:::.spatial_half_split(pts, seed = 1, caller = "t"))
+  sp  <- res$value
+  expect_true(any(grepl("left 250 and 8 points .* finer .* grid instead", res$warnings)))
+  # The first attempt's advice to use smaller blocks is not passed on for a
+  # split that was then made on smaller blocks.
+  expect_false(any(grepl("ratio 31.25", res$warnings)))
+  expect_true(length(sp$selection) >= 10L && length(sp$estimation) >= 10L)
+  expect_length(intersect(sp$selection, sp$estimation), 0L)
+  expect_setequal(c(sp$selection, sp$estimation), seq_len(nrow(pts)))
+  # A design the caller chose is used as given, and refused as before.
+  expect_error(suppressWarnings(spatialkit:::.spatial_half_split(
+    pts, seed = 1, caller = "t", block_nx = 2, block_ny = 3)),
+    "at least 10 each are needed")
+})
+
+test_that("the split records how uneven its halves are and where they lie", {
+  set.seed(3)
+  cl <- rbind(data.frame(x = rnorm(200, 0, 50), y = rnorm(200, 0, 50)),
+              data.frame(x = rnorm(60, 2000, 50), y = rnorm(60, 0, 50)),
+              data.frame(x = rnorm(40, 1000, 50), y = rnorm(40, 1500, 50)))
+  pts <- sf::st_as_sf(cl, coords = c("x", "y"), crs = 32632)
+  sp  <- spatialkit:::.spatial_half_split(pts, seed = 1, caller = "t")
+  # Whole clusters land in one half: 200 against 100, accepted by the
+  # default tolerance of 3 and, until now, reported nowhere.
+  expect_equal(sp$balance, 2)
+  expect_identical(sp$grid, "3 x 2")
+  bb <- sf::st_bbox(sf::st_geometry(pts)[sp$estimation])
+  expect_equal(sp$extent$estimation, bb)
+  # The grid is fixed by the extent, so the seed only decides which side
+  # selects: the partition is one of two orientations of the same cut.
+  cuts <- unique(lapply(1:6, function(s) {
+    h <- spatialkit:::.spatial_half_split(pts, seed = s, caller = "t")
+    sort(c(min(h$selection), min(h$estimation)))
+  }))
+  expect_length(cuts, 1L)
+  # A block design passed through `...` reaches make_folds().
+  sp4 <- spatialkit:::.spatial_half_split(pts, seed = 1, caller = "t",
+                                          block_nx = 4, block_ny = 4)
+  expect_identical(sp4$grid, "4 x 4")
+})
