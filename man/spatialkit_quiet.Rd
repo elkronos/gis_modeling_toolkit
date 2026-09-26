@@ -30,6 +30,15 @@ This helper names the right index.
 These are log records, not R conditions: \code{suppressWarnings()}
 and \code{tryCatch(warning = )} do not see them.  Conditions the package
 raises as real R warnings are unaffected by this function.
+
+While a document is being knitted (R Markdown, Quarto, a \pkg{pkgdown}
+article) the console echo is also sent as an R message, because
+\pkg{knitr} does not capture what is written to the console's error stream
+and the cautions would otherwise be missing from the output.  They appear
+as \code{## WARN [...]} lines, and the chunk option \code{message = FALSE},
+like \code{suppressMessages()}, keeps them out of the document.  A line the
+package also raises as an R warning is not repeated, since the document
+shows the warning.  Outside \pkg{knitr} nothing changes.
 }
 \examples{
 old <- spatialkit_quiet()      # console echo off
