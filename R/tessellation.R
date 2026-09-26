@@ -2,6 +2,75 @@
 # CRS handling shared by the tessellation builders
 # -----------------------------------------------------------------------------
 
+#' Give a CRS-less points layer or boundary the other one's CRS
+#'
+#' When exactly one of the two has a CRS, the other is interpreted from it
+#' the way harmonize_crs() does, warning either way: coordinates that look
+#' like lon/lat are taken as EPSG:4326 and reprojected, anything else is
+#' stamped.  Before this, the builders handed sf two layers in different CRSs
+#' and every method stopped with sf's bare "st_crs(x) == st_crs(y) is not
+#' TRUE": UTM points read from a CSV with a UTM boundary, or projected points
+#' with a boundary read from a file that lost its .prj.  A CRS-less points
+#' layer that does not look like lon/lat cannot be put in a GEOGRAPHIC
+#' boundary's CRS -- stamping degrees onto UTM numbers is wrong -- so that is
+#' refused with a message that says what to do.
+#'
+#' @param points,boundary sf layers; \code{boundary} may be \code{NULL}.
+#' @param caller Function name for the messages.
+#' @return A list with \code{points} and \code{boundary}.
+#' @keywords internal
+#' @noRd
+.resolve_crsless_pair <- function(points, boundary, caller) {
+  if (is.null(boundary)) return(list(points = points, boundary = boundary))
+  pcrs <- sf::st_crs(points)
+  bcrs <- sf::st_crs(boundary)
+  if (is.na(bcrs) && !is.na(pcrs)) {
+    boundary <- .transform_or_stamp(boundary, pcrs, "boundary", caller)
+  } else if (is.na(pcrs) && !is.na(bcrs)) {
+    if (isTRUE(sf::st_is_longlat(bcrs)) && !isTRUE(.looks_like_lonlat(points)$lonlat))
+      stop(sprintf(paste0(
+        "%s(): `points_sf` has no CRS and its coordinates do not look like ",
+        "lon/lat, but `boundary` is in a geographic CRS (%s), so the two ",
+        "cannot be placed in one space. Set the CRS of `points_sf` with ",
+        "sf::st_crs(), or pass a boundary in the points' own projected CRS."),
+        caller, .fold_crs_label(bcrs)), call. = FALSE)
+    points <- .transform_or_stamp(points, bcrs, "points_sf", caller)
+    attr(points, "crs_assumed") <- NULL
+  }
+  list(points = points, boundary = boundary)
+}
+
+
+#' Is `crs` a geographic (lon/lat) CRS?
+#' @keywords internal
+#' @noRd
+.is_geographic_crs <- function(crs) {
+  cc <- tryCatch(sf::st_crs(crs), error = function(e) sf::NA_crs_)
+  !is.na(cc) && isTRUE(sf::st_is_longlat(cc))
+}
+
+
+#' Return a layer built in a projected CRS in the geographic CRS asked for
+#'
+#' A geographic \code{crs} names the CRS a tessellation is returned in; the
+#' cells are built in metres (see build_tessellation()).  Long edges are
+#' densified first, to a hundredth of the layer's extent, so a straight edge
+#' in the working projection keeps its course in lon/lat instead of being
+#' read as a great circle between its two ends.
+#'
+#' @param x sf layer (or \code{NULL}).
+#' @param crs_out The geographic \code{sf::crs}, or \code{NULL} for no change.
+#' @keywords internal
+#' @noRd
+.to_output_crs <- function(x, crs_out) {
+  if (is.null(x) || is.null(crs_out)) return(x)
+  bb  <- sf::st_bbox(x)
+  ext <- max(as.numeric(bb["xmax"] - bb["xmin"]), as.numeric(bb["ymax"] - bb["ymin"]))
+  if (is.finite(ext) && ext > 0) x <- sf::st_segmentize(x, dfMaxLength = ext / 100)
+  sf::st_transform(x, crs_out)
+}
+
+
 #' Project a lon/lat boundary for a grid of equal-area cells
 #'
 #' The CRS ensure_projected() picks for distances, unless that CRS distorts
@@ -42,18 +111,29 @@
 
 #' Build a polygonal clip target from points and/or a boundary
 #'
-#' Resolves the single polygon that every tessellation method clips against.
-#' With a `boundary` it is that boundary (optionally buffered by `expand`);
-#' without one it is the convex hull of `points_sf`, again optionally buffered.
-#' Reach for it when you want to see or reuse the exact clip target
-#' [build_tessellation()] will apply, for instance to check that a study-area
-#' polygon actually contains the observations before tessellating, or to pass
-#' the same envelope to [create_voronoi_polygons()] and
+#' Resolves a single polygon to tessellate within. With a `boundary` it is
+#' that boundary (optionally buffered by `expand`); without one it is the
+#' axis-aligned bounding box of `points_sf` (the rectangle in the working
+#' CRS), again optionally buffered, or a small buffer around the points when
+#' they all share one x or one y. Reach for it to build the `boundary` that
+#' `method = "hex"` and `"square"` require, to check that a study-area
+#' polygon actually contains the observations before tessellating, or to
+#' pass the same envelope to [create_voronoi_polygons()] and
 #' [create_grid_polygons()] so that two tessellations of one dataset cover
 #' identical ground.
 #'
+#' It is not the target [build_tessellation()] derives on its own:
+#' `method = "voronoi"` without a boundary clips to the convex hull of the
+#' points buffered by 2 percent of its diagonal, and there `expand` is always
+#' a distance. A bounding box over a non-rectangular point cloud includes
+#' corners with no data, so a hex or square grid laid over it has cells that
+#' hold no points; pass the study-area polygon when there is one.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
-#' @param boundary Optional polygonal sf object.
+#' @param boundary Optional polygonal sf object. One with no CRS, given with
+#'   points that have one, is interpreted in the points' CRS as
+#'   [harmonize_crs()] does, with a warning: coordinates that look like
+#'   lon/lat are taken as EPSG:4326 and reprojected, anything else is stamped.
 #' @param expand Numeric expansion distance or fraction (0–1 = fraction of
 #'   extent). Absolute values are expressed in the units of the CRS the clip
 #'   target is built in. Because [sf::st_buffer()] interprets `dist` as
@@ -74,9 +154,9 @@
 #'   data.frame(x = 5e5 + runif(30, 0, 100), y = 5e6 + runif(30, 0, 100)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' # No boundary: the convex hull, expanded by 10% of the extent
-#' hull <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
-#' st_area(hull)
+#' # No boundary: the bounding box, expanded by 10% of the extent
+#' box <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
+#' st_area(box)
 #' @export
 clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALSE) {
   .msg <- function(...) if (!quiet) message(...)
@@ -115,6 +195,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
   crs_pts <- sf::st_crs(points_sf)
 
   if (!is.null(boundary)) {
+    # .align_crs() leaves a CRS-less boundary as it is, so the target came
+    # back with no CRS -- and for lon/lat points, in degrees, with `expand =
+    # 20` buffering by 20 degrees rather than 20 metres.  Interpret it in the
+    # points' (projected) CRS instead, as build_tessellation() does.
+    if (is.na(sf::st_crs(boundary)) && !is.na(crs_pts))
+      boundary <- .transform_or_stamp(boundary, crs_pts, "boundary", "clip_target_for")
     boundary <- .align_crs(boundary, points_sf)
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("clip_target_for(): `boundary` must be polygonal.")
@@ -256,20 +342,47 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' point-to-cell correspondence that `st_voronoi()` scrambles, and stamping
 #' stable `cell_id` values.
 #'
+#' The generators are the points' vertices, not the features. A MULTIPOINT
+#' feature with several vertices therefore gets one cell per vertex, and its
+#' `index` entry is the smallest `cell_id` among the cells it touches; the
+#' others are referenced by no feature. Other functions in the package
+#' ([prep_model_data()], [make_folds()]) reduce such a feature to its
+#' centroid instead, so cast to POINT, or take centroids, first if one cell
+#' per feature is what you want.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries.
-#' @param boundary Optional polygonal sf object.
-#' @param expand Numeric; absolute buffer distance for the envelope.
+#' @param boundary Optional polygonal sf object. When exactly one of
+#'   `points_sf` and `boundary` has a CRS, the other is interpreted in it as
+#'   [harmonize_crs()] does, with a warning (lon/lat-looking coordinates are
+#'   reprojected from EPSG:4326, others are stamped); CRS-less points that do
+#'   not look like lon/lat cannot take a geographic boundary's CRS, and are
+#'   refused with an error.
+#' @param expand Numeric; absolute distance, in the working CRS's units, by
+#'   which the boundary (or the hull derived from the points) is grown before
+#'   the diagram is built. With `clip = TRUE` the cells are clipped to the
+#'   grown boundary, so they reach `expand` beyond the study area, and a point
+#'   up to `expand` outside it gets a cell and an `index` value. The grown
+#'   boundary is the one returned as `boundary`.
 #' @param clip Logical; intersect cells with boundary.
-#' @param keep_duplicates Logical; keep coincident points for graph construction.
-#' @param crs Optional target CRS.
+#' @param keep_duplicates Logical. Has no effect on the result: coincident
+#'   points are merged before the diagram is built either way, so they share
+#'   one cell and all of them are indexed to it.
+#' @param crs Optional target CRS. A projected CRS is the working CRS. A
+#'   geographic one (EPSG:4326, say) is the CRS the result is returned in:
+#'   the cells are built in the local projected CRS [ensure_projected()]
+#'   picks for the points, so they are nearest-point cells on the ground, and
+#'   are then transformed, with long edges densified.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @return A list with \code{cells}, \code{index}, \code{boundary},
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
-#'   every cell, which means outside the study area, so a summary built from it
-#'   counts only the points the tessellation actually covers.
+#'   every cell, which means outside the study area (grown by \code{expand}
+#'   when it is positive), so a summary built from it counts only the points
+#'   the tessellation actually covers.  \code{boundary} is the boundary the
+#'   cells were built in: the one supplied or derived, grown by
+#'   \code{expand}.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -291,13 +404,31 @@ create_voronoi_polygons <- function(
   .msg <- function(...) if (!quiet) message(...)
 
   pts <- points_sf
+  crs_out <- NULL
   if (!is.null(crs)) {
     pts <- .transform_or_stamp(pts, crs, "points_sf", "create_voronoi_polygons")
     if (!is.null(boundary))
       boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_voronoi_polygons")
+    # A geographic `crs` is where the cells are RETURNED, not where they are
+    # built: st_voronoi() on degrees is not a nearest-point partition (at
+    # 55N, 21% of sampled locations sat in another point's cell) and s2 read
+    # the degree-sized hull buffer below as metres.
+    if (.is_geographic_crs(crs)) {
+      crs_out <- sf::st_crs(pts)
+      pts <- ensure_projected(pts)
+      if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
+    }
   } else {
     if (.is_longlat(pts)) pts <- ensure_projected(pts)
-    if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
+    if (!is.null(boundary)) {
+      # One side with no CRS takes the other's (.align_crs() leaves it as it
+      # is, and sf then refused the pair with its bare CRS-mismatch error).
+      pair <- .resolve_crsless_pair(pts, boundary, "create_voronoi_polygons")
+      pts <- pair$points; boundary <- pair$boundary
+      # CRS-less lon/lat points that just took a geographic boundary's CRS.
+      if (.is_longlat(pts)) pts <- ensure_projected(pts)
+      boundary <- .align_crs(boundary, pts)
+    }
   }
 
   if (is.null(boundary)) {
@@ -367,9 +498,13 @@ create_voronoi_polygons <- function(
   attr(index, "snapped") <- NULL
 
   list(
-    cells    = cells,
+    cells    = .to_output_crs(cells, crs_out),
     index    = index,
-    boundary = boundary,
+    # The boundary the cells were built in and clipped to.  With expand > 0
+    # that is the grown one: returning the ungrown input described a study
+    # area the cells overhang by `expand` (1.93 km^2 of cells against a
+    # returned 1 km^2) and in which indexed points lay outside.
+    boundary = .to_output_crs(boundary_expanded, crs_out),
     method   = "voronoi",
     params   = list(clip = clip, expand = expand, keep_duplicates = keep_duplicates,
                     snapped = snapped)
@@ -398,9 +533,12 @@ create_voronoi_polygons <- function(
 #'
 #' @param boundary Polygonal sf or sfc object.
 #' @param target_cells Optional approximate desired number of cells.  The cell
-#'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, so
-#'   square grids get square cells; for hex grids the count is adjusted for
-#'   hexagonal packing density.  The word "approximate" is load bearing: a
+#'   \emph{size} is derived from it as \code{sqrt(area / target_cells)}, where
+#'   \code{area} is that of the boundary's bounding box, so square grids get
+#'   square cells; for hex grids the count is adjusted for hexagonal packing
+#'   density and the size rounded so that a whole number of hexagons spans
+#'   the longer side of the box.  Neither depends on which way the boundary
+#'   lies.  The word "approximate" is load bearing: a
 #'   grid of square cells over an elongated bounding box needs more of them
 #'   than a grid of rectangles would (a 1000 x 1 strip at
 #'   \code{target_cells = 9} yields cells of side 10.5 and about 95 of them),
@@ -430,7 +568,12 @@ create_voronoi_polygons <- function(
 #'   Mercator over a near-global extent, a UTM zone stretched well past its
 #'   width), `ensure_projected(purpose = "area")` is used instead, with a
 #'   logged warning, so the cells stay equal-area; a local extent keeps its
-#'   UTM zone.
+#'   UTM zone. A geographic `crs` (EPSG:4326, say) is the CRS the grid is
+#'   returned in: a grid sized by `target_cells` or `n` is laid in that
+#'   projected CRS and then transformed, with long edges densified. A
+#'   `cellsize` is in the units of `crs`, so with a geographic `crs` it is in
+#'   degrees and the grid is laid in degrees, as asked; such cells are not
+#'   equal-area.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -474,8 +617,18 @@ create_grid_polygons <- function(
            c("POLYGON", "MULTIPOLYGON")))
     stop("create_grid_polygons(): 'boundary' must be polygonal (POLYGON/MULTIPOLYGON).")
 
+  crs_out <- NULL
   if (!is.null(crs)) {
     boundary <- .transform_or_stamp(boundary, crs, "boundary", "create_grid_polygons")
+    # A geographic `crs` is where the grid is RETURNED.  Laid in degrees the
+    # cells were neither square nor equal-area, and clipping them under s2
+    # often stopped with "Edge 0 is degenerate" or left points inside the
+    # boundary with no cell.  An explicit `cellsize` is in the units of
+    # `crs`, degrees, so a grid sized by it is still laid in degrees.
+    if (.is_geographic_crs(crs) && is.null(cellsize)) {
+      crs_out  <- sf::st_crs(boundary)
+      boundary <- .project_for_grid(boundary)
+    }
   } else {
     crs_before <- sf::st_crs(boundary)
     boundary <- .project_for_grid(boundary)
@@ -570,7 +723,17 @@ create_grid_polygons <- function(
         cellsize <- c(w / nx, h / ny)
       }
     } else {
-      cellsize <- c(w / nx, h / ny)
+      # st_make_grid() builds hexagons from cellsize[1] alone, and that was
+      # w / nx: the WIDTH of the box over a column count rounded, and floored
+      # at 1, from the aspect ratio.  A tall narrow boundary therefore got
+      # hexagons about as wide as the whole box -- a 1 x 1000 strip at target
+      # 9 gave 1734 of them where the same strip lying flat gave 89.  Count
+      # along the LONGER side instead.  For a boundary at least as wide as it
+      # is tall that is exactly w / nx, so those grids are unchanged; a tall
+      # one now gets the grid its lying-down twin gets.
+      long <- max(w, h)
+      side <- long / max(1L, round(sqrt(effective_target * long / min(w, h))))
+      cellsize <- c(side, side)
     }
   }
 
@@ -655,7 +818,7 @@ create_grid_polygons <- function(
     grid_sf <- grid_sf[keep, , drop = FALSE]
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
   }
-  grid_sf
+  .to_output_crs(grid_sf, crs_out)
 }
 
 # -----------------------------------------------------------------------------
@@ -685,6 +848,12 @@ create_grid_polygons <- function(
 #' \code{\link{determine_optimal_levels}()} will suggest a cell count from the
 #' spatial structure of the data.
 #'
+#' \code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
+#' a MULTIPOINT feature with several vertices gets one cell (or triangle
+#' corner) per vertex, and its \code{index} entry is the smallest
+#' \code{cell_id} among the cells it touches.  See
+#' \code{\link{create_voronoi_polygons}()}.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometry.
 #' @param boundary Polygonal sf/sfc study area. **Required** for
 #'   `method = "hex"` and `method = "square"`, which have no extent of their
@@ -692,7 +861,11 @@ create_grid_polygons <- function(
 #'   or build one from the points with [clip_target_for()]. **Optional** for
 #'   `method = "voronoi"` and `method = "triangles"`, which derive their extent
 #'   from the points themselves and use `boundary` only to clip the result when
-#'   `clip = TRUE`.
+#'   `clip = TRUE`. When exactly one of `points_sf` and `boundary` has a CRS,
+#'   the other is interpreted in it as [harmonize_crs()] does, with a warning;
+#'   CRS-less points that do not look like lon/lat cannot take a geographic
+#'   boundary's CRS and are refused with an error. When neither has one, both
+#'   stay in the same unnamed planar space.
 #' @param method One of "voronoi", "triangles", "hex", "square".
 #' @param approx_n_cells Approximate number of cells.  Read by
 #'   \code{method = "hex"} and \code{"square"} only: \code{"voronoi"} grows
@@ -709,18 +882,42 @@ create_grid_polygons <- function(
 #'   \code{select_resolution()} at its default criterion).  The count used
 #'   is returned as \code{params$approx_n_cells} and where it came from as
 #'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
+#'   A count read off a profile or selection is a number of k-means cells:
+#'   every one occupied, and small where the points are dense.  A lattice
+#'   lays that many equal cells over the whole boundary, so on clustered
+#'   points many of them hold no point (about half, on six clusters in a
+#'   square); on evenly spread points it matches.  \code{params$cells_occupied}
+#'   and \code{params$cells_empty} report how the points filled the grid, and
+#'   a count that came from a profile or selection warns when fewer than
+#'   three quarters of it are occupied.  For cells that follow the points,
+#'   seed a Voronoi tessellation with
+#'   \code{get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)}.
 #' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
 #'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 #'   are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
-#'   a logged warning; supply one or the other.
-#' @param expand Buffer distance for the Voronoi envelope. Applied by
+#'   a logged warning; supply one or the other.  With a geographic \code{crs}
+#'   it is in that CRS's degrees, and the grid is laid in degrees.
+#' @param expand Buffer distance, in the working CRS's units, by which the
+#'   Voronoi boundary is grown before the diagram is built. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
 #'   methods ignore it (the value you passed is still echoed back in
-#'   `params$expand`).
+#'   `params$expand`). With `clip = TRUE` the cells are clipped to the grown
+#'   boundary, which is the one returned as `boundary`: cells reach `expand`
+#'   beyond the study area, and a point up to `expand` outside it is indexed.
 #' @param clip Logical; clip to boundary.
-#' @param keep_duplicates Logical; keep duplicate points.
-#' @param crs Optional target CRS.
+#' @param keep_duplicates Logical. Has no effect on the cells or the index:
+#'   coincident points are merged before a Voronoi diagram or a Delaunay
+#'   triangulation is built either way, and every one of them is indexed to
+#'   the cell they share.
+#' @param crs Optional target CRS. A projected CRS is the working CRS. A
+#'   geographic one (EPSG:4326, say) is the CRS the result is returned in: the
+#'   cells are built in the local projected CRS [ensure_projected()] picks for
+#'   the points, indexed there, and then transformed with long edges
+#'   densified, so Voronoi cells are nearest-point cells on the ground and
+#'   grid cells are laid in metres rather than degrees. The exception is a hex
+#'   or square grid sized by `cellsize`, which is in degrees and so is laid in
+#'   degrees.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -736,12 +933,15 @@ create_grid_polygons <- function(
 #'       sitting exactly on a shared edge, and leaves points outside the study
 #'       area as `NA`. A summary built from `index` therefore counts only the
 #'       points the tessellation actually covers.}
-#'     \item{`boundary`}{The boundary used (possibly derived and/or reprojected).}
+#'     \item{`boundary`}{The boundary used (possibly derived and/or
+#'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units).}
+#'       outside every cell each sat, in CRS units). For `"hex"` and
+#'       `"square"` also `cells_occupied` and `cells_empty`, the number of
+#'       cells that hold at least one point and that hold none.}
 #'   }
 #' @family tessellation
 #' @examples
@@ -803,10 +1003,27 @@ build_tessellation <- function(
   }
 
   # --- CRS handling ---
+  crs_out <- NULL
   if (!is.null(crs)) {
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
     if (!is.null(boundary))
       boundary <- .transform_or_stamp(boundary, crs, "boundary", "build_tessellation")
+    # A geographic `crs` names the CRS the result is RETURNED in; the cells
+    # are built in metres.  st_voronoi(), st_make_grid() and the hull buffer
+    # all work on raw coordinates, so in degrees Voronoi cells stopped being
+    # a nearest-point partition (21% of sampled locations at 55N sat in
+    # another point's cell), grid cells were neither square nor equal-area,
+    # and clipping them under s2 often stopped with "Edge 0 is degenerate"
+    # or gave points inside the boundary an NA index.  Build in the local
+    # projected CRS, index there, and transform at the end (finish() below).
+    # An explicit `cellsize` is in the units of `crs`, degrees, so a lattice
+    # sized by it is still laid in degrees, as asked.
+    if (.is_geographic_crs(crs) &&
+        !(method %in% c("hex", "square") && !is.null(cellsize))) {
+      crs_out   <- sf::st_crs(points_sf)
+      points_sf <- ensure_projected(points_sf)
+      if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
+    }
   } else {
     # ONE decision for points and boundary together.  A CRS-less layer goes
     # through the same lon/lat heuristic as everywhere else; if it is taken as
@@ -824,11 +1041,28 @@ build_tessellation <- function(
       points_sf <- ensure_projected(points_sf)
     }
     if (!is.null(boundary)) {
+      # Only a POSITIVE assumption is a CRS.  ensure_projected() records
+      # "none" for CRS-less points it left planar, and st_crs("none") is an
+      # error ("invalid crs: none"), so every method failed on CRS-less
+      # planar points with a CRS-less boundary -- including the documented
+      # boundary = clip_target_for(pts) -- and such data could not be gridded
+      # at all.  Left alone, the two stay in the same unnamed space.
       assumed <- attr(points_sf, "crs_assumed")
-      if (!is.null(assumed) && is.na(sf::st_crs(boundary)))
+      if (identical(assumed, "EPSG:4326") && is.na(sf::st_crs(boundary)))
         boundary <- sf::st_set_crs(boundary, sf::st_crs(assumed))
+      # One side with no CRS takes the other's; .align_crs() leaves a
+      # CRS-less side as it is, and sf then stopped every method with its
+      # bare "st_crs(x) == st_crs(y) is not TRUE".
+      pair <- .resolve_crsless_pair(points_sf, boundary, "build_tessellation")
+      points_sf <- pair$points; boundary <- pair$boundary
       boundary <- .align_crs(boundary, points_sf)
     }
+  }
+  finish <- function(res) {
+    if (is.null(crs_out)) return(res)
+    res$cells    <- .to_output_crs(res$cells, crs_out)
+    res$boundary <- .to_output_crs(res$boundary, crs_out)
+    res
   }
   if (!is.null(boundary)) {
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
@@ -844,11 +1078,11 @@ build_tessellation <- function(
 
   # ---- Voronoi ----
   if (identical(method, "voronoi")) {
-    return(create_voronoi_polygons(
+    return(finish(create_voronoi_polygons(
       points_sf = points_sf, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
       crs = crs_arg, quiet = quiet
-    ))
+    )))
   }
 
   # ---- Hex / Square ----
@@ -884,14 +1118,37 @@ build_tessellation <- function(
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL
 
-    return(list(
+    # How the points filled the lattice.  A count read off resolution_profile()
+    # or select_resolution() is a number of k-means cells: all occupied, small
+    # where the points are dense.  The same number of EQUAL cells over the
+    # boundary leaves the gaps between clusters empty -- on six clusters in a
+    # square, 33 of 77 hexagons held a point for a profile count of 56 -- and
+    # nothing said so.  Report occupancy always, and warn when a count that
+    # came from a profile or selection leaves under three quarters occupied
+    # (evenly spread points fill 1.2 times the count).
+    occupied <- length(unique(index[!is.na(index)]))
+    if (!is.null(approx_n_cells_from) && is.null(cellsize) &&
+        occupied < 0.75 * approx_n_cells)
+      .warn_and_log(paste0(
+        "build_tessellation(method = \"%s\"): %d of the %d cells hold a point, ",
+        "against %s cells from %s. That count is of k-means cells, every one ",
+        "occupied and dense where the points are; a lattice of equal cells ",
+        "over clustered points leaves many empty. For cells that follow the ",
+        "points, place seeds with get_voronoi_seeds(method = \"kmeans\", n = ",
+        "<the count>, sample_points = <the points>) and use method = ",
+        "\"voronoi\"."),
+        method, occupied, nrow(grid), format(approx_n_cells), approx_n_cells_from)
+
+    return(finish(list(
       cells = grid, index = index, boundary = boundary, method = method,
       params = list(approx_n_cells = approx_n_cells,
                     approx_n_cells_from = approx_n_cells_from,
                     cellsize = cellsize,
                     clip = clip, keep_duplicates = keep_duplicates,
-                    expand = expand, snapped = snapped)
-    ))
+                    expand = expand, snapped = snapped,
+                    cells_occupied = occupied,
+                    cells_empty = nrow(grid) - occupied)
+    )))
   }
 
   # ---- Delaunay triangles ----
@@ -899,8 +1156,18 @@ build_tessellation <- function(
     pts <- if (isTRUE(keep_duplicates)) points_sf else .dedup_points(points_sf)
     if (nrow(pts) < 3L) stop("build_tessellation(triangles): need at least 3 unique points.")
     coords <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
+    # Points on one line have no triangulation.  qhull returned a 0 x 3
+    # matrix without an error, the fallback below then logged that
+    # delaunayn() had failed, which it had not, and the call returned no cells
+    # and an index of NAs (a single transect, 10 points on y = 0.5x).  Say so,
+    # as the three-point rule above does.
+    if (qr(scale(coords, scale = FALSE))$rank < 2L)
+      stop("build_tessellation(triangles): the points are collinear, so their ",
+           "Delaunay triangulation is empty. Use method = \"voronoi\", which ",
+           "handles points on a line.", call. = FALSE)
 
     tri_sfc <- NULL
+    why_geos <- "package 'geometry' is not installed"
     if (requireNamespace("geometry", quietly = TRUE)) {
       # Centre the points before qhull sees them.  It triangulates by lifting
       # each point onto x^2 + y^2, and at projected magnitudes (a UTM
@@ -916,6 +1183,10 @@ build_tessellation <- function(
       # so the output coordinates are untouched.
       ctr <- (apply(coords, 2L, min) + apply(coords, 2L, max)) / 2
       tri_idx <- try(geometry::delaunayn(sweep(coords, 2L, ctr)), silent = TRUE)
+      why_geos <- if (inherits(tri_idx, "try-error"))
+        sprintf("geometry::delaunayn() failed (%s)",
+                trimws(conditionMessage(attr(tri_idx, "condition"))))
+      else "geometry::delaunayn() returned no triangles"
       if (!inherits(tri_idx, "try-error") && length(tri_idx)) {
         polys <- vector("list", nrow(tri_idx))
         for (i in seq_len(nrow(tri_idx))) {
@@ -935,15 +1206,23 @@ build_tessellation <- function(
     }
 
     if (is.null(tri_sfc)) {
-      .log_warn(
-        "build_tessellation(triangles): package 'geometry' unavailable or delaunayn() failed. Falling back to GEOS via sf::st_triangulate() instead of qhull; the result is still the Delaunay triangulation of the input points, but degenerate (e.g. co-circular) configurations may be resolved differently."
-      )
+      # Name the reason that applies: the message used to blame a missing
+      # package or a failure whichever had happened.
+      .log_warn(paste0(
+        "build_tessellation(triangles): %s. Falling back to GEOS via ",
+        "sf::st_triangulate() instead of qhull; the result is still the ",
+        "Delaunay triangulation of the input points, but degenerate (e.g. ",
+        "co-circular) configurations may be resolved differently."), why_geos)
       # st_triangulate() accepts a MULTIPOINT and returns the true Delaunay
       # triangulation of it.  Triangulating the convex-hull POLYGON instead
       # (as this used to) discards every interior point.
       tri_sfc <- sf::st_triangulate(sf::st_union(sf::st_geometry(pts)))
       tri_sfc <- sf::st_collection_extract(tri_sfc, "POLYGON", warn = FALSE)
       tri_sfc <- sf::st_sfc(tri_sfc, crs = sf::st_crs(pts))
+      if (length(tri_sfc) == 0L)
+        stop("build_tessellation(triangles): the Delaunay triangulation of ",
+             "these points is empty (they are collinear to within rounding). ",
+             "Use method = \"voronoi\".", call. = FALSE)
     }
 
     tri_sf <- sf::st_sf(geometry = .safe_make_valid(tri_sfc))
@@ -965,13 +1244,13 @@ build_tessellation <- function(
     snapped <- attr(index, "snapped")
     attr(index, "snapped") <- NULL
 
-    return(list(
+    return(finish(list(
       cells = tri_sf, index = index, boundary = boundary, method = "triangles",
       params = list(clip = clip, approx_n_cells = approx_n_cells,
                     approx_n_cells_from = approx_n_cells_from,
                     keep_duplicates = keep_duplicates, expand = expand,
                     snapped = snapped)
-    ))
+    )))
   }
 
   stop("build_tessellation(): unknown method.")
