@@ -13,7 +13,7 @@ bnd <- tour_boundary(pts)
 # Train on the western half only. `slope` runs west to east in this fixture, so
 # the eastern half is genuinely new ground in predictor space, not just on the
 # map -- which is the situation the area of applicability exists to detect.
-west <- pts[sf::st_coordinates(pts)[, 1] < 500, ]
+west <- pts[sf::st_coordinates(pts)[, 1] < 5e5 + 500, ]   # x runs 5e5 to 5e5 + 1000
 ws_fit <- function(train_sf, ...) {
   new_spatial_fit(subclass = "ws_fit",
                   engine = stats::lm(z ~ elev + slope,

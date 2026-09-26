@@ -46,7 +46,8 @@ test_that("residual_morans_i() validates k instead of silently collapsing it", {
   fit2 <- new_spatial_fit("t7fit", engine = lm(value ~ p1, data = sf::st_drop_geometry(d2)),
                           formula = value ~ p1, response_var = "value",
                           predictor_vars = "p1", data_sf = d2)
-  mi <- residual_morans_i(fit2)
+  # The dropped row is announced, and the warning is part of the contract.
+  expect_warning(mi <- residual_morans_i(fit2), "dropping 1 row")
   expect_true(is.finite(mi$observed))
   expect_equal(mi$n, n - 1L)
 })

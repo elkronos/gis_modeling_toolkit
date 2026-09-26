@@ -150,7 +150,7 @@ library(spatialkit)
 
 set.seed(42)
 n  <- 400
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 xy$w <- rnorm(n)
 # Mostly a smooth spatial field, with a weak measured predictor on top.
