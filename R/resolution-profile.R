@@ -196,7 +196,13 @@
 #'     calibration are in \code{\link{determine_optimal_levels}}).  The
 #'     classical chord on linear axes found a "knee" on such a layer anyway,
 #'     at about \eqn{\sqrt{L_{first} L_{last}}}, where the ladder's ends put
-#'     it.  Geometry only; it knows nothing of the response.}
+#'     it.  A level whose WSS is 0 (to within \eqn{10^{-12}} of the total),
+#'     one cell on every distinct location, which the ladder reaches when
+#'     locations repeat, is left out of the line; when the other levels have
+#'     no elbow, that fall to zero is the elbow, and its sag is measured with
+#'     the WSS floored at \eqn{10^{-12}} of the total, which puts it far
+#'     above any other level's.  Geometry only; it knows nothing of the
+#'     response.}
 #'   \item{\code{cp}}{Mallows' \eqn{C_p} of the piecewise-constant
 #'     approximation of the response (or of its OLS residuals on
 #'     \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
@@ -220,9 +226,9 @@
 #'     and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 #'     says so when that happens.  It becomes a genuine interior criterion
 #'     only when the nugget is a large share of the sill.  With a nugget of 0
-#'     (usually a fit clipped at its lower bound) the penalty is 0 and
-#'     \eqn{C_p} descends to the ceiling whatever the field; the profile
-#'     warns.}
+#'     (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
+#'     bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
+#'     the field; the profile warns.}
 #'   \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 #'     residuals of the cell means regressed on the cell-mean predictors (an
 #'     intercept alone when there are none): how much spatial structure the
@@ -252,7 +258,8 @@
 #' them is made knowingly.
 #'
 #' @param data_sf An sf object of points (other geometries are reduced to
-#'   representative points).
+#'   representative points).  Features with empty or non-finite coordinates
+#'   are dropped with a warning.
 #' @param response_var Optional response column name (numeric or logical).
 #'   Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
 #'   sets the floor of the ladder and \code{reliability}.  Rows where it, or a
@@ -293,7 +300,9 @@
 #'   \code{cell_diam_median} are then in that CRS's units.  A sac whose
 #'   range was rejected (\code{NA} with a \code{rejected_reason}) gives
 #'   \code{cp} its nugget, with a warning, and leaves \code{reliability}
-#'   \code{NA}, since that needs the range; one whose model did not converge
+#'   \code{NA}, since that needs the range; one whose model did not converge,
+#'   or whose range is below the shortest lag fitted (a structure that
+#'   cannot be told from a nugget, so the nugget is not identified either),
 #'   gives neither.  Under \code{select_on = "split"} the sac must come from
 #'   the selection half alone: run the profile once without it, fit the sac
 #'   on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
@@ -366,7 +375,7 @@
 #'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
 #'   # noise for Mallows' Cp to have an interior optimum rather than descend
 #'   # to the ceiling.
-#'   set.seed(2)
+#'   set.seed(4)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
@@ -412,8 +421,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
   ok_xy <- is.finite(xy[, 1]) & is.finite(xy[, 2])
   if (!all(ok_xy)) {
-    .log_warn("resolution_profile(): dropping %d point(s) with empty or non-finite coordinates.",
-              sum(!ok_xy))
+    # An R warning, as in determine_optimal_levels(): a log line alone could
+    # not be caught, and spatialkit_quiet() hid it.
+    .warn_and_log("resolution_profile(): dropping %d point(s) with empty or non-finite coordinates.",
+                  sum(!ok_xy))
     data_sf <- data_sf[ok_xy, , drop = FALSE]
     xy <- xy[ok_xy, , drop = FALSE]
   }
@@ -584,6 +595,12 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # Variogram: supplied, or estimated on the subsample (its selection half
   # under select_on = "split": the range reads the response).
   vg <- NULL
+  # The messages below name the variogram as the caller knows it: their own
+  # `sac`, or the one estimated here.  They said "`sac`" either way, and
+  # told a caller who had passed none to pass a different one.
+  sac_given <- !is.null(sac)
+  sac_what  <- if (sac_given) "`sac`"
+               else "the variogram estimated from `response_var` (attr(<profile>, \"sac\"))"
   if (is.null(sac) && has_resp && requireNamespace("gstat", quietly = TRUE)) {
     sac <- tryCatch(
       suppressWarnings(estimate_sac_range(if (is.null(in_sel)) data_sf
@@ -609,8 +626,12 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # the first level, and nothing said so.  summarize_by_cell() refuses such
     # a model outright.  Here the nugget, fitted at the short lags, still
     # serves Cp; the correlation function, which is the unidentified range,
-    # does not.  A fit that did not converge is refused whole: its nugget is
-    # where the optimiser stopped.
+    # does not.  Two refusals are whole.  A fit that did not converge: its
+    # nugget is where the optimiser stopped.  A range below the shortest lag:
+    # the structure cannot be told from a nugget, so the split between the
+    # two is exactly what is not identified.  On white noise detrended by
+    # REML that model's nugget was 6e-7 on a sill of 0.99, and Cp, with no
+    # penalty, ran to the support ceiling (7 cells with the nugget at 0.98).
     rejected <- attr(sac, "rejected_reason")
     rejected <- if (!is.finite(r) && length(rejected)) as.character(rejected)[1L] else NULL
     cor_fn <- if (is.data.frame(vm)) .vgm_correlation_fn(vm) else NULL
@@ -625,30 +646,45 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     }
     if (!is.null(vg) && !is.null(rejected)) {
       if (grepl("converge", rejected, fixed = TRUE)) {
-        .warn_and_log(paste0("resolution_profile(): `sac` reports no usable range (%s); ",
+        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s); ",
                              "its nugget and sill are where the optimiser stopped, not ",
-                             "fitted values, so `cp` and `reliability` are NA."), rejected)
+                             "fitted values, so `cp` and `reliability` are NA."),
+                      sac_what, rejected)
+        vg <- NULL
+      } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
+        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s): ",
+                             "a structure that dies out before the closest pairs of ",
+                             "points cannot be told from a nugget, so its nugget (%.3g) ",
+                             "is not identified either, and `cp` and `reliability` ",
+                             "are NA."),
+                      sac_what, rejected, vg$nugget)
         vg <- NULL
       } else {
-        .warn_and_log(paste0("resolution_profile(): `sac` reports no usable range (%s). ",
+        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s). ",
                              "`cp` still takes its nugget (%.3g), fitted at the short lags; ",
                              "`reliability` needs the range and is NA."),
-                      rejected, vg$nugget)
+                      sac_what, rejected, vg$nugget)
         vg$cor_fn <- NULL
       }
     } else if (is.null(vg)) {
       .log_info("resolution_profile(): the variogram carries no usable model; `cp` and `reliability` are NA.")
     }
-    # A nugget of exactly 0 is usually the fit's lower bound, not an estimate
-    # (gstat does not warn when it clips there), and with it Cp's penalty is
-    # 0: Cp is the RSS alone and falls with every finer level to the ceiling,
-    # whatever the field.
-    if (has_resp && !is.null(vg) && vg$nugget <= 0)
-      .warn_and_log(paste0("resolution_profile(): the variogram's nugget is 0, so Cp has ",
+    # A nugget of 0 is usually the fit's lower bound, not an estimate (gstat
+    # does not warn when it clips there), and with it Cp's penalty is 0: Cp
+    # is the RSS alone and falls with every finer level to the ceiling,
+    # whatever the field.  Zero to within 1e-4 of the sill: a REML fit stops
+    # short of its bound, and a nugget of 6e-7 on a sill of 0.99 slipped past
+    # a test for exactly 0.
+    if (has_resp && !is.null(vg) && vg$nugget <= 1e-4 * (vg$nugget + vg$psill))
+      .warn_and_log(paste0("resolution_profile(): the variogram's nugget is 0 (%.2g ",
+                           "against a sill of %.3g), so Cp has ",
                            "no penalty and falls as the cells get finer: its minimum ",
                            "will sit at or near the finest level whatever the field. ",
-                           "A zero nugget is usually the fit's lower bound; check it ",
-                           "with plot() on the sac, or pass one whose nugget you trust."))
+                           "A zero nugget is usually the fit's lower bound; %s"),
+                    vg$nugget, vg$nugget + vg$psill,
+                    if (sac_given) "check it with plot() on the sac, or pass one whose nugget you trust."
+                    else paste0("check it with plot(attr(<profile>, \"sac\")), or pass a ",
+                                "`sac` whose nugget you trust."))
     # The variogram has to describe the variable the profile scores.  A
     # residual variogram's nugget put into Cp for the raw response (or the
     # reverse) moved the Cp pick from 2-4 cells to the ceiling of 44 in five
@@ -656,10 +692,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # which it is cannot be checked.
     if (!is.null(vg) && !is.na(vg$detrended) && !is.na(variable) &&
         !identical(vg$detrended, identical(variable, "residuals")))
-      .warn_and_log(paste0("resolution_profile(): `sac` is a variogram of %s, but the ",
+      .warn_and_log(paste0("resolution_profile(): %s is a variogram of %s, but the ",
                            "profile scores %s, so `cp` and `reliability` take their ",
                            "nugget, sill and range from a different variable. Pass a ",
-                           "sac fitted to %s."),
+                           "`sac` fitted to %s."),
+                    sac_what,
                     if (vg$detrended) "detrended residuals" else "the raw response",
                     if (identical(variable, "residuals"))
                       "the OLS residuals on `predictor_vars`" else "the raw response",
@@ -805,15 +842,18 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # keep 5/8 of the total, not 1/2), so a chord from 2 finds a "knee" at its
   # four quadrants.
   fin <- is.finite(out$wss)
-  # A level with a WSS of 0 has a cell on every distinct location: no
-  # geometry is left to bend, and log(0) would take the line with it.
-  pos <- fin & out$wss > 0
-  if (sum(pos) >= 2L) {
+  # A level with a WSS of 0 (to within 1e-12 of the total) has a cell on
+  # every distinct location.  It is left out of the line, which log(0) would
+  # take with it, and when the rest of the curve has no elbow it is the
+  # elbow, the fall to zero being the sharpest bend there is (see
+  # .elbow_read()).  Leaving it out alone made five stations visited thirty
+  # times each a layer with no elbow.
+  if (any(fin)) {
     tss <- sum(sweep(xy, 2L, colMeans(xy))^2)
-    sag <- .elbow_sag(c(1L, levels[pos]), c(tss, out$wss[pos]))[-1L]
-    if (any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG)
-      out$elbow[pos] <- sag
-    else
+    rd  <- .elbow_read(c(1L, levels[fin]), c(tss, out$wss[fin]))
+    if (rd$structured)
+      out$elbow[fin] <- rd$sag[-1L]
+    else if (sum(!rd$zero[-1L]) >= 2L)
       .log_info(paste0("resolution_profile(): the WSS curve has no elbow (on log-log ",
                        "axes it falls in a straight line, as it does for points with ",
                        "no cluster structure); `elbow` is NA."))
@@ -870,18 +910,24 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   cat("Resolution profile:", nrow(x), "levels on", b$n,
       if (isTRUE(n_fit < b$n)) sprintf("points (k-means fitted to a subsample of %d)\n", n_fit)
       else "points\n")
-  cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d from %s)%s\n",
+  cat(sprintf("  ladder      : %d to %d cells (floor %s, ceiling %d%s)%s\n",
               min(x$levels), max(x$levels),
               if (!is.finite(b$range)) "2 (no range)"
               else paste0(if (is.na(b$floor)) sprintf("beyond integer range from range %.0f", b$range)
                           else sprintf("%d from range %.0f", b$floor, b$range),
                           if (isFALSE(b$range_floor)) ", not applied" else ""),
               b$ceiling,
-              if (identical(b$ceiling_from, "distinct locations"))
-                sprintf("%d distinct locations", b$n_distinct %||% NA_integer_)
+              # With no location repeated the cap is one short of the points
+              # (stats::kmeans() needs fewer centres than points), and "from
+              # 30 distinct locations" named a number that did not bind.
+              if (identical(b$ceiling_from, "distinct locations") &&
+                  isTRUE(b$ceiling < (b$n_distinct %||% NA_integer_)))
+                sprintf(", one short of the %d points", b$n)
+              else if (identical(b$ceiling_from, "distinct locations"))
+                sprintf(" from %d distinct locations", b$n_distinct %||% NA_integer_)
               else if (identical(b$ceiling_from, "sample_n"))
-                sprintf("the %d-point subsample", n_fit)
-              else sprintf("min_cell_n = %d", b$min_cell_n),
+                sprintf(" from the %d-point subsample", n_fit)
+              else sprintf(" from min_cell_n = %d", b$min_cell_n),
               if (!isTRUE(b$supported)) "  -- floor above ceiling: not supported"
               else if (isTRUE(b$floor > b$ceiling)) "  -- floor above ceiling: raise sample_n"
               else ""))
@@ -1019,7 +1065,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
 #'   # noise for Mallows' Cp to have an interior optimum rather than descend
 #'   # to the ceiling.
-#'   set.seed(2)
+#'   set.seed(4)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))
@@ -1120,7 +1166,10 @@ select_resolution <- function(profile,
     if (max(scored) < max(ladder))
       return("the last level the criterion is computable at")
     if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
-      return(if (identical(bounds$ceiling_from, "distinct locations"))
+      return(if (identical(bounds$ceiling_from, "distinct locations") &&
+                 isTRUE(bounds$ceiling < (bounds$n_distinct %||% NA_integer_)))
+               "the support ceiling (one short of the points, the most k-means can fit)"
+             else if (identical(bounds$ceiling_from, "distinct locations"))
                "the support ceiling (as many cells as the distinct locations allow)"
              else if (identical(bounds$ceiling_from, "sample_n"))
                "the subsample's ceiling (two subsample points per cell; raise sample_n)"
@@ -1230,7 +1279,7 @@ print.resolution_selection <- function(x, ...) {
 #'   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
 #'   # noise for Mallows' Cp to have an interior optimum rather than descend
 #'   # to the ceiling.
-#'   set.seed(2)
+#'   set.seed(4)
 #'   n <- 400
 #'   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 #'   D  <- as.matrix(dist(xy))

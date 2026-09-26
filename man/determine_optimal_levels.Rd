@@ -51,8 +51,9 @@ error.}
 
 \item{criterion}{One of \code{"geometric"} (default when no response given),
 \code{"morans_i"} (select the k whose residual Moran's I is least
-\emph{significant}), or \code{"combined"} (rank-average of WSS elbow
-distance and that same quantity).  Falls back to \code{"geometric"},
+\emph{significant}), or \code{"combined"} (rank-average of the WSS
+curve's log-log sag, the quantity the elbow is read from, and that same
+significance).  Falls back to \code{"geometric"},
 with a warning, when \code{response_var} or \code{predictor_vars} is not
 given, and with a logged warning when no candidate clears the
 nine-cell resolution floor described in \strong{Details}.  A
@@ -127,7 +128,12 @@ warns and returns the linear-axis answer, which the ladder chose, not the
 data.  An elongated extent also bends, at about its aspect ratio, because
 the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
 past the threshold that bend is reported as an elbow, and it describes
-the extent's shape rather than clusters in it.
+the extent's shape rather than clusters in it.  When locations repeat
+(stations visited many times), the sweep can reach one cell per distinct
+location, where the WSS is zero (to within \eqn{10^{-12}} of the total).
+That \code{k} has no place on log axes and is left out of the line, but
+the fall to zero is the sharpest bend there is: when the rest of the
+curve has no elbow, the number of distinct locations is the elbow.
 
 When \code{response_var} and \code{predictor_vars} are provided, the
 geometric WSS elbow is supplemented with Moran's I computed on OLS
@@ -210,9 +216,12 @@ from about \code{max_levels = 40}.  Measured on 1000 uniform points,
 \code{max_levels} of 12, 20 and 30 all fell back, and 40 scored
 \code{k} = 10 and 11 alone.  On such a layer
 \code{\link{resolution_profile}()}, which scores Moran's z at every level of
-its ladder, is the model-aware view.  Under \code{criterion = "combined"}, a candidate below the
-floor that sits alongside candidates above it is ranked last on the Moran's
-I axis while still competing on the geometric axis.
+its ladder, is the model-aware view.  Under \code{criterion = "combined"},
+the candidates below the floor that sit alongside candidates above it all
+take the last place on the Moran's I axis, after every candidate it
+scored, while still competing on the geometric axis.  That axis is the
+elbow's own log-log sag at each candidate; when the WSS curve has no elbow
+it is flat, every candidate tied, and Moran's I alone orders them.
 }
 \section{Post-selection inference}{
 
