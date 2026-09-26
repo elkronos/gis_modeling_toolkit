@@ -84,9 +84,10 @@
 #' \code{ranger} matches factor predictors by level, so a level that was not
 #' present when the forest was grown has no split to follow.  Depending on the
 #' ranger version this either errors or, as in ranger 0.16, silently returns a
-#' plausible-looking number.  An error there reaches \code{predict.rf_fit()}'s
-#' \code{tryCatch}, which turns it into an all-\code{NA} vector plus one log
-#' line.  Both are worse than an error naming the level.
+#' plausible-looking number.  An error there used to reach
+#' \code{predict.rf_fit()}'s \code{tryCatch}, which turned it into an
+#' all-\code{NA} vector plus one log line (it now raises ranger's reason, which
+#' does not name the column).  Both are worse than an error naming the level.
 #'
 #' @param X Prediction frame from \code{.rf_frame()}.
 #' @param train_X Training frame from \code{.rf_frame()}.
@@ -186,6 +187,14 @@
 #' do not compare the two directly. \code{\link{compare_models_cv}} exists for
 #' that.
 #'
+#' A row that every tree sampled has no out-of-bag prediction, and ranger
+#' reports \code{NaN} for it.  That is every row under \code{replace = FALSE}
+#' with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
+#' The fit warns with the count; \code{fitted()} and \code{residuals()} are
+#' \code{NaN} on those rows, and \code{summary()} says how many rows its
+#' metrics were computed on.  With no row out of bag at all, the OOB error and
+#' the permutation importance are \code{NaN} too.
+#'
 #' @param data_sf An sf object with response, predictors and geometry.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
@@ -211,6 +220,9 @@
 #'   (default) uses ranger's rule: all rows when \code{replace = TRUE},
 #'   0.632 (the expected share of distinct rows in a bootstrap sample)
 #'   when \code{replace = FALSE}.  A single number in (0, 1] overrides it.
+#'   \code{replace = FALSE} with \code{sample_fraction = 1} grows every tree
+#'   on every row, so nothing is out of bag: the fit warns, and see
+#'   \strong{What fitted() returns}.
 #' @param seed Seed passed to ranger. Default 123.
 #' @param num_threads Threads for ranger. Default \code{NULL} means
 #'   \code{getOption("mc.cores", 1L)}: one thread unless the session has
@@ -395,16 +407,54 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   # numeric(0) that as.numeric(NULL) produces -- see ?.num1.
   oob_mse <- .num1(fit$prediction.error)
 
+  # A row every tree sampled has no out-of-bag prediction, and ranger returns
+  # NaN for it: every row under replace = FALSE with sample_fraction = 1
+  # (each tree is grown on all of them), a few under a small num_trees.  Then
+  # fitted() and residuals() are NaN there, summary() and model_metrics() score
+  # the remaining rows while summary() heads its output "n = <all of them>",
+  # and with no row out of bag at all the OOB error and the permutation
+  # importance are NaN as well -- all with nothing said.  The forest itself is
+  # sound and predict(newdata =) and cv_rf() are unaffected, so warn rather
+  # than refuse.
+  oob_pred <- fit$predictions
+  n_no_oob <- if (is.numeric(oob_pred) && length(oob_pred) == nrow(X))
+    sum(!is.finite(oob_pred)) else 0L
+  if (n_no_oob == nrow(X)) {
+    .warn_and_log(paste0("fit_rf_model(): no row is out of bag for any tree ",
+                         "(%s), so fitted(), residuals(), the out-of-bag error%s ",
+                         "are undefined (NaN) and summary() and model_metrics() ",
+                         "have nothing to score. Use replace = TRUE or a ",
+                         "sample_fraction below 1, or score the forest with ",
+                         "cv_rf()."),
+                  if (!isTRUE(replace) && sample_fraction >= 1)
+                    "replace = FALSE with sample_fraction = 1 grows every tree on every row"
+                  else sprintf("%d tree(s)", as.integer(num_trees)),
+                  if (identical(importance, "permutation"))
+                    " and the permutation importance" else "")
+  } else if (n_no_oob > 0L) {
+    .warn_and_log(paste0("fit_rf_model(): %d of %d rows were sampled by every ",
+                         "one of the %d tree(s) and so have no out-of-bag ",
+                         "prediction: fitted() and residuals() are NaN there, ",
+                         "and summary(), model_metrics() and the out-of-bag ",
+                         "error use the other %d. Raise num_trees to cover ",
+                         "every row."),
+                  n_no_oob, nrow(X), as.integer(num_trees), nrow(X) - n_no_oob)
+  }
+
   new_spatial_fit(
     subclass       = "rf_fit",
     engine         = fit,
     # Show the coordinates in the formula when they are predictors, so
     # print()ing the fit does not hide them.  It is display-only: the forest is
-    # built through ranger's x/y interface, never from this formula.
+    # built through ranger's x/y interface, never from this formula.  Hence
+    # env = globalenv(): reformulate()'s default is this frame, which holds the
+    # forest (`fit`, `rr`), the data and the predictor frame, and a formula
+    # serialises its environment -- so saveRDS() on an rf_fit wrote the forest
+    # out a second time (1.62 MB for a 100-tree forest of 0.72 MB).
     formula        = stats::reformulate(
       termlabels = if (isTRUE(include_coords))
         c(predictor_vars, "..x", "..y") else predictor_vars,
-      response = response_var),
+      response = response_var, env = globalenv()),
     response_var   = response_var,
     predictor_vars = predictor_vars,
     data_sf        = dat,
@@ -564,14 +614,19 @@ cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
 #'   \code{type = "quantiles"}, \code{type = "se"} with \code{predict.all})
 #'   are rejected, because this method's contract is one number per row of
 #'   \code{newdata}. Call \code{predict(fit$engine, data = ...)} directly for
-#'   those. \code{seed} defaults to a constant: an unset \code{seed} makes
+#'   those.  So is anything \code{ranger}'s predict method itself refuses,
+#'   such as \code{type = "quantiles"} on a forest grown without
+#'   \code{quantreg = TRUE} or \code{type = "se"} without
+#'   \code{keep.inbag = TRUE}: the error names ranger's reason.
+#'   \code{seed} defaults to a constant: an unset \code{seed} makes
 #'   \code{ranger} draw one uniform from the global RNG stream per call, so the
 #'   number of \code{predict()} calls a script happens to make (via
 #'   \code{\link{predict_surface}}'s \code{chunk_size}, say) would otherwise
 #'   shift every later random draw. It does not affect a regression forest's
 #'   predictions; pass your own if you need one.
 #' @return Numeric vector, aligned to \code{nrow(newdata)} with \code{NA} for
-#'   rows dropped as incomplete.
+#'   rows dropped as incomplete.  A failure inside \code{ranger}'s predict
+#'   method is an error, not an all-\code{NA} vector.
 #' @family methods on a fitted model
 #' @export
 predict.rf_fit <- function(object, newdata = NULL, ...) {
@@ -625,14 +680,20 @@ predict.rf_fit <- function(object, newdata = NULL, ...) {
   # core when num.threads is unset.
   if (!("num.threads" %in% names(dots)))
     dots$num.threads <- .sanitize_core_count(getOption("mc.cores", 1L))
-  p <- tryCatch(
-    do.call(stats::predict, c(list(object$engine, data = X), dots))$predictions,
-    error = function(e) {
-      .log_warn("predict.rf_fit(): ranger predict failed: %s",
-                conditionMessage(e))
-      NULL
-    }
-  )
+  # A failure is an error naming ranger's reason.  It was caught, logged and
+  # returned as an all-NA vector, so type = "quantiles" on a forest grown
+  # without quantreg = TRUE, and type = "se" without keep.inbag = TRUE, both of
+  # which the documentation promises are rejected, came back as NA with no R
+  # condition, and model_metrics(newdata =) then reported n = 0.  Every caller
+  # already handles an error: the cv_*() fold loop records it as the fold's
+  # cause, and predict_surface() stops naming the rows.
+  rr <- .call_capturing_stderr(function()
+    do.call(stats::predict, c(list(object$engine, data = X), dots))$predictions)
+  if (!is.null(rr$error))
+    stop(sprintf("predict.rf_fit(): ranger's predict() failed: %s",
+                 sub("^Error:\\s*", "", .stderr_reason(rr$error, rr$stderr))),
+         call. = FALSE)
+  p <- rr$value
   # predict.all = TRUE and type = "quantiles" make ranger return a matrix.
   # as.numeric() would flatten it column-major into a vector of the wrong
   # length, which .expand_predictions() would then either reject or (at the

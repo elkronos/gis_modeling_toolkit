@@ -37,6 +37,15 @@ The "effective range" where correlation drops to ~5\% is
 }
 \details{
 Subsamples large datasets to avoid O(n^2) memory and time cost.
+
+These are the bounds a length-scale \emph{prior} is calibrated over, not
+the scales a fitted model can resolve: that depends on the basis size
+(\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
+it as \code{$info$gp_ell_min}).  Both bounds are fixed fractions of the
+spread of pairwise distances, so they do not shrink as points are added to
+the same area.  A surface whose range sits below what the basis resolves
+needs a larger \code{gp_k}: more points help the data identify a short
+range, but they make neither these bounds nor the derived basis finer.
 }
 \examples{
 set.seed(1)
