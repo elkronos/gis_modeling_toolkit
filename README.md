@@ -530,8 +530,10 @@ to memoise, so both are cached:
 ### Logging
 
 Detailed diagnostics are logged to a session temp file, and warnings are
-echoed to the console. Logging is scoped to the `"spatialkit"` namespace
-and never touches your global logger configuration.
+echoed to the console. Logging is scoped to the `"spatialkit"` namespace:
+it never touches your global logger configuration, and a global
+configuration set up before the package loads does not carry over into
+it.
 
 The two are separate `logger` appenders: **index 1** is the temp file
 (INFO+), **index 2** is the console echo (WARN+). Both
@@ -553,6 +555,12 @@ Note that these are `logger` messages, not R conditions:
 not suppress them. Where the documentation says a function *raises* a
 warning, it means a genuine R `warning()`; where it says a function
 *logs* one, it means this.
+
+knitr does not capture the console’s error stream, so while a document
+is being knitted (R Markdown, Quarto, pkgdown) the console echo is also
+sent as an R message. The logged cautions then appear in the output next
+to the warnings, and the chunk option `message = FALSE` keeps them out
+of it.
 
 ## Development
 
