@@ -39,7 +39,11 @@ row; \code{\link[=prep_model_data]{prep_model_data()}} and \code{\link[=make_fol
 drop any other empty geometry.  Empty lines are never handed to
 \code{\link[sf:st_line_sample]{sf::st_line_sample()}}: it yields no midpoint for them, which would
 misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
-empty part of one) crashed the R session.
+empty part of one) crashed the R session.  An empty part inside a
+non-empty feature is ignored, so the feature gets the point its other
+parts give; GEOS's interior point, used by \code{"point_on_surface"} and by
+the temporary projection's choice of CRS, segfaulted on an empty line
+part too.
 }
 \examples{
 library(sf)
