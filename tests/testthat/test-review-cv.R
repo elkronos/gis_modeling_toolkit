@@ -191,3 +191,65 @@ test_that("a fold dropped before fitting is not warned about twice", {
   expect_length(r2$warnings, 1L)
   expect_match(r2$warnings, "dropped before fitting")
 })
+
+
+# ---------------------------------------------------------------------------
+# select_features_forward(): every candidate set scored on the same rows
+# ---------------------------------------------------------------------------
+
+# The response is driven by `a`; land cover `lc` is noise whose level "C" sits
+# only in the north-east corner, which is also where the response is noisiest.
+# Under block CV the fold holding the corner cannot be predicted by any set
+# containing `lc`, so such a set used to be scored on the 192 easier rows.
+.rv_corner_pts <- function(n = 250, seed = 10) {
+  set.seed(seed)
+  xy <- cbind(runif(n, 0, 1000), runif(n, 0, 1000))
+  d <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], a = rnorm(n)),
+                    coords = c("x", "y"), crs = 32632)
+  corner <- xy[, 1] > 800 & xy[, 2] > 800
+  d$lc <- factor(ifelse(corner, "C", sample(c("A", "B"), n, TRUE)))
+  d$z <- 2 * d$a + rnorm(n, 0, ifelse(corner, 12, 1))
+  d
+}
+
+test_that("select_features_forward() does not let a set win by losing a fold", {
+  # With lm and a null model: `a` was selected, then `lc` was accepted at step
+  # 2 because {a, lc} scored RMSE 0.94 on 192 rows against 2.33 for {a} on 250.
+  d <- .rv_corner_pts()
+  fitf <- function(tr, vars) lm_spatial_fit(tr, "z", vars)
+  r <- .rv_warnings(select_features_forward(d, "z", c("a", "lc"), fitf,
+                                            k = 5, seed = 1, quiet = TRUE))
+  sel <- r$value
+  expect_identical(sel$selected, "a")
+  expect_identical(sel$params$n_scored, 250L)
+  h <- sel$history
+  expect_true("n_pred" %in% names(h))
+  expect_identical(h$n_pred[h$variable == "<none>"], 250L)
+  expect_identical(h$n_pred[h$step == 1L & h$variable == "a"], 250L)
+  # Every set holding `lc` predicted 192 rows and is NA, not a score.
+  lc_rows <- h[h$variable == "lc", ]
+  expect_true(all(lc_rows$n_pred == 192L))
+  expect_true(all(is.na(lc_rows$score)))
+  # One warning per step from the sweep, naming the set; cv_spatial()'s own
+  # partial-failure warning is not repeated for every candidate.
+  expect_length(r$warnings, 2L)
+  expect_match(r$warnings[1], paste0("^select_features_forward\\(\\): step 1: ",
+                                     "\\{lc\\} \\(192 of them predicted\\)"))
+  expect_match(r$warnings[2], "step 2: \\{a, lc\\} \\(192 of them predicted\\)")
+})
+
+test_that("with no null model the rows every step-1 set predicted are the reference", {
+  # RF refuses an empty predictor set, so the reference is the union of the
+  # step-1 candidates' rows: `lc` is still NA and `a` is chosen.  It used to
+  # be the other way round (RMSE 2.35 on 192 rows beat 2.63 on 250).
+  skip_if_not_installed("ranger")
+  d <- .rv_corner_pts()
+  fitf <- function(tr, vars) fit_rf_model(tr, "z", vars, num_trees = 100, seed = 1)
+  expect_warning(
+    sel <- select_features_forward(d, "z", c("a", "lc"), fitf, k = 5, seed = 1,
+                                   quiet = TRUE, max_vars = 1),
+    "step 1: \\{lc\\}")
+  expect_identical(sel$selected, "a")
+  expect_identical(sel$params$n_scored, 250L)
+  expect_identical(sel$history$n_pred, c(250L, 192L))
+})
