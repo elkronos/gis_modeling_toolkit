@@ -7,6 +7,8 @@
 #   * build_tessellation(method = "triangles") handed raw UTM-sized
 #     coordinates to qhull, which lost the precision to make nearby points
 #     vertices.
+#   * .pick_local_projected_crs() sent circumpolar lon/lat data to Web
+#     Mercator as if they were global coverage.
 # ===========================================================================
 
 
@@ -202,4 +204,90 @@ test_that("triangle cell_ids do not depend on the input row order", {
   expect_identical(.rt_tri_key(a$cells), .rt_tri_key(b$cells))
   expect_identical(a$cells$cell_id, b$cells$cell_id)
   expect_identical(a$index[perm], b$index)
+})
+
+
+# ---------------------------------------------------------------------------
+# Circumpolar lon/lat data
+# ---------------------------------------------------------------------------
+
+.rt_ring <- function(lat_lo, lat_hi, n = 40L, seed = 2) {
+  set.seed(seed)
+  sf::st_as_sf(data.frame(lon = stats::runif(n, -180, 180),
+                          lat = stats::runif(n, lat_lo, lat_hi)),
+               coords = c("lon", "lat"), crs = 4326)
+}
+
+
+test_that("circumpolar data get a pole-centred equal-area projection, not Web Mercator", {
+  ant <- .rt_ring(-80, -65)
+  lines <- capture_spatialkit_log(out <- ensure_projected(ant))
+  p4 <- sf::st_crs(out)$proj4string
+  expect_match(p4, "+proj=laea", fixed = TRUE)
+  expect_match(p4, "+lat_0=-90", fixed = TRUE)
+  expect_true(log_has(lines, "circles the South Pole"))
+  expect_false(log_has(lines, "global coverage"))
+
+  # The choice is measured, and the figures travel with the result.
+  ch <- attr(out, "crs_choice")
+  expect_s3_class(ch, "data.frame")
+  expect_equal(nrow(ch), 2L)
+  expect_match(ch$name[ch$chosen], "South Pole")
+  expect_lt(ch$distance_error[ch$chosen], 0.05)
+  expect_gt(ch$distance_error[!ch$chosen], 1)      # Web Mercator: >100%
+
+  # The quantity that matters: a 1-degree pair along a meridian at 75S is
+  # about 111 km, and Web Mercator made it about 445 km.
+  pair <- sf::st_as_sf(data.frame(lon = c(0, 0), lat = c(-75, -76)),
+                       coords = c("lon", "lat"), crs = 4326)
+  d_true <- as.numeric(sf::st_distance(pair)[1, 2])
+  d_proj <- as.numeric(stats::dist(sf::st_coordinates(
+    sf::st_transform(pair, sf::st_crs(out)))))
+  expect_lt(abs(d_proj / d_true - 1), 0.02)
+
+  # A station AT the pole: Web Mercator put it at y = -2.4e8 m.
+  sp <- rbind(ant, sf::st_as_sf(data.frame(lon = 0, lat = -90),
+                                coords = c("lon", "lat"), crs = 4326))
+  xy <- sf::st_coordinates(ensure_projected(sp))
+  expect_true(all(is.finite(xy)))
+  expect_lt(max(abs(xy)), 1e7)
+
+  # The Arctic gets the North Pole.
+  arc <- ensure_projected(.rt_ring(66, 84))
+  expect_match(sf::st_crs(arc)$proj4string, "+lat_0=90", fixed = TRUE)
+
+  # purpose = "area": the polar Lambert azimuthal is equal-area, so it is the
+  # answer there too, in place of Equal Earth.
+  ant_area <- ensure_projected(ant, purpose = "area")
+  expect_match(sf::st_crs(ant_area)$proj4string, "+proj=laea", fixed = TRUE)
+  expect_match(sf::st_crs(ant_area)$proj4string, "+lat_0=-90", fixed = TRUE)
+
+  # And it reaches the tessellation: Voronoi cells are built in it.
+  tess <- build_tessellation(.rt_ring(66, 84, n = 30L), method = "voronoi",
+                             quiet = TRUE)
+  expect_match(sf::st_crs(tess$cells)$proj4string, "+lat_0=90", fixed = TRUE)
+})
+
+
+test_that("global coverage and low-latitude belts keep the global fallback", {
+  # Both hemispheres: global coverage, unchanged.
+  set.seed(3)
+  glob <- sf::st_as_sf(data.frame(lon = stats::runif(80, -170, 170),
+                                  lat = stats::runif(80, -60, 70)),
+                       coords = c("lon", "lat"), crs = 4326)
+  gl <- capture_spatialkit_log(g_out <- ensure_projected(glob))
+  expect_equal(sf::st_crs(g_out)$epsg, 3857L)
+  expect_null(attr(g_out, "crs_choice"))
+  expect_true(log_has(gl, "global coverage"))
+  expect_match(sf::st_crs(ensure_projected(glob, purpose = "area"))$proj4string,
+               "eqearth|moll")
+
+  # One hemisphere, but a low-latitude belt that does not wrap round the
+  # antimeridian: the polar projection measures worse than Web Mercator
+  # there, so it is not used.
+  set.seed(4)
+  belt <- sf::st_as_sf(data.frame(lon = stats::runif(60, -100, 100),
+                                  lat = stats::runif(60, 0, 20)),
+                       coords = c("lon", "lat"), crs = 4326)
+  expect_equal(sf::st_crs(ensure_projected(belt))$epsg, 3857L)
 })
