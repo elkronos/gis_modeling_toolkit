@@ -583,15 +583,43 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     stop("plot_folds(): no points matched the fold assignment; were `folds` ",
          "built from a different layer?", call. = FALSE)
 
+  # coord_sf() brings layers that carry a CRS into one, but a CRS-less layer
+  # beside one that has a CRS aborts at PRINT time with sf's bare "cannot
+  # transform sfc object with missing crs".  make_folds() produces that mix
+  # itself: it projects CRS-less lon/lat points to a UTM zone, and stamps
+  # CRS-less points with a boundary's CRS, so the blocks it stores carry a CRS
+  # the very layer the folds came from does not.  So a CRS-less layer is
+  # brought into the points' CRS, or failing that the one the folds were built
+  # in, or the first layer's that has one -- reprojected from lon/lat when its
+  # coordinates look like degrees, and stamped with a warning otherwise, as
+  # make_folds() did.
+  blk <- folds$params$blocks
+  if (!(isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)) blk <- NULL
+  plot_crs <- sf::st_crs(dat)
+  if (is.na(plot_crs) && is.character(folds$params$crs) &&
+      length(folds$params$crs) == 1L && !is.na(folds$params$crs))
+    plot_crs <- tryCatch(sf::st_crs(folds$params$crs),
+                         error = function(e) sf::NA_crs_)
+  for (lyr in list(blk, boundary)) {
+    if (!is.na(plot_crs)) break
+    if (!is.null(lyr))
+      plot_crs <- tryCatch(sf::st_crs(lyr), error = function(e) sf::NA_crs_)
+  }
+  align <- function(x, what) {
+    if (is.null(x) || is.na(plot_crs) || !is.na(sf::st_crs(x))) return(x)
+    .transform_or_stamp(x, plot_crs, what = what, caller = "plot_folds")
+  }
+  dat <- align(dat, "points_sf")
+  blk <- align(blk, "folds$params$blocks")
+  if (!is.null(boundary)) boundary <- align(boundary, "boundary")
+
   p <- ggplot2::ggplot()
   if (!is.null(boundary))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(boundary),
                               fill = NA, colour = "grey60")
   # The block design, when the folds carry it (block_kfold): outlines under
-  # the points, in the CRS the folds were built in -- coord_sf() brings the
-  # layers to one CRS.
-  blk <- folds$params$blocks
-  if (isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)
+  # the points.
+  if (!is.null(blk))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(blk),
                               fill = NA, colour = "grey45", linewidth = 0.25)
   p +
@@ -611,7 +639,10 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   prm <- folds$params
   fin <- function(v) length(v) == 1L && is.finite(suppressWarnings(as.numeric(v)))
   num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",")
-  units <- if (is.character(prm$crs) && length(prm$crs) == 1L && nzchar(prm$crs))
+  # make_folds() records NA_character_ for points without a CRS, and
+  # nzchar(NA) is TRUE: the subtitle read "Block size 300 (NA units)".
+  units <- if (is.character(prm$crs) && length(prm$crs) == 1L &&
+               !is.na(prm$crs) && nzchar(prm$crs))
     sprintf(" (%s units)", prm$crs) else ""
   switch(as.character(folds$method),
     random_kfold =

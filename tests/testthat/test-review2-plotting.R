@@ -91,3 +91,67 @@ test_that("a units, Date, POSIXct or difftime fill column draws instead of faili
   expect_gt(length(labs), 1L)
   expect_false(any(grepl("^[0-9.e+]+$", labs)))
 })
+
+
+# ---- plot_folds() --------------------------------------------------------
+
+test_that("plot_folds draws the layer the folds came from when only the blocks carry a CRS", {
+  skip_if_not_installed("ggplot2")
+  # make_folds() projects CRS-less lon/lat points to a UTM zone, so its blocks
+  # carry a CRS the points do not; coord_sf() then aborted at print with
+  # "cannot transform sfc object with missing crs".
+  set.seed(1); n <- 80
+  ll <- sf::st_as_sf(data.frame(x = 10 + runif(n, 0, 0.01), y = 45 + runif(n, 0, 0.01)),
+                     coords = c("x", "y"))
+  f <- suppressWarnings(make_folds(ll, k = 5, method = "block_kfold", block_size = 300))
+  expect_false(is.na(sf::st_crs(f$params$blocks)))
+  expect_warning(p <- plot_folds(f, ll), "plot_folds\\(\\): `points_sf` has no CRS; its coordinates look like lon/lat")
+  expect_no_error(b <- ggplot2::ggplot_build(p))
+  # The points are reprojected onto the blocks, not stamped as metres.
+  blk <- sf::st_bbox(b$data[[1]]$geometry); pt <- sf::st_bbox(b$data[[2]]$geometry)
+  expect_true(pt[["xmin"]] >= blk[["xmin"]] && pt[["xmax"]] <= blk[["xmax"]] &&
+              pt[["ymin"]] >= blk[["ymin"]] && pt[["ymax"]] <= blk[["ymax"]])
+  expect_equal(nrow(b$data[[2]]), n)
+})
+
+test_that("plot_folds aligns a CRS-less boundary or CRS-less points to the other layers", {
+  skip_if_not_installed("ggplot2")
+  pts <- r2_points(n = 80)
+  f <- make_folds(pts, k = 5, method = "block_kfold", block_size = 300, seed = 1)
+  bnd <- sf::st_as_sf(sf::st_as_sfc(sf::st_bbox(pts)))
+  bnd_na <- sf::st_set_crs(bnd, NA)
+  expect_warning(p <- plot_folds(f, pts, boundary = bnd_na), "`boundary` has no CRS")
+  expect_no_error(b <- ggplot2::ggplot_build(p))
+  expect_length(b$data, 3L)
+
+  # CRS-less points whose folds took a boundary's CRS inside make_folds().
+  pts_na <- sf::st_set_crs(pts, NA)
+  f2 <- suppressWarnings(make_folds(pts_na, k = 5, method = "block_kfold",
+                                    block_size = 300, boundary = bnd, seed = 1))
+  expect_warning(p2 <- plot_folds(f2, pts_na), "`points_sf` has no CRS")
+  expect_no_error(ggplot2::ggplot_build(p2))
+  # CRS-less points and folds, a boundary with a CRS.
+  f3 <- suppressWarnings(make_folds(pts_na, k = 5, method = "block_kfold",
+                                    block_size = 300, seed = 1))
+  p3 <- suppressWarnings(plot_folds(f3, pts_na, boundary = bnd))
+  expect_no_error(ggplot2::ggplot_build(p3))
+  # No layer with a CRS: drawn as they are, with nothing to warn about.
+  expect_no_warning(p4 <- plot_folds(f3, pts_na))
+  expect_no_error(ggplot2::ggplot_build(p4))
+})
+
+test_that("plot_folds' subtitle gives no unit for folds built without a CRS", {
+  skip_if_not_installed("ggplot2")
+  # make_folds() records NA_character_ as the CRS and nzchar(NA) is TRUE, so
+  # the subtitle read "Block size 300 (NA units)".
+  pts_na <- sf::st_set_crs(r2_points(n = 80), NA)
+  fb <- suppressWarnings(make_folds(pts_na, k = 4, method = "block_kfold",
+                                    block_size = 300, seed = 1))
+  expect_true(is.na(fb$params$crs))
+  sub_b <- plot_folds(fb, pts_na)$labels$subtitle
+  expect_match(sub_b, "Block size 300\n")
+  expect_false(grepl("NA units", sub_b))
+  fl <- suppressWarnings(make_folds(pts_na, k = 80, method = "buffered_loo", buffer = 150))
+  sub_l <- plot_folds(fl, pts_na)$labels$subtitle
+  expect_identical(sub_l, "Leave-one-out with a 150 buffer")
+})
