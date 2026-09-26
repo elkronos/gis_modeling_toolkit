@@ -213,7 +213,9 @@ test_that("the dropped record does not survive subsetting the layer", {
                                pred = c(1, 2, 3, 4, Inf, 6, 7, 8)),
                     coords = c("x", "y"), crs = 32632)
   out <- suppressWarnings(prep_model_data(d, "resp", "pred"))
-  expect_identical(class(out), c("spatialkit_rows", "sf", "data.frame"))
+  # After "sf", so that vctrs (dplyr::bind_rows()) sees an sf; see
+  # test-review2-assignment.R.
+  expect_identical(class(out), c("sf", "spatialkit_rows", "data.frame"))
   expect_identical(attr(out, "dropped")$n, 2L)
   # Every shape of `[` leaves a plain layer with no record: the positions in
   # `which` do not survive the renumbering, and `n` is not a fact about the
@@ -246,11 +248,12 @@ test_that("the dropped record does not survive subsetting the layer", {
 })
 
 test_that("a layer carrying a record still satisfies S4 dispatch written for sf", {
-  # The class sits ahead of "sf", and S4 looks a class up in its own table
-  # rather than walking the S3 vector, so without setOldClass() every S4
-  # method written for "sf" -- methods::as(x, "Spatial") on the way into
-  # GWmodel, terra::vect(), sp's coercions -- fails a prepared layer with
-  # "no method or default for coercing".
+  # The class sat ahead of "sf" (and still does on a layer saved by an
+  # earlier version), and S4 looks a class up in its own table rather than
+  # walking the S3 vector, so without setOldClass() every S4 method written
+  # for "sf" -- methods::as(x, "Spatial") on the way into GWmodel,
+  # terra::vect(), sp's coercions -- failed a prepared layer with "no method
+  # or default for coercing".
   d <- sf::st_as_sf(data.frame(x = 1:8, y = 8:1,
                                resp = c(1, 2, NA, 4, 5, 6, 7, 8),
                                pred = c(1, 2, 3, 4, Inf, 6, 7, 8)),
