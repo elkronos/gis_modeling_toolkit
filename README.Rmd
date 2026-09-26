@@ -58,8 +58,10 @@ structure of the observations, and `determine_optimal_levels()` reads one off
 their clustering when they have any. `build_tessellation()` produces
 Voronoi, hex, square or Delaunay cells clipped to your study area, with IDs that
 stay stable when the input row order changes. `summarize_by_cell()` aggregates
-onto them and corrects the cell-level standard errors for within-cell
-autocorrelation, which on a correlated field roughly doubles them.
+onto them with a count and a standard error for every cell mean. When the cell
+means stand in for a population mean, it corrects those standard errors for
+within-cell autocorrelation, which on a correlated field can double them or
+more.
 
 Redrawing boundaries is easy. Knowing whether the result means anything is the
 hard part, so the second half of the package is the evidence layer. Three model
@@ -171,11 +173,14 @@ populated <- st_drop_geometry(cells)[cells$n > 1 & !is.na(cells$n), ]
 head(populated[, c("poly_id", "n", "resp_mean_z", "..se_resp_z")], 4)
 ```
 
-Every aggregate arrives with a count and a standard error, and `deff = "kish"`
-widens that error by the design effect of the within-cell correlation; the
-uncorrected version assumes the points in a cell are independent. A lattice laid
-over an irregular point cloud leaves some cells with one observation or none,
-which is why `n` travels with every row.
+Every aggregate arrives with a count and a standard error. `deff = "kish"` makes
+that the standard error of each cell mean as an estimate of the population mean,
+widened by the design effect of the within-cell correlation. For a map of the
+cells' own values leave `deff` at 1: the uncorrected standard error is the right
+one for a cell's own mean when its points are spread through it
+(`?summarize_by_cell` says which to use when). A lattice laid over an irregular
+point cloud leaves some cells with one observation or none, which is why `n`
+travels with every row.
 
 Now score a model. The learner below is a cubic trend surface in the
 coordinates, which is a realistic thing to fit and also the leakage mechanism
@@ -415,11 +420,16 @@ same reason.
 matrix, which is why it stops here.
 `install.packages(c("FNN", "Matrix"))`, both of them.
 
+**`compare_models_cv(): no recognised model requested.`**
+None of the names in `models` is `"GWR"`, `"Bayesian"` or `"RF"`, which are
+matched exactly, case included. The `ignoring unknown model(s)` warning printed
+with the error names the ones it ignored.
+
 **`compare_models_cv(): no viable models.`**
-Every requested backend was dropped: unrecognised names raise a warning,
-uninstalled backends print `dropping <name> (package/function unavailable)`.
-Read the messages immediately above the error; they name each one. Install the
-backend, or request one you have.
+At least one requested name was recognised, but every recognised backend is
+uninstalled: each prints `dropping <name> (package/function unavailable)` above
+the error, and any unrecognised names are named in a warning printed with it.
+Install the backend, or request one you have.
 
 **`cv_*(): all folds failed; cross-validation results contain no predictions.`**
 This is a warning: `$overall` comes back all-`NA` with `n_pred = 0`. The
