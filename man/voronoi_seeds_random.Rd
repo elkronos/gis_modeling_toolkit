@@ -4,19 +4,24 @@
 \alias{voronoi_seeds_random}
 \title{Random seed generation within a polygonal boundary}
 \usage{
-voronoi_seeds_random(boundary, k, set_seed = 456)
+voronoi_seeds_random(boundary, k, set_seed = NULL)
 }
 \arguments{
 \item{boundary}{An sf or sfc polygonal object.}
 
 \item{k}{Integer; number of random seeds.}
 
-\item{set_seed}{Integer RNG seed. Default 456.}
+\item{set_seed}{Optional integer RNG seed. Default \code{NULL}: the seeds are
+drawn from the session's random-number stream, so consecutive calls give
+different seedings and \code{\link[=set.seed]{set.seed()}} before a call makes it reproducible.
+Pass a number to get the same seeds whatever that stream holds; the
+caller's stream is then left as it was. The default used to be 456,
+which made every call return the same "random" seeding, even inside a
+loop over \code{\link[=set.seed]{set.seed()}}.}
 }
 \value{
-An sf object of \strong{at most} \code{k} random POINTs (rejection sampling
-inside an awkward geometry can fall short of \code{k}, which is warned about),
-with \code{seed_id} and \code{method = "random"} columns matching
+An sf object of \code{k} random POINTs (fewer only in the degenerate
+case above), with \code{seed_id} and \code{method = "random"} columns matching
 \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
 }
 \description{
@@ -30,18 +35,23 @@ sensitivity comparison: re-running an analysis over several random seedings
 shows how much of a result depends on one particular tessellation.
 }
 \details{
-Sampling is by rejection inside the polygon, so an awkward geometry can
-return fewer than \code{k} seeds; that shortfall is warned about rather than
-silently padded.
+Seeds are drawn uniformly inside the polygon. When a draw falls short of \code{k}
+it is topped up with further uniform draws from the same polygon, so the
+result has exactly \code{k} seeds; only a geometry that still yields too few
+after ten top-ups returns fewer, and that shortfall is logged.
 }
 \examples{
 library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
+set.seed(1)
 seeds <- voronoi_seeds_random(bnd, k = 10)
-nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
+nrow(seeds)   # 10
 seeds
+# Another call is another seeding; set_seed pins one.
+identical(st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)),
+          st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)))
 }
 \seealso{
 Other tessellation: 

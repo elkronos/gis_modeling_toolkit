@@ -26,7 +26,11 @@ own to lay a grid over and error without it; supply the study-area polygon,
 or build one from the points with \code{\link[=clip_target_for]{clip_target_for()}}. \strong{Optional} for
 \code{method = "voronoi"} and \code{method = "triangles"}, which derive their extent
 from the points themselves and use \code{boundary} only to clip the result when
-\code{clip = TRUE}.}
+\code{clip = TRUE}. When exactly one of \code{points_sf} and \code{boundary} has a CRS,
+the other is interpreted in it as \code{\link[=harmonize_crs]{harmonize_crs()}} does, with a warning;
+CRS-less points that do not look like lon/lat cannot take a geographic
+boundary's CRS and are refused with an error. When neither has one, both
+stay in the same unnamed planar space.}
 
 \item{method}{One of "voronoi", "triangles", "hex", "square".}
 
@@ -44,24 +48,48 @@ vector of ranked candidates from \code{\link{determine_optimal_levels}()}
 (its \code{$best}), or a \code{\link{resolution_profile}()} (read with
 \code{select_resolution()} at its default criterion).  The count used
 is returned as \code{params$approx_n_cells} and where it came from as
-\code{params$approx_n_cells_from} (\code{NULL} for a plain number).}
+\code{params$approx_n_cells_from} (\code{NULL} for a plain number).
+A count read off a profile or selection is a number of k-means cells:
+every one occupied, and small where the points are dense.  A lattice
+lays that many equal cells over the whole boundary, so on clustered
+points many of them hold no point (about half, on six clusters in a
+square); on evenly spread points it matches.  \code{params$cells_occupied}
+and \code{params$cells_empty} report how the points filled the grid, and
+a count that came from a profile or selection warns when fewer than
+three quarters of it are occupied.  For cells that follow the points,
+seed a Voronoi tessellation with
+\code{get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)}.}
 
 \item{cellsize}{Numeric cell size, in the units of the working CRS.  Read by
 \code{method = "hex"} and \code{"square"} only; the other two methods warn
 that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
-a logged warning; supply one or the other.}
+a logged warning; supply one or the other.  With a geographic \code{crs}
+it is in that CRS's degrees, and the grid is laid in degrees.}
 
-\item{expand}{Buffer distance for the Voronoi envelope. Applied by
+\item{expand}{Buffer distance, in the working CRS's units, by which the
+Voronoi boundary is grown before the diagram is built. Applied by
 \code{method = "voronoi"} only; the \code{"hex"}, \code{"square"} and \code{"triangles"}
 methods ignore it (the value you passed is still echoed back in
-\code{params$expand}).}
+\code{params$expand}). With \code{clip = TRUE} the cells are clipped to the grown
+boundary, which is the one returned as \code{boundary}: cells reach \code{expand}
+beyond the study area, and a point up to \code{expand} outside it is indexed.}
 
 \item{clip}{Logical; clip to boundary.}
 
-\item{keep_duplicates}{Logical; keep duplicate points.}
+\item{keep_duplicates}{Logical. Has no effect on the cells or the index:
+coincident points are merged before a Voronoi diagram or a Delaunay
+triangulation is built either way, and every one of them is indexed to
+the cell they share.}
 
-\item{crs}{Optional target CRS.}
+\item{crs}{Optional target CRS. A projected CRS is the working CRS. A
+geographic one (EPSG:4326, say) is the CRS the result is returned in: the
+cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}} picks for
+the points, indexed there, and then transformed with long edges
+densified, so Voronoi cells are nearest-point cells on the ground and
+grid cells are laid in metres rather than degrees. The exception is a hex
+or square grid sized by \code{cellsize}, which is in degrees and so is laid in
+degrees.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -80,12 +108,15 @@ median cell width of a cell is snapped to it. That covers points
 sitting exactly on a shared edge, and leaves points outside the study
 area as \code{NA}. A summary built from \code{index} therefore counts only the
 points the tessellation actually covers.}
-\item{\code{boundary}}{The boundary used (possibly derived and/or reprojected).}
+\item{\code{boundary}}{The boundary used (possibly derived and/or
+reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units).}
+outside every cell each sat, in CRS units). For \code{"hex"} and
+\code{"square"} also \code{cells_occupied} and \code{cells_empty}, the number of
+cells that hold at least one point and that hold none.}
 }
 }
 \description{
@@ -110,6 +141,12 @@ axis-aligned artefacts of squares and have uniform neighbour distances.
 interpolation and adjacency work; it is not meant as an aggregation unit.
 \code{\link{determine_optimal_levels}()} will suggest a cell count from the
 spatial structure of the data.
+
+\code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
+a MULTIPOINT feature with several vertices gets one cell (or triangle
+corner) per vertex, and its \code{index} entry is the smallest
+\code{cell_id} among the cells it touches.  See
+\code{\link{create_voronoi_polygons}()}.
 }
 \examples{
 library(sf)

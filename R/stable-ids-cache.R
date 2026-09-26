@@ -97,6 +97,19 @@ ensure_stable_poly_id <- function(polygons_sf,
   # projection it arrives in.  Falling back to the untransformed geometry
   # silently therefore does not degrade the result, it defeats the function's
   # purpose -- the IDs stop being comparable with any other run -- so say so.
+  #
+  # The key is measured in lon/lat, where sf routes st_centroid() and
+  # st_area() to s2, or with sf_use_s2(FALSE) to lwgeom (not a dependency:
+  # every Voronoi tessellation, projected ones included, died with "package
+  # lwgeom required") and to planar arithmetic on degrees, which differs from
+  # the spherical centroid by far more than the rounding step below, so a few
+  # near-tied cells took different IDs in s2-on and s2-off sessions (4 of
+  # 2,000 Voronoi cells).  s2 is switched on for this function only and
+  # restored on exit, so the key is the same whatever sf_use_s2() says.
+  if (!isTRUE(sf::sf_use_s2())) {
+    suppressMessages(sf::sf_use_s2(TRUE))
+    on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
+  }
   sort_sf <- polygons_sf
   if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
     sort_sf <- tryCatch(
@@ -111,16 +124,6 @@ ensure_stable_poly_id <- function(polygons_sf,
                   conditionMessage(e))
         sort_sf
       })
-
-  # The key is taken on the sphere whatever sf_use_s2() says.  With s2 off,
-  # the centroid of the lon/lat copy was planar in degrees, which differs
-  # from the spherical one by far more than the rounding step below, so a
-  # few near-tied cells took different IDs in s2-on and s2-off sessions (4 of
-  # 2,000 Voronoi cells), and the s2-off path needed lwgeom.
-  if (isTRUE(sf::st_is_longlat(sort_sf)) && !isTRUE(sf::sf_use_s2())) {
-    suppressMessages(sf::sf_use_s2(TRUE))
-    on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
-  }
 
   # Validity is a property of the geometry in the CRS it is being measured
   # in, so the make_valid above (in the layer's own CRS) does not carry over.
@@ -354,7 +357,9 @@ create_grid_polygons_cached <- function(boundary,
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
     stop("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON.")
-  bnd <- ensure_projected(bnd)
+  # The same projection create_grid_polygons() makes, so a cached grid is laid
+  # in the CRS an uncached one would be (see .project_for_grid()).
+  bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
 
   key <- .cache_key(bnd, type, target_cells, ...)
 
