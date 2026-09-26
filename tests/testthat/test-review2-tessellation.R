@@ -356,3 +356,67 @@ test_that("a lattice sized by a selection reports and warns about empty cells", 
                                              approx_n_cells = 56, quiet = TRUE))
   expect_true(is.numeric(t3$params$cells_occupied))
 })
+
+
+# ---------------------------------------------------------------------------
+# Seeding
+# ---------------------------------------------------------------------------
+
+test_that("k-means seeding projects CRS-less lon/lat points like everything else", {
+  set.seed(11)
+  ll <- data.frame(x = stats::runif(800, 0, 1.6), y = stats::runif(800, 60, 61))
+  p_na <- sf::st_as_sf(ll, coords = c("x", "y"))
+  p_ll <- sf::st_as_sf(ll, coords = c("x", "y"), crs = 4326)
+  ref <- sf::st_coordinates(voronoi_seeds_kmeans(p_ll, k = 2, set_seed = 1))
+
+  expect_warning(s_na <- voronoi_seeds_kmeans(p_na, k = 2, set_seed = 1), "EPSG:4326")
+  expect_true(is.na(sf::st_crs(s_na)))
+  expect_equal(unname(sf::st_coordinates(s_na)), unname(ref), tolerance = 1e-9)
+
+  expect_warning(g_na <- get_voronoi_seeds(method = "kmeans", n = 2, sample_points = p_na,
+                                           set_seed = 1), "EPSG:4326")
+  expect_true(is.na(sf::st_crs(g_na)))
+  expect_equal(unname(sf::st_coordinates(g_na)), unname(ref), tolerance = 1e-9)
+})
+
+
+test_that("voronoi_seeds_random() gives another seeding per call unless pinned", {
+  bnd <- .r2_sq(0, 0, 100, crs = 32632)
+  xy <- function(s) sf::st_coordinates(s)
+  set.seed(1); a <- voronoi_seeds_random(bnd, k = 5)
+  set.seed(2); b <- voronoi_seeds_random(bnd, k = 5)
+  set.seed(1); a2 <- voronoi_seeds_random(bnd, k = 5)
+  expect_false(identical(xy(a), xy(b)))
+  expect_identical(xy(a), xy(a2))
+  expect_identical(xy(voronoi_seeds_random(bnd, k = 5, set_seed = 7)),
+                   xy(voronoi_seeds_random(bnd, k = 5, set_seed = 7)))
+  expect_null(formals(voronoi_seeds_random)$set_seed)
+})
+
+
+test_that("voronoi_seeds_kmeans() takes nstart", {
+  set.seed(4)
+  pts <- sf::st_as_sf(data.frame(x = stats::runif(200, 0, 1000),
+                                 y = stats::runif(200, 0, 1000)),
+                      coords = c("x", "y"), crs = 32632)
+  expect_equal(nrow(voronoi_seeds_kmeans(pts, k = 6, nstart = 1)), 6L)
+  expect_equal(nrow(voronoi_seeds_kmeans(pts, k = 6, nstart = 25)), 6L)
+  expect_error(voronoi_seeds_kmeans(pts, k = 6, nstart = 0), "nstart")
+})
+
+
+# ---------------------------------------------------------------------------
+# harmonize_crs()
+# ---------------------------------------------------------------------------
+
+test_that("harmonize_crs() takes a layer as target_crs", {
+  set.seed(1)
+  a <- sf::st_set_crs(.r2_pts_na(), 32632)
+  b <- sf::st_transform(a[1:5, ], 4326)
+  ref <- sf::st_transform(a[1:3, ], 3035)
+  for (tgt in list(ref, ref[1, ], sf::st_geometry(ref))) {
+    h <- harmonize_crs(a, b, target_crs = tgt)
+    expect_equal(sf::st_crs(h$a)$epsg, 3035L)
+    expect_equal(sf::st_crs(h$b)$epsg, 3035L)
+  }
+})

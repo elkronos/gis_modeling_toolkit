@@ -1036,7 +1036,8 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'
 #' @param a,b Objects of class sf or sfc.
 #' @param prefer Which object's CRS to keep ("a" or "b").
-#' @param target_crs Optional target CRS to apply to both.
+#' @param target_crs Optional target CRS to apply to both: anything
+#'   [sf::st_crs()] accepts, including an sf or sfc object, whose CRS is used.
 #' @param on_transform_error What to do when st_transform() fails:
 #'   \code{"stop"} (default) raises an error immediately;
 #'   \code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
@@ -1060,6 +1061,12 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (!inherits(b, c("sf", "sfc"))) stop("harmonize_crs(): `b` must be sf or sfc.")
   prefer <- match.arg(prefer)
   on_transform_error <- match.arg(on_transform_error)
+  # A layer as the target means its CRS, as it does for ensure_projected().
+  # Passed through as it was, st_transform() read a multi-row sf as a list of
+  # candidate CRSs ("the condition has length > 1") and refused a one-row one.
+  # Only sf/sfc are converted here: st_crs() on a string it cannot parse
+  # throws before st_transform() runs, which would bypass on_transform_error.
+  if (inherits(target_crs, c("sf", "sfc"))) target_crs <- sf::st_crs(target_crs)
 
   crs_a <- sf::st_crs(a)
   crs_b <- sf::st_crs(b)
