@@ -318,6 +318,14 @@ print.summary.spatial_fit <- function(x, ...) {
   else
     cat("\n  In-sample metrics:\n")
   m <- x$in_sample
+  # The metrics use the rows with a finite fitted value, which is not always
+  # all of them: an rf_fit has no out-of-bag prediction for a row every tree
+  # sampled (ranger returns NaN), so a 5-tree forest printed "n = 200" above
+  # an R^2 computed on 180 rows.
+  n_m <- m$n %||% NA_integer_
+  if (length(n_m) == 1L && is.finite(n_m) && is.finite(x$n) && n_m < x$n)
+    cat(sprintf("    (computed on %d of %d rows; the rest have no finite fitted value)\n",
+                n_m, x$n))
   # ASCII on purpose: a superscript two rendered as R<U+00B2> on every
   # non-UTF-8 console, and the labels were not aligned.
   cat(sprintf("    RMSE    = %.4f\n", m$RMSE))
