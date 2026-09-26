@@ -167,7 +167,7 @@ the field, and whether the cell values can be told apart from noise. `moran_z`
 is the diagnostic, and a large deviate says the cells are still leaving spatial
 pattern on the table.
 
-```{r plot-profile, fig.height=8, fig.alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all three."}
+```{r plot-profile, fig.height=8, fig.alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 49 cells and turns up at 55, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 20 cells and climbs past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are one to three levels wide, none has a gap, and no level sits inside all three."}
 plot(prof)
 ```
 

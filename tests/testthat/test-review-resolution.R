@@ -136,7 +136,9 @@ test_that("select_on = 'split' reads the selection half's response on the whole 
     criterion = "morans_i", select_on = "split", set_seed = 2))
   sel <- attr(out, "split")$selection
   expect_true(length(seen) > 0L)
-  for (s in seen) expect_identical(s$resp, pts$z[sel])
+  # The rows arrive in the canonical (coordinate) order the sweep uses, so
+  # compare them as a set.
+  for (s in seen) expect_identical(sort(s$resp), sort(pts$z[sel]))
   ks <- vapply(seen, function(s) max(s$cl), integer(1))
   used <- vapply(seen, function(s) length(unique(s$cl)), integer(1))
   expect_true(any(used < ks))

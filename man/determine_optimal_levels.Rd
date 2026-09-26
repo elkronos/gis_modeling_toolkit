@@ -31,7 +31,10 @@ large \code{top_n} is; only the model-aware criteria can return more.}
 
 \item{sample_n}{Integer; subsample size for speed. Default 1500.}
 
-\item{set_seed}{Integer RNG seed. Default 123.}
+\item{set_seed}{Integer RNG seed for the subsample and the k-means++
+restarts; restored afterwards. Default 123.  The rows are put in
+coordinate order before either, so the answer does not depend on the
+order they come in.}
 
 \item{response_var}{Optional response column name. When provided alongside
 \code{predictor_vars}, enables model-aware level selection via Moran's I

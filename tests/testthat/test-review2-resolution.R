@@ -202,6 +202,38 @@ test_that("a sac supplied under select_on = 'split' is flagged", {
 })
 
 
+test_that("row order does not change the profile or the count", {
+  pts  <- r2_pts(300, seed = 6)
+  set.seed(9)
+  perm <- sample(nrow(pts))
+  sac  <- r2_sac(300, nugget = 0.5)
+  a <- resolution_profile(pts, "z", sac = sac, n_levels = 6, nstart = 3)
+  b <- resolution_profile(pts[perm, ], "z", sac = sac, n_levels = 6, nstart = 3)
+  expect_identical(b$wss, a$wss)
+  expect_equal(b$cp, a$cp)
+  # A layer larger than sample_n draws the same subsample either way.
+  c1 <- resolution_profile(pts, n_levels = 4, nstart = 2, sample_n = 150)
+  c2 <- resolution_profile(pts[perm, ], n_levels = 4, nstart = 2, sample_n = 150)
+  expect_identical(c2$wss, c1$wss)
+  d1 <- suppressWarnings(determine_optimal_levels(pts, max_levels = 8))
+  d2 <- suppressWarnings(determine_optimal_levels(pts[perm, ], max_levels = 8))
+  expect_identical(d2, d1)
+})
+
+
+test_that("k-means++ seeding draws in proportion to the squared distance", {
+  # Four points on a line; the first centre is uniform, the second is drawn
+  # with probability d2 / sum(d2): 0.374, 0.167, 0.459 by hand.
+  xy <- cbind(c(0, 1, 3, 3), 0)
+  set.seed(2)
+  second <- replicate(4000, spatialkit:::.kmeanspp_centers(xy, 2)[2, 1])
+  p <- as.numeric(table(factor(second, levels = c(0, 1, 3)))) / 4000
+  expect_equal(p, c(0.374, 0.167, 0.459), tolerance = 0.06)
+  # A point already chosen (distance 0) is never drawn again.
+  for (i in 1:50) expect_length(unique(spatialkit:::.kmeanspp_centers(xy, 3)[, 1]), 3L)
+})
+
+
 test_that("range_floor = FALSE starts the ladder at 2 and still reports the floor", {
   pts <- r2_pts(300)
   sac <- r2_sac(250)
