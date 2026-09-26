@@ -439,7 +439,7 @@ test_that("gwr_model_selection selects a bandwidth when none is supplied", {
   expect_identical(nrow(sel$table), 3L)          # 2 + 1
   expect_match(sel$bandwidth_source, "bw\\.gwr")
   expect_true(is.finite(sel$bandwidth))
-  expect_gte(sel$bandwidth, 4L)                  # n_cand + 2 floor
+  expect_gte(sel$bandwidth, 5L)                  # bisquare floor, n_cand + 3
   expect_lte(sel$bandwidth, 60L)
   expect_true("a" %in% sel$best)
 })
