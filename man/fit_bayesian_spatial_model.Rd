@@ -59,7 +59,11 @@ length-scale/domain ratio.  The fitted model carries
 NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
 wide enough to contain the longest plausible correlation range; a value
 that is too small truncates the domain and degrades the approximation for
-smooth, long-range surfaces.}
+smooth, long-range surfaces.  When you set \code{gp_c} and leave
+\code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
+wider boundary needs more basis functions to resolve the same
+length-scale, so raising \code{gp_c} raises the derived \code{gp_k} with
+it, up to the cap of 50 per dimension (a capped value is logged).}
 
 \item{gp_iso}{Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
 (the default) fits a separate length-scale per coordinate axis, letting the

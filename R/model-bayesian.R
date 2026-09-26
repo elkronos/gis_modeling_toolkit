@@ -168,7 +168,11 @@
 #'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
 #'   wide enough to contain the longest plausible correlation range; a value
 #'   that is too small truncates the domain and degrades the approximation for
-#'   smooth, long-range surfaces.
+#'   smooth, long-range surfaces.  When you set \code{gp_c} and leave
+#'   \code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
+#'   wider boundary needs more basis functions to resolve the same
+#'   length-scale, so raising \code{gp_c} raises the derived \code{gp_k} with
+#'   it, up to the cap of 50 per dimension (a capped value is logged).
 #' @param prior Optional brms prior specification. When NULL and
 #'   \code{standardize_predictors = TRUE}, weakly informative
 #'   \code{normal(0, 5)} priors are set on regression coefficients.
@@ -594,8 +598,18 @@ fit_bayesian_spatial_model <- function(
   # that scaled gp_k with sqrt(n) made the approximation cost grow as n while
   # adding no resolution the data supported.  NULL means "derive"; an explicit
   # value passes through untouched, which is the contract the CV internals
-  # rely on when a user supplies gp_k per fold.
-  gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds)
+  # rely on when a user supplies gp_k per fold.  A user's gp_c is handed to the
+  # rule, so a derived gp_k is sized for the boundary actually used: k grows
+  # with c, and a gp_c raised for a long-range surface (the advice under
+  # @param gp_c) used to keep the k derived for the default c, a basis coarser
+  # than the lower length-scale bound it is sized to resolve.  gp_c is
+  # therefore validated first, before the rule reads it.
+  if (!is.null(gp_c) &&
+      (!is.numeric(gp_c) || length(gp_c) != 1L || !is.finite(gp_c) || gp_c <= 1))
+    stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
+         call. = FALSE)
+  gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds,
+                              c = gp_c)
   gp_k_auto <- is.null(gp_k)
   if (gp_k_auto)      gp_k <- gp_spec$k
   if (is.null(gp_c))  gp_c <- gp_spec$c
@@ -605,9 +619,6 @@ fit_bayesian_spatial_model <- function(
   # produce a nonsensical resolvable-length-scale and a spurious diagnostic.
   if (!is.numeric(gp_k) || length(gp_k) != 1L || !is.finite(gp_k) || gp_k < 2)
     stop("fit_bayesian_spatial_model(): `gp_k` must be a single finite number >= 2.",
-         call. = FALSE)
-  if (!is.numeric(gp_c) || length(gp_c) != 1L || !is.finite(gp_c) || gp_c <= 1)
-    stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
          call. = FALSE)
   gp_k <- as.integer(gp_k)
   if (gp_c < 1.25)
