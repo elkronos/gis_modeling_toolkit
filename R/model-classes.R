@@ -212,7 +212,13 @@ print.spatial_fit <- function(x, ...) {
                 x$info$gp_n_basis %||% NA_integer_))
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
-    if (!isTRUE(x$info$convergence_ok))
+    # NA is "not checked" (check_convergence = FALSE, or no diagnostic could be
+    # read), which is neither a pass nor a failure; NULL (nothing recorded)
+    # still reads as a failure.
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
       cat("  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
@@ -340,6 +346,16 @@ print.summary.spatial_fit <- function(x, ...) {
     sub <- if (is.finite(n_s) && is.finite(m$n) && n_s < m$n)
       sprintf("  (over %d of %d rows)", n_s, m$n) else ""
     cat(sprintf("    SMAPE   = %.2f%%%s\n", m$SMAPE, sub))
+  }
+  # The same convergence verdict print() on the fit gives.  The summary carried
+  # it in $info and never showed it, so metrics from a posterior that had not
+  # converged printed exactly like metrics from one that had.
+  if (identical(x$class, "bayesian_fit") && "convergence_ok" %in% names(x$info)) {
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("\n  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
+      cat("\n  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
 }

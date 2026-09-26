@@ -116,8 +116,17 @@ exactly the setting the divergence warning tells you to raise.}
 before fitting. Default FALSE. When TRUE, the scaling parameters are
 stored in the return value so predictions can be computed correctly.}
 
-\item{check_convergence}{Logical; after fitting, check for divergences,
-low ESS, and high R-hat and issue warnings. Default TRUE.}
+\item{check_convergence}{Logical; after fitting, check for divergent
+transitions, R-hat above 1.05, an effective-sample-size ratio below 0.1,
+and a GP basis too coarse for the posterior length-scale.  Each problem
+found is written to the log as a WARN line (shown on the console unless
+\code{\link{spatialkit_quiet}()} is on), sets
+\code{$info$convergence_ok} to \code{FALSE}, and is detailed in
+\code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
+They are not raised as R warnings.  Under \pkg{rstan} the sampler raises
+its own R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so
+read \code{$info$convergence_ok}.  \code{FALSE} skips the checks and
+leaves \code{convergence_ok} \code{NA} (not checked).  Default TRUE.}
 
 \item{pointize}{Strategy for non-point geometry coercion.}
 
@@ -147,7 +156,9 @@ was calibrated over; gp_lscale_prior: the length-scale prior
 \code{brms::validate_prior()} reports the model will \emph{actually} use,
 which is not necessarily the one this function requested (several entries,
 semicolon-separated, if brms resolved the axes differently); loo, looic,
-convergence_ok, convergence_diagnostics: \code{n_divergent},
+convergence_ok (\code{TRUE} or \code{FALSE}, and \code{NA} when nothing
+was checked, as under \code{check_convergence = FALSE}),
+convergence_diagnostics: \code{n_divergent},
 \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
 \code{neff_failed}, the parameters that failed each check by name with
 their values (empty when none failed), which is what makes a failed
@@ -211,9 +222,12 @@ normalisation would leave every length-scale quantity in the wrong units.
 
 After fitting, the posterior length-scale is compared against the smallest
 scale the chosen basis can resolve
-(\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); a
-warning is issued when more than 10\% of the posterior mass falls below it,
-which is the signal that \code{gp_k} should be raised.
+(\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); when
+more than 10\% of the posterior mass falls below it a WARN line is logged
+and the share is recorded as
+\code{$info$convergence_diagnostics$gp_lscale_below_resolution}, which is
+the signal that \code{gp_k} should be raised.  This runs with the other
+checks, so only under \code{check_convergence = TRUE}.
 
 \strong{Coordinate scaling and anisotropy.}
 Before fitting the GP, X and Y coordinates are each centred and divided by

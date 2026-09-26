@@ -292,3 +292,75 @@ test_that("fit_rf_model() warns when rows have no out-of-bag prediction", {
   # A forest that covers every row is silent.
   expect_no_warning(fit_rf_model(d, "z", c("a", "b"), num_trees = 100))
 })
+
+
+# ---------------------------------------------------------------------------
+# gaps G1.8: an unchecked fit does not claim convergence; LOO says why
+# ---------------------------------------------------------------------------
+
+test_that("check_convergence = FALSE leaves convergence_ok NA, and print() says so", {
+  skip_if_not_installed("brms")
+  d <- .r2b_pts()
+  fit <- .r2b_quiet(.r2b_capture_fit(d, "z", "a", gp_k = 5))$fit
+  expect_identical(fit$info$convergence_ok, NA)
+  expect_length(fit$info$convergence_diagnostics, 0L)
+  txt <- paste(utils::capture.output(print(fit)), collapse = "\n")
+  expect_match(txt, "Convergence: NOT CHECKED", fixed = TRUE)
+  expect_false(grepl("Convergence warnings present", txt, fixed = TRUE))
+})
+
+test_that("a failed LOO is logged with its cause", {
+  skip_if_not_installed("brms")
+  d <- .r2b_pts()
+  logged <- character(0)
+  local_mocked_bindings(
+    .log_warn = function(fmt, ...) logged <<- c(logged, sprintf(fmt, ...)),
+    .package = "spatialkit")
+  local_mocked_bindings(
+    brm = function(...) structure(list(), class = "r2b_stub"),
+    loo = function(...) stop("injected loo cause 7731"),
+    .package = "brms")
+  fit <- .r2b_quiet(fit_bayesian_spatial_model(d, "z", "a", gp_k = 5,
+                                               check_convergence = FALSE,
+                                               compute_loo = TRUE))
+  expect_true(is.na(fit$info$looic))
+  expect_true(any(grepl("LOO computation failed.*injected loo cause 7731",
+                        logged)))
+})
+
+
+# ---------------------------------------------------------------------------
+# gaps G1.9: posterior's capped-ESS warning does not crowd out the others
+# ---------------------------------------------------------------------------
+
+test_that("the convergence check muffles only posterior's capped-ESS warning", {
+  skip_if_not_installed("brms")
+  d <- .r2b_pts()
+  pars <- c("b_a", "sdgp_gpa", paste0("zgp_", 1:60))
+  local_mocked_bindings(
+    brm = function(...) structure(list(), class = "brmsfit"),
+    nuts_params = function(...)
+      data.frame(Parameter = "divergent__", Value = 0),
+    rhat = function(...) stats::setNames(rep(1.001, length(pars)), pars),
+    neff_ratio = function(...) {
+      for (i in 1:60)
+        warning("The ESS has been capped to avoid unstable estimates.",
+                call. = FALSE)
+      warning("some other warning 5520", call. = FALSE)
+      stats::setNames(rep(0.8, length(pars)), pars)
+    },
+    .package = "brms")
+  seen <- character(0)
+  fit <- withCallingHandlers(
+    .r2b_quiet(fit_bayesian_spatial_model(d, "z", "a", gp_k = 5,
+                                          compute_loo = FALSE)),
+    warning = function(w) {
+      seen <<- c(seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    })
+  expect_false(any(grepl("ESS has been capped", seen, fixed = TRUE)))
+  expect_true("some other warning 5520" %in% seen)
+  # The values themselves are still read.
+  expect_equal(fit$info$convergence_diagnostics$min_neff_ratio, 0.8)
+  expect_true(isTRUE(fit$info$convergence_ok))
+})
