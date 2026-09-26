@@ -28,7 +28,11 @@
 #'   overlap area and never calls the predicate.
 #' @param largest Logical; when \code{features_sf} is itself polygonal, keep
 #'   the polygon with the largest overlap. Default TRUE. Ignored for point and
-#'   line features. Invalid geometries (usually a self-intersecting ring),
+#'   line features. A feature that only touches the polygon layer (shares an
+#'   edge or a corner with it, with no overlap area) has no largest overlap
+#'   and is unassigned, in any CRS; with \code{largest = FALSE} the default
+#'   \code{st_intersects} counts touching, so such a feature is assigned.
+#'   Invalid geometries (usually a self-intersecting ring),
 #'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 #'   for the join, with a warning, and returned as they arrived. If the
 #'   overlap still cannot be computed the function stops: falling back to
@@ -36,7 +40,10 @@
 #'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
-#'   smallest area, \code{"first"} keeps the first match (original order-dependent
+#'   smallest area and, among polygons of equal area (a point on the shared
+#'   edge of two grid cells), the one whose bounding-box centre is lowest,
+#'   then leftmost, so the choice does not depend on the order of the rows;
+#'   \code{"first"} keeps the first match (original order-dependent
 #'   behavior).
 #' @return An sf object with `polygon_id_col` attached, one row per input
 #'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
@@ -185,6 +192,30 @@ assign_features_to_polygons <- function(
         if (isTRUE(sf::st_is_longlat(f)))
           ", or project both layers first (see ensure_projected())" else ""),
         call. = FALSE))
+    # sf keeps the largest intersection piece without asking whether it has
+    # any area, so under GEOS a feature that only shares an edge or a corner
+    # with the cells was assigned to one of them with zero overlap, while
+    # under s2 (lon/lat, s2 on) the same feature had no piece and came back
+    # unassigned: sf's 100 nc counties against 50 of them as cells gave 70
+    # rows projected and 50 in lon/lat.  A feature with no overlap has no largest
+    # overlap, so it is unassigned whatever the CRS.  s2 already does this.
+    if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
+      hit <- which(!is.na(joined[[id_col]]))
+      if (length(hit)) {
+        # "2********": the interiors meet in an area.
+        overlaps <- suppressMessages(sf::st_relate(f, p_sel, pattern = "2********"))
+        ids_p    <- p_sel[[id_col]]
+        fi       <- joined[["..pre_join_row_id"]][hit]
+        touch    <- !vapply(seq_along(hit), function(k)
+          joined[[id_col]][hit[k]] %in% ids_p[overlaps[[fi[k]]]], logical(1))
+        if (any(touch)) {
+          .log_info(paste0("assign_features_to_polygons(): %d polygon feature(s) ",
+                           "only touch the polygon layer (no overlap area) and ",
+                           "are left unassigned."), sum(touch))
+          joined[[id_col]][hit[touch]] <- NA
+        }
+      }
+    }
   } else {
     joined <- do.call(sf::st_join, join_args)
   }
@@ -222,17 +253,40 @@ assign_features_to_polygons <- function(
               length(tie_rows), nrow(f), tie_break)
   if (any(dup_mask) && identical(tie_break, "smallest_area")) {
     # For each duplicated feature, keep the polygon with the smallest area
-    # (the most specific / tightest-fitting polygon).
+    # (the most specific / tightest-fitting polygon).  Areas are compared to
+    # 9 significant digits, so equal cells whose computed areas differ in the
+    # last bits count as equal.
     poly_areas <- suppressWarnings(as.numeric(sf::st_area(p)))
     poly_areas[!is.finite(poly_areas)] <- Inf
     names(poly_areas) <- as.character(p[[id_col]])
-    
-    joined$`..poly_area` <- poly_areas[as.character(joined[[polygon_id_col]])]
+
+    joined$`..poly_area` <- signif(poly_areas[as.character(joined[[polygon_id_col]])], 9L)
     joined$`..poly_area`[is.na(joined$`..poly_area`)] <- Inf
-    
+
+    # Equal areas -- every cell of a regular grid, for a point on a shared
+    # edge -- used to fall through to row order, so the answer depended on
+    # the order of the polygon layer after all: edge points at x = 100 went
+    # to cells 1, 4, 7, or to 2, 5, 8 with the rows reversed.  The candidate
+    # whose bounding-box centre is lowest, then leftmost, wins instead.  On
+    # a create_grid_polygons() grid, which is numbered from the lower left a
+    # row at a time, that is the cell the row order picked.
+    tie_ids <- unique(as.character(
+      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
+    tie_ids <- tie_ids[!is.na(tie_ids)]
+    p_tie   <- sf::st_geometry(p)[match(tie_ids, as.character(p[[id_col]]))]
+    ctr     <- vapply(p_tie, function(g) {
+      bb <- sf::st_bbox(g)
+      c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
+    }, numeric(2))
+    ctr_x <- stats::setNames(ctr[1, ], tie_ids)
+    ctr_y <- stats::setNames(ctr[2, ], tie_ids)
+    ids_j <- as.character(joined[[polygon_id_col]])
+    key_y <- unname(ctr_y[ids_j]); key_y[!is.finite(key_y)] <- Inf
+    key_x <- unname(ctr_x[ids_j]); key_x[!is.finite(key_x)] <- Inf
+
     # Within each group of duplicates, keep the row with smallest area
-    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]]), ,
-                     drop = FALSE]
+    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]],
+                           key_y, key_x), , drop = FALSE]
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
     joined[["..poly_area"]] <- NULL
   } else {
@@ -291,6 +345,16 @@ assign_features_to_polygons <- function(
 #' only ever produces single-component \code{Exp} or \code{Sph} models; other
 #' shapes reach this function through a user-built \code{sac}.
 #'
+#' A component with a 2-D geometric anisotropy (gstat's \code{ang1} and
+#' \code{anis1}, from \code{vgm(..., anis = c(angle, ratio))}) cannot be
+#' evaluated at a scalar distance, so the function of distance reads it at
+#' its major range, and the returned function carries an attribute
+#' \code{"cor_xy"}: a function of a coordinate matrix returning the full
+#' correlation matrix, with each component's separations rotated and its
+#' minor axis stretched by \code{1 / anis1} as gstat does.  Callers that hold
+#' coordinates use that.  The 3-D terms (\code{ang2}, \code{ang3},
+#' \code{anis2}) do not act on 2-D coordinates and are ignored.
+#'
 #' There is deliberately no special case at \code{h = 0}.  The nugget captures
 #' measurement error and variation below the sampling resolution, so two
 #' distinct observations each carry independent nugget noise and are less than
@@ -325,7 +389,7 @@ assign_features_to_polygons <- function(
     return(NULL)
   f_i <- .vgm_shape_fns[as.character(struct$model)]
 
-  function(h) {
+  fn <- function(h) {
     num <- 0
     for (i in seq_along(c_i)) num <- num + c_i[i] * f_i[[i]](h, a_i[i])
     # No special case at h = 0: this is the correlation between two DISTINCT
@@ -334,6 +398,32 @@ assign_features_to_polygons <- function(
     # the diagonal.
     pmin(pmax(num / total, 0), 1)
   }
+
+  # A 2-D anisotropy was read as isotropic at the major range: for
+  # vgm(0.8, "Exp", 300, 0.2, anis = c(0, 0.2)) the correlation at 50 m
+  # east-west came out 0.677 where gstat's is 0.348, and the median design
+  # effect 14.1 against 7.7.  Distance alone cannot carry a direction, so
+  # coordinate-holding callers get a function of the coordinates.
+  ang  <- if ("ang1" %in% names(struct)) as.numeric(struct$ang1) else rep(0, nrow(struct))
+  anis <- if ("anis1" %in% names(struct)) as.numeric(struct$anis1) else rep(1, nrow(struct))
+  ang[!is.finite(ang)] <- 0
+  anis[!is.finite(anis) | anis <= 0 | anis > 1] <- 1
+  if (any(anis < 1)) {
+    attr(fn, "cor_xy") <- function(xy) {
+      num <- 0
+      for (i in seq_along(c_i)) {
+        # gstat: ang1 is the major axis's direction, clockwise from north;
+        # the separation along the minor axis is stretched by 1 / anis1.
+        th <- ang[i] * pi / 180
+        u  <- xy[, 1] * sin(th) + xy[, 2] * cos(th)
+        v  <- (xy[, 1] * cos(th) - xy[, 2] * sin(th)) / anis[i]
+        d  <- as.matrix(stats::dist(cbind(u, v)))
+        num <- num + c_i[i] * f_i[[i]](d, a_i[i])
+      }
+      pmin(pmax(num / total, 0), 1)
+    }
+  }
+  fn
 }
 
 # Correlation shape f(h; a) of each supported gstat family, so that the
@@ -411,13 +501,18 @@ assign_features_to_polygons <- function(
 #' @param max_n Cells larger than this are subsampled before forming the
 #'   \code{n x n} correlation matrix.  Default 500.
 #' @param seed RNG seed for that subsampling.
+#' @param r_bar The per-cell mean correlations, when the caller already has
+#'   them from \code{.cell_cor_stats_variogram()}: building every cell's
+#'   correlation matrix a second time only to recompute them doubled the
+#'   cost of \code{summarize_by_cell(deff = "variogram")}.
 #' @return Named numeric vector of design effects, one per cell.
 #' @keywords internal
 #' @noRd
 .cell_deff_variogram <- function(coords, cell_id, cor_fn, max_n = 500L,
-                                 seed = 42L) {
-  r_bar <- .cell_rbar_variogram(coords, cell_id, cor_fn, max_n = max_n,
-                                seed = seed)
+                                 seed = 42L, r_bar = NULL) {
+  if (is.null(r_bar))
+    r_bar <- .cell_rbar_variogram(coords, cell_id, cor_fn, max_n = max_n,
+                                  seed = seed)
   n_i   <- table(factor(cell_id, levels = names(r_bar)))
   n_i   <- as.numeric(n_i[names(r_bar)])
   out   <- 1 + (n_i - 1) * r_bar
@@ -535,11 +630,22 @@ assign_features_to_polygons <- function(
 #' pairwise-distance distribution is the cell's, so the ratio transfers where
 #' the raw df would not.
 #'
+#' Rows with a non-finite coordinate (an empty point) have no location to
+#' correlate, so they are left out: the statistics describe the located
+#' points.  An anisotropic model is evaluated through its \code{"cor_xy"}
+#' attribute (see \code{.vgm_correlation_fn()}).
+#'
 #' @return Named numeric vector \code{c(rbar =, df_ratio =)}; \code{c(0, 1)}
-#'   when there is at most one point or no correlation function.
+#'   when there is at most one located point or no correlation function.
 #' @keywords internal
 #' @noRd
 .cor_stats_from_coords <- function(xy, cor_fn, max_n = 500L, seed = 42L) {
+  # An empty point's NA coordinates put NA in R and stopped the df test
+  # below with "missing value where TRUE/FALSE needed".
+  if (!is.null(xy) && length(dim(xy)) == 2L && nrow(xy) > 0L) {
+    located <- is.finite(xy[, 1]) & is.finite(xy[, 2])
+    if (!all(located)) xy <- xy[located, , drop = FALSE]
+  }
   n_i <- nrow(xy)
   if (is.null(cor_fn) || is.null(n_i) || n_i <= 1L)
     return(c(rbar = 0, df_ratio = 1))
@@ -548,11 +654,16 @@ assign_features_to_polygons <- function(
     on.exit(cleanup(), add = TRUE)
     xy <- xy[sample.int(n_i, max_n), , drop = FALSE]
   }
-  d <- as.matrix(stats::dist(xy))
   # Rebuild explicitly rather than relying on cor_fn() to preserve `dim`.
   # A correlation function written as, say, rep(1, length(h)) returns a bare
   # vector, and diag()<- would then fail.
-  R <- matrix(as.numeric(cor_fn(as.numeric(d))), nrow = nrow(d), ncol = ncol(d))
+  cor_xy <- attr(cor_fn, "cor_xy", exact = TRUE)
+  R <- if (is.function(cor_xy)) {
+    matrix(as.numeric(cor_xy(xy)), nrow = nrow(xy), ncol = nrow(xy))
+  } else {
+    d <- as.matrix(stats::dist(xy))
+    matrix(as.numeric(cor_fn(as.numeric(d))), nrow = nrow(d), ncol = ncol(d))
+  }
   diag(R) <- 1
   n_used <- nrow(R)
   r_bar  <- (sum(R) - n_used) / (n_used * (n_used - 1))
@@ -563,6 +674,24 @@ assign_features_to_polygons <- function(
   tr_ar2 <- sum(R * R) - 2 * n_used * sum(cm^2) + sum(cm)^2
   df_r   <- if (tr_ar2 > 0) (tr_ar^2 / tr_ar2) / (n_used - 1) else 0
   c(rbar = min(max(r_bar, 0), 1), df_ratio = min(max(df_r, 0), 1))
+}
+
+
+#' Warn that a requested design effect fell back to 1
+#'
+#' \code{.warn_and_log()} with a condition class, so that a caller running
+#' many summaries can catch exactly this case -- the standard errors are the
+#' uncorrected ones although a correction was asked for -- with
+#' \code{tryCatch(spatialkit_deff_fallback = )} or
+#' \code{withCallingHandlers()}, rather than by matching message text.
+#'
+#' @keywords internal
+#' @noRd
+.warn_deff_fallback <- function(fmt, ...) {
+  msg <- sprintf(fmt, ...)
+  .log_warn("%s", msg)
+  warning(warningCondition(msg, class = "spatialkit_deff_fallback"))
+  invisible(msg)
 }
 
 
@@ -680,7 +809,10 @@ assign_features_to_polygons <- function(
 #' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
 #' the column's non-missing values whatever `agg_funs` computes, and is `NA`
 #' wherever the standard error is (a single observation; complete redundancy
-#' under `deff`).
+#' under `deff`). `..neff_*` and `..df_*` are `NA` where the column has one
+#' non-missing value or none, like the standard error; `cell_weight` still
+#' counts such a cell (1, or `1 / deff` for a numeric `deff`), so the two
+#' differ there.
 #'
 #' The degrees of freedom are **not** `neff - 1`. The interval's spread comes
 #' from the within-cell sample variance, and under exchangeable correlation
@@ -708,19 +840,32 @@ assign_features_to_polygons <- function(
 #' cells, moves the coverage with it.
 #'
 #' @param assigned_points_sf An sf object with a cell identifier column.
-#' @param response_var Optional response column name for per-cell aggregation.
-#' @param predictor_vars Optional predictor column names for per-cell aggregation.
+#' @param response_var Optional response column name for per-cell
+#'   aggregation: a single character string. A name that is not a column, or
+#'   a column that is not numeric, is skipped with a warning.
+#' @param predictor_vars Optional predictor column names for per-cell
+#'   aggregation. Names that are not columns, and columns that are not
+#'   numeric, are skipped with a warning.
 #' @param id_col Preferred name of the polygon/cell ID column.
 #' @param agg_funs Named list of aggregation functions. Default
 #'   \code{list(mean = \(x) mean(x, na.rm = TRUE))}. Additional common options:
-#'   \code{median}, \code{sum}, \code{sd}.
+#'   \code{median}, \code{sum}, \code{sd}. A single function
+#'   (\code{agg_funs = median}) or a character vector of function names
+#'   (\code{c("median", "sum")}) is also accepted and named after the
+#'   function; anything else falls back to the default mean with a warning.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
 #'   the polygon geometry from cells_sf, with one row per cell in `cells_sf`.
 #'   Cells that no feature fell in are kept, with `NA` summaries. Duplicate
 #'   ID values in `cells_sf` would multiply those rows, so they are reported
-#'   with a warning. When NULL (default), a plain data.frame/tibble is
-#'   returned (previous behaviour).
+#'   with a warning. Its ID column is the first of `id_col`, `"poly_id"`,
+#'   `"polygon_id"`, `"id"`, `"cell_id"` and `"grid_id"` it carries, the
+#'   list and order [assign_features_to_polygons()] reads the polygons' IDs
+#'   from. A summarised ID that matches no cell is reported with a warning,
+#'   since the join drops it with its points; a `cells_sf` with none of
+#'   those columns, or one that is not an sf object, gives a warning and a
+#'   plain data frame (an error with `area = TRUE`). When NULL (default), a
+#'   plain data.frame/tibble is returned (previous behaviour).
 #' @param deff Design-effect adjustment for standard errors. One of:
 #'   \describe{
 #'     \item{`1` (default)}{No adjustment; the classic IID standard error
@@ -737,8 +882,14 @@ assign_features_to_polygons <- function(
 #'       the fit via `sac`, or it is estimated when `response_var` is given and
 #'       'gstat' is available. Exponential, spherical and Gaussian models are
 #'       supported, with a nugget and with several structured components
-#'       (each weighted by its partial sill); a model of any other family
-#'       falls back to `deff = 1` with a warning naming it.}
+#'       (each weighted by its partial sill) and with gstat's 2-D geometric
+#'       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
+#'       applies it. A model of any other family falls back to `deff = 1`
+#'       with a warning naming it, and so does a request with no usable
+#'       model (none supplied and none could be estimated, or a rejected
+#'       fit); see "Value" for how to detect a fallback. Points with empty
+#'       geometry count towards their cells' values but not towards the
+#'       correlation, with a warning.}
 #'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
 #'       (ICCs) from the grouped data using a one-way random-effects ANOVA
 #'       decomposition (one ICC for the response variable and a separate
@@ -765,16 +916,19 @@ assign_features_to_polygons <- function(
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
 #'       naive SE. Use when you have an external estimate of the design
-#'       effect. Anything that is not a single number `>= 1` (including a
-#'       value below 1, which would *shrink* the standard errors) is
-#'       refused with a warning and replaced by 1.}
+#'       effect. Anything that is not a single finite number `>= 1`
+#'       (including a value below 1, which would *shrink* the standard
+#'       errors, and `NA` or `Inf`) is refused with a warning and replaced
+#'       by 1.}
 #'   }
 #' @param sac Optional `sac_range` object from [estimate_sac_range()], used
 #'   when `deff = "variogram"`. Supplying one avoids re-fitting the variogram
 #'   and lets you inspect the fit the design effect is based on. A `sac_range`
-#'   whose fit was *rejected* (its `status` is not `"ok"`) carries no usable
-#'   correlation function, so `deff` falls back to 1 with a warning and does
-#'   not correct by a shape that was not trusted enough to report a range.
+#'   whose fit was *rejected* (its value is `NA` and it carries a
+#'   `rejected_reason` attribute) carries no usable correlation function, so
+#'   it is set aside with a warning: the variogram is then estimated as if
+#'   no `sac` had been given, or `deff` falls back to 1, rather than
+#'   correcting by a shape that was not trusted enough to report a range.
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500.
@@ -807,8 +961,22 @@ assign_features_to_polygons <- function(
 #'   `agg_funs` entry per variable, `..sd_*` / `..se_*` for every numeric
 #'   response and predictor, `..neff_*` / `..df_*` / `..ci_lo_*` /
 #'   `..ci_hi_*` for the same columns when `conf_level` is given,
-#'   `cell_weight`, and `cell_area` / `n_per_area` when `area = TRUE`. An
-#'   input column also called `n` is not allowed to shadow the count.
+#'   `cell_weight`, `deff_applied` when a design effect was requested (any
+#'   `deff` other than 1), and `cell_area` / `n_per_area` when
+#'   `area = TRUE`. An input column also called `n` is not allowed to shadow
+#'   the count.
+#'
+#'   `deff_applied` is `TRUE` on every row when the requested correction was
+#'   applied (exactly when the `"deff_applied"` attribute below is attached)
+#'   and `FALSE` when it fell back to the uncorrected standard errors: a
+#'   refused `deff`, a `"variogram"` request with no usable model, or a
+#'   `"kish"` ICC of 0 (and `NA` on a `cells_sf` row no point fell in).
+#'   Unlike the attribute it survives `rbind()` and
+#'   `dplyr::bind_rows()` of many results. A fallback is also signalled by a
+#'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 is
+#'   reported on `attr(, "icc")` instead), which
+#'   `tryCatch(spatialkit_deff_fallback = )` catches without matching the
+#'   message.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
@@ -830,7 +998,9 @@ assign_features_to_polygons <- function(
 #'   The ID column keeps its input type when `cells_sf`'s ID column and the
 #'   summarised IDs already have the same class. When the classes differ, both
 #'   are coerced to character in order to join (logged as a warning), and the
-#'   returned ID column is therefore character.
+#'   returned ID column is therefore character. Whole numbers are written out
+#'   in full for that (`"100000"`, never `"1e+05"`), so an integer and a
+#'   double ID of the same cell still match.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -901,6 +1071,22 @@ summarize_by_cell <- function(assigned_points_sf,
          call. = FALSE)
   if (!is.logical(area) || length(area) != 1L || is.na(area))
     stop("summarize_by_cell(): `area` must be TRUE or FALSE.", call. = FALSE)
+  # c("val", "flag") used to stop with "the condition has length > 1", and a
+  # non-character name was looked up and skipped without a word.
+  if (!is.null(response_var) &&
+      (!is.character(response_var) || length(response_var) != 1L ||
+       is.na(response_var) || !nzchar(response_var)))
+    stop("summarize_by_cell(): `response_var` must be a single column name ",
+         "(a character string), or NULL; list further numeric columns in ",
+         "`predictor_vars`.", call. = FALSE)
+  if (!is.null(predictor_vars) && !is.character(predictor_vars))
+    stop("summarize_by_cell(): `predictor_vars` must be a character vector of ",
+         "column names, or NULL.", call. = FALSE)
+  # Whether the caller asked for a design effect at all.  Only then does the
+  # result carry the per-row `deff_applied` column, so a default call returns
+  # exactly the frame it always has.
+  deff_requested <- !(is.numeric(deff) && length(deff) == 1L &&
+                        isTRUE(deff == 1))
   # A density needs the cells, and it needs them in a CRS whose areas are
   # comparable.  Both are checked before any summary is computed, so a
   # request that cannot be honoured fails at once rather than after the
@@ -941,8 +1127,27 @@ summarize_by_cell <- function(assigned_points_sf,
   .msg(sprintf("summarize_by_cell(): using id_col = '%s'", id_col))
 
   # --- validate agg_funs ---
+  # A bare function (`agg_funs = median`) or a vector of function names
+  # (`"median"`) is what the documented options invite, and both used to be
+  # replaced by the mean with only a log line: resp_mean_v = 1.228 came back
+  # for a median of 0.927.
+  if (is.function(agg_funs)) {
+    fn_expr  <- substitute(agg_funs)
+    agg_funs <- stats::setNames(list(agg_funs),
+                                if (is.name(fn_expr)) as.character(fn_expr) else "agg1")
+  } else if (is.character(agg_funs) && length(agg_funs) > 0L && !anyNA(agg_funs)) {
+    fns <- lapply(agg_funs, function(nm)
+      tryCatch(match.fun(nm), error = function(e) NULL))
+    if (all(vapply(fns, is.function, logical(1))))
+      agg_funs <- stats::setNames(fns, agg_funs)
+  }
   if (!is.list(agg_funs) || length(agg_funs) == 0L) {
-    .log_warn("summarize_by_cell(): invalid agg_funs; falling back to mean.")
+    .warn_and_log(paste0("summarize_by_cell(): `agg_funs` must be a named list ",
+                         "of functions, a function, or the names of functions; ",
+                         "got %s. Falling back to the mean."),
+                  if (is.character(agg_funs))
+                    paste(sprintf("'%s'", agg_funs), collapse = ", ")
+                  else paste0("an object of class ", class(agg_funs)[1L]))
     agg_funs <- list(mean = function(x) mean(x, na.rm = TRUE))
   }
   if (is.null(names(agg_funs)) || any(!nzchar(names(agg_funs)))) {
@@ -958,13 +1163,16 @@ summarize_by_cell <- function(assigned_points_sf,
     deff <- 1
   }
   if (!use_kish && !use_vgm) {
-    if (!is.numeric(deff) || length(deff) != 1L || deff < 1) {
+    # is.finite(): NA and NaN made the test itself NA ("missing value where
+    # TRUE/FALSE needed"), and Inf passed it, gave uncorrected SEs (see
+    # .se_with_deff()) beside a cell_weight of 0 and a record of deff = Inf.
+    if (!is.numeric(deff) || length(deff) != 1L || !is.finite(deff) || deff < 1) {
       # A real warning, not a log line: silently substituting 1 for a value the
       # caller chose means the standard errors are not the ones they asked for,
       # and nothing in the returned object records that (no `deff_applied` is
       # attached when deff == 1).
-      .warn_and_log("summarize_by_cell(): `deff` must be a single number >= 1, \"kish\" or \"variogram\"; got %s. Falling back to deff = 1, so the standard errors are the uncorrected ones.",
-                    paste(format(deff), collapse = ", "))
+      .warn_deff_fallback("summarize_by_cell(): `deff` must be a single number >= 1 (and finite), \"kish\" or \"variogram\"; got %s. Falling back to deff = 1, so the standard errors are the uncorrected ones.",
+                          paste(format(deff), collapse = ", "))
       deff <- 1
     }
   }
@@ -1037,13 +1245,18 @@ summarize_by_cell <- function(assigned_points_sf,
   }
 
   # --- resolve numeric columns for response and predictors ---
+  # A column that was asked for and cannot be summarised is a warning, not a
+  # progress message: .msg() prints nothing under the default quiet = TRUE,
+  # so a misspelt response_var returned a frame with no resp_* column, a
+  # cell_weight equal to n and (under "kish") no design effect, without a
+  # word.
   .resolve_numeric <- function(df, cols, label) {
     keep <- cols[cols %in% names(df)]
     if (length(keep) == 0L) return(character(0))
     is_num <- vapply(keep, function(nm) is.numeric(df[[nm]]), logical(1))
     if (!all(is_num)) {
-      .msg(sprintf("summarize_by_cell(): non-numeric %s columns skipped: %s",
-                   label, paste(keep[!is_num], collapse = ", ")))
+      .warn_and_log("summarize_by_cell(): %s column(s) %s are not numeric and are not summarised.",
+                    label, paste(sprintf("'%s'", keep[!is_num]), collapse = ", "))
     }
     keep[is_num]
   }
@@ -1055,17 +1268,17 @@ summarize_by_cell <- function(assigned_points_sf,
     if (response_var %in% names(df)) {
       resp_num <- .resolve_numeric(df, response_var, "response")
     } else {
-      .msg(sprintf("summarize_by_cell(): response_var '%s' not found; skipping.",
-                   response_var))
+      .warn_and_log("summarize_by_cell(): response_var '%s' is not a column of `assigned_points_sf`; no resp_* columns are returned.",
+                    response_var)
     }
   }
   if (!is.null(predictor_vars)) {
+    absent <- setdiff(predictor_vars, names(df))
+    if (length(absent))
+      .warn_and_log("summarize_by_cell(): predictor_vars %s are not columns of `assigned_points_sf` and are not summarised.",
+                    paste(sprintf("'%s'", absent), collapse = ", "))
     present <- predictor_vars[predictor_vars %in% names(df)]
-    if (length(present)) {
-      pred_num <- .resolve_numeric(df, present, "predictor")
-    } else {
-      .msg("summarize_by_cell(): none of the requested predictor_vars are present; skipping.")
-    }
+    if (length(present)) pred_num <- .resolve_numeric(df, present, "predictor")
   }
 
   # --- estimate ICC for Kish correction if requested ---
@@ -1131,6 +1344,13 @@ summarize_by_cell <- function(assigned_points_sf,
       .vgm  <- vgm         # list(coords, cor_fn, max_n): per-column exact path
       .kish <- use_kish
       .id   <- id_col
+      # The ..se_, ..neff_, ..df_ and ..ci_ closures each call this for the
+      # same column in the same cell (summarise() runs each of them over
+      # every cell in turn), and on the per-column variogram path every call
+      # rebuilt the cell's correlation matrix: five builds per column and
+      # cell with conf_level set.  The statistics depend only on which rows
+      # enter, so they are kept against those rows.
+      .seen <- new.env(parent = emptyenv())
       function(x) {
         ok      <- !is.na(x)
         n_valid <- sum(ok)
@@ -1162,8 +1382,13 @@ summarize_by_cell <- function(assigned_points_sf,
             dr <- if (!is.null(.dfr) && g %in% names(.dfr)) .dfr[[g]] else NA_real_
           } else {
             rows <- dplyr::cur_group_rows()[ok]
-            st   <- .cor_stats_from_coords(.vgm$coords[rows, , drop = FALSE],
+            key  <- paste(rows, collapse = ",")
+            st   <- .seen[[key]]
+            if (is.null(st)) {
+              st <- .cor_stats_from_coords(.vgm$coords[rows, , drop = FALSE],
                                            .vgm$cor_fn, max_n = .vgm$max_n)
+              assign(key, st, envir = .seen)
+            }
             rb <- st[["rbar"]]; dr <- st[["df_ratio"]]
           }
           deff_i <- if (is.finite(rb)) min(max(1, 1 + (n_valid - 1) * rb), n_valid)
@@ -1245,19 +1470,29 @@ summarize_by_cell <- function(assigned_points_sf,
     # the correlation function then saturated at every within-cell distance,
     # deff came out equal to n, cell_weight collapsed to 1 and standard errors
     # were inflated 40-50x.  Treat it like no fit at all.
+    no_fit <- NULL          # why no model is available, for the warning below
+    rejection_warned <- FALSE
     if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
-      .warn_and_log(paste0("summarize_by_cell(): the supplied `sac` reports no ",
-                           "usable range (%s), so its fitted variogram model ",
-                           "cannot size a design effect. Falling back to ",
-                           "deff = 1."),
-                    as.character(attr(sac, "rejected_reason")))
+      .warn_deff_fallback(paste0("summarize_by_cell(): the supplied `sac` reports no ",
+                                 "usable range (%s), so its fitted variogram model ",
+                                 "cannot size a design effect. Falling back to ",
+                                 "deff = 1."),
+                          as.character(attr(sac, "rejected_reason")))
       sac <- NULL
+      rejection_warned <- TRUE
     }
     vgm_model <- attr(sac, "variogram_model")
     vgm_crs   <- attr(sac, "crs")
     if (is.null(vgm_model)) {
-      if (!is.null(response_var) && requireNamespace("gstat", quietly = TRUE)) {
+      # Why there is no model, for the fallback warning below: the only
+      # signal used to be a log line, which spatialkit_quiet() hides and no
+      # tryCatch() sees, while the standard errors came back uncorrected.
+      if (is.null(response_var)) {
+        no_fit <- "there is no `response_var` to fit one to"
+      } else if (!requireNamespace("gstat", quietly = TRUE)) {
+        no_fit <- "estimating one needs the 'gstat' package, which is not installed"
+      } else {
         .msg("summarize_by_cell(): no fitted variogram supplied; estimating one.")
         # On the RESPONSE, not on OLS residuals.  The ..se_resp_* columns are
         # the SE of the cell mean as an estimate of the grand mean of the
@@ -1273,16 +1508,21 @@ summarize_by_cell <- function(assigned_points_sf,
                    silent = TRUE)
         # Same test on the internally estimated fit: a rejected range means the
         # model behind it is not usable either.
-        if (!inherits(est, "try-error") &&
-            !(is.na(suppressWarnings(as.numeric(est))[1L]) &&
-              !is.null(attr(est, "rejected_reason")))) {
+        if (inherits(est, "try-error")) {
+          no_fit <- sprintf("estimate_sac_range() failed: %s",
+                            conditionMessage(attr(est, "condition")))
+        } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
+                   !is.null(attr(est, "rejected_reason"))) {
+          .warn_deff_fallback(paste0("summarize_by_cell(): the estimated variogram ",
+                                     "reports no usable range (%s), so it cannot size ",
+                                     "a design effect. Falling back to deff = 1."),
+                              as.character(attr(est, "rejected_reason")))
+          rejection_warned <- TRUE
+        } else {
           vgm_model <- attr(est, "variogram_model")
           vgm_crs   <- attr(est, "crs")
-        } else if (!inherits(est, "try-error")) {
-          .warn_and_log(paste0("summarize_by_cell(): the estimated variogram ",
-                               "reports no usable range (%s), so it cannot size ",
-                               "a design effect. Falling back to deff = 1."),
-                        as.character(attr(est, "rejected_reason")))
+          if (is.null(vgm_model))
+            no_fit <- "estimate_sac_range() returned no fitted model"
         }
       }
     }
@@ -1294,16 +1534,20 @@ summarize_by_cell <- function(assigned_points_sf,
         setdiff(unique(as.character(vgm_model$model)),
                 c("Nug", names(.vgm_shape_fns))) else character(0)
       if (length(other)) {
-        .warn_and_log(paste0("summarize_by_cell(): deff = \"variogram\" ",
-                             "supports exponential, spherical and Gaussian ",
-                             "variogram models (plus a nugget); the supplied ",
-                             "model uses %s. Falling back to deff = 1."),
-                      paste(sQuote(other, FALSE), collapse = ", "))
-      } else {
-        .log_warn(paste0("summarize_by_cell(): deff = \"variogram\" requires a ",
-                         "fitted variogram model; none was available (pass one ",
-                         "via `sac = estimate_sac_range(...)`). Falling back to ",
-                         "deff = 1."))
+        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" ",
+                                   "supports exponential, spherical and Gaussian ",
+                                   "variogram models (plus a nugget); the supplied ",
+                                   "model uses %s. Falling back to deff = 1."),
+                            paste(sQuote(other, FALSE), collapse = ", "))
+      } else if (!rejection_warned) {
+        # (A rejected fit has already been warned about, by its reason.)
+        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" requires ",
+                                   "a fitted variogram model; none was available (%s). ",
+                                   "Pass one via `sac = estimate_sac_range(...)`. ",
+                                   "Falling back to deff = 1, so the standard errors ",
+                                   "are the uncorrected ones."),
+                            if (is.null(no_fit)) "the supplied model could not be read"
+                            else no_fit)
       }
       use_vgm <- FALSE
       deff <- 1
@@ -1333,6 +1577,19 @@ summarize_by_cell <- function(assigned_points_sf,
         ensure_projected(pts_for_deff)
       }
       coords_mat <- sf::st_coordinates(pts_for_deff)[, 1:2, drop = FALSE]
+      # An empty point has no location to correlate.  It still counts towards
+      # its cell's values, and .cor_stats_from_coords() leaves it out of the
+      # correlation; it used to stop the call with "missing value where
+      # TRUE/FALSE needed", while deff = "kish" took the same layer.
+      unlocated <- !(is.finite(coords_mat[, 1]) & is.finite(coords_mat[, 2])) &
+        !is.na(df[[id_col]])
+      if (any(unlocated))
+        .warn_and_log(paste0("summarize_by_cell(): %d point(s) have empty or ",
+                             "non-finite coordinates; their values are ",
+                             "summarised, but the variogram design effect of ",
+                             "their cells is computed from the located points ",
+                             "only."),
+                      sum(unlocated))
 
       # Per-cell mean off-diagonal correlation, NOT a per-cell deff: the design
       # effect each column needs is 1 + (n_valid - 1) * rbar for ITS non-missing
@@ -1341,7 +1598,7 @@ summarize_by_cell <- function(assigned_points_sf,
                                              max_n = deff_max_n)
       vgm_rbar <- vgm_stats$rbar
       vgm_deff <- .cell_deff_variogram(coords_mat, df[[id_col]], cor_fn,
-                                       max_n = deff_max_n)
+                                       max_n = deff_max_n, r_bar = vgm_rbar)
       vgm_bits <- list(coords = coords_mat, cor_fn = cor_fn, max_n = deff_max_n,
                        df_ratio = vgm_stats$df_ratio)
       .msg(sprintf(
@@ -1488,16 +1745,48 @@ summarize_by_cell <- function(assigned_points_sf,
     attr(out, "icc") <- list(
       resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
       pred = if (has_pred) as.numeric(pred_rho) else NA_real_)
-  
+  # The same fact per row.  The attribute does not survive rbind(),
+  # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
+  # (a simulation, a benchmark over many layers) could not tell a row whose
+  # design effect fell back to 1 from one that was corrected, and a fallback
+  # fires when the variogram is rejected -- often when correlation is
+  # strongest.  Only when a design effect was requested, so the default
+  # frame is unchanged.
+  if (deff_requested)
+    out$deff_applied <- !is.null(attr(out, "deff_applied"))
+
   if (!is.null(cells_sf)) {
     if (!inherits(cells_sf, "sf")) {
-      .log_warn("summarize_by_cell(): cells_sf is not an sf object; returning plain data.frame.")
+      # A warning, not a log line: the documented return is an sf layer.
+      .warn_and_log("summarize_by_cell(): `cells_sf` is not an sf object; returning a plain data frame without cell geometry.")
     } else {
-      # Locate the matching ID column in cells_sf
-      cells_id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+      # Locate the matching ID column in cells_sf: the candidates, in the
+      # order, that assign_features_to_polygons() reads the polygons' IDs
+      # from, so the cells are read the way the points were labelled.  'id'
+      # and 'grid_id' were missing here, so cells keyed by 'id' (common in a
+      # shapefile) were assigned cleanly and then summarised to a plain table
+      # with no geometry, and cells with 'id' and a differently numbered
+      # 'cell_id' were joined on 'cell_id', putting most summaries on the
+      # wrong polygons.
+      cells_id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "id",
+                                      "cell_id", "grid_id"))
       cells_id_found <- cells_id_candidates[cells_id_candidates %in% names(cells_sf)]
-      if (length(cells_id_found) > 0L) {
+      if (length(cells_id_found) == 0L) {
+        msg <- sprintf(paste0("`cells_sf` has none of the ID columns %s, so the ",
+                              "summaries cannot be joined to it"),
+                       paste(sprintf("'%s'", cells_id_candidates), collapse = ", "))
+        if (isTRUE(area))
+          stop("summarize_by_cell(): `area = TRUE` needs the cells' areas, but ",
+               msg, ". Rename the cells' ID column to '", id_col, "'.",
+               call. = FALSE)
+        .warn_and_log("summarize_by_cell(): %s; returning a plain data frame without cell geometry. Rename the cells' ID column to '%s'.",
+                      msg, id_col)
+      } else {
         cells_id <- cells_id_found[[1]]
+        if (cells_id != id_col)
+          .log_info(paste0("summarize_by_cell(): `cells_sf` has no '%s' column; ",
+                           "joining the summaries on its '%s' column."),
+                    id_col, cells_id)
         # Keep only geometry + id from cells to avoid column collisions
         cells_slim <- cells_sf[, cells_id, drop = FALSE]
         # A duplicated cell ID makes left_join() emit one summary row per
@@ -1525,9 +1814,26 @@ summarize_by_cell <- function(assigned_points_sf,
             id_col, paste(class(cells_slim[[id_col]]), collapse = "/"),
             paste(class(out[[id_col]]), collapse = "/"), id_col
           )
-          out[[id_col]] <- as.character(out[[id_col]])
-          cells_slim[[id_col]] <- as.character(cells_slim[[id_col]])
+          out[[id_col]] <- .id_as_character(out[[id_col]])
+          cells_slim[[id_col]] <- .id_as_character(cells_slim[[id_col]])
         }
+        # A summarised cell that matches no polygon is dropped by the join
+        # below, with its points.  That was silent -- the coercion above lost
+        # every cell whose double ID R prints in scientific notation, 11 of 30
+        # points in one check -- and it is also what a `cells_sf` other than
+        # the layer the points were assigned to looks like.
+        ids_out   <- out[[id_col]]
+        unmatched <- !is.na(ids_out) & !(ids_out %in% cells_slim[[id_col]])
+        if (any(unmatched))
+          .warn_and_log(paste0("summarize_by_cell(): %d of the %d summarised cell ",
+                               "ID(s) (%s) match no `cells_sf$%s`, so they and the ",
+                               "%d point(s) in them are not in the result. Check ",
+                               "that `cells_sf` is the layer the points were ",
+                               "assigned to."),
+                        sum(unmatched), sum(!is.na(ids_out)),
+                        paste(utils::head(.id_as_character(ids_out[unmatched]), 5L),
+                              collapse = ", "),
+                        cells_id, sum(out$n[unmatched]))
 
         # dplyr::left_join() rebuilds attributes from the `x` template, which
         # silently drops "deff_applied".  Save it, then re-attach it, mapping
@@ -1567,11 +1873,24 @@ summarize_by_cell <- function(assigned_points_sf,
           }
           attr(out, "deff_applied") <- deff_attr
         }
-      } else {
-        .log_warn("summarize_by_cell(): cells_sf has no matching ID column; returning plain data.frame.")
       }
     }
   }
 
+  out
+}
+
+
+# as.character() writes a double in scientific notation from 1e5 on
+# ("1e+05") but an integer or a string in full ("100000"), so a join across
+# ID classes lost every cell whose double ID R prints that way.  Whole
+# numbers are written out digit by digit, and anything else as
+# as.character() writes it (format(scientific = FALSE) would pad every
+# element to a common width).
+.id_as_character <- function(x) {
+  if (!is.double(x) || is.object(x)) return(as.character(x))
+  out   <- as.character(x)
+  whole <- is.finite(x) & x == trunc(x) & abs(x) < 2^53
+  out[whole] <- sprintf("%.0f", x[whole] + 0)   # + 0 turns -0 into 0
   out
 }

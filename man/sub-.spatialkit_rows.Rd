@@ -26,7 +26,8 @@ built with, and \code{[} on an \code{sf} object copies attributes through
 unchanged, which would leave a subset reporting its parent's numbers with
 row positions that no longer resolve.  Subsetting therefore returns a plain
 layer with the record removed; read the record from the layer the function
-returned, before subsetting it.
+returned, before subsetting it.  Binding such layers (\code{rbind()},
+\code{dplyr::bind_rows()}) likewise returns a plain \code{sf} layer.
 }
 \examples{
 library(sf)

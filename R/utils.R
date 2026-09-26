@@ -658,19 +658,36 @@
 # for "sf": methods::as(x, "Spatial") -- which .to_sp() calls on its way into
 # GWmodel -- and terra::vect() and friends look the class up in the S4 table,
 # and an unregistered class ahead of "sf" fails them with "no method or
-# default for coercing". Registering only the chain up to "sf" is deliberate:
-# sf itself registers c("sf", "data.frame"), and naming "data.frame" here as
-# well is rejected as inconsistent with that.
+# default for coercing". The class now goes after "sf" (see below), but a
+# layer built by an earlier version, read back from an .rds, has it first.
+# Registering only the chain up to "sf" is deliberate: sf itself registers
+# c("sf", "data.frame"), and naming "data.frame" here as well is rejected as
+# inconsistent with that.
 setOldClass(c("spatialkit_rows", "sf"))
 
 .row_record_attrs <- c("dropped", "ties")
 
 # Attach `value` as the `which` record of `x`, stamped and classed.
+#
+# The class goes right after "sf", not ahead of it.  vctrs -- behind
+# dplyr::bind_rows(), vctrs::vec_rbind() and dplyr::union_all() -- reads the
+# first class, and an unknown one ahead of "sf" sent two layers with the same
+# record (bind_rows(a, a), or two equal-sized batches) down its same-type
+# path into its sf restore method, which failed with 'attr(obj, "sf_column")
+# does not point to a geometry column'.  After "sf", vctrs binds an sf, and
+# the result carries no record: it describes neither input's rows.  `[`
+# still removes the record, reaching `[.spatialkit_rows` through the
+# NextMethod() in sf's own `[` method, as it always did for the output of
+# sf::st_transform(), which puts "sf" first.
 .set_row_record <- function(x, which, value) {
   value$n_rows <- as.integer(nrow(x))
   attr(x, which) <- value
-  if (!inherits(x, "spatialkit_rows"))
-    class(x) <- c("spatialkit_rows", class(x))
+  if (!inherits(x, "spatialkit_rows")) {
+    cl <- class(x)
+    at <- match("sf", cl)
+    class(x) <- if (is.na(at)) c("spatialkit_rows", cl)
+                else append(cl, "spatialkit_rows", after = at)
+  }
   x
 }
 
@@ -697,7 +714,8 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' unchanged, which would leave a subset reporting its parent's numbers with
 #' row positions that no longer resolve.  Subsetting therefore returns a plain
 #' layer with the record removed; read the record from the layer the function
-#' returned, before subsetting it.
+#' returned, before subsetting it.  Binding such layers (\code{rbind()},
+#' \code{dplyr::bind_rows()}) likewise returns a plain \code{sf} layer.
 #'
 #' @param x A layer returned by \code{\link{prep_model_data}()} or
 #'   \code{\link{assign_features_to_polygons}()}.
