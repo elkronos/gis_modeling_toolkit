@@ -358,3 +358,37 @@ test_that("equal-area ties go to the same cell whatever the row order", {
   expect_true(all(won[1:6, "X"] < xy[1:6, 1]))
   expect_true(all(won[7:10, "Y"] < xy[7:10, 2]))
 })
+
+
+# --- the row-record class ----------------------------------------------------
+
+test_that("layers carrying a row record bind with dplyr and vctrs", {
+  bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(
+    c(xmin = 5e5, ymin = 5e6, xmax = 5e5 + 300, ymax = 5e6 + 300),
+    crs = sf::st_crs(32632))))
+  g <- create_grid_polygons(bnd, cellsize = 100, quiet = TRUE)
+  set.seed(4)
+  mk <- function() sf::st_as_sf(data.frame(x = 5e5 + runif(10, 0, 300),
+                                           y = 5e6 + runif(10, 0, 300),
+                                           v = rnorm(10)),
+                                coords = c("x", "y"), crs = 32632)
+  a1 <- assign_features_to_polygons(mk(), g)
+  a2 <- assign_features_to_polygons(mk(), g)
+  expect_true(inherits(a1, "spatialkit_rows"))
+  # Same size, same (empty) ties record: vctrs took its same-type path and
+  # failed with 'attr(obj, "sf_column") does not point to a geometry column'.
+  b <- dplyr::bind_rows(a1, a2)
+  expect_s3_class(b, "sf")
+  expect_identical(nrow(b), 20L)
+  expect_null(attr(b, "ties"))          # it describes neither input's rows
+  expect_identical(nrow(dplyr::bind_rows(list(y1 = a1, y2 = a2), .id = "year")), 20L)
+  expect_identical(nrow(vctrs::vec_rbind(a1, a2)), 20L)
+  expect_identical(nrow(dplyr::union_all(a1, a1)), 20L)
+  d <- sf::st_as_sf(data.frame(x = 1:8, y = 8:1, resp = c(1, 2, NA, 4:8), pred = 1:8),
+                    coords = c("x", "y"), crs = 32632)
+  p <- suppressWarnings(prep_model_data(d, "resp", "pred"))
+  expect_identical(nrow(dplyr::bind_rows(p, p)), 14L)
+  # `[` still removes the record.
+  expect_null(attr(a1[1:3, ], "ties"))
+  expect_false(inherits(a1[1:3, ], "spatialkit_rows"))
+})
