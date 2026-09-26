@@ -65,9 +65,15 @@ correlation function from.  Pass one fitted with \code{detrend =
 with the same \code{predictor_vars}.}
 
 \item{select_on}{\code{"all"} (default) profiles every point;
-\code{"split"} profiles one spatially blocked half and returns the other
-half as the set to estimate on, in the \code{"split"} attribute.  See
-the "Post-selection inference" section of
+\code{"split"} reads the response on one spatially blocked half only
+(the OLS fit, the variogram, \code{rss}, \code{cp} and \code{moran_z})
+and returns the other half as the set to estimate on, in the
+\code{"split"} attribute.  The cells, \code{wss}, \code{elbow}, and the
+extent and point counts behind the bounds, \code{cp}'s variance term and
+\code{reliability} still come from every point, because the
+tessellation the count is for is built on every point: the levels are
+cell counts for the whole layer, and the estimation half's response
+never touches them.  See the "Post-selection inference" section of
 \code{\link{determine_optimal_levels}}; the profile reads the response
 whenever \code{response_var} is given.}
 }

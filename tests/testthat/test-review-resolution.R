@@ -88,3 +88,84 @@ test_that("a layer larger than sample_n is bounded, judged and scored on all its
   # holds a scored row here, so L_m = L.
   expect_equal(prof$cp, prof$rss / 300 + 0.5 * (prof$levels / 300 + prof$levels / 1200))
 })
+
+
+test_that("select_on = 'split' chooses a count for the layer it is applied to", {
+  # Four clusters at the corners of a 10 km square.  Every spatial half holds
+  # two of them, and determine_optimal_levels(select_on = "split") used to
+  # run on that half and answer 2, which the documented workflow then
+  # applied to a tessellation of all four clusters.
+  set.seed(1)
+  cen <- expand.grid(cx = c(1000, 9000), cy = c(1000, 9000))
+  g <- rep(1:4, each = 60)
+  d <- data.frame(x = rnorm(240, cen$cx[g], 300), y = rnorm(240, cen$cy[g], 300),
+                  a = rnorm(240), b = rnorm(240))
+  d$z <- d$a + rnorm(240)
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  all <- suppressWarnings(determine_optimal_levels(
+    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"), set_seed = 1))
+  spl <- suppressWarnings(determine_optimal_levels(
+    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"),
+    select_on = "split", set_seed = 1))
+  expect_identical(as.integer(all[1]), 4L)
+  expect_identical(as.integer(spl[1]), 4L)
+})
+
+
+test_that("select_on = 'split' reads the selection half's response on the whole layer's cells", {
+  # The Moran pass is the only step that reads the response.  Record what it
+  # is handed: the selection half's rows, labelled by k-means cells fitted to
+  # every point.  On the half's own partition every level would label the
+  # half's rows with all k cells; on the whole layer's, a spatial half falls
+  # in only some of them.
+  set.seed(8)
+  n <- 200
+  d <- data.frame(x = runif(n, 0, 5000), y = runif(n, 0, 5000), w = rnorm(n))
+  d$z <- 2 * d$w + rnorm(n)
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  seen <- list()
+  local_mocked_bindings(
+    .morans_i_for_k = function(xy, response, predictors, cluster_ids) {
+      seen[[length(seen) + 1L]] <<- list(resp = response, cl = cluster_ids)
+      c(I = NA_real_, z = NA_real_)
+    },
+    .package = "spatialkit")
+  out <- suppressWarnings(determine_optimal_levels(
+    pts, max_levels = 12, response_var = "z", predictor_vars = "w",
+    criterion = "morans_i", select_on = "split", set_seed = 2))
+  sel <- attr(out, "split")$selection
+  expect_true(length(seen) > 0L)
+  for (s in seen) expect_identical(s$resp, pts$z[sel])
+  ks <- vapply(seen, function(s) max(s$cl), integer(1))
+  used <- vapply(seen, function(s) length(unique(s$cl)), integer(1))
+  expect_true(any(used < ks))
+})
+
+
+test_that("a split profile is bounded on the whole layer and reads one half's response", {
+  # Three clusters of 210, 60 and 30 points.  Profiled on its selection half,
+  # the split used to take the half's hull (1.6e6 against 4.6e7 m^2), the
+  # half's point count and the half's clusters, and so bounded and judged a
+  # different layer from the one the count was applied to.
+  set.seed(10)
+  mk <- function(n, cx, cy) data.frame(x = rnorm(n, cx, 150), y = rnorm(n, cy, 150))
+  d <- rbind(mk(210, 2000, 2000), mk(60, 8000, 3000), mk(30, 5000, 8000))
+  d$z <- 0.0002 * d$x + rnorm(300)
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  sac <- rr_sac(pts, range = 1500, nugget = 1, psill = 0.5)
+  prof <- function(p, ...) resolution_profile(p, "z", sac = sac, n_levels = 5, nstart = 5, ...)
+  all <- prof(pts)
+  spl <- suppressWarnings(prof(pts, select_on = "split"))
+  keys <- c("floor", "ceiling", "ceiling_from", "supported", "area", "n", "n_distinct")
+  expect_identical(attr(spl, "bounds")[keys], attr(all, "bounds")[keys])
+  expect_identical(spl$levels, all$levels)
+  expect_identical(spl$wss, all$wss)
+  # The estimation half's response is never read; the selection half's is.
+  s <- attr(spl, "split")
+  pts_e <- pts; pts_e$z[s$estimation] <- rnorm(length(s$estimation), 50, 20)
+  spl_e <- suppressWarnings(prof(pts_e, select_on = "split"))
+  expect_identical(spl_e[c("rss", "cp", "moran_z")], spl[c("rss", "cp", "moran_z")])
+  pts_s <- pts; pts_s$z[s$selection] <- rnorm(length(s$selection), 50, 20)
+  spl_s <- suppressWarnings(prof(pts_s, select_on = "split"))
+  expect_false(isTRUE(all.equal(spl_s$rss, spl$rss)))
+})
