@@ -60,7 +60,10 @@ Suggests:
     spdep,
     testthat (>= 3.1.7),
     knitr,
-    rmarkdown
+    rmarkdown,
+    units,
+    vctrs,
+    withr
 Additional_repositories: https://stan-dev.r-universe.dev
 Config/testthat/edition: 3
 VignetteBuilder: knitr
