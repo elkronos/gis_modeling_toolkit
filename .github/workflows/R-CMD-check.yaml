@@ -43,26 +43,32 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
-      # Hard dependencies only.  Installing Suggests here pulled the entire
-      # Stan toolchain into every matrix job -- slow everywhere, and fatal on
-      # r-devel, where nothing arrives as a binary.  There CRAN's rstan 2.32.7
-      # was compiled against StanHeaders 2.39.0.9000 from the stan-dev
-      # universe and died with "'ecuyer1988' is not a member of 'boost'":
-      # Stan dropped that typedef after 2.32.  The optional backends are the
-      # job of the `backends` job below and of check-brms.yaml.
+      # Hard dependencies and a short list of Suggests.  Installing all of
+      # Suggests here pulled the entire Stan toolchain into every matrix job --
+      # slow everywhere, and fatal on r-devel, where nothing arrives as a
+      # binary.  There CRAN's rstan 2.32.7 was compiled against StanHeaders
+      # 2.39.0.9000 from the stan-dev universe and died with "'ecuyer1988' is
+      # not a member of 'boost'": Stan dropped that typedef after 2.32.  The
+      # optional backends are the job of the `backends` job below and of
+      # check-brms.yaml.
       #
       # Three Suggests are not optional in practice.  knitr and rmarkdown build
-      # the vignette during R CMD build, and tests/testthat.R opens with
+      # the vignettes during R CMD build, and tests/testthat.R opens with
       # library(testthat), so without it the test stage errors rather than
       # skipping.  _R_CHECK_FORCE_SUGGESTS_ = false does not cover this -- it
       # only downgrades the complaint about absent Suggests, it does not stop
       # check from running the test file.
       #
-      # ggplot2 is installed by choice rather than necessity.  The vignette
-      # gates every chunk on requireNamespace("ggplot2") in its setup chunk, so
-      # R CMD build succeeds without it -- but then the vignette renders as code
-      # with no output and none of the plotting code runs anywhere in this
-      # matrix.  It is a cheap pure-R install; keep it.
+      # ggplot2 and gstat are installed by choice rather than necessity.  Every
+      # vignette gates its chunks on requireNamespace() in its setup chunk, so
+      # R CMD build succeeds without them -- but then the North Carolina demo
+      # (gated on ggplot2) and the resolution, diagnostics and spatial
+      # cross-validation vignettes (gated on gstat and ggplot2) render as code
+      # with no output, and the tests behind skip_if_not_installed("gstat")
+      # skip.  Without these two, that code would run only on ubuntu, in the
+      # `backends` job below.  gstat brings sp, FNN, zoo, xts, intervals,
+      # spacetime, sftime and stars with it; none declares a system
+      # requirement, but on r-devel they build from source, which is slower.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'
@@ -71,6 +77,7 @@ jobs:
             any::knitr
             any::rmarkdown
             any::ggplot2
+            any::gstat
             any::testthat
           needs: check
 
@@ -145,7 +152,7 @@ jobs:
       - name: Confirm optional backends are installed
         run: |
           for (p in c("sp", "GWmodel", "gstat", "FNN", "Matrix", "geometry",
-                      "ranger", "tibble")) {
+                      "ranger", "tibble", "spdep")) {
             if (!requireNamespace(p, quietly = TRUE))
               stop("Backend package not installed: ", p)
           }
