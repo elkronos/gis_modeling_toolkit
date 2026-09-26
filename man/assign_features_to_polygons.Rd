@@ -31,7 +31,11 @@ overlap area and never calls the predicate.}
 
 \item{largest}{Logical; when \code{features_sf} is itself polygonal, keep
 the polygon with the largest overlap. Default TRUE. Ignored for point and
-line features. Invalid geometries (usually a self-intersecting ring),
+line features. A feature that only touches the polygon layer (shares an
+edge or a corner with it, with no overlap area) has no largest overlap
+and is unassigned, in any CRS; with \code{largest = FALSE} the default
+\code{st_intersects} counts touching, so such a feature is assigned.
+Invalid geometries (usually a self-intersecting ring),
 whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 for the join, with a warning, and returned as they arrived. If the
 overlap still cannot be computed the function stops: falling back to
@@ -40,7 +44,10 @@ feature in the layer, so pass \code{largest = FALSE} to ask for that.}
 
 \item{tie_break}{Strategy for resolving features that match multiple
 polygons: \code{"smallest_area"} (default) keeps the polygon with the
-smallest area, \code{"first"} keeps the first match (original order-dependent
+smallest area and, among polygons of equal area (a point on the shared
+edge of two grid cells), the one whose bounding-box centre is lowest,
+then leftmost, so the choice does not depend on the order of the rows;
+\code{"first"} keeps the first match (original order-dependent
 behavior).}
 }
 \value{

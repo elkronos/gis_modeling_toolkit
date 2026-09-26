@@ -302,3 +302,59 @@ test_that("agg_funs takes a bare function or function names", {
                  "Falling back to the mean")
   expect_true("resp_mean_v" %in% names(out3))
 })
+
+
+# --- assign_features_to_polygons() ------------------------------------------
+
+test_that("a polygon feature that only touches the cells is unassigned, in any CRS", {
+  cells <- sf::st_sf(poly_id = 1:2,
+                     geometry = sf::st_sfc(.r2_sq(0, 0), .r2_sq(10, 0), crs = 32632))
+  feats <- sf::st_sf(v = 1:4, geometry = sf::st_sfc(
+    .r2_sq(20, 0),        # shares cell 2's east edge
+    .r2_sq(-5, 10, 5),    # meets cell 1 at the corner (0, 10)
+    .r2_sq(6, 2, 7),      # 4 units in cell 1, 3 in cell 2
+    .r2_sq(12, 2, 3),     # inside cell 2
+    crs = 32632))
+  # (sf's own intersection says its attributes are assumed constant.)
+  quiet_assign <- function(...) suppressWarnings(assign_features_to_polygons(...))
+  out <- quiet_assign(feats, cells, keep_unassigned = TRUE)
+  # The first two were assigned with zero overlap under GEOS.
+  expect_identical(out$poly_id, c(NA, NA, 1L, 2L))
+  expect_identical(nrow(quiet_assign(feats, cells)), 2L)
+  # s2 already said so in lon/lat; the two now agree.
+  ll <- quiet_assign(sf::st_transform(feats, 4326),
+                     sf::st_transform(cells, 4326), keep_unassigned = TRUE)
+  expect_identical(ll$poly_id, out$poly_id)
+  # largest = FALSE is the predicate's answer, which counts touching.
+  by_pred <- assign_features_to_polygons(feats, cells, largest = FALSE)
+  expect_identical(by_pred$poly_id, c(2L, 1L, 1L, 2L))
+})
+
+test_that("equal-area ties go to the same cell whatever the row order", {
+  bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(
+    c(xmin = 5e5, ymin = 5e6, xmax = 5e5 + 300, ymax = 5e6 + 300),
+    crs = sf::st_crs(32632))))
+  g <- create_grid_polygons(bnd, cellsize = 100, quiet = TRUE)
+  # Points on the shared edges: x = 100 and 200 at mid-row, y = 100 at
+  # mid-column, and one corner shared by four cells.
+  xy <- rbind(cbind(5e5 + 100, 5e6 + c(50, 150, 250)),
+              cbind(5e5 + 200, 5e6 + c(50, 150, 250)),
+              cbind(5e5 + c(50, 150, 250), 5e6 + 100),
+              c(5e5 + 100, 5e6 + 100))
+  pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2]),
+                      coords = c("x", "y"), crs = 32632)
+  fwd <- assign_features_to_polygons(pts, g)
+  rev <- assign_features_to_polygons(pts, g[rev(seq_len(nrow(g))), ])
+  shf <- assign_features_to_polygons(pts, g[c(5, 9, 1, 3, 7, 2, 8, 4, 6), ])
+  expect_identical(attr(fwd, "ties")$n, 10L)
+  # Reversing the rows used to hand every one of these points to the other
+  # cell.
+  expect_identical(rev$poly_id, fwd$poly_id)
+  expect_identical(shf$poly_id, fwd$poly_id)
+  # The cell below or to the left of the edge: on this grid, numbered from
+  # the lower left a row at a time, what the row order picked before.
+  ctr <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(g)))
+  won <- ctr[match(fwd$poly_id, g$poly_id), ]
+  expect_true(all(won[1:6, "X"] < xy[1:6, 1]))
+  expect_true(all(won[7:10, "Y"] < xy[7:10, 2]))
+})
