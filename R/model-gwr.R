@@ -42,7 +42,8 @@
 #'
 #' @param data_sf An sf object with POINT geometry.
 #' @param keep_cols Character vector of column names to retain. NULL = all.
-#' @return A SpatialPointsDataFrame.
+#' @return A SpatialPointsDataFrame with two coordinate columns (any Z or M
+#'   is dropped).
 #' @keywords internal
 #' @noRd
 .to_sp <- function(data_sf, keep_cols = NULL) {
@@ -52,6 +53,11 @@
     keep_cols <- intersect(keep_cols, names(data_sf))
     data_sf <- data_sf[, keep_cols, drop = FALSE]
   }
+  # GWmodel is strictly 2-D: gw.dist() rejects a third coordinate column for
+  # the data points and reshapes regression points with matrix(, ncol = 2).
+  # prep_model_data() already drops Z/M; this covers the callers that skip it
+  # (fit_gwr_model(.already_prepped = TRUE)) and a fit made before it did.
+  data_sf <- .drop_zm(data_sf)
   methods::as(data_sf, "Spatial")
 }
 

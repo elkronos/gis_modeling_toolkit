@@ -36,8 +36,9 @@ required to be present (useful for out-of-sample prediction where the
 response is unknown).  Default TRUE.}
 }
 \value{
-An sf object with POINT geometry, cleaned of rows carrying missing
-or non-finite values in the modelling columns or in the coordinates.  What
+An sf object with 2-D (XY) POINT geometry, cleaned of rows
+carrying missing or non-finite values in the modelling columns or in the
+coordinates.  What
 was removed is recorded on the attribute \code{"dropped"}, a list with
 \code{n} (rows dropped), \code{n_geometry} (how many of them for an
 empty or non-finite geometry), \code{which} (their positions in
@@ -66,6 +67,8 @@ geometry is empty or whose coordinates are not finite, which no model
 backend can use.  All non-POINT geometries (including MULTIPOINT) are
 coerced to representative points via \code{coerce_to_points()}, so
 downstream coordinate extraction always aligns one row per observation.
+Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+dropped, because every backend works in 2-D map distance.
 }
 \details{
 The response may not appear in \code{predictor_vars}.  Using it as its own
