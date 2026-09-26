@@ -180,7 +180,22 @@
     stop("area_of_applicability(): `weights` has no entry for: ",
          paste(sQuote(missing_w), collapse = ", "), call. = FALSE)
   w <- weights[vars]
-  if (anyNA(w) || any(!is.finite(w)) || any(w < 0))
+  # A non-finite weight got the negative-weight advice, pmax(importance, 0),
+  # which keeps NaN: a forest with no out-of-bag rows has NaN permutation
+  # importance, and following the hint reproduced the same error.
+  bad <- !is.finite(w)
+  if (any(bad))
+    stop(sprintf("area_of_applicability(): `weights` is %s for %s.%s",
+                 if (all(is.nan(w[bad]))) "NaN" else "not finite",
+                 paste(sQuote(names(w)[bad]), collapse = ", "),
+                 if (any(is.nan(w[bad])))
+                   paste0(" Permutation importance is NaN when no row is out ",
+                          "of bag (a forest grown with replace = FALSE and ",
+                          "sample_fraction = 1), and pmax() keeps NaN; refit ",
+                          "with out-of-bag rows (replace = TRUE or ",
+                          "sample_fraction < 1), or pass weights = NULL.")
+                 else ""), call. = FALSE)
+  if (any(w < 0))
     stop("area_of_applicability(): `weights` must be finite and non-negative. ",
          "Permutation importance is slightly negative for predictors that do ",
          "not help, so pass pmax(importance, 0).", call. = FALSE)
@@ -292,21 +307,6 @@
 }
 
 
-# Fold labels are numbered by the rule cv_*() uses (.folds_from_labels()):
-# numbers in numeric order, a factor by its own levels, anything else in C
-# (radix) order.  as.factor() sorted character labels under the session's
-# LC_COLLATE, so "north"/"North" came out in a different order under en_US
-# than under C, and fold k here need not be fold k in a cv_*() result built
-# from the same labels.  The partition, and so the threshold, never depended
-# on it; which fold a message names did.
-.aoa_label_factor <- function(folds) {
-  if (is.factor(folds)) return(folds)
-  if (is.numeric(folds)) return(factor(folds, levels = sort(unique(folds))))
-  x <- as.character(folds)
-  factor(x, levels = sort(unique(x), method = "radix"))
-}
-
-
 #' Normalise a fold specification into train/test position lists
 #'
 #' Accepts a \code{make_folds()} result, a bare list of \code{train}/\code{test}
@@ -331,24 +331,18 @@
       stop(sprintf(paste0("area_of_applicability(): `folds` has %d labels but ",
                           "the training data has %d rows."),
                    length(folds), n), call. = FALSE)
-    # droplevels() matters: a factor subset from a larger data set keeps its
-    # unused levels, and each one would otherwise become an empty fold that
-    # inflates the reported fold count and reaches .aoa_min_dist() with no
-    # test rows.
-    f <- droplevels(.aoa_label_factor(folds))
-    if (anyNA(f))
-      stop("area_of_applicability(): `folds` contains missing labels.",
-           call. = FALSE)
-    if (nlevels(f) < 2L)
-      stop("area_of_applicability(): `folds` must define at least two ",
-           "non-empty folds.", call. = FALSE)
-    # Fall through to the shared validation below rather than returning here,
-    # so label-built splits get the same checks as hand-built ones.
-    sp <- lapply(levels(f), function(lv) {
-      te <- which(f == lv)
-      list(test = te, train = setdiff(seq_len(n), te))
-    })
-    # which() already returns positions, so there is nothing to resolve.
+    # Labels are grouped and numbered by .folds_from_labels(), the helper
+    # every cv_*() uses, so fold k here is fold k in a cv_*() result built
+    # from the same labels: numbers in numeric order, a factor by its own
+    # used levels, anything else in C (radix) order.  A copy of that rule
+    # here drifted: two doubles that print alike (0.3 and 0.1 + 0.2) stopped
+    # with R's "factor level [2] is duplicated" where cv_*() made them one
+    # fold.  The helper also refuses missing labels and fewer than two
+    # non-empty folds.  With ..row_id = 1..n its IDs are row positions, so
+    # there is nothing to resolve.  Fall through to the shared validation
+    # below, so label-built splits get the same checks as hand-built ones.
+    sp <- .folds_from_labels(folds, data.frame(..row_id = seq_len(n)),
+                             "area_of_applicability")
     row_ids <- NULL
   } else {
     sp <- if (is.list(folds) && !is.null(folds$folds)) folds$folds else folds
@@ -622,9 +616,13 @@
 #'   typical predictor. Naming them explicitly overrides that. An unnamed
 #'   vector may have one value per predictor either with or without the two
 #'   coordinate columns. Weights must be finite and non-negative, so pass
-#'   permutation importance as \code{pmax(importance, 0)}. That is all zero
-#'   when the model found no predictor useful, and then the weights cannot say
-#'   anything: with a single predictor any weight gives the same index and zero
+#'   permutation importance as \code{pmax(importance, 0)}. (A forest with no
+#'   out-of-bag rows, \code{replace = FALSE} with \code{sample_fraction = 1},
+#'   has \code{NaN} importance, which \code{pmax()} keeps and which is
+#'   refused; refit it with out-of-bag rows or use \code{weights = NULL}.)
+#'   \code{pmax(importance, 0)} is all zero when the model found no
+#'   predictor useful, and then the weights cannot say anything: with a
+#'   single predictor any weight gives the same index and zero
 #'   is accepted; with several, all of them are weighted equally, as with
 #'   \code{weights = NULL}, and a warning says so. The coordinate default
 #'   above is the mean of the supplied weights, so a zero weight on the only

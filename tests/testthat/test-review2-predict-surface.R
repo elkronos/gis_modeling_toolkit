@@ -85,10 +85,11 @@ test_that("the automatic grid does not lose a column to floating-point rounding"
     expect_identical(length(unique(g$..grid_y)), 100L)
   }
 
-  # A width that is NOT a multiple keeps the floor: 100 / 30 is 3 cells.
+  # A width that is NOT a multiple gets enough cells to cover it, centred:
+  # 100 / 30 is 4 cells, overhanging by 10 on each side.
   bb <- sf::st_bbox(c(xmin = 0, ymin = 0, xmax = 100, ymax = 100), crs = crs)
   expect_equal(sort(unique(grid_fn(bb, crs, cell_size = 30)$..grid_x)),
-               c(15, 45, 75))
+               c(5, 35, 65, 95))
 })
 
 

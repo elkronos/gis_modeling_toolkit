@@ -36,8 +36,8 @@ the model absorbed: a residual sill well below the response sill
 means most of it, two curves that coincide mean none.  When both
 effective ranges were identified over the same point pairs the caption
 gives the residual sill as a share of the response sill and the two
-ranges; when either variogram reached no sill, or the two are not over
-the same pairs, the caption says so and compares nothing: a sill the
+ranges; when either variogram has no identified range, or the two are
+not over the same pairs, the caption says so and compares nothing: a sill the
 data never reached is not a number to divide by, and one direction's
 sill is not comparable with all directions'.
 The residual range is expected to come out shorter and the residual
