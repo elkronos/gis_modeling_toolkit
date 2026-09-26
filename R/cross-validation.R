@@ -4143,8 +4143,8 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   if (!requireNamespace("sp", quietly = TRUE))
     stop("cv_gwr(): package 'sp' is required (for GWmodel interop).", call. = FALSE)
 
-  # match.arg() alone: it already refuses every value .validate_kernel() could
-  # repair (wrong case, NA, length > 1), so calling that after it was dead code.
+  # match.arg() is the whole of kernel validation: it refuses a wrong case,
+  # NA or a vector, so a separate repair step after it could never run.
   kernel <- match.arg(kernel)
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
