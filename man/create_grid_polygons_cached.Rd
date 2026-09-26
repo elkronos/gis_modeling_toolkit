@@ -6,7 +6,7 @@
 \usage{
 create_grid_polygons_cached(
   boundary,
-  target_cells,
+  target_cells = NULL,
   type = c("square", "hex"),
   ...,
   cache_env = .gmt_cache,
@@ -16,7 +16,9 @@ create_grid_polygons_cached(
 \arguments{
 \item{boundary}{An sf or sfc polygonal object.}
 
-\item{target_cells}{Approximate desired number of cells.}
+\item{target_cells}{Approximate desired number of cells. Default \code{NULL},
+as in \code{\link[=create_grid_polygons]{create_grid_polygons()}}, so the grid can be sized by \code{cellsize}
+or \code{n} passed through \code{...} instead.}
 
 \item{type}{Grid type: \code{"square"} (the default) or \code{"hex"}, matching
 \code{\link[=create_grid_polygons]{create_grid_polygons()}}.}

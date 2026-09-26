@@ -315,7 +315,10 @@ sp
 The split is spatially blocked, not random, and records the method and seed that
 produced it. A random half would put neighbours of every selection point in the
 estimation set, and on an autocorrelated field that leaks the structure you are
-choosing against.
+choosing against. Blocking reduces that leak without removing it: the two halves
+share a border, and points on either side of it within the correlation range
+are still correlated, so read the separation as a large improvement on a random
+half rather than as independence.
 
 Choose from `prof_split`, then aggregate the rows in `sp$estimation`. The cells
 on the ladder are still drawn on every point, so the count it picks is a count
