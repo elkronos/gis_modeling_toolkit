@@ -100,11 +100,32 @@
 }
 
 
+# The one place the package hands a line to logger.  Every helper formats its
+# message with sprintf() first, so it is marked skip_formatter(): no formatter
+# on any index -- including one logger copied into this namespace from a
+# user's global configuration -- gets to read a `%` or a `{` in it as syntax.
+# And a log line is never worth the computation that produced it.  An
+# appender that fails (a session temp directory deleted under the file trace,
+# a user's own appender that throws) is swallowed here rather than aborting
+# the caller, so the R warning .warn_and_log() raises next still arrives.
+# `raising` tells the console appender that the line is about to be raised as
+# an R warning too; see .sk_console_appender() in zzz.R.
+.sk_log_state <- new.env(parent = emptyenv())
+.sk_log <- function(level, msg, raising = FALSE) {
+  .sk_log_state$raising <- raising
+  on.exit(.sk_log_state$raising <- FALSE, add = TRUE)
+  tryCatch(logger::log_level(level, logger::skip_formatter(msg),
+                             namespace = "spatialkit"),
+           error = function(e) NULL)
+  invisible(msg)
+}
+
+
 #' Structured warning via logger
 #' @keywords internal
 #' @noRd
 .log_warn <- function(fmt, ...) {
-  logger::log_warn(sprintf(fmt, ...), namespace = "spatialkit")
+  .sk_log(logger::WARN, sprintf(fmt, ...))
 }
 
 # A warning about a CHOICE, logged once per session under `key`.  A choice
@@ -177,7 +198,10 @@
 #' @noRd
 .warn_and_log <- function(fmt, ...) {
   msg <- sprintf(fmt, ...)
-  logger::log_warn(msg, namespace = "spatialkit")
+  # Logged first, so the trace keeps the line even when the caller catches
+  # the warning with tryCatch(); .sk_log() cannot fail, so the warning
+  # always follows.
+  .sk_log(logger::WARN, msg, raising = TRUE)
   warning(msg, call. = FALSE)
   invisible(msg)
 }
@@ -187,7 +211,7 @@
 #' @keywords internal
 #' @noRd
 .log_info <- function(fmt, ...) {
-  logger::log_info(sprintf(fmt, ...), namespace = "spatialkit")
+  .sk_log(logger::INFO, sprintf(fmt, ...))
 }
 
 
@@ -774,14 +798,21 @@ setOldClass(c("spatialkit_rows", "sf"))
 # wrote to stderr.  Anything written by a call that SUCCEEDED is passed
 # straight through to stderr afterwards, so ordinary progress and warning
 # output from compiled code is not swallowed.
-.call_capturing_stderr <- function(fun) {
+.call_capturing_stderr <- function(fun, path = tempfile("spatialkit-stderr-")) {
   err <- NULL
   if (!identical(as.integer(sink.number(type = "message")), 2L)) {
     val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
     return(list(value = val, error = err, stderr = character(0)))
   }
-  path <- tempfile("spatialkit-stderr-")
-  con  <- file(path, open = "wt")
+  # A session temp directory deleted under a running session leaves nowhere
+  # to divert to, and file() then failed the whole call with "cannot open the
+  # connection".  Run it undiverted instead, as when a sink is active.
+  con <- tryCatch(suppressWarnings(file(path, open = "wt")),
+                  error = function(e) NULL)
+  if (is.null(con)) {
+    val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
+    return(list(value = val, error = err, stderr = character(0)))
+  }
   open <- TRUE
   # Restore the stream whatever happens, an interrupt included: leaving a
   # session with its messages diverted to a deleted temp file would silence
