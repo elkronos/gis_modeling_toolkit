@@ -32,6 +32,10 @@
 #'   edge or a corner with it, with no overlap area) has no largest overlap
 #'   and is unassigned, in any CRS; with \code{largest = FALSE} the default
 #'   \code{st_intersects} counts touching, so such a feature is assigned.
+#'   A feature that overlaps two or more polygons by exactly the same area
+#'   (to 9 significant digits; a square split evenly across a cell edge) is
+#'   given to one of them by \code{tie_break} and counted in \code{"ties"},
+#'   so the choice does not depend on the order of the polygon rows.
 #'   Invalid geometries (usually a self-intersecting ring),
 #'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 #'   for the join, with a warning, and returned as they arrived. If the
@@ -39,7 +43,8 @@
 #'   \code{predicate} and \code{tie_break} would change the rule for every
 #'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
 #' @param tie_break Strategy for resolving features that match multiple
-#'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
+#'   polygons (with \code{largest}, that overlap several polygons equally):
+#'   \code{"smallest_area"} (default) keeps the polygon with the
 #'   smallest area and, among polygons of equal area (a point on the shared
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
 #'   then leftmost, so the choice does not depend on the order of the rows;
@@ -47,21 +52,29 @@
 #'   behavior).
 #' @return An sf object with `polygon_id_col` attached, one row per input
 #'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
-#'   the CRS `features_sf` arrived in. Any column of `features_sf` whose name
-#'   would collide with the polygon ID column is dropped before the spatial
-#'   join (with a warning), so re-assigning an already-assigned layer replaces
-#'   the old IDs and does not fail. If *no* feature falls inside any polygon
+#'   the CRS `features_sf` arrived in. A column of `features_sf` already
+#'   called `polygon_id_col` is dropped before the spatial join (with a
+#'   warning), so re-assigning an already-assigned layer replaces the old IDs
+#'   and does not fail. Every other column is kept, including one named like
+#'   the polygons' own ID column when that is read from a fallback such as
+#'   `"id"` (a site `id` joined to cells keyed by `id`). If *no* feature
+#'   falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
 #'   places (a CRS that could only be stamped, not reprojected). The
 #'   attribute `"ties"` records how many features matched more than one
-#'   polygon and had the `tie_break` rule decide for them: a list with `n`,
-#'   `which` (their row positions in `features_sf`) and `rule`. A large `n`
-#'   means the polygon layer overlaps, and per-cell counts built from the
+#'   polygon (with `largest`, overlapped several by exactly the same area)
+#'   and had the `tie_break` rule decide for them: a list with `n`,
+#'   `which` (their row positions in `features_sf`), `rule` and `n_rows`
+#'   (the number of rows returned, which the record was made for). A large
+#'   `n` means the polygon layer overlaps, and per-cell counts built from the
 #'   result depend on the rule. The record describes the rows this call
-#'   returned and does not survive subsetting: `joined[i, ]` is a plain layer
+#'   returned and does not survive subsetting: `joined[i, ]`, like
+#'   `dplyr::filter()`, `slice()` or `arrange()` of it, is a plain layer
 #'   with no `"ties"` attribute, so nothing reports the parent's count
-#'   against row positions that no longer resolve.
+#'   for a different set of rows. `sf::st_drop_geometry()` keeps the record,
+#'   since the rows are the same; see \code{\link{[.spatialkit_rows}} for
+#'   what binding such data frames does.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -122,14 +135,21 @@ assign_features_to_polygons <- function(
     p[[id_col]] <- seq_len(nrow(p))
   }
 
+  # The polygons' ID travels through the join under a reserved name and is
+  # renamed to `polygon_id_col` afterwards.  Under its source name, a
+  # features column of that name -- a site `id` joined to cells keyed by
+  # `id` -- collided inside st_join() and was dropped, although the result
+  # only ever gains `polygon_id_col`.
+  join_id <- "..poly_id"
   p_sel <- p[, id_col, drop = FALSE]
+  names(p_sel)[names(p_sel) == id_col] <- join_id
 
   # st_join() suffixes columns present on both sides (`poly_id.x` /
   # `poly_id.y`), which would defeat the rename below and leave
   # `polygon_id_col` absent -- silently returning zero rows.  This is reachable
   # simply by re-assigning already-assigned points, or points that came out of
   # summarize_by_cell().  Drop the colliding column(s) up front instead.
-  collide <- intersect(unique(c(id_col, polygon_id_col)), names(f))
+  collide <- intersect(unique(c(polygon_id_col, join_id)), names(f))
   if (length(collide)) {
     .warn_and_log(
       "assign_features_to_polygons(): `features_sf` already carries column(s) %s, which would collide with the polygon ID column; dropping them before the spatial join. Rename them first if you need to keep them.",
@@ -177,13 +197,28 @@ assign_features_to_polygons <- function(
   }
 
   join_args <- list(x = f, y = p_sel, join = predicate, left = TRUE)
+  largest_ties <- integer(0)
   if (use_largest) {
     # With `largest = TRUE` sf never calls `predicate` (it intersects the
     # layers and keeps the biggest piece), so no predicate can reject it: an
     # error here is a geometry failure.  Falling back to `tie_break` would
     # change the rule for every feature in the layer, so stop instead.
+    #
+    # sf's st_intersection() warns "attribute variables are assumed to be
+    # spatially constant throughout all geometries" unless every attribute
+    # is flagged constant, and st_join() adds its own unflagged grouping
+    # columns before calling it, so every ordinary call raised it (setting
+    # st_agr() on the inputs does not help).  Keeping one cell per feature is
+    # exactly that assumption, so the warning says nothing about the data;
+    # it alone is muffled.
     joined <- tryCatch(
-      do.call(sf::st_join, c(join_args, largest = TRUE)),
+      withCallingHandlers(
+        do.call(sf::st_join, c(join_args, largest = TRUE)),
+        warning = function(w) {
+          if (grepl("attribute variables are assumed to be spatially constant",
+                    conditionMessage(w), fixed = TRUE))
+            invokeRestart("muffleWarning")
+        }),
       error = function(e) stop(sprintf(paste0(
         "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
         "Pass largest = FALSE to assign every feature by `predicate` and ",
@@ -200,21 +235,37 @@ assign_features_to_polygons <- function(
     # rows projected and 50 in lon/lat.  A feature with no overlap has no largest
     # overlap, so it is unassigned whatever the CRS.  s2 already does this.
     if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
-      hit <- which(!is.na(joined[[id_col]]))
+      hit <- which(!is.na(joined[[join_id]]))
       if (length(hit)) {
         # "2********": the interiors meet in an area.
         overlaps <- suppressMessages(sf::st_relate(f, p_sel, pattern = "2********"))
-        ids_p    <- p_sel[[id_col]]
+        ids_p    <- p_sel[[join_id]]
         fi       <- joined[["..pre_join_row_id"]][hit]
         touch    <- !vapply(seq_along(hit), function(k)
-          joined[[id_col]][hit[k]] %in% ids_p[overlaps[[fi[k]]]], logical(1))
+          joined[[join_id]][hit[k]] %in% ids_p[overlaps[[fi[k]]]], logical(1))
         if (any(touch)) {
           .log_info(paste0("assign_features_to_polygons(): %d polygon feature(s) ",
                            "only touch the polygon layer (no overlap area) and ",
                            "are left unassigned."), sum(touch))
-          joined[[id_col]][hit[touch]] <- NA
+          joined[[join_id]][hit[touch]] <- NA
         }
       }
+    }
+    # sf keeps which.max() of the overlap areas, so a feature split evenly
+    # between two cells went to whichever comes first in `polygons_sf`, and
+    # no tie was recorded: a 40 m square across the edge of cells 1 and 2
+    # went to cell 1, or to cell 2 with the polygon rows reversed.  Features
+    # overlapping two or more cells are measured again, and an exact tie
+    # (areas equal to 9 significant digits, as for the cell areas below) is
+    # decided by `tie_break` among the equally largest cells.
+    lt <- .largest_overlap_ties(f, p_sel, joined, join_id, tie_break)
+    if (length(lt$rows)) {
+      joined[[join_id]][lt$rows] <- lt$ids
+      largest_ties <- joined[["..pre_join_row_id"]][lt$rows]
+      .log_info(paste0("assign_features_to_polygons(): %d of %d polygon ",
+                       "feature(s) overlap two or more polygons by exactly the ",
+                       "same area; the '%s' rule chose one for each."),
+                length(lt$rows), nrow(f), tie_break)
     }
   } else {
     joined <- do.call(sf::st_join, join_args)
@@ -224,8 +275,8 @@ assign_features_to_polygons <- function(
   # than a transform round trip of it.
   joined <- sf::st_set_geometry(joined, f_geom[joined[["..pre_join_row_id"]]])
 
-  if (!identical(id_col, polygon_id_col)) {
-    names(joined)[names(joined) == id_col] <- polygon_id_col
+  if (!identical(join_id, polygon_id_col)) {
+    names(joined)[names(joined) == join_id] <- polygon_id_col
   }
   if (!polygon_id_col %in% names(joined)) {
     stop(sprintf(
@@ -317,11 +368,59 @@ assign_features_to_polygons <- function(
 
   # Stamped and classed: the record names row positions, so it must not
   # survive a subset that renumbers or removes them.
+  tie_rows <- sort(unique(c(tie_rows, largest_ties)))
   joined <- .set_row_record(joined, "ties",
                             list(n = length(tie_rows),
                                  which = as.integer(tie_rows),
                                  rule = tie_break))
   joined
+}
+
+
+# Exact ties in a largest-overlap join.  `joined` is st_join(largest = TRUE)
+# of `f` onto `p_sel`, the polygons' ID in column `join_id`.  The features
+# assigned there that overlap two or more polygons are intersected with them
+# again; where the largest overlap is shared (areas equal to 9 significant
+# digits) the polygon is picked among the equally largest by `tie_break`:
+# "smallest_area" takes the smallest polygon, then the one whose bounding-box
+# centre is lowest, then leftmost, as for the predicate join; "first" takes
+# the first by polygon row.  Returns the rows of `joined` that had a tie and
+# the ID each gets.
+.largest_overlap_ties <- function(f, p_sel, joined, join_id, tie_break) {
+  none <- list(rows = integer(0), ids = NULL)
+  rows <- which(!is.na(joined[[join_id]]))
+  if (!length(rows)) return(none)
+  gf <- sf::st_geometry(f)[joined[["..pre_join_row_id"]][rows]]
+  gp <- sf::st_geometry(p_sel)
+  cand  <- suppressMessages(sf::st_intersects(gf, gp))
+  multi <- which(lengths(cand) >= 2L)
+  if (!length(multi)) return(none)
+  pieces <- tryCatch(suppressMessages(suppressWarnings(
+    sf::st_intersection(gf[multi], gp))), error = function(e) NULL)
+  if (is.null(pieces) || !length(pieces)) return(none)
+  idx  <- attr(pieces, "idx")
+  area <- signif(suppressWarnings(as.numeric(sf::st_area(pieces))), 9L)
+  area[!is.finite(area)] <- 0
+  out_rows <- integer(0)
+  out_ids  <- p_sel[[join_id]][integer(0)]
+  for (s in split(seq_along(area), idx[, 1L])) {
+    top <- max(area[s])
+    if (!(top > 0)) next
+    tied <- sort(unique(idx[s[area[s] == top], 2L]))
+    if (length(tied) < 2L) next
+    pick <- if (identical(tie_break, "first")) tied[1L] else {
+      ga <- signif(suppressWarnings(as.numeric(sf::st_area(gp[tied]))), 9L)
+      ga[!is.finite(ga)] <- Inf
+      ctr <- vapply(gp[tied], function(g) {
+        bb <- sf::st_bbox(g)
+        c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
+      }, numeric(2))
+      tied[order(ga, ctr[2, ], ctr[1, ])[1L]]
+    }
+    out_rows <- c(out_rows, rows[multi[idx[s[1L], 1L]]])
+    out_ids  <- c(out_ids, p_sel[[join_id]][pick])
+  }
+  list(rows = out_rows, ids = out_ids)
 }
 
 
@@ -436,6 +535,22 @@ assign_features_to_polygons <- function(
   Sph = function(h, a) ifelse(h >= a, 0, 1 - 1.5 * (h / a) + 0.5 * (h / a)^3),
   Gau = function(h, a) exp(-(h / a)^2)
 )
+
+# TRUE for a variogram model with a positive nugget and no structured sill
+# (no structured component, or only ones of partial sill 0, of the families
+# above): it implies no correlation between distinct observations.
+# .vgm_correlation_fn() returns NULL for it, deliberately, since it has no
+# correlation function to offer; callers that can use "uncorrelated" ask this.
+.vgm_is_pure_nugget <- function(vgm_model) {
+  if (!is.data.frame(vgm_model) || !all(c("model", "psill") %in% names(vgm_model)))
+    return(FALSE)
+  fam <- as.character(vgm_model$model)
+  ps  <- suppressWarnings(as.numeric(vgm_model$psill))
+  if (!length(fam) || !all(fam %in% c("Nug", names(.vgm_shape_fns))) ||
+      !all(is.finite(ps)))
+    return(FALSE)
+  sum(ps[fam == "Nug"]) > 0 && all(ps[fam != "Nug"] == 0)
+}
 
 
 #' Standard error of a cell mean under a design effect
@@ -689,7 +804,9 @@ assign_features_to_polygons <- function(
 #' @noRd
 .warn_deff_fallback <- function(fmt, ...) {
   msg <- sprintf(fmt, ...)
-  .log_warn("%s", msg)
+  # raising = TRUE: the warning below shows it, so a knitted document must
+  # not repeat the line as a message (see .sk_console_appender()).
+  .sk_log(logger::WARN, msg, raising = TRUE)
   warning(warningCondition(msg, class = "spatialkit_deff_fallback"))
   invisible(msg)
 }
@@ -744,6 +861,23 @@ assign_features_to_polygons <- function(
 #' `n_i / (1 + (n_i - 1) * rho)`. This is a first-order correction that
 #' does not require a full spatial covariance model but does require enough
 #' cells and observations for a stable ICC estimate.
+#'
+#' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
+#' with a second, small-sample correction. The within-cell correlation that
+#' inflates the variance of the mean to `sigma^2 * deff / n` also biases the
+#' within-cell sample variance downward: under exchangeable correlation `rho`
+#' (Kish's own assumption), with `deff = 1 + (n - 1) * rho`,
+#' `E[s^2] = sigma^2 * (n - deff) / (n - 1)`, so `s^2` understates `sigma^2`
+#' by very nearly the factor by which `deff` inflates the mean's variance, and
+#' the two errors compound rather than cancel. The standard error is therefore
+#' `s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))`, and `NA` where
+#' `deff >= n` (the cell then holds one observation's worth of information
+#' and `s` carries none about `sigma`). This is the package's own derivation,
+#' not taken from a reference. Measured 95% interval coverage at `n = 30`
+#' over 20,000 replicates: 0.921, 0.844 and 0.628 at `rho` = 0.2, 0.5 and 0.8
+#' with `s * sqrt(deff / n)` alone, against 0.948, 0.950 and 0.949 with the
+#' rescaling.
+#'
 #' You may also pass a fixed numeric design effect (e.g. `deff = 2`) to
 #' uniformly inflate standard errors: an externally supplied constant is
 #' applied as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive SE in
@@ -794,8 +928,10 @@ assign_features_to_polygons <- function(
 #' is that of the part the predictors do not explain, is weaker; using it here
 #' dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
 #' listed.) Pass `sac` explicitly when you want a different variogram, such as
-#' a residual one from `estimate_sac_range(..., predictor_vars = )`, and check
-#' `attr(sac, "detrended")` to know which you have.
+#' a residual one from `estimate_sac_range(..., predictor_vars = )`. A `sac`
+#' whose `attr(sac, "detrended")` is `TRUE` is used as given, but when it
+#' corrects response columns a warning says that their standard errors are
+#' understated, as [kriging_adequacy()] warns about the same mismatch.
 #'
 #' @section Confidence intervals:
 #' With `conf_level` set, every numeric response and predictor column gains
@@ -851,8 +987,12 @@ assign_features_to_polygons <- function(
 #'   \code{list(mean = \(x) mean(x, na.rm = TRUE))}. Additional common options:
 #'   \code{median}, \code{sum}, \code{sd}. A single function
 #'   (\code{agg_funs = median}) or a character vector of function names
-#'   (\code{c("median", "sum")}) is also accepted and named after the
-#'   function; anything else falls back to the default mean with a warning.
+#'   (\code{c("median", "sum")}) is also accepted. A single function is named
+#'   after the expression passed: a name gives that name (\code{median}, or
+#'   \code{f} for a variable \code{f} holding a function),
+#'   \code{stats::median} gives \code{median}, and any other expression gives
+#'   \code{agg1}; pass a named list to choose the name. Anything else falls
+#'   back to the default mean with a warning.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
 #'   the polygon geometry from cells_sf, with one row per cell in `cells_sf`.
@@ -887,7 +1027,11 @@ assign_features_to_polygons <- function(
 #'       applies it. A model of any other family falls back to `deff = 1`
 #'       with a warning naming it, and so does a request with no usable
 #'       model (none supplied and none could be estimated, or a rejected
-#'       fit); see "Value" for how to detect a fallback. Points with empty
+#'       fit that could not be replaced by an estimate); see "Value" for how
+#'       to detect a fallback. A model with no structured component (a pure
+#'       nugget) implies that distinct observations are uncorrelated, so it
+#'       is applied as a design effect of 1 in every cell, not treated as a
+#'       fallback. Points with empty
 #'       geometry count towards their cells' values but not towards the
 #'       correlation, with a warning.}
 #'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
@@ -911,8 +1055,10 @@ assign_features_to_polygons <- function(
 #'       predictors') that sets `cell_weight` whenever a response was given.
 #'       Requires at least 2 cells with 2+ observations and at least 2 residual
 #'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 (no
-#'       correction, no `"deff_applied"` attribute) otherwise, and likewise
-#'       when the estimate itself comes out at or below 0.}
+#'       correction for that variable type) otherwise, and likewise when the
+#'       estimate itself comes out at or below 0. The `"deff_applied"`
+#'       attribute is attached when either ICC is positive, so when both are
+#'       0 there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
 #'       naive SE. Use when you have an external estimate of the design
@@ -926,12 +1072,17 @@ assign_features_to_polygons <- function(
 #'   and lets you inspect the fit the design effect is based on. A `sac_range`
 #'   whose fit was *rejected* (its value is `NA` and it carries a
 #'   `rejected_reason` attribute) carries no usable correlation function, so
-#'   it is set aside with a warning: the variogram is then estimated as if
-#'   no `sac` had been given, or `deff` falls back to 1, rather than
-#'   correcting by a shape that was not trusted enough to report a range.
+#'   it is set aside rather than correcting by a shape that was not trusted
+#'   enough to report a range: the variogram is then estimated as if no `sac`
+#'   had been given, with a plain warning saying so, or, where that is not
+#'   possible, `deff` falls back to 1 with the fallback warning, which names
+#'   the rejection. A `sac` fitted to residuals (`attr(sac, "detrended")`
+#'   `TRUE`) is used as given, with a warning when it corrects response
+#'   columns (see "Design effects and variable types").
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
-#'   `deff = "variogram"`. Default 500.
+#'   `deff = "variogram"`. Default 500. It must be a single number of at
+#'   least 2 when `deff = "variogram"`; anything else is an error.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{TRUE},
@@ -950,7 +1101,12 @@ assign_features_to_polygons <- function(
 #'   forced into one zone (14 percent), or a few degrees of latitude in Web
 #'   Mercator (4 percent at 48N), does not.  [ensure_projected()] with
 #'   `purpose = "area"` chooses an equal-area CRS for lon/lat input; build the
-#'   cells in it.  The measured spread is attached as `attr(, "area_error")`.
+#'   cells in it.  Lon/lat cells are measured geodesically instead: their
+#'   `cell_area` is `sf::st_area()`'s area in square metres (on the sphere
+#'   with s2, sf's default), not a planar area in squared degrees, and the
+#'   distortion check passes by construction; with s2 switched off, sf needs
+#'   the lwgeom package for that area and the request is refused without
+#'   it.  The measured spread is attached as `attr(, "area_error")`.
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
@@ -967,19 +1123,24 @@ assign_features_to_polygons <- function(
 #'   the count.
 #'
 #'   `deff_applied` is `TRUE` on every row when the requested correction was
-#'   applied (exactly when the `"deff_applied"` attribute below is attached)
+#'   applied (exactly when the `"deff_applied"` attribute below is attached;
+#'   under `"kish"`, when any standard-error column was corrected)
 #'   and `FALSE` when it fell back to the uncorrected standard errors: a
-#'   refused `deff`, a `"variogram"` request with no usable model, or a
-#'   `"kish"` ICC of 0 (and `NA` on a `cells_sf` row no point fell in).
+#'   refused `deff`, a `"variogram"` request with no usable model, or
+#'   `"kish"` ICCs of 0 for every variable type (and `NA` on a `cells_sf`
+#'   row no point fell in).
 #'   Unlike the attribute it survives `rbind()` and
 #'   `dplyr::bind_rows()` of many results. A fallback is also signalled by a
 #'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 is
 #'   reported on `attr(, "icc")` instead), which
 #'   `tryCatch(spatialkit_deff_fallback = )` catches without matching the
-#'   message.
+#'   message; it is raised only when the standard errors really are the
+#'   uncorrected ones.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
-#'   attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
+#'   attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
+#'   for `"kish"` (`deff` is the primary variable's per-cell design effect,
+#'   all 1 when only the predictor ICC was positive),
 #'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
 #'   the design effect at the primary variable's non-missing count per cell,
 #'   `deff_rows` at the cell's row count, which is the vector the log line
@@ -988,8 +1149,8 @@ assign_features_to_polygons <- function(
 #'   (`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
 #'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
-#'   applied: `deff = 1`, a `deff = "kish"` ICC of 0, or a `"variogram"`
-#'   request that could not be fitted. A `deff = "kish"` request always
+#'   applied: `deff = 1`, a `deff = "kish"` request whose ICCs are all 0, or
+#'   a `"variogram"` request that could not be fitted. A `deff = "kish"` request always
 #'   records the ICCs it estimated on an attribute `"icc"` (`resp` and
 #'   `pred`, `NA` for a variable type with no numeric column), whether or not
 #'   they were positive enough to apply, so a result with no `"deff_applied"`
@@ -1132,9 +1293,16 @@ summarize_by_cell <- function(assigned_points_sf,
   # replaced by the mean with only a log line: resp_mean_v = 1.228 came back
   # for a median of 0.927.
   if (is.function(agg_funs)) {
+    # Named after the expression passed; `stats::median` used to give
+    # resp_agg1_v where `median` gave resp_median_v.
     fn_expr  <- substitute(agg_funs)
-    agg_funs <- stats::setNames(list(agg_funs),
-                                if (is.name(fn_expr)) as.character(fn_expr) else "agg1")
+    fn_name  <- if (is.name(fn_expr)) as.character(fn_expr)
+                else if (is.call(fn_expr) && length(fn_expr) == 3L &&
+                         (identical(fn_expr[[1L]], as.name("::")) ||
+                          identical(fn_expr[[1L]], as.name(":::"))))
+                  as.character(fn_expr[[3L]])
+                else "agg1"
+    agg_funs <- stats::setNames(list(agg_funs), fn_name)
   } else if (is.character(agg_funs) && length(agg_funs) > 0L && !anyNA(agg_funs)) {
     fns <- lapply(agg_funs, function(nm)
       tryCatch(match.fun(nm), error = function(e) NULL))
@@ -1158,6 +1326,12 @@ summarize_by_cell <- function(assigned_points_sf,
   use_kish <- identical(deff, "kish")
   use_vgm  <- identical(deff, "variogram")
   if (use_vgm) {
+    # A subsample of 0 or 1 points has no pairs: the mean correlation came out
+    # NaN, the design effect 1 and the SEs uncorrected, on rows still marked
+    # deff_applied = TRUE; NA stopped with "missing value where TRUE/FALSE
+    # needed".  Checked only here, where the argument is used.
+    .check_scalar(deff_max_n, "deff_max_n", "summarize_by_cell", min = 2,
+                  max = .Machine$integer.max)
     # The SE closures below do arithmetic on `deff`; the per-cell variogram
     # values are applied after summarising, so neutralise it here.
     deff <- 1
@@ -1470,18 +1644,26 @@ summarize_by_cell <- function(assigned_points_sf,
     # the correlation function then saturated at every within-cell distance,
     # deff came out equal to n, cell_weight collapsed to 1 and standard errors
     # were inflated 40-50x.  Treat it like no fit at all.
-    no_fit <- NULL          # why no model is available, for the warning below
-    rejection_warned <- FALSE
+    #
+    # What replaces it is said once it is known.  This used to raise the
+    # classed fallback warning ("Falling back to deff = 1") right here, and
+    # then a variogram estimated from `response_var` was applied after all
+    # (deff_applied TRUE, median deff 5.2), so tryCatch() on the class threw
+    # a corrected result away; with the estimate rejected too, one fallback
+    # gave two R warnings.  Now a replaced `sac` gets a plain warning below,
+    # and an unreplaced one is named in the single fallback warning.
+    no_fit    <- NULL       # why no model is available, for the warning below
+    set_aside <- NULL       # why a supplied `sac` was not used
     if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
-      .warn_deff_fallback(paste0("summarize_by_cell(): the supplied `sac` reports no ",
-                                 "usable range (%s), so its fitted variogram model ",
-                                 "cannot size a design effect. Falling back to ",
-                                 "deff = 1."),
-                          as.character(attr(sac, "rejected_reason")))
+      set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
+                           as.character(attr(sac, "rejected_reason"))[1L])
       sac <- NULL
-      rejection_warned <- TRUE
     }
+    # A residual variogram used for the response's own standard errors is
+    # used as documented, but said so: kriging_adequacy() warns about the
+    # same attribute on the same object.
+    detrended_sac <- !is.null(sac) && isTRUE(attr(sac, "detrended"))
     vgm_model <- attr(sac, "variogram_model")
     vgm_crs   <- attr(sac, "crs")
     if (is.null(vgm_model)) {
@@ -1513,11 +1695,9 @@ summarize_by_cell <- function(assigned_points_sf,
                             conditionMessage(attr(est, "condition")))
         } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
                    !is.null(attr(est, "rejected_reason"))) {
-          .warn_deff_fallback(paste0("summarize_by_cell(): the estimated variogram ",
-                                     "reports no usable range (%s), so it cannot size ",
-                                     "a design effect. Falling back to deff = 1."),
-                              as.character(attr(est, "rejected_reason")))
-          rejection_warned <- TRUE
+          no_fit <- sprintf(paste0("the variogram estimated from `response_var` ",
+                                   "reports no usable range (%s)"),
+                            as.character(attr(est, "rejected_reason"))[1L])
         } else {
           vgm_model <- attr(est, "variogram_model")
           vgm_crs   <- attr(est, "crs")
@@ -1527,6 +1707,16 @@ summarize_by_cell <- function(assigned_points_sf,
       }
     }
     cor_fn <- .vgm_correlation_fn(vgm_model)
+    if (is.null(cor_fn) && .vgm_is_pure_nugget(vgm_model)) {
+      # No structured component: distinct observations are uncorrelated and
+      # a design effect of 1 is the exact answer, not a fallback.  It used to
+      # be reported as "the supplied model could not be read", with the
+      # fallback warning and deff_applied FALSE.
+      .log_info(paste0("summarize_by_cell(): the variogram model is a pure ",
+                       "nugget, so distinct observations are uncorrelated and ",
+                       "the design effect is 1 in every cell."))
+      cor_fn <- function(h) 0 * h
+    }
     if (is.null(cor_fn)) {
       # Name the family when that is the reason: a user-built Matern or power
       # model used to be read as exponential without a word.
@@ -1539,19 +1729,36 @@ summarize_by_cell <- function(assigned_points_sf,
                                    "variogram models (plus a nugget); the supplied ",
                                    "model uses %s. Falling back to deff = 1."),
                             paste(sQuote(other, FALSE), collapse = ", "))
-      } else if (!rejection_warned) {
-        # (A rejected fit has already been warned about, by its reason.)
+      } else {
         .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" requires ",
                                    "a fitted variogram model; none was available (%s). ",
                                    "Pass one via `sac = estimate_sac_range(...)`. ",
                                    "Falling back to deff = 1, so the standard errors ",
                                    "are the uncorrected ones."),
-                            if (is.null(no_fit)) "the supplied model could not be read"
-                            else no_fit)
+                            paste(c(set_aside,
+                                    if (is.null(no_fit)) "the supplied model could not be read"
+                                    else no_fit),
+                                  collapse = "; "))
       }
       use_vgm <- FALSE
       deff <- 1
     } else {
+      if (!is.null(set_aside))
+        .warn_and_log(paste0("summarize_by_cell(): %s, so its fitted variogram ",
+                             "model cannot size a design effect. It was set aside, ",
+                             "and the design effect uses the variogram estimated ",
+                             "from `response_var` instead."),
+                      set_aside)
+      if (detrended_sac && length(resp_num))
+        .warn_and_log(paste0("summarize_by_cell(): `sac` is the variogram of the ",
+                             "residuals on predictors (detrend = \"%s\"), but the ",
+                             "..se_resp_* columns estimate the grand mean of the ",
+                             "response, whose own correlation is the one to correct ",
+                             "for; a residual variogram is weaker, so those standard ",
+                             "errors are understated. Pass a variogram of the ",
+                             "response (estimate_sac_range() without predictor_vars) ",
+                             "or sac = NULL."),
+                      as.character(attr(sac, "detrend_method") %||% "ols")[1L])
       # st_coordinates() returns one row per VERTEX, so any non-POINT geometry
       # (this function accepts POLYGON and MULTIPOINT features) would misalign
       # coords_mat with `df` and feed the wrong points into every cell.
@@ -1659,8 +1866,11 @@ summarize_by_cell <- function(assigned_points_sf,
   # of information about the response, not 5.  (`n` still reports rows.)
   primary_col <- if (has_resp) resp_num[[1L]] else if (has_pred) pred_num[[1L]] else NULL
   n_valid_primary <- if (is.null(primary_col)) out$n else {
-    cnt <- tapply(!is.na(df[[primary_col]]), df[[id_col]], sum)
-    v   <- as.numeric(cnt[as.character(out[[id_col]])])
+    # exclude = NULL keeps the group of rows with no cell ID (from
+    # keep_unassigned = TRUE), which is a summary row too: tapply() dropped
+    # it, and its cell_weight came out 0 beside n = 5 and a finite SE.
+    cnt <- tapply(!is.na(df[[primary_col]]), factor(df[[id_col]], exclude = NULL), sum)
+    v   <- as.numeric(cnt[match(as.character(out[[id_col]]), names(cnt))])
     v[is.na(v)] <- 0
     v
   }
@@ -1680,9 +1890,14 @@ summarize_by_cell <- function(assigned_points_sf,
     primary_rho <- if (has_resp) max(resp_rho, 0)
                    else if (has_pred) max(pred_rho, 0)
                    else 0
-    if (primary_rho > 0) {
-      deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
+    deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
+    if (primary_rho > 0)
       out$cell_weight <- n_valid_primary / deff_per_cell
+    # Recorded whenever EITHER ICC corrected its columns.  Keyed on the
+    # primary variable alone, a clustered predictor beside an unclustered
+    # response had its SEs inflated 11x on rows marked deff_applied = FALSE,
+    # with no attribute.  `deff` stays the primary variable's (all 1 then).
+    if (max(resp_rho, pred_rho, 0) > 0) {
       attr(out, "deff_applied") <- list(
         method   = "kish",
         icc_resp = if (has_resp) resp_rho else NA_real_,
@@ -1864,7 +2079,12 @@ summarize_by_cell <- function(assigned_points_sf,
           # Realigning $deff alone left $rbar in pre-join order and pre-join
           # length, so deff[i] and rbar[i] described different cells and the
           # identity deff = 1 + (n-1) * rbar no longer held row-wise.
-          for (fld in c("deff", "deff_rows", "rbar")) {
+          # A fixed deff is one number, not a per-cell vector: with exactly
+          # one cell summarised its length matched, and deff = 2 came back
+          # as c(2, NA, NA, ...).
+          flds <- if (identical(deff_attr$method, "fixed")) character(0)
+                  else c("deff", "deff_rows", "rbar")
+          for (fld in flds) {
             v <- deff_attr[[fld]]
             if (!is.null(v) && length(v) == length(pre_join_id)) {
               lookup <- stats::setNames(v, pre_join_id)

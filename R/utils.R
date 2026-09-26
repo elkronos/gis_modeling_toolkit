@@ -125,7 +125,49 @@
 #' @keywords internal
 #' @noRd
 .log_warn <- function(fmt, ...) {
-  .sk_log(logger::WARN, sprintf(fmt, ...))
+  msg <- sprintf(fmt, ...)
+  # While knitting, the console echo is also sent as an R message (see
+  # .sk_console_appender()), and a caution logged here and then raised by the
+  # caller's very next statement, `warning(...)` -- the pattern of the
+  # cross-validation cautions (random-fold fallback, blocks smaller than the
+  # range) -- appeared in the document twice, as a message and a warning.
+  # Such a line is marked `raising`, as a .warn_and_log() line is.  The
+  # caller's code is read only while knitting.
+  raising <- isTRUE(getOption("knitr.in.progress")) && {
+    p <- sys.parent()
+    p > 0L && .next_is_warning(sys.call(), sys.function(p))
+  }
+  .sk_log(logger::WARN, msg, raising = raising)
+}
+
+# Whether `call` appears in the body of `fn` as a statement of a `{` block
+# whose next statement is a call to warning().  Attributes are ignored: with
+# source references kept, sys.call() carries a "srcref" that the statement in
+# the body does not.
+.next_is_warning <- function(call, fn) {
+  if (!is.function(fn) || is.primitive(fn) || !is.call(call)) return(FALSE)
+  attributes(call) <- NULL
+  found <- FALSE
+  walk <- function(e) {
+    if (found || !is.call(e)) return(invisible(NULL))
+    n <- length(e)
+    if (identical(e[[1L]], as.name("{")) && n > 2L) {
+      for (i in 2:(n - 1L)) {
+        nxt <- e[[i + 1L]]
+        cur <- e[[i]]
+        if (is.call(cur)) attributes(cur) <- NULL
+        if (is.call(nxt) && identical(nxt[[1L]], as.name("warning")) &&
+            identical(cur, call)) {
+          found <<- TRUE
+          return(invisible(NULL))
+        }
+      }
+    }
+    for (j in seq_len(n)) if (is.call(e[[j]])) walk(e[[j]])
+    invisible(NULL)
+  }
+  tryCatch(walk(body(fn)), error = function(e) NULL)
+  found
 }
 
 # A warning about a CHOICE, logged once per session under `key`.  A choice
@@ -735,11 +777,24 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' attribute recording what happened to its rows (\code{"dropped"} and
 #' \code{"ties"} respectively).  Those records describe the rows the layer was
 #' built with, and \code{[} on an \code{sf} object copies attributes through
-#' unchanged, which would leave a subset reporting its parent's numbers with
-#' row positions that no longer resolve.  Subsetting therefore returns a plain
-#' layer with the record removed; read the record from the layer the function
-#' returned, before subsetting it.  Binding such layers (\code{rbind()},
+#' unchanged, which would leave a subset reporting its parent's numbers for a
+#' different set of rows.  Subsetting therefore returns a plain layer with the
+#' record removed, and so do the \pkg{dplyr} verbs that select or reorder
+#' rows (\code{filter()}, \code{slice()}, \code{arrange()},
+#' \code{distinct()}); read the record from the layer the function returned,
+#' before subsetting it.  Binding such layers (\code{rbind()},
 #' \code{dplyr::bind_rows()}) likewise returns a plain \code{sf} layer.
+#'
+#' Each record carries \code{n_rows}, the number of rows it was made for.
+#' \code{sf::st_drop_geometry()} keeps the rows, and with them the record: it
+#' returns a data frame of class \code{c("spatialkit_rows", "data.frame")}.
+#' Binding such data frames with
+#' \code{rbind()} or \code{dplyr::bind_rows()} keeps the first one's record
+#' and class, so the record then describes only the first input's rows: its
+#' \code{n_rows} no longer equals \code{nrow()} of the result.  The
+#' package's own readers ignore a record whose \code{n_rows} does not match;
+#' when reading \code{attr(x, "dropped")} or \code{attr(x, "ties")} yourself
+#' from a layer that has been through such steps, check it the same way.
 #'
 #' @param x A layer returned by \code{\link{prep_model_data}()} or
 #'   \code{\link{assign_features_to_polygons}()}.
@@ -762,6 +817,20 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'   attach the records this method removes.
 #' @export
 `[.spatialkit_rows` <- function(x, ...) {
+  y <- NextMethod()
+  if (!is.data.frame(y)) return(y)
+  for (nm in .row_record_attrs) attr(y, nm) <- NULL
+  class(y) <- setdiff(class(y), "spatialkit_rows")
+  y
+}
+
+# dplyr's row verbs -- filter(), slice(), arrange(), distinct() -- reach the
+# data through dplyr_row_slice(), not `[`, and kept the record: filter(a,
+# v >= 3) on 5 rows returned 3 rows still reporting ties$n = 3.  They drop it
+# as `[` does.  sf's own dplyr methods strip "sf" from the class and call
+# NextMethod(), so this runs for an sf layer too.  Registered in .onLoad()
+# on dplyr's generic.
+.dplyr_row_slice_spatialkit_rows <- function(data, i, ...) {
   y <- NextMethod()
   if (!is.data.frame(y)) return(y)
   for (nm in .row_record_attrs) attr(y, nm) <- NULL
