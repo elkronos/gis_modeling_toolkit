@@ -370,10 +370,10 @@
 #'   zero, and each drops the rows where its own denominator vanishes (`MAPE`
 #'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
 #'   when no row qualifies. "Zero" is relative to the data, as for every
-#'   metric here: a denominator within `100 * .Machine$double.eps` of the
-#'   largest one, and, for `R2`, a total sum of squares whose RMS deviation
-#'   is within that fraction of the RMS of `y` (then `R2` is `NA`). The
-#'   result therefore does not depend on the response's units.
+#'   metric here: a denominator no larger than `100 * .Machine$double.eps`
+#'   times the largest one, and, for `R2`, a total sum of squares whose RMS
+#'   deviation is no larger than that fraction of the RMS of `y` (then `R2`
+#'   is `NA`). The result therefore does not depend on the response's units.
 #'   `n_MAPE` and `n_SMAPE` are the row counts each was
 #'   actually averaged over, so that a percentage error over a subset is
 #'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
