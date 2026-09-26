@@ -80,9 +80,11 @@ caution above exists to prevent, so the leakage warning
 \item{select_on}{\code{"all"} (default) runs the sweep on every row of
 \code{train_sf}.  \code{"split"} runs it on one spatially blocked half,
 then fits the selected set on that half and scores it on the other:
-\code{score_holdout} is then an honest estimate of the selected model's
-\code{metric} on data the selection never saw (the sweep's own
-\code{score} is not; see "The score is not a performance estimate").
+\code{score_holdout} is then the selected model's \code{metric} on rows
+whose response the sweep never read (the sweep's own \code{score} is
+not; see "The score is not a performance estimate").  It is one
+estimate from one region: the halves share a border with no buffer, so
+rows near it are still correlated with the selection half.
 Both halves come back in \code{$split}.  See the "Post-selection
 inference" section of \code{\link{determine_optimal_levels}} for the
 trade: coverage for half the sample.}

@@ -239,7 +239,11 @@ of every point, so it is chosen on that layer's extent and clusters
 rather than on half of them.  Build the tessellation on
 every point (cells are geometry), but aggregate and fit on
 \code{data_sf[attr(x, "split")$estimation, ]}, whose response the
-selection never saw; that restores nominal coverage with no new theory.
+selection never saw.  That keeps the selection's use of the response out
+of the estimates, but only as far as the two halves are independent: the
+split has no buffer, so points near the border between them are
+correlated with the selection half over the autocorrelation range, and
+coverage is nominal only when that range is short against the blocks.
 The price is
 precision: half the points estimate, and García Rasines and Young (2023)
 show a \emph{contiguous} spatial half is less efficient than the
