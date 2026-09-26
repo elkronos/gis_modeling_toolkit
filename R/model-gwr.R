@@ -367,7 +367,11 @@
 #'   warning, to the smallest that gives every local regression more points
 #'   of non-zero weight than parameters: the number of predictors plus 3 for
 #'   the bisquare and tricube kernels (which give the farthest neighbour in a
-#'   window weight 0), plus 2 for the others.
+#'   window weight 0), plus 2 for the others.  A count above the number of
+#'   observations is capped at it, with a warning (a distance meant for
+#'   \code{adaptive = FALSE}, most often).  \code{bw.gwr()} searches adaptive
+#'   bandwidths from 20 neighbours up, so below 20 observations its choice is
+#'   capped the same way, with a warning, and is not an optimised bandwidth.
 #' @param kernel Kernel function type. One of "bisquare" (default),
 #'   "gaussian", "tricube", "boxcar", "exponential".
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
@@ -805,7 +809,31 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
                       bw, n_params, kernel, min_bw)
       bw <- min_bw
     }
-    if (bw > max_bw) bw <- max_bw
+    # Capped at n, as before, but no longer in silence.  A supplied count
+    # above n is most often a distance passed with adaptive left at TRUE:
+    # 1500 (metres) on 200 points became a near-global fit whose local slopes
+    # varied half as much as the intended one's.  And bw.gwr() searches
+    # adaptive bandwidths from 20 up to n, a reversed range below 20 points,
+    # so its choice there exceeds n and the fit is not at the bandwidth it
+    # chose.  The fallback's own warning already names its clamp.
+    if (bw > max_bw) {
+      if (!is.null(bandwidth))
+        .warn_and_log(paste0("fit_gwr_model(): an adaptive bandwidth of %d ",
+                             "neighbours exceeds the %d observations; using ",
+                             "%d. With adaptive = TRUE the bandwidth is a ",
+                             "count of neighbours; for a distance in CRS ",
+                             "units, set adaptive = FALSE."),
+                      bw, n_obs, n_obs)
+      else if (!bandwidth_is_fallback)
+        .warn_and_log(paste0("fit_gwr_model(): GWmodel::bw.gwr() searches ",
+                             "adaptive bandwidths from 20 neighbours up to n, ",
+                             "a range that is empty for %d observations, and ",
+                             "returned %d; using %d. Neither is an optimised ",
+                             "bandwidth: with this few observations, supply ",
+                             "`bandwidth`."),
+                      n_obs, bw, n_obs)
+      bw <- max_bw
+    }
   }
 
   # The fallback warning is issued AFTER the clamp, not before it.  The clamp

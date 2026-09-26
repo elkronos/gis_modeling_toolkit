@@ -39,7 +39,10 @@ have chosen for you.  Geographic input is projected before the bandwidth
 is used, so a value in degrees would be read as metres.  An adaptive
 count too small for the full model is raised, with a warning, to the
 number of candidates plus 3 for the bisquare and tricube kernels (which
-give the farthest neighbour in a window weight 0), plus 2 for the others.}
+give the farthest neighbour in a window weight 0), plus 2 for the others.
+One above the number of observations is capped at it, with a warning;
+below 20 observations that includes \code{bw.gwr()}'s choice, since its
+adaptive search starts at 20 neighbours.}
 
 \item{adaptive}{Logical; adaptive (nearest-neighbour) bandwidth. Default
 \code{TRUE}.}
