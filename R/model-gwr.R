@@ -2,37 +2,6 @@
 # Internal helpers
 # -----------------------------------------------------------------------------
 
-#' Validate a GWR kernel name
-#'
-#' GWmodel accepts kernel names as character strings directly (unlike spgwr
-#' which required function objects).
-#'
-#' \strong{Currently unreachable.}  Every entry point that takes a kernel
-#' (\code{fit_gwr_model()}, \code{gwr_model_selection()} and \code{cv_gwr()})
-#' declares it as a \code{c("bisquare", ...)} default and runs
-#' \code{match.arg()} on it, which rejects any value this function would have
-#' to repair.  \code{cv_gwr()} (R/cross-validation.R) is its only caller and
-#' calls it on the line \emph{after} its own \code{match.arg()}, so the
-#' fallback branch below cannot execute.  It is kept only because that caller
-#' lives in another file; if the redundant call there is removed, remove this
-#' too.  Do not add a comment anywhere claiming it "earns its keep" in
-#' \code{cv_gwr()}.  It does not.
-#'
-#' @param kernel Character scalar.
-#' @return The validated kernel string.
-#' @keywords internal
-#' @noRd
-.validate_kernel <- function(kernel) {
-  valid <- c("bisquare", "gaussian", "tricube", "boxcar", "exponential")
-  kernel <- tolower(kernel)
-  if (!kernel %in% valid) {
-    .log_warn("fit_gwr_model(): unknown kernel '%s'; falling back to 'bisquare'.", kernel)
-    kernel <- "bisquare"
-  }
-  kernel
-}
-
-
 #' Coerce an sf object to SpatialPointsDataFrame for GWmodel
 #'
 #' GWmodel's core functions (gwr.basic, bw.gwr, gwr.model.selection) currently
@@ -478,9 +447,7 @@ fit_gwr_model <- function(data_sf, response_var, predictor_vars,
     stop("fit_gwr_model(): package 'sp' is required (for GWmodel interop).",
          call. = FALSE)
   # match.arg() is the whole of kernel validation: an invalid value never gets
-  # past it.  (.validate_kernel() below is called by cv_gwr() but only ever
-  # after that function's own match.arg(), so it is unreachable there too --
-  # see its @noRd block.)
+  # past it.
   kernel <- match.arg(kernel)
 
   # prep_model_data() accepts character(0) so an intercept-only spatial GP can

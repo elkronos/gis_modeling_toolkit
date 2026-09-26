@@ -587,9 +587,7 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
     stop("gwr_model_selection(): `response_var` must be a single column name.",
          call. = FALSE)
   # match.arg() is the only kernel validation this package needs: an invalid
-  # value never gets past it.  (.validate_kernel() in R/model-gwr.R exists and
-  # is called by cv_gwr(), but only ever *after* that function's own
-  # match.arg(), so it is unreachable there too -- see its @noRd block.)
+  # value never gets past it.
   kernel      <- match.arg(kernel)
   bw_approach <- match.arg(bw_approach)
 
