@@ -372,8 +372,12 @@ no idea what it was computed over.
 
 For the aggregates themselves, report the standard error that comes with each
 cell mean rather than the mean alone. `summarize_by_cell()` computes it with
-the observation count beside it, and `deff` corrects it for within-cell
-autocorrelation. A cell mean from two observations and one from thirteen are
+the observation count beside it. For per-region values like the map above,
+that is the default `deff = 1` standard error used here (or the block-kriging
+variance, `kr_var`, from `kriging_adequacy()`). A `deff` setting widens it for
+within-cell autocorrelation, which is right only when the regional means feed
+a claim about the population (here statewide) mean; `?summarize_by_cell` says
+which is which. A cell mean from two observations and one from thirteen are
 different claims, and printed side by side they look identical.
 
 ```{r se-example}

@@ -263,8 +263,11 @@ head(as.data.frame(cell_stats)[, c("cell_id", "n", "resp_mean_y",
                                    "..sd_resp_y", "..se_resp_y")])
 ```
 
-The `..se_*` columns are **IID** standard errors at the default `deff = 1`,
-which is anticonservative when points inside a cell are spatially correlated.
+The `..se_*` columns are **IID** standard errors at the default `deff = 1`.
+That is the right standard error for each cell's own mean, the value a
+choropleth shows, when the points are spread through the cell. As a standard
+error for the population (grand) mean it is anticonservative when points inside
+a cell are spatially correlated. For that population-level use,
 `deff = "kish"` applies Kish's design-effect correction from an estimated
 intra-class correlation, and `attr(., "deff_applied")` records what was used:
 
@@ -432,7 +435,7 @@ c(random = folds_random$k, blocked = folds_blocked$k,
 `plot_folds()` is the fastest way to see whether the blocks actually separate
 the data or are smaller than the autocorrelation range and therefore leaking:
 
-```{r plot-folds, fig.width=7, fig.height=6, eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE), fig.alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map each fold occupies a contiguous part of the state, with the block grid drawn behind."}
+```{r plot-folds, fig.width=7, fig.height=6, eval=has_ggplot && requireNamespace("patchwork", quietly = TRUE), fig.alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map, with the block grid drawn behind, every block holds a single fold and each fold is two to four whole blocks: four of the five folds fall in two separate parts of the state, and the fifth's two blocks meet only at a corner."}
 library(patchwork)
 (plot_folds(folds_random,  points_sf, boundary = nc_boundary) /
  plot_folds(folds_blocked, points_sf, boundary = nc_boundary)) +
@@ -536,6 +539,17 @@ gwr_met <- model_metrics(gwr_fit)
 cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
             gwr_fit$info$bandwidth, gwr_met$R2, gwr_met$RMSE))
 ```
+
+When you run this, `fit_gwr_model()` also warns that 25 of the 300 local
+windows have a collinear design (scaled condition index above 30), and four of
+the five GWR fits inside `compare_models_cv()` below repeat the warning for
+their own training sets. The cause is `elevation`: it averages about 3,000 but
+has a standard deviation of only about 400 inside a 42-neighbour window, so
+locally it is nearly collinear with the intercept (see "Collinearity
+diagnostics" in `?fit_gwr_model`). What that leaves poorly determined is the
+local intercepts, not the fit: centring the predictor
+(`elevation - mean(elevation)`) gives the same bandwidth and fitted values and
+no warning, and a wider bandwidth clears it too.
 
 ### Comparing backends on identical folds
 
