@@ -342,7 +342,27 @@
                     bw, n_cand, kernel, min_bw)
       bw <- min_bw
     }
-    if (bw > n_obs) bw <- as.integer(n_obs)
+    # Capped at n, and said: a supplied count above n is most often a
+    # distance meant for adaptive = FALSE, and bw.gwr() searches from 20 up
+    # to n, so below 20 points its choice exceeds n.  See fit_gwr_model().
+    if (bw > n_obs) {
+      if (identical(bandwidth_source, "supplied"))
+        .warn_and_log(paste0("gwr_model_selection(): an adaptive bandwidth of ",
+                             "%d neighbours exceeds the %d observations; using ",
+                             "%d. With adaptive = TRUE the bandwidth is a count ",
+                             "of neighbours; for a distance in CRS units, set ",
+                             "adaptive = FALSE."),
+                      bw, n_obs, n_obs)
+      else if (!identical(bandwidth_source, "fallback"))
+        .warn_and_log(paste0("gwr_model_selection(): GWmodel::bw.gwr() ",
+                             "searches adaptive bandwidths from 20 neighbours ",
+                             "up to n, a range that is empty for %d ",
+                             "observations, and returned %d; using %d. Neither ",
+                             "is an optimised bandwidth: with this few ",
+                             "observations, supply `bandwidth`."),
+                      n_obs, bw, n_obs)
+      bw <- as.integer(n_obs)
+    }
   }
 
   # A FIXED bandwidth needs the distance matrix.  Without one,
@@ -461,6 +481,9 @@
 #'   count too small for the full model is raised, with a warning, to the
 #'   number of candidates plus 3 for the bisquare and tricube kernels (which
 #'   give the farthest neighbour in a window weight 0), plus 2 for the others.
+#'   One above the number of observations is capped at it, with a warning;
+#'   below 20 observations that includes \code{bw.gwr()}'s choice, since its
+#'   adaptive search starts at 20 neighbours.
 #' @param adaptive Logical; adaptive (nearest-neighbour) bandwidth. Default
 #'   \code{TRUE}.
 #' @param kernel Weighting kernel. One of \code{"bisquare"} (default),

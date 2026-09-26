@@ -225,3 +225,54 @@ test_that("gwr_model_selection() warns when it raises a too-small adaptive bandw
                                "small for the full 5-predictor model with the ",
                                "bisquare kernel; using 8"), r$warnings)))
 })
+
+
+# ---------------------------------------------------------------------------
+# An adaptive bandwidth above n was capped at n in silence: a distance passed
+# with adaptive left at TRUE, and bw.gwr()'s choice below 20 points, whose
+# search range [20, n] is then reversed.
+# ---------------------------------------------------------------------------
+
+test_that("an adaptive bandwidth above n is capped with a warning that suggests adaptive = FALSE", {
+  set.seed(7)
+  dd <- data.frame(x = runif(200, 0, 5000), y = runif(200, 0, 5000), a = rnorm(200))
+  dd$z <- (1 + 3 * dd$x / 5000) * dd$a + rnorm(200, 0, 0.3)
+  d <- sf::st_as_sf(dd, coords = c("x", "y"), crs = 32632)
+  r <- .r2_catch(fit_gwr_model(d, "z", "a", bandwidth = 1500))
+  expect_equal(r$value$info$bandwidth, 200)
+  w <- grep("exceeds the 200 observations", r$warnings, value = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "adaptive bandwidth of 1500 neighbours.*set adaptive = FALSE")
+  # n itself is a valid count and says nothing.
+  r200 <- .r2_catch(fit_gwr_model(d, "z", "a", bandwidth = 200))
+  expect_false(any(grepl("exceeds", r200$warnings)))
+
+  s <- .r2_pts(14, 1, c("a", "b"))
+  s$z <- 1 + s$a + rnorm(14, 0, 0.3)
+  rs <- .r2_catch(gwr_model_selection(s, "z", c("a", "b"), bandwidth = 50))
+  expect_identical(rs$value$bandwidth, 14L)
+  expect_true(any(grepl("adaptive bandwidth of 50 neighbours exceeds the 14 observations",
+                        rs$warnings)))
+})
+
+test_that("below 20 points, capping bw.gwr()'s choice at n is said", {
+  set.seed(1)
+  n <- 12
+  x <- runif(n, 0, 1000); y <- runif(n, 0, 1000); a <- rnorm(n)
+  d <- sf::st_as_sf(data.frame(x = x, y = y, a = a,
+                               z = 1 + (x / 1000) * a + rnorm(n, 0, 0.3)),
+                    coords = c("x", "y"), crs = 32617)
+  r <- .r2_catch(fit_gwr_model(d, "z", "a"))
+  expect_equal(r$value$info$bandwidth, 12)
+  expect_false(r$value$info$bandwidth_is_fallback)
+  expect_true(any(grepl(paste0("bw\\.gwr\\(\\) searches adaptive bandwidths ",
+                               "from 20 neighbours up to n, a range that is ",
+                               "empty for 12 observations, and returned [0-9]+; ",
+                               "using 12"), r$warnings)))
+
+  s <- .r2_pts(14, 1, c("a", "b"))
+  s$z <- 1 + s$a + rnorm(14, 0, 0.3)
+  rs <- .r2_catch(gwr_model_selection(s, "z", c("a", "b")))
+  expect_identical(rs$value$bandwidth, 14L)
+  expect_true(any(grepl("empty for 14 observations", rs$warnings)))
+})

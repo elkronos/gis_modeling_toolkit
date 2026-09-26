@@ -42,7 +42,11 @@ the count is rounded, and one too small for the model is raised, with a
 warning, to the smallest that gives every local regression more points
 of non-zero weight than parameters: the number of predictors plus 3 for
 the bisquare and tricube kernels (which give the farthest neighbour in a
-window weight 0), plus 2 for the others.}
+window weight 0), plus 2 for the others.  A count above the number of
+observations is capped at it, with a warning (a distance meant for
+\code{adaptive = FALSE}, most often).  \code{bw.gwr()} searches adaptive
+bandwidths from 20 neighbours up, so below 20 observations its choice is
+capped the same way, with a warning, and is not an optimised bandwidth.}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
 "gaussian", "tricube", "boxcar", "exponential".}
