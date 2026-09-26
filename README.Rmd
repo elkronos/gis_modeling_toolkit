@@ -451,11 +451,13 @@ the package is doing.
 
 ### Parallel cross-validation
 
-Every CV function (`cv_gwr()`, `cv_bayes()`, `cv_rf()` and `cv_spatial()`)
-accepts a `parallel` argument for fold-level parallelism via
-`parallel::mclapply()` (macOS/Linux; falls back to sequential on Windows with a
-message). This matters most for `cv_bayes()`, where every fold is a full MCMC
-run:
+`cv_bayes()`, `cv_rf()` and `cv_spatial()` accept a `parallel` argument for
+fold-level parallelism via `parallel::mclapply()` (macOS/Linux; falls back to
+sequential on Windows with a message). `cv_gwr()` accepts it too but always
+runs its folds one after another, with a warning if you ask for more: GWmodel
+runs OpenMP code, which deadlocks forked workers once a GWR has been fitted in
+the session. Parallel folds matter most for `cv_bayes()`, where every fold is a
+full MCMC run:
 
 ```r
 # cv_bayes() needs `brms`. Without it every fold fails and you get an empty
