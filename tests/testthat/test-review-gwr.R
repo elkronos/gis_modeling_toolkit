@@ -80,3 +80,107 @@ test_that("gwr_model_selection() and cv_gwr() use 2-D distances on POINT Z data"
   expect_equal(cv3$n_folds_succeeded, 3L)
   expect_identical(cv3$predictions, cv2$predictions)
 })
+
+
+# ---------------------------------------------------------------------------
+# predict() at new locations.  GWmodel::gwr.predict() returned EVERY value as
+# NA when one location's window was empty or singular (inv() threw for the
+# whole call), when nrow(train) + nrow(newdata) > 10000 ('DM3.given' not
+# found) and when nrow(train) > 5000 ("No regression point is fixed").
+# ---------------------------------------------------------------------------
+
+.rg_pts <- function(n = 150, seed = 9, extent = 1000) {
+  set.seed(seed)
+  x <- runif(n, 0, extent); y <- runif(n, 0, extent)
+  df <- data.frame(x = 5e5 + x, y = 5e6 + y, a = rnorm(n))
+  df$v <- 1 + (x / (extent / 2)) * df$a + rnorm(n, 0, 0.3)
+  sf::st_as_sf(df, coords = c("x", "y"), crs = 32632)
+}
+
+test_that("one empty fixed-bandwidth window makes only its own prediction NA", {
+  d   <- .rg_pts()
+  fit <- suppressWarnings(fit_gwr_model(d, "v", "a", adaptive = FALSE,
+                                        bandwidth = 300))
+  # 20 locations inside the data and, 11th, one 400 m beyond its edge, where
+  # no training point lies within the bandwidth.
+  set.seed(1)
+  nd <- sf::st_as_sf(
+    data.frame(x = 5e5 + c(runif(10, 100, 900), 1400, runif(10, 100, 900)),
+               y = 5e6 + c(runif(10, 100, 900), 500, runif(10, 100, 900)),
+               a = rnorm(21)),
+    coords = c("x", "y"), crs = 32632)
+  p_in <- predict(fit, newdata = nd[-11, ])
+  expect_false(anyNA(p_in))
+  expect_warning(p_all <- predict(fit, newdata = nd),
+                 "1 of 21 location\\(s\\) have no estimable local regression")
+  expect_true(is.na(p_all[11]))
+  # The others are the values they get without the bad location, to the bit.
+  expect_identical(p_all[-11], p_in)
+})
+
+test_that("fixed-bandwidth block CV scores the held-out points it can reach", {
+  d <- .rg_pts(n = 200, seed = 10, extent = 2000)
+  folds <- make_folds(d, k = 4, method = "block_kfold", block_size = 700,
+                      seed = 1)
+  cv <- suppressWarnings(suppressMessages(
+    cv_gwr(d, "v", "a", folds = folds, adaptive = FALSE, bandwidth = 400)))
+  expect_equal(cv$n_folds_succeeded, cv$n_folds_attempted)
+  expect_gt(cv$overall$n_pred, 0)
+})
+
+test_that("predict() fills a 100 x 100 grid (train + newdata > 10000 rows)", {
+  d   <- .rg_pts(n = 150, seed = 4)
+  fit <- suppressWarnings(fit_gwr_model(d, "v", "a", bandwidth = 40))
+  gx  <- seq(5, 995, length.out = 100)
+  set.seed(2)
+  g <- sf::st_as_sf(data.frame(x = 5e5 + rep(gx, 100),
+                               y = 5e6 + rep(gx, each = 100),
+                               a = rnorm(1e4)),
+                    coords = c("x", "y"), crs = 32632)
+  p <- predict(fit, newdata = g)
+  expect_length(p, 1e4)
+  expect_false(anyNA(p))
+  some <- c(1:50, 9951:1e4)
+  expect_identical(p[some], predict(fit, newdata = g[some, ]))
+})
+
+test_that("predict() works with more than 5000 training rows", {
+  d <- .rg_pts(n = 5200, seed = 12, extent = 5000)
+  # A GWR fit of 5200 rows takes minutes; predict() needs only the data and
+  # the settings, so hand it those.
+  fit <- new_spatial_fit("gwr_fit", engine = list(), formula = v ~ a,
+                         response_var = "v", predictor_vars = "a", data_sf = d,
+                         info = list(bandwidth = 60, adaptive = TRUE,
+                                     kernel = "bisquare"))
+  nd <- d[c(7, 1000, 4000), ]
+  nd$a <- c(-1, 0.5, 2)
+  p <- predict(fit, newdata = nd)
+  # Local least squares by hand: bisquare weights on the distance to the
+  # 60th-nearest TRAINING point.
+  xy <- sf::st_coordinates(d)
+  X  <- cbind(1, d$a)
+  hand <- vapply(1:3, function(i) {
+    xy0 <- sf::st_coordinates(nd)[i, ]
+    dd  <- sqrt((xy[, 1] - xy0[1])^2 + (xy[, 2] - xy0[2])^2)
+    w   <- spatialkit:::.gw_kernel_weights(dd, 60, "bisquare", TRUE)
+    b   <- solve(crossprod(X, w * X), crossprod(X, w * d$v))
+    sum(c(1, nd$a[i]) * b)
+  }, numeric(1))
+  expect_equal(p, hand, tolerance = 1e-10)
+})
+
+test_that("predict() keeps fitted() at the training points and NA rows in place", {
+  # Not regressions -- the gwr.predict() path got these right too -- but what
+  # its replacement has to preserve.
+  d <- .rg_pts(n = 120, seed = 3)
+  for (ad in c(TRUE, FALSE)) {
+    fit <- suppressWarnings(fit_gwr_model(d, "v", "a", adaptive = ad,
+                                          bandwidth = if (ad) 30 else 400))
+    expect_identical(predict(fit, newdata = d), unname(fitted(fit)))
+  }
+  nd <- d[1:12, ]
+  nd$a[c(2, 9)] <- c(NA, Inf)
+  p <- predict(fit, newdata = nd)
+  expect_identical(which(is.na(p)), c(2L, 9L))
+  expect_identical(p[-c(2, 9)], predict(fit, newdata = nd[-c(2, 9), ]))
+})
