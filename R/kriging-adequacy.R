@@ -164,8 +164,18 @@
 #' @param assigned_points_sf Points with a cell identifier column, as
 #'   \code{\link{assign_features_to_polygons}()} returns.
 #' @param response_var The response column.
-#' @param cells_sf The cell polygons, with the matching ID column.
-#' @param id_col Preferred name of the ID column.  Default \code{"poly_id"}.
+#' @param cells_sf The cell polygons, with the matching ID column.  A layer
+#'   with no CRS is taken to be in the points' CRS (and points with none in
+#'   the cells'), with a warning.
+#' @param id_col Preferred name of the ID column, found as
+#'   \code{\link{summarize_by_cell}()} finds it: on the points the first of
+#'   \code{id_col}, \code{"poly_id"}, \code{"polygon_id"} and
+#'   \code{"cell_id"}; on the cells the first of that column,
+#'   \code{"poly_id"}, \code{"polygon_id"}, \code{"id"}, \code{"cell_id"}
+#'   and \code{"grid_id"}.  IDs are matched as text, whole numbers written
+#'   out in full, so a double \code{1e5} matches an integer \code{100000};
+#'   a point whose ID matches no cell is counted in no cell, with a
+#'   warning.  Default \code{"poly_id"}.
 #' @param sac Optional \code{sac_range} carrying a variogram model.
 #' @param folds Optional \code{\link{make_folds}()} result on
 #'   \code{assigned_points_sf} for the cross-validation statistic; built here
@@ -246,13 +256,25 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     stop("kriging_adequacy(): `nmax` must be a single positive number.", call. = FALSE)
 
   # --- the ID column, as summarize_by_cell() finds it ---
-  id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
-  id_pts   <- id_candidates[id_candidates %in% names(assigned_points_sf)]
-  id_cells <- id_candidates[id_candidates %in% names(cells_sf)]
-  if (!length(id_pts) || !length(id_cells))
-    stop("kriging_adequacy(): could not find a cell ID column in both layers. ",
-         "Looked for: ", paste(id_candidates, collapse = ", "), ".", call. = FALSE)
-  id_pts <- id_pts[[1L]]; id_cells <- id_cells[[1L]]
+  # The same candidates in the same order: on the points the columns
+  # assign_features_to_polygons() writes, and on the cells, after the points'
+  # own column, every one it reads the polygons' IDs from.  Cells keyed by
+  # 'id' or 'grid_id' were refused here while summarize_by_cell() joined them.
+  pts_candidates <- unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+  id_pts <- pts_candidates[pts_candidates %in% names(assigned_points_sf)]
+  if (!length(id_pts))
+    stop("kriging_adequacy(): could not find a cell ID column in ",
+         "`assigned_points_sf`. Looked for: ",
+         paste(pts_candidates, collapse = ", "), ".", call. = FALSE)
+  id_pts <- id_pts[[1L]]
+  cells_candidates <- unique(c(id_pts, "poly_id", "polygon_id", "id", "cell_id",
+                               "grid_id"))
+  id_cells <- cells_candidates[cells_candidates %in% names(cells_sf)]
+  if (!length(id_cells))
+    stop("kriging_adequacy(): could not find a cell ID column in `cells_sf`. ",
+         "Looked for: ", paste(cells_candidates, collapse = ", "), ".",
+         call. = FALSE)
+  id_cells <- id_cells[[1L]]
 
   if (!is.numeric(max_neighbours) || length(max_neighbours) != 1L ||
       !is.finite(max_neighbours) || max_neighbours < 1)
@@ -263,7 +285,21 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
          call. = FALSE)
 
   # --- geometry: projected points, cells in the same CRS ---
+  # A layer with no CRS is taken to be in the other's, as passed and before
+  # anything is moved: the points were assigned to these cells, so they share
+  # a coordinate space.  .align_crs() leaves a CRS-less layer as it is, and
+  # gstat::krige() then failed on the mismatch with an internal assertion.
   pts <- assigned_points_sf
+  cells_in <- cells_sf
+  pts_na   <- is.na(sf::st_crs(pts))
+  cells_na <- is.na(sf::st_crs(cells_in))
+  if (cells_na && !pts_na)
+    cells_in <- .transform_or_stamp(cells_in, sf::st_crs(pts), what = "cells_sf",
+                                    caller = "kriging_adequacy")
+  else if (pts_na && !cells_na)
+    pts <- .transform_or_stamp(pts, sf::st_crs(cells_in),
+                               what = "assigned_points_sf",
+                               caller = "kriging_adequacy")
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
     pts <- coerce_to_points(pts, "auto")
   # A supplied variogram's range is a length in the CRS it was fitted in, so
@@ -278,7 +314,12 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # Row identities survive the completeness filter below, so folds built on
   # the layer as passed (or here, on the kept rows) map back by `..row_id`.
   if (!("..row_id" %in% names(pts))) pts$..row_id <- seq_len(nrow(pts))
-  cells <- .align_crs(cells_sf, pts)
+  # Both without a CRS, and the points put in the variogram's: the cells
+  # follow them the same way.
+  cells <- if (is.na(sf::st_crs(cells_in)) && !is.na(sf::st_crs(pts)))
+    .transform_or_stamp(cells_in, sf::st_crs(pts), what = "cells_sf",
+                        caller = "kriging_adequacy")
+  else .align_crs(cells_in, pts)
   cells <- .safe_make_valid(cells)
   z <- suppressWarnings(as.numeric(sf::st_drop_geometry(pts)[[response_var]]))
   ok <- is.finite(z) & !sf::st_is_empty(pts)
@@ -292,14 +333,25 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   kp$..z <- z[ok]
 
   # --- the variogram model ---
-  if (is.null(sac)) {
+  sac_supplied <- !is.null(sac)
+  if (!sac_supplied) {
     .msg("kriging_adequacy(): estimating the variogram of ", response_var, " ...")
     sac <- estimate_sac_range(kp, "..z", seed = seed)
   }
   vm <- attr(sac, "variogram_model")
-  if (is.null(vm) || !is.data.frame(vm))
-    stop("kriging_adequacy(): `sac` carries no variogram model (estimate_sac_range() ",
-         "returned a bare NA), so there is nothing to krige with.", call. = FALSE)
+  if (is.null(vm) || !is.data.frame(vm)) {
+    # Why there is none: a classed refusal says (both fits singular), and a
+    # bare NA is a run that could fit nothing.  Blaming `sac` when none was
+    # passed sent the user looking at an argument they had not used.
+    why <- attr(sac, "rejected_reason")
+    why <- if (is.character(why) && length(why) == 1L && !is.na(why)) why
+      else "estimate_sac_range() returned a bare NA"
+    stop(sprintf(paste0("kriging_adequacy(): %s carries no variogram model, so ",
+                        "there is nothing to krige with: %s."),
+                 if (sac_supplied) "`sac`"
+                 else sprintf("the variogram estimated here from '%s'", response_var),
+                 why), call. = FALSE)
+  }
   fam <- as.character(vm$model)
   bad_fam <- setdiff(fam, c("Nug", "Exp", "Sph", "Gau"))
   if (length(bad_fam))
@@ -376,8 +428,22 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                   sum(m_loc[loc] > 1L), nrow(kk), me, nugget)
   }
 
-  ids_pts <- as.character(sf::st_drop_geometry(kp)[[id_pts]])
-  ids_cells <- as.character(sf::st_drop_geometry(cells)[[id_cells]])
+  # summarize_by_cell()'s conversion: as.character() writes a double from 1e5
+  # on as "1e+05", so every such point missed its integer-keyed cell and the
+  # cell came back with n = 0, no plain mean, and a kriging neighbourhood
+  # without its own points.  Said, not silent, when an ID still matches no
+  # cell, as summarize_by_cell() says it.
+  ids_pts <- .id_as_character(sf::st_drop_geometry(kp)[[id_pts]])
+  ids_cells <- .id_as_character(sf::st_drop_geometry(cells)[[id_cells]])
+  unmatched <- !is.na(ids_pts) & !(ids_pts %in% ids_cells)
+  if (any(unmatched))
+    .warn_and_log(paste0("kriging_adequacy(): %d of the %d point(s) with a cell ID ",
+                         "carry one that matches no `cells_sf$%s` (%s), so they ",
+                         "are in no cell's n, mean or se, though the kriging still ",
+                         "uses them. Check that `cells_sf` is the layer the points ",
+                         "were assigned to."),
+                  sum(unmatched), sum(!is.na(ids_pts)), id_cells,
+                  paste(utils::head(unique(ids_pts[unmatched]), 5L), collapse = ", "))
 
   # --- cells gstat cannot discretise at a bounded cost ---
   # gstat discretises a polygon block with spsample(n = 500, type =

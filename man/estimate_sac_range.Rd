@@ -146,9 +146,15 @@ be taken on trust.}
 \item{Rejected range}{\code{NA_real_} when a range was fitted but is
 not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
 \code{range_frac}), which applies to the all-pairs fit even when some
-directions reached a sill; or it is shorter than the shortest lag the
+directions reached a sill; or too few pairs of points lie inside
+it to identify it, because it is shorter than the shortest lag the
 empirical variogram resolves (the mean separation in its first
-bin), below which a structure cannot be told from a nugget; or the
+bin) or, with \code{detrend = "reml"}, than the distance within
+which 30 pairs of the points the REML fit used lie, when that is
+shorter (the REML range is fitted to the point pairs, not to the
+bins).  A structure that short cannot be told from a nugget, and
+the bound is about identification, not a test for spatial
+structure (see above).  Or the
 model did not converge; or the empirical
 variogram \emph{decreases} with distance over its shorter lags (a
 net fall of more than 15 percent of the mean semivariance there,
@@ -175,8 +181,11 @@ that was refused), \code{rejected_reason} (one of
 \code{"fitted range is non-positive or non-finite"},
 \code{"no variogram model could be fitted (singular fits)"}), \code{crs}
 (so the units the rejected number was in stay recoverable, which is
-what \code{plot()} labels its axis from) and
-\code{detrend_method}.  It carries \code{directional},
+what \code{plot()} labels its axis from),
+\code{detrend_method}, \code{reml} (as on success) and, for
+\code{"fitted range is below the shortest lag fitted"},
+\code{range_floor} (the distance the refused range fell short of).
+It carries \code{directional},
 \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
 \code{directional_fitted} and, with
 \code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
@@ -279,23 +288,34 @@ to the cutoff, each \code{cutoff * max_dist / 15} wide (about 47 m on a
 resolved coarsely and comes out long: exponential fields with an effective
 range of 60 m (n = 300 on a 1000 m square, 30 draws) returned a median of
 89--102 m, where the same fields binned over a 200 m cutoff gave 65--68,
-and at a range of 300 m there was no bias.  When the estimate is within a
-few bin widths of zero, run it again with a smaller \code{cutoff}.
+and at a range of 300 m there was no bias.  A range shorter than the
+first bin cannot be resolved at all and can come back several times too
+long: an effective range of 24 m (n = 1500 on a 1000 m square, 8 draws)
+returned 93--479 m, five of them as the directional maximum, against
+19--32 m at \code{cutoff = 0.1}; the first bin's semivariance was 92--99
+percent of the fitted sill in all eight.  So whenever the empirical
+variogram is already at its sill in the first one or two bins
+(\code{plot()} the result), run it again with a smaller \code{cutoff},
+whatever range was fitted.
 
 Nothing tests whether the layer has spatial structure at all.  On white
 noise (n = 300 on a 1000 m square, 30 draws) the estimate was a finite,
 spurious range (57--533 m) in 8 draws and a refusal in the rest, mostly
 as past the fitted lags or not converged, and only once as no model
-fitted; with \code{detrend = "reml"} it was finite in 10 of 30.  A
+fitted; with \code{detrend = "reml"} it was finite in 13 of 30 (21--453
+m), and 16 of the refusals were ranges of 0.18--12.5 m, too short for 30
+pairs of points to lie inside them.  A
 spurious range errs towards larger blocks, so the harm is mostly lost
 training data, but a caller who needs to know whether there is any
 structure should look at the variogram (\code{plot()} on the result)
 rather than at whether the answer is \code{NA}.
 
-A log warning is emitted when the directional maximum is used; where the
-all-pairs estimate is available it names both the ratio and that estimate.  A
-log note is emitted instead when the directional ranges vary but the spread
-is consistent with sampling noise.
+When the all-pairs fit is singular or did not converge and two or more
+directions reached a sill, the directional maximum is returned in its
+place (\code{anisotropy_used = TRUE}), and a log warning names the
+directional ranges when their ratio exceeds 1.5.  When the all-pairs
+estimate is used and the directional ranges vary by more than 1.5, a log
+note (INFO) names them instead.
 
 The returned range is in the coordinate units of the (projected) data and
 can be passed directly to \code{make_folds(block_size = ...)} so that CV

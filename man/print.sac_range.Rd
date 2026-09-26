@@ -21,8 +21,9 @@ unusable is labelled with why (\code{directional_status}) and the range
 its fit reported (\code{directional_fitted}) when the object carries
 them, and \code{unidentified} otherwise.  A last line names the unit and
 the CRS the range is a length in (\code{attr(x, "crs")}, which for
-lon/lat input is the projected CRS the estimate chose), and whether the
-variogram is of the response or of its residuals on
+lon/lat input is the projected CRS the estimate chose; for a layer with
+no CRS, it says the range is in that layer's own coordinate units), and
+whether the variogram is of the response or of its residuals on
 \code{predictor_vars} (\code{detrended}, \code{detrend_method}).
 }
 \seealso{

@@ -804,7 +804,9 @@ test_that("a REML range shorter than the shortest lag is refused, not returned",
   vg <- attr(r, "variogram")
   expect_lt(attr(r, "rejected_range"), min(vg$dist[vg$np > 0]))
   expect_identical(attr(r, "detrend_method"), "reml")
-  expect_true(log_has(lines, "shorter than the shortest lag"))
+  # The REML floor: the distance within which 30 pairs of its points lie
+  # (about 15 m here), capped at that first lag.
+  expect_true(log_has(lines, "shorter than the distance within which 30 of its point pairs lie"))
   # And a field with a real range is untouched by the bound.
   ok <- estimate_sac_range(sac_test_field(), "z", seed = 1)
   expect_true(is.finite(ok))

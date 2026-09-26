@@ -607,6 +607,27 @@ plot.sac_range <- function(x, ...) {
                          "variogram never reached a sill."),
                   attr(sac, "rejected_range"),
                   attr(sac, "cutoff_dist"))
+        else if (identical(reason, "fitted range is below the shortest lag fitted") &&
+                 is.numeric(attr(sac, "rejected_range"))) {
+          # The distance the range fell short of is recorded on the refusal:
+          # the first lag of this variogram, or for a REML range the distance
+          # within which 30 pairs of its points lie, when that is shorter.
+          # An older object without it is captioned from the first lag.
+          first_lag <- suppressWarnings(min(vg$dist[is.finite(vg$dist) & vg$np > 0]))
+          fl <- attr(sac, "range_floor") %||% first_lag
+          if (is.numeric(fl) && length(fl) == 1L && is.finite(fl) &&
+              is.finite(first_lag) && fl < first_lag)
+            sprintf(paste0("No effective range: the fitted range (%.3g) is ",
+                           "below %.3g, the distance within which 30 pairs of ",
+                           "the points the REML fit used lie, too few to ",
+                           "identify it."),
+                    attr(sac, "rejected_range"), fl)
+          else
+            sprintf(paste0("No effective range: the fitted range (%.3g) is ",
+                           "below the shortest lag fitted (%.3g), so no lag ",
+                           "inside it was fitted."),
+                    attr(sac, "rejected_range"), fl)
+        }
         else
           # A reason this method does not know by name: say it verbatim rather
           # than caption it with another case's sentence.

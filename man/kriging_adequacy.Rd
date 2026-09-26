@@ -25,9 +25,19 @@ kriging_adequacy(
 
 \item{response_var}{The response column.}
 
-\item{cells_sf}{The cell polygons, with the matching ID column.}
+\item{cells_sf}{The cell polygons, with the matching ID column.  A layer
+with no CRS is taken to be in the points' CRS (and points with none in
+the cells'), with a warning.}
 
-\item{id_col}{Preferred name of the ID column.  Default \code{"poly_id"}.}
+\item{id_col}{Preferred name of the ID column, found as
+\code{\link{summarize_by_cell}()} finds it: on the points the first of
+\code{id_col}, \code{"poly_id"}, \code{"polygon_id"} and
+\code{"cell_id"}; on the cells the first of that column,
+\code{"poly_id"}, \code{"polygon_id"}, \code{"id"}, \code{"cell_id"}
+and \code{"grid_id"}.  IDs are matched as text, whole numbers written
+out in full, so a double \code{1e5} matches an integer \code{100000};
+a point whose ID matches no cell is counted in no cell, with a
+warning.  Default \code{"poly_id"}.}
 
 \item{sac}{Optional \code{sac_range} carrying a variogram model.}
 
