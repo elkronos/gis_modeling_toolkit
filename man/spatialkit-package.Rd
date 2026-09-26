@@ -104,9 +104,6 @@ range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in \code{estimate_sac_range()}.
 \item Cliff and Ord moments for the residual Moran's I in
 \code{residual_morans_i()}, with \code{null = "auto"}.
-\item The small-sample rescaling applied with every data-derived design
-effect in \code{summarize_by_cell()}, whose derivation and measured
-coverage are on that help page.
 }
 
 Defaults that were chosen, and are defensible, but do not rest on a
@@ -135,6 +132,11 @@ and the figure sits in the gap.
 length-scale in \code{fit_bayesian_spatial_model()}, which is this
 package's own operationalisation of a check the reference recommends,
 not a figure from the paper.
+\item The small-sample rescaling applied with every data-derived design
+effect in \code{summarize_by_cell()}: the package's own derivation from
+Kish's exchangeable-correlation model, not taken from a reference.
+The derivation and its measured coverage are in the section "Spatial
+autocorrelation and standard-error bias" of that help page.
 }
 }
 

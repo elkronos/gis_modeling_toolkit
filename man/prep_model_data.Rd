@@ -45,12 +45,18 @@ empty or non-finite geometry), \code{which} (their positions in
 \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 layer carries that column, else \code{NULL}) and \code{reason} (one per
 dropped row: \code{"geometry"}, \code{"missing"} or
-\code{"non_finite"}, in that order of precedence when several apply).
+\code{"non_finite"}, in that order of precedence when several apply),
+plus \code{n_rows}, the number of rows returned, which the record was
+made for.
 Every fit stores \code{n} as \code{$info$n_dropped}.  The record
 describes the rows this call returned and does not survive subsetting:
-\code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
-and a fit given such a subset with \code{.already_prepped = TRUE} reports
-\code{n_dropped = 0} even when the parent layer dropped rows.  The CRS is
+\code{clean[i, ]}, like \code{dplyr::filter()}, \code{slice()} or
+\code{arrange()} of it, is a plain layer with no \code{"dropped"}
+attribute, and a fit given such a subset with \code{.already_prepped =
+TRUE} reports \code{n_dropped = 0} even when the parent layer dropped
+rows.  \code{sf::st_drop_geometry()} keeps the record, since the rows are
+the same; see \code{\link{[.spatialkit_rows}} for what binding such data
+frames does.  The CRS is
 projected whenever one can be established.  A CRS-less layer is decided by
 the lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
 box fits the lon/lat envelope \emph{and} it either spans more than one unit

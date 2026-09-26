@@ -23,11 +23,25 @@ subset that is not a data frame (a single column taken with
 attribute recording what happened to its rows (\code{"dropped"} and
 \code{"ties"} respectively).  Those records describe the rows the layer was
 built with, and \code{[} on an \code{sf} object copies attributes through
-unchanged, which would leave a subset reporting its parent's numbers with
-row positions that no longer resolve.  Subsetting therefore returns a plain
-layer with the record removed; read the record from the layer the function
-returned, before subsetting it.  Binding such layers (\code{rbind()},
+unchanged, which would leave a subset reporting its parent's numbers for a
+different set of rows.  Subsetting therefore returns a plain layer with the
+record removed, and so do the \pkg{dplyr} verbs that select or reorder
+rows (\code{filter()}, \code{slice()}, \code{arrange()},
+\code{distinct()}); read the record from the layer the function returned,
+before subsetting it.  Binding such layers (\code{rbind()},
 \code{dplyr::bind_rows()}) likewise returns a plain \code{sf} layer.
+}
+\details{
+Each record carries \code{n_rows}, the number of rows it was made for.
+\code{sf::st_drop_geometry()} keeps the rows, and with them the record: it
+returns a data frame of class \code{c("spatialkit_rows", "data.frame")}.
+Binding such data frames with
+\code{rbind()} or \code{dplyr::bind_rows()} keeps the first one's record
+and class, so the record then describes only the first input's rows: its
+\code{n_rows} no longer equals \code{nrow()} of the result.  The
+package's own readers ignore a record whose \code{n_rows} does not match;
+when reading \code{attr(x, "dropped")} or \code{attr(x, "ties")} yourself
+from a layer that has been through such steps, check it the same way.
 }
 \examples{
 library(sf)
