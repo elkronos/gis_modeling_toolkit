@@ -364,3 +364,72 @@ test_that("the convergence check muffles only posterior's capped-ESS warning", {
   expect_equal(fit$info$convergence_diagnostics$min_neff_ratio, 0.8)
   expect_true(isTRUE(fit$info$convergence_ok))
 })
+
+
+# ---------------------------------------------------------------------------
+# models LOW-4: a saved fit carries its engine once
+# ---------------------------------------------------------------------------
+
+test_that("an rf_fit's formula does not drag the fitting frame into saveRDS()", {
+  skip_if_not_installed("ranger")
+  d   <- .r2b_rf_pts()
+  fit <- fit_rf_model(d, "z", c("a", "b"), num_trees = 100)
+  sz  <- function(x) length(serialize(x, NULL))
+  # The formula's environment was the fitting frame, which holds the forest
+  # again: 1.62 MB for a 0.72 MB forest.
+  expect_lt(sz(fit), 1.2 * (sz(fit$engine) + sz(fit$data_sf)))
+})
+
+test_that("a bayesian_fit's formula does not drag the fitting frame into saveRDS()", {
+  skip_if_not_installed("brms")
+  d <- .r2b_pts()
+  big <- structure(list(payload = stats::rnorm(2e5)), class = "r2b_stub")
+  fit <- .r2b_quiet(.r2b_capture_fit(d, "z", "a", gp_k = 5, engine = big))$fit
+  sz <- function(x) length(serialize(x, NULL))
+  expect_lt(sz(fit), 1.2 * sz(fit$engine) + 2 * sz(fit$data_sf))
+})
+
+test_that("a warm fitted() cache does not write the engine a second time", {
+  skip_if_not_installed("brms")
+  d <- .r2b_pts(n = 30)
+  # A stand-in for the stanfit a brmsfit carries: what identifies a sampling
+  # run is the environment rstan and brms create for each one (with an empty
+  # parent, as theirs have, so serialising it does not drag this frame along).
+  methods::setClass("r2b_fake_stanfit", representation(.MISC = "environment"),
+                    where = environment())
+  mk_engine <- function() structure(
+    list(fit = methods::new("r2b_fake_stanfit",
+                            .MISC = new.env(parent = emptyenv())),
+         payload = stats::rnorm(2e5)),
+    class = "brmsfit")
+  e1  <- mk_engine()
+  fit <- new_spatial_fit("bayesian_fit", engine = e1, formula = z ~ a,
+                         response_var = "z", predictor_vars = "a", data_sf = d)
+  calls <- 0L
+  local_mocked_bindings(
+    posterior_epred = function(object, newdata, ...) {
+      calls <<- calls + 1L
+      matrix(1, nrow = 4L, ncol = nrow(newdata))
+    },
+    .package = "brms")
+  sz <- function(x) length(serialize(x, NULL))
+  before <- sz(fit)
+  expect_equal(fitted(fit), rep(1, 30))
+  after <- sz(fit)
+  # Was before + the whole engine (the entry held it); now the n values and a
+  # small identifier.
+  expect_lt(after - before, 0.1 * sz(e1))
+  # Still a hit for the same engine...
+  fitted(fit)
+  expect_identical(calls, 1L)
+  # ...and also after a round trip through serialisation.
+  rt <- unserialize(serialize(fit, NULL))
+  expect_equal(fitted(rt), rep(1, 30))
+  expect_identical(calls, 1L)
+  # A copy carrying a different engine still misses (test-audit-pass7.R has
+  # the list-engine version of this).
+  cp <- fit
+  cp$engine <- mk_engine()
+  fitted(cp)
+  expect_identical(calls, 2L)
+})

@@ -446,11 +446,15 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
     engine         = fit,
     # Show the coordinates in the formula when they are predictors, so
     # print()ing the fit does not hide them.  It is display-only: the forest is
-    # built through ranger's x/y interface, never from this formula.
+    # built through ranger's x/y interface, never from this formula.  Hence
+    # env = globalenv(): reformulate()'s default is this frame, which holds the
+    # forest (`fit`, `rr`), the data and the predictor frame, and a formula
+    # serialises its environment -- so saveRDS() on an rf_fit wrote the forest
+    # out a second time (1.62 MB for a 100-tree forest of 0.72 MB).
     formula        = stats::reformulate(
       termlabels = if (isTRUE(include_coords))
         c(predictor_vars, "..x", "..y") else predictor_vars,
-      response = response_var),
+      response = response_var, env = globalenv()),
     response_var   = response_var,
     predictor_vars = predictor_vars,
     data_sf        = dat,
