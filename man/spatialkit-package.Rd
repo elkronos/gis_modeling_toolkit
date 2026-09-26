@@ -94,9 +94,11 @@ the length-scale-to-domain ratio in
 \code{make_folds(method = "nndm")} and their \code{min_train = 0.5}:
 Mila et al. (2022).
 \item The area-of-applicability threshold as the outlier-removed maximum
-of the training dissimilarity, with importance weights applied directly,
-without taking their square root, matching the reference
-implementation: Meyer and Pebesma (2021).
+of the training dissimilarity, as the paper defines it (the reference
+implementation, CAST, uses the outlier fence itself, which is larger
+whenever a training value lies above it), with importance weights
+applied directly, without taking their square root, as CAST does:
+Meyer and Pebesma (2021).
 \item The effective range of an exponential variogram as three times its
 range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in \code{estimate_sac_range()}.

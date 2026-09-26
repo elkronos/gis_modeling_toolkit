@@ -184,9 +184,35 @@
     stop("area_of_applicability(): `weights` must be finite and non-negative. ",
          "Permutation importance is slightly negative for predictors that do ",
          "not help, so pass pmax(importance, 0).", call. = FALSE)
-  if (all(w == 0))
-    stop("area_of_applicability(): all `weights` are zero.", call. = FALSE)
+  w <- .aoa_equal_if_all_zero(w)
   w * (length(w) / sum(w))
+}
+
+#' Replace all-zero weights with equal ones
+#'
+#' The advice above, \code{pmax(importance, 0)}, is all zero whenever the
+#' model found no predictor useful, which a forest with one predictor does
+#' often (9 fits in 20 when that predictor carried no signal).  That used to
+#' be an error, and it lost the AOA in exactly the folds where the predictor
+#' was weakest.  With ONE predictor the weight cannot matter: the index is
+#' invariant to the scale of the weights, so zero is just a degenerate way of
+#' writing any positive value, and it is accepted silently.  With several,
+#' all-zero weights say nothing about how the predictors compare, so they are
+#' weighted equally, as \code{weights = NULL} would, with a warning.
+#'
+#' @keywords internal
+#' @noRd
+.aoa_equal_if_all_zero <- function(w) {
+  if (length(w) == 0L || any(w != 0)) return(w)
+  if (length(w) > 1L)
+    .warn_and_log(paste0("area_of_applicability(): every weight is zero (%s), ",
+                         "which says nothing about how the predictors compare; ",
+                         "weighting them equally, as weights = NULL does. ",
+                         "pmax(importance, 0) is all zero when the model found ",
+                         "no predictor useful."),
+                  paste(names(w), collapse = ", "))
+  w[] <- 1
+  w
 }
 
 
@@ -218,6 +244,10 @@
   # against the quantity it is divided by.
   if (is.null(chunk_size))
     chunk_size <- max(1L, min(10000L, as.integer(floor(4e6 / max(1L, nd)))))
+  # A whole number of rows per block.  A fractional chunk_size gave fractional
+  # block starts, the s:e ranges below truncated, and the rows between blocks
+  # kept the 0 they were initialised with: a DI of 0, inside the AOA.
+  chunk_size <- max(1L, as.integer(chunk_size))
   out  <- numeric(nq)
   dsq  <- rowSums(data^2)
   for (s in seq.int(1L, nq, by = chunk_size)) {
@@ -416,11 +446,15 @@
 #' Outlier-removed maximum of the training dissimilarity index
 #'
 #' The threshold is the largest training DI that is not an upper outlier by the
-#' usual rule, i.e. the largest value at or below \code{Q3 + 1.5 * IQR}.  That
-#' is the "(outlier-removed) maximum" of Meyer & Pebesma (2021).  CAST obtains
-#' it via \code{grDevices::boxplot.stats()}, which uses Tukey's hinges;
-#' \code{stats::quantile()} returns the type-7 quantiles, and the two agree
-#' closely but not exactly.
+#' usual rule, i.e. the largest value at or below \code{Q3 + 1.5 * IQR}, with
+#' \code{stats::quantile()}'s default (type 7) quartiles.  That is the
+#' "(outlier-removed) maximum" of Meyer & Pebesma (2021).  CAST, the reference
+#' implementation, uses the same type-7 fence since it stopped calling
+#' \code{grDevices::boxplot.stats()} (whose upper whisker is this rule on
+#' Tukey's hinges), but takes the FENCE itself, capped at the largest training
+#' DI, as the threshold.  The two agree whenever nothing lies above the fence;
+#' otherwise CAST's threshold is the larger.  The paper's definition is kept,
+#' and the help page says how to reproduce CAST's value.
 #'
 #' @keywords internal
 #' @noRd
@@ -479,12 +513,35 @@
 #' that holds it out}. That means everything outside its own fold for random
 #' and block folds, and the smaller training set that buffered and NNDM folds
 #' actually leave (see the next section). The threshold is then the largest
-#' training DI that is not an upper outlier. Prediction points at or below that
-#' threshold are inside the AOA.
+#' training DI that is not an upper outlier, i.e. not above the fence
+#' \code{Q3 + 1.5 * IQR} of the training DI, with the quartiles of
+#' \code{stats::quantile()}'s default type 7. Prediction points at or below
+#' that threshold are inside the AOA.
+#'
+#' That is the paper's "outlier-removed maximum". \pkg{CAST}, the reference
+#' implementation, computes the same fence with the same quartiles but uses the
+#' fence itself as the threshold, capped at the largest training DI. The two
+#' agree whenever no training DI lies above the fence (\code{n_outliers} is 0);
+#' otherwise \pkg{CAST}'s threshold is the larger, and so is its AOA. (Earlier
+#' \pkg{CAST} releases used \code{grDevices::boxplot.stats()}, which gives the
+#' rule used here but with Tukey's hinges as the quartiles, so they can also
+#' differ when the number of training points is even.) To apply the current
+#' \pkg{CAST} rule to the same training DI, pass
+#' \code{threshold = min(quantile(res$train_DI, 0.75) + 1.5 * IQR(res$train_DI),
+#' max(res$train_DI))} for an earlier result \code{res}.
 #'
 #' The DI is invariant to the overall scale of \code{weights}: the numerator
 #' and the normaliser carry the same factor. Importance values can be passed
 #' as-is.
+#'
+#' Each training point's reference is its nearest \emph{other} training row, so
+#' an exact duplicate in predictor space (repeat visits to a site with static
+#' covariates, or covariates read off a raster coarser than the sampling) has a
+#' training DI of 0. Once about three quarters of the rows have a twin among
+#' their reference rows the threshold is 0, and only exact copies of a
+#' training row count as inside. That is logged as a caution; folds that keep
+#' the duplicates together (\code{make_folds(method = "leave_location_out",
+#' group_var = ...)}), or removing them, give the threshold its meaning back.
 #'
 #' @section The fold scheme changes the answer, and should:
 #' With \code{folds = NULL} the training reference is each point's nearest
@@ -502,11 +559,14 @@
 #' silently dummy-coded. Predictors whose variance is negligible \emph{relative
 #' to their own magnitude} (the test is
 #' \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-#' metres and in gigametres is treated identically) are dropped, and a
-#' prediction point taking a different value there is a form of extrapolation
-#' this index cannot express. Without \code{weights} every predictor counts
-#' equally, which overstates dissimilarity along directions the model barely
-#' uses.
+#' metres and in gigametres is treated identically) are dropped from the
+#' distance. A prediction point taking a value there outside the training
+#' range (with the same relative tolerance) is extrapolation along a direction
+#' the training data never varied in: its scaled distance along it is
+#' infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
+#' gives the count. A point missing that value is judged on the other
+#' predictors. Without \code{weights} every predictor counts equally, which
+#' overstates dissimilarity along directions the model barely uses.
 #'
 #' @section Models fitted with the coordinates as predictors:
 #' When \code{model} was fitted with \code{include_coords = TRUE} the model
@@ -546,7 +606,15 @@
 #'   mean of the weights you did supply, so location counts about as much as a
 #'   typical predictor. Naming them explicitly overrides that. An unnamed
 #'   vector may have one value per predictor either with or without the two
-#'   coordinate columns.
+#'   coordinate columns. Weights must be finite and non-negative, so pass
+#'   permutation importance as \code{pmax(importance, 0)}. That is all zero
+#'   when the model found no predictor useful, and then the weights cannot say
+#'   anything: with a single predictor any weight gives the same index and zero
+#'   is accepted; with several, all of them are weighted equally, as with
+#'   \code{weights = NULL}, and a warning says so. The coordinate default
+#'   above is the mean of the supplied weights, so a zero weight on the only
+#'   covariate of a coordinate-using model zeroes the coordinates too, and
+#'   that equal weighting applies.
 #' @param folds Cross-validation folds: a \code{\link{make_folds}} result, a
 #'   list of \code{train}/\code{test} splits, or a vector of fold labels with
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
@@ -555,7 +623,8 @@
 #'   computing the mean pairwise distance, which is quadratic. Default 5000.
 #' @param seed Seed for that subsample. Default 123.
 #' @param chunk_size Query rows per distance block on the dense path. Default
-#'   \code{NULL} (chosen from the training size).
+#'   \code{NULL} (chosen from the training size). Otherwise a single number of
+#'   at least 1; a fractional value is truncated to a whole number of rows.
 #' @param use_fnn Use \pkg{FNN} for nearest-neighbour search when available.
 #'   Exposed so the dense fallback can be tested.
 #'
@@ -566,7 +635,9 @@
 #'       computation ran on, which for a coordinate-using model is
 #'       \code{newdata} after pointizing, CRS reconciliation and the addition
 #'       of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
-#'       are not all finite gets \code{NA} in both columns.
+#'       are not all finite gets \code{NA} in both columns, and a row outside
+#'       the training range of a predictor in \code{dropped_vars} gets
+#'       \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 #'     \item \code{threshold}: the DI cut-off used.
 #'     \item \code{train_DI}: the training points' own DI values.
 #'     \item \code{normalizer}: the mean pairwise training distance.
@@ -586,8 +657,10 @@
 #'       aside (the "outlier-removed" in its name); computed whether or not
 #'       \code{threshold} was supplied.
 #'     \item \code{n_train}, \code{n_new}, \code{n_inside},
-#'       \code{n_outside}, \code{n_na}: row counts; \code{n_train} and
-#'       \code{n_new} count the rows that survived the finite-value filter.
+#'       \code{n_outside}, \code{n_na}: row counts. \code{n_train} counts the
+#'       training rows that survived the finite-value filter; \code{n_new} is
+#'       every row of \code{newdata}, so
+#'       \code{n_new = n_inside + n_outside + n_na}.
 #'     \item \code{params} records the call: \code{folds_supplied},
 #'       \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
 #'       \code{normalizer_max_n}, \code{normalizer_n_used},
@@ -672,6 +745,16 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
          "installed. Install it with install.packages(\"FNN\"), or pass ",
          "use_fnn = FALSE to use the dense fallback.", call. = FALSE)
 
+  # chunk_size reached seq.int(1, nq, by = chunk_size) unvalidated.  A computed
+  # value such as 1e3 / nrow(train) = 12.5 left some rows of each block at the
+  # 0 they were initialised with, so extrapolation read as inside the AOA; 0,
+  # NA or a length-2 vector failed in base R without naming the argument.
+  if (!is.null(chunk_size)) {
+    .check_scalar(chunk_size, "chunk_size", "area_of_applicability", min = 1,
+                  max = .Machine$integer.max, what = "a single positive number")
+    chunk_size <- as.integer(chunk_size)
+  }
+
   # A model fitted with the coordinates as predictors splits on location, so
   # the dissimilarity index has to measure location too.  Without this, a
   # prediction point far outside the training extent but with ordinary
@@ -741,8 +824,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   if (length(dropped) > 0L)
     .log_warn(paste0("area_of_applicability(): dropping predictor(s) with no ",
                      "variance in the training data: %s. A prediction point ",
-                     "taking a different value there is extrapolation the ",
-                     "dissimilarity index cannot represent."),
+                     "taking a different value there is extrapolation along ",
+                     "it, and is marked outside the AOA with DI = Inf."),
               paste(dropped, collapse = ", "))
   used_vars <- names(sc$keep)[sc$keep]
 
@@ -756,8 +839,11 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # numbers.  Multiplying by sqrt(w) instead (contributing w to the squared
   # distance) is the other defensible reading of "weighted Euclidean" and is
   # NOT what is used here.
-  w_vec <- unname(w <- .aoa_weight_vector(weights, predictor_vars,
-                                          fill_vars = coord_vars)[used_vars])
+  # The weights that matter are those of the predictors kept; if the only
+  # non-zero ones sat on predictors dropped above, the rest are all zero.
+  w_vec <- unname(w <- .aoa_equal_if_all_zero(
+    .aoa_weight_vector(weights, predictor_vars,
+                       fill_vars = coord_vars)[used_vars]))
   Z_tr  <- sweep(Z_tr, 2L, w_vec, "*")
   Z_nw  <- sweep(Z_nw, 2L, w_vec, "*")
 
@@ -792,6 +878,26 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     as.numeric(threshold)
   }
 
+  # Each training row's reference is its nearest OTHER training row, so an
+  # exact duplicate in predictor space -- repeat measurements at a site with
+  # static covariates, covariates read off a raster coarser than the sampling
+  # -- has a training DI of 0, and random folds put twins on both sides.  Once
+  # about three quarters of the rows have one, Q3 and the IQR are 0 and so is
+  # the threshold: 30 sites visited 4 times put 0 of 200 new points inside,
+  # against 197 after deduplication, with nothing said.  The rule is applied
+  # as defined; the caution says why it came out that way.
+  if (is.null(threshold) && thr == 0)
+    .log_warn(paste0("area_of_applicability(): the DI threshold is 0 because ",
+                     "%d of %d training rows have an exact duplicate in ",
+                     "predictor space among their reference rows (training ",
+                     "DI = 0), so only prediction points identical to a ",
+                     "training row count as inside. Repeat measurements at a ",
+                     "site, or covariates coarser than the sampling, do this: ",
+                     "pass folds that keep the duplicates together ",
+                     "(make_folds(method = \"leave_location_out\", group_var = ",
+                     "...)), or remove the duplicate rows."),
+              sum(train_DI == 0), length(train_DI))
+
   # NA or Inf predictors in newdata give NA DI rather than a misleading number.
   # Same test as the training side above, deliberately: complete.cases() alone
   # lets an Inf through, and an Inf predictor then produces Inf - Inf = NaN in
@@ -804,6 +910,39 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     DI[nw_ok] <- .aoa_min_dist(Z_nw[nw_ok, , drop = FALSE], Z_tr,
                                use_fnn = use_fnn,
                                chunk_size = chunk_size) / norm$value
+
+  # A predictor dropped for having no training variance is not in the
+  # distance, so a prediction row taking a different value there was judged
+  # on the other predictors alone: a land-cover dummy that is 0 throughout the
+  # training region put 37 of 40 urban rows inside the AOA, while ONE urban
+  # training row would have kept the predictor and put 1 inside.  Along that
+  # direction the scaled distance is (x - c) / 0, infinite, so that is the DI.
+  # "Different" means outside the training range by more than the relative
+  # tolerance .aoa_scaling() drops the predictor with; a missing value cannot
+  # be compared and leaves the row to the other predictors.
+  if (length(dropped) > 0L) {
+    Xd_tr <- X_tr_full[, dropped, drop = FALSE]
+    lo    <- apply(Xd_tr, 2L, min)
+    hi    <- apply(Xd_tr, 2L, max)
+    mag   <- pmax(abs(lo), abs(hi))
+    mag[!is.finite(mag) | mag <= 0] <- 1
+    slack <- .Machine$double.eps^0.5 * mag
+    Xd_nw <- X_nw_full[, dropped, drop = FALSE]
+    off   <- sweep(Xd_nw, 2L, lo - slack, "<") | sweep(Xd_nw, 2L, hi + slack, ">")
+    off[is.na(off)] <- FALSE
+    beyond <- rowSums(off) > 0L & !is.na(DI)
+    if (any(beyond)) {
+      DI[beyond] <- Inf
+      .warn_and_log(paste0("area_of_applicability(): %d of %d prediction ",
+                           "row(s) take a value the training data never has on ",
+                           "%s, dropped for having no training variance; they ",
+                           "are extrapolation along it and are marked outside ",
+                           "the AOA with DI = Inf."),
+                    sum(beyond), length(DI),
+                    paste(sQuote(dropped[colSums(off[beyond, , drop = FALSE]) > 0L]),
+                          collapse = ", "))
+    }
+  }
   inside <- DI <= thr
 
   out <- newdata
@@ -920,6 +1059,13 @@ print.aoa <- function(x, ...) {
   cat(sprintf("  threshold   : %.4f%s\n", x$threshold,
               if (isTRUE(x$params$threshold_supplied)) " (supplied)" else
                 " (outlier-removed max of training DI)"))
+  # A zero threshold reads as "nothing is inside" with no reason given; the
+  # reason is duplicated training rows, and the count says how many.
+  n_zero <- sum(x$train_DI == 0, na.rm = TRUE)
+  if (!isTRUE(x$params$threshold_supplied) && isTRUE(x$threshold == 0))
+    cat(sprintf(paste0("                (%d of %d training DI are 0: exact ",
+                       "duplicates in predictor space)\n"),
+                n_zero, length(x$train_DI)))
   cat("\n")
 
   pct <- if (x$n_new > 0L) 100 * x$n_inside / x$n_new else NA_real_
@@ -927,6 +1073,9 @@ print.aoa <- function(x, ...) {
               x$n_inside, x$n_new, pct))
   if (x$n_na > 0L)
     cat(sprintf("  %d with missing predictors (DI = NA)\n", x$n_na))
+  n_inf <- sum(is.infinite(x$aoa$DI))
+  if (n_inf > 0L)
+    cat(sprintf("  %d outside on a dropped predictor (DI = Inf)\n", n_inf))
   if (x$n_outside > 0L)
     cat("\nPredictions outside the AOA are extrapolations; the ",
         "cross-validated\nperformance estimate does not cover them.\n",

@@ -42,7 +42,15 @@ expected to supply importances for them: any you leave out default to the
 mean of the weights you did supply, so location counts about as much as a
 typical predictor. Naming them explicitly overrides that. An unnamed
 vector may have one value per predictor either with or without the two
-coordinate columns.}
+coordinate columns. Weights must be finite and non-negative, so pass
+permutation importance as \code{pmax(importance, 0)}. That is all zero
+when the model found no predictor useful, and then the weights cannot say
+anything: with a single predictor any weight gives the same index and zero
+is accepted; with several, all of them are weighted equally, as with
+\code{weights = NULL}, and a warning says so. The coordinate default
+above is the mean of the supplied weights, so a zero weight on the only
+covariate of a coordinate-using model zeroes the coordinates too, and
+that equal weighting applies.}
 
 \item{folds}{Cross-validation folds: a \code{\link{make_folds}} result, a
 list of \code{train}/\code{test} splits, or a vector of fold labels with
@@ -56,7 +64,8 @@ computing the mean pairwise distance, which is quadratic. Default 5000.}
 \item{seed}{Seed for that subsample. Default 123.}
 
 \item{chunk_size}{Query rows per distance block on the dense path. Default
-\code{NULL} (chosen from the training size).}
+\code{NULL} (chosen from the training size). Otherwise a single number of
+at least 1; a fractional value is truncated to a whole number of rows.}
 
 \item{use_fnn}{Use \pkg{FNN} for nearest-neighbour search when available.
 Exposed so the dense fallback can be tested.}
@@ -69,7 +78,9 @@ and a logical \code{AOA} column added. This is the object the
 computation ran on, which for a coordinate-using model is
 \code{newdata} after pointizing, CRS reconciliation and the addition
 of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
-are not all finite gets \code{NA} in both columns.
+are not all finite gets \code{NA} in both columns, and a row outside
+the training range of a predictor in \code{dropped_vars} gets
+\code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 \item \code{threshold}: the DI cut-off used.
 \item \code{train_DI}: the training points' own DI values.
 \item \code{normalizer}: the mean pairwise training distance.
@@ -89,8 +100,10 @@ traced to the predictor that put it outside.
 aside (the "outlier-removed" in its name); computed whether or not
 \code{threshold} was supplied.
 \item \code{n_train}, \code{n_new}, \code{n_inside},
-\code{n_outside}, \code{n_na}: row counts; \code{n_train} and
-\code{n_new} count the rows that survived the finite-value filter.
+\code{n_outside}, \code{n_na}: row counts. \code{n_train} counts the
+training rows that survived the finite-value filter; \code{n_new} is
+every row of \code{newdata}, so
+\code{n_new = n_inside + n_outside + n_na}.
 \item \code{params} records the call: \code{folds_supplied},
 \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
 \code{normalizer_max_n}, \code{normalizer_n_used},
@@ -134,12 +147,35 @@ each point's nearest neighbour \emph{among the training rows of the fold
 that holds it out}. That means everything outside its own fold for random
 and block folds, and the smaller training set that buffered and NNDM folds
 actually leave (see the next section). The threshold is then the largest
-training DI that is not an upper outlier. Prediction points at or below that
-threshold are inside the AOA.
+training DI that is not an upper outlier, i.e. not above the fence
+\code{Q3 + 1.5 * IQR} of the training DI, with the quartiles of
+\code{stats::quantile()}'s default type 7. Prediction points at or below
+that threshold are inside the AOA.
+
+That is the paper's "outlier-removed maximum". \pkg{CAST}, the reference
+implementation, computes the same fence with the same quartiles but uses the
+fence itself as the threshold, capped at the largest training DI. The two
+agree whenever no training DI lies above the fence (\code{n_outliers} is 0);
+otherwise \pkg{CAST}'s threshold is the larger, and so is its AOA. (Earlier
+\pkg{CAST} releases used \code{grDevices::boxplot.stats()}, which gives the
+rule used here but with Tukey's hinges as the quartiles, so they can also
+differ when the number of training points is even.) To apply the current
+\pkg{CAST} rule to the same training DI, pass
+\code{threshold = min(quantile(res$train_DI, 0.75) + 1.5 * IQR(res$train_DI),
+max(res$train_DI))} for an earlier result \code{res}.
 
 The DI is invariant to the overall scale of \code{weights}: the numerator
 and the normaliser carry the same factor. Importance values can be passed
 as-is.
+
+Each training point's reference is its nearest \emph{other} training row, so
+an exact duplicate in predictor space (repeat visits to a site with static
+covariates, or covariates read off a raster coarser than the sampling) has a
+training DI of 0. Once about three quarters of the rows have a twin among
+their reference rows the threshold is 0, and only exact copies of a
+training row count as inside. That is logged as a caution; folds that keep
+the duplicates together (\code{make_folds(method = "leave_location_out",
+group_var = ...)}), or removing them, give the threshold its meaning back.
 }
 
 \section{The fold scheme changes the answer, and should}{
@@ -161,11 +197,14 @@ Predictors must be numeric; categorical variables are refused and never
 silently dummy-coded. Predictors whose variance is negligible \emph{relative
 to their own magnitude} (the test is
 \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-metres and in gigametres is treated identically) are dropped, and a
-prediction point taking a different value there is a form of extrapolation
-this index cannot express. Without \code{weights} every predictor counts
-equally, which overstates dissimilarity along directions the model barely
-uses.
+metres and in gigametres is treated identically) are dropped from the
+distance. A prediction point taking a value there outside the training
+range (with the same relative tolerance) is extrapolation along a direction
+the training data never varied in: its scaled distance along it is
+infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
+gives the count. A point missing that value is judged on the other
+predictors. Without \code{weights} every predictor counts equally, which
+overstates dissimilarity along directions the model barely uses.
 }
 
 \section{Models fitted with the coordinates as predictors}{
