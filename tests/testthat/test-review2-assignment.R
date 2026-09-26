@@ -392,3 +392,58 @@ test_that("layers carrying a row record bind with dplyr and vctrs", {
   expect_null(attr(a1[1:3, ], "ties"))
   expect_false(inherits(a1[1:3, ], "spatialkit_rows"))
 })
+
+
+# --- stable IDs and the grid cache ------------------------------------------
+
+test_that("two CRSs with the same generic name do not share a cached grid", {
+  # What a custom CRS read back from a GeoPackage or shapefile looks like:
+  # sf names it "unknown", whatever it is.
+  named_unknown <- function(lon, lat) structure(list(
+    input = "unknown",
+    wkt = sf::st_crs(sprintf("+proj=aeqd +lat_0=%s +lon_0=%s +datum=WGS84 +units=m",
+                             lat, lon))$wkt), class = "crs")
+  sq <- sf::st_polygon(list(rbind(c(-5000, -5000), c(5000, -5000), c(5000, 5000),
+                                  c(-5000, 5000), c(-5000, -5000))))
+  site_a <- sf::st_sf(geometry = sf::st_sfc(sq, crs = named_unknown(10, 50)))
+  site_b <- sf::st_sf(geometry = sf::st_sfc(sq, crs = named_unknown(-100, 40)))
+  env <- new.env(parent = emptyenv())
+  ga <- create_grid_polygons_cached(site_a, target_cells = 16, cache_env = env)
+  gb <- create_grid_polygons_cached(site_b, target_cells = 16, cache_env = env)
+  # Site B was handed site A's grid, centred 11,000 km away.
+  expect_true(sf::st_crs(gb) == sf::st_crs(site_b))
+  centre <- sf::st_coordinates(sf::st_centroid(sf::st_transform(sf::st_union(gb), 4326)))
+  expect_equal(unname(centre[1, ]), c(-100, 40), tolerance = 1e-6)
+  expect_length(ls(env), 2L)
+})
+
+test_that("create_grid_polygons_cached() can be sized by cellsize or n", {
+  bnd <- sf::st_sf(geometry = sf::st_sfc(.r2_sq(0, 0, 100), crs = 32632))
+  env <- new.env(parent = emptyenv())
+  # Both stopped with 'argument "target_cells" is missing, with no default'.
+  by_size <- create_grid_polygons_cached(bnd, cellsize = 25, cache_env = env)
+  expect_identical(nrow(by_size), nrow(create_grid_polygons(bnd, cellsize = 25)))
+  by_n <- create_grid_polygons_cached(bnd, n = 5, cache_env = env)
+  expect_identical(nrow(by_n), 25L)
+})
+
+test_that("stable IDs do not depend on whether s2 is switched on", {
+  # A triangle whose spherical centroid lies at longitude 9.745 and whose
+  # planar (degree) centroid lies at 9.667, and a small square at 9.70
+  # between the two: the two ways of taking the centroid order them
+  # differently.
+  tri <- sf::st_polygon(list(rbind(c(9, 60), c(11, 60), c(9, 70), c(9, 60))))
+  sq  <- sf::st_polygon(list(rbind(c(9.69, 40), c(9.71, 40), c(9.71, 40.02),
+                                   c(9.69, 40.02), c(9.69, 40))))
+  lyr <- sf::st_sf(name = c("tri", "sq"), geometry = sf::st_sfc(tri, sq, crs = 4326))
+  on_ids <- ensure_stable_poly_id(lyr)
+  expect_identical(on_ids$name, c("sq", "tri"))
+  # With s2 off the key was planar and, without lwgeom, st_area() stopped
+  # the call.
+  old <- suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(old)), add = TRUE)
+  off_ids <- ensure_stable_poly_id(lyr)
+  expect_false(sf::sf_use_s2())                      # restored
+  expect_identical(off_ids$name, on_ids$name)
+  expect_identical(off_ids$poly_id, on_ids$poly_id)
+})
