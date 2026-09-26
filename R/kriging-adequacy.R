@@ -67,9 +67,9 @@
 #' range.  To check the nugget, pass random folds
 #' (\code{make_folds(method = "random_kfold")}) as \code{folds}: the
 #' held-out points are then close to their neighbours, where the nugget
-#' decides the variance.  \code{gstat::krige.cv()} computes the statistic on
-#' the fold labels \code{\link{make_folds}()} built, so the folds carry the
-#' same separation the package uses everywhere else.
+#' decides the variance.  The statistic is computed fold by fold with
+#' \code{gstat::krige()} on the fold labels \code{\link{make_folds}()} built,
+#' so the folds carry the same separation the package uses everywhere else.
 #'
 #' @section What it said about block kriging as an aggregator:
 #' On the same simulated fields, with 16, 36 and 64 square cells: under
@@ -95,6 +95,28 @@
 #' model attached) is used with a warning: its sill was never reached by the
 #' data, so the ratios rest on an extrapolation.  Requires \pkg{gstat}.
 #'
+#' @section Repeat measurements at one location:
+#' Two observations at the same coordinates (visits to a station, records
+#' geocoded to one address) make a kriging system singular, because
+#' \pkg{gstat} gives them the full sill, nugget included, as their
+#' covariance, as if they were one observation.  The kriging and its
+#' cross-validation therefore use one observation per location, the mean of
+#' its replicates, with a warning; \code{n} and \code{mean} still count every
+#' point.  How much of the nugget \eqn{c_0} a mean of \eqn{m} replicates
+#' keeps is read off the replicates: their pooled within-location variance
+#' \eqn{s_w^2}, capped at \eqn{c_0}, is the part that differs from visit to
+#' visit and averages down, and the rest is micro-scale variation the visits
+#' share, so the mean carries error variance \eqn{c_0 - s_w^2 + s_w^2/m}.
+#' That goes to \pkg{gstat} as a known measurement error (its
+#' \code{weights}) on the model with the nugget set to zero.  For replicates
+#' that differ only by measurement error this is exactly the kriging of every
+#' observation, and for identical replicates it is the kriging of one; a
+#' location seen once is kriged as before.  In the cross-validation a
+#' location is held out whole, under the fold of its first row, and its
+#' error variance is part of its standardised error.  A cell or held-out
+#' location \pkg{gstat} still cannot krige is reported \code{NA} with a
+#' warning, and \code{print()} says how many.
+#'
 #' @param assigned_points_sf Points with a cell identifier column, as
 #'   \code{\link{assign_features_to_polygons}()} returns.
 #' @param response_var The response column.
@@ -116,7 +138,9 @@
 #'   \code{variogram} (the model frame), \code{sill}, \code{nugget},
 #'   \code{range}, \code{range_identified}, \code{cv} (a list:
 #'   \code{zscore_var}, \code{zscore_mean}, \code{rmse}, \code{n_pred},
-#'   \code{k}, \code{method}), \code{nmax} and \code{n_points}.
+#'   \code{k}, \code{method}), \code{nmax}, \code{n_points} (the points
+#'   used) and \code{n_locations} (the distinct locations among them, which
+#'   the kriging used).
 #' @references
 #' Cressie, N. (1993). \emph{Statistics for Spatial Data}, revised edition.
 #' Wiley. (Block kriging, chapter 3; cross-validation of the kriging
@@ -215,17 +239,60 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                          "extrapolated model."),
                   attr(sac, "rejected_reason") %||% "no effective range")
 
+  # --- one observation per location for the kriging systems ---
+  # gstat gives two observations at distance zero the full sill, nugget
+  # included, as their covariance, as if they were one, so repeat visits to a
+  # station make every kriging system holding them singular, and gstat
+  # returns NA and says so only at debug.level > 0.  Each location is kriged
+  # from the mean of its replicates instead (the plain cell means below still
+  # use every point).  The replicates say how much of the nugget that mean
+  # keeps: their pooled within-location variance is the part that differs
+  # between visits (capped at the nugget) and averages down by the count; the
+  # rest is micro-scale variation the visits share.  That goes to gstat as a
+  # known measurement error (`weights` = 1 / variance) on the model with its
+  # nugget zeroed: a location seen once gets the whole nugget, as before;
+  # replicates differing only by measurement error give the kriging of every
+  # observation; identical replicates give the kriging of one.
+  xy  <- sf::st_coordinates(kp)[, 1:2, drop = FALSE]
+  key <- paste(xy[, 1], xy[, 2])
+  loc <- match(key, unique(key))
+  first <- !duplicated(loc)
+  kk <- kp[first, , drop = FALSE]
+  vk <- vm
+  w <- NULL
+  err_var <- rep(0, nrow(kk))    # already in vk's nugget when w is NULL
+  if (any(!first)) {
+    m_loc <- tabulate(loc)
+    kk$..z <- as.numeric(rowsum(kp$..z, loc)) / m_loc
+    me <- min(sum((kp$..z - kk$..z[loc])^2) / sum(m_loc - 1L), nugget)
+    err_var <- nugget - me + me / m_loc
+    vk$psill[fam == "Nug"] <- 0
+    w <- 1 / err_var
+    .warn_and_log(paste0("kriging_adequacy(): %d point(s) share a location with another; ",
+                         "kriging from the mean at each of the %d distinct locations, with ",
+                         "the part of the nugget that differs between replicates (%.3g of ",
+                         "%.3g) divided by their count."),
+                  sum(m_loc[loc] > 1L), nrow(kk), me, nugget)
+  }
+
   # --- block kriging onto the cells ---
   .msg("kriging_adequacy(): block kriging onto ", nrow(cells), " cells ...")
   bk <- tryCatch(
-    gstat::krige(..z ~ 1, locations = kp, newdata = cells, model = vm,
-                 nmax = as.integer(nmax), debug.level = 0),
+    gstat::krige(..z ~ 1, locations = kk, newdata = cells, model = vk,
+                 weights = w, nmax = as.integer(nmax), debug.level = 0),
     error = function(e)
       stop("kriging_adequacy(): gstat::krige() failed: ", conditionMessage(e),
            call. = FALSE))
   kr_pred <- suppressWarnings(as.numeric(bk$var1.pred))
   kr_var  <- suppressWarnings(as.numeric(bk$var1.var))
   kr_var[is.finite(kr_var) & kr_var < 0] <- 0
+  # gstat answers a system it cannot solve with NA and, at debug.level 0,
+  # nothing else.
+  n_na <- sum(!is.finite(kr_pred) | !is.finite(kr_var))
+  if (n_na)
+    .warn_and_log(paste0("kriging_adequacy(): gstat::krige() returned no estimate for %d ",
+                         "of %d cell(s) (a kriging system it could not solve); their ",
+                         "kr_ columns are NA."), n_na, length(kr_pred))
   # The scale for kr_ratio.  kr_var is the variance of a cell MEAN, and with
   # no data it levels off at the cell's own C(B,B), not at the point sill:
   # divided by the sill, an empty cell far from every datum read about 0.1,
@@ -261,21 +328,37 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
     fold_vec <- .fold_labels_for(folds, kp)
     method <- if (is.list(folds) && !is.null(folds$method)) folds$method else "supplied labels"
   }
+  # A location is held out whole, under the fold of its first row: a
+  # replicate predicted from its twin in the training folds is no test.
+  fold_vec <- fold_vec[first]
   cv <- list(zscore_var = NA_real_, zscore_mean = NA_real_, rmse = NA_real_,
              n_pred = 0L, k = length(unique(fold_vec[is.finite(fold_vec)])),
              method = method)
   keep <- is.finite(fold_vec)
   if (sum(keep) >= 10L && cv$k >= 2L) {
     .msg("kriging_adequacy(): cross-validating the kriging variance over ", cv$k, " folds ...")
-    kcv <- tryCatch(
-      gstat::krige.cv(..z ~ 1, kp[keep, , drop = FALSE], model = vm,
-                      nfold = fold_vec[keep], nmax = as.integer(nmax),
-                      debug.level = 0, verbose = FALSE),
-      error = function(e) {
-        .log_warn("kriging_adequacy(): gstat::krige.cv() failed (%s); no cross-validation statistic.",
-                  conditionMessage(e))
-        NULL
-      })
+    # The folds are run here rather than by gstat::krige.cv(), which subsets
+    # the data per fold but not `weights`.  With the nugget zeroed in vk, a
+    # held-out location's own error variance goes back into its variance.
+    kc <- kk[keep, , drop = FALSE]; fk <- fold_vec[keep]
+    wc <- w[keep]; ec <- err_var[keep]
+    kcv <- tryCatch({
+      pred <- pvar <- rep(NA_real_, nrow(kc))
+      for (f in unique(fk)) {
+        te <- fk == f
+        kf <- gstat::krige(..z ~ 1, locations = kc[!te, , drop = FALSE],
+                           newdata = kc[te, , drop = FALSE], model = vk, weights = wc[!te],
+                           nmax = as.integer(nmax), debug.level = 0)
+        pred[te] <- suppressWarnings(as.numeric(kf$var1.pred))
+        pvar[te] <- suppressWarnings(as.numeric(kf$var1.var)) + ec[te]
+      }
+      data.frame(residual = kc$..z - pred,
+                 zscore = suppressWarnings((kc$..z - pred) / sqrt(pvar)))
+    }, error = function(e) {
+      .log_warn(paste0("kriging_adequacy(): gstat::krige() failed in cross-validation (%s); ",
+                       "no cross-validation statistic."), conditionMessage(e))
+      NULL
+    })
     if (!is.null(kcv)) {
       zs <- suppressWarnings(as.numeric(kcv$zscore)); zs <- zs[is.finite(zs)]
       res <- suppressWarnings(as.numeric(kcv$residual)); res <- res[is.finite(res)]
@@ -283,6 +366,11 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       cv$zscore_mean <- if (length(zs)) mean(zs) else NA_real_
       cv$rmse        <- if (length(res)) sqrt(mean(res^2)) else NA_real_
       cv$n_pred      <- length(zs)
+      if (cv$n_pred < nrow(kc))
+        .warn_and_log(paste0("kriging_adequacy(): gstat::krige() returned no cross-validation ",
+                             "prediction it could use for %d of %d held-out location(s); ",
+                             "the statistic uses the other %d."),
+                      nrow(kc) - cv$n_pred, nrow(kc), cv$n_pred)
     }
   } else {
     .log_warn("kriging_adequacy(): too few points or folds for the cross-validation statistic.")
@@ -293,6 +381,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
             range = suppressWarnings(as.numeric(sac)),
             range_identified = range_identified,
             cv = cv, nmax = as.integer(nmax), n_points = nrow(kp),
+            n_locations = nrow(kk),
             response_var = response_var,
             class = c("kriging_adequacy", class(out)))
 }
@@ -361,8 +450,12 @@ print.kriging_adequacy <- function(x, ...) {
   }
   df <- sf::st_drop_geometry(x)
   cv <- attr(x, "cv")
-  cat(sprintf("Block-kriging adequacy over %d cells (%d points, nmax %d)\n",
-              nrow(df), attr(x, "n_points"), attr(x, "nmax")))
+  n_loc <- attr(x, "n_locations") %||% attr(x, "n_points")
+  pts_word <- if (n_loc < attr(x, "n_points")) "locations" else "points"
+  cat(sprintf("Block-kriging adequacy over %d cells (%d points%s, nmax %d)\n",
+              nrow(df), attr(x, "n_points"),
+              if (pts_word == "locations") sprintf(" at %d distinct locations", n_loc) else "",
+              attr(x, "nmax")))
   vm <- attr(x, "variogram", exact = TRUE)
   cat(sprintf("  variogram: %s; sill %.3g, nugget %.3g (%.0f%%), range %s\n",
               paste(sprintf("%s(%.3g, %.3g)", vm$model, vm$psill, vm$range), collapse = " + "),
@@ -370,6 +463,12 @@ print.kriging_adequacy <- function(x, ...) {
               100 * attr(x, "nugget") / attr(x, "sill"),
               if (isTRUE(attr(x, "range_identified")))
                 sprintf("%.1f", attr(x, "range")) else "not identified"))
+  # Every line below counts only the cells with an estimate, so say first
+  # how many have none.
+  kr_ok <- is.finite(df$kr_pred) & is.finite(df$kr_var)
+  if (!all(kr_ok))
+    cat(sprintf(paste0("  no kriged estimate for %d of the %d cells (gstat could not ",
+                       "solve their kriging systems)\n"), sum(!kr_ok), nrow(df)))
   r <- df$kr_ratio[is.finite(df$kr_ratio)]
   if (length(r))
     cat(sprintf(paste0("  kriging variance / no-data variance of the cell mean (1 = nothing ",
@@ -383,13 +482,15 @@ print.kriging_adequacy <- function(x, ...) {
   if (length(sh))
     cat(sprintf("  kriged minus plain mean: |shift| > 1 SE in %d of %d cell(s), > 2 SE in %d\n",
                 sum(abs(sh) > 1), length(sh), sum(abs(sh) > 2)))
-  cat(sprintf("  empty cells: %d (kriged estimate and variance available for each)\n",
-              sum(df$n == 0L)))
+  n_empty <- sum(df$n == 0L)
+  n_empty_kr <- sum(df$n == 0L & kr_ok)
+  cat(sprintf("  empty cells: %d (kriged estimate and variance available for %s)\n",
+              n_empty, if (n_empty_kr == n_empty) "each" else sprintf("%d of them", n_empty_kr)))
   if (is.finite(cv$zscore_var %||% NA_real_))
-    cat(sprintf(paste0("  blocked CV (%s, %d folds, %d points): var of standardised ",
+    cat(sprintf(paste0("  blocked CV (%s, %d folds, %d %s): var of standardised ",
                        "error %.2f (1 = kriging variance correct; above 1 = ",
                        "understated), mean %.2f, RMSE %.3g\n"),
-                cv$method, cv$k, cv$n_pred, cv$zscore_var, cv$zscore_mean, cv$rmse))
+                cv$method, cv$k, cv$n_pred, pts_word, cv$zscore_var, cv$zscore_mean, cv$rmse))
   else cat("  blocked CV: not computed\n")
   invisible(x)
 }

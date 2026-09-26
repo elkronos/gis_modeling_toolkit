@@ -49,7 +49,9 @@ error), \code{kr_pred}, \code{kr_var}, \code{kr_ratio},
 \code{variogram} (the model frame), \code{sill}, \code{nugget},
 \code{range}, \code{range_identified}, \code{cv} (a list:
 \code{zscore_var}, \code{zscore_mean}, \code{rmse}, \code{n_pred},
-\code{k}, \code{method}), \code{nmax} and \code{n_points}.
+\code{k}, \code{method}), \code{nmax}, \code{n_points} (the points
+used) and \code{n_locations} (the distinct locations among them, which
+the kriging used).
 }
 \description{
 \code{\link{summarize_by_cell}()} aggregates by plain means inside cell
@@ -116,9 +118,9 @@ sill whatever the nugget, so the blocked statistic checks the sill and
 range.  To check the nugget, pass random folds
 (\code{make_folds(method = "random_kfold")}) as \code{folds}: the
 held-out points are then close to their neighbours, where the nugget
-decides the variance.  \code{gstat::krige.cv()} computes the statistic on
-the fold labels \code{\link{make_folds}()} built, so the folds carry the
-same separation the package uses everywhere else.
+decides the variance.  The statistic is computed fold by fold with
+\code{gstat::krige()} on the fold labels \code{\link{make_folds}()} built,
+so the folds carry the same separation the package uses everywhere else.
 }
 
 \section{What it said about block kriging as an aggregator}{
@@ -147,6 +149,30 @@ components with a nugget.  Anything else is refused by name.  A
 model whose range was not identified (a bare \code{NA} estimate with the
 model attached) is used with a warning: its sill was never reached by the
 data, so the ratios rest on an extrapolation.  Requires \pkg{gstat}.
+}
+
+\section{Repeat measurements at one location}{
+
+Two observations at the same coordinates (visits to a station, records
+geocoded to one address) make a kriging system singular, because
+\pkg{gstat} gives them the full sill, nugget included, as their
+covariance, as if they were one observation.  The kriging and its
+cross-validation therefore use one observation per location, the mean of
+its replicates, with a warning; \code{n} and \code{mean} still count every
+point.  How much of the nugget \eqn{c_0} a mean of \eqn{m} replicates
+keeps is read off the replicates: their pooled within-location variance
+\eqn{s_w^2}, capped at \eqn{c_0}, is the part that differs from visit to
+visit and averages down, and the rest is micro-scale variation the visits
+share, so the mean carries error variance \eqn{c_0 - s_w^2 + s_w^2/m}.
+That goes to \pkg{gstat} as a known measurement error (its
+\code{weights}) on the model with the nugget set to zero.  For replicates
+that differ only by measurement error this is exactly the kriging of every
+observation, and for identical replicates it is the kriging of one; a
+location seen once is kriged as before.  In the cross-validation a
+location is held out whole, under the fold of its first row, and its
+error variance is part of its standardised error.  A cell or held-out
+location \pkg{gstat} still cannot krige is reported \code{NA} with a
+warning, and \code{print()} says how many.
 }
 
 \examples{
