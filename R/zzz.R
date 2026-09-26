@@ -52,6 +52,15 @@
   # configuration, and they kept the user's appenders: spatialkit's WARN and
   # INFO lines landed in the user's own log files.
   .sk_logger_drop_copied_indices("spatialkit")
+
+  # dplyr's row verbs drop a layer's row record as `[` does (see
+  # .dplyr_row_slice_spatialkit_rows() in utils.R).  dplyr is imported, so
+  # its namespace is loaded; guarded all the same, so that loading never
+  # fails on its account.
+  tryCatch(registerS3method("dplyr_row_slice", "spatialkit_rows",
+                            .dplyr_row_slice_spatialkit_rows,
+                            envir = asNamespace("dplyr")),
+           error = function(e) NULL)
 }
 
 
@@ -87,8 +96,9 @@
 # while knitr is running it is ALSO sent as an R message, which the document
 # shows and the chunk option `message = FALSE` hides; nothing that reached the
 # console before is lost.  A line that is about to be raised as an R warning
-# as well -- .warn_and_log() -- is not repeated as a message, since the
-# document already shows the warning.
+# as well -- .warn_and_log(), .warn_deff_fallback(), and a .log_warn() whose
+# caller raises warning() as its next statement -- is not repeated as a
+# message, since the document already shows the warning.
 .sk_console_appender <- function(lines) {
   cat(lines, file = stderr(), sep = "\n")
   if (isTRUE(getOption("knitr.in.progress")) && !isTRUE(.sk_log_state$raising))

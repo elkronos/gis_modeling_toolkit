@@ -36,8 +36,12 @@ numeric, are skipped with a warning.}
 \code{list(mean = \(x) mean(x, na.rm = TRUE))}. Additional common options:
 \code{median}, \code{sum}, \code{sd}. A single function
 (\code{agg_funs = median}) or a character vector of function names
-(\code{c("median", "sum")}) is also accepted and named after the
-function; anything else falls back to the default mean with a warning.}
+(\code{c("median", "sum")}) is also accepted. A single function is named
+after the expression passed: a name gives that name (\code{median}, or
+\code{f} for a variable \code{f} holding a function),
+\code{stats::median} gives \code{median}, and any other expression gives
+\code{agg1}; pass a named list to choose the name. Anything else falls
+back to the default mean with a warning.}
 
 \item{cells_sf}{Optional polygon sf layer to join cell geometries onto
 the output. When supplied, the return value is an sf object with
@@ -74,7 +78,11 @@ anisotropy (\code{vgm(..., anis = c(angle, ratio))}), applied as gstat
 applies it. A model of any other family falls back to \code{deff = 1}
 with a warning naming it, and so does a request with no usable
 model (none supplied and none could be estimated, or a rejected
-fit); see "Value" for how to detect a fallback. Points with empty
+fit that could not be replaced by an estimate); see "Value" for how
+to detect a fallback. A model with no structured component (a pure
+nugget) implies that distinct observations are uncorrelated, so it
+is applied as a design effect of 1 in every cell, not treated as a
+fallback. Points with empty
 geometry count towards their cells' values but not towards the
 correlation, with a warning.}
 \item{\code{"kish"}}{Estimate per-variable-type intra-class correlations
@@ -98,8 +106,10 @@ columns or vice versa, and it is the response's ICC (not the
 predictors') that sets \code{cell_weight} whenever a response was given.
 Requires at least 2 cells with 2+ observations and at least 2 residual
 degrees of freedom (\code{N - k >= 2}); the ICC is taken as 0 (no
-correction, no \code{"deff_applied"} attribute) otherwise, and likewise
-when the estimate itself comes out at or below 0.}
+correction for that variable type) otherwise, and likewise when the
+estimate itself comes out at or below 0. The \code{"deff_applied"}
+attribute is attached when either ICC is positive, so when both are
+0 there is none.}
 \item{A positive number}{Applied as a uniform design effect to every
 cell, as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the
 naive SE. Use when you have an external estimate of the design
@@ -114,13 +124,18 @@ when \code{deff = "variogram"}. Supplying one avoids re-fitting the variogram
 and lets you inspect the fit the design effect is based on. A \code{sac_range}
 whose fit was \emph{rejected} (its value is \code{NA} and it carries a
 \code{rejected_reason} attribute) carries no usable correlation function, so
-it is set aside with a warning: the variogram is then estimated as if
-no \code{sac} had been given, or \code{deff} falls back to 1, rather than
-correcting by a shape that was not trusted enough to report a range.}
+it is set aside rather than correcting by a shape that was not trusted
+enough to report a range: the variogram is then estimated as if no \code{sac}
+had been given, with a plain warning saying so, or, where that is not
+possible, \code{deff} falls back to 1 with the fallback warning, which names
+the rejection. A \code{sac} fitted to residuals (\code{attr(sac, "detrended")}
+\code{TRUE}) is used as given, with a warning when it corrects response
+columns (see "Design effects and variable types").}
 
 \item{deff_max_n}{Cells with more than this many points are subsampled
 before forming the \verb{n x n} correlation matrix used by
-\code{deff = "variogram"}. Default 500.}
+\code{deff = "variogram"}. Default 500. It must be a single number of at
+least 2 when \code{deff = "variogram"}; anything else is an error.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -147,7 +162,12 @@ percent and the request goes through; the conterminous United States
 forced into one zone (14 percent), or a few degrees of latitude in Web
 Mercator (4 percent at 48N), does not.  \code{\link[=ensure_projected]{ensure_projected()}} with
 \code{purpose = "area"} chooses an equal-area CRS for lon/lat input; build the
-cells in it.  The measured spread is attached as \code{attr(, "area_error")}.}
+cells in it.  Lon/lat cells are measured geodesically instead: their
+\code{cell_area} is \code{sf::st_area()}'s area in square metres (on the sphere
+with s2, sf's default), not a planar area in squared degrees, and the
+distortion check passes by construction; with s2 switched off, sf needs
+the lwgeom package for that area and the request is refused without
+it.  The measured spread is attached as \code{attr(, "area_error")}.}
 }
 \value{
 A tibble/data.frame (or sf if cells_sf given) with per-cell
@@ -161,19 +181,24 @@ response and predictor, \verb{..neff_*} / \verb{..df_*} / \verb{..ci_lo_*} /
 the count.
 
 \code{deff_applied} is \code{TRUE} on every row when the requested correction was
-applied (exactly when the \code{"deff_applied"} attribute below is attached)
+applied (exactly when the \code{"deff_applied"} attribute below is attached;
+under \code{"kish"}, when any standard-error column was corrected)
 and \code{FALSE} when it fell back to the uncorrected standard errors: a
-refused \code{deff}, a \code{"variogram"} request with no usable model, or a
-\code{"kish"} ICC of 0 (and \code{NA} on a \code{cells_sf} row no point fell in).
+refused \code{deff}, a \code{"variogram"} request with no usable model, or
+\code{"kish"} ICCs of 0 for every variable type (and \code{NA} on a \code{cells_sf}
+row no point fell in).
 Unlike the attribute it survives \code{rbind()} and
 \code{dplyr::bind_rows()} of many results. A fallback is also signalled by a
 warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 is
 reported on \code{attr(, "icc")} instead), which
 \code{tryCatch(spatialkit_deff_fallback = )} catches without matching the
-message.
+message; it is raised only when the standard errors really are the
+uncorrected ones.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
-attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} for \code{"kish"},
+attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} and \code{deff}
+for \code{"kish"} (\code{deff} is the primary variable's per-cell design effect,
+all 1 when only the predictor ICC was positive),
 \code{deff}/\code{deff_rows}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"} (\code{deff} is
 the design effect at the primary variable's non-missing count per cell,
 \code{deff_rows} at the cell's row count, which is the vector the log line
@@ -182,8 +207,8 @@ When \code{cells_sf} is supplied, \emph{every} per-cell vector in that attribute
 (\code{deff}, \code{deff_rows} and \code{rbar} alike) is realigned to the joined row
 order, so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
 observations carry \code{NA}. No attribute is attached when no correction was
-applied: \code{deff = 1}, a \code{deff = "kish"} ICC of 0, or a \code{"variogram"}
-request that could not be fitted. A \code{deff = "kish"} request always
+applied: \code{deff = 1}, a \code{deff = "kish"} request whose ICCs are all 0, or
+a \code{"variogram"} request that could not be fitted. A \code{deff = "kish"} request always
 records the ICCs it estimated on an attribute \code{"icc"} (\code{resp} and
 \code{pred}, \code{NA} for a variable type with no numeric column), whether or not
 they were positive enough to apply, so a result with no \code{"deff_applied"}
@@ -246,6 +271,23 @@ adjustment, and each cell's effective sample size is reduced to
 \code{n_i / (1 + (n_i - 1) * rho)}. This is a first-order correction that
 does not require a full spatial covariance model but does require enough
 cells and observations for a stable ICC estimate.
+
+A design effect estimated from the data (\code{"kish"} or \code{"variogram"}) comes
+with a second, small-sample correction. The within-cell correlation that
+inflates the variance of the mean to \code{sigma^2 * deff / n} also biases the
+within-cell sample variance downward: under exchangeable correlation \code{rho}
+(Kish's own assumption), with \code{deff = 1 + (n - 1) * rho},
+\code{E[s^2] = sigma^2 * (n - deff) / (n - 1)}, so \code{s^2} understates \code{sigma^2}
+by very nearly the factor by which \code{deff} inflates the mean's variance, and
+the two errors compound rather than cancel. The standard error is therefore
+\code{s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))}, and \code{NA} where
+\code{deff >= n} (the cell then holds one observation's worth of information
+and \code{s} carries none about \code{sigma}). This is the package's own derivation,
+not taken from a reference. Measured 95\% interval coverage at \code{n = 30}
+over 20,000 replicates: 0.921, 0.844 and 0.628 at \code{rho} = 0.2, 0.5 and 0.8
+with \code{s * sqrt(deff / n)} alone, against 0.948, 0.950 and 0.949 with the
+rescaling.
+
 You may also pass a fixed numeric design effect (e.g. \code{deff = 2}) to
 uniformly inflate standard errors: an externally supplied constant is
 applied as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the naive SE in
@@ -300,8 +342,10 @@ correct for is the response's own. (A residual variogram, whose correlation
 is that of the part the predictors do not explain, is weaker; using it here
 dropped grand-mean coverage from 0.93 to 0.51 the moment a predictor was
 listed.) Pass \code{sac} explicitly when you want a different variogram, such as
-a residual one from \code{estimate_sac_range(..., predictor_vars = )}, and check
-\code{attr(sac, "detrended")} to know which you have.
+a residual one from \code{estimate_sac_range(..., predictor_vars = )}. A \code{sac}
+whose \code{attr(sac, "detrended")} is \code{TRUE} is used as given, but when it
+corrects response columns a warning says that their standard errors are
+understated, as \code{\link[=kriging_adequacy]{kriging_adequacy()}} warns about the same mismatch.
 }
 
 \section{Confidence intervals}{

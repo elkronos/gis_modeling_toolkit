@@ -506,13 +506,13 @@ test_that("a rejected sac cannot size a design effect", {
                                  nugget = 0),
     crs = sf::st_crs(32632))
 
-  # Two: the supplied `sac` is refused, and the internal re-estimate on this
-  # small fixture is refused too.
+  # The supplied `sac` is refused, and the internal re-estimate on this small
+  # fixture is refused too: one fallback, so one warning, naming both.
   expect_warning(
-    expect_warning(out <- summarize_by_cell(pts, response_var = "resp",
-                                            deff = "variogram", sac = fake),
-                   "no usable range"),
-    "no usable range")
+    out <- summarize_by_cell(pts, response_var = "resp",
+                             deff = "variogram", sac = fake),
+    "supplied `sac` reports no usable range.*estimated from `response_var` reports no usable range",
+    class = "spatialkit_deff_fallback")
   expect_null(attr(out, "deff_applied"))
   iid <- summarize_by_cell(pts, response_var = "resp", deff = 1)
   expect_equal(out[["..se_resp_resp"]], iid[["..se_resp_resp"]], tolerance = 1e-10)
