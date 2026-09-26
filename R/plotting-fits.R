@@ -315,7 +315,7 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   else if (!is.null(unmasked_cn)) unmasked_cn
   else if (surveyed)
     "No location masked: every local design is well conditioned"
-  else "Collinearity not surveyed (fewer than two numeric predictors)"
+  else "Collinearity not surveyed (no numeric predictor, or a fit made before the survey)"
   p + ggplot2::labs(
     title = sprintf("Local coefficient of %s", term),
     subtitle = subtitle,
