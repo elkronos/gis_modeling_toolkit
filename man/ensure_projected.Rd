@@ -87,8 +87,18 @@ logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they ar
 \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 hemisphere. The wrap is detected from the coordinates (one very large
 gap in the sorted longitudes) and an equal-area projection centred on
-the true extent is used. Only truly global coverage falls back to
-EPSG:3857.}
+the true extent is used.}
+\item{Around a pole}{Data spanning more than 180 degrees of longitude
+with no such gap surround a pole. When every point also lies on one
+side of the equator (Antarctic stations, a pan-Arctic network), a
+Lambert azimuthal equal-area centred on that pole is used, provided it
+measures a smaller distance error than the global fallback. Web
+Mercator splits such a layer at +/-180 degrees and stretches it
+towards the pole: a ring of Antarctic stations measured a worst-case
+distance error near 20,000 percent in it, against about 2 percent in
+the polar projection. Only the coverage left over, spanning both
+hemispheres or a low-latitude belt the polar projection fits worse,
+falls back to EPSG:3857 (Equal Earth for \code{purpose = "area"}).}
 \item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
 lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 then apply; coordinates the heuristic declines are left exactly as they
