@@ -17,14 +17,24 @@ is supported).  NULL = fitted values.}
 }
 \value{
 Numeric vector aligned to \code{nrow(newdata)}, with \code{NA} for
-rows dropped as missing or non-finite.  If \code{GWmodel::gwr.predict()}
-fails, every value is \code{NA} and a warning says why.  CRS-less
+rows dropped as missing or non-finite, and for locations whose local
+regression cannot be estimated (too few training points within a fixed
+bandwidth, or a singular local design); a warning counts those.  If the
+design matrix for \code{newdata} cannot be built, every value is
+\code{NA} and a warning says why.  CRS-less
 \code{newdata} first receives the interpretation the training data got, so
 the same rows land where they did at fit time.
 }
 \description{
 When \code{newdata} is NULL, returns the in-sample fitted values.
-Otherwise uses \code{GWmodel::gwr.predict()} on the new locations.
+Otherwise estimates the local coefficients at each new location with
+\code{GWmodel::gwr.basic(regression.points = )}, with the fit's kernel and
+bandwidth (an adaptive bandwidth counts neighbours among the training
+points), and returns \eqn{x^\top\hat\beta(u)}{x'beta(u)}.  These are the
+values \code{GWmodel::gwr.predict()} returns, without its prediction
+variance, which this method never returned and which costs time cubic in
+the number of training points.  Each location stands alone: one that cannot
+be estimated does not affect the others.
 \code{newdata} is first transformed to the CRS used during fitting
 (via \code{ensure_projected()}), so predictions are computed in a
 single coordinate system regardless of the CRS newdata arrives in.
