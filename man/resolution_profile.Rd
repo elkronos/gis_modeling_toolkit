@@ -24,7 +24,10 @@ representative points).}
 
 \item{response_var}{Optional response column name (numeric or logical).
 Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
-sets the floor of the ladder and \code{reliability}.}
+sets the floor of the ladder and \code{reliability}.  Rows where it, or a
+predictor, is missing or non-finite stay in the geometry and are left out
+of the OLS fit, the RSS, \code{cp} and \code{moran_z}; a logged warning
+gives their number.}
 
 \item{predictor_vars}{Optional predictor column names (numeric or
 logical).  With them, \code{cp} scores the OLS residuals of the response
