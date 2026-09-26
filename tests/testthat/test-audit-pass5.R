@@ -530,8 +530,12 @@ test_that("duplicate cell IDs are reported", {
   pts <- .p5_assigned(nc = 3, np = 10)
   cells <- .p5_cells(nc = 3)
   cells$poly_id[3] <- 2L
-  expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells),
-                 "duplicated value")
+  # Renumbering cell 3 as 2 also leaves the points summarised under ID 3
+  # with no cell, which is reported too.
+  expect_warning(
+    expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells),
+                   "duplicated value"),
+    "match no `cells_sf\\$poly_id`")
 })
 
 
