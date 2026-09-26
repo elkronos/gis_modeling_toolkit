@@ -248,9 +248,10 @@ and `summarize_by_cell()` take `polygon_id_col` and `id_col` to name either,
 and fall back through both when neither is named.
 
 Eight cells, four of them slivers at the state's edge with no county inside,
-is coarse. That is what the elbow finds on a hundred points, and
-`vignette("resolution")` is where to argue with it: `resolution_profile()`
-scores every cell count on four criteria at once.
+is coarse. A hundred county centroids spread fairly evenly have no elbow to
+find, and the call warns that `max_levels` chose this count rather than the
+data. `vignette("resolution")` is where to argue with it:
+`resolution_profile()` scores every cell count on four criteria at once.
 
 ```{r map, eval=has_ggplot, fig.height=4.5, fig.alt="North Carolina covered by four large hexagonal cells shaded by their mean SIDS rate, plus four unshaded slivers at the edges that hold no county. The western cell has the lowest mean, about 1.5 per thousand, and the small southern cell the highest, about 2.8."}
 plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate",
