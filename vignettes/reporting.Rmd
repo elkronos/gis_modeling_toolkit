@@ -170,7 +170,9 @@ not is portable: a file that has been reprojected, re-sorted and re-read
 elsewhere has no memory of how it was built. `ensure_stable_poly_id()` derives
 an ID from the geometry itself, in a common CRS, so the same region gets the
 same ID from whoever computes it, in whatever projection the file is in by
-then.
+then. The exception is fine cells stacked within about a centimetre of the
+same longitude, which a reprojection can swap (see `?ensure_stable_poly_id`);
+regions this size are nowhere near it.
 
 ```{r stable-ids}
 regions$src <- seq_len(nrow(regions))

@@ -28,9 +28,16 @@ whichever projection it arrives in), so if the transform fails the
 function says so rather than quietly sorting in the input's own CRS. The
 sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 the floating-point noise of a round trip through a different projection
-cannot reverse two neighbouring cells. Set to NULL to sort in the input
-CRS, which gives IDs that are reproducible but not comparable across
-projections.}
+does not usually reverse two neighbouring cells. It can where two cells'
+centres lie within about that step of the same longitude, as fine cells
+stacked north-south near a projection's central meridian do: 36 of 2,500
+100 m cells straddling a UTM central meridian changed ID after a
+transform to EPSG:3035. No rounding step removes that, so to match cells
+computed in different projections, join them on geometry rather than on
+the ID. The key is computed on the sphere (s2) whether or not
+\code{sf::sf_use_s2()} is on, so the session setting does not change the
+IDs. Set to NULL to sort in the input CRS, which gives IDs that are
+reproducible but not comparable across projections.}
 }
 \value{
 An sf polygon layer re-ordered with sequential IDs in id_col.
