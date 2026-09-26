@@ -122,8 +122,8 @@ tessellate them. The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
 `criterion = "morans_i"` and `criterion = "combined"` settings need both
-`response_var` and `predictor_vars`; give it only a response and it logs a
-warning and falls back to `"geometric"`. And its ladder runs from 1 to
+`response_var` and `predictor_vars`; give it only a response and it warns
+and falls back to `"geometric"`. And its ladder runs from 1 to
 `max_levels` with no lower bound from the spatial correlation of the data, so it
 can prefer cells wider than the field's own correlation range. The profile below
 does impose that bound, which is why the two can disagree.
