@@ -31,7 +31,8 @@
 #'   \code{"poly_id"}, \code{"polygon_id"} and \code{"id"} the layer has, so
 #'   the cells of \code{\link{build_tessellation}()} (\code{cell_id}) and the
 #'   output of \code{\link{summarize_by_cell}()} (\code{poly_id}) are
-#'   labelled without naming one.
+#'   labelled without naming one.  A \code{units} or \code{difftime} column
+#'   is drawn formatted, with its unit.
 #' @param label_size Label text size. Default 2.7.
 #' @param legend Logical; show fill legend. Default TRUE.
 #' @param legend_title Optional legend title.
@@ -124,6 +125,17 @@ plot_tessellation_map <- function(tessellation_sf,
   }
   .check_lim(xlim, "xlim")
   .check_lim(ylim, "ylim")
+  # A vector reached `&&` and if() below and failed with R's bare
+  # "'length = 2' in coercion to 'logical(1)'".
+  .check_col <- function(v, nm) {
+    if (is.null(v)) return(invisible(NULL))
+    if (!is.character(v) || length(v) != 1L || is.na(v))
+      stop(sprintf("plot_tessellation_map(): `%s` must be a single column name.",
+                   nm), call. = FALSE)
+    invisible(NULL)
+  }
+  .check_col(fill_col, "fill_col")
+  .check_col(label_col, "label_col")
 
   # --- pick plot CRS ---
   plot_crs <- if (!is.null(target_crs)) sf::st_crs(target_crs) else sf::st_crs(tessellation_sf)
@@ -235,9 +247,18 @@ plot_tessellation_map <- function(tessellation_sf,
                 label_col)
     } else if (nrow(tess) > 0L && !all(sf::st_is_empty(tess))) {
       centers <- suppressWarnings(sf::st_point_on_surface(.drop_empty_parts(tess)))
-      centers$`..__lab__` <- tess[[label_col]]
+      # An st_area() label column (class units) failed at print with "units
+      # package is not attached", as a units fill column once did; drawn as
+      # text, a units or difftime value keeps its unit.
+      lab <- tess[[label_col]]
+      if (inherits(lab, c("units", "difftime"))) lab <- format(lab, trim = TRUE)
+      centers$`..__lab__` <- lab
+      # The label points are computed above; geom_sf_text()'s default
+      # fun.geometry ran st_point_on_surface() on them again at print, which
+      # warned on every lon/lat layer.
       p <- p + ggplot2::geom_sf_text(
-        data = centers, ggplot2::aes(label = .data[["..__lab__"]]), size = label_size
+        data = centers, ggplot2::aes(label = .data[["..__lab__"]]), size = label_size,
+        fun.geometry = sf::st_geometry
       )
     }
   }

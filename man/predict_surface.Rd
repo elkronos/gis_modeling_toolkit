@@ -35,8 +35,11 @@ then keeps the cells whose point falls inside it.}
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 would produce more than 5,000,000 cells is refused, naming the implied
-count and the CRS units.  The usual cause is a value in the wrong unit.  A
-\code{cell_size} wider than the extent yields a single centred cell.}
+count and the CRS units.  The usual cause is a value in the wrong unit.
+The grid is centred on the training bounding box and covers it: when the
+extent is not a whole number of cells, it overhangs the box by less than
+one cell, split evenly between the two sides.  A \code{cell_size} wider
+than the extent yields a single centred cell.}
 
 \item{n_cells}{Approximate cell count used to derive \code{cell_size}.
 Default 10000.  Must be a single positive finite number and at most

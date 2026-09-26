@@ -125,7 +125,8 @@ message naming it.
 | `sp`, `GWmodel` | `fit_gwr_model()`, `cv_gwr()` |
 | `brms` (plus a Stan toolchain) | `fit_bayesian_spatial_model()`, `cv_bayes()` |
 | `geometry` | Delaunay triangle tessellations |
-| `ggplot2`, `patchwork` | every `plot_*()` function and `plot()` method |
+| `ggplot2` | every `plot_*()` function and `plot()` method |
+| `patchwork` | the combined panels in `vignette("spatialkit_nc_demo")` and its script |
 | `FNN`, `Matrix` | sparse k-nearest-neighbour weights for Moran's I on large layers |
 | `loo` | PSIS-LOO for the Bayesian backend |
 | `nlme` | REML detrending in `estimate_sac_range()` |

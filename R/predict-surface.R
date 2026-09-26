@@ -77,15 +77,19 @@
   # were unreachable.  Build the axis explicitly instead.
   .axis <- function(lo, hi) {
     lo <- as.numeric(lo); hi <- as.numeric(hi)
-    # A relative tolerance on the floor.  When the extent is an exact multiple
-    # of the cell size the ratio can land a hair below the integer -- 0.3 / 0.1
-    # is 2.9999999999999996 -- and a whole column went missing, leaving a
-    # cell-wide strip uncovered: 1197 of 10000 random squares at the default
-    # n_cells came out 99 columns wide instead of 100.
+    # Enough cells to cover the extent, centred on it.  floor() cells anchored
+    # at the lower bound left the remainder -- up to a cell wide -- uncovered
+    # on the east and north: cell_size = 100 on a 980 x 956 extent covered
+    # 900 x 900, and 14 of 120 training points lay in no cell.  The grid now
+    # overhangs the box by less than one cell, split evenly on both sides, so
+    # every centre stays inside it.  The relative tolerance keeps an exact
+    # multiple exact: 0.3 / 0.1 is 2.9999999999999996, and a ratio a hair
+    # above an integer must not gain a column either.
     r <- (hi - lo) / cell_size
-    n <- floor(r + sqrt(.Machine$double.eps) * max(1, r))
-    if (!is.finite(n) || n < 1L) return(lo + (hi - lo) / 2)   # one centred cell
-    lo + cell_size / 2 + seq.int(0L, n - 1L) * cell_size
+    n <- ceiling(r - sqrt(.Machine$double.eps) * max(1, r))
+    if (!is.finite(n) || n < 1L) n <- 1L     # a cell wider than the extent
+    offset <- (hi - lo - n * cell_size) / 2
+    lo + offset + cell_size / 2 + seq.int(0L, n - 1L) * cell_size
   }
   xs <- .axis(bb[["xmin"]], bb[["xmax"]])
   ys <- .axis(bb[["ymin"]], bb[["ymax"]])
@@ -129,8 +133,11 @@
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
-#'   count and the CRS units.  The usual cause is a value in the wrong unit.  A
-#'   \code{cell_size} wider than the extent yields a single centred cell.
+#'   count and the CRS units.  The usual cause is a value in the wrong unit.
+#'   The grid is centred on the training bounding box and covers it: when the
+#'   extent is not a whole number of cells, it overhangs the box by less than
+#'   one cell, split evenly between the two sides.  A \code{cell_size} wider
+#'   than the extent yields a single centred cell.
 #' @param n_cells Approximate cell count used to derive \code{cell_size}.
 #'   Default 10000.  Must be a single positive finite number and at most
 #'   5,000,000; anything else is an error.  Also ignored when \code{grid} is

@@ -61,10 +61,10 @@
 #'       means most of it, two curves that coincide mean none.  When both
 #'       effective ranges were identified over the same point pairs the caption
 #'       gives the residual sill as a share of the response sill and the two
-#'       ranges; when either variogram reached no sill, or the two are not over
-#'       the same pairs, the caption says so and compares nothing: a sill the
-#'       data never reached is not a number to divide by, and one direction's
-#'       sill is not comparable with all directions'.
+#'       ranges; when either variogram has no identified range, or the two
+#'       are not over the same pairs, the caption says so and compares
+#'       nothing: a sill the data never reached is not a number to divide by,
+#'       and one direction's sill is not comparable with all directions'.
 #'       The residual range is expected to come out shorter and the residual
 #'       sill lower even when the model is right, because residuals of a
 #'       fitted trend understate the variogram (see
@@ -497,6 +497,15 @@ plot.sac_range <- function(x, ...) {
     s_res <- sill_of(vm); s_resp <- sill_of(ovm)
     both_ok <- same_pairs && is.finite(sac) && is.finite(overlay) &&
       is.finite(s_res) && is.finite(s_resp) && s_resp > 0
+    # A range can be missing for several reasons (no sill within the lags, a
+    # fit that did not converge, a falling or flat variogram), so the clause
+    # says only that none was identified.  "Reached no identified sill"
+    # described every case as a still-rising curve.  The residual reason is
+    # in the subtitle; the response's appears nowhere else, so it is named.
+    ov_reason <- attr(overlay, "rejected_reason")
+    ov_why <- if (is.character(ov_reason) && length(ov_reason) == 1L &&
+                  !is.na(ov_reason) && nzchar(ov_reason))
+      sprintf(" (%s)", ov_reason) else ""
     overlay_caption <- paste(c(
       sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
               overlay_label, tolower(what)),
@@ -510,11 +519,14 @@ plot.sac_range <- function(x, ...) {
                              if (is.na(az)) "all directions" else dir_label(az),
                              if (is.na(ov_az)) "all directions" else dir_label(ov_az))
                    else if (!is.finite(sac) && !is.finite(overlay))
-                     "neither variogram reached an identified sill"
+                     sprintf("neither variogram has an identified range%s",
+                             if (nzchar(ov_why))
+                               sprintf(" (response: %s)", ov_reason) else "")
                    else if (!is.finite(sac))
-                     "the residual variogram reached no identified sill"
+                     "the residual variogram has no identified range"
                    else if (!is.finite(overlay))
-                     "the response variogram reached no identified sill"
+                     sprintf("the response variogram has no identified range%s",
+                             ov_why)
                    else "a variogram model could not be fitted")
     ), collapse = "\n")
     p <- p + ggplot2::labs(caption = .wrap_label(overlay_caption, 72))
@@ -698,9 +710,15 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",")
   # make_folds() records NA_character_ for points without a CRS, and
   # nzchar(NA) is TRUE: the subtitle read "Block size 300 (NA units)".
-  units <- if (is.character(prm$crs) && length(prm$crs) == 1L &&
-               !is.na(prm$crs) && nzchar(prm$crs))
-    sprintf(" (%s units)", prm$crs) else ""
+  # prm$crs identifies the CRS (an EPSG code, else the proj string or the
+  # whole WKT); the subtitle wants its linear unit, as .draw_sac_variogram()
+  # gives it.  Printed as it was, a CRS with no EPSG code put a 1,300-character
+  # WKT into the subtitle.
+  u <- if (is.character(prm$crs) && length(prm$crs) == 1L &&
+           !is.na(prm$crs) && nzchar(prm$crs))
+    tryCatch(sf::st_crs(prm$crs)$units_gdal, error = function(e) NULL)
+  units <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
+    sprintf(" (%s)", u) else ""
   switch(as.character(folds$method),
     random_kfold =
       "Random folds: a held-out point's neighbours stay in the training set",

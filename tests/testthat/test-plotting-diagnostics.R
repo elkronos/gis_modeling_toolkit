@@ -134,7 +134,7 @@ test_that("plot.aoa draws both distributions and the threshold", {
   expect_no_error(ggplot2::ggplot_build(ph))
   expect_true(all(c("GeomBar", "GeomPath", "GeomVline") %in% layer_geoms(ph)))
 
-  # No folds: the caption says the threshold is optimistic.
+  # No folds: the caption says the training DI was not cross-validated.
   aoa0 <- area_of_applicability(new, train_sf = pts, predictor_vars = c("a", "b"))
   expect_match(plot(aoa0)$labels$caption, "not cross-validated")
   expect_error(plot.aoa(list(a = 1)), "must be the object returned by area_of_applicability")
