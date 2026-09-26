@@ -28,7 +28,11 @@
 #'   overlap area and never calls the predicate.
 #' @param largest Logical; when \code{features_sf} is itself polygonal, keep
 #'   the polygon with the largest overlap. Default TRUE. Ignored for point and
-#'   line features. Invalid geometries (usually a self-intersecting ring),
+#'   line features. A feature that only touches the polygon layer (shares an
+#'   edge or a corner with it, with no overlap area) has no largest overlap
+#'   and is unassigned, in any CRS; with \code{largest = FALSE} the default
+#'   \code{st_intersects} counts touching, so such a feature is assigned.
+#'   Invalid geometries (usually a self-intersecting ring),
 #'   whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
 #'   for the join, with a warning, and returned as they arrived. If the
 #'   overlap still cannot be computed the function stops: falling back to
@@ -36,7 +40,10 @@
 #'   feature in the layer, so pass \code{largest = FALSE} to ask for that.
 #' @param tie_break Strategy for resolving features that match multiple
 #'   polygons: \code{"smallest_area"} (default) keeps the polygon with the
-#'   smallest area, \code{"first"} keeps the first match (original order-dependent
+#'   smallest area and, among polygons of equal area (a point on the shared
+#'   edge of two grid cells), the one whose bounding-box centre is lowest,
+#'   then leftmost, so the choice does not depend on the order of the rows;
+#'   \code{"first"} keeps the first match (original order-dependent
 #'   behavior).
 #' @return An sf object with `polygon_id_col` attached, one row per input
 #'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
@@ -185,6 +192,30 @@ assign_features_to_polygons <- function(
         if (isTRUE(sf::st_is_longlat(f)))
           ", or project both layers first (see ensure_projected())" else ""),
         call. = FALSE))
+    # sf keeps the largest intersection piece without asking whether it has
+    # any area, so under GEOS a feature that only shares an edge or a corner
+    # with the cells was assigned to one of them with zero overlap, while
+    # under s2 (lon/lat, s2 on) the same feature had no piece and came back
+    # unassigned: sf's nc counties beside 50 of them as cells gave 70 rows
+    # projected and 50 in lon/lat.  A feature with no overlap has no largest
+    # overlap, so it is unassigned whatever the CRS.  s2 already does this.
+    if (!(isTRUE(sf::st_is_longlat(f)) && isTRUE(sf::sf_use_s2()))) {
+      hit <- which(!is.na(joined[[id_col]]))
+      if (length(hit)) {
+        # "2********": the interiors meet in an area.
+        overlaps <- suppressMessages(sf::st_relate(f, p_sel, pattern = "2********"))
+        ids_p    <- p_sel[[id_col]]
+        fi       <- joined[["..pre_join_row_id"]][hit]
+        touch    <- !vapply(seq_along(hit), function(k)
+          joined[[id_col]][hit[k]] %in% ids_p[overlaps[[fi[k]]]], logical(1))
+        if (any(touch)) {
+          .log_info(paste0("assign_features_to_polygons(): %d polygon feature(s) ",
+                           "only touch the polygon layer (no overlap area) and ",
+                           "are left unassigned."), sum(touch))
+          joined[[id_col]][hit[touch]] <- NA
+        }
+      }
+    }
   } else {
     joined <- do.call(sf::st_join, join_args)
   }
@@ -222,17 +253,40 @@ assign_features_to_polygons <- function(
               length(tie_rows), nrow(f), tie_break)
   if (any(dup_mask) && identical(tie_break, "smallest_area")) {
     # For each duplicated feature, keep the polygon with the smallest area
-    # (the most specific / tightest-fitting polygon).
+    # (the most specific / tightest-fitting polygon).  Areas are compared to
+    # 9 significant digits, so equal cells whose computed areas differ in the
+    # last bits count as equal.
     poly_areas <- suppressWarnings(as.numeric(sf::st_area(p)))
     poly_areas[!is.finite(poly_areas)] <- Inf
     names(poly_areas) <- as.character(p[[id_col]])
-    
-    joined$`..poly_area` <- poly_areas[as.character(joined[[polygon_id_col]])]
+
+    joined$`..poly_area` <- signif(poly_areas[as.character(joined[[polygon_id_col]])], 9L)
     joined$`..poly_area`[is.na(joined$`..poly_area`)] <- Inf
-    
+
+    # Equal areas -- every cell of a regular grid, for a point on a shared
+    # edge -- used to fall through to row order, so the answer depended on
+    # the order of the polygon layer after all: edge points at x = 100 went
+    # to cells 1, 4, 7, or to 2, 5, 8 with the rows reversed.  The candidate
+    # whose bounding-box centre is lowest, then leftmost, wins instead.  On
+    # a create_grid_polygons() grid, which is numbered from the lower left a
+    # row at a time, that is the cell the row order picked.
+    tie_ids <- unique(as.character(
+      joined[[polygon_id_col]][joined[["..pre_join_row_id"]] %in% tie_rows]))
+    tie_ids <- tie_ids[!is.na(tie_ids)]
+    p_tie   <- sf::st_geometry(p)[match(tie_ids, as.character(p[[id_col]]))]
+    ctr     <- vapply(p_tie, function(g) {
+      bb <- sf::st_bbox(g)
+      c((bb[["xmin"]] + bb[["xmax"]]) / 2, (bb[["ymin"]] + bb[["ymax"]]) / 2)
+    }, numeric(2))
+    ctr_x <- stats::setNames(ctr[1, ], tie_ids)
+    ctr_y <- stats::setNames(ctr[2, ], tie_ids)
+    ids_j <- as.character(joined[[polygon_id_col]])
+    key_y <- unname(ctr_y[ids_j]); key_y[!is.finite(key_y)] <- Inf
+    key_x <- unname(ctr_x[ids_j]); key_x[!is.finite(key_x)] <- Inf
+
     # Within each group of duplicates, keep the row with smallest area
-    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]]), ,
-                     drop = FALSE]
+    joined <- joined[order(joined[["..pre_join_row_id"]], joined[["..poly_area"]],
+                           key_y, key_x), , drop = FALSE]
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
     joined[["..poly_area"]] <- NULL
   } else {
