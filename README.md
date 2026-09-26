@@ -447,7 +447,7 @@ asked for.
 
 **`estimate_sac_range()` returned `NA`.** The range was not identified,
 so nothing is reported. `attr(x, "rejected_reason")` names which of the
-five refusals it was, `?estimate_sac_range` says what each one means,
+six refusals it was, `?estimate_sac_range` says what each one means,
 and `plot()` on the returned object draws the variogram behind it.
 `vignette("spatial-cross-validation")` covers what an `NA` there leaves
 you to decide about the block size.

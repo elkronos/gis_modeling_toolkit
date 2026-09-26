@@ -1235,7 +1235,13 @@
 #' of that mean is a decrease.  Measured on 60 draws each (n = 250, tol =
 #' 0.15): 0 of an exponential field, 2 percent of white noise, 98 percent of a
 #' field with a periodic (hole-effect) component, 100 percent of a layer whose
-#' variance differs between a dense cluster and the rest.  An unremoved trend
+#' variance differs between a dense cluster and the rest.  The tolerance is
+#' fixed while the noise in the short-lag bins grows as the sample shrinks, so
+#' small samples trip it on ordinary fields: an exponential field with
+#' effective range 300 and nugget 0.2 was refused in 7--9 of 60 draws at
+#' n = 30, 3--6 at n = 50 and 0--1 at n = 100, and with range 150 in 15--16
+#' of 60 at n = 30.  The refusal is the conservative outcome (geometric
+#' blocks, with a warning), so it is left as it is.  An unremoved trend
 #' is \emph{not} what produces this shape.  A trend makes the variogram rise
 #' without reaching a sill, which the over-cutoff rejection catches, so the
 #' message aimed at this case must not say "trend".
@@ -1307,10 +1313,21 @@ sac_nugget <- function(x) {
 #' \emph{effective range}: for the exponential model, three times the fitted
 #' range parameter, which is where the semivariance reaches ~95 % of the
 #' sill; for the spherical model (fitted only when the exponential fit is
-#' singular) the fitted range itself, which is where the spherical
-#' semivariance reaches its sill exactly.  Both are the distance beyond which
-#' two observations are (near) uncorrelated, which is what a block or a
-#' buffer has to exceed.
+#' singular or does not converge) the fitted range itself, which is where the
+#' spherical semivariance reaches its sill exactly.  Both are the distance
+#' beyond which two observations are (near) uncorrelated, which is what a
+#' block or a buffer has to exceed.
+#'
+#' The exponential model is kept whenever it converges, without comparing it
+#' with the spherical fit, and on fields smoother than exponential that makes
+#' the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+#' 30 draws each): about 1.8--2.1 times the practical range of a Gaussian
+#' covariance, and 1.3--1.4 times the range of a spherical one, while an
+#' exponential field came back at 0.97 of its effective range.  The error is
+#' on the safe side (blocks too large, cross-validation pessimistic), and it
+#' is kept on purpose: choosing the family by the smaller weighted sum of
+#' squares corrects the spherical case but sends exponential fields low, to
+#' about 0.82 of the truth, which is the direction that leaks.
 #'
 #' The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
 #' variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
@@ -1331,11 +1348,25 @@ sac_nugget <- function(x) {
 #'
 #' Where a field is \emph{known} to be anisotropic, blocks must be at least
 #' as large as the longest autocorrelation range to avoid leakage, and the
-#' conservative choice is to size them from
-#' \code{max(attr(range, "directional"))} explicitly.  A ratio above 1.5 is
-#' logged so the case is not missed, with that advice.  Only when the
-#' omnidirectional fit is itself unusable is the directional maximum returned
-#' in its place, and \code{anisotropy_used} is \code{TRUE} in that case alone.
+#' conservative choice is to size them from the longest directional range
+#' explicitly.  Read it from \code{directional_fitted}, not
+#' \code{directional}: on a strongly anisotropic field the major axis is the
+#' direction most likely to run past the fitted lags, which leaves it
+#' \code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
+#' with \code{na.rm = TRUE} the second-longest range.  Check
+#' \code{directional_status} first: a major axis marked \code{"over_cutoff"}
+#' has no identified range at all, and a longer \code{cutoff} or
+#' \code{\link{make_folds}(method = "nndm")} is the way on.  A ratio above
+#' 1.5 is written to the package log at INFO level with that advice, which
+#' reaches the session log file but not the console (the ratio passes 1.5 on
+#' most isotropic fields too); \code{print()} shows the directional ranges
+#' and the ratio, and \code{attr(range, "anisotropy")} holds it.  Only when
+#' the omnidirectional fit is singular or did not converge is the directional
+#' maximum returned in its place, and \code{anisotropy_used} is \code{TRUE}
+#' in that case alone.  An omnidirectional fit that converged to a range past
+#' the fitted lags is refused (see the Value section) whatever the directions
+#' found: the directions that reached a sill are the shorter ones, so their
+#' maximum is a lower bound, not an estimate.
 #'
 #' A direction whose fit fails, does not converge, or reports a range beyond
 #' the longest fitted lag is excluded and recorded as \code{NA} in the
@@ -1347,6 +1378,25 @@ sac_nugget <- function(x) {
 #' the range: with a 50% nugget the fitted range came back at about 0.45 of the
 #' truth, so \code{make_folds(auto_range = TRUE)} built blocks less than half
 #' the correlation length it reported.
+#'
+#' The lags are binned the way \pkg{gstat} bins them by default, 15 bins out
+#' to the cutoff, each \code{cutoff * max_dist / 15} wide (about 47 m on a
+#' 1000 m square at the defaults).  A range spanning only one or two bins is
+#' resolved coarsely and comes out long: exponential fields with an effective
+#' range of 60 m (n = 300 on a 1000 m square, 30 draws) returned a median of
+#' 89--102 m, where the same fields binned over a 200 m cutoff gave 65--68,
+#' and at a range of 300 m there was no bias.  When the estimate is within a
+#' few bin widths of zero, run it again with a smaller \code{cutoff}.
+#'
+#' Nothing tests whether the layer has spatial structure at all.  On white
+#' noise (n = 300 on a 1000 m square, 30 draws) the estimate was a finite,
+#' spurious range (57--533 m) in 8 draws and a refusal in the rest, mostly
+#' as past the fitted lags or not converged, and only once as no model
+#' fitted; with \code{detrend = "reml"} it was finite in 10 of 30.  A
+#' spurious range errs towards larger blocks, so the harm is mostly lost
+#' training data, but a caller who needs to know whether there is any
+#' structure should look at the variogram (\code{plot()} on the result)
+#' rather than at whether the answer is \code{NA}.
 #'
 #' A log warning is emitted when the directional maximum is used; where the
 #' all-pairs estimate is available it names both the ratio and that estimate.  A
@@ -1389,7 +1439,17 @@ sac_nugget <- function(x) {
 #'   observed lags instead of measuring a long autocorrelation range.  Passing
 #'   it to \code{make_folds(auto_range = TRUE)} would collapse the block grid to
 #'   a single block.  Default 1.0; raise it to accept ranges extrapolated
-#'   beyond the fitted lags.
+#'   beyond the fitted lags.  The bound does not guarantee room for two
+#'   blocks: at the defaults it is half the farthest-pair distance, about
+#'   0.71 of the side of a square layer, and a block grid needs a range below
+#'   half the width of the bounding box in one direction or the other.  An
+#'   accepted range between the two leaves
+#'   \code{make_folds(auto_range = TRUE)} room for a single block of that
+#'   size (see its \code{auto_range} argument for what it does then).  On a
+#'   1000 m square with an exponential field of effective range 570 (n = 300),
+#'   9 of 30 draws were accepted in that band.  Lowering \code{range_frac} to fit the
+#'   grid would turn those estimates into \code{NA} and the blocks into
+#'   geometric ones smaller than the range.
 #' @param seed RNG seed for the \code{n_max} subsample, restored afterwards so
 #'   the caller's random stream is untouched.  Default \code{123L}: the
 #'   subsample is an internal approximation and no part of the answer, and
@@ -1486,8 +1546,9 @@ sac_nugget <- function(x) {
 #'       90° and 135° ranges, named by azimuth; \code{NA} where that
 #'       direction's fit was unusable), \code{anisotropy} (largest
 #'       over smallest), \code{anisotropy_used} (logical: \code{TRUE} only when
-#'       the all-pairs fit was unusable and the directional maximum stands in
-#'       for it), \code{directional_status} (per azimuth, why a direction is
+#'       the all-pairs fit was singular or did not converge and the
+#'       directional maximum stands in for it), \code{directional_status}
+#'       (per azimuth, why a direction is
 #'       \code{NA} in \code{directional}: \code{"ok"}, \code{"over_cutoff"}
 #'       (its range ran past the largest lag fitted), \code{"not_converged"}
 #'       or \code{"no_fit"}), \code{directional_fitted} (the range each
@@ -1515,20 +1576,31 @@ sac_nugget <- function(x) {
 #'       be taken on trust.}
 #'     \item{Rejected range}{\code{NA_real_} when a range was fitted but is
 #'       not identified: it exceeds \code{range_frac * cutoff * max_dist} (see
-#'       \code{range_frac}); or the model did not converge; or the empirical
+#'       \code{range_frac}), which applies to the all-pairs fit even when some
+#'       directions reached a sill; or it is shorter than the shortest lag the
+#'       empirical variogram resolves (the mean separation in its first
+#'       bin), below which a structure cannot be told from a nugget; or the
+#'       model did not converge; or the empirical
 #'       variogram \emph{decreases} with distance over its shorter lags (a
 #'       net fall of more than 15 percent of the mean semivariance there,
 #'       weighted by pairs), which is the shape of a periodic, hole-effect
 #'       structure or of a variance that differs between a dense cluster and
-#'       the rest of the layer (an unremoved trend instead makes the variogram
-#'       rise without a sill, and the first test catches that); or
-#'       the fitted range is non-positive.  It is classed \code{sac_range} as
-#'       well, so it prints as a bare \code{NA} without dumping its
+#'       the rest of the layer.  Sampling noise in the short-lag bins of a
+#'       small sample can make that fall too: on exponential fields it
+#'       refused 7--9 of 60 draws at n = 30, 3--6 at n = 50 and 0--1 at
+#'       n = 100 (effective range 300 on a 1000 m square), and 15--16 of 60
+#'       at n = 30 with a range of 150.  An unremoved trend makes the
+#'       variogram rise instead; when it rises past the fitted lags the first
+#'       test catches it, but a milder trend only lengthens the fitted range
+#'       and passes, which is what \code{predictor_vars} is for.  Last, the
+#'       fitted range can be non-positive.  It is classed \code{sac_range} as
+#'       well, so it prints as \code{NA} without dumping its
 #'       attributes, and it carries \code{max_dist}, \code{cutoff_dist},
 #'       \code{variogram}, \code{variogram_model} and \code{nugget} (the
 #'       evidence for the rejection), plus \code{rejected_range} (the value
 #'       that was refused), \code{rejected_reason} (one of
 #'       \code{"fitted range exceeds the largest lag fitted"},
+#'       \code{"fitted range is below the shortest lag fitted"},
 #'       \code{"variogram model did not converge"},
 #'       \code{"empirical variogram decreases with distance"},
 #'       \code{"fitted range is non-positive or non-finite"},
@@ -1546,7 +1618,8 @@ sac_nugget <- function(x) {
 #'       \code{rejected_range = NA}, \code{variogram_model = NULL} and
 #'       \code{nugget = NA}, is returned when no variogram model could be
 #'       fitted at all (both the exponential and the spherical fit singular,
-#'       which is what a flat, nugget-only variogram produces);
+#'       which a flat, nugget-only variogram can produce, though on white
+#'       noise it was the outcome in only 1 of 30 draws: see above);
 #'       \code{rejected_reason} says so and the empirical variogram is still
 #'       attached.}
 #'     \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
@@ -2087,6 +2160,20 @@ estimate_sac_range <- function(points_sf, response_var,
   iso_ok <- is.finite(iso_fit_always) &&
             as.numeric(iso_fit_always) <= max_supported &&
             !identical(attr(iso_fit_always, "converged"), FALSE)
+  # A converged all-pairs fit whose range runs past the fitted lags is not an
+  # unusable fit but a finding: the pooled variogram, which sees every pair,
+  # reached no sill.  The directional maximum must not stand in for it.  The
+  # directions that did reach a sill are by construction the SHORTER ones (a
+  # trend's cross-slope directions, an anisotropic field's minor axes), so
+  # their maximum is a lower bound on the range, not an estimate of it, and
+  # whether two of them happened to fit flipped the answer between NA and a
+  # finite range from one draw to the next: with an east-west trend on an
+  # exponential field of range 150, 12 of 30 draws returned 131-596 this way
+  # with anisotropy_used = TRUE, and 16 others NA.  It goes to the rejection
+  # below, as the documentation always said a trend would.
+  iso_over <- is.finite(iso_fit_always) &&
+              !identical(attr(iso_fit_always, "converged"), FALSE) &&
+              as.numeric(iso_fit_always) > max_supported
 
   if (!is.null(reml_fit)) {
     # --- REML detrending: the range is the REML estimate ---------------------
@@ -2105,7 +2192,7 @@ estimate_sac_range <- function(points_sf, response_var,
     vg_used  <- if (inherits(vg_iso_always, "data.frame")) vg_iso_always else NULL
     if (dir_success)
       anisotropy <- max(usable, na.rm = TRUE) / min(usable, na.rm = TRUE)
-  } else if (dir_success) {
+  } else if (dir_success && !iso_over) {
     dir_max    <- max(usable, na.rm = TRUE)
     anisotropy <- dir_max / min(usable, na.rm = TRUE)
     winner     <- which.max(usable)
@@ -2141,7 +2228,10 @@ estimate_sac_range <- function(points_sf, response_var,
     # fits is biased upward whatever hurdle is put in front of it.  So the
     # all-pairs range is the estimate; the directional ranges are reported as
     # a diagnostic, and a caller who KNOWS the field is anisotropic can size
-    # blocks from max(attr(x, "directional")) explicitly.
+    # blocks from the longest directional range explicitly.  Not from
+    # max(attr(x, "directional")): on exactly such a field the major axis is
+    # the direction most likely to run past the fitted lags, which makes it NA
+    # there and the maximum NA (or, with na.rm = TRUE, the second-longest).
     if (iso_ok) {
       effective_range <- as.numeric(iso_fit_always)
       vg_used  <- vg_iso_always
@@ -2153,14 +2243,19 @@ estimate_sac_range <- function(points_sf, response_var,
                  "point pairs and the windows are fixed to the coordinate axes, ",
                  "so this spread is expected on an isotropic field too; the ",
                  "all-directions estimate (%.1f) is used. If the field is known ",
-                 "to be anisotropic, size blocks from ",
-                 "max(attr(range, \"directional\")) instead."),
+                 "to be anisotropic, size blocks from the longest directional ",
+                 "range instead: max(attr(range, \"directional_fitted\"), ",
+                 "na.rm = TRUE), after checking attr(range, ",
+                 "\"directional_status\"), since a direction that is not \"ok\" ",
+                 "has no identified range."),
           anisotropy,
           paste(sprintf("%d\u00b0 = %.1f", dir_az[dir_ok], dir_ranges[dir_ok]),
                 collapse = ", "),
           as.numeric(iso_fit_always))
     } else {
-      # The isotropic fit is unusable; the directional sweep is all there is.
+      # The isotropic fit is singular or did not converge (one that converged
+      # past the fitted lags goes to the refusal instead, see `iso_over`); the
+      # directional sweep is all there is.
       aniso_used      <- TRUE
       effective_range <- dir_max
       vg_used  <- dir_fits[[winner]]$vg
@@ -2175,10 +2270,14 @@ estimate_sac_range <- function(points_sf, response_var,
     }
   } else {
     # --- Isotropic variogram (fallback when directional fits fail) ----------
+    # Also reached when the all-pairs fit converged past the fitted lags
+    # (`iso_over`), whatever the directions did, so the refusal below sees it.
     # The same all-pairs variogram and fit as above; it was recomputed here,
     # which cost a second fit and logged its failure twice.
     vg_iso    <- vg_iso_always
     iso_range <- iso_fit_always
+    if (dir_success)
+      anisotropy <- max(usable, na.rm = TRUE) / min(usable, na.rm = TRUE)
     if (is.finite(iso_range)) {
       # A gstat fit that stopped at its iteration limit reports a range that is
       # wherever the optimiser happened to be, not a fitted parameter.  Record
@@ -2194,13 +2293,15 @@ estimate_sac_range <- function(points_sf, response_var,
     } else {
       # Neither directional nor isotropic succeeded.  The VALUE is NA, but the
       # empirical variogram is still the thing to look at: both fits being
-      # singular is what a flat, nugget-only variogram produces -- residuals
-      # with no spatial structure at the lags resolved -- and returning a bare
-      # NA left plot(type = "variogram") unable to draw exactly that picture
-      # ("could not be fitted; there may be too few finite residuals").
+      # singular is one thing a flat, nugget-only variogram produces --
+      # residuals with no spatial structure at the lags resolved -- and
+      # returning a bare NA left plot(type = "variogram") unable to draw
+      # exactly that picture ("could not be fitted; there may be too few
+      # finite residuals").  Only one: on 30 draws of white noise this branch
+      # was reached once, and eight came back with a finite (spurious) range.
       .log_warn(paste0("estimate_sac_range(): no variogram model could be fitted ",
                        "(the exponential and spherical fits are both singular, ",
-                       "which is what a flat, nugget-only variogram produces); ",
+                       "which a flat, nugget-only variogram can produce); ",
                        "returning NA. The empirical variogram is attached for ",
                        "inspection: call plot() on the returned value."))
       return(structure(
@@ -2282,12 +2383,27 @@ estimate_sac_range <- function(points_sf, response_var,
   # a variance that differs between a dense cluster and the rest of the layer
   # (see .variogram_decreasing() for the measured rates).
   decreasing    <- .variogram_decreasing(vg_used)
+  # The mirror of `over_cutoff` at the other end of the lags.  A range shorter
+  # than the shortest lag the variogram resolves (the mean separation in its
+  # first non-empty bin) describes a structure that has died out before the
+  # closest pairs of points, which the data cannot tell from a nugget.  It is
+  # what white noise gives the REML fit, which is not fitted to the binned
+  # variogram at all: on 30 draws of iid noise (n = 300, 1000 m square) it
+  # returned ranges of 0.18-23.6 m in 19, against a first lag of about 30 m,
+  # and one of 0.27 m sized a 3642 x 3676 block grid.  The weighted fit to
+  # the bins did not go below the first lag on those draws, so nothing it
+  # identified before is refused.
+  first_lag <- if (is.data.frame(vg_used) && all(c("dist", "np") %in% names(vg_used))) {
+    d1 <- vg_used$dist[is.finite(vg_used$dist) & is.finite(vg_used$np) & vg_used$np > 0]
+    if (length(d1)) min(d1) else NA_real_
+  } else NA_real_
+  under_lag <- is.finite(first_lag) && effective_range < first_lag
   # Non-convergence is refused on the same terms and for the same reason: the
   # number is not a fitted parameter.  gstat signals it with a warning and
   # returns anyway, which is why it needs its own test rather than riding on
   # the cutoff bound -- a non-converged range can land inside the bound and
   # would otherwise have sized a block.
-  if (over_cutoff || !fit_converged || decreasing) {
+  if (over_cutoff || !fit_converged || decreasing || under_lag) {
     if (decreasing) {
       .log_warn(
         paste0("estimate_sac_range(): the empirical variogram decreases with ",
@@ -2296,9 +2412,17 @@ estimate_sac_range <- function(points_sf, response_var,
                "(hole-effect) structure produces, or a variance that differs ",
                "between a dense cluster and the rest of the layer; an ",
                "unremoved trend makes a variogram rise without a sill, which ",
-               "is a different signal. Returning NA. Inspect it with plot() on ",
+               "is a different signal.%s Returning NA. Inspect it with plot() on ",
                "the returned value, and set a block size explicitly."),
-        effective_range
+        effective_range,
+        # The fixed 15% tolerance does not widen with the sampling noise of
+        # the short-lag bins: 7-9 of 60 ordinary exponential fields were
+        # refused at n = 30, 0-1 at n = 100 (see .variogram_decreasing()).
+        if (nrow(pts) < 100L)
+          sprintf(paste0(" With %d points the short-lag bins are noisy enough ",
+                         "for an ordinary field to show this shape as well."),
+                  nrow(pts))
+        else ""
       )
     } else if (over_cutoff) {
       .log_warn(
@@ -2307,8 +2431,20 @@ estimate_sac_range <- function(points_sf, response_var,
                "empirical variogram never reached a sill, so the range is ",
                "unidentified rather than long. Returning NA. Raise `cutoff` to ",
                "fit longer lags, supply `predictor_vars` to detrend, or set a ",
-               "block size explicitly."),
+               "block size explicitly. (A variogram that is flat from the ",
+               "first lag, with no spatial structure to find, can end here ",
+               "too: plot() the returned value to tell the two apart.)"),
         effective_range, max_supported, format(range_frac), cutoff_dist
+      )
+    } else if (fit_converged) {
+      .log_warn(
+        paste0("estimate_sac_range(): the fitted range (%.3g) is shorter than ",
+               "the shortest lag the variogram resolves (%.3g, the mean ",
+               "separation in its first bin), so the structure it describes ",
+               "dies out before the closest pairs of points and cannot be told ",
+               "from a nugget. That is what a layer with no spatial structure ",
+               "at the lags resolved gives. Returning NA."),
+        effective_range, first_lag
       )
     } else {
       .log_warn(
@@ -2355,6 +2491,8 @@ estimate_sac_range <- function(points_sf, response_var,
         "empirical variogram decreases with distance"
       else if (over_cutoff)
         "fitted range exceeds the largest lag fitted"
+      else if (fit_converged)
+        "fitted range is below the shortest lag fitted"
       else "variogram model did not converge"
     ))
   }
@@ -2415,7 +2553,11 @@ estimate_sac_range <- function(points_sf, response_var,
 #' summarised beneath it when one is available.  A direction whose fit was
 #' unusable is labelled with why (\code{directional_status}) and the range
 #' its fit reported (\code{directional_fitted}) when the object carries
-#' them, and \code{unidentified} otherwise.
+#' them, and \code{unidentified} otherwise.  A last line names the unit and
+#' the CRS the range is a length in (\code{attr(x, "crs")}, which for
+#' lon/lat input is the projected CRS the estimate chose), and whether the
+#' variogram is of the response or of its residuals on
+#' \code{predictor_vars} (\code{detrended}, \code{detrend_method}).
 #'
 #' @param x An object of class \code{sac_range}.
 #' @param ... Ignored.
@@ -2457,6 +2599,27 @@ print.sac_range <- function(x, ...) {
         sep = "")
     if (is.finite(a)) cat(sprintf("  (ratio %.2f)", a))
     cat("\n")
+  }
+  # What the number is a length in, and of what.  Lon/lat input is fitted in a
+  # UTM or equal-area CRS picked for it, and a detrended estimate is the range
+  # of the residuals rather than of the response.  Both ride as attributes,
+  # and not every function that takes the object reconciles them with its
+  # own data, so they are shown where a mismatch can be seen before the
+  # object is passed on.
+  cr <- attr(x, "crs")
+  if (inherits(cr, "crs") && !is.na(cr)) {
+    u <- tryCatch(cr$units_gdal, error = function(e) NULL)
+    unit <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
+      switch(u, metre = "metres", kilometre = "kilometres", foot = "feet",
+             "US survey foot" = "US survey feet", degree = "degrees", u)
+    else "CRS units"
+    dm <- attr(x, "detrend_method")
+    what <- if (isTRUE(attr(x, "detrended")))
+      sprintf("; variogram of the residuals on predictor_vars (%s)",
+              if (is.character(dm) && length(dm) == 1L && !is.na(dm)) dm else "detrended")
+    else if (isFALSE(attr(x, "detrended"))) "; variogram of the response itself"
+    else ""
+    cat(sprintf("  in %s of %s%s\n", unit, .fold_crs_label(cr), what))
   }
   invisible(x)
 }

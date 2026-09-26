@@ -383,10 +383,13 @@ axes, so nothing built from them is invariant to rotating the layer. The
 all-pairs fit is the estimate whenever it is usable; the directional maximum
 stands in for it only when the all-pairs fit fails, and the `anisotropy_used`
 attribute is `TRUE` in that case alone. If you *know* the field is anisotropic,
-size blocks from `max(attr(sac, "directional"))` explicitly. It returns `NA`
-(still classed `sac_range`, so it prints as a bare `NA`) when the empirical
-variogram never reaches a sill, because an unidentified range must not be used
-to size blocks.
+size blocks from the longest directional range explicitly:
+`max(attr(sac, "directional_fitted"), na.rm = TRUE)`, after checking
+`attr(sac, "directional_status")`, since `directional` is `NA` for a direction
+that ran past the fitted lags, which on such a field is often the long one. It
+returns `NA` (still classed `sac_range`, so it prints as `NA`) when the
+empirical variogram never reaches a sill, because an unidentified range must
+not be used to size blocks.
 
 ```{r sac-range, eval=has_ggplot && has_gstat}
 sac <- estimate_sac_range(points_sf, response_var = "y",
