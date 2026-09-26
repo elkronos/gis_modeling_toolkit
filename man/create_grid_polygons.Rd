@@ -50,9 +50,14 @@ corner, covering only part of the boundary.}
 
 \item{clip}{Logical; clip grid to boundary.}
 
-\item{crs}{Optional target CRS. When \code{NULL} (default) the boundary is
+\item{crs}{Optional target CRS. When \code{NULL} (default) a lon/lat boundary is
 projected with \code{\link[=ensure_projected]{ensure_projected()}}, which changes the CRS of the returned
-grid; a message reports this unless \code{quiet = TRUE}.}
+grid; a message reports this unless \code{quiet = TRUE}. When that CRS would
+distort cell areas across the boundary by more than 1 percent (Web
+Mercator over a near-global extent, a UTM zone stretched well past its
+width), \code{ensure_projected(purpose = "area")} is used instead, with a
+logged warning, so the cells stay equal-area; a local extent keeps its
+UTM zone.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

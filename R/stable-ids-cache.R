@@ -90,6 +90,16 @@ ensure_stable_poly_id <- function(polygons_sf,
   # projection it arrives in.  Falling back to the untransformed geometry
   # silently therefore does not degrade the result, it defeats the function's
   # purpose -- the IDs stop being comparable with any other run -- so say so.
+  #
+  # The key is measured in lon/lat, where sf routes st_centroid() and
+  # st_area() to s2, or with sf_use_s2(FALSE) to lwgeom (not a dependency:
+  # every Voronoi tessellation, projected ones included, died with "package
+  # lwgeom required") and to planar arithmetic on degrees (other IDs).  Only
+  # this sort copy is measured with s2 on; see .with_s2().
+  if (!isTRUE(sf::sf_use_s2())) {
+    suppressMessages(sf::sf_use_s2(TRUE))
+    on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
+  }
   sort_sf <- polygons_sf
   if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
     sort_sf <- tryCatch(
@@ -328,7 +338,9 @@ create_grid_polygons_cached <- function(boundary,
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
     stop("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON.")
-  bnd <- ensure_projected(bnd)
+  # The same projection create_grid_polygons() makes, so a cached grid is laid
+  # in the CRS an uncached one would be (see .project_for_grid()).
+  bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
 
   key <- .cache_key(bnd, type, target_cells, ...)
 
