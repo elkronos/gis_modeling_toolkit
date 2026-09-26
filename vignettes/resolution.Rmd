@@ -141,10 +141,12 @@ prof
 ```
 
 One row per level. `cell_n_median` and `cell_diam_median` are usually the first
-two columns worth reading: how many points a typical cell holds, and how wide it
-is in CRS units. The width is the number you can compare against something you
-already know about your own data, such as the spacing of a sampling grid or the
-size of a field.
+two columns worth reading: how many points a typical cell holds, and how big it
+is in CRS units. `cell_diam_median` is twice the median root-mean-square
+distance of a cell's points from its centre, about 0.8 of the side of a square
+cell of the same area, so compare it against something you already know about
+your own data, such as the spacing of a sampling grid or the size of a field,
+with that factor in mind.
 
 ### The four criteria
 
@@ -283,10 +285,10 @@ The ladder runs between two bounds the data impose, both recorded on the profile
 str(attr(prof, "bounds"))
 ```
 
-The ceiling is `floor(n / min_cell_n)`, or one short of the number of distinct
-locations when that is smaller; `ceiling_from` says which. Past it the average
-cell holds too few points to estimate anything from, or k-means has more
-centres to place than distinct points. The floor is `ceiling(area / range^2)`, from
+The ceiling is `floor(n / min_cell_n)`, or the number of distinct locations
+when that is smaller (one short of it when no location repeats); `ceiling_from`
+says which. Past it the average cell holds too few points to estimate anything
+from, or k-means has more centres to place than distinct points. The floor is `ceiling(area / range^2)`, from
 the fitted autocorrelation range: cells wider than the range average over more
 than one patch of the field, mixing values the field itself keeps apart.
 
@@ -320,7 +322,11 @@ on the ladder are still drawn on every point, so the count it picks is a count
 for the whole layer, and the ladder is as long as the full profile's. Only the
 steps that read the response (the variogram, `cp`, `moran_z`) use the
 selection half. The cost is power: those criteria see half the data, so the
-profile is noisier and the band wider.
+profile is noisier and the band wider. The estimation rows also fill only
+their own half of the layer: a cell inside the selection half gets none of
+them, and a cell across the border between the halves is estimated from the
+part of it on the estimation side. Read standard errors only off cells whose
+points are all estimation rows.
 
 ```{r split-ladder}
 unlist(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])

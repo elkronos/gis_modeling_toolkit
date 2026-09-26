@@ -77,8 +77,9 @@ test_that("a layer larger than sample_n is bounded, judged and scored on all its
   # Reliability is for cells holding the layer's points, not the subsample's.
   vm  <- attr(sac, "variogram_model")
   cf  <- spatialkit:::.vgm_correlation_fn(vm)
-  bb  <- sf::st_bbox(pts)
-  rbV <- spatialkit:::.rbar_rect(cf, bb[["xmax"]] - bb[["xmin"]], bb[["ymax"]] - bb[["ymin"]])
+  # The domain term over the hull the area is measured on (review round 2).
+  hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(pts)))
+  rbV <- spatialkit:::.rbar_domain(cf, hull, b$area)
   expect_equal(prof$reliability,
                vapply(prof$levels, spatialkit:::.reliability_at, numeric(1),
                       area = b$area, n_total = 1200, nugget = 0.5, psill = 1,

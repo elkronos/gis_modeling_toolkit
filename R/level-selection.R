@@ -147,7 +147,13 @@
   # layer.  On log-log axes that curve is straight (see .elbow_sag()).  The
   # linear answer is kept only as the fallback, flagged, when there is no
   # bend there.
-  sag <- .elbow_sag(k_idx, wss_k)
+  # A k with a WSS of 0 has a cell on every distinct location (the sweep can
+  # reach that k when locations repeat): no geometry is left to bend there,
+  # and log(0) would take the whole line with it, so it is left out.
+  # Anything else that is not positive still leaves no line at all.
+  pos <- !(is.finite(wss_k) & wss_k == 0)
+  sag <- rep(NA_real_, length(k_idx))
+  sag[pos] <- .elbow_sag(k_idx[pos], wss_k[pos])
   structured <- any(is.finite(sag)) && max(sag, na.rm = TRUE) >= .ELBOW_MIN_SAG
   if (structured) knee_k <- k_idx[which.max(sag)]
 
@@ -496,7 +502,9 @@
 #'
 #' @param data_sf An sf object.  Features with empty or non-finite
 #'   coordinates are dropped with a warning.
-#' @param max_levels Integer upper bound on levels. Default 12.
+#' @param max_levels Integer upper bound on levels. Default 12.  The sweep
+#'   also stops at the number of distinct locations (k-means cannot place
+#'   more centres) and one short of the number of points.
 #' @param top_n Integer; how many candidates to return. Default 3. Under
 #'   \code{criterion = "geometric"} the candidate set is the elbow and its two
 #'   immediate neighbours, so at most 3 values are ever returned no matter how
@@ -839,8 +847,12 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
 
   k_max <- max(2L, min(as.integer(max_levels), nrow(xy) - 1L))
 
+  # One centre per distinct location at most, which with repeat visits is
+  # below nrow(xy) - 1 (stats::kmeans() refuses as many centres as points).
+  # It was one short of the distinct locations, so five stations visited
+  # thirty times each could not reach k = 5.
   n_uniq <- nrow(unique(round(xy, 8)))
-  k_max <- min(k_max, n_uniq - 1L)
+  k_max <- min(k_max, n_uniq)
   if (k_max < 2L) return(.with_split(1L))
 
   # Say it BEFORE the sweep: the model-aware criteria carry no information at
