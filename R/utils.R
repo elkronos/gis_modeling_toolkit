@@ -79,9 +79,14 @@
         ll$bb[["ymin"]], ll$bb[["ymax"]])
       return(sf::st_transform(sf::st_set_crs(x, 4326), crs))
     }
+    # Named by its label: most callers have no `crs` argument, so "the
+    # supplied `crs`" sent the reader looking for one they had not passed.
+    lbl <- tryCatch(sf::st_crs(crs)$input, error = function(e) NULL)
+    lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
+      sprintf("the target CRS ('%s')", lbl) else "the target CRS"
     .warn_and_log(
-      "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
-      caller, what)
+      "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping %s WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
+      caller, what, lbl)
     return(sf::st_set_crs(x, crs))
   }
   sf::st_transform(x, crs)
@@ -125,49 +130,12 @@
 #' @keywords internal
 #' @noRd
 .log_warn <- function(fmt, ...) {
-  msg <- sprintf(fmt, ...)
-  # While knitting, the console echo is also sent as an R message (see
-  # .sk_console_appender()), and a caution logged here and then raised by the
-  # caller's very next statement, `warning(...)` -- the pattern of the
-  # cross-validation cautions (random-fold fallback, blocks smaller than the
-  # range) -- appeared in the document twice, as a message and a warning.
-  # Such a line is marked `raising`, as a .warn_and_log() line is.  The
-  # caller's code is read only while knitting.
-  raising <- isTRUE(getOption("knitr.in.progress")) && {
-    p <- sys.parent()
-    p > 0L && .next_is_warning(sys.call(), sys.function(p))
-  }
-  .sk_log(logger::WARN, msg, raising = raising)
-}
-
-# Whether `call` appears in the body of `fn` as a statement of a `{` block
-# whose next statement is a call to warning().  Attributes are ignored: with
-# source references kept, sys.call() carries a "srcref" that the statement in
-# the body does not.
-.next_is_warning <- function(call, fn) {
-  if (!is.function(fn) || is.primitive(fn) || !is.call(call)) return(FALSE)
-  attributes(call) <- NULL
-  found <- FALSE
-  walk <- function(e) {
-    if (found || !is.call(e)) return(invisible(NULL))
-    n <- length(e)
-    if (identical(e[[1L]], as.name("{")) && n > 2L) {
-      for (i in 2:(n - 1L)) {
-        nxt <- e[[i + 1L]]
-        cur <- e[[i]]
-        if (is.call(cur)) attributes(cur) <- NULL
-        if (is.call(nxt) && identical(nxt[[1L]], as.name("warning")) &&
-            identical(cur, call)) {
-          found <<- TRUE
-          return(invisible(NULL))
-        }
-      }
-    }
-    for (j in seq_len(n)) if (is.call(e[[j]])) walk(e[[j]])
-    invisible(NULL)
-  }
-  tryCatch(walk(body(fn)), error = function(e) NULL)
-  found
+  # A caution that is also raised as an R warning goes through
+  # .warn_and_log(), which marks its line `raising`, so a knitted document
+  # shows it once, as the warning, rather than as a message and a warning.
+  # A line logged here is a caution only, and reaches the document as a
+  # message (see .sk_console_appender()).
+  .sk_log(logger::WARN, sprintf(fmt, ...))
 }
 
 # A warning about a CHOICE, logged once per session under `key`.  A choice

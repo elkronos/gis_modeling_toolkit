@@ -309,7 +309,11 @@
 #'   call with the same \code{seed}, which makes the same split.  When
 #'   \code{NULL} and a response is given, one is estimated on the subsample
 #'   (its selection half under \code{"split"}) with the same
-#'   \code{predictor_vars}.
+#'   \code{predictor_vars}.  A plain number is taken as the range alone, in
+#'   the units of the CRS the profile is computed in (metres for lon/lat
+#'   input): it sets the floor, and \code{cp} and \code{reliability}, which
+#'   need a fitted model, are \code{NA}.  A \code{units} object is refused
+#'   rather than read as a number in whatever unit it was written in.
 #' @param select_on \code{"all"} (default) profiles every point;
 #'   \code{"split"} reads the response on one spatially blocked half only
 #'   (the OLS fit, the variogram, \code{rss}, \code{cp} and \code{moran_z})
@@ -414,6 +418,18 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   has_pred <- !is.null(predictor_vars) && length(predictor_vars) > 0L
   if (has_pred && !has_resp)
     stop("resolution_profile(): `predictor_vars` needs a `response_var`.", call. = FALSE)
+  # as.numeric() strips a `units` object to its number in whatever unit it
+  # was written in, so set_units(1.5, "km") became a range of 1.5 CRS units
+  # (metres): a floor of 41 million cells, with nothing said.  Refused by
+  # name, as fold_separation() and cv_block_size_sweep() refuse it; and a
+  # character string, which as.numeric() also read, with it.
+  if (!is.null(sac) && (inherits(sac, "units") || !is.numeric(sac)))
+    stop("resolution_profile(): `sac` must be an estimate_sac_range() result, ",
+         "or a plain number in the units of the CRS the profile is computed ",
+         "in (metres for lon/lat input); got ",
+         if (inherits(sac, "units")) format(sac)
+         else sprintf("an object of class %s", class(sac)[1L]),
+         ".", call. = FALSE)
 
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT"))
     data_sf <- coerce_to_points(data_sf, "auto")

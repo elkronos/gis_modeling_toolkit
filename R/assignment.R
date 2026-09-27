@@ -1082,9 +1082,11 @@ assign_features_to_polygons <- function(
 #'   enough to report a range: the variogram is then estimated as if no `sac`
 #'   had been given, with a plain warning saying so, or, where that is not
 #'   possible, `deff` falls back to 1 with the fallback warning, which names
-#'   the rejection. A `sac` fitted to residuals (`attr(sac, "detrended")`
-#'   `TRUE`) is used as given, with a warning when it corrects response
-#'   columns (see "Design effects and variable types").
+#'   the rejection. A `sac` with no `variogram_model` attribute -- a plain
+#'   number or a `units` object, say -- is a range without a correlation
+#'   function, and is set aside the same way. A `sac` fitted to residuals
+#'   (`attr(sac, "detrended")` `TRUE`) is used as given, with a warning when
+#'   it corrects response columns (see "Design effects and variable types").
 #' @param deff_max_n Cells with more than this many points are subsampled
 #'   before forming the `n x n` correlation matrix used by
 #'   `deff = "variogram"`. Default 500. It must be a single number of at
@@ -1660,10 +1662,23 @@ summarize_by_cell <- function(assigned_points_sf,
     # and an unreplaced one is named in the single fallback warning.
     no_fit    <- NULL       # why no model is available, for the warning below
     set_aside <- NULL       # why a supplied `sac` was not used
+    set_aside_so <- ""      # and what that means, for the replacement warning
     if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
       set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
                            as.character(attr(sac, "rejected_reason"))[1L])
+      set_aside_so <- ", so its fitted variogram model cannot size a design effect"
+      sac <- NULL
+    } else if (!is.null(sac) && is.null(attr(sac, "variogram_model"))) {
+      # A bare range -- a number, a units object -- carries no correlation
+      # function, and it was passed over without a word: the design effect
+      # came from a variogram estimated here, and nothing said that the value
+      # given had not been used.
+      set_aside <- sprintf(paste0("the supplied `sac` (%s) carries no fitted ",
+                                  "variogram model, and a range alone cannot ",
+                                  "size a design effect"),
+                           if (is.numeric(sac)) paste(format(sac), collapse = ", ")
+                           else sprintf("an object of class %s", class(sac)[1L]))
       sac <- NULL
     }
     # A residual variogram used for the response's own standard errors is
@@ -1750,11 +1765,10 @@ summarize_by_cell <- function(assigned_points_sf,
       deff <- 1
     } else {
       if (!is.null(set_aside))
-        .warn_and_log(paste0("summarize_by_cell(): %s, so its fitted variogram ",
-                             "model cannot size a design effect. It was set aside, ",
+        .warn_and_log(paste0("summarize_by_cell(): %s%s. It was set aside, ",
                              "and the design effect uses the variogram estimated ",
                              "from `response_var` instead."),
-                      set_aside)
+                      set_aside, set_aside_so)
       if (detrended_sac && length(resp_num))
         .warn_and_log(paste0("summarize_by_cell(): `sac` is the variogram of the ",
                              "residuals on predictors (detrend = \"%s\"), but the ",

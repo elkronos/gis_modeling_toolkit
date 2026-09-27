@@ -58,7 +58,16 @@ that equal weighting applies.}
 
 \item{folds}{Cross-validation folds: a \code{\link{make_folds}} result, a
 list of \code{train}/\code{test} splits, or a vector of fold labels with
-one entry per training row. Default \code{NULL} (plain nearest neighbour).}
+one entry per training row. Default \code{NULL} (plain nearest neighbour).
+The folds you passed to \code{cv_*()}, built on the layer \code{model}
+was fitted from, may name rows that \code{prep_model_data()} removed
+(a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+they are dropped from the folds, and a label vector with one entry per
+row of that layer loses theirs. Also
+as in \code{cv_*()}, a \code{make_folds()} result built on other data --
+another layer, or these rows in another order -- is refused. That check
+is skipped when the folds were built on polygons and the training data
+are the points a fit reduced them to.}
 
 \item{threshold}{Optional numeric override for the DI threshold.}
 

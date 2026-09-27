@@ -321,9 +321,15 @@
 #'   VALUES and resolved to row positions with \code{match()}; when
 #'   \code{NULL} they are treated as positions, as before.  Fold labels are
 #'   always positional: they are one label per row by definition.
+#' @param removed_ids Optional \code{..row_id} values of rows that
+#'   \code{prep_model_data()} removed from the training data (read from its
+#'   \code{"dropped"} record).  They are taken out of every train and test
+#'   slot before the IDs are resolved, as \code{.remap_folds()} does for
+#'   \code{cv_*()}, and a fold left with no test row is dropped.  Any other
+#'   unknown ID is still an error.
 #' @keywords internal
 #' @noRd
-.aoa_fold_splits <- function(folds, n, row_ids = NULL) {
+.aoa_fold_splits <- function(folds, n, row_ids = NULL, removed_ids = NULL) {
   if (is.null(folds)) return(NULL)
 
   if (is.atomic(folds) && !is.list(folds)) {
@@ -358,6 +364,41 @@
          "list of train/test splits, or a vector of fold labels.",
          call. = FALSE)
 
+  # Folds built on the layer a model was fitted from name every row of it,
+  # including those prep_model_data() then removed (a missing response, a
+  # non-finite predictor, an empty geometry).  cv_*() drops such IDs from the
+  # splits (.remap_folds()); here they were resolved against the shorter
+  # training data and every one of them stopped the call with "refers to rows
+  # outside 1:n" -- for the same folds cv_*() had just accepted.  Drop them,
+  # and say how many.
+  if (length(removed_ids) && !is.null(row_ids)) {
+    named <- unique(unlist(lapply(sp, function(z) c(z$train, z$test)),
+                           use.names = FALSE))
+    n_hit <- sum(named %in% removed_ids)
+    if (n_hit > 0L) {
+      sp <- lapply(sp, function(z) {
+        z$train <- z$train[!(z$train %in% removed_ids)]
+        z$test  <- z$test[!(z$test %in% removed_ids)]
+        z
+      })
+      no_test <- vapply(sp, function(z) length(z$test) == 0L, logical(1))
+      .log_info(paste0("area_of_applicability(): `folds` name %d row(s) that ",
+                       "prep_model_data() removed from the training data ",
+                       "(missing or non-finite values, or an empty geometry); ",
+                       "they were dropped from every fold%s."),
+                n_hit,
+                if (any(no_test))
+                  sprintf(", and the %d fold(s) left with no test row with them",
+                          sum(no_test))
+                else "")
+      sp <- sp[!no_test]
+      if (length(sp) == 0L)
+        stop("area_of_applicability(): no fold has a test row left once the ",
+             "rows prep_model_data() removed are taken out of `folds`.",
+             call. = FALSE)
+    }
+  }
+
   # Every make_folds() branch emits ..row_id VALUES in its train/test slots, as
   # its @return documents, and those coincide with row POSITIONS only when the
   # training data had no pre-existing ..row_id column.  cv_gwr(), cv_bayes()
@@ -373,7 +414,10 @@
       stop(sprintf(paste0("area_of_applicability(): fold %d's %s set names %d ",
                           "..row_id value(s) that are not in the training data ",
                           "(first: %s). `folds` was built on a different data ",
-                          "set, or on rows that have since been removed."),
+                          "set, or on rows that have since been removed other ",
+                          "than by prep_model_data(), whose removals are ",
+                          "dropped from the folds while the training data ",
+                          "carries its \"dropped\" record."),
                    j, slot, sum(is.na(pos)),
                    format(v[is.na(pos)][1L])), call. = FALSE)
     as.integer(pos)
@@ -388,7 +432,11 @@
       stop(sprintf(paste0("area_of_applicability(): fold %d refers to rows ",
                           "outside 1:%d. `folds` was probably built on a ",
                           "different data set, or on data carrying its own ",
-                          "..row_id."), j, n), call. = FALSE)
+                          "..row_id. (Rows prep_model_data() removed are ",
+                          "dropped from the folds when the training data ",
+                          "carries its \"dropped\" record, as a fit's data_sf ",
+                          "does; a subset or a re-ordering of it does not.)"),
+                   j, n), call. = FALSE)
     if (length(te) == 0L)
       stop(sprintf("area_of_applicability(): fold %d has an empty test set.",
                    j), call. = FALSE)
@@ -418,6 +466,104 @@
                         "test fold, so they have no reference distance."),
                  sum(seen == 0L)), call. = FALSE)
   out
+}
+
+
+#' Line the folds up with a training layer prep_model_data() removed rows from
+#'
+#' A fit's \code{data_sf} is the \code{prep_model_data()} output: rows with a
+#' missing or non-finite modelling value or an empty geometry are gone, and
+#' it carries no \code{..row_id} unless its input did.  Folds built on the
+#' layer the model was fitted FROM -- the ones passed to \code{cv_*()} -- name
+#' the input's rows.  The \code{"dropped"} record says which those were, so
+#' the input's row IDs of the kept rows can be rebuilt: positions when the
+#' input had no \code{..row_id} (make_folds() numbers the rows then), the
+#' recorded IDs otherwise.
+#'
+#' When the training data carries \code{..row_id}, list-shaped folds are
+#' resolved by ID already, and only the removed rows' IDs are needed.
+#' Without it, the IDs of folds built on the training data itself are its
+#' row positions, \code{1:n}; folds built on the layer fitted from name that
+#' layer's rows, and so name a row past \code{n} whenever a row before its
+#' end was removed (a trailing row's removal leaves the numbering the same).
+#' So a fold list naming a row past \code{n} is read in the input's
+#' numbering, and one that does not is left as positions.  A label vector
+#' with one label per input row is cut down to the kept rows; one with one
+#' label per training row is left alone.
+#'
+#' @return A list: \code{folds}, \code{row_ids} (the training rows' IDs, or
+#'   the \code{row_ids} given) and \code{removed_ids} (the IDs of the removed
+#'   rows, or \code{NULL}).
+#' @keywords internal
+#' @noRd
+.aoa_rows_for_folds <- function(folds, train_sf, row_ids) {
+  out <- list(folds = folds, row_ids = row_ids, removed_ids = NULL)
+  rec <- if (is.data.frame(train_sf)) .get_row_record(train_sf, "dropped") else NULL
+  n_rm <- suppressWarnings(as.integer(rec$n %||% 0L))
+  if (is.null(rec) || length(n_rm) != 1L || is.na(n_rm) || n_rm < 1L)
+    return(out)
+  n    <- as.integer(nrow(train_sf))
+  n_in <- n + n_rm
+  kept <- setdiff(seq_len(n_in), as.integer(rec$which))
+  # A record that does not add up describes other rows; ignore it.
+  if (length(kept) != n) return(out)
+  if (is.atomic(folds) && !is.list(folds)) {
+    if (length(folds) == n_in) {
+      .log_info(paste0("area_of_applicability(): `folds` has one label per row ",
+                       "of the layer the model was fitted from; the %d label(s) ",
+                       "of the row(s) prep_model_data() removed were dropped."),
+                n_rm)
+      out$folds <- folds[kept]
+    }
+    return(out)
+  }
+  if (!is.null(row_ids)) {
+    if (length(rec$row_id)) out$removed_ids <- rec$row_id
+    return(out)
+  }
+  sp <- if (is.list(folds) && is.list(folds$folds)) folds$folds else folds
+  named <- if (is.list(sp))
+    suppressWarnings(as.numeric(unlist(lapply(sp, function(z)
+      if (is.list(z)) c(z$train, z$test)), use.names = FALSE)))
+  else numeric(0)
+  if (length(named) && any(named > n, na.rm = TRUE)) {
+    out$row_ids     <- kept
+    out$removed_ids <- as.integer(rec$which)
+  }
+  out
+}
+
+
+#' The fold provenance check of cv_*(), for area_of_applicability()
+#'
+#' \code{.check_fold_probe()} on the training data, with its row IDs as the
+#' folds are resolved against them.  A fit's \code{data_sf} holds the points
+#' \code{prep_model_data()} reduced its layer to, so folds built on the
+#' polygons it was fitted from carry a probe taken on polygon centroids: the
+#' two cannot be compared location by location, and the check is skipped
+#' (logged) rather than refusing a documented workflow.
+#' @keywords internal
+#' @noRd
+.aoa_check_fold_probe <- function(folds, train_sf, row_ids) {
+  probe <- tryCatch(folds$params$row_probe, error = function(e) NULL)
+  if (!is.list(probe) || !inherits(train_sf, "sf") || nrow(train_sf) == 0L)
+    return(invisible(NULL))
+  tr_points <- tryCatch(
+    all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"),
+    error = function(e) NA)
+  if (is.logical(probe$points) && length(probe$points) == 1L &&
+      !is.na(probe$points) && !identical(probe$points, tr_points)) {
+    .log_info(paste0("area_of_applicability(): `folds` were built on %s ",
+                     "geometry and the training data has %s geometry, so their ",
+                     "row locations cannot be compared; skipping the ",
+                     "provenance check."),
+              if (probe$points) "POINT" else "non-POINT",
+              if (isTRUE(tr_points)) "POINT" else "non-POINT")
+    return(invisible(NULL))
+  }
+  chk <- train_sf
+  chk[["..row_id"]] <- if (is.null(row_ids)) seq_len(nrow(train_sf)) else row_ids
+  .check_fold_probe(folds, chk, "area_of_applicability")
 }
 
 
@@ -631,6 +777,15 @@
 #' @param folds Cross-validation folds: a \code{\link{make_folds}} result, a
 #'   list of \code{train}/\code{test} splits, or a vector of fold labels with
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
+#'   The folds you passed to \code{cv_*()}, built on the layer \code{model}
+#'   was fitted from, may name rows that \code{prep_model_data()} removed
+#'   (a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+#'   they are dropped from the folds, and a label vector with one entry per
+#'   row of that layer loses theirs. Also
+#'   as in \code{cv_*()}, a \code{make_folds()} result built on other data --
+#'   another layer, or these rows in another order -- is refused. That check
+#'   is skipped when the folds were built on polygons and the training data
+#'   are the points a fit reduced them to.
 #' @param threshold Optional numeric override for the DI threshold.
 #' @param normalizer_max_n Subsample the training data to this many points when
 #'   computing the mean pairwise distance, which is quadratic. Default 5000.
@@ -768,6 +923,23 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     chunk_size <- as.integer(chunk_size)
   }
 
+  # Fold train/test slots from make_folds() are ..row_id VALUES, not row
+  # positions; keep the IDs alongside so .aoa_fold_splits() can resolve them.
+  tr_meta <- if (inherits(train_sf, "sf")) sf::st_drop_geometry(train_sf) else
+    as.data.frame(train_sf)
+  tr_row_ids <- if ("..row_id" %in% names(tr_meta)) tr_meta[["..row_id"]] else NULL
+  removed_ids <- NULL
+  if (!is.null(folds)) {
+    fr <- .aoa_rows_for_folds(folds, train_sf, tr_row_ids)
+    folds       <- fr$folds
+    tr_row_ids  <- fr$row_ids
+    removed_ids <- fr$removed_ids
+    # The provenance check cv_*() make: fold splits are row IDs, so folds
+    # built on another layer of the same size, or on these rows in another
+    # order, applied silently and moved the threshold.
+    .aoa_check_fold_probe(folds, train_sf, tr_row_ids)
+  }
+
   # A model fitted with the coordinates as predictors splits on location, so
   # the dissimilarity index has to measure location too.  Without this, a
   # prediction point far outside the training extent but with ordinary
@@ -803,12 +975,6 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
 
   X_tr_full <- .aoa_matrix(train_sf, predictor_vars, "the training data")
   X_nw_full <- .aoa_matrix(newdata,  predictor_vars, "`newdata`")
-
-  # Fold train/test slots from make_folds() are ..row_id VALUES, not row
-  # positions; keep the IDs alongside so .aoa_fold_splits() can resolve them.
-  tr_meta <- if (inherits(train_sf, "sf")) sf::st_drop_geometry(train_sf) else
-    as.data.frame(train_sf)
-  tr_row_ids <- if ("..row_id" %in% names(tr_meta)) tr_meta[["..row_id"]] else NULL
 
   # Training rows carrying NA or Inf cannot define a reference distance.
   # complete.cases() alone would let an Inf through, and it would then poison
@@ -860,7 +1026,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   Z_tr  <- sweep(Z_tr, 2L, w_vec, "*")
   Z_nw  <- sweep(Z_nw, 2L, w_vec, "*")
 
-  splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids)
+  splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids,
+                             removed_ids = removed_ids)
 
   # What KIND of folds these are is part of what the threshold means: Meyer
   # and Pebesma define it from the cross-validated training DI, so a threshold

@@ -43,13 +43,8 @@
                         "rows numbered, or make the IDs unique."),
                  sum(duplicated(keep_idx))), call. = FALSE)
   if (is.null(folds)) {
-    .log_warn(
-      "cross-validation: no fold specification provided; falling back to random k-fold CV (k=%d). Random folds leak spatial autocorrelation and overstate out-of-sample performance.",
-      k
-    )
-    warning(
-      "cross-validation: falling back to random k-fold CV. For spatial data, use make_folds(method='block_kfold') to avoid optimistic performance estimates.",
-      call. = FALSE
+    .warn_and_log(
+      "cross-validation: falling back to random k-fold CV. For spatial data, use make_folds(method='block_kfold') to avoid optimistic performance estimates."
     )
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
@@ -732,6 +727,47 @@
                         "this data."),
                  caller, bad, sum(ok)), call. = FALSE)
   invisible(NULL)
+}
+
+
+#' Give a cv_*() boundary that has no CRS one, once, naming the caller
+#'
+#' A \code{cv_*()} call hands \code{boundary} to \code{prep_model_data()},
+#' which takes the data's CRS from it, and to \code{make_folds()}, which clips
+#' the blocks to it.  Each interpreted a CRS-less boundary on its own: a
+#' lon/lat one raised two R warnings, one from each, naming
+#' \code{ensure_projected()} rather than the caller or the argument.  Called
+#' with \code{to = NULL} before preparation, a boundary whose coordinates
+#' look like lon/lat is taken as EPSG:4326 -- what \code{prep_model_data()}
+#' would assume -- with one warning.  Called with the prepared data as
+#' \code{to} before \code{make_folds()}, a boundary still without a CRS is
+#' stamped with the data's, as \code{make_folds()} would stamp it, with one
+#' warning.  Either way the next consumer finds a CRS and says nothing.
+#'
+#' @param boundary The caller's \code{boundary}, or \code{NULL}.
+#' @param caller Calling function name, for the warning.
+#' @param to \code{NULL}, or the prepared data whose CRS to stamp.
+#' @return \code{boundary}, with a CRS where one was assumed.
+#' @keywords internal
+#' @noRd
+.cv_boundary_crs <- function(boundary, caller, to = NULL) {
+  if (!(inherits(boundary, "sf") || inherits(boundary, "sfc")) ||
+      !is.na(sf::st_crs(boundary)))
+    return(boundary)
+  if (is.null(to)) {
+    ll <- .looks_like_lonlat(boundary)
+    if (!isTRUE(ll$lonlat)) return(boundary)
+    .warn_and_log(
+      paste0("%s(): `boundary` has no CRS; its coordinates look like lon/lat ",
+             "(xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f), so it is taken as ",
+             "EPSG:4326. Set the CRS explicitly with sf::st_crs() to suppress ",
+             "this."),
+      caller, ll$bb[["xmin"]], ll$bb[["xmax"]], ll$bb[["ymin"]], ll$bb[["ymax"]])
+    return(sf::st_set_crs(boundary, 4326))
+  }
+  crs <- .crs_or_null(to)
+  if (is.null(crs)) return(boundary)
+  .transform_or_stamp(boundary, crs, what = "boundary", caller = caller)
 }
 
 
@@ -3080,7 +3116,10 @@ print.sac_range <- function(x, ...) {
 #'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
 #' @param boundary Optional polygonal sf/sfc for block_kfold.  The grid is
 #'   clipped to it; a cell that the boundary only touches at a corner or
-#'   along an edge is not a block.
+#'   along an edge is not a block.  A boundary without a CRS is brought into
+#'   the points' CRS: reprojected from EPSG:4326 when its coordinates look
+#'   like lon/lat, otherwise stamped, with a warning either way.  The same
+#'   goes for \code{prediction_points} and \code{blocks}.
 #' @param buffer For \code{"buffered_loo"}: a single positive number, the
 #'   distance within which the held-out point's neighbours are excluded from
 #'   its training set.  Like \code{block_size} it is in the units of the CRS
@@ -3569,7 +3608,8 @@ make_folds <- function(points_sf, k,
         pts <- .transform_or_stamp(pts, sf::st_crs(blocks),
                                    what = "points_sf", caller = "make_folds")
       if (!is.null(.crs_or_null(pts)))
-        blocks <- ensure_projected(blocks, .crs_or_null(pts))
+        blocks <- .transform_or_stamp(blocks, sf::st_crs(pts),
+                                      what = "blocks", caller = "make_folds")
       blocks <- .safe_make_valid(blocks)
     }
     # A CRS-less `points_sf` leaves .crs_or_null(pts) NULL, so the boundary
@@ -3583,7 +3623,13 @@ make_folds <- function(points_sf, k,
                                  what = "points_sf", caller = "make_folds")
     }
     reg <- if (!is.null(boundary)) {
-      b <- ensure_projected(boundary, .crs_or_null(pts))
+      # A CRS-less boundary is aligned to the points as every other function
+      # given one aligns it: an R warning naming this function and argument.
+      # ensure_projected()'s stamp was a log line naming neither, invisible
+      # to tryCatch(), knitr and spatialkit_quiet().
+      b <- if (is.null(.crs_or_null(pts))) ensure_projected(boundary)
+           else .transform_or_stamp(boundary, sf::st_crs(pts),
+                                    what = "boundary", caller = "make_folds")
       if (inherits(b, "sfc")) b <- sf::st_sf(geometry = b)
       b <- .safe_make_valid(sf::st_union(b))
       mat <- sf::st_intersects(pts, b, sparse = FALSE)
@@ -3660,14 +3706,9 @@ make_folds <- function(points_sf, k,
           block_size <- sac_range
           size_from_range <- TRUE
         } else if (block_size < sac_range) {
-          .log_warn(
-            "make_folds(block_kfold): supplied block_size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Spatial CV may still leak correlated information.",
+          .warn_and_log(
+            "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Consider increasing block_size to reduce information leakage across folds.",
             block_size, sac_range
-          )
-          warning(
-            sprintf("make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Consider increasing block_size to reduce information leakage across folds.",
-                    block_size, sac_range),
-            call. = FALSE
           )
         }
       } else {
@@ -3699,8 +3740,7 @@ make_folds <- function(points_sf, k,
                       why)
       }
     } else if (isTRUE(auto_range) && is.null(response_var)) {
-      .log_warn("make_folds(block_kfold): auto_range = TRUE but response_var is NULL; cannot estimate range. Falling back to geometric blocks.")
-      warning("make_folds(): auto_range requires response_var; ignoring.", call. = FALSE)
+      .warn_and_log("make_folds(): auto_range requires response_var; ignoring.")
     } else if (!is.null(response_var)) {
       # auto_range is off, but a response is to hand -- which it always is when
       # a cv_*() function built the folds -- so estimate the range for the
@@ -3731,14 +3771,9 @@ make_folds <- function(points_sf, k,
         # below the range leaks exactly as a geometric one does.
         if (!isTRUE(auto_range) && is.finite(sac_range) && sac_range > 0 &&
             block_size < sac_range) {
-          .log_warn(
-            "make_folds(block_kfold): supplied block_size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Spatial CV may leak correlated information.",
+          .warn_and_log(
+            "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Consider increasing block_size to reduce information leakage across folds.",
             block_size, sac_range
-          )
-          warning(
-            sprintf("make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Consider increasing block_size to reduce information leakage across folds.",
-                    block_size, sac_range),
-            call. = FALSE
           )
         }
         # If the caller also supplied explicit block_nx/block_ny, warn about override
@@ -3787,14 +3822,9 @@ make_folds <- function(points_sf, k,
         if (is.finite(sac_range) && sac_range > 0 && length(split_cells)) {
           min_cell <- min(split_cells)
           if (min_cell < sac_range) {
-            .log_warn(
-              "make_folds(block_kfold): geometric block size (%.1f) is smaller than the estimated autocorrelation range (%.1f). Consider setting block_size >= %.0f or auto_range = TRUE to avoid information leakage.",
-              min_cell, sac_range, sac_range
-            )
-            warning(
-              sprintf("make_folds(): block dimension (%.1f) < autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. Pass block_size = %.0f or auto_range = TRUE.",
-                      min_cell, sac_range, ceiling(sac_range)),
-              call. = FALSE
+            .warn_and_log(
+              "make_folds(): block dimension (%.1f) < autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. Pass block_size = %.0f or auto_range = TRUE.",
+              min_cell, sac_range, ceiling(sac_range)
             )
           }
         }
@@ -3822,14 +3852,9 @@ make_folds <- function(points_sf, k,
         if (is.finite(sac_range) && sac_range > 0 && length(split_cells)) {
           min_cell <- min(split_cells)
           if (min_cell < sac_range) {
-            .log_warn(
-              "make_folds(block_kfold): user-supplied grid (%dx%d) yields blocks of ~%.1f units, smaller than estimated autocorrelation range (%.1f).",
-              nx, ny, min_cell, sac_range
-            )
-            warning(
-              sprintf("make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%.1f). Consider using block_size = %.0f.",
-                      sac_range, ceiling(sac_range)),
-              call. = FALSE
+            .warn_and_log(
+              "make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%.1f). Consider using block_size = %.0f.",
+              sac_range, ceiling(sac_range)
             )
           }
         }
@@ -4082,14 +4107,9 @@ make_folds <- function(points_sf, k,
         na.rm = TRUE)
       if (is.finite(sac_range) && sac_range > 0 && is.finite(block_scale) &&
           block_scale < sac_range) {
-        .log_warn(
-          "make_folds(block_kfold): the supplied blocks have a median scale (sqrt of area) of %.1f units, smaller than the estimated autocorrelation range (%.1f).",
-          block_scale, sac_range
-        )
-        warning(
-          sprintf("make_folds(): the supplied blocks (median scale %.1f) are smaller than the autocorrelation range (%.1f). Spatial CV may leak correlated information across folds; supply blocks at least %.0f units across.",
-                  block_scale, sac_range, ceiling(sac_range)),
-          call. = FALSE
+        .warn_and_log(
+          "make_folds(): the supplied blocks (median scale %.1f) are smaller than the autocorrelation range (%.1f). Spatial CV may leak correlated information across folds; supply blocks at least %.0f units across.",
+          block_scale, sac_range, ceiling(sac_range)
         )
       }
     }
@@ -4359,7 +4379,11 @@ make_folds <- function(points_sf, k,
       pts <- .transform_or_stamp(pts, sf::st_crs(prediction_points),
                                  what = "points_sf", caller = "make_folds")
     }
-    pred <- ensure_projected(prediction_points, target_crs = .crs_or_null(pts))
+    # Aligned as `boundary` is: a CRS-less layer gets the warning, naming it.
+    pred <- if (is.null(.crs_or_null(pts))) ensure_projected(prediction_points)
+            else .transform_or_stamp(prediction_points, sf::st_crs(pts),
+                                     what = "prediction_points",
+                                     caller = "make_folds")
     pred <- sf::st_zm(pred, drop = TRUE, what = "ZM")
 
     # Target: distance from each prediction location to its nearest training
@@ -4730,6 +4754,7 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_gwr")
+  boundary <- .cv_boundary_crs(boundary, "cv_gwr")
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   if (!("..row_id" %in% names(dat_sf)))
     stop("cv_gwr(): `prep_model_data()` must preserve `..row_id`.")
@@ -4743,7 +4768,8 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   if (is.null(folds)) {
     message("cv_gwr(): no folds supplied -- using spatial block k-fold CV (k=", k, ").")
     folds <- make_folds(dat_sf, k = k, method = "block_kfold",
-                        seed = seed, boundary = boundary,
+                        seed = seed,
+                        boundary = .cv_boundary_crs(boundary, "cv_gwr", to = dat_sf),
                         block_size = block_size, auto_range = auto_range,
                         response_var = response_var,
                         predictor_vars = predictor_vars)
@@ -4821,10 +4847,8 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .log_warn("cv_gwr(): all %d folds failed to produce predictions; results are empty.%s",
-              n_attempted, why)
-    warning("cv_gwr(): all folds failed; cross-validation results contain no predictions.",
-            why, call. = FALSE)
+    .warn_and_log("cv_gwr(): all folds failed; cross-validation results contain no predictions.%s",
+                  why)
   } else {
     .cv_warn_failed_folds("cv_gwr", res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
@@ -4996,6 +5020,7 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, "cv_bayes")
+  boundary <- .cv_boundary_crs(boundary, "cv_bayes")
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   if (!("..row_id" %in% names(dat_sf)))
     stop("cv_bayes(): `prep_model_data()` must preserve `..row_id`.")
@@ -5010,7 +5035,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   if (is.null(folds)) {
     message("cv_bayes(): no folds supplied -- using spatial block k-fold CV (k=", k, ").")
     folds <- make_folds(dat_sf, k = k, method = "block_kfold",
-                        seed = seed, boundary = boundary,
+                        seed = seed,
+                        boundary = .cv_boundary_crs(boundary, "cv_bayes", to = dat_sf),
                         block_size = block_size, auto_range = auto_range,
                         response_var = response_var,
                         predictor_vars = predictor_vars)
@@ -5150,10 +5176,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .log_warn("cv_bayes(): all %d folds failed to produce predictions; results are empty.%s",
-              n_attempted, why)
-    warning("cv_bayes(): all folds failed; cross-validation results contain no predictions.",
-            why, call. = FALSE)
+    .warn_and_log("cv_bayes(): all folds failed; cross-validation results contain no predictions.%s",
+                  why)
   } else {
     .cv_warn_failed_folds("cv_bayes", res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
@@ -5480,6 +5504,7 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
 
   if (!("..row_id" %in% names(data_sf))) data_sf$`..row_id` <- seq_len(nrow(data_sf))
   folds <- .folds_from_labels(folds, data_sf, .caller)
+  boundary <- .cv_boundary_crs(boundary, .caller)
   dat_sf <- prep_model_data(data_sf, response_var, predictor_vars, boundary, pointize)
   keep_idx <- dat_sf$`..row_id`
 
@@ -5490,7 +5515,8 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   if (is.null(folds)) {
     message(.caller, "(): no folds supplied -- using spatial block k-fold CV (k=", k, ").")
     folds <- make_folds(dat_sf, k = k, method = "block_kfold",
-                        seed = seed, boundary = boundary,
+                        seed = seed,
+                        boundary = .cv_boundary_crs(boundary, .caller, to = dat_sf),
                         block_size = block_size, auto_range = auto_range,
                         response_var = response_var,
                         predictor_vars = predictor_vars)
@@ -5535,10 +5561,8 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .log_warn("%s(): all %d folds failed to produce predictions; results are empty.%s",
-              .caller, n_attempted, why)
-    warning(.caller, "(): all folds failed; cross-validation results contain ",
-            "no predictions.", why, call. = FALSE)
+    .warn_and_log("%s(): all folds failed; cross-validation results contain no predictions.%s",
+                  .caller, why)
   } else {
     .cv_warn_failed_folds(.caller, res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
