@@ -159,7 +159,10 @@ Passed to \code{estimate_sac_range()} for residual variogram estimation.}
 
 \item{boundary}{Optional polygonal sf/sfc for block_kfold.  The grid is
 clipped to it; a cell that the boundary only touches at a corner or
-along an edge is not a block.}
+along an edge is not a block.  A boundary without a CRS is brought into
+the points' CRS: reprojected from EPSG:4326 when its coordinates look
+like lon/lat, otherwise stamped, with a warning either way.  The same
+goes for \code{prediction_points} and \code{blocks}.}
 
 \item{buffer}{For \code{"buffered_loo"}: a single positive number, the
 distance within which the held-out point's neighbours are excluded from

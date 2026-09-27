@@ -128,9 +128,11 @@ it is set aside rather than correcting by a shape that was not trusted
 enough to report a range: the variogram is then estimated as if no \code{sac}
 had been given, with a plain warning saying so, or, where that is not
 possible, \code{deff} falls back to 1 with the fallback warning, which names
-the rejection. A \code{sac} fitted to residuals (\code{attr(sac, "detrended")}
-\code{TRUE}) is used as given, with a warning when it corrects response
-columns (see "Design effects and variable types").}
+the rejection. A \code{sac} with no \code{variogram_model} attribute -- a plain
+number or a \code{units} object, say -- is a range without a correlation
+function, and is set aside the same way. A \code{sac} fitted to residuals
+(\code{attr(sac, "detrended")} \code{TRUE}) is used as given, with a warning when
+it corrects response columns (see "Design effects and variable types").}
 
 \item{deff_max_n}{Cells with more than this many points are subsampled
 before forming the \verb{n x n} correlation matrix used by
