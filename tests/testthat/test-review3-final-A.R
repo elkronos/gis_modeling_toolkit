@@ -271,7 +271,11 @@ test_that("an all-failed cross-validation logs the text it warns with", {
   fails <- function(tr) stop("no fit here")
   lines <- capture_spatialkit_log(
     expect_warning(suppressMessages(cv_spatial(pts, "z", "a", fit_fn = fails, k = 3)),
-                   "cv_spatial(): all folds failed; cross-validation results contain no predictions. First error:",
+                   paste0("cv_spatial(): all folds failed (all 3 folds failed to ",
+                          "produce predictions); cross-validation results ",
+                          "contain no predictions. First error:"),
                    fixed = TRUE))
-  expect_true(log_has(lines, "cv_spatial\\(\\): all folds failed; cross-validation results contain no predictions\\. First error:"))
+  expect_true(log_has(lines, paste0("cv_spatial\\(\\): all folds failed \\(all 3 folds ",
+                                    "failed to produce predictions\\); cross-validation ",
+                                    "results contain no predictions\\. First error:")))
 })
