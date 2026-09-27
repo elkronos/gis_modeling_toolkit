@@ -38,7 +38,16 @@ the integer vector of ranked candidates from \code{\link[=determine_optimal_leve
 (its first element is used), a \code{\link[=select_resolution]{select_resolution()}} result (its
 \verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}} (read with \code{select_resolution()} at
 its default criterion). The result then carries \code{attr(, "n_from")}
-saying which.}
+saying which.
+
+With \code{method = "kmeans"}, a selection or profile also carries the
+centres of the partition the profile scored at that count, and those
+are returned instead of a new k-means: a k-means partition is the
+Voronoi partition of its centres, so their cells are the cells the
+criteria judged. \code{sample_points}, when given, is then only assigned to
+them (for \code{attr(, "kmeans")}), and \code{boundary} only sets the CRS;
+\code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used. Pass the
+count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
 
@@ -54,7 +63,7 @@ before clustering.}
 \item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. The
 partition is \code{\link[stats:kmeans]{stats::kmeans()}}, not the best-of-25 k-means++ run that
 \code{\link[=resolution_profile]{resolution_profile()}} scored a count on, so it is not that partition;
-see \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}.}
+pass the selection or profile itself as \code{n} for that one (see \code{n}).}
 
 \item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100.}
 
@@ -67,7 +76,10 @@ the seeds: \code{cluster} (the \code{seed_id} each clustered cloud point was
 assigned to), \code{rows} (those points' positions in the cloud, since rows
 with unusable coordinates are dropped first), \code{size} (points per seed),
 \code{withinss} and \code{tot_withinss} (the within-cluster sums of squares),
-\code{iter} and \code{nstart}.
+\code{iter} and \code{nstart}. For the scored centres of a selection or profile
+(see \code{n}) it describes \code{sample_points} assigned to them, each point to
+its nearest seed, with \code{iter} \code{NA} and \code{nstart} the profile's restarts,
+and is absent when no \code{sample_points} were given.
 }
 \description{
 Creates an sf POINT layer of "seed" locations. Multiple strategies are

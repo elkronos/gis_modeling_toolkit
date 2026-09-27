@@ -164,6 +164,47 @@
 }
 
 
+#' Keep the polygonal part of each clipped cell
+#'
+#' \code{st_intersection()} returns a GEOMETRYCOLLECTION for a cell whose
+#' overlap with the boundary is an area plus a line or point where the cell
+#' also touches the boundary from outside: on an L-shaped boundary, the cell
+#' over the inner corner.  Keeping only POLYGON and MULTIPOLYGON rows dropped
+#' such a cell whole, area and all, and every point in it was left with no
+#' cell (ten of thirty points on a 4 x 4 L with cells of side 2).  Each
+#' collection is replaced by its polygonal parts, one row per cell still; a
+#' row with no area (a line or point only) and an empty row are dropped as
+#' before.
+#'
+#' @param x sf layer of clipped cells.
+#' @return \code{x} with every row POLYGON or MULTIPOLYGON and non-empty.
+#' @keywords internal
+#' @noRd
+.keep_polygonal <- function(x) {
+  g <- sf::st_geometry(x)
+  if (!length(g)) return(x)
+  gtypes <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  gc <- which(gtypes == "GEOMETRYCOLLECTION")
+  if (length(gc)) {
+    geoms <- lapply(seq_along(g), function(i) g[[i]])
+    for (i in gc) {
+      # sf warns "x contains no geometries of specified type" for a
+      # collection of lines and points whatever `warn` says; such a row is
+      # dropped below, which is the point.
+      parts <- suppressWarnings(sf::st_collection_extract(g[i], "POLYGON", warn = FALSE))
+      parts <- parts[!sf::st_is_empty(parts)]
+      if (!length(parts)) next
+      geoms[[i]] <- if (length(parts) == 1L) parts[[1L]]
+                    else sf::st_combine(parts)[[1L]]
+      gtypes[i] <- if (length(parts) == 1L) "POLYGON" else "MULTIPOLYGON"
+    }
+    sf::st_geometry(x) <- sf::st_sfc(geoms, crs = sf::st_crs(g))
+  }
+  keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(x)
+  x[keep, , drop = FALSE]
+}
+
+
 #' Project a lon/lat boundary for a grid of equal-area cells
 #'
 #' The CRS ensure_projected() picks for distances, unless that CRS distorts
@@ -639,11 +680,10 @@ create_voronoi_polygons <- function(
     # "one polygon per unique point" contract.
     clip_to <- sf::st_union(sf::st_geometry(clip_to))
     cells <- suppressWarnings(sf::st_intersection(cells, clip_to))
-    # st_intersection can produce non-polygon slivers (LINESTRING, POINT,
-    # GEOMETRYCOLLECTION); keep only POLYGON/MULTIPOLYGON and non-empty rows
-    gtypes <- as.character(sf::st_geometry_type(cells, by_geometry = TRUE))
-    keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(cells)
-    cells <- cells[keep, , drop = FALSE]
+    # st_intersection can produce non-polygon slivers (LINESTRING, POINT)
+    # and, for a cell that also touches the boundary from outside, a
+    # GEOMETRYCOLLECTION holding its area; keep the polygonal part of each.
+    cells <- .keep_polygonal(cells)
   }
 
   if (nrow(cells) > 0) {
@@ -1005,10 +1045,9 @@ create_grid_polygons <- function(
     # attribute columns onto the grid.
     clip_to <- sf::st_union(sf::st_geometry(boundary))
     grid_sf <- suppressWarnings(sf::st_intersection(.safe_make_valid(grid_sf), clip_to))
-    # st_intersection can produce non-polygon slivers; keep only valid polygons
-    gtypes <- as.character(sf::st_geometry_type(grid_sf, by_geometry = TRUE))
-    keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(grid_sf)
-    grid_sf <- grid_sf[keep, , drop = FALSE]
+    # st_intersection can produce non-polygon slivers, and collections that
+    # hold a cell's area; keep the polygonal part of each.
+    grid_sf <- .keep_polygonal(grid_sf)
     grid_sf$poly_id <- seq_len(nrow(grid_sf))
   }
   .to_output_crs(grid_sf, crs_out)
@@ -1091,7 +1130,10 @@ create_grid_polygons <- function(
 #'   a count that came from a profile or selection warns when fewer than
 #'   three quarters of it are occupied.  For cells that follow the points,
 #'   seed a Voronoi tessellation with
-#'   \code{get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)}.
+#'   \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
+#'   given the \code{select_resolution()} result or the profile itself, it
+#'   returns the centres of the partition the profile scored, whose Voronoi
+#'   cells are the cells the criteria judged.
 #' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
 #'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
@@ -1222,7 +1264,9 @@ build_tessellation <- function(
         if (identical(method, "voronoi"))
           paste("Voronoi grows",
                 "one cell per input point: to control the cell count, place",
-                "seeds with get_voronoi_seeds() and tessellate those, or use",
+                "seeds with get_voronoi_seeds() and tessellate those (given a",
+                "select_resolution() result or a profile as `n`, it returns the",
+                "centres of the partition that was scored), or use",
                 "method = \"hex\" or \"square\".")
         else
           paste("Delaunay produces one triangle per neighbouring triple, so",
@@ -1408,8 +1452,9 @@ build_tessellation <- function(
         "occupied and dense where the points are; a lattice of equal cells ",
         "over clustered points leaves many empty. For cells that follow the ",
         "points, place seeds with get_voronoi_seeds(method = \"kmeans\", n = ",
-        "<the count>, sample_points = <the points>) and use method = ",
-        "\"voronoi\"."),
+        "<what you passed as approx_n_cells>, sample_points = <the points>) and ",
+        "use method = \"voronoi\": from a profile or selection those seeds are ",
+        "the centres of the partition it scored."),
         method, occupied, nrow(grid), format(approx_n_cells), approx_n_cells_from)
 
     return(finish(list(
@@ -1515,10 +1560,9 @@ build_tessellation <- function(
       # attribute columns onto the result.
       clip_to <- sf::st_union(sf::st_geometry(boundary))
       tri_sf <- suppressWarnings(sf::st_intersection(tri_sf, clip_to))
-      # Keep only POLYGON/MULTIPOLYGON (drop slivers) and non-empty
-      gtypes <- as.character(sf::st_geometry_type(tri_sf, by_geometry = TRUE))
-      keep <- gtypes %in% c("POLYGON", "MULTIPOLYGON") & !sf::st_is_empty(tri_sf)
-      tri_sf <- tri_sf[keep, , drop = FALSE]
+      # Keep the polygonal part of each triangle (drop slivers, and keep the
+      # area a GEOMETRYCOLLECTION holds) and non-empty rows.
+      tri_sf <- .keep_polygonal(tri_sf)
     }
     tri_sf$cell_id <- seq_len(nrow(tri_sf))
 

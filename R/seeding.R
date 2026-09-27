@@ -25,6 +25,15 @@
 #'   `$best`), or a [resolution_profile()] (read with `select_resolution()` at
 #'   its default criterion). The result then carries `attr(, "n_from")`
 #'   saying which.
+#'
+#'   With `method = "kmeans"`, a selection or profile also carries the
+#'   centres of the partition the profile scored at that count, and those
+#'   are returned instead of a new k-means: a k-means partition is the
+#'   Voronoi partition of its centres, so their cells are the cells the
+#'   criteria judged. `sample_points`, when given, is then only assigned to
+#'   them (for `attr(, "kmeans")`), and `boundary` only sets the CRS;
+#'   `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used. Pass the
+#'   count as a number (`n = sel$best`) for a fresh k-means instead.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
@@ -37,7 +46,7 @@
 #' @param kmeans_nstart Integer; nstart for kmeans(). Default 10. The
 #'   partition is [stats::kmeans()], not the best-of-25 k-means++ run that
 #'   [resolution_profile()] scored a count on, so it is not that partition;
-#'   see [voronoi_seeds_kmeans()].
+#'   pass the selection or profile itself as `n` for that one (see `n`).
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100.
 #' @param set_seed Optional integer RNG seed.
 #' @return An sf POINT object with seed_id and method columns. With
@@ -46,7 +55,10 @@
 #'   assigned to), `rows` (those points' positions in the cloud, since rows
 #'   with unusable coordinates are dropped first), `size` (points per seed),
 #'   `withinss` and `tot_withinss` (the within-cluster sums of squares),
-#'   `iter` and `nstart`.
+#'   `iter` and `nstart`. For the scored centres of a selection or profile
+#'   (see `n`) it describes `sample_points` assigned to them, each point to
+#'   its nearest seed, with `iter` `NA` and `nstart` the profile's restarts,
+#'   and is absent when no `sample_points` were given.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -87,6 +99,21 @@ get_voronoi_seeds <- function(boundary = NULL,
     }
   }
   if (!is.null(sample_points)) .assert_sf(sample_points, "POINT", "sample_points")
+
+  # A select_resolution() result or a resolution_profile() as `n` carries the
+  # centres of the partition the profile scored at that count.  A k-means
+  # partition is the Voronoi partition of its centres, so those centres give
+  # back the very cells the criteria judged; a new k-means (a different
+  # algorithm, different starts, a different cloud) gave other cells, and
+  # the count was then defended on a partition nobody built.
+  if (identical(method, "kmeans") && !is.null(n_res$seeds)) {
+    out <- .use_scored_seeds(n_res$seeds,
+                             like  = if (!is.null(boundary)) boundary else sample_points,
+                             cloud = sample_points, caller = "get_voronoi_seeds")
+    out <- .align_crs(out, boundary)
+    attr(out, "n_from") <- n_from
+    return(out)
+  }
 
   # --- RNG handling (always restored) ---
   cleanup <- .with_seed(set_seed)
@@ -302,15 +329,21 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' starts. [resolution_profile()] and [determine_optimal_levels()] score each
 #' count on a different run, by default the best of 25 k-means++ restarts,
 #' which usually reaches a lower within-cluster sum of squares; the seeds for
-#' a chosen count are therefore not the partition that count was scored on.
-#' Raising `nstart` narrows the gap but does not close it.
+#' a count passed as a number are therefore not the partition that count was
+#' scored on. Raising `nstart` narrows the gap but does not close it. Pass
+#' the [select_resolution()] result or the profile itself as `k` to close
+#' it: the centres of the scored partition are then returned (in the CRS of
+#' `points_sf`, with `attr(, "n_from")`), and no k-means is run.
 #'
 #' @param points_sf An sf object with POINT geometries.
 #' @param k Integer; requested number of clusters, treated as an upper bound
 #'   only. It is clamped, with a warning, to whichever is smaller of the number
 #'   of distinct point positions and `nrow(points_sf) - 1`, because k-means can
 #'   produce neither more centres than there are distinct points nor as many
-#'   centres as there are rows. Check `nrow()` on the result.
+#'   centres as there are rows. Check `nrow()` on the result. A
+#'   [select_resolution()] result or a [resolution_profile()] is also
+#'   accepted: its scored centres are returned when it carries them, and
+#'   otherwise its count is used.
 #' @param set_seed Optional integer RNG seed. Default 456, so a call gives the
 #'   same seeds every time whatever the session's random-number state; an
 #'   outer [set.seed()] does not change them, and the caller's random-number
@@ -335,6 +368,19 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @export
 voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10) {
   .assert_sf(points_sf, "POINT", "points_sf")
+  # A select_resolution() result or a resolution_profile() as `k`: the
+  # centres of the partition it scored at the chosen count when it carries
+  # them (as get_voronoi_seeds() does), otherwise the count alone.
+  if (inherits(k, c("resolution_selection", "resolution_profile"))) {
+    k_res <- .resolve_cell_count(k, "k", "voronoi_seeds_kmeans")
+    if (!is.null(k_res$seeds)) {
+      out <- .use_scored_seeds(k_res$seeds, like = points_sf, cloud = NULL,
+                               caller = "voronoi_seeds_kmeans")
+      attr(out, "n_from") <- k_res$from
+      return(out)
+    }
+    k <- k_res$n
+  }
   # `k` was never validated here, unlike get_voronoi_seeds(), which routes
   # `n` through .resolve_cell_count(): k = NA or a length-2 vector aborted on
   # the clamp below, k above .Machine$integer.max became NA through
@@ -495,4 +541,105 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' @noRd
 .kmeans_cloud_size <- function(n) {
   max(2000, 50 * as.numeric(n))
+}
+
+
+#' Seeds from the partition a resolution profile scored
+#'
+#' \code{resolution_profile()} keeps, for every level, the centres of the
+#' best-of-\code{nstart} k-means++ partition its criteria were computed on.
+#' A k-means partition is the Voronoi partition of its centres, so these are
+#' the seeds of exactly the cells that were scored.
+#'
+#' @param seeds The centres, from \code{.resolve_cell_count()}'s \code{seeds}
+#'   (an sf POINT layer in the profile's projected CRS, with
+#'   \code{attr(, "nstart")}).
+#' @param like The layer whose CRS the seeds are returned in (the boundary or
+#'   the points being seeded), or \code{NULL} for the profile's own CRS.
+#' @param cloud Optional sf POINT layer to assign to the seeds for
+#'   \code{attr(, "kmeans")}; \code{NULL} for none.
+#' @param caller Name for the log line.
+#' @return An sf POINT layer with \code{seed_id} and \code{method = "kmeans"}
+#'   columns, and \code{attr(, "kmeans")} when \code{cloud} is given.
+#' @keywords internal
+#' @noRd
+.use_scored_seeds <- function(seeds, like, cloud, caller) {
+  nstart <- attr(seeds, "nstart", exact = TRUE)
+  moved  <- .seeds_in_crs_of(seeds, like)
+  out <- sf::st_sf(seed_id = seq_len(nrow(moved)), method = "kmeans",
+                   geometry = sf::st_geometry(moved))
+  .log_info(paste0("%s(): returning the %d centres of the partition resolution_profile() ",
+                   "scored at that count (the best of %s k-means++ restarts) rather than ",
+                   "running a new k-means, so their Voronoi cells are the cells the ",
+                   "criteria judged. Pass the count as a number for a fresh k-means."),
+            caller, nrow(out), if (is.null(nstart)) "its" else format(nstart))
+  if (!is.null(cloud)) attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart)
+  out
+}
+
+
+#' Scored seeds in the CRS of the layer they are for
+#'
+#' As \code{.align_crs()}, and for a CRS-less layer the coordinates it is
+#' in: degrees when they look like lon/lat (\code{.looks_like_lonlat()}, the
+#' heuristic the profile's own \code{ensure_projected()} applied), otherwise
+#' the profile's own numbers, CRS-less.
+#'
+#' @keywords internal
+#' @noRd
+.seeds_in_crs_of <- function(seeds, like) {
+  if (is.null(like)) return(seeds)
+  to <- sf::st_crs(like); from <- sf::st_crs(seeds)
+  if (is.na(from)) return(seeds)
+  if (is.na(to)) {
+    if (isTRUE(.looks_like_lonlat(like)$lonlat))
+      seeds <- sf::st_transform(seeds, 4326)
+    return(sf::st_set_crs(seeds, NA))
+  }
+  if (from == to) seeds else sf::st_transform(seeds, to)
+}
+
+
+#' Which scored seed each cloud point falls to
+#'
+#' The \code{attr(, "kmeans")} record of \code{get_voronoi_seeds()} for seeds
+#' taken from a resolution profile: each usable cloud point is assigned to its
+#' nearest seed in the profile's projected CRS (the seed whose Voronoi cell
+#' holds it), with the sizes and within-cell sums of squares that assignment
+#' gives.  \code{iter} is \code{NA}: no k-means ran here.
+#'
+#' @keywords internal
+#' @noRd
+.scored_seeds_record <- function(cloud, seeds, nstart) {
+  scrs <- sf::st_crs(seeds); ccrs <- sf::st_crs(cloud)
+  if (!is.na(scrs)) {
+    if (is.na(ccrs))
+      cloud <- if (isTRUE(.looks_like_lonlat(cloud)$lonlat))
+        sf::st_transform(sf::st_set_crs(cloud, 4326), scrs)
+      else sf::st_set_crs(cloud, scrs)
+    else if (ccrs != scrs)
+      cloud <- sf::st_transform(cloud, scrs)
+  } else if (!is.na(ccrs)) {
+    cloud <- sf::st_set_crs(cloud, NA)
+  }
+  xy <- sf::st_coordinates(cloud)
+  xy <- if (ncol(xy) >= 2L) xy[, 1:2, drop = FALSE] else matrix(NA_real_, nrow(cloud), 2L)
+  ok <- stats::complete.cases(xy) & is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  sxy <- sf::st_coordinates(seeds)[, 1:2, drop = FALSE]
+  k   <- nrow(sxy)
+  cl  <- integer(0); d2 <- numeric(0)
+  if (any(ok)) {
+    cl <- as.integer(sf::st_nearest_feature(cloud[ok, ], seeds))
+    d2 <- rowSums((xy[ok, , drop = FALSE] - sxy[cl, , drop = FALSE])^2)
+  }
+  withinss <- as.numeric(tapply(d2, factor(cl, levels = seq_len(k)), sum, default = 0))
+  list(
+    cluster      = cl,
+    rows         = which(ok),
+    size         = tabulate(cl, nbins = k),
+    withinss     = withinss,
+    tot_withinss = sum(withinss),
+    iter         = NA_integer_,
+    nstart       = if (is.null(nstart)) NA_integer_ else as.integer(nstart)
+  )
 }

@@ -4701,17 +4701,25 @@ make_folds <- function(points_sf, k,
       rp <- rs[rs <= phi]
       max(findInterval(rp, rs) / length(rs) - G_target(rp))
     } else NA_real_
+    # The message states the statistic that fired it.  It used to lead with
+    # the two medians, which describe the whole distributions, not the short
+    # distances the test is about: the realised median could sit above the
+    # target's while the warning said the folds were "more optimistic".
     if (n_at_floor > 0L && is.finite(excess_phi) && excess_phi > 1 / n + 1e-9)
       .warn_and_log(paste0(
         "make_folds(nndm): min_train = %s stopped the distance matching in %d ",
         "of %d folds, which keep a training point closer than the prediction ",
-        "distances allow, so the realised distances remain more optimistic ",
-        "than the target (median %.4g against %.4g; largest ECDF excess ",
-        "%.3f). The prediction locations lie further from the samples than a ",
+        "distances allow. At distances up to phi (%.4g) the share of folds ",
+        "whose nearest training point is within a distance runs above the ",
+        "target's share by as much as %.3f (more than one fold's worth, 1/%d), ",
+        "so short distances are over-represented and the CV score is ",
+        "optimistic for the prediction locations. (The medians, %.4g realised ",
+        "and %.4g target, summarise all distances and need not differ the same ",
+        "way.) The prediction locations lie further from the samples than a ",
         "fold can be made to hold out: read the CV score as an upper bound on ",
         "performance there, or lower min_train."),
-        format(min_train), n_at_floor, n, stats::median(realised[fin]),
-        stats::median(g_target), excess_phi)
+        format(min_train), n_at_floor, n, phi, excess_phi, n,
+        stats::median(realised[fin]), stats::median(g_target))
 
     # Exclusion is not always needed.  When prediction locations sit no further
     # from the training data than training points sit from each other, plain
