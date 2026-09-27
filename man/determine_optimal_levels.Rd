@@ -91,7 +91,10 @@ model-aware pass actually scored (\code{eval_ks}, the elbow's
 neighbourhood).  Under \code{"combined"} it also carries the WSS of the
 re-run clustering at those \code{k} (\code{wss_eval}), the rank average
 that ordered them (\code{combined_rank}, named by \code{k}) and
-\code{criterion = "combined"}.  When the model-aware
+\code{criterion = "combined"}; when \code{"combined"} returned the
+geometric ranking because the elbow is below ten cells, it carries
+\code{criterion = "geometric"} and \code{fallback} (the reason) in
+place of \code{combined_rank}.  When the model-aware
 path itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), no
 diagnostics are available and the attribute is absent. Both fallbacks are
@@ -217,11 +220,23 @@ from about \code{max_levels = 40}.  Measured on 1000 uniform points,
 \code{k} = 10 and 11 alone.  On such a layer
 \code{\link{resolution_profile}()}, which scores Moran's z at every level of
 its ladder, is the model-aware view.  Under \code{criterion = "combined"},
-the candidates below the floor that sit alongside candidates above it all
-take the last place on the Moran's I axis, after every candidate it
-scored, while still competing on the geometric axis.  That axis is the
-elbow's own log-log sag at each candidate; when the WSS curve has no elbow
-it is flat, every candidate tied, and Moran's I alone orders them.
+an elbow below ten cells is a count Moran's I cannot score, so it cannot
+weigh the response there: the geometric ranking is returned, with a
+logged warning, and the diagnostics record it (see Value).  (Ranking the
+window anyway put the smallest count Moran's I scores, ten, first whatever
+the response did.)  Otherwise the candidates below the floor that sit
+alongside candidates above it all take the last place on the Moran's I
+axis, after every candidate it scored, while still competing on the
+geometric axis.  That axis is the elbow's own log-log sag at each
+candidate; when the WSS curve has no elbow it is flat, every candidate
+tied, and Moran's I alone orders them.
+
+\code{"combined"} is not an estimate of the number of clusters.  Where the
+elbow is at ten cells or more, Moran's I can move the pick away from it
+when the response is still spatially structured at the elbow's
+resolution.  Use \code{"geometric"} when the cell count should follow the
+clustering of the points, and \code{\link{resolution_profile}()} when the
+response should drive it.
 }
 \section{Post-selection inference}{
 
