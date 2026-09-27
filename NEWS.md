@@ -29,7 +29,22 @@
   `fold` is the `fold_id` a `cv_*()` result's `$folds` carries, so a join on
   it pairs each fold's error with its own distances (it was the list
   position, which after a dropped fold paired one fold's error with
-  another's distances).  A `units` object for `sac` is refused.
+  another's distances).  A `units` object for `sac` is refused.  As in
+  `cv_*()`, a `make_folds()` result whose recorded rows sit at other
+  locations in `data_sf` is refused.  Folds built on `prep_model_data()`'s
+  200 points and measured on the 195 that `assign_features_to_polygons()`
+  kept used to be matched by position, and reported 100 percent of the
+  hold-out inside the range against 23--48 percent on the right layer.  The
+  location check is skipped when one layer is POINT and the other is not,
+  so folds built on polygons still measure their pointized copy.  The
+  `print()` verdict now depends on the fold scheme: "widen the blocks" is
+  said only of blocked folds, buffered leave-one-out is told to widen the
+  buffer, and random, leave-location-out and hand-made splits are told to
+  use blocked or buffered folds.  NNDM folds are no longer called
+  optimistic: they are built to reproduce the prediction-to-data distances,
+  so the share describes the prediction task.  The range line gives the
+  CRS's unit ("in metres"), where it used to print the CRS code as if it
+  were a unit ("in EPSG:32617 units").
 
 * `summary()` on a `resolution_profile()` puts every criterion's pick in one
   table: the level each prefers, the flat region around it, whether a ladder
@@ -277,7 +292,9 @@
   with a hint to use the very `pmax()` it had been given, because `pmax()`
   keeps `NaN`; it now names the predictors whose weight is `NaN`, says why
   (no row is out of bag), and says what to do instead: refit with out-of-bag
-  rows, or pass `weights = NULL`.
+  rows, or pass `weights = NULL`.  With permutation importance, the fit's
+  own warning now says as much: `area_of_applicability()` cannot be
+  weighted by that importance, so pass `weights = NULL`.
 * `area_of_applicability()` records the method of the folds its threshold
   came from as `$params$folds_method` (`"block_kfold"`, `"random_kfold"`,
   ... from a `make_folds()` result; `"labels"` or `"splits"` when the input
@@ -401,7 +418,12 @@
   `sac` is read in its own CRS: the points are transformed to
   `attr(sac, "crs")` first, as `summarize_by_cell()` does (a range in US
   feet put the floor of a metre layer at 2 where the same range in metres
-  put it at 8).  Reliability's domain term is taken over the convex hull the
+  put it at 8).  A `sac` given as a `units` object (`set_units(1.5, "km")`)
+  or a character string is refused by name; a `units` object used to be
+  read as a number in the CRS units, so 1.5 km became a range of 1.5 m and
+  a floor of 41 million cells.  A plain number is taken as the range alone:
+  it sets the floor, and `cp` and `reliability` are
+  `NA`.  Reliability's domain term is taken over the convex hull the
   area is measured on, not the bounding box: on a 3000 x 120 strip the
   reliability pick is 6 cells whether the strip lies axis-aligned or rotated
   by 45 degrees (it was 8 and 2), and 10 either way on a square (it was 10
@@ -482,7 +504,9 @@
   edge.  `params` gains `n_blocks` (before empties were dropped; for a grid,
   `grid_nx * grid_ny`, the cells a `boundary` clips away included),
   `blocks_supplied` and `block_scale` on every `block_kfold` result;
-  `grid_nx`/`grid_ny` are `NA` for supplied blocks.
+  `grid_nx`/`grid_ny` are `NA` for supplied blocks.  A `blocks` layer
+  without a CRS is brought into the points' CRS with an R warning naming
+  it, as `boundary` is.
 
 * `make_folds()` gains `balance_tol`, the largest-to-smallest fold size
   ratio above which `block_kfold` reports its folds as imbalanced.  The
@@ -798,7 +822,12 @@
   as `summarize_by_cell()` finds it (cells keyed by `id` or `grid_id` too,
   and a double ID of 1e5 matches an integer 100000, where it used to leave
   that cell with n = 0), a point whose ID matches no cell is counted in a
-  warning, and a layer with no CRS is taken to be in the other's.
+  warning, and a layer with no CRS is taken to be in the other's.  Folds
+  whose recorded rows sit at other locations in `assigned_points_sf` are
+  refused, as in `cv_*()`.  Folds built before
+  `assign_features_to_polygons()` dropped points used to be applied by
+  position, holding out the wrong points (cross-validation RMSE 1.82
+  against 2.11 with folds built on the assigned layer), with nothing said.
 
 * `MAPE` and `SMAPE` now say how many rows they were averaged over.  Every
   metrics frame --- `model_metrics()`, `summary()`, `evaluate_insample()`,
@@ -1245,7 +1274,7 @@
   that was not there counted as "no model variables": with the default
   criterion a typo kept `"geometric"` where supplying both variables
   upgrades to `"combined"` (on one 400-point layer `7 6 8` instead of
-  `5 6 4`, with no warning and no diagnostics), and under `"morans_i"` or
+  `11 10 7`, with no warning and no diagnostics), and under `"morans_i"` or
   `"combined"` the one log line said the variables were required although
   both had been supplied.  A named column that is not in the layer is now
   an error, as it is in `resolution_profile()`, and a model-aware criterion
@@ -1317,6 +1346,25 @@
   the boundary is geographic, because stamping degrees on them would be
   wrong; a CRS-less boundary beside geographic points is read as lon/lat or
   refused (below).
+
+* **A `boundary` without a CRS got a log line in `make_folds()`, `cv_*()`
+  and `predict_surface()`, where every other function raises an R warning,
+  and `cv_rf()` warned twice about one lon/lat boundary.**  With projected
+  points, `build_tessellation()`, `clip_target_for()`, `plot_folds()` and
+  the rest said "`boundary` has no CRS ... stamping" as an R warning, while
+  `make_folds()`, `cv_*()` and `predict_surface()` stamped it with a "WARN
+  ensure_projected(): input has no CRS" log line that `tryCatch()` and
+  knitr never see and `spatialkit_quiet()` hides, naming neither the
+  function nor the argument.  A boundary whose coordinates looked like
+  lon/lat got two R warnings from one `cv_rf()` call, one from
+  `prep_model_data()` and one from `make_folds()`, both naming
+  `ensure_projected()`.  All three now warn as the others do, naming
+  themselves and `boundary` (`make_folds()` also `prediction_points`), and
+  a `cv_*()` call warns once, naming the `cv_*()` function.  Which CRS the
+  boundary ends up in is unchanged.  The stamping warning of every function
+  now names the CRS it stamps ("stamping the target CRS ('EPSG:32632')
+  WITHOUT reprojection") instead of "the supplied `crs`", an argument most
+  of them do not have.
 
 * **A geographic `crs` made every tessellation method work in degrees.**
   `build_tessellation()`, `create_voronoi_polygons()` and
@@ -1558,6 +1606,24 @@
   units (`in the coordinate units of a layer with no CRS`), still with what
   was modelled; it used to be left out.
 
+* **`estimate_sac_range(predictor_vars = )` fitted its variogram to the raw
+  response, trend and all, when a single predictor or response value was
+  infinite.**  `lm()`'s `na.exclude` drops `NA` but not `Inf`, so one `Inf`
+  among 200 rows stopped the detrending ("NA/NaN/Inf in 'x'"), and the
+  function fell back to the raw response with a warning.  The range came
+  out at 2950 instead of 2168 (the answer with that row removed), and
+  `make_folds(auto_range = TRUE, predictor_vars = )` built blocks 37
+  percent larger.  `resolution_profile()`, which hides that warning, then
+  warned that the variogram it had estimated itself was of the raw
+  response.  With `detrend = "reml"`, a `-Inf` predictor (a `log(0)`
+  covariate) first gave a false warning that the REML fit "did not
+  converge", and then the OLS fallback failed the same way.  Rows with a
+  missing or non-finite response or predictor are now left out of the
+  detrending fit and the variogram, with a logged count, as
+  `prep_model_data()` and `resolution_profile()` already do.  One `Inf` now
+  gives the same range as that row set to `NA` (2167.5 detrended on the
+  example; 1598.4 under REML).
+
 * **`make_folds(drop_empty_blocks = FALSE)` could return folds with no test
   points.**  `k` was lowered only when the highest block id holding a point
   was below it, and with empty blocks kept that id says nothing about how
@@ -1634,12 +1700,16 @@
   past the fitted lags, fewer than 30 points, gstat missing), the blocks the
   caller asked to be sized from the data were not, and under knitr,
   `spatialkit_quiet` or `tryCatch()` nothing showed it.  This is now a
-  warning that gives the rejection reason.  The warning could give the
-  reason only when `estimate_sac_range()` attached one.  For the bare `NA`
-  it returns before fitting, it said only "estimate_sac_range() returned
-  NA".  It now says when there are fewer than 30 points or gstat is missing,
-  and otherwise names the three remaining causes: fewer than 30 finite
-  values, a variable with no variance, and points with no extent.
+  warning that gives the rejection reason.  `estimate_sac_range()` can give
+  up before it fits anything: fewer than 30 points, fewer than 30 finite
+  values, a constant response (or residuals, when the predictors explain
+  the response exactly), points with no extent, or gstat missing.  It used
+  to return a bare `NA` then, with the reason only in a log line, and the
+  warning said only "estimate_sac_range() returned NA".  That `NA` now
+  carries a `rejected_reason` attribute saying which (it is still unclassed,
+  with no other attribute).  The warning quotes it, as do
+  `kriging_adequacy()`'s no-model error and `summarize_by_cell()`'s
+  fallback warning.
 
 * NNDM fold construction releases FNN's copy of the neighbour tables as soon
   as it has them, so a second `n` x `n/2` pair is no longer held through the
@@ -1982,6 +2052,33 @@
   points were reported inside and 16 training DI of 0 moved the threshold.
   `chunk_size` is now validated by name and truncated to whole rows.
 
+* **`area_of_applicability(model = fit, folds = folds)` stopped with "fold 1
+  refers to rows outside 1:n" whenever `prep_model_data()` had dropped a
+  row, for the same folds `cv_*()` accepted.**  One missing response in 200
+  rows was enough: `make_folds()` numbers the rows of the layer it is given,
+  the fit keeps only the 199 rows `prep_model_data()` returned, and the fold
+  IDs were read as positions in those.  The documented workflow ("pass the
+  same `make_folds()` result you passed to `cv_spatial()`") therefore failed
+  on any layer with a missing or non-finite modelling value or an empty
+  geometry.  The rows the fit's `"dropped"` record names are now taken out
+  of the folds, as `cv_*()` take them out, with a log line giving the count;
+  a label vector with one label per row of the layer fitted from loses those
+  labels.  The threshold is the one you get by removing the rows from the
+  folds by hand.  Folds built on the model's own training data (the
+  `prep_model_data()` output) are still read as positions in it, and a fold
+  ID naming a row the data never had is still an error.
+
+* **`area_of_applicability()` applied folds built on other rows without a
+  word.**  Fold splits are row IDs, and `cv_*()` compare the sample of row
+  locations `make_folds()` records against the data, refusing folds built
+  on another layer.  `area_of_applicability()` did not: a model fitted on
+  the same rows in another order took the folds anyway and moved the
+  threshold (0.2432 against 0.2404).  It now makes the same check on the
+  training data and refuses such folds with the `cv_*()` message.  The
+  check is skipped (logged) when the folds were built on polygons and the
+  training data are the points a fit reduced them to, so a model fitted on
+  polygons with folds built on those polygons keeps working.
+
 * **`predict_surface()` filled a polygon grid with covariates from an
   arbitrary point inside each cell.**  `st_nearest_feature()` returns the
   first zero-distance match the spatial index yields, so a
@@ -2229,6 +2326,16 @@
   gets a plain warning saying what replaced it, and the fallback warning is
   raised once per call, only when the standard errors really are the
   uncorrected ones, naming every reason, the rejected `sac` included.
+
+* **`summarize_by_cell(deff = "variogram")` ignored a `sac` that carried no
+  variogram model without saying so.**  A plain number, or
+  `units::set_units(1.5, "km")`, was passed over and the design effect came
+  from a variogram estimated from `response_var`, with no condition; the
+  caller could not tell that the value given had not been used.  Such a
+  `sac` is now set aside with a warning, as a rejected `sac` is: a plain
+  warning when a variogram is estimated instead, and the classed
+  `spatialkit_deff_fallback` warning, naming it, when `deff` falls back
+  to 1.
 
 * **`summarize_by_cell(deff = "kish")` recorded no correction when only the
   predictor standard errors were corrected.**  The `"deff_applied"`
@@ -2793,11 +2900,26 @@
   error when no requested name is recognised, and says that
   `"no viable models."` means every recognised backend is uninstalled.  The
   getting-started install table no longer says `patchwork` is needed for the
-  `plot_*()` functions.  The North Carolina vignette explains why the local
-  designs of its GWR fit have high condition indices (an uncentred
-  `elevation`, nearly collinear with the intercept inside each window).  Its
-  fold-map alt text now describes each blocked fold as whole blocks in
-  separate parts of the state, not as one contiguous area.
+  `plot_*()` functions.  The North Carolina vignette explains why some
+  local designs of its GWR fit have a high condition index with the
+  intercept (an uncentred `elevation`, nearly collinear with the intercept
+  inside each window), and why the fit raises no collinearity warning: the
+  slope index stays below 30, so the slopes are well determined and only
+  the local intercepts are not.  Its fold-map alt text now describes each
+  blocked fold as whole blocks in separate parts of the state, not as one
+  contiguous area.
+
+* `vignette("diagnostics")`: the "Two ways to leak" example of selection
+  inside the folds leaked itself (blocks about 250 m across against an
+  autocorrelation range of about 330 m) and its learner could not fit the
+  intercept-only model, so `tol` did not apply to the first variable.  It
+  now passes `block_size = 400`, fits `z ~ 1` for an empty predictor set,
+  and shows `sel$history`.
+
+* `?fit_rf_model` recommended
+  `area_of_applicability(weights = pmax(fit$info$importance, 0))` without
+  condition.  It now says this works only when that importance is finite,
+  which it is not when no row is out of bag.
 
 # spatialkit 2.0.0
 
