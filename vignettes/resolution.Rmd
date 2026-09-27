@@ -67,9 +67,12 @@ runs on the hard dependencies; it is the quick answer and the one
 cell count on a ladder against four criteria at once and needs gstat for two
 of them. `select_resolution()` reads one criterion off that profile, and
 `summary()` on the profile reads all four side by side. If the cells will feed
-a model, the profile is the one to use; if you need a count now and the data
-are all you have, the elbow is defensible and this article says where it
-falls short.
+a model, the profile is the one to use. If you need a count now and the data
+are all you have, the elbow is defensible when the points cluster, and this
+article says where it falls short. On points spread evenly there is no elbow
+to read, and both functions say so: the profile leaves its `elbow` column
+empty, and `determine_optimal_levels()` warns that the count it still returns
+was chosen by the ends of its ladder, not by the data.
 
 The argument that says "how many" is spelled differently by the function it
 belongs to: `max_levels` bounds the elbow's ladder, `n_levels` sets the
@@ -90,7 +93,7 @@ library(spatialkit)
 
 set.seed(42)
 n  <- 500
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n)) +
         rnorm(n, sd = 1)
@@ -106,6 +109,12 @@ lv <- determine_optimal_levels(pts, max_levels = 40)
 lv
 ```
 
+This fixture's points are uniform, so their within-cluster sum of squares falls
+like `c / k` all the way down and bends nowhere of its own. The call warns that
+it found no elbow and that `max_levels` chose `lv`: a larger `max_levels` would
+give a larger answer. Read an elbow only off points that cluster; here the
+profile below is the better guide.
+
 `lv[1]` is what `get_voronoi_seeds()` takes as `n`, and what
 `build_tessellation()` takes as `approx_n_cells` for its `"hex"` and `"square"`
 methods. Voronoi has no cell count to set: it grows one cell per point you hand
@@ -114,8 +123,8 @@ tessellate them. The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
 `criterion = "morans_i"` and `criterion = "combined"` settings need both
-`response_var` and `predictor_vars`; give it only a response and it logs a
-warning and falls back to `"geometric"`. And its ladder runs from 1 to
+`response_var` and `predictor_vars`; give it only a response and it warns
+and falls back to `"geometric"`. And its ladder runs from 1 to
 `max_levels` with no lower bound from the spatial correlation of the data, so it
 can prefer cells wider than the field's own correlation range. The profile below
 does impose that bound, which is why the two can disagree.
@@ -133,10 +142,12 @@ prof
 ```
 
 One row per level. `cell_n_median` and `cell_diam_median` are usually the first
-two columns worth reading: how many points a typical cell holds, and how wide it
-is in CRS units. The width is the number you can compare against something you
-already know about your own data, such as the spacing of a sampling grid or the
-size of a field.
+two columns worth reading: how many points a typical cell holds, and how big it
+is in CRS units. `cell_diam_median` is twice the median root-mean-square
+distance of a cell's points from its centre, about 0.8 of the side of a square
+cell of the same area, so compare it against something you already know about
+your own data, such as the spacing of a sampling grid or the size of a field,
+with that factor in mind.
 
 ### The four criteria
 
@@ -144,7 +155,7 @@ size of a field.
 cat(
 "| criterion | measures | needs | direction |\n",
 "|---|---|---|---|\n",
-"| `elbow` | how far the within-cluster sum of squares curve bends below its own chord | coordinates only | larger |\n",
+"| `elbow` | how far the log of the within-cluster sum of squares sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |\n",
 "| `cp` | Mallows' \\(C_p\\) of the piecewise-constant approximation of the response by cell means | a response, and a variogram for the nugget | smaller |\n",
 "| `moran_z` | spatial structure surviving in the residuals of the cell means | a response | nearer zero |\n",
 "| `reliability` | the share of the spread in the cell means that is signal, not sampling noise | a variogram | larger |\n",
@@ -157,7 +168,7 @@ the field, and whether the cell values can be told apart from noise. `moran_z`
 is the diagnostic, and a large deviate says the cells are still leaving spatial
 pattern on the table.
 
-```{r plot-profile, fig.height=8, fig.alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, the elbow statistic peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all four."}
+```{r plot-profile, fig.height=8, fig.alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 49 cells and turns up at 55, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 20 cells and climbs past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are one to three levels wide, none has a gap, and no level sits inside all three."}
 plot(prof)
 ```
 
@@ -275,10 +286,10 @@ The ladder runs between two bounds the data impose, both recorded on the profile
 str(attr(prof, "bounds"))
 ```
 
-The ceiling is `floor(n / min_cell_n)`, or one short of the number of distinct
-locations when that is smaller; `ceiling_from` says which. Past it the average
-cell holds too few points to estimate anything from, or k-means has more
-centres to place than distinct points. The floor is `ceiling(area / range^2)`, from
+The ceiling is `floor(n / min_cell_n)`, or the number of distinct locations
+when that is smaller (one short of it when no location repeats); `ceiling_from`
+says which. Past it the average cell holds too few points to estimate anything
+from, or k-means has more centres to place than distinct points. The floor is `ceiling(area / range^2)`, from
 the fitted autocorrelation range: cells wider than the range average over more
 than one patch of the field, mixing values the field itself keeps apart.
 
@@ -305,18 +316,28 @@ sp
 The split is spatially blocked, not random, and records the method and seed that
 produced it. A random half would put neighbours of every selection point in the
 estimation set, and on an autocorrelated field that leaks the structure you are
-choosing against.
+choosing against. Blocking reduces that leak without removing it: the two halves
+share a border, and points on either side of it within the correlation range
+are still correlated, so read the separation as a large improvement on a random
+half rather than as independence.
 
-Choose from `prof_split`, then aggregate the rows in `sp$estimation`. The cost is
-power: half the data gives a noisier profile and a wider band, and the ladder
-itself gets shorter because the ceiling scales with `n`.
+Choose from `prof_split`, then aggregate the rows in `sp$estimation`. The cells
+on the ladder are still drawn on every point, so the count it picks is a count
+for the whole layer, and the ladder is as long as the full profile's. Only the
+steps that read the response (the variogram, `cp`, `moran_z`) use the
+selection half. The cost is power: those criteria see half the data, so the
+profile is noisier and the band wider. The estimation rows also fill only
+their own half of the layer: a cell inside the selection half gets none of
+them, and a cell across the border between the halves is estimated from the
+part of it on the estimation side. Read standard errors only off cells whose
+points are all estimation rows.
 
 ```{r split-ladder}
 unlist(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])
 ```
 
-On a layer of a few hundred points that shortening can leave very little ladder,
-which is a useful answer in itself.
+The floor can differ from the full profile's, because it comes from the range
+estimated on the selection half.
 
 ## Next
 

@@ -36,7 +36,19 @@ model containing every candidate. Integer neighbour count when
 \code{adaptive = TRUE}; otherwise a distance in the units of the
 \strong{projected} CRS the sweep runs in, which \code{prep_model_data()} may
 have chosen for you.  Geographic input is projected before the bandwidth
-is used, so a value in degrees would be read as metres.}
+is used, so a value in degrees would be read as metres; a fixed
+bandwidth below a ten-thousandth of the data's extent raises a warning
+saying so, as in \code{\link{fit_gwr_model}()}.  An adaptive
+count too small for the full model is raised, with a warning, to the
+number of candidates plus 3 for the bisquare and tricube kernels (which
+give the farthest neighbour in a window weight 0), plus 2 for the others.
+That floor is enough unless several neighbours tie at the kernel's edge
+(a regular grid), which leaves a window fewer weighted points; then use
+a larger bandwidth.  An adaptive count below 1 or above R's largest
+integer is refused, as in \code{\link{fit_gwr_model}()}.
+One above the number of observations is capped at it, with a warning;
+below 20 observations that includes \code{bw.gwr()}'s choice, since its
+adaptive search starts at 20 neighbours.}
 
 \item{adaptive}{Logical; adaptive (nearest-neighbour) bandwidth. Default
 \code{TRUE}.}
@@ -67,7 +79,11 @@ progress.}
 An object of class \code{gwr_model_selection}, a list with:
 \code{best} (character vector of the selected predictors);
 \code{table} (ranked data.frame of every model evaluated, with columns
-\code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
+\code{rank}, \code{n_vars}, \code{variables} and \code{criterion};
+\code{criterion} is \code{NA}, and the model ranked last, where GWmodel
+could not evaluate it or where AICc is undefined because the model's
+effective number of parameters \eqn{tr(S)} is not below \eqn{n - 2},
+which raises a warning);
 \code{criterion} (label for the criterion actually read, noting when it
 had to be located positionally);
 \code{criterion_by_name} (logical: whether that column was found by

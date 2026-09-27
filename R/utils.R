@@ -79,9 +79,14 @@
         ll$bb[["ymin"]], ll$bb[["ymax"]])
       return(sf::st_transform(sf::st_set_crs(x, 4326), crs))
     }
+    # Named by its label: most callers have no `crs` argument, so "the
+    # supplied `crs`" sent the reader looking for one they had not passed.
+    lbl <- tryCatch(sf::st_crs(crs)$input, error = function(e) NULL)
+    lbl <- if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nzchar(lbl))
+      sprintf("the target CRS ('%s')", lbl) else "the target CRS"
     .warn_and_log(
-      "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping the supplied `crs` WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
-      caller, what)
+      "%s(): `%s` has no CRS and its coordinates do not look like lon/lat, so it cannot be reprojected; stamping %s WITHOUT reprojection. Verify the coordinates are already expressed in that CRS, or set the input CRS with sf::st_crs().",
+      caller, what, lbl)
     return(sf::st_set_crs(x, crs))
   }
   sf::st_transform(x, crs)
@@ -100,11 +105,37 @@
 }
 
 
+# The one place the package hands a line to logger.  Every helper formats its
+# message with sprintf() first, so it is marked skip_formatter(): no formatter
+# on any index -- including one logger copied into this namespace from a
+# user's global configuration -- gets to read a `%` or a `{` in it as syntax.
+# And a log line is never worth the computation that produced it.  An
+# appender that fails (a session temp directory deleted under the file trace,
+# a user's own appender that throws) is swallowed here rather than aborting
+# the caller, so the R warning .warn_and_log() raises next still arrives.
+# `raising` tells the console appender that the line is about to be raised as
+# an R warning too; see .sk_console_appender() in zzz.R.
+.sk_log_state <- new.env(parent = emptyenv())
+.sk_log <- function(level, msg, raising = FALSE) {
+  .sk_log_state$raising <- raising
+  on.exit(.sk_log_state$raising <- FALSE, add = TRUE)
+  tryCatch(logger::log_level(level, logger::skip_formatter(msg),
+                             namespace = "spatialkit"),
+           error = function(e) NULL)
+  invisible(msg)
+}
+
+
 #' Structured warning via logger
 #' @keywords internal
 #' @noRd
 .log_warn <- function(fmt, ...) {
-  logger::log_warn(sprintf(fmt, ...), namespace = "spatialkit")
+  # A caution that is also raised as an R warning goes through
+  # .warn_and_log(), which marks its line `raising`, so a knitted document
+  # shows it once, as the warning, rather than as a message and a warning.
+  # A line logged here is a caution only, and reaches the document as a
+  # message (see .sk_console_appender()).
+  .sk_log(logger::WARN, sprintf(fmt, ...))
 }
 
 # A warning about a CHOICE, logged once per session under `key`.  A choice
@@ -177,7 +208,10 @@
 #' @noRd
 .warn_and_log <- function(fmt, ...) {
   msg <- sprintf(fmt, ...)
-  logger::log_warn(msg, namespace = "spatialkit")
+  # Logged first, so the trace keeps the line even when the caller catches
+  # the warning with tryCatch(); .sk_log() cannot fail, so the warning
+  # always follows.
+  .sk_log(logger::WARN, msg, raising = TRUE)
   warning(msg, call. = FALSE)
   invisible(msg)
 }
@@ -187,7 +221,7 @@
 #' @keywords internal
 #' @noRd
 .log_info <- function(fmt, ...) {
-  logger::log_info(sprintf(fmt, ...), namespace = "spatialkit")
+  .sk_log(logger::INFO, sprintf(fmt, ...))
 }
 
 
@@ -345,7 +379,12 @@
 #'   `MAPE` and `SMAPE` were averaged over: both have a denominator that can be
 #'   zero, and each drops the rows where its own denominator vanishes (`MAPE`
 #'   where `y == 0`, `SMAPE` where `|y| + |yhat| == 0`), returning `NA` only
-#'   when no row qualifies. `n_MAPE` and `n_SMAPE` are the row counts each was
+#'   when no row qualifies. "Zero" is relative to the data, as for every
+#'   metric here: a denominator no larger than `100 * .Machine$double.eps`
+#'   times the largest one, and, for `R2`, a total sum of squares whose RMS
+#'   deviation is no larger than that fraction of the RMS of `y` (then `R2`
+#'   is `NA`). The result therefore does not depend on the response's units.
+#'   `n_MAPE` and `n_SMAPE` are the row counts each was
 #'   actually averaged over, so that a percentage error over a subset is
 #'   labelled as one; they equal `n` whenever no row was dropped, and are `0`
 #'   in the empty frame. They sit last so that code addressing the first seven
@@ -383,16 +422,28 @@
   rmse <- sqrt(rss / n)
   mae  <- mean(abs(y - yhat))
 
-  nz <- abs(y) > .Machine$double.eps * 100
+  # "Zero" means zero at the scale of the data, 100 machine epsilons of its
+  # magnitude, for every metric.  The thresholds were absolute (1e-14 for a
+  # denominator, var(y) > 2.2e-16 for R2), so a response in small units --
+  # sd below about 1.5e-8 -- lost its R2 while RMSE and MAE were fine, and
+  # select_features_forward(metric = "R2") then selected nothing.  A constant
+  # response still has a TSS of exactly 0 (or of rounding noise, below the
+  # threshold), so its R2 stays NA.
+  tol <- 100 * .Machine$double.eps
+  nz <- abs(y) > tol * max(abs(y))
   mape <- if (any(nz)) mean(abs((y[nz] - yhat[nz]) / y[nz])) * 100 else NA_real_
 
   denom <- abs(y) + abs(yhat)
-  smape_ok <- denom > .Machine$double.eps * 100
+  smape_ok <- denom > tol * max(denom)
   smape <- if (any(smape_ok)) {
     mean(2 * abs(y[smape_ok] - yhat[smape_ok]) / denom[smape_ok]) * 100
   } else NA_real_
 
-  r2 <- if (tss > .Machine$double.eps * n) 1 - rss / tss else NA_real_
+  # TSS against the squared magnitude of y: R2 needs the spread about the
+  # baseline to exceed rounding, i.e. an RMS deviation above tol times the
+  # RMS of y.  (Relative to sum(y^2) itself, not squared tol, it would turn
+  # R2 NA for an ordinary response on a large offset, 1e8 +- 0.1.)
+  r2 <- if (tss > tol^2 * sum(y^2)) 1 - rss / tss else NA_real_
 
   adj_r2 <- NA_real_
   if (!is.null(p) && is.finite(r2) && n > (p + 1L)) {
@@ -641,19 +692,36 @@
 # for "sf": methods::as(x, "Spatial") -- which .to_sp() calls on its way into
 # GWmodel -- and terra::vect() and friends look the class up in the S4 table,
 # and an unregistered class ahead of "sf" fails them with "no method or
-# default for coercing". Registering only the chain up to "sf" is deliberate:
-# sf itself registers c("sf", "data.frame"), and naming "data.frame" here as
-# well is rejected as inconsistent with that.
+# default for coercing". The class now goes after "sf" (see below), but a
+# layer built by an earlier version, read back from an .rds, has it first.
+# Registering only the chain up to "sf" is deliberate: sf itself registers
+# c("sf", "data.frame"), and naming "data.frame" here as well is rejected as
+# inconsistent with that.
 setOldClass(c("spatialkit_rows", "sf"))
 
 .row_record_attrs <- c("dropped", "ties")
 
 # Attach `value` as the `which` record of `x`, stamped and classed.
+#
+# The class goes right after "sf", not ahead of it.  vctrs -- behind
+# dplyr::bind_rows(), vctrs::vec_rbind() and dplyr::union_all() -- reads the
+# first class, and an unknown one ahead of "sf" sent two layers with the same
+# record (bind_rows(a, a), or two equal-sized batches) down its same-type
+# path into its sf restore method, which failed with 'attr(obj, "sf_column")
+# does not point to a geometry column'.  After "sf", vctrs binds an sf, and
+# the result carries no record: it describes neither input's rows.  `[`
+# still removes the record, reaching `[.spatialkit_rows` through the
+# NextMethod() in sf's own `[` method, as it always did for the output of
+# sf::st_transform(), which puts "sf" first.
 .set_row_record <- function(x, which, value) {
   value$n_rows <- as.integer(nrow(x))
   attr(x, which) <- value
-  if (!inherits(x, "spatialkit_rows"))
-    class(x) <- c("spatialkit_rows", class(x))
+  if (!inherits(x, "spatialkit_rows")) {
+    cl <- class(x)
+    at <- match("sf", cl)
+    class(x) <- if (is.na(at)) c("spatialkit_rows", cl)
+                else append(cl, "spatialkit_rows", after = at)
+  }
   x
 }
 
@@ -677,10 +745,24 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' attribute recording what happened to its rows (\code{"dropped"} and
 #' \code{"ties"} respectively).  Those records describe the rows the layer was
 #' built with, and \code{[} on an \code{sf} object copies attributes through
-#' unchanged, which would leave a subset reporting its parent's numbers with
-#' row positions that no longer resolve.  Subsetting therefore returns a plain
-#' layer with the record removed; read the record from the layer the function
-#' returned, before subsetting it.
+#' unchanged, which would leave a subset reporting its parent's numbers for a
+#' different set of rows.  Subsetting therefore returns a plain layer with the
+#' record removed, and so do the \pkg{dplyr} verbs that select or reorder
+#' rows (\code{filter()}, \code{slice()}, \code{arrange()},
+#' \code{distinct()}); read the record from the layer the function returned,
+#' before subsetting it.  Binding such layers (\code{rbind()},
+#' \code{dplyr::bind_rows()}) likewise returns a plain \code{sf} layer.
+#'
+#' Each record carries \code{n_rows}, the number of rows it was made for.
+#' \code{sf::st_drop_geometry()} keeps the rows, and with them the record: it
+#' returns a data frame of class \code{c("spatialkit_rows", "data.frame")}.
+#' Binding such data frames with
+#' \code{rbind()} or \code{dplyr::bind_rows()} keeps the first one's record
+#' and class, so the record then describes only the first input's rows: its
+#' \code{n_rows} no longer equals \code{nrow()} of the result.  The
+#' package's own readers ignore a record whose \code{n_rows} does not match;
+#' when reading \code{attr(x, "dropped")} or \code{attr(x, "ties")} yourself
+#' from a layer that has been through such steps, check it the same way.
 #'
 #' @param x A layer returned by \code{\link{prep_model_data}()} or
 #'   \code{\link{assign_features_to_polygons}()}.
@@ -703,6 +785,20 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'   attach the records this method removes.
 #' @export
 `[.spatialkit_rows` <- function(x, ...) {
+  y <- NextMethod()
+  if (!is.data.frame(y)) return(y)
+  for (nm in .row_record_attrs) attr(y, nm) <- NULL
+  class(y) <- setdiff(class(y), "spatialkit_rows")
+  y
+}
+
+# dplyr's row verbs -- filter(), slice(), arrange(), distinct() -- reach the
+# data through dplyr_row_slice(), not `[`, and kept the record: filter(a,
+# v >= 3) on 5 rows returned 3 rows still reporting ties$n = 3.  They drop it
+# as `[` does.  sf's own dplyr methods strip "sf" from the class and call
+# NextMethod(), so this runs for an sf layer too.  Registered in .onLoad()
+# on dplyr's generic.
+.dplyr_row_slice_spatialkit_rows <- function(data, i, ...) {
   y <- NextMethod()
   if (!is.data.frame(y)) return(y)
   for (nm in .row_record_attrs) attr(y, nm) <- NULL
@@ -739,14 +835,21 @@ setOldClass(c("spatialkit_rows", "sf"))
 # wrote to stderr.  Anything written by a call that SUCCEEDED is passed
 # straight through to stderr afterwards, so ordinary progress and warning
 # output from compiled code is not swallowed.
-.call_capturing_stderr <- function(fun) {
+.call_capturing_stderr <- function(fun, path = tempfile("spatialkit-stderr-")) {
   err <- NULL
   if (!identical(as.integer(sink.number(type = "message")), 2L)) {
     val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
     return(list(value = val, error = err, stderr = character(0)))
   }
-  path <- tempfile("spatialkit-stderr-")
-  con  <- file(path, open = "wt")
+  # A session temp directory deleted under a running session leaves nowhere
+  # to divert to, and file() then failed the whole call with "cannot open the
+  # connection".  Run it undiverted instead, as when a sink is active.
+  con <- tryCatch(suppressWarnings(file(path, open = "wt")),
+                  error = function(e) NULL)
+  if (is.null(con)) {
+    val <- tryCatch(fun(), error = function(e) { err <<- e; NULL })
+    return(list(value = val, error = err, stderr = character(0)))
+  }
   open <- TRUE
   # Restore the stream whatever happens, an interrupt included: leaving a
   # session with its messages diverted to a deleted temp file would silence

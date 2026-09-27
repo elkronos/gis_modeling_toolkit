@@ -92,6 +92,39 @@
 }
 
 
+#' Evaluate a convergence accessor without posterior's capped-ESS warning
+#'
+#' \pkg{posterior} warns "The ESS has been capped to avoid unstable estimates."
+#' once for every parameter whose effective sample size exceeds its draw
+#' count.  In a Hilbert-space GP that is most of the \code{zgp} basis weights,
+#' which mix well precisely because their chains are antithetic: an
+#' \code{n = 80} fit raised 41 of them from a single
+#' \code{brms::neff_ratio()} call.  R keeps only the first 50 warnings, so a
+#' warning that mattered and came later -- loo's Pareto-k, raised after this
+#' check -- was dropped.  The capped value is still the one to read; only that
+#' message is muffled, and every other warning passes through.  Restricting
+#' the check to non-\code{zgp} parameters instead would hide real flags: in the
+#' fits the review ran, the only ratios below 0.1 were \code{zgp} weights.
+#'
+#' @param expr The call to evaluate.
+#' @return The value of \code{expr}.
+#' @keywords internal
+#' @noRd
+.muffle_ess_cap <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    if (grepl("The ESS has been capped", conditionMessage(w), fixed = TRUE))
+      invokeRestart("muffleWarning")
+  })
+}
+
+
+# The brms families whose response is a category rather than a number, and so
+# the only ones fit_bayesian_spatial_model() lets a factor or character
+# response through for.
+.brms_category_families <- c("categorical", "cumulative", "sratio", "cratio",
+                             "acat")
+
+
 #' Build the brms gp() term for the spatial GP
 #'
 #' Kept separate from \code{fit_bayesian_spatial_model()} so the formula text
@@ -113,6 +146,107 @@
 .gp_formula_term <- function(gp_k, gp_c, gp_iso = FALSE) {
   sprintf("gp(..x, ..y, k = %s, c = %s, scale = FALSE, iso = %s)",
           gp_k, gp_c, if (isTRUE(gp_iso)) "TRUE" else "FALSE")
+}
+
+
+#' The coefficient-level length-scale parameters brms creates for a model
+#'
+#' One row per \code{lscale} coefficient, with everything that addresses it:
+#' \code{coef}, \code{resp}, \code{dpar} and \code{nlpar}.  The address is more
+#' than the \code{coef} name.  A family with several distributional parameters
+#' gives each its own GP -- \code{brms::categorical()} one per non-reference
+#' category (\code{muhi}, \code{mumid}), a \code{brms::mixture()} one per
+#' component -- under the SAME \code{coef} names, so a prior built from
+#' \code{coef} alone lands every row on \code{dpar = ""} twice, and brms
+#' refuses the whole model with "Duplicated prior specifications are not
+#' allowed" before sampling.
+#'
+#' @param fml,data,family As handed to \code{brms::brm()}.
+#' @return A data.frame with character columns \code{coef}, \code{resp},
+#'   \code{dpar}, \code{nlpar}, or \code{NULL} when brms reports none (or
+#'   \code{brms::get_prior()} fails).
+#' @keywords internal
+#' @noRd
+.lscale_coef_rows <- function(fml, data, family) {
+  gp_def <- tryCatch(brms::get_prior(fml, data = data, family = family),
+                     error = function(e) NULL)
+  if (is.null(gp_def) || !all(c("class", "coef") %in% names(gp_def)))
+    return(NULL)
+  keep <- gp_def$class == "lscale" & nzchar(gp_def$coef)
+  if (!any(keep)) return(NULL)
+  field <- function(nm) {
+    v <- if (nm %in% names(gp_def)) as.character(gp_def[[nm]][keep])
+         else rep("", sum(keep))
+    v[is.na(v)] <- ""
+    v
+  }
+  unique(data.frame(coef = field("coef"), resp = field("resp"),
+                    dpar = field("dpar"), nlpar = field("nlpar"),
+                    stringsAsFactors = FALSE))
+}
+
+
+#' One coefficient-level lscale prior per row of .lscale_coef_rows()
+#'
+#' @param spec The prior, as a Stan distribution string.
+#' @param rows A (non-empty) return value of \code{.lscale_coef_rows()}.
+#' @return A \code{brmsprior}.
+#' @keywords internal
+#' @noRd
+.lscale_prior_rows <- function(spec, rows) {
+  Reduce(`+`, lapply(seq_len(nrow(rows)), function(i)
+    brms::set_prior(spec, class = "lscale", coef = rows$coef[[i]],
+                    resp = rows$resp[[i]], dpar = rows$dpar[[i]],
+                    nlpar = rows$nlpar[[i]])))
+}
+
+
+#' The weakly informative slope prior, one row per distributional parameter
+#'
+#' \code{set_prior(spec, class = "b")} with no \code{dpar} addresses only the
+#' slopes of the main parameter.  A \code{brms::categorical()} or
+#' \code{brms::mixture()} family has none of those -- its slopes belong to
+#' \code{muhi}/\code{mumid} or \code{mu1}/\code{mu2} -- so brms refused the
+#' whole model with "The following priors do not correspond to any model
+#' parameter: b ~ normal(0, 5)", a prior the user never wrote.  The
+#' class-level \code{b} rows are therefore read back from
+#' \code{brms::get_prior()}, as for the length-scale prior, and the prior is
+#' set on each.  A family with one \code{mu} gets the single dpar-less row it
+#' always had.
+#'
+#' @param spec The prior, as a Stan distribution string.
+#' @param fml,data,family As handed to \code{brms::brm()}.
+#' @return A \code{brmsprior}; the global \code{class = "b"} row when
+#'   \code{brms::get_prior()} fails or reports no class-level \code{b} row.
+#' @keywords internal
+#' @noRd
+.b_prior_rows <- function(spec, fml, data, family) {
+  gp_def <- tryCatch(brms::get_prior(fml, data = data, family = family),
+                     error = function(e) NULL)
+  keep <- if (!is.null(gp_def) && all(c("class", "coef") %in% names(gp_def)))
+    gp_def$class == "b" & !nzchar(gp_def$coef) else FALSE
+  if (!any(keep)) return(brms::set_prior(spec, class = "b"))
+  field <- function(nm) {
+    v <- if (nm %in% names(gp_def)) as.character(gp_def[[nm]][keep])
+         else rep("", sum(keep))
+    v[is.na(v)] <- ""
+    v
+  }
+  rows <- unique(data.frame(resp = field("resp"), dpar = field("dpar"),
+                            nlpar = field("nlpar"), stringsAsFactors = FALSE))
+  Reduce(`+`, lapply(seq_len(nrow(rows)), function(i)
+    brms::set_prior(spec, class = "b", resp = rows$resp[[i]],
+                    dpar = rows$dpar[[i]], nlpar = rows$nlpar[[i]])))
+}
+
+
+#' Label lscale coefficients for a log line, with their dpar/nlpar/resp
+#' @keywords internal
+#' @noRd
+.lscale_row_labels <- function(rows) {
+  where <- paste(rows$resp, rows$dpar, rows$nlpar, sep = "/")
+  where <- gsub("^/+|/+$", "", gsub("/{2,}", "/", where))
+  paste0(sQuote(rows$coef), ifelse(nzchar(where), paste0(" (", where, ")"), ""))
 }
 
 
@@ -151,9 +285,11 @@
 #'   \code{brms::hurdle_poisson()}, \code{brms::bernoulli()} or
 #'   \code{brms::Beta()}.  Default \code{NULL}, resolved to
 #'   \code{stats::gaussian()}.  The family reaches \code{brms::brm()}
-#'   unchanged with the spatial GP term still in the formula, so any response
-#'   type brms can fit, this function can fit; see the section on
-#'   non-Gaussian responses and the count example below.
+#'   unchanged with the spatial GP term still in the formula.  A factor
+#'   response is accepted only under \code{brms::categorical()} or an ordinal
+#'   family, and those fits have no single expected value per row, so several
+#'   methods cannot use them; see the section on non-Gaussian responses for
+#'   what each family supports, and the count example below.
 #' @param gp_k Positive integer giving the number of GP basis functions
 #'   \emph{per dimension}, or NULL (default) to derive it from the
 #'   length-scale/domain ratio.  The fitted model carries
@@ -168,7 +304,11 @@
 #'   NULL (default) to derive it alongside \code{gp_k}.  The boundary must be
 #'   wide enough to contain the longest plausible correlation range; a value
 #'   that is too small truncates the domain and degrades the approximation for
-#'   smooth, long-range surfaces.
+#'   smooth, long-range surfaces.  When you set \code{gp_c} and leave
+#'   \code{gp_k = NULL}, \code{gp_k} is derived for \emph{your} boundary: a
+#'   wider boundary needs more basis functions to resolve the same
+#'   length-scale, so raising \code{gp_c} raises the derived \code{gp_k} with
+#'   it, up to the cap of 50 per dimension (a capped value is logged).
 #' @param prior Optional brms prior specification. When NULL and
 #'   \code{standardize_predictors = TRUE}, weakly informative
 #'   \code{normal(0, 5)} priors are set on regression coefficients.
@@ -200,9 +340,33 @@
 #' @param compute_loo Logical; compute PSIS-LOO. Default TRUE.
 #' @param standardize_predictors Logical; center and scale numeric predictors
 #'   before fitting. Default FALSE. When TRUE, the scaling parameters are
-#'   stored in the return value so predictions can be computed correctly.
-#' @param check_convergence Logical; after fitting, check for divergences,
-#'   low ESS, and high R-hat and issue warnings. Default TRUE.
+#'   stored in the return value (\code{$info$predictor_scaling}, a
+#'   \code{center} and \code{scale} per predictor) so predictions can be
+#'   computed correctly.  The model is then fitted on the standardised
+#'   predictors, so \code{coef()} reports a slope per standard deviation of
+#'   each predictor and an intercept at the predictor means, not the raw-unit
+#'   values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.
+#' @param check_convergence Logical; after fitting, check for divergent
+#'   transitions, R-hat above 1.05 and an effective-sample-size ratio below
+#'   0.1.  Each problem found is written to the log as a WARN line (shown on
+#'   the console unless \code{\link{spatialkit_quiet}()} is on), sets
+#'   \code{$info$convergence_ok} to \code{FALSE}, and is detailed in
+#'   \code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
+#'   The GP basis is also checked against the posterior length-scale (see
+#'   Details): a basis too coarse for it is logged as a WARN line, and the
+#'   share of draws it cannot resolve is recorded as
+#'   \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, but it
+#'   does not change \code{convergence_ok} and \code{print()} does not flag
+#'   it.  None of these are raised as R warnings by the fit itself; the
+#'   functions that score fits do raise one: \code{\link{cv_bayes}()} names
+#'   the folds whose sampler did not converge (and marks them in
+#'   \code{fold_metrics$convergence_ok}), and
+#'   \code{\link{compare_models}()} names such a model (column
+#'   \code{convergence_ok}).  Under \pkg{rstan} the sampler raises its own
+#'   R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so read
+#'   \code{$info$convergence_ok}.  \code{FALSE} skips
+#'   the checks and leaves \code{convergence_ok} \code{NA} (not checked).
+#'   Default TRUE.
 #' @param pointize Strategy for non-point geometry coercion.
 #' @param boundary Optional polygonal sf/sfc for CRS harmonization.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
@@ -246,9 +410,12 @@
 #'
 #' After fitting, the posterior length-scale is compared against the smallest
 #' scale the chosen basis can resolve
-#' (\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); a
-#' warning is issued when more than 10% of the posterior mass falls below it,
-#' which is the signal that \code{gp_k} should be raised.
+#' (\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); when
+#' more than 10% of the posterior mass falls below it a WARN line is logged
+#' and the share is recorded as
+#' \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, which is
+#' the signal that \code{gp_k} should be raised.  This runs with the other
+#' checks, so only under \code{check_convergence = TRUE}.
 #'
 #' \strong{Coordinate scaling and anisotropy.}
 #' Before fitting the GP, X and Y coordinates are each centred and divided by
@@ -280,14 +447,18 @@
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 #'   gp_S: the pooled centred range \code{brms::gp(c = )} multiplies;
+#'   gp_cmeans: the column means brms centred the scaled coordinates on;
 #'   gp_xy_range: the training extrema of the scaled coordinates, which
-#'   \code{predict()} uses to pin the GP boundary;
+#'   \code{predict()} uses, with gp_S and gp_cmeans, to hold the GP boundary
+#'   at its fitted value;
 #'   gp_lengthscale_bounds: the \code{c(lower, upper)} the length-scale prior
 #'   was calibrated over; gp_lscale_prior: the length-scale prior
 #'   \code{brms::validate_prior()} reports the model will \emph{actually} use,
 #'   which is not necessarily the one this function requested (several entries,
 #'   semicolon-separated, if brms resolved the axes differently); loo, looic,
-#'   convergence_ok, convergence_diagnostics: \code{n_divergent},
+#'   convergence_ok (\code{TRUE} or \code{FALSE}, and \code{NA} when nothing
+#'   was checked, as under \code{check_convergence = FALSE}),
+#'   convergence_diagnostics: \code{n_divergent},
 #'   \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
 #'   \code{neff_failed}, the parameters that failed each check by name with
 #'   their values (empty when none failed), which is what makes a failed
@@ -297,16 +468,38 @@
 #'   The raw brmsfit is in \code{$engine}.
 #' @family model fitting
 #' @section Non-Gaussian responses:
-#' Nothing in this function is Gaussian-specific except its default.  The
-#' response check is family-aware: a non-numeric response is refused only when
-#' the family resolves to gaussian, so a count, binary or bounded response
-#' passes straight through to brms under the family you name.  Zero-inflated
-#' and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
-#' have all been verified to reach \code{brms::brm()} with the GP term intact.
+#' Nothing in this function is Gaussian-specific except its default.  A
+#' numeric count, binary (0/1 or logical) or bounded response passes straight
+#' through to brms under the family you name; zero-inflated and hurdle
+#' counts, negative binomial, Bernoulli, beta, ordinal, categorical and
+#' mixture families have all been verified to reach \code{brms::brm()} with
+#' the GP term intact, the length-scale prior attached to each
+#' distributional parameter's GP.
 #'
-#' Two things follow.  First, the metrics that come back from
-#' \code{\link{model_metrics}()} and the \code{cv_*()} functions are not all
-#' meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+#' The response check is family-aware.  A factor or character response is
+#' accepted only under \code{brms::categorical()} or an ordinal family
+#' (\code{cumulative}, \code{sratio}, \code{cratio}, \code{acat}), and refused
+#' under every other family before anything is compiled; under gaussian a
+#' logical response is refused too.  The case to watch is a two-level factor
+#' under \code{brms::bernoulli()}: brms would fit it, but
+#' \code{residuals()}, \code{summary()}, \code{model_metrics()} and
+#' \code{\link{cv_bayes}()} could not score a factor, so convert it to 0/1
+#' first.
+#'
+#' An ordinal or categorical fit has a probability per response category, not
+#' one expected value per row.  \code{predict()} with its default
+#' \code{type = "epred"}, \code{fitted()}, \code{residuals()},
+#' \code{summary()} and \code{model_metrics()} therefore stop with a message
+#' saying so, and \code{\link{cv_bayes}()} refuses the family before fitting
+#' anything.  \code{predict(type = "predict", draws = TRUE)} returns the
+#' posterior predicted categories, as category indices, for new rows as well
+#' as the training ones (the share of draws in each category estimates its
+#' probability), and \code{brms::posterior_epred(fit$engine)} the
+#' probabilities for the training rows.
+#'
+#' For the numeric families two things follow.  First, the metrics that come
+#' back from \code{\link{model_metrics}()} and the \code{cv_*()} functions are
+#' not all meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
 #' are Gaussian-shaped, and for this backend \code{\link{cv_bayes}()}'s CRPS
 #' and interval coverage are the proper scores to read.  See
 #' \code{\link{model_metrics}()}, section "Which metrics survive a
@@ -317,10 +510,10 @@
 #'
 #' One trap.  The response check reads the family's name through
 #' \code{brms}'s own accessor; a family object it cannot name is treated as
-#' "not gaussian" and the check is skipped entirely, without falling back
-#' to the gaussian rule.  A malformed \code{family} therefore buys less
-#' validation, not more, and a wrong response type will surface as a Stan
-#' error, with no message from this function.
+#' unknown and the check is skipped entirely, without falling back to either
+#' rule above.  A malformed \code{family} therefore buys less validation, not
+#' more, and a wrong response type will surface as a Stan error, with no
+#' message from this function.
 #'
 #' @section Spatial confounding:
 #' A fixed-effect coefficient estimated alongside a spatial random effect is a
@@ -334,7 +527,12 @@
 #' the spatial field can explain, and the non-spatial one is not.  Which of the
 #' two a user wants depends on the question, so the honest diagnostic is to
 #' report both side by side and leave them unadjusted: fit the same formula
-#' with \code{stats::lm()} or \code{stats::glm()} and compare.
+#' with \code{stats::lm()} or \code{stats::glm()} and compare.  Compare like
+#' with like: under \code{standardize_predictors = TRUE} the coefficients here
+#' are per standard deviation of each predictor, so either fit the
+#' non-spatial model on the same standardised columns or divide these slopes
+#' by \code{$info$predictor_scaling[[name]]$scale} first (see
+#' \code{\link{coef.bayesian_fit}}).
 #'
 #' The literature on remedies is unsettled and this function takes no side.
 #' Restricted spatial regression (Hughes and Haran 2013) projects the spatial
@@ -511,13 +709,37 @@ fit_bayesian_spatial_model <- function(
   if (nrow(dat_sf) < 2L)
     stop(sprintf("fit_bayesian_spatial_model(): %d usable row(s) after cleaning; at least two are needed to fit a spatial GP.",
                  nrow(dat_sf)), call. = FALSE)
-  if (identical(.brms_family_name(family), "gaussian") &&
-      !is.numeric(dat_cols[[response_var]]))
+  fam_name <- .brms_family_name(family)
+  y_resp   <- dat_cols[[response_var]]
+  if (identical(fam_name, "gaussian") && !is.numeric(y_resp))
     stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' is %s, ",
                         "not numeric, but the family is gaussian. Convert it ",
                         "to numeric, or pass a `family` that matches it (e.g. ",
-                        "brms::bernoulli() for a 0/1 outcome)."),
-                 response_var, class(dat_cols[[response_var]])[1L]),
+                        "brms::bernoulli() for an outcome coded 0/1)."),
+                 response_var, class(y_resp)[1L]),
+         call. = FALSE)
+  # A factor or character response under any other family that is not
+  # categorical or ordinal.  brms fits a two-level factor under bernoulli(), so
+  # this used to pass, and then residuals() came back all NA, summary(),
+  # model_metrics() and compare_models() stopped on "response is factor", and
+  # cv_bayes() ran a whole fold of MCMC before aborting in the fold scoring.
+  # Refused here, before anything is compiled.  A family whose name cannot be
+  # read (NA) is not checked, as documented.
+  if (!is.na(fam_name) && !identical(fam_name, "gaussian") &&
+      !(is.numeric(y_resp) || is.logical(y_resp)) &&
+      !(fam_name %in% .brms_category_families))
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' is %s, ",
+                        "not numeric, and the family is %s. Only ",
+                        "brms::categorical() and the ordinal families (%s) ",
+                        "take a categorical response here; convert it first, ",
+                        "e.g. to 0/1 for brms::bernoulli() with as.integer(",
+                        "%s == \"<the level to model>\"). residuals(), ",
+                        "summary(), model_metrics() and cv_bayes() all need a ",
+                        "numeric response to score the fit."),
+                 response_var, class(y_resp)[1L], fam_name,
+                 paste(setdiff(.brms_category_families, "categorical"),
+                       collapse = ", "),
+                 response_var),
          call. = FALSE)
 
   # NOTE: prep_model_data() coerces geometry to points and drops incomplete
@@ -592,8 +814,18 @@ fit_bayesian_spatial_model <- function(
   # that scaled gp_k with sqrt(n) made the approximation cost grow as n while
   # adding no resolution the data supported.  NULL means "derive"; an explicit
   # value passes through untouched, which is the contract the CV internals
-  # rely on when a user supplies gp_k per fold.
-  gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds)
+  # rely on when a user supplies gp_k per fold.  A user's gp_c is handed to the
+  # rule, so a derived gp_k is sized for the boundary actually used: k grows
+  # with c, and a gp_c raised for a long-range surface (the advice under
+  # @param gp_c) used to keep the k derived for the default c, a basis coarser
+  # than the lower length-scale bound it is sized to resolve.  gp_c is
+  # therefore validated first, before the rule reads it.
+  if (!is.null(gp_c) &&
+      (!is.numeric(gp_c) || length(gp_c) != 1L || !is.finite(gp_c) || gp_c <= 1))
+    stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
+         call. = FALSE)
+  gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds,
+                              c = gp_c)
   gp_k_auto <- is.null(gp_k)
   if (gp_k_auto)      gp_k <- gp_spec$k
   if (is.null(gp_c))  gp_c <- gp_spec$c
@@ -603,9 +835,6 @@ fit_bayesian_spatial_model <- function(
   # produce a nonsensical resolvable-length-scale and a spurious diagnostic.
   if (!is.numeric(gp_k) || length(gp_k) != 1L || !is.finite(gp_k) || gp_k < 2)
     stop("fit_bayesian_spatial_model(): `gp_k` must be a single finite number >= 2.",
-         call. = FALSE)
-  if (!is.numeric(gp_c) || length(gp_c) != 1L || !is.finite(gp_c) || gp_c <= 1)
-    stop("fit_bayesian_spatial_model(): `gp_c` must be a single finite number > 1.",
          call. = FALSE)
   gp_k <- as.integer(gp_k)
   if (gp_c < 1.25)
@@ -682,7 +911,15 @@ fit_bayesian_spatial_model <- function(
   # makes the prior far too diffuse and the adequacy check fire on every fit.
   # With scale = FALSE there is exactly one coordinate scaling, ours.
   gp_term <- .gp_formula_term(gp_k, gp_c, gp_iso)
-  fml <- stats::as.formula(sprintf("%s ~ %s + %s", response_var, rhs_terms, gp_term))
+  # env = globalenv(), not this frame.  A formula carries its environment, and
+  # brms stores the formula inside the brmsfit, so the default (the frame this
+  # line runs in) made the fit and its $engine capture THIS frame -- which by
+  # the end holds the brmsfit itself (`fit`), the data twice and every
+  # intermediate.  An environment is serialised once but a list every time it
+  # is met, so saveRDS() wrote the whole brmsfit twice.  The formula names
+  # columns of the data and brms's own gp(); nothing in it needs this frame.
+  fml <- stats::as.formula(sprintf("%s ~ %s + %s", response_var, rhs_terms, gp_term),
+                           env = globalenv())
 
   # Build priors in two independent steps:
   # 1. Regression coefficient priors (only when no user prior and predictors
@@ -693,8 +930,10 @@ fit_bayesian_spatial_model <- function(
   if (is.null(prior)) {
     prior_parts <- list()
     if (isTRUE(standardize_predictors) && length(predictor_vars) > 0L) {
+      # One row per distributional parameter's slopes (.b_prior_rows()): a
+      # dpar-less row matches no slope of a categorical or mixture model.
       prior_parts <- c(prior_parts, list(
-        brms::set_prior("normal(0, 5)", class = "b")
+        .b_prior_rows("normal(0, 5)", fml, dat_df, family)
       ))
       .log_info("fit_bayesian_spatial_model(): using weakly informative normal(0,5) priors on standardized coefficients.")
     }
@@ -764,14 +1003,13 @@ fit_bayesian_spatial_model <- function(
     # The coefficient names are read back from brms rather than hard-coded:
     # they embed the covariate names ("gp..x..y..x", "gp..x..y..y") and the
     # count depends on `iso`, so deriving them is the only version-safe way.
-    ls_coefs <- tryCatch({
-      gp_def <- brms::get_prior(fml, data = dat_df, family = family)
-      gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
-    }, error = function(e) character(0))
+    # So is each one's dpar/nlpar/resp: a categorical or mixture family repeats
+    # the same names once per distributional parameter (see
+    # .lscale_coef_rows()), and dropping that address made every such fit fail.
+    ls_rows <- .lscale_coef_rows(fml, dat_df, family)
 
-    ls_prior <- if (length(ls_coefs) > 0L) {
-      Reduce(`+`, lapply(ls_coefs, function(k)
-        brms::set_prior(lscale_prior_spec, class = "lscale", coef = k)))
+    ls_prior <- if (!is.null(ls_rows)) {
+      .lscale_prior_rows(lscale_prior_spec, ls_rows)
     } else {
       # No lscale coefficient to attach to (a brms that names them
       # differently, or a formula with no GP term).  Fall back to the global
@@ -797,24 +1035,46 @@ fit_bayesian_spatial_model <- function(
     # does what it says.
     is_global_ls <- prior$class == "lscale" & !nzchar(prior$coef)
     if (any(is_global_ls)) {
-      ls_coefs <- tryCatch({
-        gp_def <- brms::get_prior(fml, data = dat_df, family = family)
-        gp_def$coef[gp_def$class == "lscale" & nzchar(gp_def$coef)]
-      }, error = function(e) character(0))
-      if (length(ls_coefs) > 0L) {
-        expanded <- NULL
-        for (i in which(is_global_ls)) {
-          for (k in ls_coefs) {
-            row <- brms::set_prior(prior$prior[i], class = "lscale", coef = k)
-            expanded <- if (is.null(expanded)) row else expanded + row
-          }
+      ls_rows <- .lscale_coef_rows(fml, dat_df, family)
+      if (!is.null(ls_rows)) {
+        # Each global row is expanded only onto the coefficients it addresses
+        # -- those with its own resp/dpar/nlpar, which is how brms resolves a
+        # global prior itself -- and never onto one the user already gave a
+        # coefficient-level prior.  Expanding every row onto every coef name
+        # turned a dpar-level prior (dpar = "mumid" on a categorical fit) into
+        # rows for every category at once, duplicates brms refuses.
+        pcol <- function(nm) {
+          v <- if (nm %in% names(prior)) as.character(prior[[nm]])
+               else rep("", nrow(prior))
+          v[is.na(v)] <- ""
+          v
         }
-        kept  <- prior[!is_global_ls, , drop = FALSE]
-        prior <- if (nrow(kept) > 0L) kept + expanded else expanded
-        .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
-                         "'lscale' prior was attached to %s so that brms uses ",
-                         "it (a global lscale prior is otherwise discarded)."),
-                  paste(sQuote(ls_coefs), collapse = ", "))
+        p_resp <- pcol("resp"); p_dpar <- pcol("dpar"); p_nlpar <- pcol("nlpar")
+        row_keys  <- paste(ls_rows$coef, ls_rows$resp, ls_rows$dpar,
+                           ls_rows$nlpar, sep = "\r")
+        user_keys <- paste(prior$coef, p_resp, p_dpar, p_nlpar, sep = "\r")[
+          prior$class == "lscale" & nzchar(prior$coef)]
+        expanded <- NULL
+        done     <- rep(FALSE, nrow(prior))
+        targets  <- character(0)
+        for (i in which(is_global_ls)) {
+          hit <- ls_rows$resp == p_resp[[i]] & ls_rows$dpar == p_dpar[[i]] &
+            ls_rows$nlpar == p_nlpar[[i]] & !(row_keys %in% user_keys)
+          if (!any(hit)) next
+          tgt  <- ls_rows[hit, , drop = FALSE]
+          part <- .lscale_prior_rows(prior$prior[[i]], tgt)
+          expanded <- if (is.null(expanded)) part else expanded + part
+          done[i]  <- TRUE
+          targets  <- c(targets, .lscale_row_labels(tgt))
+        }
+        if (any(done)) {
+          kept  <- prior[!done, , drop = FALSE]
+          prior <- if (nrow(kept) > 0L) kept + expanded else expanded
+          .log_info(paste0("fit_bayesian_spatial_model(): the supplied global ",
+                           "'lscale' prior was attached to %s so that brms uses ",
+                           "it (a global lscale prior is otherwise discarded)."),
+                    paste(targets, collapse = ", "))
+        }
       } else {
         .log_warn(paste0("fit_bayesian_spatial_model(): the supplied prior has a ",
                          "GLOBAL 'lscale' entry, which brms discards because ",
@@ -862,9 +1122,14 @@ fit_bayesian_spatial_model <- function(
     stop(sprintf("fit_bayesian_spatial_model(): brms fit failed: %s", as.character(fit)))
 
   # ---- Convergence diagnostics ----
-  convergence_ok <- TRUE
+  # NA until a check has actually run.  It was TRUE from the start, so
+  # check_convergence = FALSE returned convergence_ok = TRUE over an empty
+  # diagnostics list -- a verdict on checks that never happened, for a fit
+  # whose max R-hat was 1.28 -- and print() had nothing to caveat.
+  convergence_ok <- NA
   convergence_diagnostics <- list()
   if (isTRUE(check_convergence) && inherits(fit, "brmsfit")) {
+    convergence_ok <- TRUE
     # Divergent transitions
     np <- tryCatch(brms::nuts_params(fit), error = function(e) NULL)
     if (!is.null(np)) {
@@ -879,9 +1144,10 @@ fit_bayesian_spatial_model <- function(
       }
     }
     
-    # R-hat
+    # R-hat.  Both accessors run under .muffle_ess_cap(): posterior's
+    # "The ESS has been capped" arrives once per well-mixed basis weight.
     rhat_vals <- tryCatch({
-      rh <- brms::rhat(fit)
+      rh <- .muffle_ess_cap(brms::rhat(fit))
       if (is.numeric(rh)) rh else NULL
     }, error = function(e) NULL)
     
@@ -912,7 +1178,7 @@ fit_bayesian_spatial_model <- function(
     
     # Effective sample size ratio
     neff_vals <- tryCatch({
-      ne <- brms::neff_ratio(fit)
+      ne <- .muffle_ess_cap(brms::neff_ratio(fit))
       if (is.numeric(ne)) ne else NULL
     }, error = function(e) NULL)
     
@@ -965,6 +1231,8 @@ fit_bayesian_spatial_model <- function(
           100 * frac_below, gp_ell_min, gp_k, gp_k^2
         )
     }
+    # Every accessor failed, so nothing was checked after all.
+    if (!length(convergence_diagnostics)) convergence_ok <- NA
   }
 
   loo_obj <- NULL; looic <- NA_real_
@@ -981,7 +1249,11 @@ fit_bayesian_spatial_model <- function(
           looic <- suppressWarnings(as.numeric(-2 * est["elpd_loo", "Estimate"]))
       }
     } else {
-      .log_warn("fit_bayesian_spatial_model(): LOO computation failed.")
+      # With the cause: "LOO computation failed." alone left compare_models()
+      # showing LOOIC NA with nothing anywhere saying why.
+      .log_warn(paste0("fit_bayesian_spatial_model(): LOO computation failed, ",
+                       "so $info$looic is NA. Cause: %s"),
+                .try_error_message(loo_try))
     }
   }
 
@@ -1003,20 +1275,23 @@ fit_bayesian_spatial_model <- function(
       gp_lscale_prior          = gp_lscale_prior_used,
       gp_n_basis               = gp_k^2,
       gp_ell_min               = gp_ell_min,
-      # The scaled-coordinate extrema of the training data, and the pooled
-      # centred range brms derived the boundary from.  predict() needs them:
-      # brms 2.x stores only Xgp/dmax/cmeans in the fit's GP basis, NOT the
+      # The scaled-coordinate extrema of the training data, the column means
+      # brms centred them on, and the pooled centred range it derived the
+      # boundary L = c * S from.  predict() needs them: brms 2.17 to 2.22
+      # store only Xgp/dmax/cmeans in the fit's GP basis, NOT the
       # Hilbert-space boundary L, so brms:::.data_gp() RECOMPUTES
       # L = c * range(centred newdata) from whatever rows predict() is handed.
-      # Without pinning, a point's prediction depends on which other points
+      # Unless L is held, a point's prediction depends on which other points
       # share the predict() call -- predict_surface()'s chunk_size changed the
       # surface, and every cv_bayes() fold was scored against a basis the model
-      # was not fitted with.  See .pin_gp_boundary_rows().
+      # was not fitted with.  brms >= 2.23.0 stores L and reuses it.  See
+      # .pin_gp_boundary_rows().
       gp_xy_range              = list(
         x = range(dat_df[["..x"]], na.rm = TRUE),
         y = range(dat_df[["..y"]], na.rm = TRUE)
       ),
       gp_S                     = gp_spec$S,
+      gp_cmeans                = gp_spec$cmeans,
       gp_lengthscale_bounds    = ls_bounds,
       convergence_ok           = convergence_ok,
       n_dropped                = n_dropped,

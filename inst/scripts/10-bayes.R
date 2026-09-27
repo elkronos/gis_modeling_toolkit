@@ -22,15 +22,22 @@ sub <- pts[sample(nrow(pts), 100), ]
 cat(sprintf("  running on %d of %d points to keep the sampling tractable\n",
             nrow(sub), nrow(pts)))
 
-step("10.1", "How fine a length-scale can the basis even represent?")
+step("10.1", "What length-scales the prior expects, before fitting")
 # The GP is approximated by a basis expansion, and `gp_k` sets how many terms
-# it gets. Too few and the model cannot represent short-range structure no
-# matter what the data say. Check the bounds BEFORE fitting; it costs nothing.
+# it gets per axis. Too few and the model cannot represent short-range
+# structure no matter what the data say.
+# gp_lengthscale_bounds() gives the range the length-scale PRIOR is calibrated
+# over. They are not the scales the basis resolves: that depends on gp_k, and
+# the fit reports it in 10.3. The lower bound is a fixed fraction of the
+# pairwise distances (their 25th percentile / 2.45), so it does not move with
+# n, and neither does the gp_k derived from it.
 bounds <- gp_lengthscale_bounds(sf::st_coordinates(sub))
-cat(sprintf("  resolvable length-scales: %.0f to %.0f CRS units\n",
+cat(sprintf("  length-scale prior calibrated over %.0f to %.0f CRS units\n",
             bounds["lower"], bounds["upper"]))
-cat("  A field whose true range sits below the lower bound needs more points,\n",
-    "  not a bigger gp_k.\n", sep = "")
+cat("  A field whose true range sits below the scale the basis resolves needs a\n",
+    "  bigger gp_k: neither these bounds nor the derived basis grow finer with\n",
+    "  n, though denser sampling still helps the data identify a short range.\n",
+    sep = "")
 
 step("10.2", "Fit it")
 t0 <- Sys.time()
@@ -53,13 +60,19 @@ cat(sprintf("  basis          : gp_k %d -> %d functions\n",
             bf$info$gp_k, bf$info$gp_n_basis))
 cat(sprintf("  finest scale   : %.2f in scaled units = %.0f CRS units\n",
             bf$info$gp_ell_min, ell_crs))
+# gp_k = 12 is below the 20-25 the rule derives when gp_k is left NULL, to
+# keep the fit fast, so this basis may not reach the prior's lower bound.
+cat(sprintf("  prior's lower  : %.0f CRS units (10.1) -- %s\n", bounds["lower"],
+            if (ell_crs > bounds["lower"])
+              "finer than this basis resolves; a larger gp_k would reach it"
+            else "within what this basis resolves"))
 if (!is.null(bf$info$looic))
   cat(sprintf("  LOOIC          : %.1f\n", bf$info$looic))
 cd <- bf$info$convergence_diagnostics
 if (!is.null(cd) && length(cd))
   cat("  diagnostics    :", paste(utils::head(names(cd), 6), collapse = ", "), "\n")
-cat("  The message about length-scale draws below the resolvable scale is the\n",
-    "  one to act on: raise gp_k and refit, or accept that the short-range\n",
+cat("  The logged WARN line about length-scale draws below the resolvable scale\n",
+    "  is the one to act on: raise gp_k and refit, or accept that the short-range\n",
     "  structure is outside this model's reach and say so.\n", sep = "")
 
 step("10.4", "What it buys: an interval per prediction")

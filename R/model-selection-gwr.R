@@ -98,6 +98,36 @@
 }
 
 
+#' The uncorrected-AIC column of GWmodel's diagnostic table, or NULL
+#'
+#' Needed to tell a defined AICc from one outside its domain (see
+#' \code{.gwr_aicc_undefined()}).  Found by name in a labelled table, or as
+#' column 2 of the documented four-column \code{c(bandwidth, AIC, AICc, RSS)}
+#' layout when AICc was read positionally from column 3.  \code{NULL} for any
+#' other shape, so an unrecognised table is never guarded on a guessed column.
+#'
+#' @param gwr_df The diagnostic table.
+#' @param crit What \code{.gwr_ms_criterion()} returned for it.
+#' @return Numeric vector, one value per model, or \code{NULL}.
+#' @keywords internal
+#' @noRd
+.gwr_ms_aic_column <- function(gwr_df, crit) {
+  if (is.null(dim(gwr_df))) return(NULL)
+  is_df <- is.data.frame(gwr_df)
+  cn    <- if (is_df) names(gwr_df) else colnames(gwr_df)
+  col   <- NA_integer_
+  if (!is.null(cn)) {
+    hit <- which(toupper(trimws(cn)) == "AIC")
+    if (length(hit)) col <- as.integer(hit[[1L]])
+  }
+  if (is.na(col) && !isTRUE(crit$by_name) && isTRUE(crit$shape_ok) &&
+      identical(as.integer(crit$column), 3L))
+    col <- 2L
+  if (is.na(col)) return(NULL)
+  suppressWarnings(as.numeric(if (is_df) gwr_df[[col]] else gwr_df[, col]))
+}
+
+
 #' Normalise GWmodel's model list into character vectors of predictors
 #'
 #' Handles the three shapes the element can take: a two-element list of the
@@ -293,18 +323,58 @@
   # the full model underdetermined, and GWmodel would fail partway through.
   if (isTRUE(adaptive)) {
     bw      <- as.integer(round(bw))
-    min_bw  <- n_cand + 2L
-    if (min_bw > n_obs)
+    if (n_cand + 2L > n_obs)
       stop(sprintf(paste0("gwr_model_selection(): %d observations cannot ",
                           "support a local fit of %d candidate predictors ",
                           "plus an intercept."), n_obs, n_cand), call. = FALSE)
+    # The full model has n_cand + 1 parameters.  n_cand + 2 left bisquare and
+    # tricube windows with n_cand + 1 points (their bw-th neighbour has weight
+    # 0), an exact interpolator whose AICc of about -n^2/2 put it first; see
+    # .gwr_min_adaptive_bw().  Capped at n_obs, as the stop above allows, and
+    # the AICc guard in gwr_model_selection() deals with what is left.
+    min_bw  <- min(.gwr_min_adaptive_bw(n_cand + 1L, kernel), n_obs)
     if (bw < min_bw) {
-      .log_warn("gwr_model_selection(): adaptive bandwidth %d is too small for the full %d-predictor model; clamping to %d.",
-                bw, n_cand, min_bw)
+      # A warning: every model in the sweep is fitted at a bandwidth the
+      # caller did not ask for.
+      .warn_and_log(paste0("gwr_model_selection(): an adaptive bandwidth of ",
+                           "%d neighbours is too small for the full ",
+                           "%d-predictor model with the %s kernel; using %d.%s"),
+                    bw, n_cand, kernel, min_bw,
+                    if (kernel %in% c("bisquare", "tricube"))
+                      paste0(" That is enough unless several neighbours tie ",
+                             "at the kernel's edge (a regular grid), which ",
+                             "gives them weight 0 too; then use a larger ",
+                             "bandwidth.") else "")
       bw <- min_bw
     }
-    if (bw > n_obs) bw <- as.integer(n_obs)
+    # Capped at n, and said: a supplied count above n is most often a
+    # distance meant for adaptive = FALSE, and bw.gwr() searches from 20 up
+    # to n, so below 20 points its choice exceeds n.  See fit_gwr_model().
+    if (bw > n_obs) {
+      if (identical(bandwidth_source, "supplied"))
+        .warn_and_log(paste0("gwr_model_selection(): an adaptive bandwidth of ",
+                             "%d neighbours exceeds the %d observations; using ",
+                             "%d. With adaptive = TRUE the bandwidth is a count ",
+                             "of neighbours; for a distance in CRS units, set ",
+                             "adaptive = FALSE."),
+                      bw, n_obs, n_obs)
+      else if (!identical(bandwidth_source, "fallback"))
+        .warn_and_log(paste0("gwr_model_selection(): GWmodel::bw.gwr() ",
+                             "searches adaptive bandwidths from 20 neighbours ",
+                             "up to n, a range that is empty for %d ",
+                             "observations, and returned %d; using %d. Neither ",
+                             "is an optimised bandwidth: with this few ",
+                             "observations, supply `bandwidth`."),
+                      n_obs, bw, n_obs)
+      bw <- as.integer(n_obs)
+    }
   }
+
+  # A supplied fixed bandwidth in the wrong units (degrees read as metres)
+  # empties every window, and the sweep then died on GWmodel's bare "inv():
+  # matrix is singular"; fit_gwr_model() says what is wrong, and so does this.
+  if (!isTRUE(adaptive) && identical(bandwidth_source, "supplied"))
+    .gwr_warn_tiny_fixed_bw(dat, bw, "gwr_model_selection")
 
   # A FIXED bandwidth needs the distance matrix.  Without one,
   # gwr.model.selection() sets dMat <- matrix(0, 0, 0) and then asserts
@@ -342,9 +412,12 @@
   if (!is.null(dMat)) ms_args$dMat <- dMat
   res <- tryCatch(
     .gwr_quietly(do.call(GWmodel::gwr.model.selection, ms_args), quiet),
-    error = function(e)
-      stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s",
-                   conditionMessage(e)), call. = FALSE)
+    error = function(e) {
+      msg <- conditionMessage(e)
+      stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s%s",
+                   msg, if (grepl("singular", msg, fixed = TRUE))
+                     .gwr_singular_hint() else ""), call. = FALSE)
+    }
   )
 
   if (!is.list(res) || length(res) < 2L)
@@ -418,7 +491,19 @@
 #'   \code{adaptive = TRUE}; otherwise a distance in the units of the
 #'   **projected** CRS the sweep runs in, which \code{prep_model_data()} may
 #'   have chosen for you.  Geographic input is projected before the bandwidth
-#'   is used, so a value in degrees would be read as metres.
+#'   is used, so a value in degrees would be read as metres; a fixed
+#'   bandwidth below a ten-thousandth of the data's extent raises a warning
+#'   saying so, as in \code{\link{fit_gwr_model}()}.  An adaptive
+#'   count too small for the full model is raised, with a warning, to the
+#'   number of candidates plus 3 for the bisquare and tricube kernels (which
+#'   give the farthest neighbour in a window weight 0), plus 2 for the others.
+#'   That floor is enough unless several neighbours tie at the kernel's edge
+#'   (a regular grid), which leaves a window fewer weighted points; then use
+#'   a larger bandwidth.  An adaptive count below 1 or above R's largest
+#'   integer is refused, as in \code{\link{fit_gwr_model}()}.
+#'   One above the number of observations is capped at it, with a warning;
+#'   below 20 observations that includes \code{bw.gwr()}'s choice, since its
+#'   adaptive search starts at 20 neighbours.
 #' @param adaptive Logical; adaptive (nearest-neighbour) bandwidth. Default
 #'   \code{TRUE}.
 #' @param kernel Weighting kernel. One of \code{"bisquare"} (default),
@@ -441,7 +526,11 @@
 #' @return An object of class \code{gwr_model_selection}, a list with:
 #'   \code{best} (character vector of the selected predictors);
 #'   \code{table} (ranked data.frame of every model evaluated, with columns
-#'   \code{rank}, \code{n_vars}, \code{variables} and \code{criterion});
+#'   \code{rank}, \code{n_vars}, \code{variables} and \code{criterion};
+#'   \code{criterion} is \code{NA}, and the model ranked last, where GWmodel
+#'   could not evaluate it or where AICc is undefined because the model's
+#'   effective number of parameters \eqn{tr(S)} is not below \eqn{n - 2},
+#'   which raises a warning);
 #'   \code{criterion} (label for the criterion actually read, noting when it
 #'   had to be located positionally);
 #'   \code{criterion_by_name} (logical: whether that column was found by
@@ -518,9 +607,7 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
     stop("gwr_model_selection(): `response_var` must be a single column name.",
          call. = FALSE)
   # match.arg() is the only kernel validation this package needs: an invalid
-  # value never gets past it.  (.validate_kernel() in R/model-gwr.R exists and
-  # is called by cv_gwr(), but only ever *after* that function's own
-  # match.arg(), so it is unreachable there too -- see its @noRd block.)
+  # value never gets past it.
   kernel      <- match.arg(kernel)
   bw_approach <- match.arg(bw_approach)
 
@@ -543,6 +630,16 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                  else
                    "a distance in the CRS units of `data_sf`"),
          call. = FALSE)
+  # The same range check fit_gwr_model() applies to an adaptive count.
+  # Without it a count above .Machine$integer.max (a distance passed with
+  # adaptive left at TRUE) became NA in the engine's as.integer() and the
+  # clamp stopped with a bare "missing value where TRUE/FALSE needed", and a
+  # count below 1 was rounded to "0 neighbours" and raised, where
+  # fit_gwr_model() refuses it.
+  if (!is.null(bandwidth) && isTRUE(adaptive))
+    .check_scalar(bandwidth, "bandwidth", "gwr_model_selection", min = 1,
+                  max = .Machine$integer.max,
+                  what = "a single number of nearest neighbours when adaptive = TRUE")
 
   candidate_vars <- unique(as.character(candidate_vars))
   missing_v <- setdiff(c(response_var, candidate_vars), names(data_sf))
@@ -600,6 +697,39 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 
   varsets <- .gwr_ms_varsets(eng$model_list, response_var)
   crit    <- .gwr_ms_criterion(eng$gwr_df, criterion = "AICc")
+  # A model whose AICc is outside its domain (tr S >= n - 2: its local fits
+  # interpolate the data) gets a large negative AICc from GWmodel, and the
+  # sweep ranked it first: at n = 60 a model of `a` plus three noise
+  # variables won with -66689.  Set those to NA so they rank last, and say so.
+  # GWmodel picked its own forward steps on the same numbers, which the
+  # warning says too.  Unguarded when the AIC column cannot be located.
+  aic <- .gwr_ms_aic_column(eng$gwr_df, crit)
+  if (!is.null(aic) && length(aic) == length(crit$values)) {
+    undef <- !is.na(crit$values) & .gwr_aicc_undefined(aic, crit$values)
+    if (any(undef)) {
+      crit$values[undef] <- NA_real_
+      # No larger adaptive bandwidth exists once it is every observation.
+      at_n <- isTRUE(adaptive) &&
+        isTRUE(suppressWarnings(as.numeric(eng$bandwidth)) >= nrow(dat))
+      .warn_and_log(paste0("gwr_model_selection(): AICc is undefined for %d ",
+                           "of %d model(s) at bandwidth %s and they are ranked ",
+                           "last: their effective number of parameters tr(S) ",
+                           "is not below n - 2 = %d, so their local fits ",
+                           "(nearly) interpolate the data. GWmodel chose its ",
+                           "forward steps on the same values, so the sweep ",
+                           "past them may not follow the best path. %s"),
+                    sum(undef), length(undef), format(eng$bandwidth),
+                    nrow(dat) - 2L,
+                    if (at_n)
+                      sprintf(paste0("Even the widest adaptive window (all %d ",
+                                     "observations) leaves too few residual ",
+                                     "degrees of freedom for them: use fewer ",
+                                     "candidates, more observations, or a ",
+                                     "gaussian or exponential kernel."),
+                              nrow(dat))
+                    else "Use a larger bandwidth.")
+    }
+  }
   tab     <- .gwr_ms_table(varsets, crit$values, minimise = TRUE)
 
   # GWmodel builds GWR.df with rbind() over unnamed vectors, so it never

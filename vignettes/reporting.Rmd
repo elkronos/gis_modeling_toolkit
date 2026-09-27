@@ -170,7 +170,9 @@ not is portable: a file that has been reprojected, re-sorted and re-read
 elsewhere has no memory of how it was built. `ensure_stable_poly_id()` derives
 an ID from the geometry itself, in a common CRS, so the same region gets the
 same ID from whoever computes it, in whatever projection the file is in by
-then.
+then. The exception is fine cells stacked within about a centimetre of the
+same longitude, which a reprojection can swap (see `?ensure_stable_poly_id`);
+regions this size are nowhere near it.
 
 ```{r stable-ids}
 regions$src <- seq_len(nrow(regions))
@@ -370,8 +372,12 @@ no idea what it was computed over.
 
 For the aggregates themselves, report the standard error that comes with each
 cell mean rather than the mean alone. `summarize_by_cell()` computes it with
-the observation count beside it, and `deff` corrects it for within-cell
-autocorrelation. A cell mean from two observations and one from thirteen are
+the observation count beside it. For per-region values like the map above,
+that is the default `deff = 1` standard error used here (or the block-kriging
+variance, `kr_var`, from `kriging_adequacy()`). A `deff` setting widens it for
+within-cell autocorrelation, which is right only when the regional means feed
+a claim about the population (here statewide) mean; `?summarize_by_cell` says
+which is which. A cell mean from two observations and one from thirteen are
 different claims, and printed side by side they look identical.
 
 ```{r se-example}

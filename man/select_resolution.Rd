@@ -29,7 +29,8 @@ which can skip a rung), \code{criterion}, \code{value} (the optimum),
 \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
 or first of the levels this criterion was scored at, which for
 \code{moran_z} starts above nine cells), \code{edge} (which bound that
-is, in words: the support ceiling, the range floor, the ladder's own end,
+is, in words: the support ceiling, the subsample's ceiling, the range
+floor, the ladder's own end,
 or the first or last level the criterion is computable at; \code{NA} for
 an interior optimum), \code{n_levels} and \code{values} (the criterion
 at every level, \code{NA} where it could not be computed).
@@ -54,7 +55,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
   # noise for Mallows' Cp to have an interior optimum rather than descend
   # to the ceiling.
-  set.seed(2)
+  set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))

@@ -29,9 +29,16 @@
 #'   function says so rather than quietly sorting in the input's own CRS. The
 #'   sort key is rounded to 7 decimal degrees (about 1 cm) before ordering, so
 #'   the floating-point noise of a round trip through a different projection
-#'   cannot reverse two neighbouring cells. Set to NULL to sort in the input
-#'   CRS, which gives IDs that are reproducible but not comparable across
-#'   projections.
+#'   does not usually reverse two neighbouring cells. It can where two cells'
+#'   centres lie within about that step of the same longitude, as fine cells
+#'   stacked north-south near a projection's central meridian do: 36 of 2,500
+#'   100 m cells straddling a UTM central meridian changed ID after a
+#'   transform to EPSG:3035. No rounding step removes that, so to match cells
+#'   computed in different projections, join them on geometry rather than on
+#'   the ID. The key is computed on the sphere (s2) whether or not
+#'   \code{sf::sf_use_s2()} is on, so the session setting does not change the
+#'   IDs. Set to NULL to sort in the input CRS, which gives IDs that are
+#'   reproducible but not comparable across projections.
 #' @return An sf polygon layer re-ordered with sequential IDs in id_col.
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
@@ -61,7 +68,8 @@ ensure_stable_poly_id <- function(polygons_sf,
   # Normalize to sf
   if (inherits(polygons_sf, "sfc")) polygons_sf <- sf::st_as_sf(polygons_sf)
   if (!inherits(polygons_sf, "sf"))
-    stop("ensure_stable_poly_id(): `polygons_sf` must be an sf/sfc object.")
+    stop(paste0("ensure_stable_poly_id(): `polygons_sf` must be an sf/sfc object",
+                .tess_hint(polygons_sf, "$cells"), "."))
 
   # Keep only polygon rows
   gtypes <- as.character(sf::st_geometry_type(polygons_sf, by_geometry = TRUE))
@@ -90,6 +98,19 @@ ensure_stable_poly_id <- function(polygons_sf,
   # projection it arrives in.  Falling back to the untransformed geometry
   # silently therefore does not degrade the result, it defeats the function's
   # purpose -- the IDs stop being comparable with any other run -- so say so.
+  #
+  # The key is measured in lon/lat, where sf routes st_centroid() and
+  # st_area() to s2, or with sf_use_s2(FALSE) to lwgeom (not a dependency:
+  # every Voronoi tessellation, projected ones included, died with "package
+  # lwgeom required") and to planar arithmetic on degrees, which differs from
+  # the spherical centroid by far more than the rounding step below, so a few
+  # near-tied cells took different IDs in s2-on and s2-off sessions (4 of
+  # 2,000 Voronoi cells).  s2 is switched on for this function only and
+  # restored on exit, so the key is the same whatever sf_use_s2() says.
+  if (!isTRUE(sf::sf_use_s2())) {
+    suppressMessages(sf::sf_use_s2(TRUE))
+    on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
+  }
   sort_sf <- polygons_sf
   if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
     sort_sf <- tryCatch(
@@ -119,7 +140,7 @@ ensure_stable_poly_id <- function(polygons_sf,
   # Representative points — all paths produce an sfc_POINT vector
   rep_sfc <- switch(method,
     centroid      = suppressWarnings(sf::st_geometry(sf::st_centroid(sort_sf))),
-    surface_point = sf::st_geometry(sf::st_point_on_surface(sort_sf)),
+    surface_point = sf::st_geometry(sf::st_point_on_surface(.drop_empty_parts(sort_sf))),
     bbox_center   = {
       geoms <- sf::st_geometry(sort_sf)
       sf::st_sfc(
@@ -152,6 +173,11 @@ ensure_stable_poly_id <- function(polygons_sf,
   # the failure the function exists to prevent.  7 decimals is about a
   # centimetre of longitude; the transform_for_sort default puts the key in
   # degrees, and the tie-break on area then index keeps the result total.
+  # Rounding moves the problem to the step boundaries rather than removing
+  # it: two cells whose longitudes differ by less than a step (fine cells in
+  # one column near a central meridian) can still round apart in one CRS and
+  # together in another -- 36 of 2,500 100 m cells did via EPSG:3035, and 6
+  # decimals is no better -- which is why the documentation says "usually".
   kx <- round(xy[, 1], 7L)
   ky <- round(xy[, 2], 7L)
   ord <- do.call(order, list(kx, ky, signif(area, 9L), idx0))
@@ -183,14 +209,16 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' @noRd
 .cache_key <- function(boundary, type, target_cells, ...,
                        version = .spatialkit_version()) {
+  # The CRS's full WKT, not its `input` name.  A layer read from a file with
+  # a custom CRS reports a generic name such as "unknown", so two different
+  # site-centred CRSs with the same local boundary coordinates shared a key,
+  # and the second site was handed the first one's grid, 11,000 km away.
+  # The cost is a rebuild when one CRS arrives written two ways (an EPSG
+  # code and the equivalent proj string).
   crs_obj <- sf::st_crs(boundary)
-  crs_token <- if (!is.null(crs_obj) && !is.na(crs_obj)) {
-    inp <- crs_obj$input
-    eps <- crs_obj$epsg
-    if (!is.null(inp) && !is.na(inp) && nzchar(as.character(inp))) as.character(inp)
-    else if (!is.null(eps) && !is.na(eps)) as.character(eps)
-    else "NA_CRS"
-  } else "NA_CRS"
+  crs_token <- if (!is.null(crs_obj) && !is.na(crs_obj) &&
+                   !is.null(crs_obj$wkt) && nzchar(crs_obj$wkt)) crs_obj$wkt
+               else "NA_CRS"
 
   # Use binary (WKB) digest for geometry — much faster than WKT for complex shapes
   geom_hash <- tryCatch(
@@ -276,7 +304,9 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' so repeated calls with the same inputs return instantly.
 #'
 #' @param boundary An sf or sfc polygonal object.
-#' @param target_cells Approximate desired number of cells.
+#' @param target_cells Approximate desired number of cells. Default `NULL`,
+#'   as in [create_grid_polygons()], so the grid can be sized by `cellsize`
+#'   or `n` passed through `...` instead.
 #' @param type Grid type: `"square"` (the default) or `"hex"`, matching
 #'   [create_grid_polygons()].
 #' @param ... Additional arguments forwarded to create_grid_polygons().
@@ -313,7 +343,7 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' all(g2$poly_id == g$poly_id[same_cell])
 #' @export
 create_grid_polygons_cached <- function(boundary,
-                                        target_cells,
+                                        target_cells = NULL,
                                         type = c("square", "hex"),
                                         ...,
                                         cache_env = .gmt_cache,
@@ -327,8 +357,11 @@ create_grid_polygons_cached <- function(boundary,
 
   bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
   if (!inherits(bnd, "sf"))
-    stop("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON.")
-  bnd <- ensure_projected(bnd)
+    stop(paste0("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON",
+                .tess_hint(bnd, "$boundary"), "."))
+  # The same projection create_grid_polygons() makes, so a cached grid is laid
+  # in the CRS an uncached one would be (see .project_for_grid()).
+  bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")
 
   key <- .cache_key(bnd, type, target_cells, ...)
 

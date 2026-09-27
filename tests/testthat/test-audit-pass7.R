@@ -46,7 +46,8 @@ test_that("residual_morans_i() validates k instead of silently collapsing it", {
   fit2 <- new_spatial_fit("t7fit", engine = lm(value ~ p1, data = sf::st_drop_geometry(d2)),
                           formula = value ~ p1, response_var = "value",
                           predictor_vars = "p1", data_sf = d2)
-  mi <- residual_morans_i(fit2)
+  # The dropped row is announced, and the warning is part of the contract.
+  expect_warning(mi <- residual_morans_i(fit2), "dropping 1 row")
   expect_true(is.finite(mi$observed))
   expect_equal(mi$n, n - 1L)
 })
@@ -134,7 +135,7 @@ test_that("compare_models() says so when nothing is a spatial_fit", {
   # `met_df$AICc <- NA_real_` turned that into a bare list, after which
   # seq_len(nrow(NULL)) aborted with "argument must be coercible to
   # non-negative integer".
-  expect_error(compare_models(list(a = 1, b = 2)), "no element of `models`")
+  expect_error(compare_models(list(a = 1, b = 2)), "no element of `fits`")
 })
 
 test_that("a fitted-value cache entry belongs to the engine that produced it", {

@@ -17,7 +17,8 @@ harmonize_crs(
 
 \item{prefer}{Which object's CRS to keep ("a" or "b").}
 
-\item{target_crs}{Optional target CRS to apply to both.}
+\item{target_crs}{Optional target CRS to apply to both: anything
+\code{\link[sf:st_crs]{sf::st_crs()}} accepts, including an sf or sfc object, whose CRS is used.}
 
 \item{on_transform_error}{What to do when st_transform() fails:
 \code{"stop"} (default) raises an error immediately;

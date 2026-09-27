@@ -12,18 +12,26 @@
 # Run from the package root:
 #   Rscript dev/make_readme_figures.R
 #
-# Requires: sf, ggplot2 (and devtools if spatialkit is not installed).
+# Requires: sf, ggplot2, and pkgload (or an installed spatialkit).
+#
+# The figures are drawn by the working tree, loaded with pkgload::load_all(),
+# as the other dev scripts are; an installed spatialkit is used only when
+# pkgload is missing, and then the figures show that release, not the code
+# in front of you.
 # ---------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
-  if (requireNamespace("spatialkit", quietly = TRUE)) {
-    library(spatialkit)
+  if (file.exists("DESCRIPTION") && requireNamespace("pkgload", quietly = TRUE)) {
+    pkgload::load_all(".", quiet = TRUE)
   } else {
-    devtools::load_all(".", quiet = TRUE)
+    library(spatialkit)
   }
   library(sf)
   library(ggplot2)
 })
+cat("spatialkit loaded from: ",
+    tryCatch(getNamespaceInfo(asNamespace("spatialkit"), "path"),
+             error = function(e) NA_character_), "\n", sep = "")
 
 dir.create("man/figures", showWarnings = FALSE, recursive = TRUE)
 set.seed(42)
@@ -131,22 +139,24 @@ p2 <- ggplot(cv_pts) +
 ggsave("man/figures/readme-spatial-cv.png", p2,
        width = 8.5, height = 7, dpi = 150, bg = "white")
 
-# --- Figure 3: resolution sweep, with the selected k labelled ---------------
-# determine_optimal_levels() is asked for the combined criterion (a geometric
-# WSS elbow plus Moran's I on OLS residuals of val ~ west), but on this data
-# every candidate in the elbow neighbourhood sits below the nine-cell floor
-# where Moran's I on a complete k-NN graph is arithmetically degenerate, so it
-# falls back to the geometric ranking and logs a warning.  The label therefore
-# names the elbow's choice.  See "How many cells?" in README.md.
-# The first element of the returned vector is the best-ranked cell count.
-k_sel <- determine_optimal_levels(pts, max_levels = 15,
-                                  response_var = "val",
-                                  predictor_vars = "west")[1]
+# --- Figure 3: resolution sweep, with the chosen k labelled -----------------
+# The middle count is read off resolution_profile() by the reliability of the
+# cell means, and the label names that criterion.  determine_optimal_levels()
+# used to supply it, but these sites are spread evenly: its WSS curve has no
+# elbow, and it warns that the count it returns (4 at max_levels = 15) was set
+# by the ladder rather than by the data.  Reliability's flat region on this
+# field is wide (within 2 percent of the optimum from 3 to 25 cells), and the
+# README says so rather than presenting the count as the answer.  The
+# profile's warning about a zero nugget concerns Cp, which is not read here.
+prof_res <- suppressWarnings(resolution_profile(pts, response_var = "val",
+                                                predictor_vars = "west",
+                                                n_levels = 12))
+k_sel <- select_resolution(prof_res, criterion = "reliability")$best
 
 ks <- sort(unique(c(max(2, k_sel - 3), k_sel, 60)))
 if (length(ks) < 3) ks <- sort(unique(c(ks, 12)))
 labels <- vapply(ks, function(k) {
-  if (k == k_sel) sprintf("k = %d  (chosen by determine_optimal_levels)", k)
+  if (k == k_sel) sprintf("k = %d  (most reliable, resolution_profile)", k)
   else            sprintf("k = %d", k)
 }, character(1))
 

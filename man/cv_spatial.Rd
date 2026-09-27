@@ -63,13 +63,22 @@ Built via \code{block_kfold} when \code{NULL}.}
 \item{predict_args}{Extra arguments for predict().}
 
 \item{fold_info_fn}{Optional \code{function(fit, test_sf, y, yhat)}
-returning a named list of per-fold extras (a bandwidth, a tuning value,
-anything read off the fitted object), added as columns of
-\code{fold_metrics}.  It sees the fit and the held-out layer, which
+returning a named list (or a named vector) of per-fold extras (a
+bandwidth, a tuning value, anything read off the fitted object), added
+as columns of \code{fold_metrics}.  It sees the fit and the held-out
+layer, which
 \code{metrics} does not; it is applied per fold only, and its values
 are not pooled.  An element \code{..per_row} that is a data frame with
 one row per held-out observation is spliced into \code{predictions}
-instead.}
+instead (\code{NA} in the rows of a fold that returned none; one of the
+wrong length is dropped and logged); its columns must be named, once,
+and not reuse a column \code{predictions} already has (\code{..row_id},
+\code{fold}, \code{y}, \code{yhat}, \code{y_train_mean}).  Every
+other element must be named, hold one value, and not reuse a column
+\code{fold_metrics} already has;
+anything else is an error.  A \code{fold_info_fn} that throws on a fold
+is logged, its columns are \code{NA} for that fold, and
+\code{fold_status$message} says so; the fold is kept.}
 
 \item{p}{Number of predictors for Adj R² (NULL to skip).  Only meaningful
 for models with a fixed global parameter count; pass NULL for models
@@ -86,7 +95,10 @@ Default \code{FALSE}.}
 auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).}
+\code{FALSE} (sequential).  A learner that runs OpenMP code (GWmodel,
+or an xgboost built with GNU libgomp) can hang the forked workers once
+it has run in the session; keep such a \code{fit_fn} sequential, as
+\code{\link{cv_gwr}()} does.}
 
 \item{metrics}{Optional scoring function of your own; see \strong{Your
 own metrics} below.  Default \code{NULL}: the built-in metrics only.}
@@ -105,15 +117,26 @@ counts are reported deliberately: a
 run that happened to score \code{NA}, so compare them before trusting
 \code{overall}.  \code{fold_status} is a data.frame with one row per
 fold supplied (\code{fold}, \code{status} and \code{message}), where
-\code{status} is \code{"ok"}; \code{"error"} (the fit or its
+\code{status} is \code{"ok"} (\code{message} is empty unless
+\code{fold_info_fn} failed on the fold); \code{"error"} (the fit or its
 \code{predict()} threw; \code{message} is the error text);
 \code{"skipped"} (nothing scorable: too few matched rows, a prediction
 of the wrong length, or no finite observed/predicted pair);
 \code{"dropped"} (an empty test set, or fewer than two training rows,
 once incomplete rows were removed, so the fold never reached the fitter);
-or \code{"worker_error"} (a parallel worker died).  Every fold missing
+or \code{"worker_error"} (a parallel worker died, for example killed for
+lack of memory).  Each fold runs in its own worker, so a failure costs
+that fold only, and an error that stops a sequential run (a
+\code{metrics} or \code{fold_info_fn} return value of the wrong shape)
+stops a parallel one too, naming the fold.  Every fold missing
 from \code{fold_metrics} has its reason there, which matters most when
-the console output of a long run is gone.  \code{orphan_rows} holds the
+the console output of a long run is gone.  When some folds, but not
+all, end as \code{"error"}, \code{"skipped"} or \code{"worker_error"},
+the function warns, naming them and how many rows \code{overall}
+covers: it is pooled over the folds that produced predictions, and the
+fold that fails is often the hardest to predict, so it may flatter the
+model.  (A \code{"dropped"} fold has its own warning.)
+\code{orphan_rows} holds the
 \code{..row_id}s of rows in the data that no fold names (they enter no
 training set and are never scored; non-empty only when the folds were
 built on a different or subsetted layer), and \code{n_unknown_ids}
@@ -127,7 +150,19 @@ fitted.  The \code{fold} column of
 \code{fold_metrics}, \code{predictions} and \code{fold_status} carries
 the fold's index in the \code{folds} object that was supplied, so it
 lines up with \code{make_folds()$assignment$fold} even when some folds
-were unusable and dropped.  \code{overall$Adj_R2} is always \code{NA}: the
+were unusable and dropped.  Splits that already carry a \code{fold_id},
+as the \code{folds} of a \code{cv_*()} result do, keep it: handing
+one run's \code{folds} to another labels each fold as the first run
+and \code{\link{fold_separation}()} do, a dropped fold's gap
+included.  \code{R2} is out-of-sample \eqn{R^2}: the
+total sum of squares is taken about the mean of the \emph{training} rows
+(in \code{overall}, each held-out row about its own fold's training
+mean), the null prediction available when the fold is predicted, and
+not about the held-out rows' own mean, a null model that would know the
+test data.  On spatial blocks the two can differ widely; \code{R2} is
+below 0 when the model predicts worse than the training mean.
+\code{\link{model_metrics}(newdata = )} uses the same baseline.
+\code{overall$Adj_R2} is always \code{NA}: the
 pooled out-of-sample predictions come from \code{k} separately fitted
 models and have no single parameter count to adjust for.  The per-fold
 \code{fold_metrics$Adj_R2} carries the adjusted value when \code{p} is
@@ -172,7 +207,12 @@ pairs the built-in metrics use reach the function (both \code{y} and
 \code{RMSE}, and \code{n_pred} counts them.
 
 The contract: every element named, names unique and not one of the
-built-in column names, one number per name.  Anything else is an error,
+built-in column names, one number per name.  The built-in names include
+the per-fold extras of the backend or of your \code{fold_info_fn}
+(\code{bandwidth} for \code{cv_gwr()}; \code{CRPS}, \code{coverage_*},
+\code{gp_k}, \code{gp_n_basis} and \code{n_draws} for \code{cv_bayes()}),
+and \code{mean_CRPS}, which \code{compare_models_cv()} writes.  Anything
+else is an error,
 because a scoring function that returns the wrong shape is a mistake to
 surface instead of a fold to skip.  A function that \emph{throws} on a
 fold is logged and its columns are \code{NA} for that fold (and for
@@ -194,6 +234,9 @@ across the rows of its \code{overall}.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

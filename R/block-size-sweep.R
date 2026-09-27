@@ -19,20 +19,36 @@
 #' @section The fit budget:
 #' Each block size is a full cross-validation, so the cost is
 #' \code{length(block_sizes) * k} fits, plus \code{k} for the random
-#' reference.  \code{max_fits} caps that (default 60: six sizes at
-#' \code{k = 5}, plus the reference).  A sweep that would run past the cap
+#' reference.  \code{max_fits} caps that (default 60: room for up to eleven
+#' sizes at \code{k = 5} plus the reference; the default six-size ladder at
+#' \code{k = 5} needs at most 35).  A sweep that would run past the cap
 #' refuses to start, naming the number of fits it would have needed.  Raise
 #' \code{max_fits} deliberately; the RF example below takes seconds, a Bayesian
 #' \code{fit_fn} takes minutes per fit.
 #'
 #' @section The ladder:
 #' When \code{block_sizes} is \code{NULL}, \code{n_sizes} values are
-#' log-spaced from a twenty-fifth to a half of the shorter side of the
-#' data's extent, and any size at which the grid would hold fewer than
-#' \code{k} blocks is dropped, so every point on the curve is a \code{k}-fold
-#' cross-validation of the same shape.  Sizes are in the units of the CRS the
-#' folds are built in (\code{make_folds()}'s \code{params$crs}, metres for
-#' geographic input), and the returned table records that CRS.
+#' log-spaced from a twenty-fifth of the shorter side of the data's extent
+#' (of the longer side when the points lie on one line parallel to an axis)
+#' to the largest size, at most half that side, at which the grid still
+#' holds \code{k} blocks.  Half the side gives a grid two blocks across,
+#' enough for \code{k} up to 4 and, for larger \code{k}, on an extent long
+#' enough in the other direction; on a roughly square extent at the default
+#' \code{k = 5} the top is about a third of the side.  Any size at which the
+#' grid would hold more than the 1,000,000 \code{make_folds()} will build is
+#' dropped.  The count is of grid cells: on clustered data a grid
+#' of \code{k} or more cells can have fewer than \code{k} that hold points,
+#' and \code{make_folds()} then lowers \code{k} at that size, which the
+#' \code{k} column shows.  On an extent much longer than it is wide every
+#' rung can fall below the autocorrelation range while longer blocks would
+#' still fit \code{k} times along the longer side; the sweep warns when
+#' that happens, and \code{block_sizes} is then the way to reach past the
+#' range.  Sizes are in the units of the CRS the folds are built in
+#' (\code{make_folds()}'s \code{params$crs}, metres for geographic input),
+#' and the returned table records that CRS.  Each is the \emph{minimum} block
+#' edge handed to \code{make_folds()}, which fits a whole number of cells
+#' across the extent, so the cells are somewhat longer than the size on the
+#' axis (up to twice as long).
 #'
 #' @param data_sf An sf object with the response and predictors.
 #' @param response_var,predictor_vars Column names.
@@ -40,8 +56,11 @@
 #'   as for \code{\link{cv_spatial}()}; see the example for wrapping a
 #'   built-in backend.
 #' @param block_sizes Optional numeric vector of block edge lengths to sweep,
-#'   in the CRS units the folds are built in.  Default \code{NULL}: the ladder
-#'   described above.
+#'   in the CRS units the folds are built in (plain numbers; a \code{units}
+#'   object is refused).  Default \code{NULL}: the ladder described above.
+#'   A size at which the grid would hold fewer than \code{k} blocks is not
+#'   run, with a warning naming it and the largest size that still gives
+#'   \code{k} blocks; if no size is left, the call is an error.
 #' @param n_sizes Number of sizes in the default ladder.  Default 6.
 #' @param k Folds per cross-validation.  Default 5.
 #' @param metric Which column of \code{overall} to read.  Default
@@ -50,9 +69,12 @@
 #'   reference.  Default \code{TRUE}.
 #' @param max_fits The fit budget; see above.  Default 60.
 #' @param sac Optional \code{sac_range} from \code{\link{estimate_sac_range}()}
-#'   to mark on the curve.  Default \code{NULL}: estimated here from the
-#'   response, detrended on \code{predictor_vars}, when \pkg{gstat} is
-#'   installed.
+#'   to mark on the curve, or a single number in the units of the CRS the
+#'   folds are built in.  An \code{estimate_sac_range()} result records the
+#'   CRS it was fitted in; when that is not the sweep's, the range is
+#'   converted to the sweep's units, with a warning.  Default \code{NULL}:
+#'   estimated here from the response, detrended on \code{predictor_vars},
+#'   when \pkg{gstat} is installed.
 #' @param seed Seed for the fold construction at every size.
 #' @param quiet Suppress the progress messages.  Default \code{FALSE}.
 #' @param ... Passed to \code{\link{cv_spatial}()} at every size
@@ -65,8 +87,10 @@
 #'   actually built), \code{n_folds_succeeded}, \code{value} (the pooled
 #'   metric), \code{fold_min}, \code{fold_max} and \code{fold_sd} (its spread
 #'   across folds).  Attributes: \code{metric}, \code{sac_range} (the
-#'   effective range, or \code{NA}), \code{crs}, \code{n_fits}, and
-#'   \code{results}, the full \code{cv_spatial()} result at every size.
+#'   effective range, or \code{NA}), \code{crs}, \code{k} (the folds
+#'   requested, which \code{print()} and \code{plot()} report),
+#'   \code{n_fits}, \code{response_var}, and \code{results}, the full
+#'   \code{cv_spatial()} result at every size.
 #'   \code{plot()} draws it.
 #' @family cross-validation
 #' @seealso \code{\link{plot.block_size_sweep}()}.
@@ -116,23 +140,41 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   # The extent the ladder is built over, in the CRS the folds will use.
   pts <- prep_model_data(data_sf, response_var, predictor_vars)
   bb  <- sf::st_bbox(pts)
+  crs_lbl <- .fold_crs_label(pts)
+  if (is.na(crs_lbl)) crs_lbl <- "the data's CRS"
   w <- as.numeric(bb["xmax"] - bb["xmin"]); h <- as.numeric(bb["ymax"] - bb["ymin"])
   side <- min(w, h)
+  # Points on one straight axis-parallel line have a zero side, and
+  # make_folds() blocks them along the other one without complaint; the
+  # sweep refused them as having "no extent".  Run the ladder along the line.
+  if (is.finite(side) && side <= 0) side <- max(w, h)
   if (!is.finite(side) || side <= 0)
     stop("cv_block_size_sweep(): the data have no extent to build blocks over.",
          call. = FALSE)
 
-  if (is.null(block_sizes)) {
+  default_ladder <- is.null(block_sizes)
+  if (default_ladder) {
     if (!is.numeric(n_sizes) || length(n_sizes) != 1L || n_sizes < 1)
       stop("cv_block_size_sweep(): `n_sizes` must be a positive number.", call. = FALSE)
-    # The top sits a hair under half the side so that floor(side / bs) is 2
-    # rather than a floating-point 1, which would drop the largest size.
-    block_sizes <- exp(seq(log(side / 25), log(side / 2 * (1 - 1e-9)),
+    # The top is the largest size, at most a hair under half the side, whose
+    # grid still holds k cells.  Half the side itself is a 2 x 2 grid on a
+    # roughly square extent, which at the default k = 5 holds too few cells,
+    # so one rung in six was always dropped and the ladder stopped near 0.3
+    # of the side, short of ranges that side / 3 blocks (a 3 x 3 grid) reach.
+    # The hair keeps floor(side / bs) at 2 rather than a floating-point 1.
+    top <- .sweep_largest_size_for_k(bb, k, cap = side / 2 * (1 - 1e-9))
+    if (!is.finite(top)) top <- side / 2 * (1 - 1e-9)
+    block_sizes <- exp(seq(log(side / 25), log(top),
                            length.out = as.integer(n_sizes)))
   } else {
-    if (!is.numeric(block_sizes) || !length(block_sizes) || any(!is.finite(block_sizes)) ||
-        any(block_sizes <= 0))
-      stop("cv_block_size_sweep(): `block_sizes` must be positive numbers.", call. = FALSE)
+    # A `units` object passes is.numeric() and then fails the comparison
+    # inside the units package with a message that names no argument.
+    if (inherits(block_sizes, "units") || !is.numeric(block_sizes) ||
+        !length(block_sizes) || any(!is.finite(block_sizes)) || any(block_sizes <= 0))
+      stop("cv_block_size_sweep(): `block_sizes` must be positive numbers, given as ",
+           "plain numbers in ", crs_lbl, " units; got ",
+           if (length(block_sizes)) paste(format(block_sizes), collapse = ", ")
+           else "a value of length 0", ".", call. = FALSE)
     block_sizes <- sort(unique(as.numeric(block_sizes)))
   }
   # Every point on the curve is a k-fold CV of the same shape: drop the sizes
@@ -140,11 +182,47 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   n_blocks <- vapply(block_sizes, function(bs) {
     d <- .block_dims_from_size(bb, bs); as.numeric(d$nx) * as.numeric(d$ny)
   }, numeric(1))
+  # make_folds() refuses a grid of more than .block_max_cells blocks as a
+  # likely unit mistake.  On a thin transect the default ladder, built from
+  # the shorter side, starts far below that (0.08 m on a 6 km x 2 m layer:
+  # 1.9 million blocks), and the sweep died there telling the user to check
+  # the units of a `block_size` they never passed.  Drop those rungs of the
+  # default ladder; sizes the caller chose are refused up front instead,
+  # before any model is fitted, naming the argument they came from.
+  too_fine <- n_blocks > .block_max_cells
+  if (any(too_fine) && !default_ladder)
+    stop(sprintf(paste0("cv_block_size_sweep(): `block_sizes` %s would each ",
+                        "need a grid of more than %s blocks over the %s x %s ",
+                        "extent (in %s units). Check that they are in those ",
+                        "units."),
+                 paste(signif(block_sizes[too_fine], 3), collapse = ", "),
+                 format(.block_max_cells, big.mark = ",", scientific = FALSE),
+                 signif(w, 3), signif(h, 3), crs_lbl), call. = FALSE)
+  if (any(too_fine))
+    .log_info("cv_block_size_sweep(): dropping %d block size(s) whose grid would exceed %s blocks: %s.",
+              sum(too_fine), format(.block_max_cells, big.mark = ",", scientific = FALSE),
+              paste(signif(block_sizes[too_fine], 3), collapse = ", "))
   dropped <- block_sizes[n_blocks < k]
-  block_sizes <- block_sizes[n_blocks >= k]
-  if (length(dropped))
+  block_sizes <- block_sizes[n_blocks >= k & !too_fine]
+  # Sizes the caller chose are not dropped behind a log line: the table would
+  # simply lack rows that were asked for.  The default ladder's own rungs
+  # (see @section The ladder) are the sweep's business and stay logged.  When
+  # nothing is left, the error below says so instead.
+  if (length(dropped) && !default_ladder && length(block_sizes)) {
+    b_max <- .sweep_largest_size_for_k(bb, k)
+    .warn_and_log(paste0("cv_block_size_sweep(): `block_sizes` %s give fewer ",
+                         "than k = %d blocks over the %s x %s extent (in %s ",
+                         "units) and were not run%s."),
+                  paste(signif(dropped, 3), collapse = ", "), k,
+                  signif(w, 3), signif(h, 3), crs_lbl,
+                  if (is.finite(b_max))
+                    sprintf("; the largest size whose grid holds k blocks is %s",
+                            format(.signif_down(b_max)))
+                  else "")
+  } else if (length(dropped)) {
     .log_info("cv_block_size_sweep(): dropping %d block size(s) whose grid holds fewer than k = %d blocks: %s.",
               length(dropped), k, paste(signif(dropped, 3), collapse = ", "))
+  }
   if (!length(block_sizes))
     stop("cv_block_size_sweep(): no block size leaves at least k = ", k,
          " blocks over the extent (", signif(w, 3), " x ", signif(h, 3),
@@ -163,13 +241,72 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   # The autocorrelation range to mark: supplied, or estimated once here.
   sac_range <- NA_real_
   if (!is.null(sac)) {
-    sac_range <- suppressWarnings(as.numeric(sac))
+    if (inherits(sac, "units"))
+      stop("cv_block_size_sweep(): `sac` must be a plain number in ", crs_lbl,
+           " units, or an estimate_sac_range() result; got ", format(sac), ".",
+           call. = FALSE)
+    sac_range <- suppressWarnings(as.numeric(sac)[1L])
+    # The marker is drawn on an axis in the sweep's CRS.  A range estimated on
+    # a copy of the layer in another CRS was drawn as it stood: a metre range
+    # on a US-foot axis sat between the first two rungs instead of the third
+    # and fourth, with the sweep's CRS printed beside it.
+    from <- attr(sac, "crs")
+    from <- if (is.null(from)) NULL else tryCatch(sf::st_crs(from), error = function(e) NULL)
+    to   <- sf::st_crs(pts)
+    if (is.finite(sac_range) && !is.null(from) && !is.na(from) && !is.na(to) &&
+        from != to) {
+      conv <- if (!isTRUE(sf::st_is_longlat(from)) && !isTRUE(sf::st_is_longlat(to)))
+        .range_to_crs(sac_range, from, to, bb) else NA_real_
+      if (is.finite(conv) && conv > 0) {
+        .warn_and_log(paste0("cv_block_size_sweep(): `sac` was estimated in %s, ",
+                             "not in %s where the block sizes are measured; its ",
+                             "range %s has been converted to %s by measuring it at ",
+                             "the centre of the data. Estimate the range on the ",
+                             "layer passed here to mark it exactly."),
+                      .fold_crs_label(from), crs_lbl, format(signif(sac_range, 4)),
+                      format(signif(conv, 4)))
+        sac_range <- conv
+      } else {
+        .warn_and_log(paste0("cv_block_size_sweep(): `sac` was estimated in %s, ",
+                             "not in %s where the block sizes are measured, and ",
+                             "could not be converted; its marker may be misplaced."),
+                      .fold_crs_label(from), crs_lbl)
+      }
+    }
   } else if (requireNamespace("gstat", quietly = TRUE)) {
     est <- try(logger::with_log_threshold(
       estimate_sac_range(pts, response_var, predictor_vars = predictor_vars,
                          seed = seed),
       threshold = logger::FATAL, namespace = "spatialkit", index = 2), silent = TRUE)
     if (!inherits(est, "try-error")) sac_range <- suppressWarnings(as.numeric(est))
+  }
+
+  # The default ladder stops at half the SHORTER side at most.  On an
+  # elongated extent that can leave every rung below the range while blocks
+  # as long as the range would still give k blocks along the other side: on a
+  # 10 km x 100 m corridor with a 1.7 km range the ladder ran from 4 to 50 m,
+  # the curve stayed flat near the random-fold reference, and read as "no
+  # leakage".  The ladder is kept (see @section The ladder); say what it
+  # cannot show.  Since the ladder's top is the largest size up to half the
+  # shorter side whose grid holds k cells, a range above it that still gives
+  # k cells can only lie past half the shorter side.  The warning used to
+  # call the top kept rung "half the shorter side" and quote the longer side
+  # over k as the largest size that works, which on a square was below rungs
+  # already run.
+  if (default_ladder && length(sac_range) == 1L && is.finite(sac_range) &&
+      sac_range > max(block_sizes)) {
+    at_range <- .block_dims_from_size(bb, sac_range)
+    if (as.numeric(at_range$nx) * as.numeric(at_range$ny) >= k)
+      .warn_and_log(paste0("cv_block_size_sweep(): every block size in the ",
+                           "default ladder (up to %s, over the %s x %s extent) ",
+                           "is below the estimated autocorrelation range (%s), ",
+                           "so the curve cannot show the rise past it. Blocks up ",
+                           "to %s still give k = %d blocks (the largest size ",
+                           "whose grid does); pass `block_sizes` reaching past ",
+                           "the range."),
+                    format(signif(max(block_sizes), 3)), signif(w, 3), signif(h, 3),
+                    format(signif(sac_range, 4)),
+                    format(.signif_down(.sweep_largest_size_for_k(bb, k))), k)
   }
 
   # The folds are built here, on the layer as passed (as compare_models_cv()
@@ -229,6 +366,113 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
 }
 
 
+#' The largest block size whose grid still holds k cells
+#'
+#' The number of cells \code{.block_dims_from_size()} gives,
+#' \code{max(1, floor(w / b)) * max(1, floor(h / b))}, only falls as \code{b}
+#' grows, and changes only at \code{b = w / i} or \code{b = h / j}.  So the
+#' largest \code{b <= cap} with at least \code{k} cells is \code{cap} itself or
+#' one of those breakpoints.  Only \code{i} from \code{ceiling(w / cap)} to
+#' \code{max(that, k)} can matter (at \code{b = w / i} there are at least
+#' \code{i} cells, so \code{w / max(i0, k)} always qualifies), and likewise
+#' for \code{j}.  Each candidate is taken a hair (\code{1e-9}) under its
+#' breakpoint, so that \code{floor()} lands on the intended count rather than
+#' one below it.
+#'
+#' @param bb A bbox.
+#' @param k Required number of cells.
+#' @param cap Largest size allowed.
+#' @return A single number, or \code{NA} when the extent is empty.
+#' @keywords internal
+#' @noRd
+.sweep_largest_size_for_k <- function(bb, k, cap = Inf) {
+  w <- as.numeric(bb["xmax"] - bb["xmin"]); h <- as.numeric(bb["ymax"] - bb["ymin"])
+  cells <- function(b) {
+    d <- .block_dims_from_size(bb, b); as.numeric(d$nx) * as.numeric(d$ny)
+  }
+  if (is.finite(cap) && cap > 0 && cells(cap) >= k) return(cap)
+  divs <- function(len) {
+    if (!is.finite(len) || len <= 0) return(numeric(0))
+    i0 <- max(1, ceiling(len / cap))
+    len / seq(i0, max(i0, k)) * (1 - 1e-9)
+  }
+  cand <- c(divs(w), divs(h))
+  cand <- cand[cand > 0 & cand <= cap]
+  ok <- cand[vapply(cand, cells, numeric(1)) >= k]
+  if (length(ok)) max(ok) else NA_real_
+}
+
+
+#' Round a length down to three significant figures
+#'
+#' For a size quoted as the largest that still works: rounding it up can take
+#' it past the breakpoint, so a size copied from the message would fail.
+#'
+#' @param x A positive number.
+#' @return A number no larger than \code{x}.
+#' @keywords internal
+#' @noRd
+.signif_down <- function(x, digits = 3L) {
+  if (!is.finite(x) || x <= 0) return(x)
+  p <- 10^(floor(log10(x)) - digits + 1L)
+  floor(x / p) * p
+}
+
+
+#' Which direction is better for a swept metric
+#'
+#' Read by the plot's caption.  R-squared is better higher, and the error
+#' metrics lower.  An interval coverage is neither: one that covers more
+#' than its nominal level is as miscalibrated as one that covers less, so a
+#' \code{coverage_*} column is read by its closeness to the level in its
+#' name.  The name is parsed rather than matched, because the level can be
+#' written at any precision (\code{coverage_97.5} for 0.975); only
+#' \code{coverage_50}, \code{coverage_80} and \code{coverage_95} were
+#' recognised, and as higher-is-better.
+#'
+#' @param metric Column name of \code{overall}.
+#' @return A phrase, e.g. \code{"lower is better"}.
+#' @keywords internal
+#' @noRd
+.sweep_better <- function(metric) {
+  if (grepl("^coverage_", metric)) {
+    lvl <- suppressWarnings(as.numeric(sub("^coverage_", "", metric))) / 100
+    return(if (length(lvl) == 1L && is.finite(lvl) && lvl > 0 && lvl < 1)
+      sprintf("closer to %s is better", format(lvl))
+    else "closer to the nominal level is better")
+  }
+  if (metric %in% c("R2", "Adj_R2")) "higher is better" else "lower is better"
+}
+
+
+#' Re-express a length measured in one projected CRS in another
+#'
+#' Transforms two unit segments of length \code{r} (east-west and
+#' north-south), laid at the centre of \code{bb}, from \code{from} to
+#' \code{to}, and returns their mean length there.  Exact when the two CRSs
+#' differ only in their linear unit; an approximation, good near the centre
+#' of the data, when the projections differ.
+#'
+#' @param r Length in \code{from}'s units.
+#' @param from,to Projected \code{crs} objects.
+#' @param bb A bbox in \code{to}.
+#' @return A single number, or \code{NA} when the transform fails.
+#' @keywords internal
+#' @noRd
+.range_to_crs <- function(r, from, to, bb) {
+  tryCatch({
+    ctr <- sf::st_sfc(sf::st_point(c(mean(as.numeric(bb[c("xmin", "xmax")])),
+                                     mean(as.numeric(bb[c("ymin", "ymax")])))),
+                      crs = to)
+    a <- sf::st_coordinates(sf::st_transform(ctr, from))[1L, 1:2]
+    seg <- sf::st_transform(sf::st_sfc(sf::st_point(a), sf::st_point(a + c(r, 0)),
+                                       sf::st_point(a + c(0, r)), crs = from), to)
+    xy <- sf::st_coordinates(seg)[, 1:2, drop = FALSE]
+    mean(c(sqrt(sum((xy[2L, ] - xy[1L, ])^2)), sqrt(sum((xy[3L, ] - xy[1L, ])^2))))
+  }, error = function(e) NA_real_)
+}
+
+
 #' @export
 print.block_size_sweep <- function(x, ...) {
   metric <- attr(x, "metric"); r <- attr(x, "sac_range")
@@ -264,7 +508,11 @@ print.block_size_sweep <- function(x, ...) {
 #' reference as a dashed line, and the estimated autocorrelation range as a
 #' vertical marker.  Blocks smaller than the range leak, so the curve rises
 #' from the reference towards the range and plateaus beyond it; the height
-#' of the rise is what the random-fold number overstated.
+#' of the rise is what the random-fold number overstated.  The caption says
+#' which way is better: higher for \code{R2} and \code{Adj_R2}, closer to
+#' the nominal level for a \code{coverage_*} column (0.975 for
+#' \code{coverage_97.5}), since over-coverage is miscalibration too, and
+#' lower for everything else.
 #'
 #' @param x A \code{block_size_sweep}.
 #' @param ... Ignored.
@@ -316,7 +564,6 @@ plot.block_size_sweep <- function(x, ...) {
                                  colour = "grey40")
   if (is.finite(r))
     p <- p + ggplot2::geom_vline(xintercept = r, linetype = "dotted", colour = "#B2182B")
-  minimise <- !(metric %in% c("R2", "Adj_R2", "coverage_50", "coverage_80", "coverage_95"))
   p + ggplot2::scale_x_log10() +
     ggplot2::labs(
       title = sprintf("Cross-validated %s against block size", metric),
@@ -325,8 +572,8 @@ plot.block_size_sweep <- function(x, ...) {
       else "Autocorrelation range not identified; no marker drawn",
       caption = paste(c(
         if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g (the leaky reference)", metric, rnd$value[1L]),
-        sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s is better",
-                attr(x, "k"), attr(x, "n_fits"), if (minimise) "lower" else "higher")),
+        sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s",
+                attr(x, "k"), attr(x, "n_fits"), .sweep_better(metric))),
         collapse = "\n"),
       x = sprintf("Block edge length (%s, log scale)", unit), y = metric) +
     ggplot2::theme_minimal()

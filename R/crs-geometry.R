@@ -2,6 +2,77 @@
 # CRS Selection
 # -----------------------------------------------------------------------------
 
+#' Evaluate an expression with sf's spherical engine (s2) switched on
+#'
+#' On lon/lat data sf hands st_area(), st_centroid(), st_union() and
+#' st_sample() to s2 when \code{sf::sf_use_s2()} is TRUE.  With it FALSE,
+#' areas and sampling need lwgeom, which this package does not depend on
+#' ("package lwgeom required" from every Voronoi tessellation, even a
+#' projected one, because the stable-ID sort key is measured in lon/lat), and
+#' centroids and unions become planar arithmetic on degrees, which moves the
+#' centre that picks a UTM zone and prints sf's warnings past \code{quiet}.
+#' The package's own measurements on the sphere therefore run with s2 on
+#' whatever the session says, and the session's setting is restored on the
+#' way out, error or not.  Nothing is toggled when s2 is already on.
+#'
+#' @param expr Expression to evaluate.
+#' @return The value of \code{expr}.
+#' @keywords internal
+#' @noRd
+.with_s2 <- function(expr) {
+  if (isTRUE(sf::sf_use_s2())) return(expr)
+  suppressMessages(sf::sf_use_s2(TRUE))
+  on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
+  expr
+}
+
+
+#' Centre of a lon/lat layer on the sphere
+#'
+#' The centroid s2 gives for the union of the layer, which is what
+#' \code{.pick_local_projected_crs()} has always used with s2 on (the
+#' default).  Three things went wrong when it was taken with a bare
+#' \code{st_centroid(st_union())}: with \code{sf_use_s2(FALSE)} the centre
+#' was planar in degrees, so the UTM zone chosen for data near a zone edge
+#' depended on a session option; sf's warning and message about that got past
+#' \code{quiet}; and with s2 on, a polygon GEOS accepts but s2 rejects (a
+#' repeated vertex, common in real shapefiles) stopped
+#' \code{ensure_projected()} with "Edge 1 is degenerate" although a plain
+#' \code{st_transform()} of it works.  Now s2 is always used; a geometry it
+#' rejects is repaired and tried again; and if that fails too, the centre is
+#' the normalised mean of the vertices' unit vectors (for a point layer
+#' exactly what s2 returns), which needs no valid geometry at all.
+#'
+#' @param x_ll An sf/sfc object in a geographic CRS.
+#' @return A 1 x 2 matrix (\code{X}, \code{Y}) in degrees, possibly
+#'   non-finite when no centre exists (the caller falls back then).
+#' @keywords internal
+#' @noRd
+.lonlat_centre <- function(x_ll) {
+  g <- sf::st_geometry(x_ll)
+  centre_of <- function(geom) {
+    ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(geom)))
+    if (!is.numeric(ctr) || length(ctr) < 2L) stop("no centroid")
+    ctr[1L, 1:2, drop = FALSE]
+  }
+  ctr <- tryCatch(.with_s2(centre_of(g)), error = function(e) NULL)
+  if (is.null(ctr))
+    ctr <- tryCatch(.with_s2(centre_of(.safe_make_valid(g))), error = function(e) NULL)
+  if (is.null(ctr)) {
+    xy <- tryCatch(sf::st_coordinates(g)[, 1:2, drop = FALSE],
+                   error = function(e) matrix(numeric(0), 0L, 2L))
+    xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), , drop = FALSE]
+    lam <- xy[, 1L] * pi / 180; phi <- xy[, 2L] * pi / 180
+    v   <- c(sum(cos(phi) * cos(lam)), sum(cos(phi) * sin(lam)), sum(sin(phi)))
+    ctr <- matrix(if (nrow(xy) && sqrt(sum(v^2)) > 1e-12)
+                    c(atan2(v[2L], v[1L]), atan2(v[3L], sqrt(v[1L]^2 + v[2L]^2))) * 180 / pi
+                  else c(NA_real_, NA_real_),
+                  1L, 2L, dimnames = list(NULL, c("X", "Y")))
+  }
+  ctr
+}
+
+
 #' Pick a sensible local projected CRS for an sf/sfc object
 #'
 #' Chooses an appropriate projected coordinate reference system for spatial
@@ -24,8 +95,15 @@
 #'
 #' Data straddling the antimeridian are detected from the one very large gap in
 #' the sorted longitudes and given an equal-area projection centred on the true
-#' extent; only truly global coverage falls back to Web Mercator
-#' (EPSG:3857), which would otherwise SPLIT a wrapped layer.
+#' extent, since Web Mercator (EPSG:3857) would SPLIT a wrapped layer.  Data
+#' that span more than 180 degrees of longitude with no such gap surround a
+#' pole; when every point also lies on one side of the equator, the layer
+#' circles that pole (Antarctic stations, a pan-Arctic network) and gets a
+#' Lambert azimuthal equal-area centred on it, provided that measures a
+#' smaller distance error than the global fallback.  Only coverage that is
+#' left -- spanning both hemispheres, or a low-latitude belt the polar
+#' projection fits worse -- falls back to Web Mercator (Equal Earth for
+#' \code{purpose = "area"}).
 #'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
@@ -35,9 +113,11 @@
 #'   over sampled pairs, \code{NA} where it could not be measured) and
 #'   \code{chosen}.  Where only one projection was in play (a zone kept on
 #'   a local extent, the equal-area projection for a wrapped layer), that
-#'   one is measured and reported alone.  \code{candidates} is \code{NULL}
-#'   only where no local projection was chosen: non-geographic input, no
-#'   finite centroid, or an extent that falls back to the global projection.
+#'   one is measured and reported alone; a layer circling a pole reports the
+#'   polar projection and the global one it was measured against.
+#'   \code{candidates} is \code{NULL} only where no local projection was
+#'   chosen: non-geographic input, no finite centroid, or an extent that
+#'   falls back to the global projection.
 #' @keywords internal
 #' @noRd
 .pick_local_projected_crs <- function(x, purpose = c("distance", "area")) {
@@ -80,7 +160,9 @@
   if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
     return(list(crs = global_crs(), candidates = NULL))
 
-  ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(sf::st_geometry(x_ll))))
+  # On the sphere whatever sf_use_s2() says, and without failing on a polygon
+  # s2 rejects: see .lonlat_centre().
+  ctr <- .lonlat_centre(x_ll)
   if (!is.numeric(ctr) || length(ctr) < 2) return(list(crs = global_crs(), candidates = NULL))
   lon <- ctr[1]; lat <- ctr[2]
 
@@ -169,6 +251,50 @@
                     sprintf("Lambert azimuthal equal-area centred on (%.1f, %.1f)",
                             lon_ctr, lat),
                     list(wrap_crs), .crs_distance_error(x_ll, wrap_crs), 1L))
+    }
+
+    # No gap of 180 deg or more means the longitudes surround a pole.  With
+    # every point on one side of the equator the layer circles THAT pole --
+    # Antarctic stations, a pan-Arctic network -- and is not global coverage.
+    # Web Mercator splits such a layer at +/-180 and stretches it towards the
+    # pole: rings of Antarctic stations measured worst-case distance errors
+    # of 15,000-20,000% in it (a 111 km pair came out 445 km, the South Pole
+    # at y = -2.4e8 m), where a Lambert azimuthal centred on the pole gave
+    # about 2%.  That projection is equal-area, so it serves purpose = "area"
+    # too.  Its distortion grows away from the pole (about 40% for a belt
+    # reaching the equator), so it is measured against the global fallback
+    # and used only when it does better; data spanning both hemispheres never
+    # get here and keep the global fallback as before.
+    lat_min <- as.numeric(bb["ymin"]); lat_max <- as.numeric(bb["ymax"])
+    if (is.finite(lat_min) && is.finite(lat_max) && (lat_min >= 0 || lat_max <= 0)) {
+      north     <- lat_min >= 0
+      polar_crs <- sf::st_crs(sprintf(
+        "+proj=laea +lat_0=%d +lon_0=0 +datum=WGS84 +units=m +no_defs",
+        if (north) 90L else -90L))
+      glob      <- global_crs()
+      glob_name <- if (purpose != "area") "Web Mercator (EPSG:3857)" else
+        if (grepl("eqearth", glob$input, fixed = TRUE)) "Equal Earth" else "Mollweide"
+      cands     <- list(
+        list(name = sprintf("Lambert azimuthal equal-area centred on the %s Pole",
+                            if (north) "North" else "South"),
+             crs = polar_crs),
+        list(name = glob_name, crs = glob))
+      err <- vapply(cands, function(cd) .crs_distance_error(x_ll, cd$crs), numeric(1))
+      if (is.finite(err[1L]) && (!is.finite(err[2L]) || err[1L] < err[2L])) {
+        .log_warn(
+          paste0(".pick_local_projected_crs(): longitude extent spans %.1f deg ",
+                 "without straddling the antimeridian, and every point lies %s ",
+                 "of the equator (latitude %.1f to %.1f): the layer circles the ",
+                 "%s Pole. Using %s: measured worst-case distance error %.2f%% ",
+                 "against %s for %s. Pass target_crs to ensure_projected() to ",
+                 "override."),
+          span_lon, if (north) "north" else "south", lat_min, lat_max,
+          if (north) "North" else "South", cands[[1L]]$name, 100 * err[1L],
+          if (is.finite(err[2L])) sprintf("%.2f%%", 100 * err[2L]) else "not measurable",
+          cands[[2L]]$name)
+        return(scored(polar_crs, vapply(cands, `[[`, character(1), "name"),
+                      lapply(cands, `[[`, "crs"), err, 1L))
+      }
     }
 
     .log_warn(
@@ -342,6 +468,9 @@
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
 #'   reduced to representative points first, so the two distance vectors are
 #'   the same length (\code{st_coordinates()} yields one row per vertex).
+#'   With fewer than \code{max_n} features the outline's vertices, densified
+#'   along its edges, are added to those points, so that a single study-area
+#'   polygon is measured across its extent rather than not at all.
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
 #' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|}, or \code{NA}
@@ -358,9 +487,84 @@
     # comparison recycled, R raised "longer object length is not a multiple of
     # shorter object length" at the caller, every candidate scored NA, and the
     # selection silently fell back to the UTM zone while the log line reported
-    # "NA% vs NA%".  Every county-polygon layer took that path.
-    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
-      g <- suppressWarnings(sf::st_point_on_surface(g))
+    # "NA% vs NA%".  Every county-polygon layer took that path.  The empty
+    # parts go first: one inside a line feature segfaults GEOS here (see
+    # .drop_empty_parts()), and tryCatch() cannot catch a crash, so any
+    # lon/lat line layer with a null part took ensure_projected() down.
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT")) {
+      g_full <- .drop_empty_parts(g)
+      g <- suppressWarnings(sf::st_point_on_surface(g_full))
+      # GEOS reads a feature that crosses +-180 the long way round, so its
+      # interior point landed on the far side of the globe ((-0.5, -17) for a
+      # box around Fiji) and the error reported for a projection accurate to
+      # 0.02% on the box was 25%.  Such a feature spans more than 180 degrees
+      # of raw longitude; take its spherical centroid instead.
+      bb_all <- sf::st_bbox(g_full)
+      if (isTRUE(sf::st_is_longlat(g_full)) && all(is.finite(bb_all)) &&
+          bb_all[["xmax"]] - bb_all[["xmin"]] > 180) {
+        wide <- vapply(g_full, function(s) {
+          b <- sf::st_bbox(s)
+          isTRUE(b[["xmax"]] - b[["xmin"]] > 180)
+        }, logical(1))
+        ctr <- if (any(wide))
+          tryCatch(.with_s2(sf::st_centroid(g_full[wide])), error = function(e) NULL)
+        if (!is.null(ctr)) g[wide] <- ctr
+      }
+      # One point per feature is nothing to measure on a study-area outline:
+      # a single polygon gave one point, every candidate scored NA, and the
+      # selector kept the UTM zone at any extent -- a CONUS outline got zone
+      # 15 (13.7% worst-case error) where its vertices score Albers at 2.4%,
+      # and prep_model_data(boundary =) moved a whole analysis into it.  A
+      # handful of features gives a handful of pairs, none near the edges
+      # where a zone distorts most.  So below `max_n` points, add the
+      # outline's own vertices, densified along each edge until there are
+      # about `max_n` of them (a box has only its four corners).  Layers with
+      # `max_n` features or more are measured as before, and so is a
+      # GEOMETRYCOLLECTION layer, whose vertices st_coordinates() refuses.
+      xy <- if (length(g) < max_n)
+        tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
+      # Only about `max_n` of these points are measured (the evenly spaced
+      # subsample below), so thin a detailed outline to a few times that
+      # first, by evenly spaced index.  unique() on the whole vertex matrix,
+      # twice, and a ring key pasted for every vertex made the score cost
+      # 2.8 s per candidate on a 300,000-vertex outline (0.04 s before the
+      # outline was scored), and ensure_projected() 14 s.  Such an outline has
+      # far more than `max_n` vertices, so it is not densified either way.
+      if (!is.null(xy) && nrow(xy) > 4L * max_n)
+        xy <- xy[unique(round(seq(1, nrow(xy), length.out = 4L * max_n))), , drop = FALSE]
+      if (!is.null(xy)) {
+        ring <- if (ncol(xy) > 2L)
+          do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
+        xy <- xy[, 1:2, drop = FALSE]
+        ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+        xy <- xy[ok, , drop = FALSE]; ring <- ring[ok]
+        if (nrow(xy) > 0L) {
+          per_edge <- max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
+          if (per_edge > 0L && nrow(xy) > 1L) {
+            same <- ring[-1L] == ring[-length(ring)]
+            a <- xy[-nrow(xy), , drop = FALSE][same, , drop = FALSE]
+            b <- xy[-1L, , drop = FALSE][same, , drop = FALSE]
+            f <- rep(seq_len(per_edge) / (per_edge + 1), each = nrow(a))
+            a <- a[rep(seq_len(nrow(a)), per_edge), , drop = FALSE]
+            b <- b[rep(seq_len(nrow(b)), per_edge), , drop = FALSE]
+            # Along the edge as it runs on the globe, the short way round.
+            # Interpolated in raw degrees, the edge of an outline from 177 to
+            # -178 was filled with points near longitude 0, and a box around
+            # Fiji reported a 164% distance error for a projection accurate to
+            # 0.02% on it.
+            dl <- b[, 1L] - a[, 1L]
+            dl <- ((dl + 180) %% 360) - 180
+            lon <- ((a[, 1L] + f * dl + 180) %% 360) - 180
+            lat <- a[, 2L] + f * (b[, 2L] - a[, 2L])
+            xy <- rbind(xy, cbind(lon, lat))
+          }
+          xy <- unique(xy)
+          g <- c(sf::st_geometry(g), sf::st_geometry(sf::st_as_sf(
+            data.frame(x = xy[, 1L], y = xy[, 2L]), coords = c("x", "y"),
+            crs = sf::st_crs(g))))
+        }
+      }
+    }
     n <- length(g)
     if (n < 2L) return(NA_real_)
     if (n > max_n) g <- g[unique(round(seq(1, n, length.out = max_n)))]
@@ -398,12 +602,15 @@
 #' @param crs The projection to score; default the CRS of \code{x}.
 #' @param n Probe grid size when \code{x} has no polygons.
 #' @param max_n Largest number of the layer's own polygons to measure.
+#' @param grid Logical; probe with the \code{n x n} grid over the bounding box
+#'   even when \code{x} has polygons.  A single study-area polygon is one
+#'   probe, and one ratio has no spread to measure.
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
 #'   \code{NA} when it cannot be computed (no CRS, no area, geodesic areas
 #'   unavailable).
 #' @keywords internal
 #' @noRd
-.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L) {
+.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE) {
   tryCatch({
     if (is.null(crs)) crs <- sf::st_crs(x)
     if (is.na(crs) || is.na(sf::st_crs(x))) return(NA_real_)
@@ -411,15 +618,29 @@
     g <- g[!sf::st_is_empty(g)]
     if (!length(g)) return(NA_real_)
     types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
-    probe <- if (all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
+    probe <- if (!isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
       if (length(g) > max_n) g[unique(round(seq(1, length(g), length.out = max_n)))] else g
     } else {
       bb <- sf::st_bbox(sf::st_transform(g, crs))
       sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
     }
     probe  <- sf::st_transform(probe, crs)
+    # Densify before going to lon/lat: s2 reads each edge as a great circle,
+    # and over a continental probe that is not the straight edge the planar
+    # area was measured on -- an Equal Earth grid over a near-global extent
+    # measured 10% "distortion".  A projected CRS only; densifying lon/lat
+    # needs lwgeom.
+    if (!isTRUE(sf::st_is_longlat(crs))) {
+      pb  <- sf::st_bbox(probe)
+      ext <- max(as.numeric(pb["xmax"] - pb["xmin"]), as.numeric(pb["ymax"] - pb["ymin"]))
+      if (is.finite(ext) && ext > 0) probe <- sf::st_segmentize(probe, dfMaxLength = ext / 100)
+    }
     planar <- as.numeric(sf::st_area(probe))
-    geod   <- as.numeric(sf::st_area(sf::st_transform(probe, 4326)))
+    # Geodesic areas on the sphere whatever sf_use_s2() says: with it off, sf
+    # asks lwgeom for them, which is not a dependency, the error became NA
+    # here, and summarize_by_cell(area = TRUE) then refused every grid while
+    # ensure_projected(purpose = "area") skipped its distortion check.
+    geod   <- .with_s2(as.numeric(sf::st_area(sf::st_transform(probe, 4326))))
     ratio  <- planar / geod
     ok <- is.finite(ratio) & is.finite(geod) & geod > 0
     if (sum(ok) < 2L) return(NA_real_)
@@ -596,7 +817,9 @@
 #'   \item{Local extents}{The UTM zone containing the data's centre
 #'     (EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
 #'     are close to true over a few degrees of longitude, which is the case
-#'     this package is usually in.}
+#'     this package is usually in. The centre is the centroid on the sphere,
+#'     computed with s2 whatever [sf::sf_use_s2()] is set to, so data near a
+#'     zone edge get the same zone in every session.}
 #'   \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 #'     a UTM zone is designed for, a single zone can distort distances by
 #'     several percent, and that error propagates straight into variogram
@@ -605,16 +828,28 @@
 #'     a Lambert azimuthal equal-area centred on the data and (where its
 #'     standard parallels do not degenerate) an Albers conic are each scored by
 #'     projecting representative points of the data (a non-POINT layer is
-#'     reduced to points first) and comparing planar with geodesic pairwise
-#'     distances, and the one that distorts least is used.
+#'     reduced to one point per feature, plus the vertices of its outline when
+#'     it has fewer than 40 features, so a single study-area polygon is scored
+#'     too) and comparing planar with geodesic pairwise distances, and the one
+#'     that distorts least is used.
 #'     The choice, both error figures and this argument are **logged** (see the
 #'     logging note under [spatialkit_quiet()]); they are not R warnings, so
 #'     `tryCatch(warning = )` does not see them.}
 #'   \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 #'     hemisphere. The wrap is detected from the coordinates (one very large
 #'     gap in the sorted longitudes) and an equal-area projection centred on
-#'     the true extent is used. Only truly global coverage falls back to
-#'     EPSG:3857.}
+#'     the true extent is used.}
+#'   \item{Around a pole}{Data spanning more than 180 degrees of longitude
+#'     with no such gap surround a pole. When every point also lies on one
+#'     side of the equator (Antarctic stations, a pan-Arctic network), a
+#'     Lambert azimuthal equal-area centred on that pole is used, provided it
+#'     measures a smaller distance error than the global fallback. Web
+#'     Mercator splits such a layer at +/-180 degrees and stretches it
+#'     towards the pole: a ring of Antarctic stations measured a worst-case
+#'     distance error near 20,000 percent in it, against about 2 percent in
+#'     the polar projection. Only the coverage left over, spanning both
+#'     hemispheres or a low-latitude belt the polar projection fits worse,
+#'     falls back to EPSG:3857 (Equal Earth for `purpose = "area"`).}
 #'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
 #'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 #'     then apply; coordinates the heuristic declines are left exactly as they
@@ -835,7 +1070,8 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
 #'
 #' @param a,b Objects of class sf or sfc.
 #' @param prefer Which object's CRS to keep ("a" or "b").
-#' @param target_crs Optional target CRS to apply to both.
+#' @param target_crs Optional target CRS to apply to both: anything
+#'   [sf::st_crs()] accepts, including an sf or sfc object, whose CRS is used.
 #' @param on_transform_error What to do when st_transform() fails:
 #'   \code{"stop"} (default) raises an error immediately;
 #'   \code{"set_crs"} falls back to st_set_crs() (UNSAFE: coordinates are
@@ -859,6 +1095,12 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   if (!inherits(b, c("sf", "sfc"))) stop("harmonize_crs(): `b` must be sf or sfc.")
   prefer <- match.arg(prefer)
   on_transform_error <- match.arg(on_transform_error)
+  # A layer as the target means its CRS, as it does for ensure_projected().
+  # Passed through as it was, st_transform() read a multi-row sf as a list of
+  # candidate CRSs ("the condition has length > 1") and refused a one-row one.
+  # Only sf/sfc are converted here: st_crs() on a string it cannot parse
+  # throws before st_transform() runs, which would bypass on_transform_error.
+  if (inherits(target_crs, c("sf", "sfc"))) target_crs <- sf::st_crs(target_crs)
 
   crs_a <- sf::st_crs(a)
   crs_b <- sf::st_crs(b)
@@ -970,6 +1212,68 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
   sf::st_sfc(pts, crs = sf::st_crs(x))
 }
 
+
+#' Drop the EMPTY parts of multi-part geometries
+#'
+#' Every call to [sf::st_point_on_surface()] in the package goes through this
+#' first.  GEOS (3.12.1, which sf 1.0.x links) SEGFAULTS computing the
+#' interior point of a non-empty geometry that holds an EMPTY line: a
+#' MULTILINESTRING with an empty part beside a real one, or a
+#' GEOMETRYCOLLECTION with an empty LINESTRING among its members.  The R
+#' session is lost, not merely the call.  An empty POLYGON member does not
+#' crash but is worse in its way: GEOS takes the interior point from the
+#' highest dimension present, finds that dimension empty, and returns
+#' POINT EMPTY for a geometry that has a line in it.
+#'
+#' An empty part adds no points to the geometry, so dropping it changes
+#' nothing but those two failures.  A feature left with no parts is EMPTY as
+#' a whole, which GEOS handles (it gives POINT EMPTY).  Features are never
+#' removed, so the result stays aligned row for row with the input, and a
+#' feature with no empty part is returned exactly as it was.
+#'
+#' @param x An sf or sfc object.
+#' @return \code{x}, with the empty parts removed from MULTILINESTRING,
+#'   MULTIPOLYGON and GEOMETRYCOLLECTION features (recursively for a
+#'   collection's members).
+#' @keywords internal
+#' @noRd
+.drop_empty_parts <- function(x) {
+  if (inherits(x, "sf")) {
+    g  <- sf::st_geometry(x)
+    g2 <- .drop_empty_parts(g)
+    return(if (identical(g2, g)) x else sf::st_set_geometry(x, g2))
+  }
+  multi <- c("MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION")
+  idx   <- which(as.character(sf::st_geometry_type(x, by_geometry = TRUE)) %in% multi)
+  if (!length(idx)) return(x)
+
+  # Emptiness read off the structure, without a GEOS call per part: a matrix
+  # with no rows (a LINESTRING or a ring; sf refuses NA in one), a POINT with
+  # no coordinates, or a list with no non-empty element (a POLYGON's rings,
+  # the parts of a multi-geometry, a collection's members).
+  is_empty <- function(s) {
+    if (is.list(s)) return(all(vapply(s, is_empty, logical(1))))
+    length(s) == 0L || (!is.matrix(s) && all(is.na(s)))
+  }
+  has_empty <- function(s) {
+    if (!inherits(s, multi)) return(FALSE)
+    for (k in unclass(s)) if (is_empty(k) || has_empty(k)) return(TRUE)
+    FALSE
+  }
+  strip <- function(s) {
+    if (!inherits(s, multi)) return(s)
+    kids <- unclass(s)
+    if (inherits(s, "GEOMETRYCOLLECTION")) kids <- lapply(kids, strip)
+    structure(kids[!vapply(kids, is_empty, logical(1))], class = class(s))
+  }
+
+  # Only features that hold an empty part are rebuilt; the rest, which is
+  # nearly always all of them, are left exactly as they were.
+  for (i in idx[vapply(unclass(x)[idx], has_empty, logical(1))])
+    x[[i]] <- strip(x[[i]])
+  x
+}
+
 # -----------------------------------------------------------------------------
 # Point Coercion
 # -----------------------------------------------------------------------------
@@ -979,21 +1283,31 @@ harmonize_crs <- function(a, b, prefer = c("a", "b"), target_crs = NULL,
 #' Converts the geometry column of an sf object to POINTs using one of several
 #' strategies.
 #'
-#' LINESTRING midpoints are sampled with [sf::st_line_sample()], which yields
-#' no point for an EMPTY LINESTRING.  Rather than silently misaligning the
-#' result (or letting sf crash), such input raises an error; drop empty
-#' geometries first with `x <- x[!sf::st_is_empty(x), ]`.
+#' The result has one row per row of `x`, in the same order.  An EMPTY
+#' geometry of any type, lines included, becomes an EMPTY POINT in its own
+#' row; [prep_model_data()] and [make_folds()] then drop such rows, as they
+#' drop any other empty geometry.  Empty lines are never handed to
+#' [sf::st_line_sample()]: it yields no midpoint for them, which would
+#' misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
+#' empty part of one) crashed the R session.  An empty part inside a
+#' non-empty feature is ignored, so the feature gets the point its other
+#' parts give; GEOS's interior point, used by `"point_on_surface"` and by
+#' the temporary projection's choice of CRS, segfaulted on an empty line
+#' part too.
 #'
 #' @param x An sf object.
 #' @param mode One of "auto", "centroid", "point_on_surface", "surface",
 #'   "line_midpoint", "bbox_center".
 #' @param tmp_project Logical; temporarily project for line-based midpoints.
-#'   When \code{x} has no CRS and its coordinates fall inside the lon/lat
-#'   envelope, that temporary projection interprets them as EPSG:4326 (with a
-#'   warning) and the midpoints returned are geodesic ones brought back to the
-#'   input's numbers, not planar midpoints.  Set the CRS, or pass
-#'   \code{tmp_project = FALSE}, for planar data.
-#' @return An sf object with geometry coerced to POINTs.
+#'   When \code{x} has no CRS and the lon/lat heuristic of
+#'   \code{\link{ensure_projected}()} takes its coordinates for degrees
+#'   (inside the lon/lat envelope and more than one unit across, or with
+#'   decimal-degree precision), that temporary projection interprets them as
+#'   EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
+#'   brought back to the input's numbers, not planar midpoints.  Set the CRS,
+#'   or pass \code{tmp_project = FALSE}, for planar data.
+#' @return An sf object with geometry coerced to POINTs, row for row with
+#'   `x`; an empty input geometry gives an empty POINT.
 #' @family spatial data preparation
 #' @examples
 #' library(sf)
@@ -1024,34 +1338,22 @@ coerce_to_points <- function(
     return(sf::st_set_geometry(x, .bbox_center_sfc(x)))
   }
 
-  # -- direct spherical-safe ops ---
+  # -- direct ops ---
+  # Not spherical-safe, whatever this heading used to say.  On lon/lat input
+  # st_centroid() is spherical only while sf_use_s2() is TRUE: with it FALSE
+  # it is planar in degrees (a box -120..-60 x 50..75 got a centre 155 km
+  # from the s2 one) and its warning is suppressed here.  st_point_on_surface()
+  # is GEOS, planar in degrees under either setting.
   if (mode == "centroid") {
     return(sf::st_set_geometry(x, suppressWarnings(sf::st_centroid(g))))
   }
   if (mode == "point_on_surface") {
-    return(sf::st_set_geometry(x, sf::st_point_on_surface(g)))
+    # Empty parts dropped first: GEOS segfaults on an empty line inside a
+    # non-empty feature (see .drop_empty_parts()).
+    return(sf::st_set_geometry(x, sf::st_point_on_surface(.drop_empty_parts(g))))
   }
 
   is_ll <- .is_longlat(x)
-
-  # An EMPTY LINESTRING has no midpoint: st_line_sample() yields an empty
-  # MULTIPOINT that st_cast(, "POINT") silently drops (and in sf 1.0.x the
-  # call segfaults outright), so the sampled midpoints would no longer align
-  # 1:1 with the rows they are scattered back into.  Reject before sampling.
-  .guard_empty_lines <- function(geom, idx_ls) {
-    empty <- which(sf::st_is_empty(geom))
-    if (!length(empty)) return(invisible(NULL))
-    shown <- idx_ls[empty][seq_len(min(5L, length(empty)))]
-    stop(sprintf(
-      paste0("coerce_to_points(): %d of %d LINESTRING feature(s) are EMPTY ",
-             "(row(s) %s%s); st_line_sample() yields no midpoint for them, ",
-             "which would misalign the result. Drop them first, e.g. ",
-             "x <- x[!sf::st_is_empty(x), ]."),
-      length(empty), length(idx_ls),
-      paste(shown, collapse = ", "),
-      if (length(empty) > 5L) ", ..." else ""
-    ), call. = FALSE)
-  }
 
   # Backstop for any other way the sampled count could diverge from the number
   # of LINESTRING rows being filled.
@@ -1064,6 +1366,30 @@ coerce_to_points <- function(
     ), call. = FALSE)
   }
 
+  # Midpoints of the LINESTRING rows `idx_ls`, one per row, batched: project
+  # once, sample all, back-transform once.  An EMPTY line has no midpoint:
+  # st_line_sample() yields an empty MULTIPOINT that st_cast(, "POINT")
+  # silently drops (and in sf 1.0.x the call can segfault outright), so the
+  # samples would no longer align 1:1 with the rows they are scattered back
+  # into.  Empty rows never reach the sampler.  They get an EMPTY POINT, as an
+  # empty polygon, point or collection already does, so the rows stay aligned
+  # and prep_model_data() and make_folds() drop them like any empty geometry.
+  # This used to be an error, which made a line layer with one null geometry
+  # the only kind of layer those "drop empty rows" paths could not clean.
+  .line_midpoints <- function(idx_ls) {
+    res  <- rep(list(sf::st_point()), length(idx_ls))
+    full <- which(!sf::st_is_empty(g[idx_ls]))
+    if (!length(full)) return(res)
+    g_ls_sf   <- sf::st_sf(geometry = g[idx_ls[full]])
+    g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
+    midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
+    midps     <- sf::st_cast(midps, "POINT")
+    midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
+    .check_midpoint_alignment(midps, full)
+    res[full] <- as.list(midps)
+    res
+  }
+
   if (mode == "line_midpoint") {
     gtypes <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
     if (any(gtypes %in% c("MULTILINESTRING", "GEOMETRYCOLLECTION"))) {
@@ -1073,21 +1399,12 @@ coerce_to_points <- function(
     idx_other <- which(gtypes != "LINESTRING")
     out <- vector("list", length(g))
 
-    # Batch all LINESTRINGs: project once, sample all, back-transform once
     if (length(idx_ls)) {
       if (is_ll && !tmp_project) {
         ctr <- suppressWarnings(sf::st_centroid(g[idx_ls]))
         out[idx_ls] <- as.list(ctr)
       } else {
-        g_ls      <- g[idx_ls]
-        .guard_empty_lines(g_ls, idx_ls)
-        g_ls_sf   <- sf::st_sf(geometry = g_ls)
-        g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
-        midps     <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-        midps     <- sf::st_cast(midps, "POINT")
-        midps     <- .back_to_input_crs(midps, g_ls_proj, crs)
-        .check_midpoint_alignment(midps, idx_ls)
-        out[idx_ls] <- as.list(midps)
+        out[idx_ls] <- .line_midpoints(idx_ls)
       }
     }
     # Non-LINESTRING fallback to centroid
@@ -1119,7 +1436,7 @@ coerce_to_points <- function(
   # --- POLYGON / MULTIPOLYGON: vectorized point_on_surface ---
   idx_poly <- which(gtypes %in% c("POLYGON", "MULTIPOLYGON"))
   if (length(idx_poly)) {
-    pos <- sf::st_point_on_surface(g[idx_poly])
+    pos <- sf::st_point_on_surface(.drop_empty_parts(g[idx_poly]))
     out[idx_poly] <- as.list(pos)
   }
 
@@ -1130,15 +1447,7 @@ coerce_to_points <- function(
       ctr <- suppressWarnings(sf::st_centroid(g[idx_ls]))
       out[idx_ls] <- as.list(ctr)
     } else {
-      g_ls     <- g[idx_ls]
-      .guard_empty_lines(g_ls, idx_ls)
-      g_ls_sf  <- sf::st_sf(geometry = g_ls)
-      g_ls_proj <- if (tmp_project) ensure_projected(g_ls_sf) else g_ls_sf
-      midps    <- sf::st_line_sample(sf::st_geometry(g_ls_proj), sample = 0.5)
-      midps    <- sf::st_cast(midps, "POINT")
-      midps    <- .back_to_input_crs(midps, g_ls_proj, crs)
-      .check_midpoint_alignment(midps, idx_ls)
-      out[idx_ls] <- as.list(midps)
+      out[idx_ls] <- .line_midpoints(idx_ls)
     }
   }
 
@@ -1149,16 +1458,32 @@ coerce_to_points <- function(
       ctr <- suppressWarnings(sf::st_centroid(g[idx_mls]))
       out[idx_mls] <- as.list(ctr)
     } else {
-      g_mls     <- g[idx_mls]
+      # Empty parts are stripped before anything else sees them (see
+      # .drop_empty_parts()): how st_transform() and st_cast() treat an empty
+      # part varies across sf, GDAL and GEOS versions -- on macOS builds a
+      # feature holding one came back EMPTY as a whole, losing its real part.
+      g_mls     <- .drop_empty_parts(g[idx_mls])
       g_mls_sf  <- sf::st_sf(geometry = g_mls)
       g_mls_proj <- if (tmp_project) ensure_projected(g_mls_sf) else g_mls_sf
       proj_geom  <- sf::st_geometry(g_mls_proj)
       proj_crs   <- sf::st_crs(g_mls_proj)
       for (j in seq_along(idx_mls)) {
-        parts <- suppressWarnings(sf::st_cast(proj_geom[j], "LINESTRING"))
-        if (length(parts) == 0L) {
-          out[[idx_mls[j]]] <- suppressWarnings(sf::st_centroid(g[idx_mls[j]]))[[1]]
+        # st_cast() turns an EMPTY MULTILINESTRING into ONE empty LINESTRING,
+        # not zero parts, and a MULTILINESTRING can also carry an empty part
+        # beside real ones.  Either reached st_line_sample() below, which
+        # segfaults on an empty line in sf 1.0.x and took the R session with
+        # it (the usual source: a null geometry in a line layer, which
+        # GeoPackage and st_read()'s promote_to_multi return as
+        # MULTILINESTRING EMPTY).  Sample only parts that have a midpoint; a
+        # feature with none gets an EMPTY POINT, as an empty LINESTRING does.
+        # The parts are read off the structure rather than st_cast(), for the
+        # same reason as above.
+        mats  <- Filter(function(m) is.matrix(m) && nrow(m) > 0L,
+                        unclass(proj_geom[[j]]))
+        if (length(mats) == 0L) {
+          out[[idx_mls[j]]] <- sf::st_point()
         } else {
+          parts <- sf::st_sfc(lapply(mats, sf::st_linestring), crs = proj_crs)
           lens <- as.numeric(sf::st_length(parts))
           k    <- if (length(lens)) which.max(lens) else 1L
           mp   <- sf::st_line_sample(parts[k], sample = 0.5)

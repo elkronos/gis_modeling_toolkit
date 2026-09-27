@@ -40,7 +40,11 @@
 #' checks most likely to reveal a problem (is there structure left in the
 #' residuals, and where is it) had to be written by hand each time.
 #'
-#' @param x A \code{spatial_fit}.
+#' @param x A \code{spatial_fit}.  The residuals drawn are
+#'   \code{residuals(x)}; for a custom subclass with no \code{residuals()}
+#'   method (optional, see \code{\link{new_spatial_fit}()}) they are the
+#'   response minus \code{fitted(x)}, which is what the built-in backends'
+#'   methods return.
 #' @param type One of:
 #'   \describe{
 #'     \item{\code{"residuals"}}{Residuals mapped at the training locations.
@@ -55,10 +59,12 @@
 #'       dashed fit.  The gap between the two curves is the spatial structure
 #'       the model absorbed: a residual sill well below the response sill
 #'       means most of it, two curves that coincide mean none.  When both
-#'       effective ranges were identified the caption gives the residual sill
-#'       as a share of the response sill and the two ranges; when either
-#'       variogram reached no sill the caption says so and compares nothing,
-#'       because a sill the data never reached is not a number to divide by.
+#'       effective ranges were identified over the same point pairs the caption
+#'       gives the residual sill as a share of the response sill and the two
+#'       ranges; when either variogram has no identified range, or the two
+#'       are not over the same pairs, the caption says so and compares
+#'       nothing: a sill the data never reached is not a number to divide by,
+#'       and one direction's sill is not comparable with all directions'.
 #'       The residual range is expected to come out shorter and the residual
 #'       sill lower even when the model is right, because residuals of a
 #'       fitted trend understate the variogram (see
@@ -66,16 +72,24 @@
 #'       residual-variogram bias").
 #'       The distance axis is labelled in the units of the CRS the variogram
 #'       was actually fitted in, which is not necessarily the fit's own CRS
-#'       (lon/lat data are projected first). A single-direction fit names its
-#'       azimuth in the title; a fit that identified no range says why in the
-#'       subtitle, since the overlaid model line is then not a fit to believe.
+#'       (lon/lat data are projected first). Each curve is the variogram
+#'       \code{estimate_sac_range()} returns for its variable: all point pairs,
+#'       or, when the all-pairs fit was unusable, the widest of four directions,
+#'       which is named with its azimuth (in the title for the residuals, in the
+#'       caption for the response). A fit that identified no range says why in
+#'       the subtitle, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
 #'       of one \code{term} mapped at the training locations, which is the
 #'       reason to fit GWR at all.  Locations where the local design is
-#'       collinear (the kernel-weighted window's scaled condition index is
-#'       above 30, or the window is singular) are drawn hollow and grey
-#'       (\code{mask = TRUE}), because the smooth surface a naive map draws
+#'       collinear for that term are drawn hollow and grey
+#'       (\code{mask = TRUE}): for a slope, where the kernel-weighted
+#'       window's slope condition index (\code{cn_slopes}, predictors
+#'       centred in the window) is above 30 or the window is singular, or
+#'       where the index with the intercept (\code{cn}) is above 1e6; for
+#'       the Intercept, where \code{cn} is above 30 (a predictor far from 0
+#'       against its local spread makes the local intercept an
+#'       extrapolation).  They are masked because the smooth surface a naive map draws
 #'       over them is the picture of an unstable estimate, not of a
 #'       relationship; the subtitle counts them.  The condition indices are
 #'       the fit's \code{info$local_collinearity}, computed for every
@@ -90,8 +104,8 @@
 #'   map, one of the names \code{coef(x)} returns.  Default \code{NULL}: the
 #'   first predictor.  Ignored by the other types.
 #' @param mask For \code{type = "coefficients"}: whether to draw locations
-#'   whose local design is collinear (scaled condition index of the
-#'   kernel-weighted window above 30, or singular) as hollow grey points
+#'   whose local design is collinear for that term (see
+#'   \code{type = "coefficients"}) as hollow grey points
 #'   instead of colouring them by a coefficient that is not to be believed
 #'   there.  Default \code{TRUE}.  Locations whose coefficient is non-finite
 #'   are masked either way.
@@ -133,6 +147,15 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
     return(.plot_gwr_coefficients(x, term = term, mask = mask))
 
   res <- try(stats::residuals(x), silent = TRUE)
+  # A custom subclass without a residuals.<subclass>() method -- which
+  # ?new_spatial_fit calls optional -- gets residuals.default(), i.e.
+  # x$residuals, i.e. NULL, and every type but "coefficients" stopped here.
+  # The built-in backends' residuals are the observed response minus
+  # fitted(), and fitted() is the method a custom subclass must define; when
+  # it is missing too, .fitted_checked() says which method to write.
+  if (is.null(res) && is.character(x$response_var) && inherits(x$data_sf, "sf"))
+    res <- as.numeric(sf::st_drop_geometry(x$data_sf)[[x$response_var]]) -
+      as.numeric(.fitted_checked(x, .caller = "plot.spatial_fit"))
   if (inherits(res, "try-error") || !is.numeric(res))
     stop("plot.spatial_fit(): could not extract residuals from this fit.",
          call. = FALSE)
@@ -252,14 +275,30 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
                  paste(sQuote(names(cf)), collapse = ", ")), call. = FALSE)
   vals <- suppressWarnings(as.numeric(cf[[term]]))
   lc <- x$info$local_collinearity
-  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat))
-    (!is.finite(lc$cn) | lc$cn > 30) else rep(FALSE, nrow(dat))
+  # Each term is masked by the index that speaks for it.  The intercept by
+  # Belsley's uncentred index with the intercept (`cn`): a predictor far from
+  # 0 against its local spread makes the local intercept an extrapolation.  A
+  # slope by the slope index (see .gwr_slopes_collinear()), which does not
+  # depend on the predictor's origin: masking slopes on `cn` hid the whole
+  # map of a temperature in kelvin, identical to the one in degrees C that
+  # was drawn.  A fit made before `cn_slopes` existed falls back to `cn`.
+  is_intercept <- identical(term, "Intercept") && !("Intercept" %in% x$predictor_vars)
+  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat)) {
+    if (is_intercept) (!is.finite(lc$cn) | lc$cn > 30)
+    else .gwr_slopes_collinear(lc)
+  } else rep(FALSE, nrow(dat))
   non_finite <- !is.finite(vals)
   masked <- non_finite | (isTRUE(mask) & cn_bad)
   if (all(masked))
     stop("plot.spatial_fit(type = \"coefficients\"): every location is masked ",
          "(non-finite coefficient, or a collinear local design at all of them); ",
-         "there is no surface to draw.", call. = FALSE)
+         "there is no surface to draw.",
+         if (is_intercept && !all(non_finite))
+           paste0(" The local intercept is an extrapolation to predictor values ",
+                  "of 0 wherever a predictor's local values are far from 0 ",
+                  "against their spread; centre the predictors to map it, or ",
+                  "pass mask = FALSE.") else "",
+         call. = FALSE)
 
   dat$.coef   <- vals
   dat$.masked <- masked
@@ -280,16 +319,27 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
     ggplot2::scale_colour_viridis_c(name = term)
   }
   n_cn <- sum(cn_bad & !non_finite); n_nf <- sum(non_finite)
+  surveyed <- is.data.frame(lc) && nrow(lc) == nrow(dat)
+  # With mask = FALSE the collinear windows are drawn as if reliable, and the
+  # subtitle has to say so even when a non-finite coefficient elsewhere sends
+  # it down the "masked" branch; that branch used to drop the note.  And a
+  # clean survey is not a missing one: mask = FALSE on a well-conditioned fit
+  # fell through to "Collinearity not surveyed".
+  unmasked_cn <- if (!isTRUE(mask) && n_cn)
+    sprintf("mask = FALSE: %d location(s) with a collinear local design are drawn as if reliable", n_cn)
   subtitle <- if (any(masked))
-    sprintf("%d of %d locations masked (hollow):\n%s", sum(masked), nrow(dat),
-            paste(c(if (isTRUE(mask) && n_cn) sprintf("%d with a collinear local design (condition index > 30)", n_cn),
-                    if (n_nf) sprintf("%d with a non-finite coefficient", n_nf)),
-                  collapse = "; "))
-  else if (isTRUE(mask) && is.data.frame(lc))
+    paste(c(sprintf("%d of %d locations masked (hollow):\n%s", sum(masked), nrow(dat),
+                    paste(c(if (isTRUE(mask) && n_cn)
+                              sprintf("%d with a collinear local design (%s > 30)", n_cn,
+                                      if (is_intercept) "condition index with the intercept"
+                                      else "slope condition index"),
+                            if (n_nf) sprintf("%d with a non-finite coefficient", n_nf)),
+                          collapse = "; ")),
+            unmasked_cn), collapse = "\n")
+  else if (!is.null(unmasked_cn)) unmasked_cn
+  else if (surveyed)
     "No location masked: every local design is well conditioned"
-  else if (!isTRUE(mask) && any(cn_bad))
-    sprintf("mask = FALSE: %d location(s) with a collinear local design are drawn as if reliable", sum(cn_bad))
-  else "Collinearity not surveyed (fewer than two numeric predictors)"
+  else "Collinearity not surveyed (no numeric predictor, or a fit made before the survey)"
   p + ggplot2::labs(
     title = sprintf("Local coefficient of %s", term),
     subtitle = subtitle,
@@ -356,9 +406,13 @@ plot.sac_range <- function(x, ...) {
          "estimate_sac_range().", call. = FALSE)
   if (is.null(attr(x, "variogram", exact = TRUE)))
     stop("plot.sac_range(): this estimate carries no empirical variogram to ",
-         "draw. estimate_sac_range() returns a bare NA, with nothing attached, ",
-         "when the input has too few usable points or the variogram could not ",
-         "be computed at all.", call. = FALSE)
+         "draw. estimate_sac_range() returns NA with only a ",
+         "`rejected_reason` attached when it stops before computing one: ",
+         "too few usable points, no variance or extent, or gstat missing",
+         {r <- attr(x, "rejected_reason", exact = TRUE)
+          if (is.character(r) && length(r) == 1L && !is.na(r))
+            sprintf(" (here: %s)", r) else ""},
+         ".", call. = FALSE)
   .draw_sac_variogram(x, what = "Empirical variogram")
 }
 
@@ -403,16 +457,18 @@ plot.sac_range <- function(x, ...) {
   # estimate_sac_range() returns the single azimuth with the widest range --
   # about a quarter of the point pairs -- and calling that plainly by `what`
   # overstates the structure for the plot whose whole purpose is to show how
-  # much there is.
-  vg_title <- what
-  if (isTRUE(attr(sac, "anisotropy_used"))) {
-    dir_r <- attr(sac, "directional")
-    az <- if (!is.null(dir_r) && length(dir_r))
-      names(dir_r)[which.max(replace(dir_r, is.na(dir_r), -Inf))] else NA
-    vg_title <- if (is.na(az)) sprintf("%s (widest direction only)", what)
-      else sprintf("%s, %s\u00b0 \u00b1 22.5\u00b0 (the widest of four directions)",
-                   what, az)
+  # much there is.  NA: all pairs; "": one direction, azimuth unknown.
+  azimuth_of <- function(s) {
+    if (!isTRUE(attr(s, "anisotropy_used"))) return(NA_character_)
+    dir_r <- attr(s, "directional")
+    if (is.null(dir_r) || !length(dir_r) || is.null(names(dir_r))) return("")
+    names(dir_r)[which.max(replace(dir_r, is.na(dir_r), -Inf))]
   }
+  az <- azimuth_of(sac)
+  vg_title <- if (is.na(az)) what
+    else if (!nzchar(az)) sprintf("%s (widest direction only)", what)
+    else sprintf("%s, %s\u00b0 \u00b1 22.5\u00b0 (the widest of four directions)",
+                 what, az)
 
   p <- ggplot2::ggplot(vg, ggplot2::aes(x = .data$dist, y = .data$gamma)) +
     ggplot2::geom_point(ggplot2::aes(size = .data$np), alpha = 0.7) +
@@ -449,14 +505,35 @@ plot.sac_range <- function(x, ...) {
                                     colour = "grey35", linetype = "dashed",
                                     linewidth = 0.8)
     }
+    # Each curve is whichever variogram estimate_sac_range() returned for its
+    # variable: all pairs, or the widest single direction when the all-pairs
+    # fit was unusable -- which a response carrying a trend often is while
+    # its residuals are not.  The overlay was labelled plainly as the
+    # response whichever it was, and its sill and range set against an
+    # all-pairs residual curve over four times as many pairs.
+    ov_az <- azimuth_of(overlay)
+    dir_label <- function(a) if (!nzchar(a)) "the widest direction only"
+      else sprintf("the %s\u00b0 \u00b1 22.5\u00b0 direction only", a)
+    if (!is.na(ov_az))
+      overlay_label <- sprintf("%s, %s", overlay_label, dir_label(ov_az))
+    same_pairs <- identical(az, ov_az) && !identical(az, "")
     # The sills are compared only when BOTH ranges were identified: a model
     # whose range ran past the lags fitted has a sill the data never reached,
     # and a ratio of two such numbers reads as a finding while being noise.
     sill_of <- function(m) if (is.data.frame(m) && "psill" %in% names(m))
       sum(as.numeric(m$psill), na.rm = TRUE) else NA_real_
     s_res <- sill_of(vm); s_resp <- sill_of(ovm)
-    both_ok <- is.finite(sac) && is.finite(overlay) &&
+    both_ok <- same_pairs && is.finite(sac) && is.finite(overlay) &&
       is.finite(s_res) && is.finite(s_resp) && s_resp > 0
+    # A range can be missing for several reasons (no sill within the lags, a
+    # fit that did not converge, a falling or flat variogram), so the clause
+    # says only that none was identified.  "Reached no identified sill"
+    # described every case as a still-rising curve.  The residual reason is
+    # in the subtitle; the response's appears nowhere else, so it is named.
+    ov_reason <- attr(overlay, "rejected_reason")
+    ov_why <- if (is.character(ov_reason) && length(ov_reason) == 1L &&
+                  !is.na(ov_reason) && nzchar(ov_reason))
+      sprintf(" (%s)", ov_reason) else ""
     overlay_caption <- paste(c(
       sprintf("Hollow points, dashed line: %s. Filled points, solid line: %s.",
               overlay_label, tolower(what)),
@@ -464,12 +541,20 @@ plot.sac_range <- function(x, ...) {
         sprintf("Residual sill is %.0f%% of the response sill; effective ranges %.0f (residuals) and %.0f (response).",
                 100 * s_res / s_resp, as.numeric(sac), as.numeric(overlay))
       else sprintf("Sills not compared: %s.",
-                   if (!is.finite(sac) && !is.finite(overlay))
-                     "neither variogram reached an identified sill"
+                   if (!same_pairs)
+                     sprintf(paste0("the two variograms are not over the same ",
+                                    "point pairs (residuals: %s; response: %s)"),
+                             if (is.na(az)) "all directions" else dir_label(az),
+                             if (is.na(ov_az)) "all directions" else dir_label(ov_az))
+                   else if (!is.finite(sac) && !is.finite(overlay))
+                     sprintf("neither variogram has an identified range%s",
+                             if (nzchar(ov_why))
+                               sprintf(" (response: %s)", ov_reason) else "")
                    else if (!is.finite(sac))
-                     "the residual variogram reached no identified sill"
+                     "the residual variogram has no identified range"
                    else if (!is.finite(overlay))
-                     "the response variogram reached no identified sill"
+                     sprintf("the response variogram has no identified range%s",
+                             ov_why)
                    else "a variogram model could not be fitted")
     ), collapse = "\n")
     p <- p + ggplot2::labs(caption = .wrap_label(overlay_caption, 72))
@@ -508,12 +593,45 @@ plot.sac_range <- function(x, ...) {
                          "(%.0f) is not identified (periodic structure, or a ",
                          "variance that differs across the layer)."),
                   attr(sac, "rejected_range"))
+        else if (identical(reason, "fitted range exceeds the largest lag fitted") &&
+                 isTRUE(attr(sac, "rejected_range") <= attr(sac, "cutoff_dist")))
+          # The bound is range_frac x the largest lag, and the estimate does
+          # not record range_frac.  A refused range at or below the largest
+          # lag can only have been refused by a range_frac below 1, and
+          # "exceeds the largest lag fitted (651) ... never reached a sill"
+          # was then false on both counts for a range of 646.
+          sprintf(paste0("No effective range: the fitted range (%.0f) is ",
+                         "within the largest lag fitted (%.0f) but above the ",
+                         "share of it that `range_frac` accepts."),
+                  attr(sac, "rejected_range"),
+                  attr(sac, "cutoff_dist"))
         else if (identical(reason, "fitted range exceeds the largest lag fitted"))
           sprintf(paste0("No effective range: the fitted range (%.0f) ",
                          "exceeds the largest lag fitted (%.0f), so the ",
                          "variogram never reached a sill."),
                   attr(sac, "rejected_range"),
                   attr(sac, "cutoff_dist"))
+        else if (identical(reason, "fitted range is below the shortest lag fitted") &&
+                 is.numeric(attr(sac, "rejected_range"))) {
+          # The distance the range fell short of is recorded on the refusal:
+          # the first lag of this variogram, or for a REML range the distance
+          # within which 30 pairs of its points lie, when that is shorter.
+          # An older object without it is captioned from the first lag.
+          first_lag <- suppressWarnings(min(vg$dist[is.finite(vg$dist) & vg$np > 0]))
+          fl <- attr(sac, "range_floor") %||% first_lag
+          if (is.numeric(fl) && length(fl) == 1L && is.finite(fl) &&
+              is.finite(first_lag) && fl < first_lag)
+            sprintf(paste0("No effective range: the fitted range (%.3g) is ",
+                           "below %.3g, the distance within which 30 pairs of ",
+                           "the points the REML fit used lie, too few to ",
+                           "identify it."),
+                    attr(sac, "rejected_range"), fl)
+          else
+            sprintf(paste0("No effective range: the fitted range (%.3g) is ",
+                           "below the shortest lag fitted (%.3g), so no lag ",
+                           "inside it was fitted."),
+                    attr(sac, "rejected_range"), fl)
+        }
         else
           # A reason this method does not know by name: say it verbatim rather
           # than caption it with another case's sentence.
@@ -583,15 +701,43 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
     stop("plot_folds(): no points matched the fold assignment; were `folds` ",
          "built from a different layer?", call. = FALSE)
 
+  # coord_sf() brings layers that carry a CRS into one, but a CRS-less layer
+  # beside one that has a CRS aborts at PRINT time with sf's bare "cannot
+  # transform sfc object with missing crs".  make_folds() produces that mix
+  # itself: it projects CRS-less lon/lat points to a UTM zone, and stamps
+  # CRS-less points with a boundary's CRS, so the blocks it stores carry a CRS
+  # the very layer the folds came from does not.  So a CRS-less layer is
+  # brought into the points' CRS, or failing that the one the folds were built
+  # in, or the first layer's that has one -- reprojected from lon/lat when its
+  # coordinates look like degrees, and stamped with a warning otherwise, as
+  # make_folds() did.
+  blk <- folds$params$blocks
+  if (!(isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)) blk <- NULL
+  plot_crs <- sf::st_crs(dat)
+  if (is.na(plot_crs) && is.character(folds$params$crs) &&
+      length(folds$params$crs) == 1L && !is.na(folds$params$crs))
+    plot_crs <- tryCatch(sf::st_crs(folds$params$crs),
+                         error = function(e) sf::NA_crs_)
+  for (lyr in list(blk, boundary)) {
+    if (!is.na(plot_crs)) break
+    if (!is.null(lyr))
+      plot_crs <- tryCatch(sf::st_crs(lyr), error = function(e) sf::NA_crs_)
+  }
+  align <- function(x, what) {
+    if (is.null(x) || is.na(plot_crs) || !is.na(sf::st_crs(x))) return(x)
+    .transform_or_stamp(x, plot_crs, what = what, caller = "plot_folds")
+  }
+  dat <- align(dat, "points_sf")
+  blk <- align(blk, "folds$params$blocks")
+  if (!is.null(boundary)) boundary <- align(boundary, "boundary")
+
   p <- ggplot2::ggplot()
   if (!is.null(boundary))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(boundary),
                               fill = NA, colour = "grey60")
   # The block design, when the folds carry it (block_kfold): outlines under
-  # the points, in the CRS the folds were built in -- coord_sf() brings the
-  # layers to one CRS.
-  blk <- folds$params$blocks
-  if (isTRUE(blocks) && inherits(blk, "sf") && nrow(blk) > 0L)
+  # the points.
+  if (!is.null(blk))
     p <- p + ggplot2::geom_sf(data = sf::st_geometry(blk),
                               fill = NA, colour = "grey45", linewidth = 0.25)
   p +
@@ -611,8 +757,17 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
   prm <- folds$params
   fin <- function(v) length(v) == 1L && is.finite(suppressWarnings(as.numeric(v)))
   num <- function(v) format(signif(as.numeric(v), 3), big.mark = ",")
-  units <- if (is.character(prm$crs) && length(prm$crs) == 1L && nzchar(prm$crs))
-    sprintf(" (%s units)", prm$crs) else ""
+  # make_folds() records NA_character_ for points without a CRS, and
+  # nzchar(NA) is TRUE: the subtitle read "Block size 300 (NA units)".
+  # prm$crs identifies the CRS (an EPSG code, else the proj string or the
+  # whole WKT); the subtitle wants its linear unit, as .draw_sac_variogram()
+  # gives it.  Printed as it was, a CRS with no EPSG code put a 1,300-character
+  # WKT into the subtitle.
+  u <- if (is.character(prm$crs) && length(prm$crs) == 1L &&
+           !is.na(prm$crs) && nzchar(prm$crs))
+    tryCatch(sf::st_crs(prm$crs)$units_gdal, error = function(e) NULL)
+  units <- if (is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u))
+    sprintf(" (%s)", u) else ""
   switch(as.character(folds$method),
     random_kfold =
       "Random folds: a held-out point's neighbours stay in the training set",
