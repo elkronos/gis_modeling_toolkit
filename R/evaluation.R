@@ -1305,7 +1305,11 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   is set to \code{NA}, with a warning, when the fits carrying it were
 #'   fitted to different rows (a predictor with missing values drops rows,
 #'   for example) or to different responses (a transformed response on the
-#'   same rows), and the warning says which.  Alongside the metrics it
+#'   same rows), and the warning says which.  \code{convergence_ok} is
+#'   \code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
+#'   checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
+#'   otherwise; a fit that did not converge is ranked like the others, so it
+#'   also raises a warning.  Alongside the metrics it
 #'   carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 #'   \code{resid_morans_null}, the last of which names the null
@@ -1362,6 +1366,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
   met_df$AICc  <- NA_real_
   met_df$LOOIC <- NA_real_
   met_df$bandwidth_is_fallback <- NA
+  # TRUE / FALSE as fit_bayesian_spatial_model() judged the sampler, NA for
+  # other backends and for a Bayesian fit whose checks were not run.
+  met_df$convergence_ok <- NA
   for (i in seq_len(nrow(met_df))) {
     nm <- met_df$model[i]
     # By index, not fits[[nm]]: name lookup returns the FIRST match, so with two
@@ -1384,8 +1391,20 @@ compare_models <- function(fits, newdata = NULL, ...) {
         )
       }
     }
-    if (inherits(obj, "bayesian_fit"))
+    if (inherits(obj, "bayesian_fit")) {
       met_df$LOOIC[i] <- obj$info$looic %||% NA_real_
+      ok <- obj$info$convergence_ok
+      met_df$convergence_ok[i] <- if (is.logical(ok) && length(ok) == 1L) ok else NA
+      # The fit logged its R-hat, ESS and divergences, but a log line is
+      # invisible under knitr, spatialkit_quiet() and tryCatch(), and the
+      # row is ranked like the others.
+      if (isFALSE(ok))
+        .warn_and_log(paste0("compare_models(): the sampler of Bayesian model ",
+                             "'%s' did not converge (see print() on the fit, ",
+                             "or its $info$convergence_diagnostics); its ",
+                             "metrics and LOOIC come from an unreliable ",
+                             "posterior."), nm)
+    }
   }
 
   # AICc and LOOIC are sums over the observations a model was fitted to, so

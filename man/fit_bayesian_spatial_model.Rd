@@ -132,9 +132,14 @@ Details): a basis too coarse for it is logged as a WARN line, and the
 share of draws it cannot resolve is recorded as
 \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, but it
 does not change \code{convergence_ok} and \code{print()} does not flag
-it.  None of these are raised as R warnings.  Under \pkg{rstan} the
-sampler raises its own R-hat and ESS warnings; under \pkg{cmdstanr}
-nothing does, so read \code{$info$convergence_ok}.  \code{FALSE} skips
+it.  None of these are raised as R warnings by the fit itself; the
+functions that score fits do raise one: \code{\link{cv_bayes}()} names
+the folds whose sampler did not converge (and marks them in
+\code{fold_metrics$convergence_ok}), and
+\code{\link{compare_models}()} names such a model (column
+\code{convergence_ok}).  Under \pkg{rstan} the sampler raises its own
+R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so read
+\code{$info$convergence_ok}.  \code{FALSE} skips
 the checks and leaves \code{convergence_ok} \code{NA} (not checked).
 Default TRUE.}
 

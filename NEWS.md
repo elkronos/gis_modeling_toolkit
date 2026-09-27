@@ -850,6 +850,18 @@
 * `voronoi_seeds_kmeans()` gains `nstart`, the number of `stats::kmeans()`
   starts (default 10, as before).
 
+* `cv_bayes()` and `compare_models()` say when a Bayesian fit did not
+  converge.  Both scored such a fit like any other, and only the fit's WARN
+  log lines (which `tryCatch()` and knitr never see, and
+  `spatialkit_quiet()` hides) said that its posterior was not to be
+  trusted.  `cv_bayes()`'s `fold_metrics` gains `convergence_ok`: `TRUE` or
+  `FALSE` as `fit_bayesian_spatial_model()` judged that fold's sampler
+  (R-hat, effective sample size, divergences), and `NA` when `fit_args`
+  sets `check_convergence = FALSE`.  A run with any `FALSE` raises one
+  warning naming those folds.  `compare_models()` gains the same column and
+  warns once for each model that did not converge.  Code that pins the
+  exact column set of either table needs the new name added.
+
 ## Bug fixes
 
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
@@ -1359,9 +1371,12 @@
   lon/lat got two R warnings from one `cv_rf()` call, one from
   `prep_model_data()` and one from `make_folds()`, both naming
   `ensure_projected()`.  All three now warn as the others do, naming
-  themselves and `boundary` (`make_folds()` also `prediction_points`), and
-  a `cv_*()` call warns once, naming the `cv_*()` function.  Which CRS the
-  boundary ends up in is unchanged.  The stamping warning of every function
+  themselves and `boundary` (`make_folds()` also `prediction_points`,
+  `predict_surface()` also `grid` and `covariates`), and a `cv_*()` call
+  warns once, naming the `cv_*()` function.  Which CRS the layer ends up in
+  is unchanged.  For `predict_surface()` this matters most on `grid` and
+  `covariates`: a layer stamped with the wrong CRS puts every covariate
+  lookup in the wrong place.  The stamping warning of every function
   now names the CRS it stamps ("stamping the target CRS ('EPSG:32632')
   WITHOUT reprojection") instead of "the supplied `crs`", an argument most
   of them do not have.
@@ -2216,9 +2231,11 @@
   flat when the curve has no elbow, so Moran's z alone orders the window.
   Every unscored candidate takes the last place on the Moran axis, and exact
   ties go to the `k` nearest the elbow.  The same layers now give
-  `10 11 12`, `10 11 12`, `10 11 7` and `10 12 11` (Moran's z favours 10
-  there, not the 8 clusters), and 800 uniform points `10 11 7` where they
-  gave `5 4 10`.  Supplying both `response_var` and `predictor_vars` selects
+  `10 11 12`, `10 11 12`, `10 11 7` and `10 12 11`, and 800 uniform points
+  `10 11 7` where they gave `5 4 10`.  Ten is not the response's choice:
+  it is the smallest count Moran's I scores, and every candidate below the
+  nine-cell floor ranks last on that axis, so where the elbow lies below ten
+  cells this criterion returns ten or more whatever the response does.  Supplying both `response_var` and `predictor_vars` selects
   this criterion by default.
 
 * **`build_tessellation(method = "hex")` or `"square"` laid its lattice over

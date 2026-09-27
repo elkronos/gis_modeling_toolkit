@@ -125,7 +125,10 @@
 #'   is given the interpretation the training data got (the assumption recorded
 #'   on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 #'   grid can land thousands of kilometres from the covariates and every cell
-#'   takes the same nearest feature.  A grid of polygons
+#'   takes the same nearest feature.  A grid still without a CRS after that
+#'   is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
+#'   when its coordinates look like lon/lat, otherwise stamped with the fit's
+#'   CRS, with a warning either way.  A grid of polygons
 #'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 #'   representative point per cell, as \code{\link{coerce_to_points}()} does,
 #'   so covariates are taken at the location predicted for; \code{boundary}
@@ -149,7 +152,9 @@
 #'   is otherwise stamped with the fit's CRS, with a warning either way.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
-#'   contain them.  Values are taken from the nearest feature.
+#'   contain them.  Values are taken from the nearest feature.  Aligned to
+#'   the fit's CRS as \code{grid} is, with the same warning when it has no
+#'   CRS.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
@@ -226,6 +231,23 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     stop("predict_surface(): the fit carries no training geometry.", call. = FALSE)
   target_crs <- sf::st_crs(train)
 
+  # A `grid` or `covariates` layer still without a CRS once the fit's own
+  # assumption has been replayed is aligned to the fit's CRS as `boundary`
+  # is, and as the other functions align such a layer: reprojected from
+  # EPSG:4326 when it looks like lon/lat, otherwise stamped, either way with
+  # an R warning naming this function and the argument.  ensure_projected()
+  # stamped it with a log line naming neither, which knitr,
+  # spatialkit_quiet() and tryCatch() never show -- and a wrongly stamped
+  # layer puts every covariate lookup in the wrong place.  A layer the
+  # replay marked as belonging to a CRS-less fit's own space is left there.
+  .align_to_fit <- function(x, what) {
+    if (is.na(sf::st_crs(x)) && !is.null(.crs_or_null(target_crs)) &&
+        !identical(attr(x, "crs_assumed"), "none"))
+      .transform_or_stamp(x, target_crs, what = what, caller = "predict_surface")
+    else
+      ensure_projected(x, target_crs = .crs_or_null(target_crs))
+  }
+
   # ---- grid ----------------------------------------------------------------
   if (is.null(grid)) {
     grid <- .make_prediction_grid(sf::st_bbox(train), target_crs,
@@ -246,7 +268,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # handed every cell the same covariate row and the whole surface collapsed
     # to one constant -- silently, with no error anywhere.
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
-    grid <- ensure_projected(grid, target_crs = .crs_or_null(target_crs))
+    grid <- .align_to_fit(grid, "grid")
     # A polygon grid -- create_grid_polygons() output, say -- was used as it
     # was.  st_nearest_feature() then gave each cell whichever covariate point
     # inside it the spatial index returned first, not the one at its centre,
@@ -303,7 +325,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
 
     covariates <- .replay_crs_assumption(covariates, train, "predict_surface",
                                         "covariates")
-    covariates <- ensure_projected(covariates, target_crs = .crs_or_null(target_crs))
+    covariates <- .align_to_fit(covariates, "covariates")
     nn  <- sf::st_nearest_feature(grid, covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
