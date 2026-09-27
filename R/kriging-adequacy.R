@@ -179,7 +179,11 @@
 #' @param sac Optional \code{sac_range} carrying a variogram model.
 #' @param folds Optional \code{\link{make_folds}()} result on
 #'   \code{assigned_points_sf} for the cross-validation statistic; built here
-#'   with \code{block_kfold} when \code{NULL}.
+#'   with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+#'   whose recorded rows sit at other locations in
+#'   \code{assigned_points_sf} (built on another layer, such as the points
+#'   before \code{\link{assign_features_to_polygons}()} dropped some) are
+#'   refused.
 #' @param k,seed Folds and seed for that construction.
 #' @param nmax The number of neighbours each kriging system uses
 #'   (\code{gstat}'s \code{nmax}): the locations nearest the cell's centre,
@@ -283,6 +287,14 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
       is.na(max_box_ratio) || max_box_ratio < 1)
     stop("kriging_adequacy(): `max_box_ratio` must be a single number of at least 1.",
          call. = FALSE)
+
+  # Folds are row IDs, matched by position on a layer without `..row_id`.
+  # Built on prep_model_data()'s points and applied to the fewer that
+  # assign_features_to_polygons() kept, they held out the wrong points (RMSE
+  # 1.82 against 2.11 with folds built here) with nothing said, while cv_*()
+  # refuse the same folds through the probe make_folds() records.  Checked on
+  # the layer as passed, before anything is moved or pointized.
+  .check_fold_provenance(folds, assigned_points_sf, "kriging_adequacy")
 
   # --- geometry: projected points, cells in the same CRS ---
   # A layer with no CRS is taken to be in the other's, as passed and before

@@ -225,7 +225,8 @@ test_that("kriging_adequacy() says why there is no variogram model, and whose", 
                   error = conditionMessage)
   expect_match(err, "the variogram estimated here from 'z' carries no variogram model",
                fixed = TRUE)
-  expect_match(err, "estimate_sac_range() returned a bare NA", fixed = TRUE)
+  # The estimate's own reason, now that its early NA returns carry one.
+  expect_match(err, "nothing to krige with: the response is constant", fixed = TRUE)
   expect_false(grepl("`sac`", err, fixed = TRUE))
 })
 

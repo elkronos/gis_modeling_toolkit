@@ -36,7 +36,9 @@ trend on these predictors is removed first and the variogram describes
 the residual autocorrelation, the part a spatial model has to handle
 once the covariates have done their work.  How the trend is removed is
 set by \code{detrend}, and it matters: see "Detrending and the
-residual-variogram bias".}
+residual-variogram bias".  Rows whose response or predictor is missing
+or infinite are left out of that fit, and so of the variogram, with a
+logged count.}
 
 \item{n_max}{Maximum number of points to subsample before fitting.
 Variogram estimation is O(n²) so this keeps runtime bounded.}
@@ -107,8 +109,8 @@ attribute.  Set \code{TRUE} to inspect the directional curves.}
 }
 \value{
 A single number, of class \code{sac_range} in the first two of the
-three shapes below and a bare \code{NA} in the third; all three behave
-as an ordinary number.  The shapes carry different attributes:
+three shapes below and an unclassed \code{NA} in the third; all three
+behave as an ordinary number.  The shapes carry different attributes:
 \describe{
 \item{Success}{A positive effective range in projected coordinate units,
 with the fit attached as attributes \code{directional} (the 0°, 45°,
@@ -200,11 +202,19 @@ which a flat, nugget-only variogram can produce, though on white
 noise it was the outcome in only 1 of 30 draws: see above);
 \code{rejected_reason} says so and the empirical variogram is still
 attached.}
-\item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
-could not be attempted at all: \pkg{gstat} missing, fewer than 30
-finite values, a variable with no variance, or a degenerate extent.
-Without \pkg{gstat} nothing is fitted, so none of the attributes
-above exist either.}
+\item{No fit}{An unclassed \code{NA_real_} when estimation could not
+be attempted at all, whose one attribute, \code{rejected_reason},
+says why: \code{"package 'gstat', which the variogram needs, is not
+installed"}, \code{"<n> points, fewer than the 30 a variogram range
+is estimated from"}, \code{"<n> point(s) with a finite value to
+model, fewer than the 30 a variogram range is estimated from"},
+\code{"the response is constant"}, \code{"the residuals on
+predictor_vars are constant: the predictors explain the response
+exactly"} or \code{"the points have no extent (the largest distance
+between them is zero or could not be computed)"}.  Nothing is
+fitted, so none of the other attributes above exist: no
+\code{variogram}, \code{variogram_model} or \code{rejected_range},
+which is what tells it from a range that was fitted and refused.}
 }
 Attributes and the class do not affect \code{is.na()} or
 \code{is.finite()}, so every downstream guard treats all three the same
