@@ -406,9 +406,13 @@ plot.sac_range <- function(x, ...) {
          "estimate_sac_range().", call. = FALSE)
   if (is.null(attr(x, "variogram", exact = TRUE)))
     stop("plot.sac_range(): this estimate carries no empirical variogram to ",
-         "draw. estimate_sac_range() returns a bare NA, with nothing attached, ",
-         "when the input has too few usable points or the variogram could not ",
-         "be computed at all.", call. = FALSE)
+         "draw. estimate_sac_range() returns NA with only a ",
+         "`rejected_reason` attached when it stops before computing one: ",
+         "too few usable points, no variance or extent, or gstat missing",
+         {r <- attr(x, "rejected_reason", exact = TRUE)
+          if (is.character(r) && length(r) == 1L && !is.na(r))
+            sprintf(" (here: %s)", r) else ""},
+         ".", call. = FALSE)
   .draw_sac_variogram(x, what = "Empirical variogram")
 }
 

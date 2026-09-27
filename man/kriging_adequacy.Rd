@@ -43,7 +43,11 @@ warning.  Default \code{"poly_id"}.}
 
 \item{folds}{Optional \code{\link{make_folds}()} result on
 \code{assigned_points_sf} for the cross-validation statistic; built here
-with \code{block_kfold} when \code{NULL}.}
+with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+whose recorded rows sit at other locations in
+\code{assigned_points_sf} (built on another layer, such as the points
+before \code{\link{assign_features_to_polygons}()} dropped some) are
+refused.}
 
 \item{k, seed}{Folds and seed for that construction.}
 

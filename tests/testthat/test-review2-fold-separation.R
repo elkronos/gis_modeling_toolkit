@@ -35,7 +35,9 @@ test_that("fold_separation measures a recorded range in the CRS it was recorded 
   # A bare number stays in data_sf's own units, as documented.
   b3 <- fold_separation(f$folds, sf::st_transform(d, 2264), sac = 600)
   expect_equal(attr(b3, "crs"), "EPSG:2264")
-  expect_output(print(a), "in EPSG:32617 units")
+  # The CRS's unit, not its identifier ("in EPSG:32617 units" named none).
+  expect_output(print(a), "(in metres, like the distances)", fixed = TRUE)
+  expect_output(print(b3), "(in US survey feet, like the distances)", fixed = TRUE)
   expect_error(fold_separation(f, d, sac = units::set_units(0.6, km)),
                "`sac` must be a plain number")
 })

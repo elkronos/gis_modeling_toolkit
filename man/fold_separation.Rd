@@ -13,7 +13,12 @@ element (a list of \code{train}/\code{test} splits).}
 \item{data_sf}{The layer the folds were built on.  Row identifiers are
 matched through \code{..row_id} when the layer carries one, and by row
 position otherwise, which is what \code{make_folds()} and every
-\code{cv_*()} do.}
+\code{cv_*()} do.  As in \code{cv_*()}, a \code{make_folds()} result
+whose recorded rows sit at other locations here (folds built on another
+layer, such as the points before
+\code{\link{assign_features_to_polygons}()} dropped some) is refused;
+the location check is skipped when one of the two layers is POINT and
+the other is not.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying

@@ -182,7 +182,9 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 \seealso{
 \code{\link{cv_rf}} for a spatially blocked performance estimate,
 \code{\link{area_of_applicability}}, which can take
-\code{weights = pmax(fit$info$importance, 0)}.
+\code{weights = pmax(fit$info$importance, 0)} when that importance is
+finite (it is \code{NaN} when no row is out of bag; see "What
+fitted() returns").
 
 Other model fitting: 
 \code{\link{fit_bayesian_spatial_model}()},

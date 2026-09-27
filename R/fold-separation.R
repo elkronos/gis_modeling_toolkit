@@ -25,7 +25,12 @@
 #' @param data_sf The layer the folds were built on.  Row identifiers are
 #'   matched through \code{..row_id} when the layer carries one, and by row
 #'   position otherwise, which is what \code{make_folds()} and every
-#'   \code{cv_*()} do.
+#'   \code{cv_*()} do.  As in \code{cv_*()}, a \code{make_folds()} result
+#'   whose recorded rows sit at other locations here (folds built on another
+#'   layer, such as the points before
+#'   \code{\link{assign_features_to_polygons}()} dropped some) is refused;
+#'   the location check is skipped when one of the two layers is POINT and
+#'   the other is not.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
 #'   single number.  Defaults to the range the folds carry, if any.  Supplying
 #'   one adds the \code{within_range} column and the closing verdict.  A
@@ -85,6 +90,13 @@ fold_separation <- function(folds, data_sf, sac = NULL) {
   # would silently measure the distance between the wrong pairs of points.
   ids <- if ("..row_id" %in% names(data_sf)) data_sf[["..row_id"]] else
     seq_len(nrow(data_sf))
+  # Which is what happened when the folds came from another layer: built on
+  # prep_model_data()'s 200 points and measured on the 195 that
+  # assign_features_to_polygons() kept, every row after the first dropped one
+  # was paired with its neighbour's folds, and within_range read 1.0 against
+  # 0.23-0.48 on the right layer, with nothing said.  cv_*() refuse such folds
+  # through the probe make_folds() records; so does this.
+  .check_fold_provenance(folds, data_sf, "fold_separation")
 
   # as.numeric() strips a `units` object to its number in whatever unit it
   # was written in, so 20 km became a range of 20 compared against metres.
@@ -173,9 +185,15 @@ print.fold_separation <- function(x, ...) {
   cat(sprintf("Fold separation: %s, %d fold(s), %d held-out point(s)%s\n",
               attr(x, "method"), nrow(x), sum(x$n_test, na.rm = TRUE),
               if (is.na(crs)) "" else sprintf(" (%s)", crs)))
-  if (is.finite(sac))
+  # The unit of the CRS, not its identifier: "in EPSG:32617 units" named no
+  # unit.  The CRS itself is on the line above.
+  if (is.finite(sac)) {
+    unit <- if (is.na(crs)) NA_character_ else .crs_unit_label(crs)
     cat(sprintf("  autocorrelation range: %s%s\n", format(sac, digits = 4),
-                if (is.na(crs)) "" else sprintf(" (in %s units, like the distances)", crs)))
+                if (is.na(crs)) ""
+                else if (!is.na(unit)) sprintf(" (in %s, like the distances)", unit)
+                else sprintf(" (in the units of %s, like the distances)", crs)))
+  }
   df <- as.data.frame(x)
   df$min_dist    <- signif(df$min_dist, 4)
   df$median_dist <- signif(df$median_dist, 4)
@@ -208,17 +226,101 @@ print.fold_separation <- function(x, ...) {
                                "(%s), and the closest is %s away. %s"),
                         100 * share, format(sac, digits = 4),
                         format(signif(closest, 3)),
-                        if (share > 0.5)
-                          paste("Most of the hold-out is inside the range of",
-                                "its own training data, so this score is",
-                                "optimistic: widen the blocks.")
-                        else if (share > 0.1)
-                          paste("A minority leaks, which is the usual price of",
-                                "contiguous blocks at the edges.")
-                        else
-                          paste("Little of the hold-out is within reach of",
-                                "the training data.")),
+                        .fold_separation_advice(attr(x, "method"), share)),
                  width = 74, prefix = "  "), sep = "\n")
   }
   invisible(x)
+}
+
+
+#' What to make of the share of the hold-out inside the range, per fold scheme
+#'
+#' "Widen the blocks" was said of every scheme, including random folds,
+#' leave-location-out and buffered LOO, which have no blocks, and NNDM, whose
+#' folds are built to reproduce the prediction-to-data distances: a high
+#' share there describes how close the prediction points sit to the data, not
+#' an optimistic design.
+#' @param method The fold method (\code{attr(x, "method")}).
+#' @param share The share of held-out points within the range.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+.fold_separation_advice <- function(method, share) {
+  method <- if (is.character(method) && length(method) == 1L && !is.na(method))
+    method else "supplied splits"
+  if (share <= 0.1)
+    return("Little of the hold-out is within reach of the training data.")
+  if (identical(method, "nndm"))
+    return(paste("NNDM folds reproduce the distances from the prediction",
+                 "points to the data, so this share describes how close the",
+                 "prediction points themselves sit to the data, not a leak in",
+                 "the design; compare the folds' params$realised_median with",
+                 "params$target_median to check the match."))
+  remedy <- switch(method,
+                   block_kfold  = "widen the blocks",
+                   buffered_loo = "widen the buffer to at least the range",
+                   "use blocked or buffered folds")
+  if (share > 0.5)
+    return(paste0("Most of the hold-out is inside the range of its own ",
+                  "training data, so this score is optimistic: ", remedy, "."))
+  if (identical(method, "block_kfold"))
+    return(paste("A minority leaks, which is the usual price of contiguous",
+                 "blocks at the edges."))
+  paste0("A minority leaks; to hold it out, ", remedy, ".")
+}
+
+
+#' The linear unit of a CRS, spelt for a sentence
+#'
+#' From a CRS label as \code{.fold_crs_label()} writes it (an
+#' \code{AUTHORITY:CODE}, a proj string or a WKT), through
+#' \code{sf::st_crs()$units_gdal}.
+#' @param crs A CRS label.
+#' @return Character(1), \code{NA} when the unit cannot be read.
+#' @keywords internal
+#' @noRd
+.crs_unit_label <- function(crs) {
+  u <- tryCatch(suppressWarnings(sf::st_crs(crs)$units_gdal),
+                error = function(e) NULL)
+  if (!(is.character(u) && length(u) == 1L && !is.na(u) && nzchar(u)))
+    return(NA_character_)
+  switch(u, metre = "metres", kilometre = "kilometres", foot = "feet",
+         "US survey foot" = "US survey feet", degree = "degrees", u)
+}
+
+
+#' Refuse folds built on another layer, as the cv_*() functions do
+#'
+#' \code{.check_fold_probe()} for the fold consumers that are not
+#' \code{cv_*()} (\code{fold_separation()}, \code{kriging_adequacy()}):
+#' \code{data_sf} gets \code{..row_id} by position when it has none, as they
+#' match fold entries.  When the probe was taken on POINT geometry and
+#' \code{data_sf} is not, or the reverse, the locations cannot be compared (a
+#' polygon's probe point is its centroid, a pointized copy's is whatever
+#' point \code{coerce_to_points()} chose), so the check is skipped with an
+#' INFO line rather than refusing a layer that works today.  A bare split list,
+#' a label vector, or folds without a probe pass unchecked.
+#' @param folds Whatever the caller was given as \code{folds}.
+#' @param data_sf The layer the caller applies them to, as passed.
+#' @param caller Name for the messages.
+#' @return \code{invisible(NULL)}; called for the error.
+#' @keywords internal
+#' @noRd
+.check_fold_provenance <- function(folds, data_sf, caller) {
+  probe <- tryCatch(folds$params$row_probe, error = function(e) NULL)
+  if (is.null(probe) || !inherits(data_sf, "sf") || nrow(data_sf) == 0L)
+    return(invisible(NULL))
+  if (!("..row_id" %in% names(data_sf)))
+    data_sf$..row_id <- seq_len(nrow(data_sf))
+  now_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
+  if (is.logical(probe$points) && length(probe$points) == 1L &&
+      !is.na(probe$points) && !identical(probe$points, now_points)) {
+    .log_info(paste0("%s(): the supplied `folds` were built on %s geometry and ",
+                     "this layer has %s geometry, so their row locations cannot ",
+                     "be compared; skipping the provenance check."),
+              caller, if (probe$points) "POINT" else "non-POINT",
+              if (now_points) "POINT" else "non-POINT")
+    return(invisible(NULL))
+  }
+  .check_fold_probe(folds, data_sf, caller)
 }

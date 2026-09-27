@@ -273,7 +273,9 @@
 #'
 #' @seealso \code{\link{cv_rf}} for a spatially blocked performance estimate,
 #'   \code{\link{area_of_applicability}}, which can take
-#'   \code{weights = pmax(fit$info$importance, 0)}.
+#'   \code{weights = pmax(fit$info$importance, 0)} when that importance is
+#'   finite (it is \code{NaN} when no row is out of bag; see "What
+#'   fitted() returns").
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -434,14 +436,20 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
     .warn_and_log(paste0("fit_rf_model(): no row is out of bag for any tree ",
                          "(%s), so fitted(), residuals(), the out-of-bag error%s ",
                          "are undefined (NaN) and summary() and model_metrics() ",
-                         "have nothing to score. Use replace = TRUE or a ",
+                         "have nothing to score.%s Use replace = TRUE or a ",
                          "sample_fraction below 1, or score the forest with ",
                          "cv_rf()."),
                   if (!isTRUE(replace) && sample_fraction >= 1)
                     "replace = FALSE with sample_fraction = 1 grows every tree on every row"
                   else sprintf("%d tree(s)", as.integer(num_trees)),
                   if (identical(importance, "permutation"))
-                    " and the permutation importance" else "")
+                    " and the permutation importance" else "",
+                  # pmax(NaN, 0) is NaN, so the weights ?fit_rf_model
+                  # suggests for area_of_applicability() are refused too.
+                  if (identical(importance, "permutation"))
+                    paste0(" area_of_applicability() cannot be weighted by ",
+                           "that importance either: pass weights = NULL.")
+                  else "")
   } else if (!fold_fit && n_no_oob > 0L) {
     .warn_and_log(paste0("fit_rf_model(): %d of %d rows were sampled by every ",
                          "one of the %d tree(s) and so have no out-of-bag ",
