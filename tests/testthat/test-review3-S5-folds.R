@@ -244,5 +244,5 @@ test_that("the auto_range fallback warning says why a bare NA came back", {
   pc <- r2_pts(5e5 + runif(60, 0, 1000), 5e6 + runif(60, 0, 1000), z = rep(1, 60))
   expect_warning(r2_quiet(make_folds(pc, k = 3, method = "block_kfold", auto_range = TRUE,
                                      response_var = "z", seed = 1)),
-                 "a variable with no variance")
+                 "no autocorrelation range was identified \\(the response is constant\\)")
 })
