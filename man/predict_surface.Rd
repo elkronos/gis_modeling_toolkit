@@ -48,7 +48,9 @@ supplied.  The grid you pass is used verbatim.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc}; grid points outside
 it are dropped.  Put through the same CRS replay and reprojection as
-\code{grid}.}
+\code{grid}.  One still without a CRS after the replay is taken as
+EPSG:4326 and reprojected when its coordinates look like lon/lat, and
+is otherwise stamped with the fit's CRS, with a warning either way.}
 
 \item{covariates}{Optional \code{sf} layer carrying the model's predictors.
 Required when the model has predictors and \code{grid} does not already

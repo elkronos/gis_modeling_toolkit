@@ -323,8 +323,8 @@ test_that("under knitr a caution raised as a warning is not repeated as a messag
   res <- .r3_conditions(summarize_by_cell(pts, "v", deff = 0.5))
   expect_identical(res$messages, 0L)
   expect_length(res$warnings, 1L)
-  # The .log_warn() + warning() pairs of the cross-validation code: the
-  # random-folds fallback.
+  # The cross-validation cautions that are also R warnings (they used to be
+  # a .log_warn() followed by a warning()): the random-folds fallback.
   res <- .r3_conditions(spatialkit:::.remap_folds(NULL, 1:20))
   expect_identical(res$messages, 0L)
   expect_length(res$warnings, 1L)
@@ -333,7 +333,7 @@ test_that("under knitr a caution raised as a warning is not repeated as a messag
   res <- .r3_conditions(log_only())
   expect_identical(res$messages, 1L)
   expect_length(res$warnings, 0L)
-  # A warning() that does not follow the log line directly does not count.
+  # A log line and a separate warning() are two conditions.
   apart <- function() {
     spatialkit:::.log_warn("logged %d", 2L)
     x <- 1

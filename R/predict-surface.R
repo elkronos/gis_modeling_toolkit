@@ -144,7 +144,9 @@
 #'   supplied.  The grid you pass is used verbatim.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc}; grid points outside
 #'   it are dropped.  Put through the same CRS replay and reprojection as
-#'   \code{grid}.
+#'   \code{grid}.  One still without a CRS after the replay is taken as
+#'   EPSG:4326 and reprojected when its coordinates look like lon/lat, and
+#'   is otherwise stamped with the fit's CRS, with a warning either way.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
 #'   contain them.  Values are taken from the nearest feature.
@@ -263,7 +265,13 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   if (!is.null(boundary)) {
     bnd <- .replay_crs_assumption(sf::st_geometry(boundary), train,
                                   "predict_surface", "boundary")
-    bnd <- ensure_projected(bnd, target_crs = .crs_or_null(target_crs))
+    # A boundary still without a CRS is aligned to the fit's as other
+    # functions align one: an R warning naming this function and argument.
+    # ensure_projected()'s stamp was a log line naming neither.
+    bnd <- if (is.null(.crs_or_null(target_crs)))
+      ensure_projected(bnd)
+    else .transform_or_stamp(bnd, target_crs, what = "boundary",
+                             caller = "predict_surface")
     keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)

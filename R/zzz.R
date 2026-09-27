@@ -96,9 +96,8 @@
 # while knitr is running it is ALSO sent as an R message, which the document
 # shows and the chunk option `message = FALSE` hides; nothing that reached the
 # console before is lost.  A line that is about to be raised as an R warning
-# as well -- .warn_and_log(), .warn_deff_fallback(), and a .log_warn() whose
-# caller raises warning() as its next statement -- is not repeated as a
-# message, since the document already shows the warning.
+# as well -- .warn_and_log() and .warn_deff_fallback() -- is not repeated as
+# a message, since the document already shows the warning.
 .sk_console_appender <- function(lines) {
   cat(lines, file = stderr(), sep = "\n")
   if (isTRUE(getOption("knitr.in.progress")) && !isTRUE(.sk_log_state$raising))
