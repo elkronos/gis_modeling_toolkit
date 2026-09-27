@@ -40,7 +40,10 @@ predict(object, newdata = NULL, ...)
   return a matrix (`predict.all = TRUE`, `type = "quantiles"`,
   `type = "se"` with `predict.all`) are rejected, because this method's
   contract is one number per row of `newdata`. Call
-  `predict(fit$engine, data = ...)` directly for those. `seed` defaults
+  `predict(fit$engine, data = ...)` directly for those. So is anything
+  `ranger`'s predict method itself refuses, such as `type = "quantiles"`
+  on a forest grown without `quantreg = TRUE` or `type = "se"` without
+  `keep.inbag = TRUE`: the error names ranger's reason. `seed` defaults
   to a constant: an unset `seed` makes `ranger` draw one uniform from
   the global RNG stream per call, so the number of
   [`predict()`](https://rdrr.io/r/stats/predict.html) calls a script
@@ -53,7 +56,9 @@ predict(object, newdata = NULL, ...)
 ## Value
 
 Numeric vector, aligned to `nrow(newdata)` with `NA` for rows dropped as
-incomplete.
+incomplete (so all `NA`, with a WARN line in the log, when every row
+is). A failure inside `ranger`'s predict method is an error, not an
+all-`NA` vector.
 
 ## See also
 

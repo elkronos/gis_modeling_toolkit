@@ -87,25 +87,42 @@ element (a list of <code>train</code>/<code>test</code> splits).</p></dd>
 <dd><p>The layer the folds were built on.  Row identifiers are
 matched through <code>..row_id</code> when the layer carries one, and by row
 position otherwise, which is what <code><a href="make_folds.html">make_folds()</a></code> and every
-<code>cv_*()</code> do.</p></dd>
+<code>cv_*()</code> do.  As in <code>cv_*()</code>, a <code><a href="make_folds.html">make_folds()</a></code> result
+whose recorded rows sit at other locations here (folds built on another
+layer, such as the points before
+<code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> dropped some) is refused;
+the location check is skipped when one of the two layers is POINT and
+the other is not.</p></dd>
 
 
 <dt id="arg-sac">sac<a class="anchor" aria-label="anchor" href="#arg-sac"></a></dt>
 <dd><p>Optional: an <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> result or a
-single number, in the CRS units of <code>data_sf</code>.  Defaults to the range
-the folds carry, if any.  Supplying one adds the <code>within_range</code>
-column and the closing verdict.</p></dd>
+single number.  Defaults to the range the folds carry, if any.  Supplying
+one adds the <code>within_range</code> column and the closing verdict.  A
+range that records its CRS (the folds' own, or an
+<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> result) is compared with distances measured
+in that CRS, whatever CRS <code>data_sf</code> is in.  A bare number is taken
+to be in the units the distances are otherwise measured in: those of
+<code>data_sf</code> if it is projected, and for geographic (lon/lat) input
+metres, in the CRS <code><a href="ensure_projected.html">ensure_projected()</a></code> chooses (as for
+<code><a href="make_folds.html">make_folds()</a></code>'s <code>block_size</code>), not degrees.  A <code>units</code>
+object is refused.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A data.frame of class <code>fold_separation</code>, one row per fold:
-<code>fold</code>, <code>n_train</code>, <code>n_test</code>, <code>n_blocks</code> (<code>NA</code>
+<code>fold</code> (the fold's number: for the <code>$folds</code> of a
+<code>cv_*()</code> result, the <code>fold_id</code> its <code>fold_metrics</code> use,
+which differs from the list position once a fold has been dropped),
+<code>n_train</code>, <code>n_test</code>, <code>n_blocks</code> (<code>NA</code>
 for a scheme with no blocks), <code>min_dist</code> and <code>median_dist</code>
-(distance from a held-out point to its nearest training point, in CRS
-units), and <code>within_range</code> (the share of held-out points closer to
+(distance from a held-out point to its nearest training point, in the
+units of the CRS the <code>crs</code> attribute names), and
+<code>within_range</code> (the share of held-out points closer to
 training data than <code>sac</code>; <code>NA</code> without one).  Attributes:
-<code>method</code>, <code>sac_range</code>, <code>crs</code> and <code>n_unknown_ids</code>.</p>
+<code>method</code>, <code>sac_range</code>, <code>crs</code> (the CRS the distances were
+measured in) and <code>n_unknown_ids</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -145,7 +162,7 @@ for choosing a block size by cross-validated error instead.</p>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">n</span> <span class="op">&lt;-</span> <span class="fl">200</span></span></span>
 <span class="r-in"><span><span class="va">pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
@@ -153,7 +170,7 @@ for choosing a block size by cross-validated error instead.</p>
 <span class="r-in"><span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu">fold_separation</span><span class="op">(</span><span class="va">random</span>, <span class="va">pts</span>, sac <span class="op">=</span> <span class="fl">200</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Fold separation: random_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   autocorrelation range: 200</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   autocorrelation range: 200 (in metres, like the distances)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>  fold n_train n_test min_dist median_dist within_range</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>     1     150     50    4.696       36.95         100%</span>
@@ -164,14 +181,14 @@ for choosing a block size by cross-validated error instead.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   100% of held-out points sit closer to a training point than the</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   correlation range (200), and the closest is 3.83 away. Most of the</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   hold-out is inside the range of its own training data, so this score is</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   optimistic: widen the blocks.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   optimistic: use blocked or buffered folds.</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># Blocked folds hold out whole neighbourhoods, so the distances grow.</span></span></span>
 <span class="r-in"><span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">pts</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span></span>
 <span class="r-in"><span>                      block_size <span class="op">=</span> <span class="fl">250</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu">fold_separation</span><span class="op">(</span><span class="va">blocked</span>, <span class="va">pts</span>, sac <span class="op">=</span> <span class="fl">200</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Fold separation: block_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   autocorrelation range: 200</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   autocorrelation range: 200 (in metres, like the distances)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>  fold n_train n_test n_blocks min_dist median_dist within_range</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>     1     152     48        2    23.02       111.9         100%</span>

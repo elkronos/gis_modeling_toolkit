@@ -82,7 +82,9 @@ compare_models_cv(
 
 - pointize:
 
-  Geometry coercion strategy.
+  Geometry coercion strategy. It also decides where a polygon or line
+  row falls in the shared blocks, so each row is placed by the point
+  every model is fitted at.
 
 - gwr_args:
 
@@ -143,7 +145,10 @@ compare_models_cv(
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
   Default `FALSE`: geometric blocks, as before this argument existed.
   Either way the fold set is built once and every backend is scored on
-  it.
+  it. When it cannot be built (a `block_size` or estimated range that
+  leaves a single block, say) the call is an error, as it is for each
+  backend on its own; no model is scored on a design other than the one
+  asked for.
 
 - metrics:
 
@@ -153,21 +158,33 @@ compare_models_cv(
   become columns of `by_fold` and `overall` beside the built-in ones.
   See **Your own metrics** on
   [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-  for the contract. Because the three backends are scored on the same
-  folds, the columns are comparable across rows of `overall`.
+  for the contract. Because the backends are scored on the same folds
+  and, in `overall`, on the same rows (see Value), the columns are
+  comparable across rows of `overall`.
 
 ## Value
 
 A list with overall, by_fold, and per-model cv_results (`gwr_cv`,
 `bayes_cv`, `rf_cv` for the models that ran). `overall` has one row per
-model with the pooled metrics, the coverage and CRPS columns described
-above when a Bayesian model ran, and `model` as its last column. Only
-the models that actually ran appear, so check which names are present;
-there is not always one entry per requested model, because a backend
-whose package is missing is dropped with a message. When **no**
-requested backend is available there is nothing to return and the
-function errors with `"no viable models."` instead of returning an empty
-comparison.
+model with the pooled metrics, `n_pred` (the rows they are computed on),
+the coverage and CRPS columns described above when a Bayesian model ran,
+and `model` as its last column. Shared folds do not guarantee shared
+rows: a model that fails on a fold (GWR with a fixed bandwidth across a
+gap in the data, say) or predicts `NA` for some rows pools fewer rows,
+usually without the hardest ones. When the models predicted different
+rows, the function warns and recomputes every model's pooled metrics,
+your own `metrics` included, on the rows all of them predicted, so
+`n_pred` is the same on every row that has predictions; a model that
+predicted nothing stays an `NA` row. Each model's metrics over all the
+rows it predicted stay in its `*_cv` element and in
+`attr(overall, "all_rows")`, a table of the same shape. `by_fold` and
+the Bayesian coverage and CRPS columns are per fold and are not
+recomputed. Only the models that actually ran appear, so check which
+names are present; there is not always one entry per requested model,
+because a backend whose package is missing is dropped with a message.
+When **no** requested backend is available there is nothing to return
+and the function errors with `"no viable models."` instead of returning
+an empty comparison.
 
 ## Coverage and CRPS in the overall table
 
@@ -191,11 +208,14 @@ it is wider than it needs to be.
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
@@ -229,9 +249,13 @@ For the Bayesian backend,
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 additionally reports CRPS and interval coverage at 50, 80 and 95
 percent. Both are proper scoring rules computed from posterior draws, so
-they are meaningful for any `family` the backend accepts, and they are
-the numbers to compare when the response is not Gaussian. When every
-fold fails, the `fold_metrics` frame
+they are meaningful for any `family` that predicts one number per row (a
+count, a rate, a binary or bounded outcome), and they are the numbers to
+compare when the response is not Gaussian. A categorical or ordinal
+family predicts a probability per response category instead, so
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+refuses one before fitting anything. When every fold fails, the
+`fold_metrics` frame
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 returns carries the CRPS column but not the `coverage_*` columns, so
 code that reads those columns must tolerate their absence.

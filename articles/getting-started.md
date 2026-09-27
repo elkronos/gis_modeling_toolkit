@@ -35,7 +35,8 @@ optional and is needed only for the feature that uses it:
 | `sp`, `GWmodel` | [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md) and [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md) |
 | `brms` (plus a Stan toolchain) | [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md) and [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md) |
 | `geometry` | Delaunay triangle tessellations |
-| `ggplot2`, `patchwork` | every `plot_*()` function and every [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method |
+| `ggplot2` | every `plot_*()` function and every [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method |
+| `patchwork` | only the stacked panels in [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) and `example_nc_demo.R` |
 | `FNN`, `Matrix` | sparse k-nearest-neighbour weights for Moran’s I on large layers |
 
 A missing package produces a message naming it, so nothing fails
@@ -201,9 +202,8 @@ Four more things about the data, each handled without stopping you:
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   is the function that does it and `attr(x, "dropped")` says which rows.
 - Two observations at the same coordinates are fine for models and
-  folds; a Voronoi tessellation keeps one seed per location
-  (`build_tessellation(keep_duplicates = )` says what to do with the
-  rest).
+  folds; a Voronoi tessellation keeps one seed per location, and every
+  point at that location is indexed to its cell.
 - A point outside the boundary you tessellate gets no cell: `tess$index`
   is `NA` for it and
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
@@ -244,10 +244,9 @@ tess <- build_tessellation(obs, boundary = boundary, method = "hex",
 # 3. Put every observation in a cell.
 asg <- assign_features_to_polygons(obs, tess$cells)
 
-# 4. Aggregate, with standard errors corrected for within-cell correlation.
-#    cells_sf attaches the geometry so the result maps; deff = "kish" is the
-#    correction.
-cells <- summarize_by_cell(asg, "rate", cells_sf = tess$cells, deff = "kish")
+# 4. Aggregate, with a count and a standard error for every cell mean.
+#    cells_sf attaches the geometry so the result maps.
+cells <- summarize_by_cell(asg, "rate", cells_sf = tess$cells)
 
 c(best_level = lv[1], cells = nrow(tess$cells))
 ```
@@ -278,15 +277,25 @@ head(st_drop_geometry(cells)[, c("poly_id", "n", "resp_mean_rate",
 
     ##   poly_id  n resp_mean_rate ..se_resp_rate
     ## 1       1 NA             NA             NA
-    ## 2       2 22       1.483964      0.4154388
+    ## 2       2 22       1.483964      0.2721027
     ## 3       3 NA             NA             NA
-    ## 4       4 37       1.886037      0.4882373
+    ## 4       4 37       1.886037      0.2713035
 
 Every aggregate comes with a count and a standard error. The `..sd_` and
 `..se_` columns are prefixed so they cannot collide with a column of
 your own. A cell with one observation has a standard error of `NA`,
 because one number has no spread, and an empty cell has `n = NA`: both
 are kept, because a region with nothing in it is a fact about the map.
+
+At the default `deff = 1` the standard error is the one for each cell’s
+own mean, which is what a map of the regions reports, and it is right
+when a cell’s points are spread through it. `deff = "kish"` or
+`"variogram"` gives instead the standard error of a cell mean as an
+estimate of the population mean, widened for the correlation among the
+points in a cell. Use that when the cell means feed a claim about the
+population rather than about the cells themselves;
+[`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+says which is which.
 
 Two ID columns can appear on a cell layer. Every tessellation carries
 `cell_id`, derived from the geometry, so it is the same for the same
@@ -299,7 +308,9 @@ take `polygon_id_col` and `id_col` to name either, and fall back through
 both when neither is named.
 
 Eight cells, four of them slivers at the state’s edge with no county
-inside, is coarse. That is what the elbow finds on a hundred points, and
+inside, is coarse. A hundred county centroids spread fairly evenly have
+no elbow to find, and the call warns that `max_levels` chose this count
+rather than the data.
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
 is where to argue with it:
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -418,7 +429,7 @@ aoa
     ##   normaliser  : 1.1527 (mean pairwise distance)
     ##   threshold   : 0.0440 (outlier-removed max of training DI)
     ## 
-    ##   2384 of 2384 prediction points inside the AOA (100.0%)
+    ##   2454 of 2454 prediction points inside the AOA (100.0%)
 
 ``` r
 
@@ -480,7 +491,7 @@ source(file.path(dir, "03-folds.R"))
 | **nugget, sill, range** | the variogram’s value at zero distance (noise), the value it levels off at (total variance), and the distance at which it gets there; the *effective* range is where it reaches 95 percent of the sill |
 | **autocorrelation range** | that effective range: beyond it two observations are nearly independent, which is what a block or a buffer has to exceed |
 | **block** | a square of the study area used to build a fold; a fold holds out whole blocks |
-| **design effect (`deff`)** | how many times larger a cell mean’s variance is than the independent-sample formula says, because the points in a cell are correlated; `n / deff` is the effective sample size |
+| **design effect (`deff`)** | how many times larger a cell mean’s variance, as an estimate of the population mean, is than the independent-sample formula says, because the points in a cell are correlated; `n / deff` is the effective sample size for that estimate. The cell’s own mean needs no such correction when its points are spread through the cell |
 | **flat region** | the cell counts a resolution criterion cannot distinguish from its optimum; a set, not an interval |
 | **support ceiling, range floor** | the most cells the point count allows (`n / min_cell_n`) and the fewest the autocorrelation range allows (`area / range^2`); a criterion whose optimum sits on either is being chosen for by that bound |
 | **dissimilarity index (DI)** | how far a prediction location’s predictors sit from the training data, on the scale of the training data’s own spread; the area of applicability is where DI stays below what cross-validation saw |

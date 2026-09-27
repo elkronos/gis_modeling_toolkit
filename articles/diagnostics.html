@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">23 September 2026</h4>
+            <h4 data-toc-skip class="date">27 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/diagnostics.Rmd" class="external-link"><code>vignettes/diagnostics.Rmd</code></a></small>
       <div class="d-none name"><code>diagnostics.Rmd</code></div>
@@ -110,7 +110,7 @@ residuals, which is what the first diagnostic should detect.</p>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">11</span><span class="op">)</span></span>
 <span><span class="va">n</span>  <span class="op">&lt;-</span> <span class="fl">350</span></span>
-<span><span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">D</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/dist.html" class="external-link">dist</a></span><span class="op">(</span><span class="va">xy</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">field</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">70</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">1e-8</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">xy</span><span class="op">$</span><span class="va">a</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span>
@@ -120,8 +120,9 @@ residuals, which is what the first diagnostic should detect.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">lm_fit</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">response_var</span> <span class="op">=</span> <span class="st">"z"</span>, <span class="va">predictor_vars</span> <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="va">d</span>   <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">train_sf</span><span class="op">)</span></span>
-<span>  <span class="va">fml</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/formula.html" class="external-link">as.formula</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">response_var</span>, <span class="st">"~"</span>,</span>
-<span>                          <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">predictor_vars</span>, collapse <span class="op">=</span> <span class="st">" + "</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span>  <span class="co"># With no predictors the model is intercept-only: "z ~ 1", not "z ~ ".</span></span>
+<span>  <span class="va">rhs</span> <span class="op">&lt;-</span> <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">predictor_vars</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">predictor_vars</span>, collapse <span class="op">=</span> <span class="st">" + "</span><span class="op">)</span> <span class="kw">else</span> <span class="st">"1"</span></span>
+<span>  <span class="va">fml</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/formula.html" class="external-link">as.formula</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">response_var</span>, <span class="st">"~"</span>, <span class="va">rhs</span><span class="op">)</span><span class="op">)</span></span>
 <span>  <span class="fu"><a href="../reference/new_spatial_fit.html">new_spatial_fit</a></span><span class="op">(</span></span>
 <span>    subclass       <span class="op">=</span> <span class="st">"lmsurf_fit"</span>,</span>
 <span>    engine         <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/lm.html" class="external-link">lm</a></span><span class="op">(</span><span class="va">fml</span>, data <span class="op">=</span> <span class="va">d</span><span class="op">)</span>,</span>
@@ -196,9 +197,12 @@ the same neighbours:</p>
 <p>Aggregate the points into cells and the naive standard error of each
 cell mean is
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>s</mi><mi>/</mi><msqrt><mi>n</mi></msqrt></mrow><annotation encoding="application/x-tex">s/\sqrt{n}</annotation></semantics></math>,
-which assumes the points in a cell are independent. On an autocorrelated
-field they are not, and the effective sample size is smaller than the
-count.</p>
+which treats the points in a cell as independent. For the cell’s own
+mean that is the right standard error when the points are spread through
+the cell. For the cell mean as an estimate of the population (grand)
+mean it is not: on an autocorrelated field the points in a cell share
+the cell’s departure from that mean, and the effective sample size is
+smaller than the count.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">hull</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/clip_target_for.html">clip_target_for</a></span><span class="op">(</span><span class="va">pts</span>, expand <span class="op">=</span> <span class="fl">0.02</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">tess</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">pts</span>, boundary <span class="op">=</span> <span class="va">hull</span>, method <span class="op">=</span> <span class="st">"square"</span>,</span>
@@ -230,8 +234,11 @@ settings are worth comparing on the same cells.</p>
 <span><span class="co">## 5  8 0.527 0.854     0.996</span></span></code></pre>
 <p>The median cell’s standard error is 1.96 times wider under
 <code>kish</code> and 2.35 times wider under <code>variogram</code> than
-the independent-sampling one. A confidence interval built on the naive
-number is about half the width it should be on this field.</p>
+the independent-sampling one. As an estimate of the population mean, a
+confidence interval built on the naive number is about half the width it
+should be on this field. For the cell’s own mean the naive standard
+error is the right one, and section 3 (<code><a href="../reference/kriging_adequacy.html">kriging_adequacy()</a></code>)
+covers that quantity.</p>
 <p><code>deff = "kish"</code> estimates an intra-class correlation from
 the within-cell and between-cell variance and applies Kish’s factor.
 <code>deff = "variogram"</code> takes the correlation from the fitted
@@ -269,7 +276,7 @@ model. <code><a href="../reference/kriging_adequacy.html">kriging_adequacy()</a>
 <span><span class="va">ka</span></span></code></pre></div>
 <pre><code><span><span class="co">## Block-kriging adequacy over 25 cells (350 points, nmax 50)</span></span>
 <span><span class="co">##   variogram: Nug(2.34, 0) + Exp(1.49, 208); sill 3.83, nugget 2.34 (61%), range 623.7</span></span>
-<span><span class="co">##   kriging variance / sill: median 0.031, range 0.021-0.054; 0 cell(s) above 0.5</span></span>
+<span><span class="co">##   kriging variance / no-data variance of the cell mean (1 = nothing from the data): median 0.130, range 0.090-0.217; 0 cell(s) above 0.5</span></span>
 <span><span class="co">##   kriging variance exceeds s^2/n in 4 of the 25 cell(s) with two or more points</span></span>
 <span><span class="co">##   kriged minus plain mean: |shift| &gt; 1 SE in 4 of 25 cell(s), &gt; 2 SE in 0</span></span>
 <span><span class="co">##   empty cells: 0 (kriged estimate and variance available for each)</span></span>
@@ -328,7 +335,7 @@ Meyer and Pebesma (2021).</p>
 <span><span class="co">## performance estimate does not cover them.</span></span></code></pre>
 <div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">aoa</span><span class="op">)</span></span></code></pre></div>
-<p><img src="diagnostics_files/figure-html/aoa-plot-1.png" class="r-plt" alt="Cumulative distribution of the dissimilarity index. The prediction locations rise far more slowly than the cross-validated training points, and most of them sit beyond the dashed threshold, so the cross-validated score does not apply to most of the grid." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="diagnostics_files/figure-html/aoa-plot-1.png" class="r-plt" alt="Cumulative distribution of the dissimilarity index. The prediction locations rise far more slowly than the training points, each measured to its nearest other training point since no folds were passed, and most of them sit beyond the dashed threshold, so the cross-validated score does not apply to most of the grid." width="100%" style="display: block; margin: auto;"></p>
 <p>Shifting one predictor three standard deviations moves most of the
 grid outside the domain the model was trained on. The dissimilarity
 index <code>DI</code> is on <code>aoa$aoa</code>, alongside the logical
@@ -350,30 +357,50 @@ assignment. Test for <code>TRUE</code>:</p>
 <p><strong>Coordinates as predictors.</strong> A model given
 <code>x</code> and <code>y</code> can reproduce the training surface by
 memorising location, and random folds will not detect it.
-<code>fit_rf_model(include_coords = TRUE)</code> warns for this reason.
-Score any such model with blocked folds, and read
-<code><a href="../articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> for what the blocking
-has to be wide enough to do.</p>
+<code>fit_rf_model(include_coords = TRUE)</code> logs a caution (once
+per session) for this reason. Score any such model with blocked folds,
+and read <code><a href="../articles/spatial-cross-validation.html">vignette("spatial-cross-validation")</a></code> for what the
+blocking has to be wide enough to do.</p>
 <p><strong>Selection outside the fold.</strong> Choosing predictors on
 the whole data set and then cross-validating the chosen set gives the
 selection a look at every test row.
 <code><a href="../reference/select_features_forward.html">select_features_forward()</a></code> does the selection inside the
 resampling, and it takes the fold scheme as an argument for the same
-reason the outer loop does:</p>
+reason the outer loop does. Blocked folds only keep test rows apart from
+training rows if the blocks are at least as wide as the autocorrelation
+range. <code><a href="../reference/make_folds.html">make_folds()</a></code> estimates that range for what the
+candidates leave unexplained, about 330 m on this field, and warns when
+the blocks are narrower. The default grid here has blocks about 250 m
+across, so <code>block_size = 400</code> is passed:</p>
 <div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># select_features_forward() calls fit_fn(train_sf, vars), so the learner above</span></span>
-<span><span class="co"># needs an adapter that puts `vars` in the predictor slot.</span></span>
+<span><span class="co"># needs an adapter that puts `vars` in the predictor slot. Step 0 fits it with</span></span>
+<span><span class="co"># no predictors at all, which is why lm_fit() builds "z ~ 1" for an empty set.</span></span>
 <span><span class="va">sel_fn</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">train_sf</span>, <span class="va">vars</span><span class="op">)</span> <span class="fu">lm_fit</span><span class="op">(</span><span class="va">train_sf</span>, <span class="st">"z"</span>, <span class="va">vars</span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">sel</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/select_features_forward.html">select_features_forward</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span>, fit_fn <span class="op">=</span> <span class="va">sel_fn</span>,</span>
-<span>                               k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
+<span>                               k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>,</span>
+<span>                               block_size <span class="op">=</span> <span class="fl">400</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">sel</span><span class="op">$</span><span class="va">selected</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] "a"</span></span></code></pre>
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sel</span><span class="op">$</span><span class="va">history</span></span></code></pre></div>
+<pre><code><span><span class="co">##   step variable    score n_pred</span></span>
+<span><span class="co">## 1    0   &lt;none&gt; 1.886912    350</span></span>
+<span><span class="co">## 2    1        a 1.113470    350</span></span>
+<span><span class="co">## 3    1        b 1.887999    350</span></span>
+<span><span class="co">## 4    2        b 1.116468    350</span></span></code></pre>
+<p><code>history</code> has one row per candidate scored at each step.
+Step 0 is the intercept-only model, so <code>a</code> had to beat it to
+be added, and at step 2 adding the noise variable <code>b</code> made
+the cross-validated RMSE slightly worse, so the selection stopped at
+<code>a</code>. With <code>tol</code> set, a candidate has to improve
+the score by more than <code>tol</code>, from step 1 on.</p>
 <p>Its inner folds default to the scheme you pass. Passing
-<code>random_kfold</code> there produces a warning, because a leaky
-inner loop can select a variable for being spatially close to the
-response and an honest outer loop will then report a respectable number
-for a dishonestly chosen feature set.</p>
+<code>random_kfold</code> there logs a caution, because a leaky inner
+loop can select a variable for being spatially close to the response and
+an honest outer loop will then report a respectable number for a
+dishonestly chosen feature set.</p>
 </div>
 <div class="section level2">
 <h2 id="next">Next<a class="anchor" aria-label="anchor" href="#next"></a>

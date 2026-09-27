@@ -33,8 +33,14 @@ needs gstat for two of them.
 reads one criterion off that profile, and
 [`summary()`](https://rdrr.io/r/base/summary.html) on the profile reads
 all four side by side. If the cells will feed a model, the profile is
-the one to use; if you need a count now and the data are all you have,
-the elbow is defensible and this article says where it falls short.
+the one to use. If you need a count now and the data are all you have,
+the elbow is defensible when the points cluster, and this article says
+where it falls short. On points spread evenly there is no elbow to read,
+and both functions say so: the profile leaves its `elbow` column empty,
+and
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+warns that the count it still returns was chosen by the ends of its
+ladder, not by the data.
 
 The argument that says “how many” is spelled differently by the function
 it belongs to: `max_levels` bounds the elbow’s ladder, `n_levels` sets
@@ -57,7 +63,7 @@ library(spatialkit)
 
 set.seed(42)
 n  <- 500
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 xy$z <- as.numeric(t(chol(exp(-D / 100) + diag(1e-8, n))) %*% rnorm(n)) +
         rnorm(n, sd = 1)
@@ -77,6 +83,13 @@ lv
 
     ## [1] 7 6 8
 
+This fixture’s points are uniform, so their within-cluster sum of
+squares falls like `c / k` all the way down and bends nowhere of its
+own. The call warns that it found no elbow and that `max_levels` chose
+`lv`: a larger `max_levels` would give a larger answer. Read an elbow
+only off points that cluster; here the profile below is the better
+guide.
+
 `lv[1]` is what
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
 takes as `n`, and what
@@ -88,8 +101,8 @@ when you tessellate them. The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
 `criterion = "morans_i"` and `criterion = "combined"` settings need both
-`response_var` and `predictor_vars`; give it only a response and it logs
-a warning and falls back to `"geometric"`. And its ladder runs from 1 to
+`response_var` and `predictor_vars`; give it only a response and it
+warns and falls back to `"geometric"`. And its ladder runs from 1 to
 `max_levels` with no lower bound from the spatial correlation of the
 data, so it can prefer cells wider than the field’s own correlation
 range. The profile below does impose that bound, which is why the two
@@ -112,53 +125,57 @@ prof
     ##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 from min_cell_n = 9)
     ##   variogram   : nugget 0.877, partial sill 1.29, range 314
     ##   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)
+    ##   elbow       : none; the WSS curve falls as it does with no cluster structure
     ## 
-    ##  levels     wss wss_spread  elbow cell_n_min cell_n_median cell_diam_median rss
-    ##      10 7850000     0.1450 0.0000         39          48.5            250.0 882
-    ##      11 6970000     0.0903 0.0771         33          45.0            233.0 905
-    ##      13 5850000     0.0849 0.1630         27          40.0            214.0 865
-    ##      14 5440000     0.0654 0.1890         20          35.5            207.0 860
-    ##      16 4750000     0.1110 0.2300         22          32.0            194.0 883
-    ##      18 4220000     0.0968 0.2550         18          28.0            179.0 884
-    ##      20 3700000     0.1080 0.2780         17          26.0            170.0 821
-    ##      22 3240000     0.1240 0.2950         16          23.0            157.0 809
-    ##      25 2810000     0.1560 0.2930         13          21.0            144.0 777
-    ##      28 2460000     0.1540 0.2820         12          17.5            137.0 719
-    ##      31 2140000     0.1530 0.2680          9          16.0            128.0 698
-    ##      35 1850000     0.1450 0.2360          9          14.0            124.0 677
-    ##      39 1680000     0.1030 0.1920          6          13.0            112.0 645
-    ##      44 1440000     0.0787 0.1380          7          11.0            105.0 677
-    ##      49 1280000     0.1090 0.0763          5           9.0             94.4 635
-    ##      55 1110000     0.1090 0.0000          5           9.0             89.2 654
+    ##  levels     wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss
+    ##      10 7850000     0.1510    NA         38          48.0            248.0 914
+    ##      11 6960000     0.0965    NA         31          45.0            233.0 900
+    ##      13 5850000     0.0578    NA         27          40.0            214.0 865
+    ##      14 5500000     0.0810    NA         26          33.0            209.0 862
+    ##      16 4750000     0.0864    NA         24          29.5            194.0 850
+    ##      18 4220000     0.0694    NA         19          27.5            179.0 862
+    ##      20 3750000     0.0666    NA         15          25.0            174.0 793
+    ##      22 3310000     0.1100    NA         15          22.5            163.0 812
+    ##      25 2780000     0.1210    NA         12          20.0            148.0 798
+    ##      28 2390000     0.1380    NA         12          17.0            139.0 778
+    ##      31 2180000     0.1060    NA          9          16.0            130.0 722
+    ##      35 1870000     0.1670    NA          7          14.0            121.0 695
+    ##      39 1650000     0.1310    NA          6          13.0            115.0 686
+    ##      44 1440000     0.0832    NA          6          11.0            107.0 648
+    ##      49 1260000     0.0984    NA          6          10.0            100.0 633
+    ##      55 1110000     0.1280    NA          4           9.0             91.8 638
     ##    cp  moran_i moran_z reliability
-    ##  1.80 -0.11400 -0.0713       0.811
-    ##  1.85  0.00559  1.9800       0.807
+    ##  1.86 -0.10600  0.1250       0.811
+    ##  1.84 -0.03160  1.3000       0.806
     ##  1.78 -0.03700  0.7000       0.798
-    ##  1.77 -0.04750  0.4320       0.794
-    ##  1.82 -0.06380  0.0399       0.786
-    ##  1.83  0.00463  0.8500       0.778
-    ##  1.71  0.00555  0.7870       0.770
-    ##  1.70  0.01740  0.8720       0.762
-    ##  1.64 -0.03800  0.0485       0.751
-    ##  1.54  0.04970  1.2100       0.740
-    ##  1.50  0.02490  0.8220       0.730
-    ##  1.48  0.01770  0.6850       0.717
-    ##  1.43  0.08040  1.6000       0.704
-    ##  1.51  0.17200  3.0700       0.690
-    ##  1.44  0.15600  2.8700       0.676
-    ##  1.50  0.19600  3.6300       0.660
+    ##  1.77 -0.05140  0.3770       0.793
+    ##  1.76 -0.00625  0.8350       0.785
+    ##  1.79 -0.02540  0.4610       0.777
+    ##  1.66 -0.05660 -0.0528       0.769
+    ##  1.70  0.01360  0.8210       0.761
+    ##  1.68  0.01050  0.7030       0.750
+    ##  1.65  0.00177  0.5310       0.739
+    ##  1.55  0.03950  1.0200       0.729
+    ##  1.51  0.07480  1.5100       0.716
+    ##  1.51  0.02900  0.8280       0.704
+    ##  1.45  0.07390  1.5300       0.689
+    ##  1.44  0.12300  2.3500       0.675
+    ##  1.47  0.18600  3.4400       0.660
 
 One row per level. `cell_n_median` and `cell_diam_median` are usually
 the first two columns worth reading: how many points a typical cell
-holds, and how wide it is in CRS units. The width is the number you can
-compare against something you already know about your own data, such as
-the spacing of a sampling grid or the size of a field.
+holds, and how big it is in CRS units. `cell_diam_median` is twice the
+median root-mean-square distance of a cell’s points from its centre,
+about 0.8 of the side of a square cell of the same area, so compare it
+against something you already know about your own data, such as the
+spacing of a sampling grid or the size of a field, with that factor in
+mind.
 
 ### The four criteria
 
 | criterion | measures | needs | direction |
 |----|----|----|----|
-| `elbow` | how far the within-cluster sum of squares curve bends below its own chord | coordinates only | larger |
+| `elbow` | how far the log of the within-cluster sum of squares sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |
 | `cp` | Mallows’ $`C_p`$ of the piecewise-constant approximation of the response by cell means | a response, and a variogram for the nugget | smaller |
 | `moran_z` | spatial structure surviving in the residuals of the cell means | a response | nearer zero |
 | `reliability` | the share of the spread in the cell means that is signal, not sampling noise | a variogram | larger |
@@ -174,15 +191,15 @@ the cells are still leaving spatial pattern on the table.
 plot(prof)
 ```
 
-![Four stacked panels, one per criterion, against the number of cells on
-a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens,
-reliability declines steadily from 10 cells on, the elbow statistic
-peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25
-cells before climbing past 30. A red dot and dotted line mark each
-criterion's choice, and shaded bands the levels within tolerance of it.
-The bands are two or three levels wide, two of them have gaps, and no
-level sits inside all
-four.](resolution_files/figure-html/plot-profile-1.png)
+![Three stacked panels, one per criterion the profile could score,
+against the number of cells on a shared axis; there is no elbow panel
+because these uniform points have no elbow. Mallows' Cp falls from 10 to
+49 cells and turns up at 55, reliability declines steadily from 10 cells
+on, and the absolute Moran's z is lowest at 20 cells and climbs past 30.
+A red dot and dotted line mark each criterion's choice, and shaded bands
+the levels within tolerance of it. The bands are one to three levels
+wide, none has a gap, and no level sits inside all
+three.](resolution_files/figure-html/plot-profile-1.png)
 
 Two behaviours are worth knowing before reading the numbers.
 
@@ -247,32 +264,30 @@ all four at once, and closes with the levels that every band contains:
 summary(prof)
 ```
 
-    ## Resolution picks: 4 criteria over 16 levels (10 to 55 cells)
+    ## Resolution picks: 3 criteria over 16 levels (10 to 55 cells)
     ## 
     ##    criterion best flat region levels in band
-    ##           cp   39      39, 49              2
+    ##           cp   49    44 to 49              2
     ##  reliability   10    10 to 13              3
-    ##        elbow   22    22 to 25              2
-    ##      moran_z   16  10, 16, 25              3
+    ##      moran_z   20          20              1
     ## 
     ##   reliability: the optimum is the range floor (area / range^2).
     ##   There the bound is choosing, not the criterion.
     ## 
-    ##   picks span 10 to 39 cells (3.9x)
+    ##   picks span 10 to 49 cells (4.9x)
     ##   no level is in every flat region: the criteria disagree over the
     ##   whole ladder. plot() draws the curves they were read from.
 
 A band is a set of levels, not an interval, because the criterion curves
-are not monotone: the `cp` band above accepts 39 and 49 and rejects the
-44 between them, while a solid run of 3 rungs prints as a range, as
-`reliability` does with `10 to 13`. Where the bands overlap you have a
-defensible set of levels, and the last line names it;
-`attr(summary(prof), "common")` returns the same levels for use in code,
-and `attr(summary(prof), "bands")` each criterion’s region in full.
-Where they do not overlap, the criteria are answering different
-questions and you have to say which one your analysis needs. An empty
-intersection is a result: it says this field has no single resolution
-that satisfies every way of asking.
+are not monotone: a band that skips a rung prints as a comma-separated
+list, while a solid run of 2 rungs prints as a range, as `cp` does with
+`44 to 49`. Where the bands overlap you have a defensible set of levels,
+and the last line names it; `attr(summary(prof), "common")` returns the
+same levels for use in code, and `attr(summary(prof), "bands")` each
+criterion’s region in full. Where they do not overlap, the criteria are
+answering different questions and you have to say which one your
+analysis needs. An empty intersection is a result: it says this field
+has no single resolution that satisfies every way of asking.
 
 The table is not a decision procedure, and nothing in the package will
 pick for you. Cross-validating a model at each suggested level is
@@ -291,7 +306,7 @@ profile.
 str(attr(prof, "bounds"))
 ```
 
-    ## List of 9
+    ## List of 11
     ##  $ floor       : int 10
     ##  $ ceiling     : int 55
     ##  $ ceiling_from: chr "min_cell_n"
@@ -299,16 +314,19 @@ str(attr(prof, "bounds"))
     ##  $ area        : num 976371
     ##  $ range       : num 314
     ##  $ n           : int 500
+    ##  $ n_sample    : int 500
     ##  $ n_distinct  : int 500
     ##  $ min_cell_n  : int 9
+    ##  $ range_floor : logi TRUE
 
-The ceiling is `floor(n / min_cell_n)`, or one short of the number of
-distinct locations when that is smaller; `ceiling_from` says which. Past
-it the average cell holds too few points to estimate anything from, or
-k-means has more centres to place than distinct points. The floor is
-`ceiling(area / range^2)`, from the fitted autocorrelation range: cells
-wider than the range average over more than one patch of the field,
-mixing values the field itself keeps apart.
+The ceiling is `floor(n / min_cell_n)`, or the number of distinct
+locations when that is smaller (one short of it when no location
+repeats); `ceiling_from` says which. Past it the average cell holds too
+few points to estimate anything from, or k-means has more centres to
+place than distinct points. The floor is `ceiling(area / range^2)`, from
+the fitted autocorrelation range: cells wider than the range average
+over more than one patch of the field, mixing values the field itself
+keeps apart.
 
 When the floor exceeds the ceiling, the data cannot support a
 tessellation that respects their own correlation structure. `supported`
@@ -338,12 +356,23 @@ sp
 The split is spatially blocked, not random, and records the method and
 seed that produced it. A random half would put neighbours of every
 selection point in the estimation set, and on an autocorrelated field
-that leaks the structure you are choosing against.
+that leaks the structure you are choosing against. Blocking reduces that
+leak without removing it: the two halves share a border, and points on
+either side of it within the correlation range are still correlated, so
+read the separation as a large improvement on a random half rather than
+as independence.
 
 Choose from `prof_split`, then aggregate the rows in `sp$estimation`.
-The cost is power: half the data gives a noisier profile and a wider
-band, and the ladder itself gets shorter because the ceiling scales with
-`n`.
+The cells on the ladder are still drawn on every point, so the count it
+picks is a count for the whole layer, and the ladder is as long as the
+full profile’s. Only the steps that read the response (the variogram,
+`cp`, `moran_z`) use the selection half. The cost is power: those
+criteria see half the data, so the profile is noisier and the band
+wider. The estimation rows also fill only their own half of the layer: a
+cell inside the selection half gets none of them, and a cell across the
+border between the halves is estimated from the part of it on the
+estimation side. Read standard errors only off cells whose points are
+all estimation rows.
 
 ``` r
 
@@ -351,10 +380,10 @@ unlist(attr(prof_split, "bounds")[c("floor", "ceiling", "n", "supported")])
 ```
 
     ##     floor   ceiling         n supported 
-    ##        13        27       251         1
+    ##        16        55       500         1
 
-On a layer of a few hundred points that shortening can leave very little
-ladder, which is a useful answer in itself.
+The floor can differ from the full profile’s, because it comes from the
+range estimated on the selection half.
 
 ## Next
 

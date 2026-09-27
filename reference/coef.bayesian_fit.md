@@ -29,11 +29,31 @@ coef(object, ...)
 ## Value
 
 A matrix of fixed-effect posterior summaries, as returned by
-[`brms::fixef()`](https://rdrr.io/pkg/nlme/man/fixed.effects.html).
-Never `NULL`: a missing 'brms' or a failing `fixef()` call errors,
-following the [`coef()`](https://rdrr.io/r/stats/coef.html) contract
-described in
+[`brms::fixef()`](https://rdrr.io/pkg/nlme/man/fixed.effects.html), on
+the fitted scale (per standard deviation of each predictor under
+`standardize_predictors = TRUE`; see above). Never `NULL`: a missing
+'brms' or a failing `fixef()` call errors, following the
+[`coef()`](https://rdrr.io/r/stats/coef.html) contract described in
 [`new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md).
+
+## Standardised predictors
+
+The summaries are on the scale the model was fitted on. A fit made with
+`standardize_predictors = TRUE` was fitted on centred and scaled numeric
+predictors, so each slope is the change in the linear predictor per
+*standard deviation* of its predictor and the intercept is its value at
+the predictor *means*, not the raw-unit numbers
+[`stats::lm()`](https://rdrr.io/r/stats/lm.html) reports on the same
+formula. Nothing on the returned matrix says so;
+[`print()`](https://rdrr.io/r/base/print.html) on the fit does, and the
+centre and scale of each predictor are in
+`object$info$predictor_scaling`. To put a slope back in raw units divide
+its `Estimate`, `Est.Error` and interval bounds by that predictor's
+`scale`. The intercept's `Estimate` follows by linearity (subtract each
+raw-unit slope times its predictor's `center`), but its `Est.Error` and
+interval depend on the posterior covariance of the coefficients:
+transform the draws from `brms::as_draws_df(object$engine)` for those,
+or refit without standardising.
 
 ## See also
 

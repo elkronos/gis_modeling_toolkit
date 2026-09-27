@@ -28,15 +28,34 @@ create_voronoi_polygons(
 
 - points_sf:
 
-  An sf object with POINT/MULTIPOINT geometries.
+  An sf object with POINT/MULTIPOINT geometries. Points with no CRS
+  whose coordinates look like lon/lat (the heuristic
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  applies, with its warning) are taken as EPSG:4326 and projected, as
+  lon/lat points are.
 
 - boundary:
 
-  Optional polygonal sf object.
+  Optional polygonal sf object. When exactly one of `points_sf` and
+  `boundary` has a CRS, the other is interpreted in it, with a warning.
+  CRS-less points, and a CRS-less boundary given with projected points,
+  are read as
+  [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
+  does (lon/lat-looking coordinates are reprojected from EPSG:4326,
+  others are stamped); CRS-less points that do not look like lon/lat
+  cannot take a geographic boundary's CRS, and are refused with an
+  error. A CRS-less boundary given with lon/lat points (or with CRS-less
+  points taken as lon/lat) is read as lon/lat when its coordinates fit
+  the lon/lat envelope, and refused with an error otherwise.
 
 - expand:
 
-  Numeric; absolute buffer distance for the envelope.
+  Numeric; absolute distance, in the working CRS's units, by which the
+  boundary (or the hull derived from the points) is grown before the
+  diagram is built. With `clip = TRUE` the cells are clipped to the
+  grown boundary, so they reach `expand` beyond the study area, and a
+  point up to `expand` outside it gets a cell and an `index` value. The
+  grown boundary is the one returned as `boundary`.
 
 - clip:
 
@@ -44,11 +63,21 @@ create_voronoi_polygons(
 
 - keep_duplicates:
 
-  Logical; keep coincident points for graph construction.
+  Logical. Has no effect on the result: coincident points are merged
+  before the diagram is built either way, so they share one cell and all
+  of them are indexed to it.
 
 - crs:
 
-  Optional target CRS.
+  Optional target CRS: anything
+  [`sf::st_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html)
+  accepts, including an sf or sfc layer, whose CRS is used. A projected
+  CRS is the working CRS. A geographic one (EPSG:4326, say) is the CRS
+  the result is returned in: the cells are built in the local projected
+  CRS
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  picks for the points, so they are nearest-point cells on the ground,
+  and are then transformed, with long edges densified.
 
 - quiet:
 
@@ -62,9 +91,10 @@ create_voronoi_polygons(
 
 A list with `cells`, `index`, `boundary`, `method` and `params`. `index`
 holds one `cell_id` per row of `points_sf`, and `NA` for a point that
-falls outside every cell, which means outside the study area, so a
-summary built from it counts only the points the tessellation actually
-covers.
+falls outside every cell, which means outside the study area (grown by
+`expand` when it is positive), so a summary built from it counts only
+the points the tessellation actually covers. `boundary` is the boundary
+the cells were built in: the one supplied or derived, grown by `expand`.
 
 ## Details
 
@@ -75,6 +105,15 @@ building and buffering an envelope so edge cells are bounded, clipping
 to `boundary`, restoring the point-to-cell correspondence that
 [`st_voronoi()`](https://r-spatial.github.io/sf/reference/geos_unary.html)
 scrambles, and stamping stable `cell_id` values.
+
+The generators are the points' vertices, not the features. A MULTIPOINT
+feature with several vertices therefore gets one cell per vertex, and
+its `index` entry is the smallest `cell_id` among the cells it touches;
+the others are referenced by no feature. Other functions in the package
+([`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md),
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md))
+reduce such a feature to its centroid instead, so cast to POINT, or take
+centroids, first if one cell per feature is what you want.
 
 ## See also
 

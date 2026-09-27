@@ -88,7 +88,12 @@ cv_bayes(
   Named list of extra arguments for fit_bayesian_spatial_model(). A
   user-supplied `gp_k` is respected in every fold; when omitted, the GP
   rank is auto-selected per training fold. `compute_loo`, `boundary`,
-  and `pointize` are always overridden by the CV internals.
+  and `pointize` are always overridden by the CV internals. A
+  categorical or ordinal `family`
+  ([`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html),
+  `cumulative`, `sratio`, `cratio`, `acat`) is refused before anything
+  is fitted: its prediction is a probability per response category, and
+  every score here needs one number per row.
 
 - summary:
 
@@ -100,7 +105,11 @@ cv_bayes(
 
 - coverage_levels:
 
-  Numeric vector of coverage levels.
+  Numeric vector of the nominal coverage levels to score, as proportions
+  strictly between 0 and 1 (`0.95`, not `95`), each given once; anything
+  else is an error. Each becomes a column `coverage_<percent>` of
+  `fold_metrics`, named at full precision (`0.975` gives
+  `coverage_97.5`).
 
 - block_size:
 
@@ -119,7 +128,12 @@ cv_bayes(
   [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
   (macOS / Linux; falls back to sequential on Windows). If an integer \>
   1, use that many cores. Default `FALSE` (sequential). Bayesian folds
-  with full MCMC runs are the primary beneficiary of this option.
+  with full MCMC runs are the primary beneficiary of this option. Mind
+  the memory: every fold compiles its own Stan model, and one
+  compilation can take several GB (3.6 GB was measured), so
+  `parallel = n` runs `n` of them at once. A compiler killed for lack of
+  memory fails its fold with rstan's `"invalid connection"` error, which
+  `fold_status` records; use fewer cores if you see it.
 
 - metrics:
 
@@ -137,12 +151,13 @@ cv_bayes(
 
 A list with `overall`, `fold_metrics`, `predictions`, `folds`,
 `n_folds_attempted`, `n_folds_succeeded`, `fold_status`, `orphan_rows`,
-`n_unknown_ids`, `n_dropped`, `formula` and `predictive_coverage`. The
-two fold counts make a run where every fold failed visible in the return
-value itself, beyond the warning, and `fold_status` (one row per fold:
-`fold`, `status`, `message`) keeps the reason each missing fold is
-missing, including the error text of a fold whose sampler failed, where
-a long run's console output would not. See
+`n_unknown_ids`, `n_dropped`, `formula`, `predictive_coverage` and
+`coverage_levels` (the nominal levels, named by their `coverage_*`
+column). The two fold counts make a run where every fold failed visible
+in the return value itself, beyond the warning, and `fold_status` (one
+row per fold: `fold`, `status`, `message`) keeps the reason each missing
+fold is missing, including the error text of a fold whose sampler
+failed, where a long run's console output would not. See
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 for the five statuses and for `orphan_rows`. `predictions` carries,
 beyond the columns its siblings share, `yhat_sd`: the posterior
@@ -151,12 +166,19 @@ that give the coverage below (`NA` when `compute_pred_intervals = FALSE`
 or the draws failed for that fold). `overall$Adj_R2` is always `NA`, as
 for every `cv_*()`: see
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
-The `predictive_coverage` entries (one per `coverage_levels` value, plus
-`mean_CRPS`) are averages across folds **weighted by each fold's
-`n_pred`**, because the per-fold values in `fold_metrics` are themselves
-means over that fold's test rows; an unweighted average would not be the
-pooled quantity when fold sizes differ, which for spatially blocked
-folds they routinely do.
+`fold_metrics` carries, beyond the columns its siblings share, `gp_k`,
+`gp_n_basis`, `n_draws`, `CRPS`, the `coverage_*` columns and
+`convergence_ok`: `TRUE` or `FALSE` as
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+judged that fold's sampler (R-hat, effective sample size, divergences),
+`NA` when `fit_args` sets `check_convergence = FALSE`. A fold that did
+not converge is scored like the others, so a run with any `FALSE` raises
+one warning naming those folds. The `predictive_coverage` entries (one
+per `coverage_levels` value, plus `mean_CRPS`) are averages across folds
+**weighted by each fold's `n_pred`**, because the per-fold values in
+`fold_metrics` are themselves means over that fold's test rows; an
+unweighted average would not be the pooled quantity when fold sizes
+differ, which for spatially blocked folds they routinely do.
 
 ## Details
 
@@ -172,11 +194,14 @@ and come back here once the predictor set has settled.
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
@@ -208,11 +233,13 @@ score.
 For the Bayesian backend, `cv_bayes()` additionally reports CRPS and
 interval coverage at 50, 80 and 95 percent. Both are proper scoring
 rules computed from posterior draws, so they are meaningful for any
-`family` the backend accepts, and they are the numbers to compare when
-the response is not Gaussian. When every fold fails, the `fold_metrics`
-frame `cv_bayes()` returns carries the CRPS column but not the
-`coverage_*` columns, so code that reads those columns must tolerate
-their absence.
+`family` that predicts one number per row (a count, a rate, a binary or
+bounded outcome), and they are the numbers to compare when the response
+is not Gaussian. A categorical or ordinal family predicts a probability
+per response category instead, so `cv_bayes()` refuses one before
+fitting anything. When every fold fails, the `fold_metrics` frame
+`cv_bayes()` returns carries the CRPS column but not the `coverage_*`
+columns, so code that reads those columns must tolerate their absence.
 
 ## See also
 

@@ -74,11 +74,14 @@ coordinates and selects candidate k values around the elbow.</p>
 
 
 <dl><dt id="arg-data-sf">data_sf<a class="anchor" aria-label="anchor" href="#arg-data-sf"></a></dt>
-<dd><p>An sf object.</p></dd>
+<dd><p>An sf object.  Features with empty or non-finite
+coordinates are dropped with a warning.</p></dd>
 
 
 <dt id="arg-max-levels">max_levels<a class="anchor" aria-label="anchor" href="#arg-max-levels"></a></dt>
-<dd><p>Integer upper bound on levels. Default 12.</p></dd>
+<dd><p>Integer upper bound on levels. Default 12.  The sweep
+also stops at the number of distinct locations (k-means cannot place
+more centres) and one short of the number of points.</p></dd>
 
 
 <dt id="arg-top-n">top_n<a class="anchor" aria-label="anchor" href="#arg-top-n"></a></dt>
@@ -93,7 +96,10 @@ large <code>top_n</code> is; only the model-aware criteria can return more.</p><
 
 
 <dt id="arg-set-seed">set_seed<a class="anchor" aria-label="anchor" href="#arg-set-seed"></a></dt>
-<dd><p>Integer RNG seed. Default 123.</p></dd>
+<dd><p>Integer RNG seed for the subsample and the k-means++
+restarts; restored afterwards. Default 123.  The rows are put in
+coordinate order before either, so the answer does not depend on the
+order they come in.</p></dd>
 
 
 <dt id="arg-response-var">response_var<a class="anchor" aria-label="anchor" href="#arg-response-var"></a></dt>
@@ -102,7 +108,9 @@ large <code>top_n</code> is; only the model-aware criteria can return more.</p><
 on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
 a factor or character response raises an error and is never coerced,
 because the residuals of an OLS fit to arbitrary level codes carry no
-meaning to test for autocorrelation.</p></dd>
+meaning to test for autocorrelation.  Rows where it, or a predictor, is
+missing or non-finite stay in the WSS sweep and the cells and are left
+out of Moran's I; a logged warning gives their number.</p></dd>
 
 
 <dt id="arg-predictor-vars">predictor_vars<a class="anchor" aria-label="anchor" href="#arg-predictor-vars"></a></dt>
@@ -114,10 +122,14 @@ error.</p></dd>
 <dt id="arg-criterion">criterion<a class="anchor" aria-label="anchor" href="#arg-criterion"></a></dt>
 <dd><p>One of <code>"geometric"</code> (default when no response given),
 <code>"morans_i"</code> (select the k whose residual Moran's I is least
-<em>significant</em>), or <code>"combined"</code> (rank-average of WSS elbow
-distance and that same quantity).  Falls back to <code>"geometric"</code> if
-response/predictors are unavailable, and also when no candidate clears the
-nine-cell resolution floor described in <strong>Details</strong>.  Supplying
+<em>significant</em>), or <code>"combined"</code> (rank-average of the WSS
+curve's log-log sag, the quantity the elbow is read from, and that same
+significance).  Falls back to <code>"geometric"</code>,
+with a warning, when <code>response_var</code> or <code>predictor_vars</code> is not
+given, and with a logged warning when no candidate clears the
+nine-cell resolution floor described in <strong>Details</strong>.  A
+<code>response_var</code> or <code>predictor_vars</code> naming a column that is not
+in <code>data_sf</code> is an error.  Supplying
 both <code>response_var</code> and <code>predictor_vars</code> upgrades
 <code>"geometric"</code> to <code>"combined"</code>: the selection then depends on
 the response (see "Post-selection inference").</p></dd>
@@ -125,17 +137,20 @@ the response (see "Post-selection inference").</p></dd>
 
 <dt id="arg-select-on">select_on<a class="anchor" aria-label="anchor" href="#arg-select-on"></a></dt>
 <dd><p><code>"all"</code> (default) selects on every point;
-<code>"split"</code> selects on one spatially blocked half of the points and
-returns the other half as the set to estimate on, so that the standard
-errors computed downstream on the chosen cells are not post-selection.
-See "Post-selection inference".</p></dd>
+<code>"split"</code> reads the response on one spatially blocked half of the
+points only and returns the other half as the set to estimate on, so
+that the standard errors computed downstream on the chosen cells are not
+post-selection.  The count is still chosen for the whole layer.  See
+"Post-selection inference".</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An integer vector of candidate level counts, <strong>best first</strong>:
 under the geometric criterion the elbow, then its lower and upper
-neighbours; under the model-aware criteria the candidates in rank order.
+neighbours (with a warning when the WSS curve has no elbow and the first
+is the ladder's choice; see Details); under the model-aware criteria the
+candidates in rank order.
 <code>k[1]</code> is therefore the top-ranked count on every path, and
 <code>top_n = 1</code> returns it alone. When
 <code>criterion != "geometric"</code>, an attribute <code>"diagnostics"</code> is
@@ -151,7 +166,10 @@ model-aware pass actually scored (<code>eval_ks</code>, the elbow's
 neighbourhood).  Under <code>"combined"</code> it also carries the WSS of the
 re-run clustering at those <code>k</code> (<code>wss_eval</code>), the rank average
 that ordered them (<code>combined_rank</code>, named by <code>k</code>) and
-<code>criterion = "combined"</code>.  When the model-aware
+<code>criterion = "combined"</code>; when <code>"combined"</code> returned the
+geometric ranking because the elbow is below ten cells, it carries
+<code>criterion = "geometric"</code> and <code>fallback</code> (the reason) in
+place of <code>combined_rank</code>.  When the model-aware
 path itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), no
 diagnostics are available and the attribute is absent. Both fallbacks are
@@ -165,7 +183,33 @@ region, see <code><a href="resolution_profile.html">resolution_profile()</a></co
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>When <code>response_var</code> and <code>predictor_vars</code> are provided, the
+    <p><strong>The elbow is read on log-log axes, and there may be none.</strong>  Points
+with no cluster structure have a WSS curve close to \(c/k\), and the
+classical rule, the point furthest below the chord from the first to the
+last k, still finds a "knee" on it on linear axes, at about
+\(\sqrt{K_{max}}\): 4 at the default <code>max_levels = 12</code> and 13 at
+160, whatever the data.  On \(\log k\) against \(\log\) WSS that curve
+is a straight line, while separated clusters fall faster than it until
+there is one cell per cluster and like it after, a bend at the cluster
+count.  The elbow is therefore the k whose \(\log\) WSS sags furthest
+below the straight line joining k = 1 and \(K_{max}\) on those axes, and
+it counts as one only when the sag is at least \(\log 1.25\) (the WSS a
+fifth below the power law through the ends).  Measured on 60 to 1500
+points with ladders to 3–40, uniform layouts over squares, discs,
+triangles, an L-shape, density gradients and jittered lattices sagged at
+most 0.16, and two to ten separated clusters at least 0.6 once
+<code>max_levels</code> passed the cluster count.  With no elbow the function
+warns and returns the linear-axis answer, which the ladder chose, not the
+data.  An elongated extent also bends, at about its aspect ratio, because
+the first cuts go across its long axis (0.2–0.45 for a 4:1 rectangle);
+past the threshold that bend is reported as an elbow, and it describes
+the extent's shape rather than clusters in it.  When locations repeat
+(stations visited many times), the sweep can reach one cell per distinct
+location, where the WSS is zero (to within \(10^{-12}\) of the total).
+That <code>k</code> has no place on log axes and is left out of the line, but
+the fall to zero is the sharpest bend there is: when the rest of the
+curve has no elbow, the number of distinct locations is the elbow.</p>
+<p>When <code>response_var</code> and <code>predictor_vars</code> are provided, the
 geometric WSS elbow is supplemented with Moran's I computed on OLS
 residuals at each candidate k.  The Moran's I profile measures how much
 spatial autocorrelation in the response remains <em>unexplained</em> at a given
@@ -207,11 +251,19 @@ from 0.114 at <code>k = 10</code> to 0.050 at <code>k = 60</code> (\(-56\%\)), w
 made an \(|I|\) ranking prefer the largest candidate for arithmetic
 reasons alone.  Candidates are therefore ordered by
 \(|z| = |I - E[I]| / \mathrm{sd}(I)\) using the Cliff &amp; Ord regression
-residual moments, which are exact here because the cell-level residuals
-are OLS residuals by construction.  Over the same runs \(z\) had mean
-\(\approx 0\), \(\mathrm{sd} \approx 1\) and a two-sided 5% rejection
-rate of 0.040–0.057 at every <code>k</code>.  Both quantities are reported in
-the <code>"diagnostics"</code> attribute, as <code>moran_i</code> and <code>moran_z</code>.</p>
+residual moments.  The cell-level residuals are OLS residuals by
+construction, which is the case those moments are derived for, but the
+derivation also assumes errors of equal variance, and a cell mean over
+\(n_j\) points has a variance proportional to \(1/n_j\).  Over the
+same runs \(z\) had mean \(\approx 0\), \(\mathrm{sd} \approx 1\)
+and a two-sided 5% rejection rate of 0.040–0.057 at every <code>k</code>, and
+it stayed calibrated on gradient and moderately clustered layouts; with
+single-point cells next to cells of 70 or more points its mean rose to
+0.2–0.34 and its rejection rate to 7–8% at 20 cells.  Where structure
+remains, \(|z|\) mixes its size with the number of cells it is measured
+on, since \(\mathrm{sd}(I)\) shrinks as cells are added.  Both
+quantities are reported in the <code>"diagnostics"</code> attribute, as
+<code>moran_i</code> and <code>moran_z</code>.</p>
 <p><strong>Resolution floor on the model-aware criteria.</strong>  Moran's I is
 computed on cell-level residuals with an 8-nearest-neighbour weight matrix,
 so it only carries information once there are more than nine cells.  At nine
@@ -225,12 +277,32 @@ deviate is \(0/0\): it carries no information about the tessellation, and
 whichever way rounding noise resolves it those candidates would rank first
 or last on nothing.  They therefore return <code>NA</code> and are excluded from
 the model-aware ranking.  When no candidate in the elbow neighbourhood
-clears the floor, which is the usual outcome for small <code>max_levels</code>,
-the whole call falls back to the geometric ranking and logs a warning; raise
-<code>max_levels</code> above roughly 10 if you want the model-aware criteria to
-contribute.  Under <code>criterion = "combined"</code>, a candidate below the
-floor that sits alongside candidates above it is ranked last on the Moran's
-I axis while still competing on the geometric axis.</p>
+clears the floor, the whole call falls back to the geometric ranking and
+logs a warning that says so.  That is the usual outcome well past
+<code>max_levels = 10</code>: the neighbourhood is the elbow plus or minus
+<code>max(4, top_n)</code>, and on points with no cluster structure the elbow
+sits near \(\sqrt{K_{max}}\), so the neighbourhood reaches ten cells only
+from about <code>max_levels = 40</code>.  Measured on 1000 uniform points,
+<code>max_levels</code> of 12, 20 and 30 all fell back, and 40 scored
+<code>k</code> = 10 and 11 alone.  On such a layer
+<code><a href="resolution_profile.html">resolution_profile()</a></code>, which scores Moran's z at every level of
+its ladder, is the model-aware view.  Under <code>criterion = "combined"</code>,
+an elbow below ten cells is a count Moran's I cannot score, so it cannot
+weigh the response there: the geometric ranking is returned, with a
+logged warning, and the diagnostics record it (see Value).  (Ranking the
+window anyway put the smallest count Moran's I scores, ten, first whatever
+the response did.)  Otherwise the candidates below the floor that sit
+alongside candidates above it all take the last place on the Moran's I
+axis, after every candidate it scored, while still competing on the
+geometric axis.  That axis is the elbow's own log-log sag at each
+candidate; when the WSS curve has no elbow it is flat, every candidate
+tied, and Moran's I alone orders them.</p>
+<p><code>"combined"</code> is not an estimate of the number of clusters.  Where the
+elbow is at ten cells or more, Moran's I can move the pick away from it
+when the response is still spatially structured at the elbow's
+resolution.  Use <code>"geometric"</code> when the cell count should follow the
+clustering of the points, and <code><a href="resolution_profile.html">resolution_profile()</a></code> when the
+response should drive it.</p>
     </div>
     <div class="section level2">
     <h2 id="post-selection-inference">Post-selection inference<a class="anchor" aria-label="anchor" href="#post-selection-inference"></a></h2>
@@ -249,12 +321,21 @@ ranked first.  It is not zero, because the count determines every cell the
 downstream standard errors are computed over.</p>
 <p><code>select_on = "split"</code> is sample splitting: the layer is cut into two
 spatially blocked halves (<code><a href="make_folds.html">make_folds</a>(k = 2, method =
-"block_kfold")</code>), the selection runs on the first half only, and the row
-positions of both halves come back in the <code>"split"</code> attribute
-(<code>selection</code> and <code>estimation</code>).  Build the tessellation on
+"block_kfold")</code>), the criteria that read the response (Moran's I on the
+cell means) read the first half only, and the row positions of both
+halves come back in the <code>"split"</code> attribute (<code>selection</code> and
+<code>estimation</code>).  The WSS curve and the k-means cells still use every
+point: they read coordinates alone, and the count is for a tessellation
+of every point, so it is chosen on that layer's extent and clusters
+rather than on half of them.  Build the tessellation on
 every point (cells are geometry), but aggregate and fit on
-<code>data_sf[attr(x, "split")$estimation, ]</code>, which the selection never
-saw; that restores nominal coverage with no new theory.  The price is
+<code>data_sf[attr(x, "split")$estimation, ]</code>, whose response the
+selection never saw.  That keeps the selection's use of the response out
+of the estimates, but only as far as the two halves are independent: the
+split has no buffer, so points near the border between them are
+correlated with the selection half over the autocorrelation range, and
+coverage is nominal only when that range is short against the blocks.
+The price is
 precision: half the points estimate, and García Rasines and Young (2023)
 show a <em>contiguous</em> spatial half is less efficient than the
 exchangeable split the i.i.d. theory assumes, because the two halves are
@@ -265,6 +346,15 @@ the split needs no distributional assumption, which is why it comes first.
 Selection on coordinates alone (<code>"geometric"</code> with no response) is
 not exposed in this way, and <code>"split"</code> then changes nothing but the
 attribute.</p>
+<p>The estimation rows cover only the estimation half's blocks, while the
+cells cover the whole layer, so the estimation rows do not fill every
+cell.  A cell inside the selection half gets none and comes back
+<code>NA</code>; a cell across the border between the halves is estimated from
+its estimation-half points alone, and its standard error describes that
+part, not the cell (on 400 simulated fields a nominal 95% interval covered
+0.97 in cells inside the estimation half and 0.88 in cells across the
+border).  Count, per cell, how many of its points are estimation rows,
+and read inferential results only off cells whose points all are.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>

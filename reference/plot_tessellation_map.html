@@ -74,7 +74,7 @@ overlays for a study boundary, seed points, and additional features.</p>
 <span>  boundary_col <span class="op">=</span> <span class="st">"#111111"</span>,</span>
 <span>  boundary_size <span class="op">=</span> <span class="fl">0.6</span>,</span>
 <span>  labels <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  label_col <span class="op">=</span> <span class="st">"grid_id"</span>,</span>
+<span>  label_col <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  label_size <span class="op">=</span> <span class="fl">2.7</span>,</span>
 <span>  legend <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  legend_title <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -111,7 +111,11 @@ overlays for a study boundary, seed points, and additional features.</p>
 
 <dt id="arg-fill-col">fill_col<a class="anchor" aria-label="anchor" href="#arg-fill-col"></a></dt>
 <dd><p>Name of the COLUMN in <code>tessellation_sf</code> to map to fill;
-<code>NULL</code> for no fill.  <code>fill_col</code> and <code>label_col</code> name
+<code>NULL</code> for no fill.  A numeric column gets a continuous scale, as
+does a Date or POSIXct column (on a date or time axis) and a
+<code>units</code> or <code>difftime</code> column (drawn as numbers, with the unit
+in the legend title); anything else a discrete one.
+<code>fill_col</code> and <code>label_col</code> name
 columns, while <code>outline_col</code>, <code>features_col</code>,
 <code>seeds_col</code> and <code>boundary_col</code> are colours.</p></dd>
 
@@ -152,8 +156,13 @@ outline.</p></dd>
 
 
 <dt id="arg-label-col">label_col<a class="anchor" aria-label="anchor" href="#arg-label-col"></a></dt>
-<dd><p>Name of the COLUMN holding the label text. Default
-<code>"grid_id"</code>.</p></dd>
+<dd><p>Name of the COLUMN holding the label text.  Default
+<code>NULL</code>: the first of <code>"grid_id"</code>, <code>"cell_id"</code>,
+<code>"poly_id"</code>, <code>"polygon_id"</code> and <code>"id"</code> the layer has, so
+the cells of <code><a href="build_tessellation.html">build_tessellation()</a></code> (<code>cell_id</code>) and the
+output of <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> (<code>poly_id</code>) are
+labelled without naming one.  A <code>units</code> or <code>difftime</code> column
+is drawn formatted, with its unit.</p></dd>
 
 
 <dt id="arg-label-size">label_size<a class="anchor" aria-label="anchor" href="#arg-label-size"></a></dt>

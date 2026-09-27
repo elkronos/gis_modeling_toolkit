@@ -132,8 +132,9 @@ it, <code>"randomisation"</code> otherwise.</p></dd>
 <dt><code>"residual"</code></dt>
 <dd><p>Always the Cliff &amp; Ord residual moments.  Falls
 back to <code>"randomisation"</code> with a logged warning if the design
-cannot be rebuilt, and warns (but proceeds) if the residuals are not
-the OLS residuals on it, in which case the moments are approximate.</p></dd>
+cannot be rebuilt, and logs a warning (but proceeds) if the residuals
+are not the OLS residuals on it, in which case the moments are
+approximate.</p></dd>
 
 
 </dl><p>Both <code>"auto"</code> and <code>"residual"</code> also fall back to
@@ -228,8 +229,15 @@ the matrix) and <code>desc</code>, the one line <code><a href="https://rdrr.io/r
 so the console shows the statistic and its null without printing the
 \(n \times n\) <code>weights</code> matrix; <code>[</code> drops the class, and
 <code>$</code>, <code>[[</code> and <code><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist()</a></code> are unaffected.
-Returns <code>NULL</code> with a warning if computation fails (e.g. fewer
-than 4 valid residuals).</p>
+A custom fit whose class has no <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code> method (which
+<code><a href="new_spatial_fit.html">new_spatial_fit</a></code> calls optional) is scored on the
+observed response minus <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code>, as <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> does for it.
+Returns <code>NULL</code> with a warning if computation fails, saying why:
+<code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code> raised an error (its message is quoted), or returned
+<code>NULL</code> and the response minus <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> could not be
+formed either (the reason is quoted), fewer than 4 valid
+residuals, or a residual vector whose length does not match the fit's
+<code>data_sf</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

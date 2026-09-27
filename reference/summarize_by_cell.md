@@ -30,11 +30,15 @@ summarize_by_cell(
 
 - response_var:
 
-  Optional response column name for per-cell aggregation.
+  Optional response column name for per-cell aggregation: a single
+  character string. A name that is not a column, or a column that is not
+  numeric, is skipped with a warning.
 
 - predictor_vars:
 
-  Optional predictor column names for per-cell aggregation.
+  Optional predictor column names for per-cell aggregation. Names that
+  are not columns, and columns that are not numeric, are skipped with a
+  warning.
 
 - id_col:
 
@@ -44,7 +48,14 @@ summarize_by_cell(
 
   Named list of aggregation functions. Default
   `list(mean = \(x) mean(x, na.rm = TRUE))`. Additional common options:
-  `median`, `sum`, `sd`.
+  `median`, `sum`, `sd`. A single function (`agg_funs = median`) or a
+  character vector of function names (`c("median", "sum")`) is also
+  accepted. A single function is named after the expression passed: a
+  name gives that name (`median`, or `f` for a variable `f` holding a
+  function), [`stats::median`](https://rdrr.io/r/stats/median.html)
+  gives `median`, and any other expression gives `agg1`; pass a named
+  list to choose the name. Anything else falls back to the default mean
+  with a warning.
 
 - cells_sf:
 
@@ -53,7 +64,15 @@ summarize_by_cell(
   geometry from cells_sf, with one row per cell in `cells_sf`. Cells
   that no feature fell in are kept, with `NA` summaries. Duplicate ID
   values in `cells_sf` would multiply those rows, so they are reported
-  with a warning. When NULL (default), a plain data.frame/tibble is
+  with a warning. Its ID column is the first of `id_col`, `"poly_id"`,
+  `"polygon_id"`, `"id"`, `"cell_id"` and `"grid_id"` it carries, the
+  list and order
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  reads the polygons' IDs from. A summarised ID that matches no cell is
+  reported with a warning, since the join drops it with its points; a
+  `cells_sf` with none of those columns, or one that is not an sf
+  object, gives a warning and a plain data frame (an error with
+  `area = TRUE`). When NULL (default), a plain data.frame/tibble is
   returned (previous behaviour).
 
 - deff:
@@ -79,8 +98,18 @@ summarize_by_cell(
       or it is estimated when `response_var` is given and 'gstat' is
       available. Exponential, spherical and Gaussian models are
       supported, with a nugget and with several structured components
-      (each weighted by its partial sill); a model of any other family
-      falls back to `deff = 1` with a warning naming it.
+      (each weighted by its partial sill) and with gstat's 2-D geometric
+      anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
+      applies it. A model of any other family falls back to `deff = 1`
+      with a warning naming it, and so does a request with no usable
+      model (none supplied and none could be estimated, or a rejected
+      fit that could not be replaced by an estimate); see "Value" for
+      how to detect a fallback. A model with no structured component (a
+      pure nugget) implies that distinct observations are uncorrelated,
+      so it is applied as a design effect of 1 in every cell, not
+      treated as a fallback. Points with empty geometry count towards
+      their cells' values but not towards the correlation, with a
+      warning.
 
   `"kish"`
 
@@ -104,18 +133,20 @@ summarize_by_cell(
       versa, and it is the response's ICC (not the predictors') that
       sets `cell_weight` whenever a response was given. Requires at
       least 2 cells with 2+ observations and at least 2 residual degrees
-      of freedom (`N - k >= 2`); the ICC is taken as 0 (no correction,
-      no `"deff_applied"` attribute) otherwise, and likewise when the
-      estimate itself comes out at or below 0.
+      of freedom (`N - k >= 2`); the ICC is taken as 0 (no correction
+      for that variable type) otherwise, and likewise when the estimate
+      itself comes out at or below 0. The `"deff_applied"` attribute is
+      attached when either ICC is positive, so when both are 0 there is
+      none.
 
   A positive number
 
   :   Applied as a uniform design effect to every cell, as
       `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive SE.
       Use when you have an external estimate of the design effect.
-      Anything that is not a single number `>= 1` (including a value
-      below 1, which would *shrink* the standard errors) is refused with
-      a warning and replaced by 1.
+      Anything that is not a single finite number `>= 1` (including a
+      value below 1, which would *shrink* the standard errors, and `NA`
+      or `Inf`) is refused with a warning and replaced by 1.
 
 - sac:
 
@@ -123,16 +154,25 @@ summarize_by_cell(
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
   used when `deff = "variogram"`. Supplying one avoids re-fitting the
   variogram and lets you inspect the fit the design effect is based on.
-  A `sac_range` whose fit was *rejected* (its `status` is not `"ok"`)
-  carries no usable correlation function, so `deff` falls back to 1 with
-  a warning and does not correct by a shape that was not trusted enough
-  to report a range.
+  A `sac_range` whose fit was *rejected* (its value is `NA` and it
+  carries a `rejected_reason` attribute) carries no usable correlation
+  function, so it is set aside rather than correcting by a shape that
+  was not trusted enough to report a range: the variogram is then
+  estimated as if no `sac` had been given, with a plain warning saying
+  so, or, where that is not possible, `deff` falls back to 1 with the
+  fallback warning, which names the rejection. A `sac` with no
+  `variogram_model` attribute – a plain number or a `units` object, say
+  – is a range without a correlation function, and is set aside the same
+  way. A `sac` fitted to residuals (`attr(sac, "detrended")` `TRUE`) is
+  used as given, with a warning when it corrects response columns (see
+  "Design effects and variable types").
 
 - deff_max_n:
 
   Cells with more than this many points are subsampled before forming
-  the `n x n` correlation matrix used by `deff = "variogram"`. Default
-  500.
+  the `n x n` correlation matrix used by `deff = "variogram"`.
+  Default 500. It must be a single number of at least 2 when
+  `deff = "variogram"`; anything else is an error.
 
 - quiet:
 
@@ -168,8 +208,14 @@ summarize_by_cell(
   latitude in Web Mercator (4 percent at 48N), does not.
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
   with `purpose = "area"` chooses an equal-area CRS for lon/lat input;
-  build the cells in it. The measured spread is attached as
-  `attr(, "area_error")`.
+  build the cells in it. Lon/lat cells are measured geodesically
+  instead: their `cell_area` is
+  [`sf::st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html)'s
+  area in square metres (on the sphere with s2, sf's default), not a
+  planar area in squared degrees, and the distortion check passes by
+  construction; with s2 switched off, sf needs the lwgeom package for
+  that area and the request is refused without it. The measured spread
+  is attached as `attr(, "area_error")`.
 
 ## Value
 
@@ -177,12 +223,30 @@ A tibble/data.frame (or sf if cells_sf given) with per-cell summaries:
 the ID column, `n` (rows in the cell), one column per `agg_funs` entry
 per variable, `..sd_*` / `..se_*` for every numeric response and
 predictor, `..neff_*` / `..df_*` / `..ci_lo_*` / `..ci_hi_*` for the
-same columns when `conf_level` is given, `cell_weight`, and `cell_area`
-/ `n_per_area` when `area = TRUE`. An input column also called `n` is
-not allowed to shadow the count.
+same columns when `conf_level` is given, `cell_weight`, `deff_applied`
+when a design effect was requested (any `deff` other than 1), and
+`cell_area` / `n_per_area` when `area = TRUE`. An input column also
+called `n` is not allowed to shadow the count.
+
+`deff_applied` is `TRUE` on every row when the requested correction was
+applied (exactly when the `"deff_applied"` attribute below is attached;
+under `"kish"`, when any standard-error column was corrected) and
+`FALSE` when it fell back to the uncorrected standard errors: a refused
+`deff`, a `"variogram"` request with no usable model, or `"kish"` ICCs
+of 0 for every variable type (and `NA` on a `cells_sf` row no point fell
+in). Unlike the attribute it survives
+[`rbind()`](https://rdrr.io/r/base/cbind.html) and
+[`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html)
+of many results. A fallback is also signalled by a warning of class
+`"spatialkit_deff_fallback"` (a Kish ICC of 0 is reported on
+`attr(, "icc")` instead), which `tryCatch(spatialkit_deff_fallback = )`
+catches without matching the message; it is raised only when the
+standard errors really are the uncorrected ones.
 
 When a correction was actually applied, an attribute `"deff_applied"` is
-attached recording it: `method` plus `icc_resp`/`icc_pred` for `"kish"`,
+attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
+for `"kish"` (`deff` is the primary variable's per-cell design effect,
+all 1 when only the predictor ICC was positive),
 `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is the
 design effect at the primary variable's non-missing count per cell,
 `deff_rows` at the cell's row count, which is the vector the log line
@@ -191,17 +255,19 @@ When `cells_sf` is supplied, *every* per-cell vector in that attribute
 (`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
 order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 observations carry `NA`. No attribute is attached when no correction was
-applied: `deff = 1`, a `deff = "kish"` ICC of 0, or a `"variogram"`
-request that could not be fitted. A `deff = "kish"` request always
-records the ICCs it estimated on an attribute `"icc"` (`resp` and
-`pred`, `NA` for a variable type with no numeric column), whether or not
-they were positive enough to apply, so a result with no `"deff_applied"`
-still says what the ICC came out as.
+applied: `deff = 1`, a `deff = "kish"` request whose ICCs are all 0, or
+a `"variogram"` request that could not be fitted. A `deff = "kish"`
+request always records the ICCs it estimated on an attribute `"icc"`
+(`resp` and `pred`, `NA` for a variable type with no numeric column),
+whether or not they were positive enough to apply, so a result with no
+`"deff_applied"` still says what the ICC came out as.
 
 The ID column keeps its input type when `cells_sf`'s ID column and the
 summarised IDs already have the same class. When the classes differ,
 both are coerced to character in order to join (logged as a warning),
-and the returned ID column is therefore character.
+and the returned ID column is therefore character. Whole numbers are
+written out in full for that (`"100000"`, never `"1e+05"`), so an
+integer and a double ID of the same cell still match.
 
 ## Details
 
@@ -238,14 +304,19 @@ regression.
 ## Spatial autocorrelation and standard-error bias
 
 By default (`deff = 1`), the `..se_*` columns are computed as
-`sd / sqrt(n)`, which assumes observations within each cell are
+`sd / sqrt(n)`, which treats the observations within each cell as
 independent. When data are spatially autocorrelated (the common case for
 the spatial workflows this package supports), within-cell observations
-are typically positively correlated, so the effective sample size is
-smaller than `n`. The naive SE is therefore **anticonservative** (too
-small), and downstream weighted regressions using `cell_weight` or
-`..se_*` columns will produce overconfident standard errors for cells
-with strong intra-cell correlation.
+are typically positively correlated: they share the cell's departure
+from the population mean, so as an estimate of the **population (grand)
+mean** a cell mean has an effective sample size smaller than `n`. For
+that estimand the naive SE is **anticonservative** (too small), and a
+downstream weighted regression that uses `cell_weight` or the `..se_*`
+columns for population-level inference will produce overconfident
+standard errors for cells with strong intra-cell correlation. For the
+cell's **own** mean the naive SE is the right one when the cell's points
+are spread through it, and the corrected SE is too wide; see "What the
+standard error estimates" before setting `deff`.
 
 Setting `deff = "kish"` applies an approximate correction using Kish's
 design effect. Separate intra-class correlations (ICCs) are estimated
@@ -254,13 +325,31 @@ decomposition across all cells. Each variable type's ICC is used for its
 own SE adjustment, and each cell's effective sample size is reduced to
 `n_i / (1 + (n_i - 1) * rho)`. This is a first-order correction that
 does not require a full spatial covariance model but does require enough
-cells and observations for a stable ICC estimate. You may also pass a
-fixed numeric design effect (e.g. `deff = 2`) to uniformly inflate
-standard errors: an externally supplied constant is applied as
-`sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive SE in every
-cell. (The `E[s^2]` correction that the estimated design effects also
-apply is derived from within-cell correlation and would not be justified
-for a number the caller chose.)
+cells and observations for a stable ICC estimate.
+
+A design effect estimated from the data (`"kish"` or `"variogram"`)
+comes with a second, small-sample correction. The within-cell
+correlation that inflates the variance of the mean to
+`sigma^2 * deff / n` also biases the within-cell sample variance
+downward: under exchangeable correlation `rho` (Kish's own assumption),
+with `deff = 1 + (n - 1) * rho`,
+`E[s^2] = sigma^2 * (n - deff) / (n - 1)`, so `s^2` understates
+`sigma^2` by very nearly the factor by which `deff` inflates the mean's
+variance, and the two errors compound rather than cancel. The standard
+error is therefore `s * sqrt(deff / n) * sqrt((n - 1) / (n - deff))`,
+and `NA` where `deff >= n` (the cell then holds one observation's worth
+of information and `s` carries none about `sigma`). This is the
+package's own derivation, not taken from a reference. Measured 95%
+interval coverage at `n = 30` over 20,000 replicates: 0.921, 0.844 and
+0.628 at `rho` = 0.2, 0.5 and 0.8 with `s * sqrt(deff / n)` alone,
+against 0.948, 0.950 and 0.949 with the rescaling.
+
+You may also pass a fixed numeric design effect (e.g. `deff = 2`) to
+uniformly inflate standard errors: an externally supplied constant is
+applied as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the naive
+SE in every cell. (The `E[s^2]` correction that the estimated design
+effects also apply is derived from within-cell correlation and would not
+be justified for a number the caller chose.)
 
 Even with the Kish correction, the adjusted SE is an approximation. For
 rigorous inference under spatial dependence, consider fitting an
@@ -284,7 +373,8 @@ average over that cell), which is what a cell-level map or a regression
 on cell values usually wants. For that quantity the naive `sd / sqrt(n)`
 is the better of the two on offer: measured coverage 0.95 under
 exchangeable within-cell correlation, against very nearly 1.00 for the
-design-effect-corrected SE, which is about five times too wide. That
+design-effect-corrected SE, which is too wide by the factor
+`sqrt(deff / (1 - rho))` (4.6 at 20 points a cell and `rho = 0.5`). That
 0.95 is exact under the exchangeable model and holds under a spatial
 covariance model only when the cell's points are spread through the
 cell; with *clustered* sampling inside a cell it is anticonservative for
@@ -310,8 +400,12 @@ response's own. (A residual variogram, whose correlation is that of the
 part the predictors do not explain, is weaker; using it here dropped
 grand-mean coverage from 0.93 to 0.51 the moment a predictor was
 listed.) Pass `sac` explicitly when you want a different variogram, such
-as a residual one from `estimate_sac_range(..., predictor_vars = )`, and
-check `attr(sac, "detrended")` to know which you have.
+as a residual one from `estimate_sac_range(..., predictor_vars = )`. A
+`sac` whose `attr(sac, "detrended")` is `TRUE` is used as given, but
+when it corrects response columns a warning says that their standard
+errors are understated, as
+[`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
+warns about the same mismatch.
 
 ## Confidence intervals
 
@@ -326,7 +420,10 @@ including that it is not an interval for the cell's own block average.
 The interval is `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on
 the plain mean of the column's non-missing values whatever `agg_funs`
 computes, and is `NA` wherever the standard error is (a single
-observation; complete redundancy under `deff`).
+observation; complete redundancy under `deff`). `..neff_*` and `..df_*`
+are `NA` where the column has one non-missing value or none, like the
+standard error; `cell_weight` still counts such a cell (1, or `1 / deff`
+for a numeric `deff`), so the two differ there.
 
 The degrees of freedom are **not** `neff - 1`. The interval's spread
 comes from the within-cell sample variance, and under exchangeable

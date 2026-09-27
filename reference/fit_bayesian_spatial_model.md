@@ -76,9 +76,13 @@ fit_bayesian_spatial_model(
   [`stats::gaussian()`](https://rdrr.io/r/stats/family.html). The family
   reaches
   [`brms::brm()`](https://paulbuerkner.com/brms/reference/brm.html)
-  unchanged with the spatial GP term still in the formula, so any
-  response type brms can fit, this function can fit; see the section on
-  non-Gaussian responses and the count example below.
+  unchanged with the spatial GP term still in the formula. A factor
+  response is accepted only under
+  [`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  or an ordinal family, and those fits have no single expected value per
+  row, so several methods cannot use them; see the section on
+  non-Gaussian responses for what each family supports, and the count
+  example below.
 
 - gp_k:
 
@@ -93,7 +97,11 @@ fit_bayesian_spatial_model(
   (default) to derive it alongside `gp_k`. The boundary must be wide
   enough to contain the longest plausible correlation range; a value
   that is too small truncates the domain and degrades the approximation
-  for smooth, long-range surfaces.
+  for smooth, long-range surfaces. When you set `gp_c` and leave
+  `gp_k = NULL`, `gp_k` is derived for *your* boundary: a wider boundary
+  needs more basis functions to resolve the same length-scale, so
+  raising `gp_c` raises the derived `gp_k` with it, up to the cap of 50
+  per dimension (a capped value is logged).
 
 - gp_iso:
 
@@ -164,12 +172,40 @@ fit_bayesian_spatial_model(
 
   Logical; center and scale numeric predictors before fitting. Default
   FALSE. When TRUE, the scaling parameters are stored in the return
-  value so predictions can be computed correctly.
+  value (`$info$predictor_scaling`, a `center` and `scale` per
+  predictor) so predictions can be computed correctly. The model is then
+  fitted on the standardised predictors, so
+  [`coef()`](https://rdrr.io/r/stats/coef.html) reports a slope per
+  standard deviation of each predictor and an intercept at the predictor
+  means, not the raw-unit values
+  [`stats::lm()`](https://rdrr.io/r/stats/lm.html) would give; see
+  [`coef.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md).
 
 - check_convergence:
 
-  Logical; after fitting, check for divergences, low ESS, and high R-hat
-  and issue warnings. Default TRUE.
+  Logical; after fitting, check for divergent transitions, R-hat above
+  1.05 and an effective-sample-size ratio below 0.1. Each problem found
+  is written to the log as a WARN line (shown on the console unless
+  [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+  is on), sets `$info$convergence_ok` to `FALSE`, and is detailed in
+  `$info$convergence_diagnostics`;
+  [`print()`](https://rdrr.io/r/base/print.html) on the fit flags it.
+  The GP basis is also checked against the posterior length-scale (see
+  Details): a basis too coarse for it is logged as a WARN line, and the
+  share of draws it cannot resolve is recorded as
+  `$info$convergence_diagnostics$gp_lscale_below_resolution`, but it
+  does not change `convergence_ok` and
+  [`print()`](https://rdrr.io/r/base/print.html) does not flag it. None
+  of these are raised as R warnings by the fit itself; the functions
+  that score fits do raise one:
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  names the folds whose sampler did not converge (and marks them in
+  `fold_metrics$convergence_ok`), and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  names such a model (column `convergence_ok`). Under rstan the sampler
+  raises its own R-hat and ESS warnings; under cmdstanr nothing does, so
+  read `$info$convergence_ok`. `FALSE` skips the checks and leaves
+  `convergence_ok` `NA` (not checked). Default TRUE.
 
 - pointize:
 
@@ -203,18 +239,22 @@ scaled coordinate columns handed to
 [`brms::gp()`](https://paulbuerkner.com/brms/reference/gp.html);
 coord_scaling, predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis,
 gp_ell_min, gp_S: the pooled centred range `brms::gp(c = )` multiplies;
+gp_cmeans: the column means brms centred the scaled coordinates on;
 gp_xy_range: the training extrema of the scaled coordinates, which
-[`predict()`](https://rdrr.io/r/stats/predict.html) uses to pin the GP
-boundary; gp_lengthscale_bounds: the `c(lower, upper)` the length-scale
-prior was calibrated over; gp_lscale_prior: the length-scale prior
+[`predict()`](https://rdrr.io/r/stats/predict.html) uses, with gp_S and
+gp_cmeans, to hold the GP boundary at its fitted value;
+gp_lengthscale_bounds: the `c(lower, upper)` the length-scale prior was
+calibrated over; gp_lscale_prior: the length-scale prior
 [`brms::validate_prior()`](https://paulbuerkner.com/brms/reference/validate_prior.html)
 reports the model will *actually* use, which is not necessarily the one
 this function requested (several entries, semicolon-separated, if brms
-resolved the axes differently); loo, looic, convergence_ok,
-convergence_diagnostics: `n_divergent`, `max_rhat`, `min_neff_ratio`,
-and `rhat_failed` / `neff_failed`, the parameters that failed each check
-by name with their values (empty when none failed), which is what makes
-a failed check actionable; and n_dropped: the rows
+resolved the axes differently); loo, looic, convergence_ok (`TRUE` or
+`FALSE`, and `NA` when nothing was checked, as under
+`check_convergence = FALSE`), convergence_diagnostics: `n_divergent`,
+`max_rhat`, `min_neff_ratio`, and `rhat_failed` / `neff_failed`, the
+parameters that failed each check by name with their values (empty when
+none failed), which is what makes a failed check actionable; and
+n_dropped: the rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry, so `$n` can
 be read against `nrow(data_sf)`). The raw brmsfit is in `$engine`.
@@ -270,9 +310,11 @@ length-scale quantity in the wrong units.
 
 After fitting, the posterior length-scale is compared against the
 smallest scale the chosen basis can resolve (`1.75 * gp_c * S / gp_k`,
-stored as `$info$gp_ell_min`); a warning is issued when more than 10% of
-the posterior mass falls below it, which is the signal that `gp_k`
-should be raised.
+stored as `$info$gp_ell_min`); when more than 10% of the posterior mass
+falls below it a WARN line is logged and the share is recorded as
+`$info$convergence_diagnostics$gp_lscale_below_resolution`, which is the
+signal that `gp_k` should be raised. This runs with the other checks, so
+only under `check_convergence = TRUE`.
 
 **Coordinate scaling and anisotropy.** Before fitting the GP, X and Y
 coordinates are each centred and divided by their own standard
@@ -300,16 +342,50 @@ strategy, and `$info$gp_iso` records which kernel was used.
 
 ## Non-Gaussian responses
 
-Nothing in this function is Gaussian-specific except its default. The
-response check is family-aware: a non-numeric response is refused only
-when the family resolves to gaussian, so a count, binary or bounded
-response passes straight through to brms under the family you name.
-Zero-inflated and hurdle counts, negative binomial, Bernoulli, beta and
-ordinal families have all been verified to reach
+Nothing in this function is Gaussian-specific except its default. A
+numeric count, binary (0/1 or logical) or bounded response passes
+straight through to brms under the family you name; zero-inflated and
+hurdle counts, negative binomial, Bernoulli, beta, ordinal, categorical
+and mixture families have all been verified to reach
 [`brms::brm()`](https://paulbuerkner.com/brms/reference/brm.html) with
-the GP term intact.
+the GP term intact, the length-scale prior attached to each
+distributional parameter's GP.
 
-Two things follow. First, the metrics that come back from
+The response check is family-aware. A factor or character response is
+accepted only under
+[`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+or an ordinal family (`cumulative`, `sratio`, `cratio`, `acat`), and
+refused under every other family before anything is compiled; under
+gaussian a logical response is refused too. The case to watch is a
+two-level factor under
+[`brms::bernoulli()`](https://paulbuerkner.com/brms/reference/brmsfamily.html):
+brms would fit it, but
+[`residuals()`](https://rdrr.io/r/stats/residuals.html),
+[`summary()`](https://rdrr.io/r/base/summary.html),
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+and
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+could not score a factor, so convert it to 0/1 first.
+
+An ordinal or categorical fit has a probability per response category,
+not one expected value per row.
+[`predict()`](https://rdrr.io/r/stats/predict.html) with its default
+`type = "epred"`,
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+[`residuals()`](https://rdrr.io/r/stats/residuals.html),
+[`summary()`](https://rdrr.io/r/base/summary.html) and
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+therefore stop with a message saying so, and
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+refuses the family before fitting anything.
+`predict(type = "predict", draws = TRUE)` returns the posterior
+predicted categories, as category indices, for new rows as well as the
+training ones (the share of draws in each category estimates its
+probability), and `brms::posterior_epred(fit$engine)` the probabilities
+for the training rows.
+
+For the numeric families two things follow. First, the metrics that come
+back from
 [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
 and the `cv_*()` functions are not all meaningful for such a response:
 RMSE and MAE are, MAPE, SMAPE and R-squared are Gaussian-shaped, and for
@@ -324,11 +400,11 @@ tracks its mean for a count; the range it reports is then less
 trustworthy than for a Gaussian response, and its help page says how.
 
 One trap. The response check reads the family's name through `brms`'s
-own accessor; a family object it cannot name is treated as "not
-gaussian" and the check is skipped entirely, without falling back to the
-gaussian rule. A malformed `family` therefore buys less validation, not
-more, and a wrong response type will surface as a Stan error, with no
-message from this function.
+own accessor; a family object it cannot name is treated as unknown and
+the check is skipped entirely, without falling back to either rule
+above. A malformed `family` therefore buys less validation, not more,
+and a wrong response type will surface as a Stan error, with no message
+from this function.
 
 ## Spatial confounding
 
@@ -345,7 +421,12 @@ is not. Which of the two a user wants depends on the question, so the
 honest diagnostic is to report both side by side and leave them
 unadjusted: fit the same formula with
 [`stats::lm()`](https://rdrr.io/r/stats/lm.html) or
-[`stats::glm()`](https://rdrr.io/r/stats/glm.html) and compare.
+[`stats::glm()`](https://rdrr.io/r/stats/glm.html) and compare. Compare
+like with like: under `standardize_predictors = TRUE` the coefficients
+here are per standard deviation of each predictor, so either fit the
+non-spatial model on the same standardised columns or divide these
+slopes by `$info$predictor_scaling[[name]]$scale` first (see
+[`coef.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md)).
 
 The literature on remedies is unsettled and this function takes no side.
 Restricted spatial regression (Hughes and Haran 2013) projects the

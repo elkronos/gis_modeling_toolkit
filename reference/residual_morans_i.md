@@ -75,8 +75,9 @@ residual_morans_i(
 
   :   Always the Cliff & Ord residual moments. Falls back to
       `"randomisation"` with a logged warning if the design cannot be
-      rebuilt, and warns (but proceeds) if the residuals are not the OLS
-      residuals on it, in which case the moments are approximate.
+      rebuilt, and logs a warning (but proceeds) if the residuals are
+      not the OLS residuals on it, in which case the moments are
+      approximate.
 
   Both `"auto"` and `"residual"` also fall back to `"randomisation"`
   when the residual degrees of freedom \\n - p\\ are below 4 (the
@@ -174,9 +175,19 @@ The list is classed `"morans_i"` and has a
 [`print()`](https://rdrr.io/r/base/print.html) method, so the console
 shows the statistic and its null without printing the \\n \times n\\
 `weights` matrix; `[` drops the class, and `$`, `[[` and
-[`unlist()`](https://rdrr.io/r/base/unlist.html) are unaffected. Returns
-`NULL` with a warning if computation fails (e.g. fewer than 4 valid
-residuals).
+[`unlist()`](https://rdrr.io/r/base/unlist.html) are unaffected. A
+custom fit whose class has no
+[`residuals()`](https://rdrr.io/r/stats/residuals.html) method (which
+[`new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+calls optional) is scored on the observed response minus
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html), as
+[`plot()`](https://rdrr.io/r/graphics/plot.default.html) does for it.
+Returns `NULL` with a warning if computation fails, saying why:
+[`residuals()`](https://rdrr.io/r/stats/residuals.html) raised an error
+(its message is quoted), or returned `NULL` and the response minus
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) could not be
+formed either (the reason is quoted), fewer than 4 valid residuals, or a
+residual vector whose length does not match the fit's `data_sf`.
 
 ## Details
 

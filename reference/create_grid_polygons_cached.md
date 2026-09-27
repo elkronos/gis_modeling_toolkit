@@ -10,7 +10,7 @@ instantly.
 ``` r
 create_grid_polygons_cached(
   boundary,
-  target_cells,
+  target_cells = NULL,
   type = c("square", "hex"),
   ...,
   cache_env = .gmt_cache,
@@ -26,7 +26,10 @@ create_grid_polygons_cached(
 
 - target_cells:
 
-  Approximate desired number of cells.
+  Approximate desired number of cells. Default `NULL`, as in
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+  so the grid can be sized by `cellsize` or `n` passed through `...`
+  instead.
 
 - type:
 

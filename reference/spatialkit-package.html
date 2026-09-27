@@ -148,17 +148,16 @@ the length-scale-to-domain ratio in
 <code>make_folds(method = "nndm")</code> and their <code>min_train = 0.5</code>:
 Mila et al. (2022).</p></li>
 <li><p>The area-of-applicability threshold as the outlier-removed maximum
-of the training dissimilarity, with importance weights applied directly,
-without taking their square root, matching the reference
-implementation: Meyer and Pebesma (2021).</p></li>
+of the training dissimilarity, as the paper defines it (the reference
+implementation, CAST, uses the outlier fence itself, which is larger
+whenever a training value lies above it), with importance weights
+applied directly, without taking their square root, as CAST does:
+Meyer and Pebesma (2021).</p></li>
 <li><p>The effective range of an exponential variogram as three times its
 range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code>.</p></li>
 <li><p>Cliff and Ord moments for the residual Moran's I in
 <code><a href="residual_morans_i.html">residual_morans_i()</a></code>, with <code>null = "auto"</code>.</p></li>
-<li><p>The small-sample rescaling applied with every data-derived design
-effect in <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>, whose derivation and measured
-coverage are on that help page.</p></li>
 </ul><p>Defaults that were chosen, and are defensible, but do not rest on a
 citation.  They are listed so that they are not mistaken for the first kind:</p><ul><li><p>The 25 k-means++ restarts per candidate level in the sweep of
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>: k-means++ seeding follows Arthur
@@ -183,6 +182,11 @@ and the figure sits in the gap.</p></li>
 length-scale in <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, which is this
 package's own operationalisation of a check the reference recommends,
 not a figure from the paper.</p></li>
+<li><p>The small-sample rescaling applied with every data-derived design
+effect in <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>: the package's own derivation from
+Kish's exchangeable-correlation model, not taken from a reference.
+The derivation and its measured coverage are in the section "Spatial
+autocorrelation and standard-error bias" of that help page.</p></li>
 </ul></div>
     <div class="section level2">
     <h2 id="where-to-start">Where to start<a class="anchor" aria-label="anchor" href="#where-to-start"></a></h2>

@@ -79,23 +79,33 @@ strategies.</p>
 
 <dt id="arg-tmp-project">tmp_project<a class="anchor" aria-label="anchor" href="#arg-tmp-project"></a></dt>
 <dd><p>Logical; temporarily project for line-based midpoints.
-When <code>x</code> has no CRS and its coordinates fall inside the lon/lat
-envelope, that temporary projection interprets them as EPSG:4326 (with a
-warning) and the midpoints returned are geodesic ones brought back to the
-input's numbers, not planar midpoints.  Set the CRS, or pass
-<code>tmp_project = FALSE</code>, for planar data.</p></dd>
+When <code>x</code> has no CRS and the lon/lat heuristic of
+<code><a href="ensure_projected.html">ensure_projected()</a></code> takes its coordinates for degrees
+(inside the lon/lat envelope and more than one unit across, or with
+decimal-degree precision), that temporary projection interprets them as
+EPSG:4326 (with a warning) and the midpoints returned are geodesic ones
+brought back to the input's numbers, not planar midpoints.  Set the CRS,
+or pass <code>tmp_project = FALSE</code>, for planar data.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>An sf object with geometry coerced to POINTs.</p>
+    <p>An sf object with geometry coerced to POINTs, row for row with
+<code>x</code>; an empty input geometry gives an empty POINT.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>LINESTRING midpoints are sampled with <code><a href="https://r-spatial.github.io/sf/reference/st_line_sample.html" class="external-link">sf::st_line_sample()</a></code>, which yields
-no point for an EMPTY LINESTRING.  Rather than silently misaligning the
-result (or letting sf crash), such input raises an error; drop empty
-geometries first with <code>x &lt;- x[!sf::st_is_empty(x), ]</code>.</p>
+    <p>The result has one row per row of <code>x</code>, in the same order.  An EMPTY
+geometry of any type, lines included, becomes an EMPTY POINT in its own
+row; <code><a href="prep_model_data.html">prep_model_data()</a></code> and <code><a href="make_folds.html">make_folds()</a></code> then drop such rows, as they
+drop any other empty geometry.  Empty lines are never handed to
+<code><a href="https://r-spatial.github.io/sf/reference/st_line_sample.html" class="external-link">sf::st_line_sample()</a></code>: it yields no midpoint for them, which would
+misalign the result, and with sf 1.0.x an empty MULTILINESTRING (or an
+empty part of one) crashed the R session.  An empty part inside a
+non-empty feature is ignored, so the feature gets the point its other
+parts give; GEOS's interior point, used by <code>"point_on_surface"</code> and by
+the temporary projection's choice of CRS, segfaulted on an empty line
+part too.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

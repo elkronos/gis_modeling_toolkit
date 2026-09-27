@@ -83,7 +83,9 @@ fit_rf_model(
   Fraction of rows drawn for each tree. `NULL` (default) uses ranger's
   rule: all rows when `replace = TRUE`, 0.632 (the expected share of
   distinct rows in a bootstrap sample) when `replace = FALSE`. A single
-  number in (0, 1\] overrides it.
+  number in (0, 1\] overrides it. `replace = FALSE` with
+  `sample_fraction = 1` grows every tree on every row, so nothing is out
+  of bag: the fit warns, and see **What fitted() returns**.
 
 - seed:
 
@@ -173,6 +175,21 @@ values are in-sample: do not compare the two directly.
 [`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 exists for that.
 
+A row that every tree sampled has no out-of-bag prediction, and ranger
+reports `NaN` for it. That is every row under `replace = FALSE` with
+`sample_fraction = 1`, and a few under a small `num_trees`. The fit
+warns with the count;
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) and
+[`residuals()`](https://rdrr.io/r/stats/residuals.html) are `NaN` on
+those rows, and [`summary()`](https://rdrr.io/r/base/summary.html) says
+how many rows its metrics were computed on. With no row out of bag at
+all, the OOB error (`NA` in `$info$oob_rmse` and `$info$oob_r_squared`)
+and the permutation importance (`NaN`) are undefined too, and
+[`print()`](https://rdrr.io/r/base/print.html) says so.
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+scores its fold forests on the held-out rows, never out of bag, so it
+warns once with the number of folds affected rather than once per fold.
+
 ## References
 
 Meyer, H., Reudenbach, C., Wöllauer, S. and Nauss, T. (2019). Importance
@@ -191,7 +208,9 @@ and a solution. *BMC Bioinformatics* 8, 25.
 [`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 for a spatially blocked performance estimate,
 [`area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
-which can take `weights = pmax(fit$info$importance, 0)`.
+which can take `weights = pmax(fit$info$importance, 0)` when that
+importance is finite (it is `NaN` when no row is out of bag; see "What
+fitted() returns").
 
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),

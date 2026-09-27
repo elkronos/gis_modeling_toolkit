@@ -3,11 +3,21 @@
 summarised beneath it when one is available.  A direction whose fit was
 unusable is labelled with why (directional_status) and the range
 its fit reported (directional_fitted) when the object carries
-them, and unidentified otherwise."><meta property="og:description" content="Prints the effective range as a plain number, with the directional fit
+them, and unidentified otherwise.  A last line names the unit and
+the CRS the range is a length in (attr(x, &quot;crs&quot;), which for
+lon/lat input is the projected CRS the estimate chose; for a layer with
+no CRS, it says the range is in that layer's own coordinate units), and
+whether the variogram is of the response or of its residuals on
+predictor_vars (detrended, detrend_method)."><meta property="og:description" content="Prints the effective range as a plain number, with the directional fit
 summarised beneath it when one is available.  A direction whose fit was
 unusable is labelled with why (directional_status) and the range
 its fit reported (directional_fitted) when the object carries
-them, and unidentified otherwise."></head><body>
+them, and unidentified otherwise.  A last line names the unit and
+the CRS the range is a length in (attr(x, &quot;crs&quot;), which for
+lon/lat input is the projected CRS the estimate chose; for a layer with
+no CRS, it says the range is in that layer's own coordinate units), and
+whether the variogram is of the response or of its residuals on
+predictor_vars (detrended, detrend_method)."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -60,7 +70,12 @@ them, and unidentified otherwise."></head><body>
 summarised beneath it when one is available.  A direction whose fit was
 unusable is labelled with why (<code>directional_status</code>) and the range
 its fit reported (<code>directional_fitted</code>) when the object carries
-them, and <code>unidentified</code> otherwise.</p>
+them, and <code>unidentified</code> otherwise.  A last line names the unit and
+the CRS the range is a length in (<code>attr(x, "crs")</code>, which for
+lon/lat input is the projected CRS the estimate chose; for a layer with
+no CRS, it says the range is in that layer's own coordinate units), and
+whether the variogram is of the response or of its residuals on
+<code>predictor_vars</code> (<code>detrended</code>, <code>detrend_method</code>).</p>
     </div>
 
     <div class="section level2">

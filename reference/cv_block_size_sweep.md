@@ -51,8 +51,11 @@ cv_block_size_sweep(
 - block_sizes:
 
   Optional numeric vector of block edge lengths to sweep, in the CRS
-  units the folds are built in. Default `NULL`: the ladder described
-  above.
+  units the folds are built in (plain numbers; a `units` object is
+  refused). Default `NULL`: the ladder described above. A size at which
+  the grid would hold fewer than `k` blocks is not run, with a warning
+  naming it and the largest size that still gives `k` blocks; if no size
+  is left, the call is an error.
 
 - n_sizes:
 
@@ -79,8 +82,13 @@ cv_block_size_sweep(
 
   Optional `sac_range` from
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  to mark on the curve. Default `NULL`: estimated here from the
-  response, detrended on `predictor_vars`, when gstat is installed.
+  to mark on the curve, or a single number in the units of the CRS the
+  folds are built in. An
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  result records the CRS it was fitted in; when that is not the sweep's,
+  the range is converted to the sweep's units, with a warning. Default
+  `NULL`: estimated here from the response, detrended on
+  `predictor_vars`, when gstat is installed.
 
 - seed:
 
@@ -105,8 +113,10 @@ cross-validation: `block_size` (`NA` for the random reference),
 `method`, `blocks_used`, `k` (the folds actually built),
 `n_folds_succeeded`, `value` (the pooled metric), `fold_min`, `fold_max`
 and `fold_sd` (its spread across folds). Attributes: `metric`,
-`sac_range` (the effective range, or `NA`), `crs`, `n_fits`, and
-`results`, the full
+`sac_range` (the effective range, or `NA`), `crs`, `k` (the folds
+requested, which [`print()`](https://rdrr.io/r/base/print.html) and
+[`plot()`](https://rdrr.io/r/graphics/plot.default.html) report),
+`n_fits`, `response_var`, and `results`, the full
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 result at every size.
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) draws it.
@@ -115,22 +125,40 @@ result at every size.
 
 Each block size is a full cross-validation, so the cost is
 `length(block_sizes) * k` fits, plus `k` for the random reference.
-`max_fits` caps that (default 60: six sizes at `k = 5`, plus the
-reference). A sweep that would run past the cap refuses to start, naming
-the number of fits it would have needed. Raise `max_fits` deliberately;
-the RF example below takes seconds, a Bayesian `fit_fn` takes minutes
-per fit.
+`max_fits` caps that (default 60: room for up to eleven sizes at `k = 5`
+plus the reference; the default six-size ladder at `k = 5` needs at most
+35). A sweep that would run past the cap refuses to start, naming the
+number of fits it would have needed. Raise `max_fits` deliberately; the
+RF example below takes seconds, a Bayesian `fit_fn` takes minutes per
+fit.
 
 ## The ladder
 
 When `block_sizes` is `NULL`, `n_sizes` values are log-spaced from a
-twenty-fifth to a half of the shorter side of the data's extent, and any
-size at which the grid would hold fewer than `k` blocks is dropped, so
-every point on the curve is a `k`-fold cross-validation of the same
-shape. Sizes are in the units of the CRS the folds are built in
+twenty-fifth of the shorter side of the data's extent (of the longer
+side when the points lie on one line parallel to an axis) to the largest
+size, at most half that side, at which the grid still holds `k` blocks.
+Half the side gives a grid two blocks across, enough for `k` up to 4
+and, for larger `k`, on an extent long enough in the other direction; on
+a roughly square extent at the default `k = 5` the top is about a third
+of the side. Any size at which the grid would hold more than the
+1,000,000
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+will build is dropped. The count is of grid cells: on clustered data a
+grid of `k` or more cells can have fewer than `k` that hold points, and
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+then lowers `k` at that size, which the `k` column shows. On an extent
+much longer than it is wide every rung can fall below the
+autocorrelation range while longer blocks would still fit `k` times
+along the longer side; the sweep warns when that happens, and
+`block_sizes` is then the way to reach past the range. Sizes are in the
+units of the CRS the folds are built in
 ([`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
 `params$crs`, metres for geographic input), and the returned table
-records that CRS.
+records that CRS. Each is the *minimum* block edge handed to
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+which fits a whole number of cells across the extent, so the cells are
+somewhat longer than the size on the axis (up to twice as long).
 
 ## See also
 

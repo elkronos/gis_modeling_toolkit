@@ -74,7 +74,7 @@ A simulated exponential field to run it on, with an effective range of
 
 set.seed(7)
 n  <- 400
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 xy$z <- as.numeric(t(chol(exp(-D / 60) + diag(1e-8, n))) %*% rnorm(n)) +
         rnorm(n, sd = 0.3)
@@ -180,11 +180,11 @@ output to the two numbers.
 
 When the variogram identifies no range,
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-returns `NA` with the reason attached, `auto_range` logs that it is
+returns `NA` with the reason attached, `auto_range` warns that it is
 falling back to geometric blocks, and you are back to choosing a size
 yourself. An `NA` there is a finding about the data.
 [`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-lists the five reasons and what each one means;
+lists the reasons and what each one means;
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the returned
 object draws the variogram that produced it.
 

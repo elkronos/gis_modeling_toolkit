@@ -37,41 +37,69 @@ assign_features_to_polygons(
 
 - predicate:
 
-  Binary spatial predicate function. Default sf::st_intersects.
+  Binary spatial predicate function. Default sf::st_intersects. Not used
+  when `largest` applies: sf then assigns polygon features by overlap
+  area and never calls the predicate.
 
 - largest:
 
   Logical; when `features_sf` is itself polygonal, keep the polygon with
   the largest overlap. Default TRUE. Ignored for point and line
-  features, and silently dropped if the `predicate` does not support it
-  ([`sf::st_intersects`](https://r-spatial.github.io/sf/reference/geos_binary_pred.html)
-  does).
+  features. A feature that only touches the polygon layer (shares an
+  edge or a corner with it, with no overlap area) has no largest overlap
+  and is unassigned, in any CRS; with `largest = FALSE` the default
+  `st_intersects` counts touching, so such a feature is assigned. A
+  feature that overlaps two or more polygons by exactly the same area
+  (to 9 significant digits; a square split evenly across a cell edge) is
+  given to one of them by `tie_break` and counted in `"ties"`, so the
+  choice does not depend on the order of the polygon rows. Invalid
+  geometries (usually a self-intersecting ring), whose overlap is
+  undefined, are repaired with
+  [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+  for the join, with a warning, and returned as they arrived. If the
+  overlap still cannot be computed the function stops: falling back to
+  `predicate` and `tie_break` would change the rule for every feature in
+  the layer, so pass `largest = FALSE` to ask for that.
 
 - tie_break:
 
-  Strategy for resolving features that match multiple polygons:
-  `"smallest_area"` (default) keeps the polygon with the smallest area,
-  `"first"` keeps the first match (original order-dependent behavior).
+  Strategy for resolving features that match multiple polygons (with
+  `largest`, that overlap several polygons equally): `"smallest_area"`
+  (default) keeps the polygon with the smallest area and, among polygons
+  of equal area (a point on the shared edge of two grid cells), the one
+  whose bounding-box centre is lowest, then leftmost, so the choice does
+  not depend on the order of the rows; `"first"` keeps the first match
+  (original order-dependent behavior).
 
 ## Value
 
 An sf object with `polygon_id_col` attached, one row per input feature
 (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in the CRS
-`features_sf` arrived in. Any column of `features_sf` whose name would
-collide with the polygon ID column is dropped before the spatial join
-(with a warning), so re-assigning an already-assigned layer replaces the
-old IDs and does not fail. If *no* feature falls inside any polygon the
-result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
-warning is raised, since the usual cause is two layers in different
-places (a CRS that could only be stamped, not reprojected). The
-attribute `"ties"` records how many features matched more than one
-polygon and had the `tie_break` rule decide for them: a list with `n`,
-`which` (their row positions in `features_sf`) and `rule`. A large `n`
-means the polygon layer overlaps, and per-cell counts built from the
-result depend on the rule. The record describes the rows this call
-returned and does not survive subsetting: `joined[i, ]` is a plain layer
-with no `"ties"` attribute, so nothing reports the parent's count
-against row positions that no longer resolve.
+`features_sf` arrived in. A column of `features_sf` already called
+`polygon_id_col` is dropped before the spatial join (with a warning), so
+re-assigning an already-assigned layer replaces the old IDs and does not
+fail. Every other column is kept, including one named like the polygons'
+own ID column when that is read from a fallback such as `"id"` (a site
+`id` joined to cells keyed by `id`). If *no* feature falls inside any
+polygon the result is empty (or all-`NA` with `keep_unassigned = TRUE`)
+and a warning is raised, since the usual cause is two layers in
+different places (a CRS that could only be stamped, not reprojected).
+The attribute `"ties"` records how many features matched more than one
+polygon (with `largest`, overlapped several by exactly the same area)
+and had the `tie_break` rule decide for them: a list with `n`, `which`
+(their row positions in `features_sf`), `rule` and `n_rows` (the number
+of rows returned, which the record was made for). A large `n` means the
+polygon layer overlaps, and per-cell counts built from the result depend
+on the rule. The record describes the rows this call returned and does
+not survive subsetting: `joined[i, ]`, like
+[`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
+`slice()` or `arrange()` of it, is a plain layer with no `"ties"`
+attribute, so nothing reports the parent's count for a different set of
+rows.
+[`sf::st_drop_geometry()`](https://r-spatial.github.io/sf/reference/st_geometry.html)
+keeps the record, since the rows are the same; see
+[`[.spatialkit_rows`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
+for what binding such data frames does.
 
 ## Details
 
@@ -84,6 +112,13 @@ when the join has to be *unambiguous*. It resolves features matching
 several polygons by an explicit `tie_break` rule instead of silently
 duplicating rows, so the assigned layer keeps one row per input feature
 and cell-level counts mean what they say.
+
+The join runs in the CRS of `polygons_sf` whenever that CRS is
+projected, so cell edges are the straight lines the cells were drawn
+with and overlap areas are planar. A copy of `features_sf` is
+transformed for it, and the features come back with the coordinates they
+arrived with. Otherwise (the polygons are in lon/lat, or carry no CRS)
+the join runs in the CRS of `features_sf`.
 
 ## See also
 

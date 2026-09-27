@@ -24,7 +24,7 @@ plot_tessellation_map(
   boundary_col = "#111111",
   boundary_size = 0.6,
   labels = FALSE,
-  label_col = "grid_id",
+  label_col = NULL,
   label_size = 2.7,
   legend = TRUE,
   legend_title = NULL,
@@ -60,8 +60,12 @@ plot_tessellation_map(
 - fill_col:
 
   Name of the COLUMN in `tessellation_sf` to map to fill; `NULL` for no
-  fill. `fill_col` and `label_col` name columns, while `outline_col`,
-  `features_col`, `seeds_col` and `boundary_col` are colours.
+  fill. A numeric column gets a continuous scale, as does a Date or
+  POSIXct column (on a date or time axis) and a `units` or `difftime`
+  column (drawn as numbers, with the unit in the legend title); anything
+  else a discrete one. `fill_col` and `label_col` name columns, while
+  `outline_col`, `features_col`, `seeds_col` and `boundary_col` are
+  colours.
 
 - palette:
 
@@ -97,7 +101,14 @@ plot_tessellation_map(
 
 - label_col:
 
-  Name of the COLUMN holding the label text. Default `"grid_id"`.
+  Name of the COLUMN holding the label text. Default `NULL`: the first
+  of `"grid_id"`, `"cell_id"`, `"poly_id"`, `"polygon_id"` and `"id"`
+  the layer has, so the cells of
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  (`cell_id`) and the output of
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  (`poly_id`) are labelled without naming one. A `units` or `difftime`
+  column is drawn formatted, with its unit.
 
 - label_size:
 

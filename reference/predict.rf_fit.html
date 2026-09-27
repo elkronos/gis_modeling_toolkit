@@ -90,7 +90,11 @@ as 0/1, so either form is accepted for one.)</p></dd>
 <code>type = "quantiles"</code>, <code>type = "se"</code> with <code>predict.all</code>)
 are rejected, because this method's contract is one number per row of
 <code>newdata</code>. Call <code>predict(fit$engine, data = ...)</code> directly for
-those. <code>seed</code> defaults to a constant: an unset <code>seed</code> makes
+those.  So is anything <code>ranger</code>'s predict method itself refuses,
+such as <code>type = "quantiles"</code> on a forest grown without
+<code>quantreg = TRUE</code> or <code>type = "se"</code> without
+<code>keep.inbag = TRUE</code>: the error names ranger's reason.
+<code>seed</code> defaults to a constant: an unset <code>seed</code> makes
 <code>ranger</code> draw one uniform from the global RNG stream per call, so the
 number of <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> calls a script happens to make (via
 <code><a href="predict_surface.html">predict_surface</a></code>'s <code>chunk_size</code>, say) would otherwise
@@ -101,7 +105,9 @@ predictions; pass your own if you need one.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>Numeric vector, aligned to <code>nrow(newdata)</code> with <code>NA</code> for
-rows dropped as incomplete.</p>
+rows dropped as incomplete (so all <code>NA</code>, with a WARN line in the
+log, when every row is).  A failure inside <code>ranger</code>'s predict
+method is an error, not an all-<code>NA</code> vector.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

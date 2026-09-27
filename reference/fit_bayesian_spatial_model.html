@@ -127,9 +127,11 @@ as <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class
 <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::hurdle_poisson()</a></code>, <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::bernoulli()</a></code> or
 <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::Beta()</a></code>.  Default <code>NULL</code>, resolved to
 <code><a href="https://rdrr.io/r/stats/family.html" class="external-link">stats::gaussian()</a></code>.  The family reaches <code><a href="https://paulbuerkner.com/brms/reference/brm.html" class="external-link">brms::brm()</a></code>
-unchanged with the spatial GP term still in the formula, so any response
-type brms can fit, this function can fit; see the section on
-non-Gaussian responses and the count example below.</p></dd>
+unchanged with the spatial GP term still in the formula.  A factor
+response is accepted only under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code> or an ordinal
+family, and those fits have no single expected value per row, so several
+methods cannot use them; see the section on non-Gaussian responses for
+what each family supports, and the count example below.</p></dd>
 
 
 <dt id="arg-gp-k">gp_k<a class="anchor" aria-label="anchor" href="#arg-gp-k"></a></dt>
@@ -144,7 +146,11 @@ length-scale/domain ratio.  The fitted model carries
 NULL (default) to derive it alongside <code>gp_k</code>.  The boundary must be
 wide enough to contain the longest plausible correlation range; a value
 that is too small truncates the domain and degrades the approximation for
-smooth, long-range surfaces.</p></dd>
+smooth, long-range surfaces.  When you set <code>gp_c</code> and leave
+<code>gp_k = NULL</code>, <code>gp_k</code> is derived for <em>your</em> boundary: a
+wider boundary needs more basis functions to resolve the same
+length-scale, so raising <code>gp_c</code> raises the derived <code>gp_k</code> with
+it, up to the cap of 50 per dimension (a capped value is logged).</p></dd>
 
 
 <dt id="arg-gp-iso">gp_iso<a class="anchor" aria-label="anchor" href="#arg-gp-iso"></a></dt>
@@ -215,12 +221,36 @@ exactly the setting the divergence warning tells you to raise.</p></dd>
 <dt id="arg-standardize-predictors">standardize_predictors<a class="anchor" aria-label="anchor" href="#arg-standardize-predictors"></a></dt>
 <dd><p>Logical; center and scale numeric predictors
 before fitting. Default FALSE. When TRUE, the scaling parameters are
-stored in the return value so predictions can be computed correctly.</p></dd>
+stored in the return value (<code>$info$predictor_scaling</code>, a
+<code>center</code> and <code>scale</code> per predictor) so predictions can be
+computed correctly.  The model is then fitted on the standardised
+predictors, so <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> reports a slope per standard deviation of
+each predictor and an intercept at the predictor means, not the raw-unit
+values <code><a href="https://rdrr.io/r/stats/lm.html" class="external-link">stats::lm()</a></code> would give; see <code><a href="coef.bayesian_fit.html">coef.bayesian_fit</a></code>.</p></dd>
 
 
 <dt id="arg-check-convergence">check_convergence<a class="anchor" aria-label="anchor" href="#arg-check-convergence"></a></dt>
-<dd><p>Logical; after fitting, check for divergences,
-low ESS, and high R-hat and issue warnings. Default TRUE.</p></dd>
+<dd><p>Logical; after fitting, check for divergent
+transitions, R-hat above 1.05 and an effective-sample-size ratio below
+0.1.  Each problem found is written to the log as a WARN line (shown on
+the console unless <code><a href="spatialkit_quiet.html">spatialkit_quiet()</a></code> is on), sets
+<code>$info$convergence_ok</code> to <code>FALSE</code>, and is detailed in
+<code>$info$convergence_diagnostics</code>; <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> on the fit flags it.
+The GP basis is also checked against the posterior length-scale (see
+Details): a basis too coarse for it is logged as a WARN line, and the
+share of draws it cannot resolve is recorded as
+<code>$info$convergence_diagnostics$gp_lscale_below_resolution</code>, but it
+does not change <code>convergence_ok</code> and <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> does not flag
+it.  None of these are raised as R warnings by the fit itself; the
+functions that score fits do raise one: <code><a href="cv_bayes.html">cv_bayes()</a></code> names
+the folds whose sampler did not converge (and marks them in
+<code>fold_metrics$convergence_ok</code>), and
+<code><a href="compare_models.html">compare_models()</a></code> names such a model (column
+<code>convergence_ok</code>).  Under <span class="pkg">rstan</span> the sampler raises its own
+R-hat and ESS warnings; under <span class="pkg">cmdstanr</span> nothing does, so read
+<code>$info$convergence_ok</code>.  <code>FALSE</code> skips
+the checks and leaves <code>convergence_ok</code> <code>NA</code> (not checked).
+Default TRUE.</p></dd>
 
 
 <dt id="arg-pointize">pointize<a class="anchor" aria-label="anchor" href="#arg-pointize"></a></dt>
@@ -249,14 +279,18 @@ Model-specific metadata lives in <code>$info</code> (coords: the names of the
 scaled coordinate columns handed to <code><a href="https://paulbuerkner.com/brms/reference/gp.html" class="external-link">brms::gp()</a></code>; coord_scaling,
 predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
 gp_S: the pooled centred range <code>brms::gp(c = )</code> multiplies;
+gp_cmeans: the column means brms centred the scaled coordinates on;
 gp_xy_range: the training extrema of the scaled coordinates, which
-<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> uses to pin the GP boundary;
+<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> uses, with gp_S and gp_cmeans, to hold the GP boundary
+at its fitted value;
 gp_lengthscale_bounds: the <code>c(lower, upper)</code> the length-scale prior
 was calibrated over; gp_lscale_prior: the length-scale prior
 <code><a href="https://paulbuerkner.com/brms/reference/validate_prior.html" class="external-link">brms::validate_prior()</a></code> reports the model will <em>actually</em> use,
 which is not necessarily the one this function requested (several entries,
 semicolon-separated, if brms resolved the axes differently); loo, looic,
-convergence_ok, convergence_diagnostics: <code>n_divergent</code>,
+convergence_ok (<code>TRUE</code> or <code>FALSE</code>, and <code>NA</code> when nothing
+was checked, as under <code>check_convergence = FALSE</code>),
+convergence_diagnostics: <code>n_divergent</code>,
 <code>max_rhat</code>, <code>min_neff_ratio</code>, and <code>rhat_failed</code> /
 <code>neff_failed</code>, the parameters that failed each check by name with
 their values (empty when none failed), which is what makes a failed
@@ -307,9 +341,12 @@ adequacy check below are all expressed in those standardised units, a second
 normalisation would leave every length-scale quantity in the wrong units.</p>
 <p>After fitting, the posterior length-scale is compared against the smallest
 scale the chosen basis can resolve
-(<code>1.75 * gp_c * S / gp_k</code>, stored as <code>$info$gp_ell_min</code>); a
-warning is issued when more than 10% of the posterior mass falls below it,
-which is the signal that <code>gp_k</code> should be raised.</p>
+(<code>1.75 * gp_c * S / gp_k</code>, stored as <code>$info$gp_ell_min</code>); when
+more than 10% of the posterior mass falls below it a WARN line is logged
+and the share is recorded as
+<code>$info$convergence_diagnostics$gp_lscale_below_resolution</code>, which is
+the signal that <code>gp_k</code> should be raised.  This runs with the other
+checks, so only under <code>check_convergence = TRUE</code>.</p>
 <p><strong>Coordinate scaling and anisotropy.</strong>
 Before fitting the GP, X and Y coordinates are each centred and divided by
 their own standard deviation.  This is a conditioning step: easting and
@@ -334,15 +371,35 @@ strategy, and <code>$info$gp_iso</code> records which kernel was used.</p>
     <h2 id="non-gaussian-responses">Non-Gaussian responses<a class="anchor" aria-label="anchor" href="#non-gaussian-responses"></a></h2>
 
 
-<p>Nothing in this function is Gaussian-specific except its default.  The
-response check is family-aware: a non-numeric response is refused only when
-the family resolves to gaussian, so a count, binary or bounded response
-passes straight through to brms under the family you name.  Zero-inflated
-and hurdle counts, negative binomial, Bernoulli, beta and ordinal families
-have all been verified to reach <code><a href="https://paulbuerkner.com/brms/reference/brm.html" class="external-link">brms::brm()</a></code> with the GP term intact.</p>
-<p>Two things follow.  First, the metrics that come back from
-<code><a href="model_metrics.html">model_metrics()</a></code> and the <code>cv_*()</code> functions are not all
-meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
+<p>Nothing in this function is Gaussian-specific except its default.  A
+numeric count, binary (0/1 or logical) or bounded response passes straight
+through to brms under the family you name; zero-inflated and hurdle
+counts, negative binomial, Bernoulli, beta, ordinal, categorical and
+mixture families have all been verified to reach <code><a href="https://paulbuerkner.com/brms/reference/brm.html" class="external-link">brms::brm()</a></code> with
+the GP term intact, the length-scale prior attached to each
+distributional parameter's GP.</p>
+<p>The response check is family-aware.  A factor or character response is
+accepted only under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code> or an ordinal family
+(<code>cumulative</code>, <code>sratio</code>, <code>cratio</code>, <code>acat</code>), and refused
+under every other family before anything is compiled; under gaussian a
+logical response is refused too.  The case to watch is a two-level factor
+under <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::bernoulli()</a></code>: brms would fit it, but
+<code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>, <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="model_metrics.html">model_metrics()</a></code> and
+<code><a href="cv_bayes.html">cv_bayes()</a></code> could not score a factor, so convert it to 0/1
+first.</p>
+<p>An ordinal or categorical fit has a probability per response category, not
+one expected value per row.  <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> with its default
+<code>type = "epred"</code>, <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code>, <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>,
+<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> and <code><a href="model_metrics.html">model_metrics()</a></code> therefore stop with a message
+saying so, and <code><a href="cv_bayes.html">cv_bayes()</a></code> refuses the family before fitting
+anything.  <code>predict(type = "predict", draws = TRUE)</code> returns the
+posterior predicted categories, as category indices, for new rows as well
+as the training ones (the share of draws in each category estimates its
+probability), and <code>brms::posterior_epred(fit$engine)</code> the
+probabilities for the training rows.</p>
+<p>For the numeric families two things follow.  First, the metrics that come
+back from <code><a href="model_metrics.html">model_metrics()</a></code> and the <code>cv_*()</code> functions are
+not all meaningful for such a response: RMSE and MAE are, MAPE, SMAPE and R-squared
 are Gaussian-shaped, and for this backend <code><a href="cv_bayes.html">cv_bayes()</a></code>'s CRPS
 and interval coverage are the proper scores to read.  See
 <code><a href="model_metrics.html">model_metrics()</a></code>, section "Which metrics survive a
@@ -352,10 +409,10 @@ its mean for a count; the range it reports is then less trustworthy than
 for a Gaussian response, and its help page says how.</p>
 <p>One trap.  The response check reads the family's name through
 <code>brms</code>'s own accessor; a family object it cannot name is treated as
-"not gaussian" and the check is skipped entirely, without falling back
-to the gaussian rule.  A malformed <code>family</code> therefore buys less
-validation, not more, and a wrong response type will surface as a Stan
-error, with no message from this function.</p>
+unknown and the check is skipped entirely, without falling back to either
+rule above.  A malformed <code>family</code> therefore buys less validation, not
+more, and a wrong response type will surface as a Stan error, with no
+message from this function.</p>
     </div>
     <div class="section level2">
     <h2 id="spatial-confounding">Spatial confounding<a class="anchor" aria-label="anchor" href="#spatial-confounding"></a></h2>
@@ -372,7 +429,12 @@ Ver Hoef 2022): the spatial coefficient is the effect <em>net of</em> whatever
 the spatial field can explain, and the non-spatial one is not.  Which of the
 two a user wants depends on the question, so the honest diagnostic is to
 report both side by side and leave them unadjusted: fit the same formula
-with <code><a href="https://rdrr.io/r/stats/lm.html" class="external-link">stats::lm()</a></code> or <code><a href="https://rdrr.io/r/stats/glm.html" class="external-link">stats::glm()</a></code> and compare.</p>
+with <code><a href="https://rdrr.io/r/stats/lm.html" class="external-link">stats::lm()</a></code> or <code><a href="https://rdrr.io/r/stats/glm.html" class="external-link">stats::glm()</a></code> and compare.  Compare like
+with like: under <code>standardize_predictors = TRUE</code> the coefficients here
+are per standard deviation of each predictor, so either fit the
+non-spatial model on the same standardised columns or divide these slopes
+by <code>$info$predictor_scaling[[name]]$scale</code> first (see
+<code><a href="coef.bayesian_fit.html">coef.bayesian_fit</a></code>).</p>
 <p>The literature on remedies is unsettled and this function takes no side.
 Restricted spatial regression (Hughes and Haran 2013) projects the spatial
 effect off the covariate space; later work argues it does not deliver what

@@ -118,8 +118,11 @@ built-in backend.</p></dd>
 
 <dt id="arg-block-sizes">block_sizes<a class="anchor" aria-label="anchor" href="#arg-block-sizes"></a></dt>
 <dd><p>Optional numeric vector of block edge lengths to sweep,
-in the CRS units the folds are built in.  Default <code>NULL</code>: the ladder
-described above.</p></dd>
+in the CRS units the folds are built in (plain numbers; a <code>units</code>
+object is refused).  Default <code>NULL</code>: the ladder described above.
+A size at which the grid would hold fewer than <code>k</code> blocks is not
+run, with a warning naming it and the largest size that still gives
+<code>k</code> blocks; if no size is left, the call is an error.</p></dd>
 
 
 <dt id="arg-n-sizes">n_sizes<a class="anchor" aria-label="anchor" href="#arg-n-sizes"></a></dt>
@@ -146,9 +149,12 @@ reference.  Default <code>TRUE</code>.</p></dd>
 
 <dt id="arg-sac">sac<a class="anchor" aria-label="anchor" href="#arg-sac"></a></dt>
 <dd><p>Optional <code>sac_range</code> from <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code>
-to mark on the curve.  Default <code>NULL</code>: estimated here from the
-response, detrended on <code>predictor_vars</code>, when <span class="pkg">gstat</span> is
-installed.</p></dd>
+to mark on the curve, or a single number in the units of the CRS the
+folds are built in.  An <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> result records the
+CRS it was fitted in; when that is not the sweep's, the range is
+converted to the sweep's units, with a warning.  Default <code>NULL</code>:
+estimated here from the response, detrended on <code>predictor_vars</code>,
+when <span class="pkg">gstat</span> is installed.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -174,8 +180,10 @@ reference), <code>method</code>, <code>blocks_used</code>, <code>k</code> (the f
 actually built), <code>n_folds_succeeded</code>, <code>value</code> (the pooled
 metric), <code>fold_min</code>, <code>fold_max</code> and <code>fold_sd</code> (its spread
 across folds).  Attributes: <code>metric</code>, <code>sac_range</code> (the
-effective range, or <code>NA</code>), <code>crs</code>, <code>n_fits</code>, and
-<code>results</code>, the full <code><a href="cv_spatial.html">cv_spatial()</a></code> result at every size.
+effective range, or <code>NA</code>), <code>crs</code>, <code>k</code> (the folds
+requested, which <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> report),
+<code>n_fits</code>, <code>response_var</code>, and <code>results</code>, the full
+<code><a href="cv_spatial.html">cv_spatial()</a></code> result at every size.
 <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> draws it.</p>
     </div>
     <div class="section level2">
@@ -184,8 +192,9 @@ effective range, or <code>NA</code>), <code>crs</code>, <code>n_fits</code>, and
 
 <p>Each block size is a full cross-validation, so the cost is
 <code>length(block_sizes) * k</code> fits, plus <code>k</code> for the random
-reference.  <code>max_fits</code> caps that (default 60: six sizes at
-<code>k = 5</code>, plus the reference).  A sweep that would run past the cap
+reference.  <code>max_fits</code> caps that (default 60: room for up to eleven
+sizes at <code>k = 5</code> plus the reference; the default six-size ladder at
+<code>k = 5</code> needs at most 35).  A sweep that would run past the cap
 refuses to start, naming the number of fits it would have needed.  Raise
 <code>max_fits</code> deliberately; the RF example below takes seconds, a Bayesian
 <code>fit_fn</code> takes minutes per fit.</p>
@@ -195,12 +204,27 @@ refuses to start, naming the number of fits it would have needed.  Raise
 
 
 <p>When <code>block_sizes</code> is <code>NULL</code>, <code>n_sizes</code> values are
-log-spaced from a twenty-fifth to a half of the shorter side of the
-data's extent, and any size at which the grid would hold fewer than
-<code>k</code> blocks is dropped, so every point on the curve is a <code>k</code>-fold
-cross-validation of the same shape.  Sizes are in the units of the CRS the
-folds are built in (<code><a href="make_folds.html">make_folds()</a></code>'s <code>params$crs</code>, metres for
-geographic input), and the returned table records that CRS.</p>
+log-spaced from a twenty-fifth of the shorter side of the data's extent
+(of the longer side when the points lie on one line parallel to an axis)
+to the largest size, at most half that side, at which the grid still
+holds <code>k</code> blocks.  Half the side gives a grid two blocks across,
+enough for <code>k</code> up to 4 and, for larger <code>k</code>, on an extent long
+enough in the other direction; on a roughly square extent at the default
+<code>k = 5</code> the top is about a third of the side.  Any size at which the
+grid would hold more than the 1,000,000 <code><a href="make_folds.html">make_folds()</a></code> will build is
+dropped.  The count is of grid cells: on clustered data a grid
+of <code>k</code> or more cells can have fewer than <code>k</code> that hold points,
+and <code><a href="make_folds.html">make_folds()</a></code> then lowers <code>k</code> at that size, which the
+<code>k</code> column shows.  On an extent much longer than it is wide every
+rung can fall below the autocorrelation range while longer blocks would
+still fit <code>k</code> times along the longer side; the sweep warns when
+that happens, and <code>block_sizes</code> is then the way to reach past the
+range.  Sizes are in the units of the CRS the folds are built in
+(<code><a href="make_folds.html">make_folds()</a></code>'s <code>params$crs</code>, metres for geographic input),
+and the returned table records that CRS.  Each is the <em>minimum</em> block
+edge handed to <code><a href="make_folds.html">make_folds()</a></code>, which fits a whole number of cells
+across the extent, so the cells are somewhat longer than the size on the
+axis (up to twice as long).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

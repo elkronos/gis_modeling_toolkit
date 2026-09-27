@@ -156,9 +156,11 @@ function named:
   (2022).
 
 - The area-of-applicability threshold as the outlier-removed maximum of
-  the training dissimilarity, with importance weights applied directly,
-  without taking their square root, matching the reference
-  implementation: Meyer and Pebesma (2021).
+  the training dissimilarity, as the paper defines it (the reference
+  implementation, CAST, uses the outlier fence itself, which is larger
+  whenever a training value lies above it), with importance weights
+  applied directly, without taking their square root, as CAST does:
+  Meyer and Pebesma (2021).
 
 - The effective range of an exponential variogram as three times its
   range parameter, and the identifiability guard against ranges beyond
@@ -168,11 +170,6 @@ function named:
 - Cliff and Ord moments for the residual Moran's I in
   [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md),
   with `null = "auto"`.
-
-- The small-sample rescaling applied with every data-derived design
-  effect in
-  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md),
-  whose derivation and measured coverage are on that help page.
 
 Defaults that were chosen, and are defensible, but do not rest on a
 citation. They are listed so that they are not mistaken for the first
@@ -212,6 +209,14 @@ kind:
   [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
   which is this package's own operationalisation of a check the
   reference recommends, not a figure from the paper.
+
+- The small-sample rescaling applied with every data-derived design
+  effect in
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md):
+  the package's own derivation from Kish's exchangeable-correlation
+  model, not taken from a reference. The derivation and its measured
+  coverage are in the section "Spatial autocorrelation and
+  standard-error bias" of that help page.
 
 ## Where to start
 

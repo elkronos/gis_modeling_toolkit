@@ -1,10 +1,16 @@
 # Predict from a GWR spatial model
 
 When `newdata` is NULL, returns the in-sample fitted values. Otherwise
-uses
+estimates the local coefficients at each new location with
+`GWmodel::gwr.basic(regression.points = )`, with the fit's kernel and
+bandwidth (an adaptive bandwidth counts neighbours among the training
+points), and returns \\x^\top\hat\beta(u)\\. These are the values
 [`GWmodel::gwr.predict()`](https://rdrr.io/pkg/GWmodel/man/gwr.predict.html)
-on the new locations. `newdata` is first transformed to the CRS used
-during fitting (via
+returns, without its prediction variance, which this method never
+returned and which costs time cubic in the number of training points.
+Each location stands alone: one that cannot be estimated does not affect
+the others. `newdata` is first transformed to the CRS used during
+fitting (via
 [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)),
 so predictions are computed in a single coordinate system regardless of
 the CRS newdata arrives in.
@@ -35,11 +41,12 @@ predict(object, newdata = NULL, ...)
 ## Value
 
 Numeric vector aligned to `nrow(newdata)`, with `NA` for rows dropped as
-missing or non-finite. If
-[`GWmodel::gwr.predict()`](https://rdrr.io/pkg/GWmodel/man/gwr.predict.html)
-fails, every value is `NA` and a warning says why. CRS-less `newdata`
-first receives the interpretation the training data got, so the same
-rows land where they did at fit time.
+missing or non-finite, and for locations whose local regression cannot
+be estimated (too few training points within a fixed bandwidth, or a
+singular local design); a warning counts those. If the design matrix for
+`newdata` cannot be built, every value is `NA` and a warning says why.
+CRS-less `newdata` first receives the interpretation the training data
+got, so the same rows land where they did at fit time.
 
 ## See also
 

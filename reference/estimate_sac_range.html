@@ -3,17 +3,37 @@
 effective range: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 % of the
 sill; for the spherical model (fitted only when the exponential fit is
-singular) the fitted range itself, which is where the spherical
-semivariance reaches its sill exactly.  Both are the distance beyond which
-two observations are (near) uncorrelated, which is what a block or a
-buffer has to exceed."><meta property="og:description" content="Fits exponential (or spherical) variogram models and returns the
+singular or does not converge) the fitted range itself, which is where the
+spherical semivariance reaches its sill exactly.  Both are the distance
+beyond which two observations are (near) uncorrelated, which is what a
+block or a buffer has to exceed.
+The exponential model is kept whenever it converges, without comparing it
+with the spherical fit, and on fields smoother than exponential that makes
+the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+30 draws each): about 1.8–2.1 times the practical range of a Gaussian
+covariance, and 1.3–1.4 times the range of a spherical one, while an
+exponential field came back at 0.97 of its effective range.  The error is
+on the safe side (blocks too large, cross-validation pessimistic), and it
+is kept on purpose: choosing the family by the smaller weighted sum of
+squares corrects the spherical case but sends exponential fields low, to
+about 0.82 of the truth, which is the direction that leaks."><meta property="og:description" content="Fits exponential (or spherical) variogram models and returns the
 effective range: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 % of the
 sill; for the spherical model (fitted only when the exponential fit is
-singular) the fitted range itself, which is where the spherical
-semivariance reaches its sill exactly.  Both are the distance beyond which
-two observations are (near) uncorrelated, which is what a block or a
-buffer has to exceed."></head><body>
+singular or does not converge) the fitted range itself, which is where the
+spherical semivariance reaches its sill exactly.  Both are the distance
+beyond which two observations are (near) uncorrelated, which is what a
+block or a buffer has to exceed.
+The exponential model is kept whenever it converges, without comparing it
+with the spherical fit, and on fields smoother than exponential that makes
+the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+30 draws each): about 1.8–2.1 times the practical range of a Gaussian
+covariance, and 1.3–1.4 times the range of a spherical one, while an
+exponential field came back at 0.97 of its effective range.  The error is
+on the safe side (blocks too large, cross-validation pessimistic), and it
+is kept on purpose: choosing the family by the smaller weighted sum of
+squares corrects the spherical case but sends exponential fields low, to
+about 0.82 of the truth, which is the direction that leaks."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -66,10 +86,20 @@ buffer has to exceed."></head><body>
 <em>effective range</em>: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 % of the
 sill; for the spherical model (fitted only when the exponential fit is
-singular) the fitted range itself, which is where the spherical
-semivariance reaches its sill exactly.  Both are the distance beyond which
-two observations are (near) uncorrelated, which is what a block or a
-buffer has to exceed.</p>
+singular or does not converge) the fitted range itself, which is where the
+spherical semivariance reaches its sill exactly.  Both are the distance
+beyond which two observations are (near) uncorrelated, which is what a
+block or a buffer has to exceed.</p>
+<p>The exponential model is kept whenever it converges, without comparing it
+with the spherical fit, and on fields smoother than exponential that makes
+the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+30 draws each): about 1.8–2.1 times the practical range of a Gaussian
+covariance, and 1.3–1.4 times the range of a spherical one, while an
+exponential field came back at 0.97 of its effective range.  The error is
+on the safe side (blocks too large, cross-validation pessimistic), and it
+is kept on purpose: choosing the family by the smaller weighted sum of
+squares corrects the spherical case but sends exponential fields low, to
+about 0.82 of the truth, which is the direction that leaks.</p>
     </div>
 
     <div class="section level2">
@@ -115,7 +145,9 @@ trend on these predictors is removed first and the variogram describes
 the residual autocorrelation, the part a spatial model has to handle
 once the covariates have done their work.  How the trend is removed is
 set by <code>detrend</code>, and it matters: see "Detrending and the
-residual-variogram bias".</p></dd>
+residual-variogram bias".  Rows whose response or predictor is missing
+or infinite are left out of that fit, and so of the variogram, with a
+logged count.</p></dd>
 
 
 <dt id="arg-n-max">n_max<a class="anchor" aria-label="anchor" href="#arg-n-max"></a></dt>
@@ -140,7 +172,17 @@ variogram never reaches a sill, and such a value extrapolates past the
 observed lags instead of measuring a long autocorrelation range.  Passing
 it to <code>make_folds(auto_range = TRUE)</code> would collapse the block grid to
 a single block.  Default 1.0; raise it to accept ranges extrapolated
-beyond the fitted lags.</p></dd>
+beyond the fitted lags.  The bound does not guarantee room for two
+blocks: at the defaults it is half the farthest-pair distance, about
+0.71 of the side of a square layer, and a block grid needs a range below
+half the width of the bounding box in one direction or the other.  An
+accepted range between the two leaves
+<code>make_folds(auto_range = TRUE)</code> room for a single block of that
+size (see its <code>auto_range</code> argument for what it does then).  On a
+1000 m square with an exponential field of effective range 570 (n = 300),
+9 of 30 draws were accepted in that band.  Lowering <code>range_frac</code> to fit the
+grid would turn those estimates into <code>NA</code> and the blocks into
+geometric ones smaller than the range.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -192,15 +234,16 @@ attribute.  Set <code>TRUE</code> to inspect the directional curves.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A single number, of class <code>sac_range</code> in the first two of the
-three shapes below and a bare <code>NA</code> in the third; all three behave
-as an ordinary number.  The shapes carry different attributes:</p><dl><dt>Success</dt>
+three shapes below and an unclassed <code>NA</code> in the third; all three
+behave as an ordinary number.  The shapes carry different attributes:</p><dl><dt>Success</dt>
 <dd><p>A positive effective range in projected coordinate units,
 with the fit attached as attributes <code>directional</code> (the 0°, 45°,
 90° and 135° ranges, named by azimuth; <code>NA</code> where that
 direction's fit was unusable), <code>anisotropy</code> (largest
 over smallest), <code>anisotropy_used</code> (logical: <code>TRUE</code> only when
-the all-pairs fit was unusable and the directional maximum stands in
-for it), <code>directional_status</code> (per azimuth, why a direction is
+the all-pairs fit was singular or did not converge and the
+directional maximum stands in for it), <code>directional_status</code>
+(per azimuth, why a direction is
 <code>NA</code> in <code>directional</code>: <code>"ok"</code>, <code>"over_cutoff"</code>
 (its range ran past the largest lag fitted), <code>"not_converged"</code>
 or <code>"no_fit"</code>), <code>directional_fitted</code> (the range each
@@ -230,27 +273,47 @@ be taken on trust.</p></dd>
 <dt>Rejected range</dt>
 <dd><p><code>NA_real_</code> when a range was fitted but is
 not identified: it exceeds <code>range_frac * cutoff * max_dist</code> (see
-<code>range_frac</code>); or the model did not converge; or the empirical
+<code>range_frac</code>), which applies to the all-pairs fit even when some
+directions reached a sill; or too few pairs of points lie inside
+it to identify it, because it is shorter than the shortest lag the
+empirical variogram resolves (the mean separation in its first
+bin) or, with <code>detrend = "reml"</code>, than the distance within
+which 30 pairs of the points the REML fit used lie, when that is
+shorter (the REML range is fitted to the point pairs, not to the
+bins).  A structure that short cannot be told from a nugget, and
+the bound is about identification, not a test for spatial
+structure (see above).  Or the
+model did not converge; or the empirical
 variogram <em>decreases</em> with distance over its shorter lags (a
 net fall of more than 15 percent of the mean semivariance there,
 weighted by pairs), which is the shape of a periodic, hole-effect
 structure or of a variance that differs between a dense cluster and
-the rest of the layer (an unremoved trend instead makes the variogram
-rise without a sill, and the first test catches that); or
-the fitted range is non-positive.  It is classed <code>sac_range</code> as
-well, so it prints as a bare <code>NA</code> without dumping its
+the rest of the layer.  Sampling noise in the short-lag bins of a
+small sample can make that fall too: on exponential fields it
+refused 7–9 of 60 draws at n = 30, 3–6 at n = 50 and 0–1 at
+n = 100 (effective range 300 on a 1000 m square), and 15–16 of 60
+at n = 30 with a range of 150.  An unremoved trend makes the
+variogram rise instead; when it rises past the fitted lags the first
+test catches it, but a milder trend only lengthens the fitted range
+and passes, which is what <code>predictor_vars</code> is for.  Last, the
+fitted range can be non-positive.  It is classed <code>sac_range</code> as
+well, so it prints as <code>NA</code> without dumping its
 attributes, and it carries <code>max_dist</code>, <code>cutoff_dist</code>,
 <code>variogram</code>, <code>variogram_model</code> and <code>nugget</code> (the
 evidence for the rejection), plus <code>rejected_range</code> (the value
 that was refused), <code>rejected_reason</code> (one of
 <code>"fitted range exceeds the largest lag fitted"</code>,
+<code>"fitted range is below the shortest lag fitted"</code>,
 <code>"variogram model did not converge"</code>,
 <code>"empirical variogram decreases with distance"</code>,
 <code>"fitted range is non-positive or non-finite"</code>,
 <code>"no variogram model could be fitted (singular fits)"</code>), <code>crs</code>
 (so the units the rejected number was in stay recoverable, which is
-what <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> labels its axis from) and
-<code>detrend_method</code>.  It carries <code>directional</code>,
+what <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> labels its axis from),
+<code>detrend_method</code>, <code>reml</code> (as on success) and, for
+<code>"fitted range is below the shortest lag fitted"</code>,
+<code>range_floor</code> (the distance the refused range fell short of).
+It carries <code>directional</code>,
 <code>anisotropy</code>, <code>anisotropy_used</code>, <code>directional_status</code>,
 <code>directional_fitted</code> and, with
 <code>keep_directional_fits = TRUE</code>, <code>directional_fits</code> as well:
@@ -261,16 +324,25 @@ past the fitted lags alike.  The same shape, with
 <code>rejected_range = NA</code>, <code>variogram_model = NULL</code> and
 <code>nugget = NA</code>, is returned when no variogram model could be
 fitted at all (both the exponential and the spherical fit singular,
-which is what a flat, nugget-only variogram produces);
+which a flat, nugget-only variogram can produce, though on white
+noise it was the outcome in only 1 of 30 draws: see above);
 <code>rejected_reason</code> says so and the empirical variogram is still
 attached.</p></dd>
 
 <dt>No fit</dt>
-<dd><p>A bare, attribute-less <code>NA_real_</code> when estimation
-could not be attempted at all: <span class="pkg">gstat</span> missing, fewer than 30
-finite values, a variable with no variance, or a degenerate extent.
-Without <span class="pkg">gstat</span> nothing is fitted, so none of the attributes
-above exist either.</p></dd>
+<dd><p>An unclassed <code>NA_real_</code> when estimation could not
+be attempted at all, whose one attribute, <code>rejected_reason</code>,
+says why: <code>"package 'gstat', which the variogram needs, is not
+installed"</code>, <code>"&lt;n&gt; points, fewer than the 30 a variogram range
+is estimated from"</code>, <code>"&lt;n&gt; point(s) with a finite value to
+model, fewer than the 30 a variogram range is estimated from"</code>,
+<code>"the response is constant"</code>, <code>"the residuals on
+predictor_vars are constant: the predictors explain the response
+exactly"</code> or <code>"the points have no extent (the largest distance
+between them is zero or could not be computed)"</code>.  Nothing is
+fitted, so none of the other attributes above exist: no
+<code>variogram</code>, <code>variogram_model</code> or <code>rejected_range</code>,
+which is what tells it from a range that was fitted and refused.</p></dd>
 
 
 </dl><p>Attributes and the class do not affect <code><a href="https://rdrr.io/r/base/NA.html" class="external-link">is.na()</a></code> or
@@ -297,11 +369,25 @@ all-pairs fit is the best-powered estimate available and is invariant to
 rotation.</p>
 <p>Where a field is <em>known</em> to be anisotropic, blocks must be at least
 as large as the longest autocorrelation range to avoid leakage, and the
-conservative choice is to size them from
-<code>max(attr(range, "directional"))</code> explicitly.  A ratio above 1.5 is
-logged so the case is not missed, with that advice.  Only when the
-omnidirectional fit is itself unusable is the directional maximum returned
-in its place, and <code>anisotropy_used</code> is <code>TRUE</code> in that case alone.</p>
+conservative choice is to size them from the longest directional range
+explicitly.  Read it from <code>directional_fitted</code>, not
+<code>directional</code>: on a strongly anisotropic field the major axis is the
+direction most likely to run past the fitted lags, which leaves it
+<code>NA</code> in <code>directional</code>, so <code><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max()</a></code> of that is <code>NA</code>, or
+with <code>na.rm = TRUE</code> the second-longest range.  Check
+<code>directional_status</code> first: a major axis marked <code>"over_cutoff"</code>
+has no identified range at all, and a longer <code>cutoff</code> or
+<code><a href="make_folds.html">make_folds</a>(method = "nndm")</code> is the way on.  A ratio above
+1.5 is written to the package log at INFO level with that advice, which
+reaches the session log file but not the console (the ratio passes 1.5 on
+most isotropic fields too); <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> shows the directional ranges
+and the ratio, and <code>attr(range, "anisotropy")</code> holds it.  Only when
+the omnidirectional fit is singular or did not converge is the directional
+maximum returned in its place, and <code>anisotropy_used</code> is <code>TRUE</code>
+in that case alone.  An omnidirectional fit that converged to a range past
+the fitted lags is refused (see the Value section) whatever the directions
+found: the directions that reached a sill are the shorter ones, so their
+maximum is a lower bound, not an estimate.</p>
 <p>A direction whose fit fails, does not converge, or reports a range beyond
 the longest fitted lag is excluded and recorded as <code>NA</code> in the
 <code>directional</code> attribute.</p>
@@ -311,10 +397,38 @@ one) <span class="pkg">gstat</span>'s default N/h² weights buy that constraint 
 the range: with a 50% nugget the fitted range came back at about 0.45 of the
 truth, so <code>make_folds(auto_range = TRUE)</code> built blocks less than half
 the correlation length it reported.</p>
-<p>A log warning is emitted when the directional maximum is used; where the
-all-pairs estimate is available it names both the ratio and that estimate.  A
-log note is emitted instead when the directional ranges vary but the spread
-is consistent with sampling noise.</p>
+<p>The lags are binned the way <span class="pkg">gstat</span> bins them by default, 15 bins out
+to the cutoff, each <code>cutoff * max_dist / 15</code> wide (about 47 m on a
+1000 m square at the defaults).  A range spanning only one or two bins is
+resolved coarsely and comes out long: exponential fields with an effective
+range of 60 m (n = 300 on a 1000 m square, 30 draws) returned a median of
+89–102 m, where the same fields binned over a 200 m cutoff gave 65–68,
+and at a range of 300 m there was no bias.  A range shorter than the
+first bin cannot be resolved at all and can come back several times too
+long: an effective range of 24 m (n = 1500 on a 1000 m square, 8 draws)
+returned 93–479 m, five of them as the directional maximum, against
+19–32 m at <code>cutoff = 0.1</code>; the first bin's semivariance was 92–99
+percent of the fitted sill in all eight.  So whenever the empirical
+variogram is already at its sill in the first one or two bins
+(<code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> the result), run it again with a smaller <code>cutoff</code>,
+whatever range was fitted.</p>
+<p>Nothing tests whether the layer has spatial structure at all.  On white
+noise (n = 300 on a 1000 m square, 30 draws) the estimate was a finite,
+spurious range (57–533 m) in 8 draws and a refusal in the rest, mostly
+as past the fitted lags or not converged, and only once as no model
+fitted; with <code>detrend = "reml"</code> it was finite in 13 of 30 (21–453
+m), and 16 of the refusals were ranges of 0.18–12.5 m, too short for 30
+pairs of points to lie inside them.  A
+spurious range errs towards larger blocks, so the harm is mostly lost
+training data, but a caller who needs to know whether there is any
+structure should look at the variogram (<code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> on the result)
+rather than at whether the answer is <code>NA</code>.</p>
+<p>When the all-pairs fit is singular or did not converge and two or more
+directions reached a sill, the directional maximum is returned in its
+place (<code>anisotropy_used = TRUE</code>), and a log warning names the
+directional ranges when their ratio exceeds 1.5.  When the all-pairs
+estimate is used and the directional ranges vary by more than 1.5, a log
+note (INFO) names them instead.</p>
 <p>The returned range is in the coordinate units of the (projected) data and
 can be passed directly to <code>make_folds(block_size = ...)</code> so that CV
 blocks are at least as wide as the autocorrelation range.</p>
@@ -434,6 +548,7 @@ levels. <em>Mathematical Geology</em>, 16(5), 499–521.
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 304.4623 </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   directional: 0 deg = 267.5557, 45 deg = 439.1852, 90 deg = 370.9347, 135 deg = 328.2169  (ratio 1.64)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   in metres of EPSG:32632; variogram of the response itself</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>        0       45       90      135 </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 267.5557 439.1852 370.9347 328.2169 </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   model    psill    range</span>
@@ -441,6 +556,7 @@ levels. <em>Mathematical Geology</em>, 16(5), 499–521.
 <span class="r-out co"><span class="r-pr">#&gt;</span> 2   Exp 1.286699 101.4874</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> NA </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   directional: 0 deg = 13190.44 (not converged), 45 deg = 42407.17 (not converged), 90 deg = 114115.2 (not converged), 135 deg = 45807.9 (not converged)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   in metres of EPSG:32632; variogram of the response itself</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 47261.27</span>
 </code></pre></div>
     </div>

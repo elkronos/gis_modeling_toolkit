@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">23 September 2026</h4>
+            <h4 data-toc-skip class="date">27 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/resolution.Rmd" class="external-link"><code>vignettes/resolution.Rmd</code></a></small>
       <div class="d-none name"><code>resolution.Rmd</code></div>
@@ -107,9 +107,13 @@ directly. <code><a href="../reference/resolution_profile.html">resolution_profil
 ladder against four criteria at once and needs gstat for two of them.
 <code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads one criterion off that profile,
 and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads all four side by side.
-If the cells will feed a model, the profile is the one to use; if you
+If the cells will feed a model, the profile is the one to use. If you
 need a count now and the data are all you have, the elbow is defensible
-and this article says where it falls short.</p>
+when the points cluster, and this article says where it falls short. On
+points spread evenly there is no elbow to read, and both functions say
+so: the profile leaves its <code>elbow</code> column empty, and
+<code><a href="../reference/determine_optimal_levels.html">determine_optimal_levels()</a></code> warns that the count it still
+returns was chosen by the ends of its ladder, not by the data.</p>
 <p>The argument that says “how many” is spelled differently by the
 function it belongs to: <code>max_levels</code> bounds the elbow’s
 ladder, <code>n_levels</code> sets the profile’s,
@@ -131,7 +135,7 @@ an effective range of 300 units across a 1000-unit square, and
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">42</span><span class="op">)</span></span>
 <span><span class="va">n</span>  <span class="op">&lt;-</span> <span class="fl">500</span></span>
-<span><span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">D</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/dist.html" class="external-link">dist</a></span><span class="op">(</span><span class="va">xy</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">xy</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">100</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">1e-8</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>        <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, sd <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
@@ -146,6 +150,12 @@ counts, best first.</p>
 <code class="sourceCode R"><span><span class="va">lv</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/determine_optimal_levels.html">determine_optimal_levels</a></span><span class="op">(</span><span class="va">pts</span>, max_levels <span class="op">=</span> <span class="fl">40</span><span class="op">)</span></span>
 <span><span class="va">lv</span></span></code></pre></div>
 <pre><code><span><span class="co">## [1] 7 6 8</span></span></code></pre>
+<p>This fixture’s points are uniform, so their within-cluster sum of
+squares falls like <code>c / k</code> all the way down and bends nowhere
+of its own. The call warns that it found no elbow and that
+<code>max_levels</code> chose <code>lv</code>: a larger
+<code>max_levels</code> would give a larger answer. Read an elbow only
+off points that cluster; here the profile below is the better guide.</p>
 <p><code>lv[1]</code> is what <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> takes as
 <code>n</code>, and what <code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> takes as
 <code>approx_n_cells</code> for its <code>"hex"</code> and
@@ -157,12 +167,11 @@ section shows the two calls in order.</p>
 <code>criterion = "morans_i"</code> and
 <code>criterion = "combined"</code> settings need both
 <code>response_var</code> and <code>predictor_vars</code>; give it only
-a response and it logs a warning and falls back to
-<code>"geometric"</code>. And its ladder runs from 1 to
-<code>max_levels</code> with no lower bound from the spatial correlation
-of the data, so it can prefer cells wider than the field’s own
-correlation range. The profile below does impose that bound, which is
-why the two can disagree.</p>
+a response and it warns and falls back to <code>"geometric"</code>. And
+its ladder runs from 1 to <code>max_levels</code> with no lower bound
+from the spatial correlation of the data, so it can prefer cells wider
+than the field’s own correlation range. The profile below does impose
+that bound, which is why the two can disagree.</p>
 </div>
 <div class="section level2">
 <h2 id="the-profile">The profile<a class="anchor" aria-label="anchor" href="#the-profile"></a>
@@ -179,47 +188,50 @@ cell diameter falls as
 <span><span class="co">##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 from min_cell_n = 9)</span></span>
 <span><span class="co">##   variogram   : nugget 0.877, partial sill 1.29, range 314</span></span>
 <span><span class="co">##   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)</span></span>
+<span><span class="co">##   elbow       : none; the WSS curve falls as it does with no cluster structure</span></span>
 <span><span class="co">## </span></span>
-<span><span class="co">##  levels     wss wss_spread  elbow cell_n_min cell_n_median cell_diam_median rss</span></span>
-<span><span class="co">##      10 7850000     0.1450 0.0000         39          48.5            250.0 882</span></span>
-<span><span class="co">##      11 6970000     0.0903 0.0771         33          45.0            233.0 905</span></span>
-<span><span class="co">##      13 5850000     0.0849 0.1630         27          40.0            214.0 865</span></span>
-<span><span class="co">##      14 5440000     0.0654 0.1890         20          35.5            207.0 860</span></span>
-<span><span class="co">##      16 4750000     0.1110 0.2300         22          32.0            194.0 883</span></span>
-<span><span class="co">##      18 4220000     0.0968 0.2550         18          28.0            179.0 884</span></span>
-<span><span class="co">##      20 3700000     0.1080 0.2780         17          26.0            170.0 821</span></span>
-<span><span class="co">##      22 3240000     0.1240 0.2950         16          23.0            157.0 809</span></span>
-<span><span class="co">##      25 2810000     0.1560 0.2930         13          21.0            144.0 777</span></span>
-<span><span class="co">##      28 2460000     0.1540 0.2820         12          17.5            137.0 719</span></span>
-<span><span class="co">##      31 2140000     0.1530 0.2680          9          16.0            128.0 698</span></span>
-<span><span class="co">##      35 1850000     0.1450 0.2360          9          14.0            124.0 677</span></span>
-<span><span class="co">##      39 1680000     0.1030 0.1920          6          13.0            112.0 645</span></span>
-<span><span class="co">##      44 1440000     0.0787 0.1380          7          11.0            105.0 677</span></span>
-<span><span class="co">##      49 1280000     0.1090 0.0763          5           9.0             94.4 635</span></span>
-<span><span class="co">##      55 1110000     0.1090 0.0000          5           9.0             89.2 654</span></span>
+<span><span class="co">##  levels     wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss</span></span>
+<span><span class="co">##      10 7850000     0.1510    NA         38          48.0            248.0 914</span></span>
+<span><span class="co">##      11 6960000     0.0965    NA         31          45.0            233.0 900</span></span>
+<span><span class="co">##      13 5850000     0.0578    NA         27          40.0            214.0 865</span></span>
+<span><span class="co">##      14 5500000     0.0810    NA         26          33.0            209.0 862</span></span>
+<span><span class="co">##      16 4750000     0.0864    NA         24          29.5            194.0 850</span></span>
+<span><span class="co">##      18 4220000     0.0694    NA         19          27.5            179.0 862</span></span>
+<span><span class="co">##      20 3750000     0.0666    NA         15          25.0            174.0 793</span></span>
+<span><span class="co">##      22 3310000     0.1100    NA         15          22.5            163.0 812</span></span>
+<span><span class="co">##      25 2780000     0.1210    NA         12          20.0            148.0 798</span></span>
+<span><span class="co">##      28 2390000     0.1380    NA         12          17.0            139.0 778</span></span>
+<span><span class="co">##      31 2180000     0.1060    NA          9          16.0            130.0 722</span></span>
+<span><span class="co">##      35 1870000     0.1670    NA          7          14.0            121.0 695</span></span>
+<span><span class="co">##      39 1650000     0.1310    NA          6          13.0            115.0 686</span></span>
+<span><span class="co">##      44 1440000     0.0832    NA          6          11.0            107.0 648</span></span>
+<span><span class="co">##      49 1260000     0.0984    NA          6          10.0            100.0 633</span></span>
+<span><span class="co">##      55 1110000     0.1280    NA          4           9.0             91.8 638</span></span>
 <span><span class="co">##    cp  moran_i moran_z reliability</span></span>
-<span><span class="co">##  1.80 -0.11400 -0.0713       0.811</span></span>
-<span><span class="co">##  1.85  0.00559  1.9800       0.807</span></span>
+<span><span class="co">##  1.86 -0.10600  0.1250       0.811</span></span>
+<span><span class="co">##  1.84 -0.03160  1.3000       0.806</span></span>
 <span><span class="co">##  1.78 -0.03700  0.7000       0.798</span></span>
-<span><span class="co">##  1.77 -0.04750  0.4320       0.794</span></span>
-<span><span class="co">##  1.82 -0.06380  0.0399       0.786</span></span>
-<span><span class="co">##  1.83  0.00463  0.8500       0.778</span></span>
-<span><span class="co">##  1.71  0.00555  0.7870       0.770</span></span>
-<span><span class="co">##  1.70  0.01740  0.8720       0.762</span></span>
-<span><span class="co">##  1.64 -0.03800  0.0485       0.751</span></span>
-<span><span class="co">##  1.54  0.04970  1.2100       0.740</span></span>
-<span><span class="co">##  1.50  0.02490  0.8220       0.730</span></span>
-<span><span class="co">##  1.48  0.01770  0.6850       0.717</span></span>
-<span><span class="co">##  1.43  0.08040  1.6000       0.704</span></span>
-<span><span class="co">##  1.51  0.17200  3.0700       0.690</span></span>
-<span><span class="co">##  1.44  0.15600  2.8700       0.676</span></span>
-<span><span class="co">##  1.50  0.19600  3.6300       0.660</span></span></code></pre>
+<span><span class="co">##  1.77 -0.05140  0.3770       0.793</span></span>
+<span><span class="co">##  1.76 -0.00625  0.8350       0.785</span></span>
+<span><span class="co">##  1.79 -0.02540  0.4610       0.777</span></span>
+<span><span class="co">##  1.66 -0.05660 -0.0528       0.769</span></span>
+<span><span class="co">##  1.70  0.01360  0.8210       0.761</span></span>
+<span><span class="co">##  1.68  0.01050  0.7030       0.750</span></span>
+<span><span class="co">##  1.65  0.00177  0.5310       0.739</span></span>
+<span><span class="co">##  1.55  0.03950  1.0200       0.729</span></span>
+<span><span class="co">##  1.51  0.07480  1.5100       0.716</span></span>
+<span><span class="co">##  1.51  0.02900  0.8280       0.704</span></span>
+<span><span class="co">##  1.45  0.07390  1.5300       0.689</span></span>
+<span><span class="co">##  1.44  0.12300  2.3500       0.675</span></span>
+<span><span class="co">##  1.47  0.18600  3.4400       0.660</span></span></code></pre>
 <p>One row per level. <code>cell_n_median</code> and
 <code>cell_diam_median</code> are usually the first two columns worth
-reading: how many points a typical cell holds, and how wide it is in CRS
-units. The width is the number you can compare against something you
-already know about your own data, such as the spacing of a sampling grid
-or the size of a field.</p>
+reading: how many points a typical cell holds, and how big it is in CRS
+units. <code>cell_diam_median</code> is twice the median
+root-mean-square distance of a cell’s points from its centre, about 0.8
+of the side of a square cell of the same area, so compare it against
+something you already know about your own data, such as the spacing of a
+sampling grid or the size of a field, with that factor in mind.</p>
 <div class="section level3">
 <h3 id="the-four-criteria">The four criteria<a class="anchor" aria-label="anchor" href="#the-four-criteria"></a>
 </h3>
@@ -239,8 +251,10 @@ or the size of a field.</p>
 <tbody>
 <tr class="odd">
 <td><code>elbow</code></td>
-<td>how far the within-cluster sum of squares curve bends below its own
-chord</td>
+<td>how far the log of the within-cluster sum of squares sags below a
+power law (the straight log-log line from one cell to the last level);
+<code>NA</code> at every level when the points have no cluster
+structure</td>
 <td>coordinates only</td>
 <td>larger</td>
 </tr>
@@ -276,7 +290,7 @@ whether the cell values can be told apart from noise.
 cells are still leaving spatial pattern on the table.</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
-<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Four stacked panels, one per criterion, against the number of cells on a shared axis. Mallows' Cp falls from 10 to 39 cells and then flattens, reliability declines steadily from 10 cells on, the elbow statistic peaks at 22 cells, and the absolute Moran's z is lowest at 10, 16 and 25 cells before climbing past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are two or three levels wide, two of them have gaps, and no level sits inside all four." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 49 cells and turns up at 55, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 20 cells and climbs past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are one to three levels wide, none has a gap, and no level sits inside all three." width="100%" style="display: block; margin: auto;"></p>
 <p>Two behaviours are worth knowing before reading the numbers.</p>
 <p><strong><code>cp</code> needs a nugget to have an interior
 optimum.</strong> On a smooth field the piecewise-constant approximation
@@ -328,32 +342,30 @@ data, so the fix is a different question, not a different
 with the levels that every band contains:</p>
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Resolution picks: 4 criteria over 16 levels (10 to 55 cells)</span></span>
+<pre><code><span><span class="co">## Resolution picks: 3 criteria over 16 levels (10 to 55 cells)</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##    criterion best flat region levels in band</span></span>
-<span><span class="co">##           cp   39      39, 49              2</span></span>
+<span><span class="co">##           cp   49    44 to 49              2</span></span>
 <span><span class="co">##  reliability   10    10 to 13              3</span></span>
-<span><span class="co">##        elbow   22    22 to 25              2</span></span>
-<span><span class="co">##      moran_z   16  10, 16, 25              3</span></span>
+<span><span class="co">##      moran_z   20          20              1</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##   reliability: the optimum is the range floor (area / range^2).</span></span>
 <span><span class="co">##   There the bound is choosing, not the criterion.</span></span>
 <span><span class="co">## </span></span>
-<span><span class="co">##   picks span 10 to 39 cells (3.9x)</span></span>
+<span><span class="co">##   picks span 10 to 49 cells (4.9x)</span></span>
 <span><span class="co">##   no level is in every flat region: the criteria disagree over the</span></span>
 <span><span class="co">##   whole ladder. plot() draws the curves they were read from.</span></span></code></pre>
 <p>A band is a set of levels, not an interval, because the criterion
-curves are not monotone: the <code>cp</code> band above accepts 39 and
-49 and rejects the 44 between them, while a solid run of 3 rungs prints
-as a range, as <code>reliability</code> does with <code>10 to 13</code>.
-Where the bands overlap you have a defensible set of levels, and the
-last line names it; <code>attr(summary(prof), "common")</code> returns
-the same levels for use in code, and
-<code>attr(summary(prof), "bands")</code> each criterion’s region in
-full. Where they do not overlap, the criteria are answering different
-questions and you have to say which one your analysis needs. An empty
-intersection is a result: it says this field has no single resolution
-that satisfies every way of asking.</p>
+curves are not monotone: a band that skips a rung prints as a
+comma-separated list, while a solid run of 2 rungs prints as a range, as
+<code>cp</code> does with <code>44 to 49</code>. Where the bands overlap
+you have a defensible set of levels, and the last line names it;
+<code>attr(summary(prof), "common")</code> returns the same levels for
+use in code, and <code>attr(summary(prof), "bands")</code> each
+criterion’s region in full. Where they do not overlap, the criteria are
+answering different questions and you have to say which one your
+analysis needs. An empty intersection is a result: it says this field
+has no single resolution that satisfies every way of asking.</p>
 <p>The table is not a decision procedure, and nothing in the package
 will pick for you. Cross-validating a model at each suggested level is
 affordable, but it does not settle the question either: on a simulated
@@ -369,7 +381,7 @@ its score had the widest spread, not because it was better.</p>
 the profile.</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## List of 9</span></span>
+<pre><code><span><span class="co">## List of 11</span></span>
 <span><span class="co">##  $ floor       : int 10</span></span>
 <span><span class="co">##  $ ceiling     : int 55</span></span>
 <span><span class="co">##  $ ceiling_from: chr "min_cell_n"</span></span>
@@ -377,13 +389,15 @@ the profile.</p>
 <span><span class="co">##  $ area        : num 976371</span></span>
 <span><span class="co">##  $ range       : num 314</span></span>
 <span><span class="co">##  $ n           : int 500</span></span>
+<span><span class="co">##  $ n_sample    : int 500</span></span>
 <span><span class="co">##  $ n_distinct  : int 500</span></span>
-<span><span class="co">##  $ min_cell_n  : int 9</span></span></code></pre>
-<p>The ceiling is <code>floor(n / min_cell_n)</code>, or one short of
-the number of distinct locations when that is smaller;
-<code>ceiling_from</code> says which. Past it the average cell holds too
-few points to estimate anything from, or k-means has more centres to
-place than distinct points. The floor is
+<span><span class="co">##  $ min_cell_n  : int 9</span></span>
+<span><span class="co">##  $ range_floor : logi TRUE</span></span></code></pre>
+<p>The ceiling is <code>floor(n / min_cell_n)</code>, or the number of
+distinct locations when that is smaller (one short of it when no
+location repeats); <code>ceiling_from</code> says which. Past it the
+average cell holds too few points to estimate anything from, or k-means
+has more centres to place than distinct points. The floor is
 <code>ceiling(area / range^2)</code>, from the fitted autocorrelation
 range: cells wider than the range average over more than one patch of
 the field, mixing values the field itself keeps apart.</p>
@@ -411,17 +425,28 @@ and hands back the row positions of both parts.</p>
 <p>The split is spatially blocked, not random, and records the method
 and seed that produced it. A random half would put neighbours of every
 selection point in the estimation set, and on an autocorrelated field
-that leaks the structure you are choosing against.</p>
+that leaks the structure you are choosing against. Blocking reduces that
+leak without removing it: the two halves share a border, and points on
+either side of it within the correlation range are still correlated, so
+read the separation as a large improvement on a random half rather than
+as independence.</p>
 <p>Choose from <code>prof_split</code>, then aggregate the rows in
-<code>sp$estimation</code>. The cost is power: half the data gives a
-noisier profile and a wider band, and the ladder itself gets shorter
-because the ceiling scales with <code>n</code>.</p>
+<code>sp$estimation</code>. The cells on the ladder are still drawn on
+every point, so the count it picks is a count for the whole layer, and
+the ladder is as long as the full profile’s. Only the steps that read
+the response (the variogram, <code>cp</code>, <code>moran_z</code>) use
+the selection half. The cost is power: those criteria see half the data,
+so the profile is noisier and the band wider. The estimation rows also
+fill only their own half of the layer: a cell inside the selection half
+gets none of them, and a cell across the border between the halves is
+estimated from the part of it on the estimation side. Read standard
+errors only off cells whose points are all estimation rows.</p>
 <div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof_split</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"floor"</span>, <span class="st">"ceiling"</span>, <span class="st">"n"</span>, <span class="st">"supported"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##     floor   ceiling         n supported </span></span>
-<span><span class="co">##        13        27       251         1</span></span></code></pre>
-<p>On a layer of a few hundred points that shortening can leave very
-little ladder, which is a useful answer in itself.</p>
+<span><span class="co">##        16        55       500         1</span></span></code></pre>
+<p>The floor can differ from the full profile’s, because it comes from
+the range estimated on the selection half.</p>
 </div>
 <div class="section level2">
 <h2 id="next">Next<a class="anchor" aria-label="anchor" href="#next"></a>

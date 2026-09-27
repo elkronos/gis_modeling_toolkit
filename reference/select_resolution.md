@@ -48,10 +48,11 @@ A list of class `resolution_selection` with `best` (the level), `flat`
 rung), `criterion`, `value` (the optimum), `at_ceiling` and `at_floor`
 (logical: the optimum is the last or first of the levels this criterion
 was scored at, which for `moran_z` starts above nine cells), `edge`
-(which bound that is, in words: the support ceiling, the range floor,
-the ladder's own end, or the first or last level the criterion is
-computable at; `NA` for an interior optimum), `n_levels` and `values`
-(the criterion at every level, `NA` where it could not be computed).
+(which bound that is, in words: the support ceiling, the subsample's
+ceiling, the range floor, the ladder's own end, or the first or last
+level the criterion is computable at; `NA` for an interior optimum),
+`n_levels` and `values` (the criterion at every level, `NA` where it
+could not be computed).
 
 ## See also
 
@@ -72,7 +73,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
   # noise for Mallows' Cp to have an interior optimum rather than descend
   # to the ceiling.
-  set.seed(2)
+  set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
@@ -91,12 +92,12 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   print(rel)
   c(at_floor = rel$at_floor, edge = rel$edge)
 }
-#> Resolution by cp: 37 cells
-#>   flat region : 31 to 44 (3 of 12 levels)
-#> [1] 31 37 44
+#> Resolution by cp: 28 cells
+#>   flat region : 18, 28 to 35 (3 of 12 levels)
+#> [1] 18 28 35
 #> [1] NA
-#> Resolution by reliability: 6 cells
-#>   flat region : 6 to 9 (3 of 12 levels)
+#> Resolution by reliability: 4 cells
+#>   flat region : 4 to 6 (3 of 12 levels)
 #>   note        : the optimum is the range floor (area / range^2); the bound is
 #>                 choosing, not the criterion. Fewer cells would be wider than
 #>                 the range and average over more than one patch of the field.

@@ -174,11 +174,13 @@ Default <code>FALSE</code>.</p></dd>
 
 
 <dt id="arg-parallel">parallel<a class="anchor" aria-label="anchor" href="#arg-parallel"></a></dt>
-<dd><p>Logical or positive integer.  If <code>TRUE</code>,
-auto-detect the number of cores and fit folds in parallel via
-<code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code> (macOS / Linux; falls back to sequential
-on Windows).  If an integer &gt; 1, use that many cores.  Default
-<code>FALSE</code> (sequential).</p></dd>
+<dd><p>Accepted so that every <code>cv_*()</code> function takes the
+same arguments, but the GWR folds always run one after another in this
+R process.  GWmodel is built with OpenMP, and OpenMP (GNU libgomp)
+deadlocks <code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code>'s forked workers once a GWR has
+been fitted in the session, for example by <code><a href="fit_gwr_model.html">fit_gwr_model()</a></code>, so
+forking would hang the call.  A value asking for more than one core
+raises a warning saying so.  Default <code>FALSE</code>.</p></dd>
 
 
 <dt id="arg-metrics">metrics<a class="anchor" aria-label="anchor" href="#arg-metrics"></a></dt>
@@ -224,6 +226,9 @@ folds.</p>
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
 Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is

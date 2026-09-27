@@ -74,7 +74,7 @@ shows how much of a result depends on one particular tessellation.</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">voronoi_seeds_random</span><span class="op">(</span><span class="va">boundary</span>, <span class="va">k</span>, set_seed <span class="op">=</span> <span class="fl">456</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">voronoi_seeds_random</span><span class="op">(</span><span class="va">boundary</span>, <span class="va">k</span>, set_seed <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -90,21 +90,27 @@ shows how much of a result depends on one particular tessellation.</p>
 
 
 <dt id="arg-set-seed">set_seed<a class="anchor" aria-label="anchor" href="#arg-set-seed"></a></dt>
-<dd><p>Integer RNG seed. Default 456.</p></dd>
+<dd><p>Optional integer RNG seed. Default <code>NULL</code>: the seeds are
+drawn from the session's random-number stream, so consecutive calls give
+different seedings and <code><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed()</a></code> before a call makes it reproducible.
+Pass a number to get the same seeds whatever that stream holds; the
+caller's stream is then left as it was. The default used to be 456,
+which made every call return the same "random" seeding, even inside a
+loop over <code><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed()</a></code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>An sf object of <strong>at most</strong> <code>k</code> random POINTs (rejection sampling
-inside an awkward geometry can fall short of <code>k</code>, which is warned about),
-with <code>seed_id</code> and <code>method = "random"</code> columns matching
+    <p>An sf object of <code>k</code> random POINTs (fewer only in the degenerate
+case above), with <code>seed_id</code> and <code>method = "random"</code> columns matching
 <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Sampling is by rejection inside the polygon, so an awkward geometry can
-return fewer than <code>k</code> seeds; that shortfall is warned about rather than
-silently padded.</p>
+    <p>Seeds are drawn uniformly inside the polygon. When a draw falls short of <code>k</code>
+it is topped up with further uniform draws from the same polygon, so the
+result has exactly <code>k</code> seeds; only a geometry that still yields too few
+after ten top-ups returns fewer, and that shortfall is logged.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -125,26 +131,31 @@ silently padded.</p>
 <span class="r-in"><span><span class="va">bnd</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sf.html" class="external-link">st_sf</a></span><span class="op">(</span>geometry <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sfc.html" class="external-link">st_sfc</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st.html" class="external-link">st_polygon</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">0</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">100</span>, <span class="fl">0</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">100</span>, <span class="fl">100</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">0</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">)</span><span class="op">)</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">seeds</span> <span class="op">&lt;-</span> <span class="fu">voronoi_seeds_random</span><span class="op">(</span><span class="va">bnd</span>, k <span class="op">=</span> <span class="fl">10</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">seeds</span><span class="op">)</span>   <span class="co"># at most 10: a seed that lands outside the boundary is dropped</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">seeds</span><span class="op">)</span>   <span class="co"># 10</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 10</span>
 <span class="r-in"><span><span class="va">seeds</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 10 features and 2 fields</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Geometry type: POINT</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Dimension:     XY</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 8.243274 ymin: 21.79086 xmax: 85.21335 ymax: 84.31172</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 6.178627 ymin: 17.65568 xmax: 94.46753 ymax: 99.19061</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Projected CRS: WGS 84 / UTM zone 32N</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>                     geometry seed_id method</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1   POINT (8.95516 37.29459)       1 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2  POINT (21.05123 21.79086)       2 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3   POINT (73.29553 75.5105)       3 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4  POINT (85.21335 82.16811)       4 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5  POINT (78.83979 59.89182)       5 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6    POINT (33.196 65.10336)       6 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 7  POINT (8.243274 84.31172)       7 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 8  POINT (28.55269 45.32381)       8 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 9  POINT (23.75033 71.67571)       9 random</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 10 POINT (38.52362 29.12222)      10 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1  POINT (26.55087 20.59746)       1 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2  POINT (37.21239 17.65568)       2 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3  POINT (57.28534 68.70228)       3 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4  POINT (90.82078 38.41037)       4 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5  POINT (20.16819 76.98414)       5 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6  POINT (89.83897 49.76992)       6 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7  POINT (94.46753 71.76185)       7 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8  POINT (66.07978 99.19061)       8 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9   POINT (62.9114 38.00352)       9 random</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 10 POINT (6.178627 77.74452)      10 random</span>
+<span class="r-in"><span><span class="co"># Another call is another seeding; set_seed pins one.</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="fu">voronoi_seeds_random</span><span class="op">(</span><span class="va">bnd</span>, k <span class="op">=</span> <span class="fl">10</span>, set_seed <span class="op">=</span> <span class="fl">7</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>          <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="fu">voronoi_seeds_random</span><span class="op">(</span><span class="va">bnd</span>, k <span class="op">=</span> <span class="fl">10</span>, set_seed <span class="op">=</span> <span class="fl">7</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] TRUE</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

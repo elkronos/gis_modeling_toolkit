@@ -25,7 +25,13 @@ plot(
 
 - x:
 
-  A `spatial_fit`.
+  A `spatial_fit`. The residuals drawn are `residuals(x)`; for a custom
+  subclass with no
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html) method
+  (optional, see
+  [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md))
+  they are the response minus `fitted(x)`, which is what the built-in
+  backends' methods return.
 
 - type:
 
@@ -49,35 +55,46 @@ plot(
       gap between the two curves is the spatial structure the model
       absorbed: a residual sill well below the response sill means most
       of it, two curves that coincide mean none. When both effective
-      ranges were identified the caption gives the residual sill as a
-      share of the response sill and the two ranges; when either
-      variogram reached no sill the caption says so and compares
-      nothing, because a sill the data never reached is not a number to
-      divide by. The residual range is expected to come out shorter and
-      the residual sill lower even when the model is right, because
+      ranges were identified over the same point pairs the caption gives
+      the residual sill as a share of the response sill and the two
+      ranges; when either variogram has no identified range, or the two
+      are not over the same pairs, the caption says so and compares
+      nothing: a sill the data never reached is not a number to divide
+      by, and one direction's sill is not comparable with all
+      directions'. The residual range is expected to come out shorter
+      and the residual sill lower even when the model is right, because
       residuals of a fitted trend understate the variogram (see
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md),
       "Detrending and the residual-variogram bias"). The distance axis
       is labelled in the units of the CRS the variogram was actually
       fitted in, which is not necessarily the fit's own CRS (lon/lat
-      data are projected first). A single-direction fit names its
-      azimuth in the title; a fit that identified no range says why in
-      the subtitle, since the overlaid model line is then not a fit to
+      data are projected first). Each curve is the variogram
+      [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+      returns for its variable: all point pairs, or, when the all-pairs
+      fit was unusable, the widest of four directions, which is named
+      with its azimuth (in the title for the residuals, in the caption
+      for the response). A fit that identified no range says why in the
+      subtitle, since the overlaid model line is then not a fit to
       believe. Requires 'gstat'.
 
   `"coefficients"`
 
   :   For a GWR fit only: the local coefficient of one `term` mapped at
       the training locations, which is the reason to fit GWR at all.
-      Locations where the local design is collinear (the kernel-weighted
-      window's scaled condition index is above 30, or the window is
-      singular) are drawn hollow and grey (`mask = TRUE`), because the
-      smooth surface a naive map draws over them is the picture of an
-      unstable estimate, not of a relationship; the subtitle counts
-      them. The condition indices are the fit's
-      `info$local_collinearity`, computed for every location when the
-      model was fitted. A diverging scale centred on zero is used when
-      the coefficient changes sign, otherwise a sequential one.
+      Locations where the local design is collinear for that term are
+      drawn hollow and grey (`mask = TRUE`): for a slope, where the
+      kernel-weighted window's slope condition index (`cn_slopes`,
+      predictors centred in the window) is above 30 or the window is
+      singular, or where the index with the intercept (`cn`) is above
+      1e6; for the Intercept, where `cn` is above 30 (a predictor far
+      from 0 against its local spread makes the local intercept an
+      extrapolation). They are masked because the smooth surface a naive
+      map draws over them is the picture of an unstable estimate, not of
+      a relationship; the subtitle counts them. The condition indices
+      are the fit's `info$local_collinearity`, computed for every
+      location when the model was fitted. A diverging scale centred on
+      zero is used when the coefficient changes sign, otherwise a
+      sequential one.
 
 - response:
 
@@ -93,11 +110,10 @@ plot(
 - mask:
 
   For `type = "coefficients"`: whether to draw locations whose local
-  design is collinear (scaled condition index of the kernel-weighted
-  window above 30, or singular) as hollow grey points instead of
-  colouring them by a coefficient that is not to be believed there.
-  Default `TRUE`. Locations whose coefficient is non-finite are masked
-  either way.
+  design is collinear for that term (see `type = "coefficients"`) as
+  hollow grey points instead of colouring them by a coefficient that is
+  not to be believed there. Default `TRUE`. Locations whose coefficient
+  is non-finite are masked either way.
 
 - ...:
 

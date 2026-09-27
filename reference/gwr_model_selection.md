@@ -55,7 +55,21 @@ gwr_model_selection(
   **projected** CRS the sweep runs in, which
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   may have chosen for you. Geographic input is projected before the
-  bandwidth is used, so a value in degrees would be read as metres.
+  bandwidth is used, so a value in degrees would be read as metres; a
+  fixed bandwidth below a ten-thousandth of the data's extent raises a
+  warning saying so, as in
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md).
+  An adaptive count too small for the full model is raised, with a
+  warning, to the number of candidates plus 3 for the bisquare and
+  tricube kernels (which give the farthest neighbour in a window weight
+  0), plus 2 for the others. That floor is enough unless several
+  neighbours tie at the kernel's edge (a regular grid), which leaves a
+  window fewer weighted points; then use a larger bandwidth. An adaptive
+  count below 1 or above R's largest integer is refused, as in
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md).
+  One above the number of observations is capped at it, with a warning;
+  below 20 observations that includes `bw.gwr()`'s choice, since its
+  adaptive search starts at 20 neighbours.
 
 - adaptive:
 
@@ -101,20 +115,23 @@ gwr_model_selection(
 An object of class `gwr_model_selection`, a list with: `best` (character
 vector of the selected predictors); `table` (ranked data.frame of every
 model evaluated, with columns `rank`, `n_vars`, `variables` and
-`criterion`); `criterion` (label for the criterion actually read, noting
-when it had to be located positionally); `criterion_by_name` (logical:
-whether that column was found by its name rather than by the documented
-position), `criterion_column` (the column it was read from) and
-`criterion_verified` (logical: `FALSE` exactly when the column was read
-positionally from a table that did not have the four documented columns,
-which is the case the log calls unverified. Gate a script on this field
-instead of on the label); `response_var` and `candidate_vars` (the
-response and the full candidate set the sweep ran over, both echoed by
-[`print()`](https://rdrr.io/r/base/print.html)); `bandwidth`,
-`bandwidth_source`, `adaptive` and `kernel` (the smoothing held fixed
-across the sweep, and where it came from); `n_obs`, `n_models`,
-`used_dmat`; and `raw` (GWmodel's unmodified return: the two-element
-list of its model list and its diagnostic table).
+`criterion`; `criterion` is `NA`, and the model ranked last, where
+GWmodel could not evaluate it or where AICc is undefined because the
+model's effective number of parameters \\tr(S)\\ is not below \\n - 2\\,
+which raises a warning); `criterion` (label for the criterion actually
+read, noting when it had to be located positionally);
+`criterion_by_name` (logical: whether that column was found by its name
+rather than by the documented position), `criterion_column` (the column
+it was read from) and `criterion_verified` (logical: `FALSE` exactly
+when the column was read positionally from a table that did not have the
+four documented columns, which is the case the log calls unverified.
+Gate a script on this field instead of on the label); `response_var` and
+`candidate_vars` (the response and the full candidate set the sweep ran
+over, both echoed by [`print()`](https://rdrr.io/r/base/print.html));
+`bandwidth`, `bandwidth_source`, `adaptive` and `kernel` (the smoothing
+held fixed across the sweep, and where it came from); `n_obs`,
+`n_models`, `used_dmat`; and `raw` (GWmodel's unmodified return: the
+two-element list of its model list and its diagnostic table).
 
 ## What this optimises, and what it does not
 
@@ -239,6 +256,6 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 #>   Formula : z ~ a + b
 #>   n       : 80
 #>   CRS     : EPSG:32632
-#>   Bandwidth: 78 (adaptive, bisquare kernel)
+#>   Bandwidth: 78 neighbours (adaptive, bisquare kernel)
 #>   AICc    : 123.31
 ```

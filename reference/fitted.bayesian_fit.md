@@ -23,8 +23,9 @@ fitted(object, ...)
 
 ## Value
 
-Numeric vector of length `object$n` (all `NA` if the posterior draw
-failed).
+Numeric vector of length `object$n`. A posterior that cannot be drawn is
+an error, as is a family with a probability per response category
+(ordinal, categorical), which has no single fitted value per row.
 
 ## The result is cached
 
@@ -62,10 +63,17 @@ from here:
 on one copy empties the cache both share (harmless, since the other
 simply recomputes), and
 [`identical()`](https://rdrr.io/r/base/identical.html) cannot
-distinguish two fits by their caches. The digest covers `data_sf` only,
-not `$engine`: a hand-mutated `brmsfit` is what
+distinguish two fits by their caches. The digest covers `data_sf` only.
+The entry is also tied to the engine that computed it – a refit or
+[`update()`](https://rdrr.io/r/stats/update.html) of the `brmsfit` is a
+different sampling run and recomputes – but a `brmsfit` edited by hand
+in place is what
 [`clear_fitted_cache`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md)
-is for.
+is for. The entry holds only the values and a small identifier of the
+sampling run, so a fit saved with
+[`saveRDS()`](https://rdrr.io/r/base/readRDS.html) after
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) is no larger
+for it.
 
 ## See also
 

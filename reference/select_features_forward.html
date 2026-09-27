@@ -168,9 +168,11 @@ caution above exists to prevent, so the leakage warning
 <dd><p><code>"all"</code> (default) runs the sweep on every row of
 <code>train_sf</code>.  <code>"split"</code> runs it on one spatially blocked half,
 then fits the selected set on that half and scores it on the other:
-<code>score_holdout</code> is then an honest estimate of the selected model's
-<code>metric</code> on data the selection never saw (the sweep's own
-<code>score</code> is not; see "The score is not a performance estimate").
+<code>score_holdout</code> is then the selected model's <code>metric</code> on rows
+whose response the sweep never read (the sweep's own <code>score</code> is
+not; see "The score is not a performance estimate").  It is one
+estimate from one region: the halves share a border with no buffer, so
+rows near it are still correlated with the selection half.
 Both halves come back in <code>$split</code>.  See the "Post-selection
 inference" section of <code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code> for the
 trade: coverage for half the sample.</p></dd>
@@ -187,20 +189,31 @@ trade: coverage for half the sample.</p></dd>
 final step: the <strong>selection-internal</strong> optimum, optimistically
 biased because it was chosen as the best of many (see the section above),
 and <code>NA</code> when nothing was selected.  <code>history</code> is a data.frame
-with <code>step</code>, <code>variable</code> and <code>score</code>, holding every
-candidate evaluated at every step; when the null model could be scored it
-also carries a <code>step = 0</code> row named <code>"&lt;none&gt;"</code> giving that
-baseline, so the first variable's gain can be read off directly.
+with <code>step</code>, <code>variable</code>, <code>score</code> and <code>n_pred</code>,
+holding every candidate evaluated at every step; when the null model
+could be scored it also carries a <code>step = 0</code> row named
+<code>"&lt;none&gt;"</code> giving that baseline, so the first variable's gain can be
+read off directly.  Every set is scored on the same rows: those the null
+model's cross-validation predicted or, when there is no null model,
+those any step-1 set predicted; <code>params$n_scored</code> counts them (a
+warning says so when that is fewer than all).  <code>n_pred</code> is how many
+rows the set's cross-validation predicted.  A set that left some of the
+scored rows unpredicted, because a fold failed for it, has <code>score</code>
+<code>NA</code>, with a warning naming it: scored on the rows it did predict
+it would be compared on fewer, usually easier, rows than its rivals.  A
+factor with a level found in one spatial block only is the usual case,
+and cannot be selected.
 <code>score_holdout</code> is <code>NA</code> unless <code>select_on = "split"</code>, and
 then the selected set's <code>metric</code> when fitted on the selection half
 and predicted on the estimation half (\(R^2\) against the selection
 half's mean, the out-of-sample convention); <code>NA</code> when nothing was
 selected or the prediction failed.  <code>split</code> is <code>NULL</code> or a
 list with <code>selection</code> and <code>estimation</code>, integer row positions
-in <code>train_sf</code> after the completeness filter above.
+in <code>train_sf</code> as passed; rows the completeness filter above dropped
+are in neither.
 <code>params</code> records <code>metric</code>, <code>method</code>, <code>k</code>,
 <code>tol</code>, <code>seed</code>, <code>auto_range</code>, <code>select_on</code>,
-<code>n_candidates</code> and <code>estimated_fits</code>.</p>
+<code>n_candidates</code>, <code>estimated_fits</code> and <code>n_scored</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

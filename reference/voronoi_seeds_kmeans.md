@@ -3,11 +3,12 @@
 Places `k` seed points at k-means cluster centres of the observed
 coordinates, so seeds (and the Voronoi cells built from them) follow the
 sampling density: clusters of observations attract seeds, empty ground
-gets none. Reach for this when you want cells that each carry a
-comparable number of observations, which is what makes per-cell
-aggregates in
+gets none. Reach for this when you want cells that follow the data, so
+that counts per cell vary far less than on a fixed grid over clustered
+points (k-means does not equalise them, it minimises the spread of
+points around each centre), which is what keeps per-cell aggregates in
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-similarly precise. Use
+from resting on one or two observations. Use
 [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
 instead when you want coverage of the study area rather than of the
 data, and
@@ -17,7 +18,7 @@ to pick between them by name.
 ## Usage
 
 ``` r
-voronoi_seeds_kmeans(points_sf, k, set_seed = 456)
+voronoi_seeds_kmeans(points_sf, k, set_seed = 456, nstart = 10)
 ```
 
 ## Arguments
@@ -37,7 +38,19 @@ voronoi_seeds_kmeans(points_sf, k, set_seed = 456)
 
 - set_seed:
 
-  Optional integer RNG seed. Default 456.
+  Optional integer RNG seed. Default 456, so a call gives the same seeds
+  every time whatever the session's random-number state; an outer
+  [`set.seed()`](https://rdrr.io/r/base/Random.html) does not change
+  them, and the caller's random-number stream is left as it was. Pass
+  `NULL` to draw the k-means starts from the session's stream instead
+  (the default of
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)).
+
+- nstart:
+
+  Number of random starts for
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html); the best is
+  kept. Default 10.
 
 ## Value
 
@@ -49,8 +62,23 @@ exceeds the number of distinct positions), with `seed_id` and
 ## Details
 
 Lon/lat input is projected first so the k-means distances are metric and
-not degrees. Rows with empty or non-finite coordinates are dropped with
+not degrees; so is input with no CRS whose coordinates look like lon/lat
+(the heuristic
+[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+applies, with its warning), and the seeds come back in the input's own
+coordinates. Rows with empty or non-finite coordinates are dropped with
 a warning, and `k` is clamped to the number of distinct positions.
+
+The partition is
+[`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) (Hartigan-Wong)
+with `nstart` random starts.
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+and
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+score each count on a different run, by default the best of 25 k-means++
+restarts, which usually reaches a lower within-cluster sum of squares;
+the seeds for a chosen count are therefore not the partition that count
+was scored on. Raising `nstart` narrows the gap but does not close it.
 
 ## See also
 

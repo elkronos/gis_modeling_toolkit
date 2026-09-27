@@ -104,7 +104,7 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
   # noise for Mallows' Cp to have an interior optimum rather than descend
   # to the ceiling.
-  set.seed(2)
+  set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
@@ -118,32 +118,28 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   print(attr(summary(prof), "common")) # the levels all of them accept, if any
   attr(summary(prof), "bands")         # each criterion's region in full
 }
-#> Resolution picks: 4 criteria over 12 levels (6 to 44 cells)
+#> Resolution picks: 3 criteria over 12 levels (4 to 44 cells)
 #> 
-#>    criterion best flat region levels in band
-#>           cp   37    31 to 44              3
-#>  reliability    6      6 to 9              3
-#>        elbow   15    15 to 18              2
-#>      moran_z   10    10 to 12              2
+#>    criterion best  flat region levels in band
+#>           cp   28 18, 28 to 35              3
+#>  reliability    4       4 to 6              3
+#>      moran_z   10           10              1
 #> 
 #>   reliability: the optimum is the range floor (area / range^2).
 #>   moran_z: the optimum is the first level the criterion is computable at.
 #>   There the bound is choosing, not the criterion.
 #> 
-#>   picks span 6 to 37 cells (6.2x)
+#>   picks span 4 to 28 cells (7.0x)
 #>   no level is in every flat region: the criteria disagree over the
 #>   whole ladder. plot() draws the curves they were read from.
 #> integer(0)
 #> $cp
-#> [1] 31 37 44
+#> [1] 18 28 35
 #> 
 #> $reliability
-#> [1] 6 7 9
-#> 
-#> $elbow
-#> [1] 15 18
+#> [1] 4 5 6
 #> 
 #> $moran_z
-#> [1] 10 12
+#> [1] 10
 #> 
 ```

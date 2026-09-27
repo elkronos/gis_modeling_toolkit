@@ -176,7 +176,10 @@ re-sorted and re-read elsewhere has no memory of how it was built.
 [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
 derives an ID from the geometry itself, in a common CRS, so the same
 region gets the same ID from whoever computes it, in whatever projection
-the file is in by then.
+the file is in by then. The exception is fine cells stacked within about
+a centimetre of the same longitude, which a reprojection can swap (see
+[`?ensure_stable_poly_id`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md));
+regions this size are nowhere near it.
 
 ``` r
 
@@ -342,7 +345,7 @@ cat(paste0("- ", names(report), ": ", unlist(report)), sep = "\n")
     ## - score: RMSE 2.25 (per fold 1.97 to 2.61), R2 -0.063
     ## - coverage: 5 of 5 folds scored, 0 rows dropped, 0 orphan, 0 unknown id
     ## - residuals: Moran's I 0.567 (z = 12.6, p = 3.62e-36, randomisation null)
-    ## - applicability: 0 of 909 prediction cells outside (DI > 0.073)
+    ## - applicability: 0 of 937 prediction cells outside (DI > 0.073)
     ## - range: estimated range 286,804 m against blocks of 100,000 m
 
 Read together, those lines say the run failed its own checks, which is
@@ -360,7 +363,7 @@ structure in `z` is the field, and a plane in the coordinates cannot
 represent it. That is the point at which you fit something spatial
 rather than report this.
 
-The applicability line reads 0 of 909 here because
+The applicability line reads 0 of 937 here because
 [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
 joined the covariate from the nearest observation, so no grid cell holds
 a combination the model never saw. On a real covariate raster it will
@@ -387,10 +390,17 @@ reader has a figure and no idea what it was computed over.
 For the aggregates themselves, report the standard error that comes with
 each cell mean rather than the mean alone.
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-computes it with the observation count beside it, and `deff` corrects it
-for within-cell autocorrelation. A cell mean from two observations and
-one from thirteen are different claims, and printed side by side they
-look identical.
+computes it with the observation count beside it. For per-region values
+like the map above, that is the default `deff = 1` standard error used
+here (or the block-kriging variance, `kr_var`, from
+[`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)).
+A `deff` setting widens it for within-cell autocorrelation, which is
+right only when the regional means feed a claim about the population
+(here statewide) mean;
+[`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+says which is which. A cell mean from two observations and one from
+thirteen are different claims, and printed side by side they look
+identical.
 
 ``` r
 
@@ -488,7 +498,7 @@ phylogenetic structure. *Ecography* 40(8), 913-929.
     ## [21] cli_3.6.6          rlang_1.3.0        units_1.0-1        intervals_0.15.5  
     ## [25] withr_3.0.3        cachem_1.1.0       yaml_2.3.12        otel_0.2.0        
     ## [29] FNN_1.1.4.1        tools_4.6.1        dplyr_1.2.1        spacetime_1.3-4   
-    ## [33] logger_0.4.3       vctrs_0.7.3        R6_2.6.1           zoo_1.9-0         
+    ## [33] logger_0.4.3       vctrs_0.7.3        R6_2.6.1           zoo_1.9-1         
     ## [37] proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    fs_2.1.0          
     ## [41] htmlwidgets_1.6.4  ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3        
     ## [45] pkgdown_2.2.1      pillar_1.11.1      bslib_0.12.0       gtable_0.3.6      

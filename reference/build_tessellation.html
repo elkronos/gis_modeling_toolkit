@@ -106,7 +106,18 @@ own to lay a grid over and error without it; supply the study-area polygon,
 or build one from the points with <code><a href="clip_target_for.html">clip_target_for()</a></code>. <strong>Optional</strong> for
 <code>method = "voronoi"</code> and <code>method = "triangles"</code>, which derive their extent
 from the points themselves and use <code>boundary</code> only to clip the result when
-<code>clip = TRUE</code>.</p></dd>
+<code>clip = TRUE</code>. When exactly one of <code>points_sf</code> and <code>boundary</code> has a CRS,
+the other is interpreted in it, with a warning. CRS-less points, and a
+CRS-less boundary given with projected points, are read as
+<code><a href="harmonize_crs.html">harmonize_crs()</a></code> does; CRS-less points that do not look like lon/lat
+cannot take a geographic boundary's CRS and are refused with an error. A
+CRS-less boundary given with lon/lat points is read as lon/lat when its
+coordinates fit the lon/lat envelope, and refused with an error
+otherwise. When neither has one, both are read by the lon/lat heuristic
+of <code><a href="ensure_projected.html">ensure_projected()</a></code>: taken as EPSG:4326 and projected when the points
+look like degrees (a boundary whose coordinates do not fit the lon/lat
+envelope is then refused with an error), otherwise left in the same
+unnamed planar space.</p></dd>
 
 
 <dt id="arg-method">method<a class="anchor" aria-label="anchor" href="#arg-method"></a></dt>
@@ -128,7 +139,17 @@ vector of ranked candidates from <code><a href="determine_optimal_levels.html">d
 (its <code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code> (read with
 <code><a href="select_resolution.html">select_resolution()</a></code> at its default criterion).  The count used
 is returned as <code>params$approx_n_cells</code> and where it came from as
-<code>params$approx_n_cells_from</code> (<code>NULL</code> for a plain number).</p></dd>
+<code>params$approx_n_cells_from</code> (<code>NULL</code> for a plain number).
+A count read off a profile or selection is a number of k-means cells:
+every one occupied, and small where the points are dense.  A lattice
+lays that many equal cells over the whole boundary, so on clustered
+points many of them hold no point (about half, on six clusters in a
+square); on evenly spread points it matches.  <code>params$cells_occupied</code>
+and <code>params$cells_empty</code> report how the points filled the grid, and
+a count that came from a profile or selection warns when fewer than
+three quarters of it are occupied.  For cells that follow the points,
+seed a Voronoi tessellation with
+<code>get_voronoi_seeds(method = "kmeans", n = &lt;the count&gt;, sample_points = &lt;the points&gt;)</code>.</p></dd>
 
 
 <dt id="arg-cellsize">cellsize<a class="anchor" aria-label="anchor" href="#arg-cellsize"></a></dt>
@@ -136,14 +157,18 @@ is returned as <code>params$approx_n_cells</code> and where it came from as
 <code>method = "hex"</code> and <code>"square"</code> only; the other two methods warn
 that it was ignored.  When both <code>cellsize</code> and <code>approx_n_cells</code>
 are given, <code>cellsize</code> wins and <code>approx_n_cells</code> is ignored with
-a logged warning; supply one or the other.</p></dd>
+a logged warning; supply one or the other.  With a geographic <code>crs</code>
+it is in that CRS's degrees, and the grid is laid in degrees.</p></dd>
 
 
 <dt id="arg-expand">expand<a class="anchor" aria-label="anchor" href="#arg-expand"></a></dt>
-<dd><p>Buffer distance for the Voronoi envelope. Applied by
+<dd><p>Buffer distance, in the working CRS's units, by which the
+Voronoi boundary is grown before the diagram is built. Applied by
 <code>method = "voronoi"</code> only; the <code>"hex"</code>, <code>"square"</code> and <code>"triangles"</code>
 methods ignore it (the value you passed is still echoed back in
-<code>params$expand</code>).</p></dd>
+<code>params$expand</code>). With <code>clip = TRUE</code> the cells are clipped to the grown
+boundary, which is the one returned as <code>boundary</code>: cells reach <code>expand</code>
+beyond the study area, and a point up to <code>expand</code> outside it is indexed.</p></dd>
 
 
 <dt id="arg-clip">clip<a class="anchor" aria-label="anchor" href="#arg-clip"></a></dt>
@@ -151,11 +176,29 @@ methods ignore it (the value you passed is still echoed back in
 
 
 <dt id="arg-keep-duplicates">keep_duplicates<a class="anchor" aria-label="anchor" href="#arg-keep-duplicates"></a></dt>
-<dd><p>Logical; keep duplicate points.</p></dd>
+<dd><p>Logical. Has no effect on the cells or the index:
+coincident points are merged before a Voronoi diagram or a Delaunay
+triangulation is built either way, and every one of them is indexed to
+the cell they share.</p></dd>
 
 
 <dt id="arg-crs">crs<a class="anchor" aria-label="anchor" href="#arg-crs"></a></dt>
-<dd><p>Optional target CRS.</p></dd>
+<dd><p>Optional target CRS: anything <code><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">sf::st_crs()</a></code> accepts, including
+an sf or sfc layer, whose CRS is used. A projected CRS is the working
+CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
+in: the cells are built in the local projected CRS <code><a href="ensure_projected.html">ensure_projected()</a></code>
+picks for the points, indexed there, and then transformed with long edges
+densified, so Voronoi cells are nearest-point cells on the ground and
+grid cells are laid in metres rather than degrees. The exception is a hex
+or square grid sized by <code>cellsize</code>, which is in degrees and so is laid in
+degrees. Whenever that local CRS is picked for lon/lat points, or
+CRS-less ones taken as lon/lat (no <code>crs</code>, or a geographic one), a hex or
+square grid with a boundary is laid in it unless it
+distorts areas across the boundary by more than 1 percent (Web Mercator
+over a near-global extent, say); the grid is then laid, and the points
+indexed, in the equal-area CRS <code>ensure_projected(purpose = "area")</code> picks
+for the boundary, with a logged warning, as <code><a href="create_grid_polygons.html">create_grid_polygons()</a></code>
+does, so the cells stay equal-area.</p></dd>
 
 
 <dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
@@ -181,7 +224,8 @@ area as <code>NA</code>. A summary built from <code>index</code> therefore count
 points the tessellation actually covers.</p></dd>
 
 <dt><code>boundary</code></dt>
-<dd><p>The boundary used (possibly derived and/or reprojected).</p></dd>
+<dd><p>The boundary used (possibly derived and/or
+reprojected, and for <code>"voronoi"</code> grown by <code>expand</code>).</p></dd>
 
 <dt><code>method</code></dt>
 <dd><p>The method actually used.</p></dd>
@@ -190,7 +234,9 @@ points the tessellation actually covers.</p></dd>
 <dd><p>The parameters the tessellation was built with, plus
 <code>snapped</code>, the record of that nearest-cell repair: a list with <code>n</code>,
 <code>which</code> (row positions in <code>points_sf</code>) and <code>distance</code> (how far
-outside every cell each sat, in CRS units).</p></dd>
+outside every cell each sat, in CRS units). For <code>"hex"</code> and
+<code>"square"</code> also <code>cells_occupied</code> and <code>cells_empty</code>, the number of
+cells that hold at least one point and that hold none.</p></dd>
 
 
 </dl></div>
@@ -206,6 +252,11 @@ axis-aligned artefacts of squares and have uniform neighbour distances.
 interpolation and adjacency work; it is not meant as an aggregation unit.
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code> will suggest a cell count from the
 spatial structure of the data.</p>
+<p><code>"voronoi"</code> and <code>"triangles"</code> are built on the points' vertices:
+a MULTIPOINT feature with several vertices gets one cell (or triangle
+corner) per vertex, and its <code>index</code> entry is the smallest
+<code>cell_id</code> among the cells it touches.  See
+<code><a href="create_voronoi_polygons.html">create_voronoi_polygons()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

@@ -90,13 +90,21 @@ cv_spatial(
 
 - fold_info_fn:
 
-  Optional `function(fit, test_sf, y, yhat)` returning a named list of
-  per-fold extras (a bandwidth, a tuning value, anything read off the
-  fitted object), added as columns of `fold_metrics`. It sees the fit
-  and the held-out layer, which `metrics` does not; it is applied per
-  fold only, and its values are not pooled. An element `..per_row` that
-  is a data frame with one row per held-out observation is spliced into
-  `predictions` instead.
+  Optional `function(fit, test_sf, y, yhat)` returning a named list (or
+  a named vector) of per-fold extras (a bandwidth, a tuning value,
+  anything read off the fitted object), added as columns of
+  `fold_metrics`. It sees the fit and the held-out layer, which
+  `metrics` does not; it is applied per fold only, and its values are
+  not pooled. An element `..per_row` that is a data frame with one row
+  per held-out observation is spliced into `predictions` instead (`NA`
+  in the rows of a fold that returned none; one of the wrong length is
+  dropped and logged); its columns must be named, once, and not reuse a
+  column `predictions` already has (`..row_id`, `fold`, `y`, `yhat`,
+  `y_train_mean`). Every other element must be named, hold one value,
+  and not reuse a column `fold_metrics` already has; anything else is an
+  error. A `fold_info_fn` that throws on a fold is logged, its columns
+  are `NA` for that fold, and `fold_status$message` says so; the fold is
+  kept.
 
 - p:
 
@@ -120,7 +128,12 @@ cv_spatial(
   cores and fit folds in parallel via
   [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
   (macOS / Linux; falls back to sequential on Windows). If an integer \>
-  1, use that many cores. Default `FALSE` (sequential).
+  1, use that many cores. Default `FALSE` (sequential). A learner that
+  runs OpenMP code (GWmodel, or an xgboost built with GNU libgomp) can
+  hang the forked workers once it has run in the session; keep such a
+  `fit_fn` sequential, as
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  does.
 
 - metrics:
 
@@ -143,30 +156,52 @@ The counts are reported deliberately: a `fit_fn` that fails on every
 fold otherwise looks like a successful run that happened to score `NA`,
 so compare them before trusting `overall`. `fold_status` is a data.frame
 with one row per fold supplied (`fold`, `status` and `message`), where
-`status` is `"ok"`; `"error"` (the fit or its
+`status` is `"ok"` (`message` is empty unless `fold_info_fn` failed on
+the fold); `"error"` (the fit or its
 [`predict()`](https://rdrr.io/r/stats/predict.html) threw; `message` is
 the error text); `"skipped"` (nothing scorable: too few matched rows, a
 prediction of the wrong length, or no finite observed/predicted pair);
 `"dropped"` (an empty test set, or fewer than two training rows, once
 incomplete rows were removed, so the fold never reached the fitter); or
-`"worker_error"` (a parallel worker died). Every fold missing from
-`fold_metrics` has its reason there, which matters most when the console
-output of a long run is gone. `orphan_rows` holds the `..row_id`s of
-rows in the data that no fold names (they enter no training set and are
-never scored; non-empty only when the folds were built on a different or
-subsetted layer), and `n_unknown_ids` counts the distinct row IDs the
-folds name that the data does not have. Each such row is named by every
-fold, once as a test row and once in each other fold's training set, and
-this counts the row, not the mentions (expected when rows were removed
-for missing values). `n_dropped` is how many rows
+`"worker_error"` (a parallel worker died, for example killed for lack of
+memory). Each fold runs in its own worker, so a failure costs that fold
+only, and an error that stops a sequential run (a `metrics` or
+`fold_info_fn` return value of the wrong shape) stops a parallel one
+too, naming the fold. Every fold missing from `fold_metrics` has its
+reason there, which matters most when the console output of a long run
+is gone. When some folds, but not all, end as `"error"`, `"skipped"` or
+`"worker_error"`, the function warns, naming them and how many rows
+`overall` covers: it is pooled over the folds that produced predictions,
+and the fold that fails is often the hardest to predict, so it may
+flatter the model. (A `"dropped"` fold has its own warning.)
+`orphan_rows` holds the `..row_id`s of rows in the data that no fold
+names (they enter no training set and are never scored; non-empty only
+when the folds were built on a different or subsetted layer), and
+`n_unknown_ids` counts the distinct row IDs the folds name that the data
+does not have. Each such row is named by every fold, once as a test row
+and once in each other fold's training set, and this counts the row, not
+the mentions (expected when rows were removed for missing values).
+`n_dropped` is how many rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry before any
 fold was fitted. The `fold` column of `fold_metrics`, `predictions` and
 `fold_status` carries the fold's index in the `folds` object that was
 supplied, so it lines up with `make_folds()$assignment$fold` even when
-some folds were unusable and dropped. `overall$Adj_R2` is always `NA`:
-the pooled out-of-sample predictions come from `k` separately fitted
-models and have no single parameter count to adjust for. The per-fold
+some folds were unusable and dropped. Splits that already carry a
+`fold_id`, as the `folds` of a `cv_*()` result do, keep it: handing one
+run's `folds` to another labels each fold as the first run and
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+do, a dropped fold's gap included. `R2` is out-of-sample \\R^2\\: the
+total sum of squares is taken about the mean of the *training* rows (in
+`overall`, each held-out row about its own fold's training mean), the
+null prediction available when the fold is predicted, and not about the
+held-out rows' own mean, a null model that would know the test data. On
+spatial blocks the two can differ widely; `R2` is below 0 when the model
+predicts worse than the training mean.
+[`model_metrics`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)`(newdata = )`
+uses the same baseline. `overall$Adj_R2` is always `NA`: the pooled
+out-of-sample predictions come from `k` separately fitted models and
+have no single parameter count to adjust for. The per-fold
 `fold_metrics$Adj_R2` carries the adjusted value when `p` is supplied,
 and is `NA` otherwise.
 
@@ -202,14 +237,22 @@ of `overall`. Only the pairs the built-in metrics use reach the function
 `RMSE`, and `n_pred` counts them.
 
 The contract: every element named, names unique and not one of the
-built-in column names, one number per name. Anything else is an error,
-because a scoring function that returns the wrong shape is a mistake to
-surface instead of a fold to skip. A function that *throws* on a fold is
-logged and its columns are `NA` for that fold (and for `overall`, if it
-throws on the pooled predictions); a fold is never dropped for it. When
-no fold produced a prediction the empty `fold_metrics` frame still
-carries the function's columns, typed, provided the function can be
-called on zero-length input.
+built-in column names, one number per name. The built-in names include
+the per-fold extras of the backend or of your `fold_info_fn`
+(`bandwidth` for
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md);
+`CRPS`, `coverage_*`, `gp_k`, `gp_n_basis` and `n_draws` for
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)),
+and `mean_CRPS`, which
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+writes. Anything else is an error, because a scoring function that
+returns the wrong shape is a mistake to surface instead of a fold to
+skip. A function that *throws* on a fold is logged and its columns are
+`NA` for that fold (and for `overall`, if it throws on the pooled
+predictions); a fold is never dropped for it. When no fold produced a
+prediction the empty `fold_metrics` frame still carries the function's
+columns, typed, provided the function can be called on zero-length
+input.
 
 `fold_info_fn` is the per-fold half of the same mechanism, with access
 to the fitted object and the held-out layer; `metrics` sees only the two
@@ -223,11 +266,14 @@ across the rows of its `overall`.
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out

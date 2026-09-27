@@ -30,24 +30,43 @@ fold_separation(folds, data_sf, sac = NULL)
   `..row_id` when the layer carries one, and by row position otherwise,
   which is what
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  and every `cv_*()` do.
+  and every `cv_*()` do. As in `cv_*()`, a
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  result whose recorded rows sit at other locations here (folds built on
+  another layer, such as the points before
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  dropped some) is refused; the location check is skipped when one of
+  the two layers is POINT and the other is not.
 
 - sac:
 
   Optional: an
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  result or a single number, in the CRS units of `data_sf`. Defaults to
-  the range the folds carry, if any. Supplying one adds the
-  `within_range` column and the closing verdict.
+  result or a single number. Defaults to the range the folds carry, if
+  any. Supplying one adds the `within_range` column and the closing
+  verdict. A range that records its CRS (the folds' own, or an
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  result) is compared with distances measured in that CRS, whatever CRS
+  `data_sf` is in. A bare number is taken to be in the units the
+  distances are otherwise measured in: those of `data_sf` if it is
+  projected, and for geographic (lon/lat) input metres, in the CRS
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  chooses (as for
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
+  `block_size`), not degrees. A `units` object is refused.
 
 ## Value
 
-A data.frame of class `fold_separation`, one row per fold: `fold`,
-`n_train`, `n_test`, `n_blocks` (`NA` for a scheme with no blocks),
-`min_dist` and `median_dist` (distance from a held-out point to its
-nearest training point, in CRS units), and `within_range` (the share of
-held-out points closer to training data than `sac`; `NA` without one).
-Attributes: `method`, `sac_range`, `crs` and `n_unknown_ids`.
+A data.frame of class `fold_separation`, one row per fold: `fold` (the
+fold's number: for the `$folds` of a `cv_*()` result, the `fold_id` its
+`fold_metrics` use, which differs from the list position once a fold has
+been dropped), `n_train`, `n_test`, `n_blocks` (`NA` for a scheme with
+no blocks), `min_dist` and `median_dist` (distance from a held-out point
+to its nearest training point, in the units of the CRS the `crs`
+attribute names), and `within_range` (the share of held-out points
+closer to training data than `sac`; `NA` without one). Attributes:
+`method`, `sac_range`, `crs` (the CRS the distances were measured in)
+and `n_unknown_ids`.
 
 ## Details
 
@@ -91,7 +110,7 @@ library(sf)
 set.seed(1)
 n <- 200
 pts <- st_as_sf(
-  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
   coords = c("x", "y"), crs = 32632
 )
 
@@ -99,7 +118,7 @@ pts <- st_as_sf(
 random  <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
 print(fold_separation(random, pts, sac = 200))
 #> Fold separation: random_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)
-#>   autocorrelation range: 200
+#>   autocorrelation range: 200 (in metres, like the distances)
 #> 
 #>  fold n_train n_test min_dist median_dist within_range
 #>     1     150     50    4.696       36.95         100%
@@ -110,14 +129,14 @@ print(fold_separation(random, pts, sac = 200))
 #>   100% of held-out points sit closer to a training point than the
 #>   correlation range (200), and the closest is 3.83 away. Most of the
 #>   hold-out is inside the range of its own training data, so this score is
-#>   optimistic: widen the blocks.
+#>   optimistic: use blocked or buffered folds.
 
 # Blocked folds hold out whole neighbourhoods, so the distances grow.
 blocked <- make_folds(pts, k = 4, method = "block_kfold",
                       block_size = 250, seed = 1)
 print(fold_separation(blocked, pts, sac = 200))
 #> Fold separation: block_kfold, 4 fold(s), 200 held-out point(s) (EPSG:32632)
-#>   autocorrelation range: 200
+#>   autocorrelation range: 200 (in metres, like the distances)
 #> 
 #>  fold n_train n_test n_blocks min_dist median_dist within_range
 #>     1     152     48        2    23.02       111.9         100%

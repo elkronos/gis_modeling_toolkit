@@ -36,15 +36,26 @@ predict_surface(
   interpretation the training data got (the assumption recorded on the
   fit), with a warning, and then reprojected. Otherwise a CRS-less grid
   can land thousands of kilometres from the covariates and every cell
-  takes the same nearest feature.
+  takes the same nearest feature. A grid still without a CRS after that
+  is treated as `boundary` is: taken as EPSG:4326 and reprojected when
+  its coordinates look like lon/lat, otherwise stamped with the fit's
+  CRS, with a warning either way. A grid of polygons
+  ([`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  output, say) is reduced to one representative point per cell, as
+  [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+  does, so covariates are taken at the location predicted for;
+  `boundary` then keeps the cells whose point falls inside it.
 
 - cell_size:
 
   Grid resolution in CRS units. Ignored when `grid` is supplied; when
   `NULL`, derived from `n_cells`. A value that would produce more than
   5,000,000 cells is refused, naming the implied count and the CRS
-  units. The usual cause is a value in the wrong unit. A `cell_size`
-  wider than the extent yields a single centred cell.
+  units. The usual cause is a value in the wrong unit. The grid is
+  centred on the training bounding box and covers it: when the extent is
+  not a whole number of cells, it overhangs the box by less than one
+  cell, split evenly between the two sides. A `cell_size` wider than the
+  extent yields a single centred cell.
 
 - n_cells:
 
@@ -56,40 +67,53 @@ predict_surface(
 - boundary:
 
   Optional polygonal `sf`/`sfc`; grid points outside it are dropped. Put
-  through the same CRS replay and reprojection as `grid`.
+  through the same CRS replay and reprojection as `grid`. One still
+  without a CRS after the replay is taken as EPSG:4326 and reprojected
+  when its coordinates look like lon/lat, and is otherwise stamped with
+  the fit's CRS, with a warning either way.
 
 - covariates:
 
   Optional `sf` layer carrying the model's predictors. Required when the
   model has predictors and `grid` does not already contain them. Values
-  are taken from the nearest feature.
+  are taken from the nearest feature. Aligned to the fit's CRS as `grid`
+  is, with the same warning when it has no CRS.
 
 - chunk_size:
 
-  Rows per prediction call. Default 5000. A pure performance knob for
-  the GWR and random-forest backends, whose rows do not interact. For a
-  `bayesian_fit` it is also that, *provided* the grid stays inside the
-  training extent. Beyond it the GP boundary has to grow and predictions
-  depend on which rows share the call; see
+  Rows per prediction call. Default 5000. A pure performance knob: rows
+  do not interact, and for a `bayesian_fit` the GP boundary is held at
+  its fitted value whatever the chunk holds; see
   [`predict.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.bayesian_fit.md).
 
 - se:
 
   Logical; also return a standard-error/posterior-SD column where the
-  backend supports it. Default FALSE.
+  backend supports it. Default FALSE. For a `bayesian_fit` this is the
+  SD of the posterior draws
+  [`predict()`](https://rdrr.io/r/stats/predict.html) returns, and those
+  are of the expected value by default (`type = "epred"`): the
+  uncertainty of the mean surface, not of a new observation, which also
+  carries the observation noise. For the predictive SD, the one that
+  goes with prediction intervals and
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)'s
+  calibration, pass `type = "predict"` as well.
 
 - ...:
 
-  Passed to [`predict()`](https://rdrr.io/r/stats/predict.html).
+  Passed to [`predict()`](https://rdrr.io/r/stats/predict.html), e.g.
+  `type = "predict"` for a `bayesian_fit`. Not `draws`, which this
+  function sets itself and refuses here.
 
 ## Value
 
 An `sf` POINT layer with a `.pred` column (and `.pred_se` when
-`se = TRUE` and available). For an auto-generated grid the resolution is
-attached as attribute `"cell_size"`. For a user-supplied `grid` it is
-only whatever `"cell_size"` attribute that object already carried. That
-is usually `NULL`, and `NULL` for certain if the grid had to be
-re-projected, since
+`se = TRUE` and available; one a supplied `grid` already carried, from
+an earlier surface, is removed otherwise). For an auto-generated grid
+the resolution is attached as attribute `"cell_size"`. For a
+user-supplied `grid` it is only whatever `"cell_size"` attribute that
+object already carried. That is usually `NULL`, and `NULL` for certain
+if the grid had to be re-projected, since
 [`st_transform()`](https://r-spatial.github.io/sf/reference/st_transform.html)
 does not preserve custom attributes. The resolution of a grid you built
 is not this function's to infer.
@@ -135,23 +159,23 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   # outside; a grid with its own covariate raster is where this bites.
   area_of_applicability(surf, model = fit)
 }
-#> Simple feature collection with 484 features and 1 field
+#> Simple feature collection with 529 features and 1 field
 #> Geometry type: POINT
 #> Dimension:     XY
-#> Bounding box:  xmin: 500034.7 ymin: 5000057 xmax: 500943.7 ymax: 5000966
+#> Bounding box:  xmin: 500026.7 ymin: 5000038 xmax: 500979 ymax: 5000990
 #> Projected CRS: WGS 84 / UTM zone 32N
 #> First 10 features:
 #>       .pred                 geometry
-#> 1  11.53496 POINT (500034.7 5000057)
-#> 2  11.71447   POINT (500078 5000057)
-#> 3  11.71447 POINT (500121.3 5000057)
-#> 4  12.06628 POINT (500164.6 5000057)
-#> 5  12.06628 POINT (500207.9 5000057)
-#> 6  12.06628 POINT (500251.1 5000057)
-#> 7  13.07745 POINT (500294.4 5000057)
-#> 8  13.07745 POINT (500337.7 5000057)
-#> 9  13.07745   POINT (500381 5000057)
-#> 10 11.63669 POINT (500424.3 5000057)
+#> 1  11.53496 POINT (500026.7 5000038)
+#> 2  11.71447   POINT (500070 5000038)
+#> 3  11.71447 POINT (500113.3 5000038)
+#> 4  12.06628 POINT (500156.6 5000038)
+#> 5  12.06628 POINT (500199.9 5000038)
+#> 6  12.06628 POINT (500243.2 5000038)
+#> 7  13.07745 POINT (500286.5 5000038)
+#> 8  13.07745 POINT (500329.7 5000038)
+#> 9  13.07745   POINT (500373 5000038)
+#> 10 11.63669 POINT (500416.3 5000038)
 #> Area of applicability (Meyer & Pebesma 2021)
 #> 
 #>   predictors  : 1 (elev)
@@ -161,5 +185,5 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>   normaliser  : 1.1283 (mean pairwise distance)
 #>   threshold   : 0.0480 (outlier-removed max of training DI)
 #> 
-#>   484 of 484 prediction points inside the AOA (100.0%)
+#>   529 of 529 prediction points inside the AOA (100.0%)
 ```

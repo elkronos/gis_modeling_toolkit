@@ -88,7 +88,38 @@ If NULL, in-sample metrics are computed.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A data.frame with one row per model and columns for
-model name and all regression metrics.</p>
+model name, all regression metrics, and <code>metric_basis</code>: what the
+row's metrics were computed on, <code>"in-sample"</code> (fitted values),
+<code>"out-of-bag"</code> (an <code>rf_fit</code>'s fitted values, see "What the
+metrics are computed on") or <code>"newdata"</code>.  Rows with different
+bases do not compare like for like.  An element that is not a
+<code>spatial_fit</code> is skipped, with a logged warning, and has no row;
+a list in which no element is a <code>spatial_fit</code> is an error.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="what-the-metrics-are-computed-on">What the metrics are computed on<a class="anchor" aria-label="anchor" href="#what-the-metrics-are-computed-on"></a></h2>
+
+
+<p>With <code>newdata = NULL</code> the metrics come from <code>fitted(object)</code>.
+That is <strong>in-sample</strong> for a <code>gwr_fit</code> or a <code>bayesian_fit</code>,
+but <strong>out-of-bag</strong> for an <code>rf_fit</code>, whose <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> method
+returns out-of-bag predictions (see <code><a href="fit_rf_model.html">fit_rf_model</a></code>).  The
+data.frame <code><a href="model_metrics.html">model_metrics()</a></code> returns carries no label distinguishing
+the two, so check <code>object$info$fitted_are_oob</code> before comparing
+numbers across backends; <code>evaluate_insample()</code> and
+<code><a href="compare_models.html">compare_models()</a></code> record it per model in a
+<code>metric_basis</code> column.  <code><a href="compare_models_cv.html">compare_models_cv</a></code> scores every
+backend the same way.</p>
+<p>\(R^2\) is \(1 - RSS/TSS\) with the total sum of squares taken about
+the mean of the response the model was <em>fitted</em> to.  In sample that
+is the ordinary \(R^2\).  With <code>newdata</code> it is out-of-sample
+\(R^2\), the convention every <code>cv_*()</code> function uses: the model is
+measured against the prediction it had to beat, the training mean, not
+against the new rows' own mean, which it could not have known.  It is
+below 0 when the model predicts the new rows worse than the training mean
+does, and it is <code>NA</code> when the response does not vary about that
+baseline by more than rounding error (100 machine epsilons of its
+magnitude, whatever its units).</p>
     </div>
     <div class="section level2">
     <h2 id="percentage-errors-on-responses-with-zeros">Percentage errors on responses with zeros<a class="anchor" aria-label="anchor" href="#percentage-errors-on-responses-with-zeros"></a></h2>
@@ -98,6 +129,9 @@ model name and all regression metrics.</p>
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
 Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
@@ -144,12 +178,12 @@ coverage, which are proper scoring rules and have no such failure mode.</p>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    model  n     RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 1 rf_fit 40 0.409009 0.3236812 86.57837 50.87364 0.9541711     NA     40</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   n_SMAPE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1      40</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   n_SMAPE metric_basis</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1      40   out-of-bag</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    model  n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1 rf_fit 20 0.5080838 0.3836504 158.4334 63.30707 0.8999583     NA     20</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   n_SMAPE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1      20</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1 rf_fit 20 0.5080838 0.3836504 158.4334 63.30707 0.9022065     NA     20</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   n_SMAPE metric_basis</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1      20      newdata</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

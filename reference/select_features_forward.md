@@ -122,10 +122,12 @@ select_features_forward(
 
   `"all"` (default) runs the sweep on every row of `train_sf`. `"split"`
   runs it on one spatially blocked half, then fits the selected set on
-  that half and scores it on the other: `score_holdout` is then an
-  honest estimate of the selected model's `metric` on data the selection
-  never saw (the sweep's own `score` is not; see "The score is not a
-  performance estimate"). Both halves come back in `$split`. See the
+  that half and scores it on the other: `score_holdout` is then the
+  selected model's `metric` on rows whose response the sweep never read
+  (the sweep's own `score` is not; see "The score is not a performance
+  estimate"). It is one estimate from one region: the halves share a
+  border with no buffer, so rows near it are still correlated with the
+  selection half. Both halves come back in `$split`. See the
   "Post-selection inference" section of
   [`determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
   for the trade: coverage for half the sample.
@@ -140,18 +142,28 @@ and `split`. `score` is the winning set's cross-validated `metric` at
 the final step: the **selection-internal** optimum, optimistically
 biased because it was chosen as the best of many (see the section
 above), and `NA` when nothing was selected. `history` is a data.frame
-with `step`, `variable` and `score`, holding every candidate evaluated
-at every step; when the null model could be scored it also carries a
-`step = 0` row named `"<none>"` giving that baseline, so the first
-variable's gain can be read off directly. `score_holdout` is `NA` unless
+with `step`, `variable`, `score` and `n_pred`, holding every candidate
+evaluated at every step; when the null model could be scored it also
+carries a `step = 0` row named `"<none>"` giving that baseline, so the
+first variable's gain can be read off directly. Every set is scored on
+the same rows: those the null model's cross-validation predicted or,
+when there is no null model, those any step-1 set predicted;
+`params$n_scored` counts them (a warning says so when that is fewer than
+all). `n_pred` is how many rows the set's cross-validation predicted. A
+set that left some of the scored rows unpredicted, because a fold failed
+for it, has `score` `NA`, with a warning naming it: scored on the rows
+it did predict it would be compared on fewer, usually easier, rows than
+its rivals. A factor with a level found in one spatial block only is the
+usual case, and cannot be selected. `score_holdout` is `NA` unless
 `select_on = "split"`, and then the selected set's `metric` when fitted
 on the selection half and predicted on the estimation half (\\R^2\\
 against the selection half's mean, the out-of-sample convention); `NA`
 when nothing was selected or the prediction failed. `split` is `NULL` or
 a list with `selection` and `estimation`, integer row positions in
-`train_sf` after the completeness filter above. `params` records
-`metric`, `method`, `k`, `tol`, `seed`, `auto_range`, `select_on`,
-`n_candidates` and `estimated_fits`.
+`train_sf` as passed; rows the completeness filter above dropped are in
+neither. `params` records `metric`, `method`, `k`, `tol`, `seed`,
+`auto_range`, `select_on`, `n_candidates`, `estimated_fits` and
+`n_scored`.
 
 ## Details
 

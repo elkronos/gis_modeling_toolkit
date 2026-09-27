@@ -51,11 +51,14 @@ exceeds the global predictor count, and a GP model has no simple `p`.
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out

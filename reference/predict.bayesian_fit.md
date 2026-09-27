@@ -59,33 +59,50 @@ predict(
 ## Value
 
 Numeric vector of length `nrow(newdata)`, or a `n_draws x nrow(newdata)`
-matrix when `draws = TRUE` (a 1-row all-`NA` matrix if the posterior
-draw fails). With `newdata = NULL` the cached
+matrix when `draws = TRUE`. If the posterior draw fails the result is
+all `NA` (a 1-row matrix for `draws = TRUE`) and the cause is logged. An
+ordinal or categorical family is not a failed draw and is an error under
+`type = "epred"`: its expected value is a probability per response
+category, not one number per row. Use `type = "predict", draws = TRUE`
+for posterior draws of the predicted category, as category indices; the
+share of draws in each category estimates its probability. Without
+`draws = TRUE`, `type = "predict"` returns the mean (or median) category
+index, an expected rank for an ordinal family and an error for
+[`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html),
+whose categories have no order. With `newdata = NULL` the cached
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) values are
 returned only for the default `summary = "mean"`, `type = "epred"`,
 `draws = FALSE` combination; any other combination is recomputed against
 the training data, because the cache holds epred column means and
 nothing else.
 
-## The GP boundary is pinned
+## The GP boundary is held at its fitted value
 
-brms 2.x does not store the Hilbert-space boundary \\L\\ in a fitted GP
-basis, so `brms:::.data_gp()` recomputes it from whatever rows
+brms 2.17 to 2.22 do not store the Hilbert-space boundary \\L\\ in a
+fitted GP basis, so `brms:::.data_gp()` recomputes it from whatever rows
 [`predict()`](https://rdrr.io/r/stats/predict.html) is handed, which
 moved every eigenfunction of the approximation with the newdata bounding
 box while the fitted basis coefficients stayed put. Two synthetic rows
 at the training coordinate extrema are therefore appended before the
-posterior draw and dropped from the result, reproducing the boundary the
-model was fitted with, so chunked, fold-wise and single-call predictions
-agree.
+posterior draw and dropped from the result, and when `newdata` reaches
+past the training range the `c` of the `gp()` term is scaled down by as
+much as the range grew, so brms rebuilds exactly the boundary the model
+was fitted with. A prediction therefore does not depend on which other
+rows share the call: chunked, fold-wise and single-call predictions
+agree, and
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+does not depend on `chunk_size`. brms 2.23.0 and later store \\L\\ and
+reuse it, so there `c` is left alone and the two extra rows change
+nothing.
 
-That is exact only for `newdata` **inside** the training coordinate
-envelope. Beyond it the boundary has to grow whatever is done, so
-predictions there are extrapolation from a basis that was not built for
-them *and* depend on which other rows share the call, including on
-[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)'s
-`chunk_size`. A notice is written to the log (not raised as a warning)
-when it happens.
+Predictions outside the training coordinate envelope are extrapolation
+(a notice is written to the log). A row further than \\L\\ from the
+centre of the training coordinates on either axis is past the edge of
+the basis, where the approximate GP is an odd reflection of the fitted
+surface rather than an estimate of anything, so it is returned as `NA`
+(a column of `NA` with `draws = TRUE`) with a warning. The default
+boundary factor puts that edge well outside the training data, so only
+`newdata` reaching far past it is affected.
 
 ## See also
 

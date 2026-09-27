@@ -13,7 +13,7 @@ result depends on one particular tessellation.
 ## Usage
 
 ``` r
-voronoi_seeds_random(boundary, k, set_seed = 456)
+voronoi_seeds_random(boundary, k, set_seed = NULL)
 ```
 
 ## Arguments
@@ -28,20 +28,28 @@ voronoi_seeds_random(boundary, k, set_seed = 456)
 
 - set_seed:
 
-  Integer RNG seed. Default 456.
+  Optional integer RNG seed. Default `NULL`: the seeds are drawn from
+  the session's random-number stream, so consecutive calls give
+  different seedings and
+  [`set.seed()`](https://rdrr.io/r/base/Random.html) before a call makes
+  it reproducible. Pass a number to get the same seeds whatever that
+  stream holds; the caller's stream is then left as it was. The default
+  used to be 456, which made every call return the same "random"
+  seeding, even inside a loop over
+  [`set.seed()`](https://rdrr.io/r/base/Random.html).
 
 ## Value
 
-An sf object of **at most** `k` random POINTs (rejection sampling inside
-an awkward geometry can fall short of `k`, which is warned about), with
-`seed_id` and `method = "random"` columns matching
+An sf object of `k` random POINTs (fewer only in the degenerate case
+above), with `seed_id` and `method = "random"` columns matching
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md).
 
 ## Details
 
-Sampling is by rejection inside the polygon, so an awkward geometry can
-return fewer than `k` seeds; that shortfall is warned about rather than
-silently padded.
+Seeds are drawn uniformly inside the polygon. When a draw falls short of
+`k` it is topped up with further uniform draws from the same polygon, so
+the result has exactly `k` seeds; only a geometry that still yields too
+few after ten top-ups returns fewer, and that shortfall is logged.
 
 ## See also
 
@@ -62,24 +70,29 @@ library(sf)
 bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
+set.seed(1)
 seeds <- voronoi_seeds_random(bnd, k = 10)
-nrow(seeds)   # at most 10: a seed that lands outside the boundary is dropped
+nrow(seeds)   # 10
 #> [1] 10
 seeds
 #> Simple feature collection with 10 features and 2 fields
 #> Geometry type: POINT
 #> Dimension:     XY
-#> Bounding box:  xmin: 8.243274 ymin: 21.79086 xmax: 85.21335 ymax: 84.31172
+#> Bounding box:  xmin: 6.178627 ymin: 17.65568 xmax: 94.46753 ymax: 99.19061
 #> Projected CRS: WGS 84 / UTM zone 32N
 #>                     geometry seed_id method
-#> 1   POINT (8.95516 37.29459)       1 random
-#> 2  POINT (21.05123 21.79086)       2 random
-#> 3   POINT (73.29553 75.5105)       3 random
-#> 4  POINT (85.21335 82.16811)       4 random
-#> 5  POINT (78.83979 59.89182)       5 random
-#> 6    POINT (33.196 65.10336)       6 random
-#> 7  POINT (8.243274 84.31172)       7 random
-#> 8  POINT (28.55269 45.32381)       8 random
-#> 9  POINT (23.75033 71.67571)       9 random
-#> 10 POINT (38.52362 29.12222)      10 random
+#> 1  POINT (26.55087 20.59746)       1 random
+#> 2  POINT (37.21239 17.65568)       2 random
+#> 3  POINT (57.28534 68.70228)       3 random
+#> 4  POINT (90.82078 38.41037)       4 random
+#> 5  POINT (20.16819 76.98414)       5 random
+#> 6  POINT (89.83897 49.76992)       6 random
+#> 7  POINT (94.46753 71.76185)       7 random
+#> 8  POINT (66.07978 99.19061)       8 random
+#> 9   POINT (62.9114 38.00352)       9 random
+#> 10 POINT (6.178627 77.74452)      10 random
+# Another call is another seeding; set_seed pins one.
+identical(st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)),
+          st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)))
+#> [1] TRUE
 ```

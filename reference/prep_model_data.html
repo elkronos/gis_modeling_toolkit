@@ -4,12 +4,16 @@ non-finite values in modeling columns, including rows whose
 geometry is empty or whose coordinates are not finite, which no model
 backend can use.  All non-POINT geometries (including MULTIPOINT) are
 coerced to representative points via coerce_to_points(), so
-downstream coordinate extraction always aligns one row per observation."><meta property="og:description" content="Ensures point geometry, projected CRS, and removes rows with missing or
+downstream coordinate extraction always aligns one row per observation.
+Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+dropped, because every backend works in 2-D map distance."><meta property="og:description" content="Ensures point geometry, projected CRS, and removes rows with missing or
 non-finite values in modeling columns, including rows whose
 geometry is empty or whose coordinates are not finite, which no model
 backend can use.  All non-POINT geometries (including MULTIPOINT) are
 coerced to representative points via coerce_to_points(), so
-downstream coordinate extraction always aligns one row per observation."></head><body>
+downstream coordinate extraction always aligns one row per observation.
+Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+dropped, because every backend works in 2-D map distance."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -63,7 +67,9 @@ non-finite values in modeling columns, <em>including</em> rows whose
 geometry is empty or whose coordinates are not finite, which no model
 backend can use.  All non-POINT geometries (including MULTIPOINT) are
 coerced to representative points via <code><a href="coerce_to_points.html">coerce_to_points()</a></code>, so
-downstream coordinate extraction always aligns one row per observation.</p>
+downstream coordinate extraction always aligns one row per observation.
+Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+dropped, because every backend works in 2-D map distance.</p>
     </div>
 
     <div class="section level2">
@@ -117,20 +123,27 @@ response is unknown).  Default TRUE.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>An sf object with POINT geometry, cleaned of rows carrying missing
-or non-finite values in the modelling columns or in the coordinates.  What
+    <p>An sf object with 2-D (XY) POINT geometry, cleaned of rows
+carrying missing or non-finite values in the modelling columns or in the
+coordinates.  What
 was removed is recorded on the attribute <code>"dropped"</code>, a list with
 <code>n</code> (rows dropped), <code>n_geometry</code> (how many of them for an
 empty or non-finite geometry), <code>which</code> (their positions in
 <code>data_sf</code>), <code>row_id</code> (their <code>..row_id</code> values when the
 layer carries that column, else <code>NULL</code>) and <code>reason</code> (one per
 dropped row: <code>"geometry"</code>, <code>"missing"</code> or
-<code>"non_finite"</code>, in that order of precedence when several apply).
+<code>"non_finite"</code>, in that order of precedence when several apply),
+plus <code>n_rows</code>, the number of rows returned, which the record was
+made for.
 Every fit stores <code>n</code> as <code>$info$n_dropped</code>.  The record
 describes the rows this call returned and does not survive subsetting:
-<code>clean[i, ]</code> is a plain layer with no <code>"dropped"</code> attribute,
-and a fit given such a subset with <code>.already_prepped = TRUE</code> reports
-<code>n_dropped = 0</code> even when the parent layer dropped rows.  The CRS is
+<code>clean[i, ]</code>, like <code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">dplyr::filter()</a></code>, <code>slice()</code> or
+<code>arrange()</code> of it, is a plain layer with no <code>"dropped"</code>
+attribute, and a fit given such a subset with <code>.already_prepped =
+TRUE</code> reports <code>n_dropped = 0</code> even when the parent layer dropped
+rows.  <code><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">sf::st_drop_geometry()</a></code> keeps the record, since the rows are
+the same; see <code><a href="sub-.spatialkit_rows.html">[.spatialkit_rows</a></code> for what binding such data
+frames does.  The CRS is
 projected whenever one can be established.  A CRS-less layer is decided by
 the lon/lat heuristic (see <code><a href="ensure_projected.html">ensure_projected</a></code>): if its bounding
 box fits the lon/lat envelope <em>and</em> it either spans more than one unit

@@ -7,7 +7,8 @@ use. All non-POINT geometries (including MULTIPOINT) are coerced to
 representative points via
 [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md),
 so downstream coordinate extraction always aligns one row per
-observation.
+observation. Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or
+KML) is dropped, because every backend works in 2-D map distance.
 
 ## Usage
 
@@ -61,20 +62,28 @@ prep_model_data(
 
 ## Value
 
-An sf object with POINT geometry, cleaned of rows carrying missing or
-non-finite values in the modelling columns or in the coordinates. What
-was removed is recorded on the attribute `"dropped"`, a list with `n`
-(rows dropped), `n_geometry` (how many of them for an empty or
-non-finite geometry), `which` (their positions in `data_sf`), `row_id`
-(their `..row_id` values when the layer carries that column, else
-`NULL`) and `reason` (one per dropped row: `"geometry"`, `"missing"` or
-`"non_finite"`, in that order of precedence when several apply). Every
-fit stores `n` as `$info$n_dropped`. The record describes the rows this
-call returned and does not survive subsetting: `clean[i, ]` is a plain
-layer with no `"dropped"` attribute, and a fit given such a subset with
-`.already_prepped = TRUE` reports `n_dropped = 0` even when the parent
-layer dropped rows. The CRS is projected whenever one can be
-established. A CRS-less layer is decided by the lon/lat heuristic (see
+An sf object with 2-D (XY) POINT geometry, cleaned of rows carrying
+missing or non-finite values in the modelling columns or in the
+coordinates. What was removed is recorded on the attribute `"dropped"`,
+a list with `n` (rows dropped), `n_geometry` (how many of them for an
+empty or non-finite geometry), `which` (their positions in `data_sf`),
+`row_id` (their `..row_id` values when the layer carries that column,
+else `NULL`) and `reason` (one per dropped row: `"geometry"`,
+`"missing"` or `"non_finite"`, in that order of precedence when several
+apply), plus `n_rows`, the number of rows returned, which the record was
+made for. Every fit stores `n` as `$info$n_dropped`. The record
+describes the rows this call returned and does not survive subsetting:
+`clean[i, ]`, like
+[`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
+`slice()` or `arrange()` of it, is a plain layer with no `"dropped"`
+attribute, and a fit given such a subset with `.already_prepped = TRUE`
+reports `n_dropped = 0` even when the parent layer dropped rows.
+[`sf::st_drop_geometry()`](https://r-spatial.github.io/sf/reference/st_geometry.html)
+keeps the record, since the rows are the same; see
+[`[.spatialkit_rows`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
+for what binding such data frames does. The CRS is projected whenever
+one can be established. A CRS-less layer is decided by the lon/lat
+heuristic (see
 [`ensure_projected`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)):
 if its bounding box fits the lon/lat envelope *and* it either spans more
 than one unit on some axis or carries decimal-degree-like precision, it

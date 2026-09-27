@@ -7,9 +7,15 @@ return a layer with an attribute recording what happened to its rows
 (`"dropped"` and `"ties"` respectively). Those records describe the rows
 the layer was built with, and `[` on an `sf` object copies attributes
 through unchanged, which would leave a subset reporting its parent's
-numbers with row positions that no longer resolve. Subsetting therefore
-returns a plain layer with the record removed; read the record from the
-layer the function returned, before subsetting it.
+numbers for a different set of rows. Subsetting therefore returns a
+plain layer with the record removed, and so do the dplyr verbs that
+select or reorder rows
+([`filter()`](https://rdrr.io/r/stats/filter.html), `slice()`,
+`arrange()`, `distinct()`); read the record from the layer the function
+returned, before subsetting it. Binding such layers
+([`rbind()`](https://rdrr.io/r/base/cbind.html),
+[`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html))
+likewise returns a plain `sf` layer.
 
 ## Usage
 
@@ -36,6 +42,21 @@ x[...]
 The subset, without the row records and without this class. A subset
 that is not a data frame (a single column taken with `drop = TRUE`) is
 returned unchanged.
+
+## Details
+
+Each record carries `n_rows`, the number of rows it was made for.
+[`sf::st_drop_geometry()`](https://r-spatial.github.io/sf/reference/st_geometry.html)
+keeps the rows, and with them the record: it returns a data frame of
+class `c("spatialkit_rows", "data.frame")`. Binding such data frames
+with [`rbind()`](https://rdrr.io/r/base/cbind.html) or
+[`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html)
+keeps the first one's record and class, so the record then describes
+only the first input's rows: its `n_rows` no longer equals
+[`nrow()`](https://rdrr.io/r/base/nrow.html) of the result. The
+package's own readers ignore a record whose `n_rows` does not match;
+when reading `attr(x, "dropped")` or `attr(x, "ties")` yourself from a
+layer that has been through such steps, check it the same way.
 
 ## See also
 

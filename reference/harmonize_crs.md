@@ -26,7 +26,9 @@ harmonize_crs(
 
 - target_crs:
 
-  Optional target CRS to apply to both.
+  Optional target CRS to apply to both: anything
+  [`sf::st_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html)
+  accepts, including an sf or sfc object, whose CRS is used.
 
 - on_transform_error:
 

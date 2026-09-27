@@ -74,8 +74,9 @@ brms::posterior_epred().  These are in-sample values."></head><body>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>Numeric vector of length <code>object$n</code> (all <code>NA</code> if the
-posterior draw failed).</p>
+    <p>Numeric vector of length <code>object$n</code>.  A posterior that cannot
+be drawn is an error, as is a family with a probability per response
+category (ordinal, categorical), which has no single fitted value per row.</p>
     </div>
     <div class="section level2">
     <h2 id="the-result-is-cached">The result is cached<a class="anchor" aria-label="anchor" href="#the-result-is-cached"></a></h2>
@@ -108,8 +109,12 @@ original's answer.</p>
 here: <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> on one copy empties the cache both
 share (harmless, since the other simply recomputes), and <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code>
 cannot distinguish two fits by their caches.  The digest covers
-<code>data_sf</code> only, not <code>$engine</code>: a hand-mutated <code>brmsfit</code> is
-what <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> is for.</p>
+<code>data_sf</code> only.  The entry is also tied to the engine that computed
+it – a refit or <code><a href="https://rdrr.io/r/stats/update.html" class="external-link">update()</a></code> of the <code>brmsfit</code> is a different
+sampling run and recomputes – but a <code>brmsfit</code> edited by hand in place
+is what <code><a href="clear_fitted_cache.html">clear_fitted_cache</a></code> is for.  The entry holds only the
+values and a small identifier of the sampling run, so a fit saved with
+<code><a href="https://rdrr.io/r/base/readRDS.html" class="external-link">saveRDS()</a></code> after <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> is no larger for it.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

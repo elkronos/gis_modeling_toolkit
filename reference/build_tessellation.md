@@ -44,7 +44,22 @@ build_tessellation(
   [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md).
   **Optional** for `method = "voronoi"` and `method = "triangles"`,
   which derive their extent from the points themselves and use
-  `boundary` only to clip the result when `clip = TRUE`.
+  `boundary` only to clip the result when `clip = TRUE`. When exactly
+  one of `points_sf` and `boundary` has a CRS, the other is interpreted
+  in it, with a warning. CRS-less points, and a CRS-less boundary given
+  with projected points, are read as
+  [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
+  does; CRS-less points that do not look like lon/lat cannot take a
+  geographic boundary's CRS and are refused with an error. A CRS-less
+  boundary given with lon/lat points is read as lon/lat when its
+  coordinates fit the lon/lat envelope, and refused with an error
+  otherwise. When neither has one, both are read by the lon/lat
+  heuristic of
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md):
+  taken as EPSG:4326 and projected when the points look like degrees (a
+  boundary whose coordinates do not fit the lon/lat envelope is then
+  refused with an error), otherwise left in the same unnamed planar
+  space.
 
 - method:
 
@@ -72,7 +87,17 @@ build_tessellation(
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
   at its default criterion). The count used is returned as
   `params$approx_n_cells` and where it came from as
-  `params$approx_n_cells_from` (`NULL` for a plain number).
+  `params$approx_n_cells_from` (`NULL` for a plain number). A count read
+  off a profile or selection is a number of k-means cells: every one
+  occupied, and small where the points are dense. A lattice lays that
+  many equal cells over the whole boundary, so on clustered points many
+  of them hold no point (about half, on six clusters in a square); on
+  evenly spread points it matches. `params$cells_occupied` and
+  `params$cells_empty` report how the points filled the grid, and a
+  count that came from a profile or selection warns when fewer than
+  three quarters of it are occupied. For cells that follow the points,
+  seed a Voronoi tessellation with
+  `get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)`.
 
 - cellsize:
 
@@ -80,14 +105,19 @@ build_tessellation(
   `method = "hex"` and `"square"` only; the other two methods warn that
   it was ignored. When both `cellsize` and `approx_n_cells` are given,
   `cellsize` wins and `approx_n_cells` is ignored with a logged warning;
-  supply one or the other.
+  supply one or the other. With a geographic `crs` it is in that CRS's
+  degrees, and the grid is laid in degrees.
 
 - expand:
 
-  Buffer distance for the Voronoi envelope. Applied by
+  Buffer distance, in the working CRS's units, by which the Voronoi
+  boundary is grown before the diagram is built. Applied by
   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
   methods ignore it (the value you passed is still echoed back in
-  `params$expand`).
+  `params$expand`). With `clip = TRUE` the cells are clipped to the
+  grown boundary, which is the one returned as `boundary`: cells reach
+  `expand` beyond the study area, and a point up to `expand` outside it
+  is indexed.
 
 - clip:
 
@@ -95,11 +125,34 @@ build_tessellation(
 
 - keep_duplicates:
 
-  Logical; keep duplicate points.
+  Logical. Has no effect on the cells or the index: coincident points
+  are merged before a Voronoi diagram or a Delaunay triangulation is
+  built either way, and every one of them is indexed to the cell they
+  share.
 
 - crs:
 
-  Optional target CRS.
+  Optional target CRS: anything
+  [`sf::st_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html)
+  accepts, including an sf or sfc layer, whose CRS is used. A projected
+  CRS is the working CRS. A geographic one (EPSG:4326, say) is the CRS
+  the result is returned in: the cells are built in the local projected
+  CRS
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  picks for the points, indexed there, and then transformed with long
+  edges densified, so Voronoi cells are nearest-point cells on the
+  ground and grid cells are laid in metres rather than degrees. The
+  exception is a hex or square grid sized by `cellsize`, which is in
+  degrees and so is laid in degrees. Whenever that local CRS is picked
+  for lon/lat points, or CRS-less ones taken as lon/lat (no `crs`, or a
+  geographic one), a hex or square grid with a boundary is laid in it
+  unless it distorts areas across the boundary by more than 1 percent
+  (Web Mercator over a near-global extent, say); the grid is then laid,
+  and the points indexed, in the equal-area CRS
+  `ensure_projected(purpose = "area")` picks for the boundary, with a
+  logged warning, as
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  does, so the cells stay equal-area.
 
 - quiet:
 
@@ -131,7 +184,8 @@ A list with components:
 
 - `boundary`:
 
-  The boundary used (possibly derived and/or reprojected).
+  The boundary used (possibly derived and/or reprojected, and for
+  `"voronoi"` grown by `expand`).
 
 - `method`:
 
@@ -142,7 +196,9 @@ A list with components:
   The parameters the tessellation was built with, plus `snapped`, the
   record of that nearest-cell repair: a list with `n`, `which` (row
   positions in `points_sf`) and `distance` (how far outside every cell
-  each sat, in CRS units).
+  each sat, in CRS units). For `"hex"` and `"square"` also
+  `cells_occupied` and `cells_empty`, the number of cells that hold at
+  least one point and that hold none.
 
 ## Details
 
@@ -156,6 +212,12 @@ returns the Delaunay triangulation, useful for interpolation and
 adjacency work; it is not meant as an aggregation unit.
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
 will suggest a cell count from the spatial structure of the data.
+
+`"voronoi"` and `"triangles"` are built on the points' vertices: a
+MULTIPOINT feature with several vertices gets one cell (or triangle
+corner) per vertex, and its `index` entry is the smallest `cell_id`
+among the cells it touches. See
+[`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md).
 
 ## See also
 

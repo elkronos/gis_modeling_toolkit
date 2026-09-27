@@ -34,19 +34,57 @@ evaluate_insample(fits, newdata = NULL, ...)
 
 ## Value
 
-A data.frame with one row per model and columns for model name and all
-regression metrics.
+A data.frame with one row per model and columns for model name, all
+regression metrics, and `metric_basis`: what the row's metrics were
+computed on, `"in-sample"` (fitted values), `"out-of-bag"` (an
+`rf_fit`'s fitted values, see "What the metrics are computed on") or
+`"newdata"`. Rows with different bases do not compare like for like. An
+element that is not a `spatial_fit` is skipped, with a logged warning,
+and has no row; a list in which no element is a `spatial_fit` is an
+error.
+
+## What the metrics are computed on
+
+With `newdata = NULL` the metrics come from `fitted(object)`. That is
+**in-sample** for a `gwr_fit` or a `bayesian_fit`, but **out-of-bag**
+for an `rf_fit`, whose
+[`fitted()`](https://rdrr.io/r/stats/fitted.values.html) method returns
+out-of-bag predictions (see
+[`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)).
+The data.frame
+[`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+returns carries no label distinguishing the two, so check
+`object$info$fitted_are_oob` before comparing numbers across backends;
+`evaluate_insample()` and
+[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+record it per model in a `metric_basis` column.
+[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+scores every backend the same way.
+
+\\R^2\\ is \\1 - RSS/TSS\\ with the total sum of squares taken about the
+mean of the response the model was *fitted* to. In sample that is the
+ordinary \\R^2\\. With `newdata` it is out-of-sample \\R^2\\, the
+convention every `cv_*()` function uses: the model is measured against
+the prediction it had to beat, the training mean, not against the new
+rows' own mean, which it could not have known. It is below 0 when the
+model predicts the new rows worse than the training mean does, and it is
+`NA` when the response does not vary about that baseline by more than
+rounding error (100 machine epsilons of its magnitude, whatever its
+units).
 
 ## Percentage errors on responses with zeros
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
@@ -92,10 +130,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 #>    model  n     RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE
 #> 1 rf_fit 40 0.409009 0.3236812 86.57837 50.87364 0.9541711     NA     40
-#>   n_SMAPE
-#> 1      40
+#>   n_SMAPE metric_basis
+#> 1      40   out-of-bag
 #>    model  n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE
-#> 1 rf_fit 20 0.5080838 0.3836504 158.4334 63.30707 0.8999583     NA     20
-#>   n_SMAPE
-#> 1      20
+#> 1 rf_fit 20 0.5080838 0.3836504 158.4334 63.30707 0.9022065     NA     20
+#>   n_SMAPE metric_basis
+#> 1      20      newdata
 ```

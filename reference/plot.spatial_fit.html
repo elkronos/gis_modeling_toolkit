@@ -78,7 +78,11 @@ residuals, and where is it) had to be written by hand each time.</p>
 
 
 <dl><dt id="arg-x">x<a class="anchor" aria-label="anchor" href="#arg-x"></a></dt>
-<dd><p>A <code>spatial_fit</code>.</p></dd>
+<dd><p>A <code>spatial_fit</code>.  The residuals drawn are
+<code>residuals(x)</code>; for a custom subclass with no <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code>
+method (optional, see <code><a href="new_spatial_fit.html">new_spatial_fit()</a></code>) they are the
+response minus <code>fitted(x)</code>, which is what the built-in backends'
+methods return.</p></dd>
 
 
 <dt id="arg-type">type<a class="anchor" aria-label="anchor" href="#arg-type"></a></dt>
@@ -99,10 +103,12 @@ response itself on the same points and lags, drawn hollow with a
 dashed fit.  The gap between the two curves is the spatial structure
 the model absorbed: a residual sill well below the response sill
 means most of it, two curves that coincide mean none.  When both
-effective ranges were identified the caption gives the residual sill
-as a share of the response sill and the two ranges; when either
-variogram reached no sill the caption says so and compares nothing,
-because a sill the data never reached is not a number to divide by.
+effective ranges were identified over the same point pairs the caption
+gives the residual sill as a share of the response sill and the two
+ranges; when either variogram has no identified range, or the two are
+not over the same pairs, the caption says so and compares nothing: a sill the
+data never reached is not a number to divide by, and one direction's
+sill is not comparable with all directions'.
 The residual range is expected to come out shorter and the residual
 sill lower even when the model is right, because residuals of a
 fitted trend understate the variogram (see
@@ -110,18 +116,26 @@ fitted trend understate the variogram (see
 residual-variogram bias").
 The distance axis is labelled in the units of the CRS the variogram
 was actually fitted in, which is not necessarily the fit's own CRS
-(lon/lat data are projected first). A single-direction fit names its
-azimuth in the title; a fit that identified no range says why in the
-subtitle, since the overlaid model line is then not a fit to believe.
+(lon/lat data are projected first). Each curve is the variogram
+<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> returns for its variable: all point pairs,
+or, when the all-pairs fit was unusable, the widest of four directions,
+which is named with its azimuth (in the title for the residuals, in the
+caption for the response). A fit that identified no range says why in
+the subtitle, since the overlaid model line is then not a fit to believe.
 Requires 'gstat'.</p></dd>
 
 <dt><code>"coefficients"</code></dt>
 <dd><p>For a GWR fit only: the local coefficient
 of one <code>term</code> mapped at the training locations, which is the
 reason to fit GWR at all.  Locations where the local design is
-collinear (the kernel-weighted window's scaled condition index is
-above 30, or the window is singular) are drawn hollow and grey
-(<code>mask = TRUE</code>), because the smooth surface a naive map draws
+collinear for that term are drawn hollow and grey
+(<code>mask = TRUE</code>): for a slope, where the kernel-weighted
+window's slope condition index (<code>cn_slopes</code>, predictors
+centred in the window) is above 30 or the window is singular, or
+where the index with the intercept (<code>cn</code>) is above 1e6; for
+the Intercept, where <code>cn</code> is above 30 (a predictor far from 0
+against its local spread makes the local intercept an
+extrapolation).  They are masked because the smooth surface a naive map draws
 over them is the picture of an unstable estimate, not of a
 relationship; the subtitle counts them.  The condition indices are
 the fit's <code>info$local_collinearity</code>, computed for every
@@ -147,8 +161,8 @@ first predictor.  Ignored by the other types.</p></dd>
 
 <dt id="arg-mask">mask<a class="anchor" aria-label="anchor" href="#arg-mask"></a></dt>
 <dd><p>For <code>type = "coefficients"</code>: whether to draw locations
-whose local design is collinear (scaled condition index of the
-kernel-weighted window above 30, or singular) as hollow grey points
+whose local design is collinear for that term (see
+<code>type = "coefficients"</code>) as hollow grey points
 instead of colouring them by a coefficient that is not to be believed
 there.  Default <code>TRUE</code>.  Locations whose coefficient is non-finite
 are masked either way.</p></dd>

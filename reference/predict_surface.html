@@ -85,15 +85,25 @@ at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
 on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
-takes the same nearest feature.</p></dd>
+takes the same nearest feature.  A grid still without a CRS after that
+is treated as <code>boundary</code> is: taken as EPSG:4326 and reprojected
+when its coordinates look like lon/lat, otherwise stamped with the fit's
+CRS, with a warning either way.  A grid of polygons
+(<code><a href="create_grid_polygons.html">create_grid_polygons()</a></code> output, say) is reduced to one
+representative point per cell, as <code><a href="coerce_to_points.html">coerce_to_points()</a></code> does,
+so covariates are taken at the location predicted for; <code>boundary</code>
+then keeps the cells whose point falls inside it.</p></dd>
 
 
 <dt id="arg-cell-size">cell_size<a class="anchor" aria-label="anchor" href="#arg-cell-size"></a></dt>
 <dd><p>Grid resolution in CRS units.  Ignored when <code>grid</code> is
 supplied; when <code>NULL</code>, derived from <code>n_cells</code>.  A value that
 would produce more than 5,000,000 cells is refused, naming the implied
-count and the CRS units.  The usual cause is a value in the wrong unit.  A
-<code>cell_size</code> wider than the extent yields a single centred cell.</p></dd>
+count and the CRS units.  The usual cause is a value in the wrong unit.
+The grid is centred on the training bounding box and covers it: when the
+extent is not a whole number of cells, it overhangs the box by less than
+one cell, split evenly between the two sides.  A <code>cell_size</code> wider
+than the extent yields a single centred cell.</p></dd>
 
 
 <dt id="arg-n-cells">n_cells<a class="anchor" aria-label="anchor" href="#arg-n-cells"></a></dt>
@@ -106,37 +116,49 @@ supplied.  The grid you pass is used verbatim.</p></dd>
 <dt id="arg-boundary">boundary<a class="anchor" aria-label="anchor" href="#arg-boundary"></a></dt>
 <dd><p>Optional polygonal <code>sf</code>/<code>sfc</code>; grid points outside
 it are dropped.  Put through the same CRS replay and reprojection as
-<code>grid</code>.</p></dd>
+<code>grid</code>.  One still without a CRS after the replay is taken as
+EPSG:4326 and reprojected when its coordinates look like lon/lat, and
+is otherwise stamped with the fit's CRS, with a warning either way.</p></dd>
 
 
 <dt id="arg-covariates">covariates<a class="anchor" aria-label="anchor" href="#arg-covariates"></a></dt>
 <dd><p>Optional <code>sf</code> layer carrying the model's predictors.
 Required when the model has predictors and <code>grid</code> does not already
-contain them.  Values are taken from the nearest feature.</p></dd>
+contain them.  Values are taken from the nearest feature.  Aligned to
+the fit's CRS as <code>grid</code> is, with the same warning when it has no
+CRS.</p></dd>
 
 
 <dt id="arg-chunk-size">chunk_size<a class="anchor" aria-label="anchor" href="#arg-chunk-size"></a></dt>
 <dd><p>Rows per prediction call. Default 5000.  A pure
-performance knob for the GWR and random-forest backends, whose rows do not
-interact.  For a <code>bayesian_fit</code> it is also that, <em>provided</em> the
-grid stays inside the training extent.  Beyond it the GP boundary has to
-grow and predictions depend on which rows share the call; see
+performance knob: rows do not interact, and for a <code>bayesian_fit</code> the
+GP boundary is held at its fitted value whatever the chunk holds; see
 <code><a href="predict.bayesian_fit.html">predict.bayesian_fit</a></code>.</p></dd>
 
 
 <dt id="arg-se">se<a class="anchor" aria-label="anchor" href="#arg-se"></a></dt>
 <dd><p>Logical; also return a standard-error/posterior-SD column where the
-backend supports it.  Default FALSE.</p></dd>
+backend supports it.  Default FALSE.  For a <code>bayesian_fit</code> this is
+the SD of the posterior draws <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> returns, and those are of
+the expected value by default (<code>type = "epred"</code>): the uncertainty
+of the mean surface, not of a new observation, which also carries the
+observation noise.  For the predictive SD, the one that goes with
+prediction intervals and <code><a href="cv_bayes.html">cv_bayes()</a></code>'s calibration, pass
+<code>type = "predict"</code> as well.</p></dd>
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Passed to <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code>.</p></dd>
+<dd><p>Passed to <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code>, e.g. <code>type = "predict"</code> for a
+<code>bayesian_fit</code>.  Not <code>draws</code>, which this function sets itself
+and refuses here.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An <code>sf</code> POINT layer with a <code>.pred</code> column (and
-<code>.pred_se</code> when <code>se = TRUE</code> and available).  For an
+<code>.pred_se</code> when <code>se = TRUE</code> and available; one a supplied
+<code>grid</code> already carried, from an earlier surface, is removed
+otherwise).  For an
 auto-generated grid the resolution is attached as attribute
 <code>"cell_size"</code>.  For a user-supplied <code>grid</code> it is only whatever
 <code>"cell_size"</code> attribute that object already carried.  That is usually
@@ -185,23 +207,23 @@ grid long before the fit itself would.</p>
 <span class="r-in"><span>  <span class="co"># outside; a grid with its own covariate raster is where this bites.</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="area_of_applicability.html">area_of_applicability</a></span><span class="op">(</span><span class="va">surf</span>, model <span class="op">=</span> <span class="va">fit</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 484 features and 1 field</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Simple feature collection with 529 features and 1 field</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Geometry type: POINT</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Dimension:     XY</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 500034.7 ymin: 5000057 xmax: 500943.7 ymax: 5000966</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: 500026.7 ymin: 5000038 xmax: 500979 ymax: 5000990</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Projected CRS: WGS 84 / UTM zone 32N</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> First 10 features:</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>       .pred                 geometry</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1  11.53496 POINT (500034.7 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2  11.71447   POINT (500078 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3  11.71447 POINT (500121.3 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4  12.06628 POINT (500164.6 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5  12.06628 POINT (500207.9 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6  12.06628 POINT (500251.1 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 7  13.07745 POINT (500294.4 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 8  13.07745 POINT (500337.7 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 9  13.07745   POINT (500381 5000057)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 10 11.63669 POINT (500424.3 5000057)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1  11.53496 POINT (500026.7 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2  11.71447   POINT (500070 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3  11.71447 POINT (500113.3 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4  12.06628 POINT (500156.6 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5  12.06628 POINT (500199.9 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6  12.06628 POINT (500243.2 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 7  13.07745 POINT (500286.5 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 8  13.07745 POINT (500329.7 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 9  13.07745   POINT (500373 5000038)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 10 11.63669 POINT (500416.3 5000038)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Area of applicability (Meyer &amp; Pebesma 2021)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   predictors  : 1 (elev)</span>
@@ -211,7 +233,7 @@ grid long before the fit itself would.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   normaliser  : 1.1283 (mean pairwise distance)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   threshold   : 0.0480 (outlier-removed max of training DI)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   484 of 484 prediction points inside the AOA (100.0%)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   529 of 529 prediction points inside the AOA (100.0%)</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

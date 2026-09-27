@@ -8,8 +8,9 @@ with the diagonal, one point per level for the fold-weighted pooled value
 systematic over-confidence (points below the line) or intervals wider than
 they need to be (above it) are read at a glance.  Three levels is a thin
 curve; pass coverage_levels = seq(0.1, 0.9, by = 0.1) to
-cv_bayes() for a full one.  The levels are read off the column
-names, so whatever was computed is drawn."><meta property="og:description" content="cv_bayes() scores every fold's posterior predictive intervals
+cv_bayes() for a full one.  Each level is drawn at the nominal value
+cv_bayes() records in coverage_levels, so whatever was
+computed is drawn where it belongs (0.975 at 0.975, not rounded)."><meta property="og:description" content="cv_bayes() scores every fold's posterior predictive intervals
 at each of coverage_levels: the share of held-out observations the
 interval of that nominal level contained.  One coverage number cannot show
 a pattern; the pairs can.  This draws observed coverage against nominal
@@ -18,8 +19,9 @@ with the diagonal, one point per level for the fold-weighted pooled value
 systematic over-confidence (points below the line) or intervals wider than
 they need to be (above it) are read at a glance.  Three levels is a thin
 curve; pass coverage_levels = seq(0.1, 0.9, by = 0.1) to
-cv_bayes() for a full one.  The levels are read off the column
-names, so whatever was computed is drawn."></head><body>
+cv_bayes() for a full one.  Each level is drawn at the nominal value
+cv_bayes() records in coverage_levels, so whatever was
+computed is drawn where it belongs (0.975 at 0.975, not rounded)."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -77,8 +79,9 @@ with the diagonal, one point per level for the fold-weighted pooled value
 systematic over-confidence (points below the line) or intervals wider than
 they need to be (above it) are read at a glance.  Three levels is a thin
 curve; pass <code>coverage_levels = seq(0.1, 0.9, by = 0.1)</code> to
-<code><a href="cv_bayes.html">cv_bayes()</a></code> for a full one.  The levels are read off the column
-names, so whatever was computed is drawn.</p>
+<code><a href="cv_bayes.html">cv_bayes()</a></code> for a full one.  Each level is drawn at the nominal value
+<code><a href="cv_bayes.html">cv_bayes()</a></code> records in <code>coverage_levels</code>, so whatever was
+computed is drawn where it belongs (0.975 at 0.975, not rounded).</p>
     </div>
 
     <div class="section level2">

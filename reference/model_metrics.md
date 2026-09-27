@@ -61,22 +61,40 @@ for an `rf_fit`, whose
 [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) method returns
 out-of-bag predictions (see
 [`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)).
-The returned data.frame carries no label distinguishing the two, so
-check `object$info$fitted_are_oob` before comparing numbers across
-backends, or use
-[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
-which scores every backend the same way.
+The data.frame `model_metrics()` returns carries no label distinguishing
+the two, so check `object$info$fitted_are_oob` before comparing numbers
+across backends;
+[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+and
+[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+record it per model in a `metric_basis` column.
+[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+scores every backend the same way.
+
+\\R^2\\ is \\1 - RSS/TSS\\ with the total sum of squares taken about the
+mean of the response the model was *fitted* to. In sample that is the
+ordinary \\R^2\\. With `newdata` it is out-of-sample \\R^2\\, the
+convention every `cv_*()` function uses: the model is measured against
+the prediction it had to beat, the training mean, not against the new
+rows' own mean, which it could not have known. It is below 0 when the
+model predicts the new rows worse than the training mean does, and it is
+`NA` when the response does not vary about that baseline by more than
+rounding error (100 machine epsilons of its magnitude, whatever its
+units).
 
 ## Percentage errors on responses with zeros
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out
@@ -110,9 +128,13 @@ For the Bayesian backend,
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 additionally reports CRPS and interval coverage at 50, 80 and 95
 percent. Both are proper scoring rules computed from posterior draws, so
-they are meaningful for any `family` the backend accepts, and they are
-the numbers to compare when the response is not Gaussian. When every
-fold fails, the `fold_metrics` frame
+they are meaningful for any `family` that predicts one number per row (a
+count, a rate, a binary or bounded outcome), and they are the numbers to
+compare when the response is not Gaussian. A categorical or ordinal
+family predicts a probability per response category instead, so
+[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+refuses one before fitting anything. When every fold fails, the
+`fold_metrics` frame
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
 returns carries the CRPS column but not the `coverage_*` columns, so
 code that reads those columns must tolerate their absence.
@@ -163,5 +185,5 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>    n     RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE n_SMAPE
 #> 1 40 0.409009 0.3236812 86.57837 50.87364 0.9541711     NA     40      40
 #>    n      RMSE       MAE     MAPE    SMAPE        R2 Adj_R2 n_MAPE n_SMAPE
-#> 1 20 0.5080838 0.3836504 158.4334 63.30707 0.8999583     NA     20      20
+#> 1 20 0.5080838 0.3836504 158.4334 63.30707 0.9022065     NA     20      20
 ```

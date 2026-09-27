@@ -262,8 +262,11 @@ head(as.data.frame(cell_stats)[, c("cell_id", "n", "resp_mean_y",
     ## 6       6 4    84.14516    7.886035    3.943018
 
 The `..se_*` columns are **IID** standard errors at the default
-`deff = 1`, which is anticonservative when points inside a cell are
-spatially correlated. `deff = "kish"` applies Kish’s design-effect
+`deff = 1`. That is the right standard error for each cell’s own mean,
+the value a choropleth shows, when the points are spread through the
+cell. As a standard error for the population (grand) mean it is
+anticonservative when points inside a cell are spatially correlated. For
+that population-level use, `deff = "kish"` applies Kish’s design-effect
 correction from an estimated intra-class correlation, and
 `attr(., "deff_applied")` records what was used:
 
@@ -434,11 +437,14 @@ coordinate axes, so nothing built from them is invariant to rotating the
 layer. The all-pairs fit is the estimate whenever it is usable; the
 directional maximum stands in for it only when the all-pairs fit fails,
 and the `anisotropy_used` attribute is `TRUE` in that case alone. If you
-*know* the field is anisotropic, size blocks from
-`max(attr(sac, "directional"))` explicitly. It returns `NA` (still
-classed `sac_range`, so it prints as a bare `NA`) when the empirical
-variogram never reaches a sill, because an unidentified range must not
-be used to size blocks.
+*know* the field is anisotropic, size blocks from the longest
+directional range explicitly:
+`max(attr(sac, "directional_fitted"), na.rm = TRUE)`, after checking
+`attr(sac, "directional_status")`, since `directional` is `NA` for a
+direction that ran past the fitted lags, which on such a field is often
+the long one. It returns `NA` (still classed `sac_range`, so it prints
+as `NA`) when the empirical variogram never reaches a sill, because an
+unidentified range must not be used to size blocks.
 
 ``` r
 
@@ -449,6 +455,7 @@ sac
 
     ## NA 
     ##   directional: 0 deg = 22475325 (past the fitted lags), 45 deg = 1243020, 90 deg = 1591410 (past the fitted lags), 135 deg = 3346918 (past the fitted lags)
+    ##   in US survey feet of EPSG:2264; variogram of the residuals on predictor_vars (ols)
 
 ``` r
 
@@ -505,9 +512,11 @@ library(patchwork)
 
 ![Two maps of the same points, random folds above and blocked folds
 below, sharing one fold legend. In the random map the five colours are
-interleaved everywhere; in the blocked map each fold occupies a
-contiguous part of the state, with the block grid drawn
-behind.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
+interleaved everywhere; in the blocked map, with the block grid drawn
+behind, every block holds a single fold and each fold is two to four
+whole blocks: four of the five folds fall in two separate parts of the
+state, and the fifth's two blocks meet only at a
+corner.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
 
 ### 5c. The number the fold scheme changes
 
@@ -667,6 +676,23 @@ cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
 
     ## Bandwidth: 42 neighbours | in-sample R2: 0.879 | RMSE: 4.664
 
+The fit raises no collinearity warning, but its survey of the local
+designs (`gwr_fit$info$local_collinearity`, see “Collinearity
+diagnostics” in
+[`?fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md))
+is worth a look: in 25 of the 300 windows the condition index that
+includes the intercept (`cn`) is above 30. The cause is `elevation`: it
+averages about 3,000 but has a standard deviation of only about 400
+inside a 42-neighbour window, so locally it is nearly collinear with the
+intercept. What that leaves poorly determined is the local intercepts,
+not the slopes: the slope index (`cn_slopes`), which centres the
+predictors in each window, stays below 30 everywhere, so no slope is
+masked and the fit does not warn.
+`plot(gwr_fit, type = "coefficients", term = "Intercept")` draws those
+25 intercepts hollow. Centring the predictor
+(`elevation - mean(elevation)`) gives the same bandwidth and fitted
+values and determines the intercepts too.
+
 ### Comparing backends on identical folds
 
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
@@ -743,7 +769,7 @@ cat(sprintf("inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n",
             aoa$n_inside, aoa$n_outside, aoa$n_na, aoa$threshold))
 ```
 
-    ## inside: 1629 | outside: 0 | undetermined: 0 | DI threshold 0.184
+    ## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.184
 
 ``` r
 
@@ -868,14 +894,14 @@ figure before drawing it.
     ## [34] e1071_1.7-17          scales_1.4.0          MASS_7.3-65          
     ## [37] cli_3.6.6             mvtnorm_1.4-2         rmarkdown_2.32       
     ## [40] intervals_0.15.5      ragg_1.5.2            generics_0.1.4       
-    ## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1          
+    ## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1-1        
     ## [46] spdep_1.4-2           DBI_1.3.0             cachem_1.1.0         
     ## [49] proxy_0.4-29          splines_4.6.1         spatialreg_1.4-3     
     ## [52] parallel_4.6.1        s2_1.1.12             marginaleffects_1.0.0
     ## [55] vctrs_0.7.3           boot_1.3-32           Matrix_1.7-5         
     ## [58] sandwich_3.1-3        jsonlite_2.0.0        spData_2.3.5         
     ## [61] systemfonts_1.3.2     jquerylib_0.1.4       units_1.0-1          
-    ## [64] glue_1.8.1            pkgdown_2.2.1         DEoptimR_1.2-1       
+    ## [64] glue_1.8.1            pkgdown_2.2.1         DEoptimR_1.2-2       
     ## [67] codetools_0.2-20      gstat_2.1-6           gtable_0.3.6         
     ## [70] deldir_2.0-4          tibble_3.3.1          logger_0.4.3         
     ## [73] pillar_1.11.1         htmltools_0.5.9       R6_2.6.1             
@@ -883,5 +909,5 @@ figure before drawing it.
     ## [79] lattice_0.22-9        backports_1.5.1       bslib_0.12.0         
     ## [82] class_7.3-23          Rcpp_1.1.2            coda_0.19-4.1        
     ## [85] nlme_3.1-169          spacetime_1.3-4       ranger_0.18.0        
-    ## [88] xfun_0.61             fs_2.1.0              zoo_1.9-0            
+    ## [88] xfun_0.61             fs_2.1.0              zoo_1.9-1            
     ## [91] pkgconfig_2.0.3

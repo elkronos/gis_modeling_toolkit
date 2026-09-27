@@ -53,7 +53,10 @@ by design. The pooled line is drawn from `overall` when it carries the
 metric, from `predictive_coverage` for
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)'s
 coverage and CRPS columns, and not at all for a per-fold extra that has
-no pooled counterpart (a bandwidth), in which case the caption says so.
+no pooled counterpart (a bandwidth) or for a count (`n_pred`, `n_MAPE`,
+`n_SMAPE`), whose `overall` value is the total over the folds; the
+caption says which. A model with no finite per-fold value gets no panel
+and no pooled line, and the caption names it.
 
 ## See also
 
@@ -87,5 +90,4 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   plot_cv_metrics(cv, "RMSE")
 }
 #> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=5).
-#> Warning: make_folds(): block dimension (238.4) < autocorrelation range (494.0). Spatial CV may leak correlated information across folds. Pass block_size = 494 or auto_range = TRUE.
 ```

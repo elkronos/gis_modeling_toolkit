@@ -149,8 +149,9 @@ fitting; passed to <code><a href="cv_spatial.html">cv_spatial</a></code>. Defaul
 and so on.  <code>data_sf</code>, <code>response_var</code>, <code>predictor_vars</code>
 and <code>.already_prepped</code> are set by this function and must not be
 passed here (every fold would fail with "matched by multiple actual
-arguments").  A <code>seed</code> given here overrides the per-fold draw
-described above.</p></dd>
+arguments").  <code>seed</code> is this function's own argument and never
+reaches <code><a href="fit_rf_model.html">fit_rf_model()</a></code> through here; see <code>seed</code> above for
+growing every fold's forest from one fixed seed.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -165,6 +166,9 @@ described above.</p></dd>
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
 Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is

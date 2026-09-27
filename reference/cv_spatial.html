@@ -143,13 +143,22 @@ Built via <code>block_kfold</code> when <code>NULL</code>.</p></dd>
 
 <dt id="arg-fold-info-fn">fold_info_fn<a class="anchor" aria-label="anchor" href="#arg-fold-info-fn"></a></dt>
 <dd><p>Optional <code>function(fit, test_sf, y, yhat)</code>
-returning a named list of per-fold extras (a bandwidth, a tuning value,
-anything read off the fitted object), added as columns of
-<code>fold_metrics</code>.  It sees the fit and the held-out layer, which
+returning a named list (or a named vector) of per-fold extras (a
+bandwidth, a tuning value, anything read off the fitted object), added
+as columns of <code>fold_metrics</code>.  It sees the fit and the held-out
+layer, which
 <code>metrics</code> does not; it is applied per fold only, and its values
 are not pooled.  An element <code>..per_row</code> that is a data frame with
 one row per held-out observation is spliced into <code>predictions</code>
-instead.</p></dd>
+instead (<code>NA</code> in the rows of a fold that returned none; one of the
+wrong length is dropped and logged); its columns must be named, once,
+and not reuse a column <code>predictions</code> already has (<code>..row_id</code>,
+<code>fold</code>, <code>y</code>, <code>yhat</code>, <code>y_train_mean</code>).  Every
+other element must be named, hold one value, and not reuse a column
+<code>fold_metrics</code> already has;
+anything else is an error.  A <code>fold_info_fn</code> that throws on a fold
+is logged, its columns are <code>NA</code> for that fold, and
+<code>fold_status$message</code> says so; the fold is kept.</p></dd>
 
 
 <dt id="arg-p">p<a class="anchor" aria-label="anchor" href="#arg-p"></a></dt>
@@ -174,7 +183,10 @@ Default <code>FALSE</code>.</p></dd>
 auto-detect the number of cores and fit folds in parallel via
 <code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code> (macOS / Linux; falls back to sequential
 on Windows).  If an integer &gt; 1, use that many cores.  Default
-<code>FALSE</code> (sequential).</p></dd>
+<code>FALSE</code> (sequential).  A learner that runs OpenMP code (GWmodel,
+or an xgboost built with GNU libgomp) can hang the forked workers once
+it has run in the session; keep such a <code>fit_fn</code> sequential, as
+<code><a href="cv_gwr.html">cv_gwr()</a></code> does.</p></dd>
 
 
 <dt id="arg-metrics">metrics<a class="anchor" aria-label="anchor" href="#arg-metrics"></a></dt>
@@ -199,15 +211,26 @@ counts are reported deliberately: a
 run that happened to score <code>NA</code>, so compare them before trusting
 <code>overall</code>.  <code>fold_status</code> is a data.frame with one row per
 fold supplied (<code>fold</code>, <code>status</code> and <code>message</code>), where
-<code>status</code> is <code>"ok"</code>; <code>"error"</code> (the fit or its
+<code>status</code> is <code>"ok"</code> (<code>message</code> is empty unless
+<code>fold_info_fn</code> failed on the fold); <code>"error"</code> (the fit or its
 <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> threw; <code>message</code> is the error text);
 <code>"skipped"</code> (nothing scorable: too few matched rows, a prediction
 of the wrong length, or no finite observed/predicted pair);
 <code>"dropped"</code> (an empty test set, or fewer than two training rows,
 once incomplete rows were removed, so the fold never reached the fitter);
-or <code>"worker_error"</code> (a parallel worker died).  Every fold missing
+or <code>"worker_error"</code> (a parallel worker died, for example killed for
+lack of memory).  Each fold runs in its own worker, so a failure costs
+that fold only, and an error that stops a sequential run (a
+<code>metrics</code> or <code>fold_info_fn</code> return value of the wrong shape)
+stops a parallel one too, naming the fold.  Every fold missing
 from <code>fold_metrics</code> has its reason there, which matters most when
-the console output of a long run is gone.  <code>orphan_rows</code> holds the
+the console output of a long run is gone.  When some folds, but not
+all, end as <code>"error"</code>, <code>"skipped"</code> or <code>"worker_error"</code>,
+the function warns, naming them and how many rows <code>overall</code>
+covers: it is pooled over the folds that produced predictions, and the
+fold that fails is often the hardest to predict, so it may flatter the
+model.  (A <code>"dropped"</code> fold has its own warning.)
+<code>orphan_rows</code> holds the
 <code>..row_id</code>s of rows in the data that no fold names (they enter no
 training set and are never scored; non-empty only when the folds were
 built on a different or subsetted layer), and <code>n_unknown_ids</code>
@@ -221,7 +244,19 @@ fitted.  The <code>fold</code> column of
 <code>fold_metrics</code>, <code>predictions</code> and <code>fold_status</code> carries
 the fold's index in the <code>folds</code> object that was supplied, so it
 lines up with <code>make_folds()$assignment$fold</code> even when some folds
-were unusable and dropped.  <code>overall$Adj_R2</code> is always <code>NA</code>: the
+were unusable and dropped.  Splits that already carry a <code>fold_id</code>,
+as the <code>folds</code> of a <code>cv_*()</code> result do, keep it: handing
+one run's <code>folds</code> to another labels each fold as the first run
+and <code><a href="fold_separation.html">fold_separation()</a></code> do, a dropped fold's gap
+included.  <code>R2</code> is out-of-sample \(R^2\): the
+total sum of squares is taken about the mean of the <em>training</em> rows
+(in <code>overall</code>, each held-out row about its own fold's training
+mean), the null prediction available when the fold is predicted, and
+not about the held-out rows' own mean, a null model that would know the
+test data.  On spatial blocks the two can differ widely; <code>R2</code> is
+below 0 when the model predicts worse than the training mean.
+<code><a href="model_metrics.html">model_metrics</a>(newdata = )</code> uses the same baseline.
+<code>overall$Adj_R2</code> is always <code>NA</code>: the
 pooled out-of-sample predictions come from <code>k</code> separately fitted
 models and have no single parameter count to adjust for.  The per-fold
 <code>fold_metrics$Adj_R2</code> carries the adjusted value when <code>p</code> is
@@ -263,7 +298,12 @@ pairs the built-in metrics use reach the function (both <code>y</code> and
 <code>yhat</code> finite), so its columns describe the same rows as
 <code>RMSE</code>, and <code>n_pred</code> counts them.</p>
 <p>The contract: every element named, names unique and not one of the
-built-in column names, one number per name.  Anything else is an error,
+built-in column names, one number per name.  The built-in names include
+the per-fold extras of the backend or of your <code>fold_info_fn</code>
+(<code>bandwidth</code> for <code><a href="cv_gwr.html">cv_gwr()</a></code>; <code>CRPS</code>, <code>coverage_*</code>,
+<code>gp_k</code>, <code>gp_n_basis</code> and <code>n_draws</code> for <code><a href="cv_bayes.html">cv_bayes()</a></code>),
+and <code>mean_CRPS</code>, which <code><a href="compare_models_cv.html">compare_models_cv()</a></code> writes.  Anything
+else is an error,
 because a scoring function that returns the wrong shape is a mistake to
 surface instead of a fold to skip.  A function that <em>throws</em> on a
 fold is logged and its columns are <code>NA</code> for that fold (and for
@@ -285,6 +325,9 @@ across the rows of its <code>overall</code>.</p>
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
 Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is

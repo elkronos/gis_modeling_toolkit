@@ -152,7 +152,11 @@ different posteriors even on identical <code>folds</code>. A <code>seed</code> i
 A user-supplied <code>gp_k</code> is respected in every fold; when omitted, the
 GP rank is auto-selected per training fold.  <code>compute_loo</code>,
 <code>boundary</code>, and <code>pointize</code> are always overridden by the CV
-internals.</p></dd>
+internals.  A categorical or ordinal <code>family</code>
+(<code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code>, <code>cumulative</code>, <code>sratio</code>,
+<code>cratio</code>, <code>acat</code>) is refused before anything is fitted: its
+prediction is a probability per response category, and every score
+here needs one number per row.</p></dd>
 
 
 <dt id="arg-summary">summary<a class="anchor" aria-label="anchor" href="#arg-summary"></a></dt>
@@ -164,7 +168,11 @@ internals.</p></dd>
 
 
 <dt id="arg-coverage-levels">coverage_levels<a class="anchor" aria-label="anchor" href="#arg-coverage-levels"></a></dt>
-<dd><p>Numeric vector of coverage levels.</p></dd>
+<dd><p>Numeric vector of the nominal coverage levels to
+score, as proportions strictly between 0 and 1 (<code>0.95</code>, not
+<code>95</code>), each given once; anything else is an error.  Each becomes a
+column <code>coverage_&lt;percent&gt;</code> of <code>fold_metrics</code>, named at full
+precision (<code>0.975</code> gives <code>coverage_97.5</code>).</p></dd>
 
 
 <dt id="arg-block-size">block_size<a class="anchor" aria-label="anchor" href="#arg-block-size"></a></dt>
@@ -184,7 +192,12 @@ auto-detect the number of cores and fit folds in parallel via
 <code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code> (macOS / Linux; falls back to sequential
 on Windows).  If an integer &gt; 1, use that many cores.  Default
 <code>FALSE</code> (sequential).  Bayesian folds with full MCMC runs
-are the primary beneficiary of this option.</p></dd>
+are the primary beneficiary of this option.  Mind the memory: every
+fold compiles its own Stan model, and one compilation can take several
+GB (3.6 GB was measured), so <code>parallel = n</code> runs <code>n</code> of them
+at once.  A compiler killed for lack of memory fails its fold with
+rstan's <code>"invalid connection"</code> error, which <code>fold_status</code>
+records; use fewer cores if you see it.</p></dd>
 
 
 <dt id="arg-metrics">metrics<a class="anchor" aria-label="anchor" href="#arg-metrics"></a></dt>
@@ -203,8 +216,9 @@ and <code>CRPS</code>, which this function computes itself.</p></dd>
     <p>A list with <code>overall</code>, <code>fold_metrics</code>,
 <code>predictions</code>, <code>folds</code>, <code>n_folds_attempted</code>,
 <code>n_folds_succeeded</code>, <code>fold_status</code>, <code>orphan_rows</code>,
-<code>n_unknown_ids</code>, <code>n_dropped</code>, <code>formula</code> and
-<code>predictive_coverage</code>.
+<code>n_unknown_ids</code>, <code>n_dropped</code>, <code>formula</code>,
+<code>predictive_coverage</code> and <code>coverage_levels</code> (the nominal
+levels, named by their <code>coverage_*</code> column).
 The two fold counts make a run where every fold failed visible in the
 return value itself, beyond the warning, and <code>fold_status</code> (one
 row per fold: <code>fold</code>, <code>status</code>, <code>message</code>) keeps the
@@ -218,6 +232,14 @@ that give the coverage below (<code>NA</code> when
 <code>compute_pred_intervals = FALSE</code> or the draws failed for that fold).
 <code>overall$Adj_R2</code> is always <code>NA</code>, as for every <code>cv_*()</code>:
 see <code><a href="cv_spatial.html">cv_spatial</a></code>.
+<code>fold_metrics</code> carries, beyond the columns its siblings share,
+<code>gp_k</code>, <code>gp_n_basis</code>, <code>n_draws</code>, <code>CRPS</code>, the
+<code>coverage_*</code> columns and <code>convergence_ok</code>: <code>TRUE</code> or
+<code>FALSE</code> as <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> judged that
+fold's sampler (R-hat, effective sample size, divergences), <code>NA</code>
+when <code>fit_args</code> sets <code>check_convergence = FALSE</code>.  A fold that
+did not converge is scored like the others, so a run with any
+<code>FALSE</code> raises one warning naming those folds.
 The <code>predictive_coverage</code> entries (one per
 <code>coverage_levels</code> value, plus <code>mean_CRPS</code>) are averages across
 folds <strong>weighted by each fold's <code>n_pred</code></strong>, because the per-fold
@@ -241,6 +263,9 @@ has settled.</p>
 \(|y| + |\hat{y}|\), so neither is defined where its denominator is zero.
 Neither returns <code>Inf</code> or <code>NaN</code>.  Both are averaged over the rows
 whose denominator is non-zero, and are <code>NA</code> when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The <code>n_MAPE</code> and <code>n_SMAPE</code> columns record how many rows that was;
 the <code>n</code> column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when <code>n_MAPE &lt; n</code>, <code>MAPE</code> is
@@ -274,8 +299,11 @@ be read as a rough summary rather than a score.</p>
 <p>For the Bayesian backend, <code>cv_bayes()</code> additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
-<code>family</code> the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  When every fold fails, the
+<code>family</code> that predicts one number per row (a count, a rate, a binary
+or bounded outcome), and they are the numbers to compare when the response
+is not Gaussian.  A categorical or ordinal family predicts a probability
+per response category instead, so <code>cv_bayes()</code> refuses one before
+fitting anything.  When every fold fails, the
 <code>fold_metrics</code> frame <code>cv_bayes()</code> returns carries the CRPS column
 but not the <code>coverage_*</code> columns, so code that reads those columns
 must tolerate their absence.</p>

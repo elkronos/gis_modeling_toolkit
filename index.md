@@ -38,17 +38,19 @@ support materially different conclusions under different boundaries.
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
 places seeds by k-means on the point cloud, so cell density follows
 sampling density.
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-and
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-read a cell count out of the spatial structure of the observations.
+scores every candidate cell count against the spatial structure of the
+observations, and
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+reads one off their clustering when they have any.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 produces Voronoi, hex, square or Delaunay cells clipped to your study
 area, with IDs that stay stable when the input row order changes.
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
-aggregates onto them and corrects the cell-level standard errors for
-within-cell autocorrelation, which on a correlated field roughly doubles
-them.
+aggregates onto them with a count and a standard error for every cell
+mean. When the cell means stand in for a population mean, it corrects
+those standard errors for within-cell autocorrelation, which on a
+correlated field can double them or more.
 
 Redrawing boundaries is easy. Knowing whether the result means anything
 is the hard part, so the second half of the package is the evidence
@@ -69,18 +71,25 @@ North Carolina
 How many cells is a decision with visible consequences. The same field
 below is cut at three resolutions beside the raw observations: too
 coarse blurs the hotspot, too fine chases noise with near-empty cells,
-and the selected count keeps the trend without tracing the sampling
-pattern.
+and the middle count, the one
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+rates most reliable, keeps the trend without tracing the sampling
+pattern. It is a reading, not a verdict: the reliability of the cell
+means stays within 2 percent of its best from 3 to 25 cells here, and
+the sites are spread evenly, so there is no elbow for
+[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+to find.
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
 covers how that number is chosen and the four criteria that disagree
 about it.
 
 ![Raw observations and the same spatial field tessellated at three
-resolutions, including the automatically selected
-one](https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png)
+resolutions, including the count resolution_profile() rates most
+reliable](https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png)
 
 Raw observations and the same spatial field tessellated at three
-resolutions, including the automatically selected one
+resolutions, including the count resolution_profile() rates most
+reliable
 
 The number a random fold reports on autocorrelated data is the reason
 the evidence layer exists. Random folds put a test point’s neighbours in
@@ -136,7 +145,8 @@ produces a message naming it.
 | `sp`, `GWmodel` | [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md), [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md) |
 | `brms` (plus a Stan toolchain) | [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md), [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md) |
 | `geometry` | Delaunay triangle tessellations |
-| `ggplot2`, `patchwork` | every `plot_*()` function and [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method |
+| `ggplot2` | every `plot_*()` function and [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method |
+| `patchwork` | the combined panels in [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) and its script |
 | `FNN`, `Matrix` | sparse k-nearest-neighbour weights for Moran’s I on large layers |
 | `loo` | PSIS-LOO for the Bayesian backend |
 | `nlme` | REML detrending in [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md) |
@@ -156,7 +166,7 @@ library(spatialkit)
 
 set.seed(42)
 n  <- 400
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 xy$w <- rnorm(n)
 # Mostly a smooth spatial field, with a weak measured predictor on top.
@@ -184,10 +194,14 @@ head(populated[, c("poly_id", "n", "resp_mean_z", "..se_resp_z")], 4)
 #> 5       5 14   0.0554452   0.7258217
 ```
 
-Every aggregate arrives with a count and a standard error, and
-`deff = "kish"` widens that error by the design effect of the
-within-cell correlation; the uncorrected version assumes the points in a
-cell are independent. A lattice laid over an irregular point cloud
+Every aggregate arrives with a count and a standard error.
+`deff = "kish"` makes that the standard error of each cell mean as an
+estimate of the population mean, widened by the design effect of the
+within-cell correlation. For a map of the cells’ own values leave `deff`
+at 1: the uncorrected standard error is the right one for a cell’s own
+mean when its points are spread through it
+([`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+says which to use when). A lattice laid over an irregular point cloud
 leaves some cells with one observation or none, which is why `n` travels
 with every row.
 
@@ -321,7 +335,7 @@ is *for* before you spend an afternoon comparing them:
 | Backend | Reach for it when you want | Cost |
 |----|----|----|
 | **GWR** ([`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md), `GWmodel` + `sp`) | spatially varying **coefficients** you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east” | moderate; grows quickly with n |
-| **Bayesian spatial GP** ([`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md), `brms`) | calibrated **uncertainty**: posterior predictive intervals, `se = TRUE` surfaces, CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
+| **Bayesian spatial GP** ([`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md), `brms`) | calibrated **uncertainty**: posterior predictive intervals, `se = TRUE` surfaces (the SD of the mean surface; add `type = "predict"` for the predictive SD), CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
 | **Random forest** ([`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md), `ranger`) | **nonlinearity and interactions** without specifying them, and no inference: you get permutation importance in place of coefficients | far the lowest; the one to prototype with |
 
 Two things that are not backend choices. First, none of them fixes bad
@@ -418,11 +432,16 @@ difference, or a column renamed by
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
 /
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-equivalents.) Everything here is regression. A factor or character
-response is refused outright; a response that came back as character
-from a CSV needs [`as.numeric()`](https://rdrr.io/r/base/numeric.html)
-first. Check for a stray thousands separator or an `"NA"` string if that
-produces `NA`s.
+equivalents.) Everything here is regression, with one exception:
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+takes a factor or character response under
+[`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+or an ordinal family (see “Non-Gaussian responses” in
+[`?fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)).
+Anywhere else a factor or character response is refused outright; a
+response that came back as character from a CSV needs
+[`as.numeric()`](https://rdrr.io/r/base/numeric.html) first. Check for a
+stray thousands separator or an `"NA"` string if that produces `NA`s.
 [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
 additionally refuses an integer-coded two-valued response and points at
 [`GWmodel::ggwr.basic()`](https://rdrr.io/pkg/GWmodel/man/ggwr.basic.html).
@@ -460,13 +479,18 @@ refuses above 5,000,000 grid cells for the same reason.
 above n = 5,000. The fallback allocates a dense n x n matrix, which is
 why it stops here. `install.packages(c("FNN", "Matrix"))`, both of them.
 
-**`compare_models_cv(): no viable models.`** Every requested backend was
-dropped: unrecognised names raise a warning, uninstalled backends print
-`dropping <name> (package/function unavailable)`. Read the messages
-immediately above the error; they name each one. Install the backend, or
-request one you have.
+**`compare_models_cv(): no recognised model requested.`** None of the
+names in `models` is `"GWR"`, `"Bayesian"` or `"RF"`, which are matched
+exactly, case included. The `ignoring unknown model(s)` warning printed
+with the error names the ones it ignored.
 
-**`cv_*(): all folds failed; cross-validation results contain no predictions.`**
+**`compare_models_cv(): no viable models.`** At least one requested name
+was recognised, but every recognised backend is uninstalled: each prints
+`dropping <name> (package/function unavailable)` above the error, and
+any unrecognised names are named in a warning printed with it. Install
+the backend, or request one you have.
+
+**`cv_*(): all folds failed (all N folds failed to produce predictions); ...`**
 This is a warning: `$overall` comes back all-`NA` with `n_pred = 0`. The
 per-fold `WARN` lines name the cause, most often a missing backend,
 sometimes a degenerate training slice or a predictor constant within a
@@ -477,7 +501,7 @@ asked for.
 
 **[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 returned `NA`.** The range was not identified, so nothing is reported.
-`attr(x, "rejected_reason")` names which of the five refusals it was,
+`attr(x, "rejected_reason")` names which of the six refusals it was,
 [`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 says what each one means, and
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on the returned
@@ -485,10 +509,21 @@ object draws the variogram behind it.
 [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)
 covers what an `NA` there leaves you to decide about the block size.
 
-**`determine_optimal_levels(): Moran's I could not be computed; falling back to geometric.`**
-Every candidate resolution sat below the nine-cell floor where Moran’s I
-is arithmetically degenerate. Expected at small `max_levels`; see
+**`determine_optimal_levels(): the model-aware criteria score only the elbow's neighbourhood, k = ... to ..., and carry no information at nine cells or fewer`**
+(or, before the sweep, `max_levels leaves k_max = ...`). Every candidate
+around the elbow sat at nine cells or fewer, where Moran’s I is
+arithmetically degenerate, so the call fell back to the geometric
+ranking. On points with no cluster structure that is the usual outcome
+below about `max_levels = 40`;
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+scores Moran’s z at every level of its ladder. See
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md).
+
+**`determine_optimal_levels(): Moran's I could not be computed at any k from ... to ... in the elbow's neighbourhood`**
+The candidates did pass nine cells, but too few of the cells hold a row
+with a response and every predictor, or the regression of the cell means
+on the predictors is singular (a predictor constant or collinear across
+cells). Check for missing values first.
 
 **Distances, bandwidths or block sizes look absurd.** Check the working
 CRS first: `st_crs(x)$units_gdal`. A block size that made sense in
@@ -505,16 +540,18 @@ changed, and seeing what the package is doing.
 
 ### Parallel cross-validation
 
-Every CV function
-([`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 and
-[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md))
-accepts a `parallel` argument for fold-level parallelism via
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+accept a `parallel` argument for fold-level parallelism via
 [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
-(macOS/Linux; falls back to sequential on Windows with a message). This
-matters most for
+(macOS/Linux; falls back to sequential on Windows with a message).
+[`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+accepts it too but always runs its folds one after another, with a
+warning if you ask for more: GWmodel runs OpenMP code, which deadlocks
+forked workers once a GWR has been fitted in the session. Parallel folds
+matter most for
 [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
 where every fold is a full MCMC run:
 
@@ -528,11 +565,13 @@ cv <- cv_bayes(site, "price", "elev", k = 5, parallel = TRUE)  # auto-detect cor
 #> WARN  cross-validation: fold 1 fit failed; skipping.
 #>       Cause: fit_bayesian_spatial_model(): package 'brms' is required.
 #> ... (once per fold)
-#> WARN  cv_bayes(): all 5 folds failed to produce predictions; results are
-#> empty. First error: fit_bayesian_spatial_model(): package 'brms' is required.
+#> WARN  cv_bayes(): all folds failed (all 5 folds failed to produce
+#> predictions); cross-validation results contain no predictions. First error:
+#> fit_bayesian_spatial_model(): package 'brms' is required.
 #> Warning message:
-#> cv_bayes(): all folds failed; cross-validation results contain no
-#> predictions. First error: fit_bayesian_spatial_model(): package 'brms' is required.
+#> cv_bayes(): all folds failed (all 5 folds failed to produce predictions);
+#> cross-validation results contain no predictions. First error:
+#> fit_bayesian_spatial_model(): package 'brms' is required.
 
 cv <- cv_rf(site, "price", "elev", k = 5, parallel = 4L)       # explicit count
 ```
@@ -582,8 +621,10 @@ to memoise, so both are cached:
 ### Logging
 
 Detailed diagnostics are logged to a session temp file, and warnings are
-echoed to the console. Logging is scoped to the `"spatialkit"` namespace
-and never touches your global logger configuration.
+echoed to the console. Logging is scoped to the `"spatialkit"`
+namespace: it never touches your global logger configuration, and a
+global configuration set up before the package loads does not carry over
+into it.
 
 The two are separate `logger` appenders: **index 1** is the temp file
 (INFO+), **index 2** is the console echo (WARN+). Both
@@ -612,6 +653,12 @@ warning, it means a genuine R
 [`warning()`](https://rdrr.io/r/base/warning.html); where it says a
 function *logs* one, it means this.
 
+knitr does not capture the console’s error stream, so while a document
+is being knitted (R Markdown, Quarto, pkgdown) the console echo is also
+sent as an R message. The logged cautions then appear in the output next
+to the warnings, and the chunk option `message = FALSE` keeps them out
+of it.
+
 ## Development
 
 ``` r
@@ -629,9 +676,9 @@ reproduces them.
 The README figures are generated from actual package output; regenerate
 them with `Rscript dev/make_readme_figures.R`. `readme-resolution.png`
 labels the cell count
-[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-chose for that data, so it goes stale whenever that function’s answer
-changes and must be rebuilt alongside it.
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+rates most reliable on that data, so it goes stale whenever that
+criterion’s answer changes and must be rebuilt alongside it.
 
 The test suite covers the geometry/tessellation pipeline, every exported
 function, and targeted regression tests for the statistical internals

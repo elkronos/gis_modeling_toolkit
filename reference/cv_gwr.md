@@ -112,11 +112,15 @@ cv_gwr(
 
 - parallel:
 
-  Logical or positive integer. If `TRUE`, auto-detect the number of
-  cores and fit folds in parallel via
-  [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
-  (macOS / Linux; falls back to sequential on Windows). If an integer \>
-  1, use that many cores. Default `FALSE` (sequential).
+  Accepted so that every `cv_*()` function takes the same arguments, but
+  the GWR folds always run one after another in this R process. GWmodel
+  is built with OpenMP, and OpenMP (GNU libgomp) deadlocks
+  [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)'s
+  forked workers once a GWR has been fitted in the session, for example
+  by
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
+  so forking would hang the call. A value asking for more than one core
+  raises a warning saying so. Default `FALSE`.
 
 - metrics:
 
@@ -162,11 +166,14 @@ to score several backends on one set of folds.
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +
 \|\hat{y}\|\\, so neither is defined where its denominator is zero.
 Neither returns `Inf` or `NaN`. Both are averaged over the rows whose
-denominator is non-zero, and are `NA` when no row qualifies. The
-`n_MAPE` and `n_SMAPE` columns record how many rows that was; the `n`
-column counts finite observation/prediction pairs. Read a percentage
-error next to its count: when `n_MAPE < n`, `MAPE` is an average over a
-subset of the data, whatever its value.
+denominator is non-zero, and are `NA` when no row qualifies. Non-zero is
+judged at the scale of the data: a denominator no larger than 100
+machine epsilons times the largest one counts as zero, so the rule does
+not depend on the units of the response. The `n_MAPE` and `n_SMAPE`
+columns record how many rows that was; the `n` column counts finite
+observation/prediction pairs. Read a percentage error next to its count:
+when `n_MAPE < n`, `MAPE` is an average over a subset of the data,
+whatever its value.
 
 This bites on any response taking exact zeros: counts, rainfall,
 abundance, claim amounts. On a zero-inflated response with 62 zeros out

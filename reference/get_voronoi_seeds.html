@@ -113,11 +113,16 @@ the first two coordinate columns are clustered, so a Z or M dimension does
 not join the distance calculation and dominate it; rows with empty or
 non-finite coordinates are dropped with a warning, so they never reach
 <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>, which fails on them without naming a cause. A lon/lat
-cloud is projected before clustering.</p></dd>
+cloud, or one with no CRS whose coordinates look like lon/lat (the
+heuristic <code><a href="ensure_projected.html">ensure_projected()</a></code> applies, with its warning), is projected
+before clustering.</p></dd>
 
 
 <dt id="arg-kmeans-nstart">kmeans_nstart<a class="anchor" aria-label="anchor" href="#arg-kmeans-nstart"></a></dt>
-<dd><p>Integer; nstart for kmeans(). Default 10.</p></dd>
+<dd><p>Integer; nstart for kmeans(). Default 10. The
+partition is <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>, not the best-of-25 k-means++ run that
+<code><a href="resolution_profile.html">resolution_profile()</a></code> scored a count on, so it is not that partition;
+see <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>.</p></dd>
 
 
 <dt id="arg-kmeans-iter">kmeans_iter<a class="anchor" aria-label="anchor" href="#arg-kmeans-iter"></a></dt>

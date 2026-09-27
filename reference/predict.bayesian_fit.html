@@ -114,32 +114,49 @@ point summary.  Default FALSE.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>Numeric vector of length <code>nrow(newdata)</code>, or a
-<code>n_draws x nrow(newdata)</code> matrix when <code>draws = TRUE</code> (a 1-row
-all-<code>NA</code> matrix if the posterior draw fails).  With
-<code>newdata = NULL</code> the cached <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> values are returned only
+<code>n_draws x nrow(newdata)</code> matrix when <code>draws = TRUE</code>.  If the
+posterior draw fails the result is all <code>NA</code> (a 1-row matrix for
+<code>draws = TRUE</code>) and the cause is logged.  An ordinal or categorical
+family is not a failed draw and is an error under
+<code>type = "epred"</code>: its expected value is a probability per response
+category, not one number per row.  Use <code>type = "predict",
+draws = TRUE</code> for posterior draws of the predicted category, as category
+indices; the share of draws in each category estimates its probability.
+Without <code>draws = TRUE</code>, <code>type = "predict"</code> returns the mean (or
+median) category index, an expected rank for an ordinal family and an
+error for <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code>, whose categories have no order.
+With <code>newdata = NULL</code> the cached <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> values are returned only
 for the default <code>summary = "mean"</code>, <code>type = "epred"</code>,
 <code>draws = FALSE</code> combination; any other combination is recomputed
 against the training data, because the cache holds epred column means and
 nothing else.</p>
     </div>
     <div class="section level2">
-    <h2 id="the-gp-boundary-is-pinned">The GP boundary is pinned<a class="anchor" aria-label="anchor" href="#the-gp-boundary-is-pinned"></a></h2>
+    <h2 id="the-gp-boundary-is-held-at-its-fitted-value">The GP boundary is held at its fitted value<a class="anchor" aria-label="anchor" href="#the-gp-boundary-is-held-at-its-fitted-value"></a></h2>
 
 
-<p>brms 2.x does not store the Hilbert-space boundary \(L\) in a fitted GP
-basis, so <code>brms:::.data_gp()</code> recomputes it from whatever rows
-<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> is handed, which moved every eigenfunction of the
+<p>brms 2.17 to 2.22 do not store the Hilbert-space boundary \(L\) in a
+fitted GP basis, so <code>brms:::.data_gp()</code> recomputes it from whatever
+rows <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> is handed, which moved every eigenfunction of the
 approximation with the newdata bounding box while the fitted basis
 coefficients stayed put.  Two synthetic rows at the training coordinate
-extrema are therefore appended before the posterior draw and dropped from the
-result, reproducing the boundary the model was fitted with, so chunked,
-fold-wise and single-call predictions agree.</p>
-<p>That is exact only for <code>newdata</code> <strong>inside</strong> the training
-coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
-predictions there are extrapolation from a basis that was not built for them
-<em>and</em> depend on which other rows share the call, including on
-<code><a href="predict_surface.html">predict_surface()</a></code>'s <code>chunk_size</code>.  A notice is written to
-the log (not raised as a warning) when it happens.</p>
+extrema are therefore appended before the posterior draw and dropped from
+the result, and when <code>newdata</code> reaches past the training range the
+<code>c</code> of the <code>gp()</code> term is scaled down by as much as the range
+grew, so brms rebuilds exactly the boundary the model was fitted with.  A
+prediction therefore does not depend on which other rows share the call:
+chunked, fold-wise and single-call predictions agree, and
+<code><a href="predict_surface.html">predict_surface()</a></code> does not depend on <code>chunk_size</code>.
+brms 2.23.0 and later store \(L\) and reuse it, so there <code>c</code> is left
+alone and the two extra rows change nothing.</p>
+<p>Predictions outside the training coordinate envelope are extrapolation (a
+notice is written to the log).  A row further than \(L\) from the centre
+of the training coordinates on either axis is past the edge of the basis,
+where the approximate GP is an odd reflection of the fitted surface rather
+than an estimate of anything, so it is returned as <code>NA</code> (a column of
+<code>NA</code> with <code>draws = TRUE</code>) with a warning.  The default boundary
+factor puts that edge well outside the training data, so only
+<code>newdata</code> reaching far past it is affected.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

@@ -4,7 +4,12 @@ Prints the effective range as a plain number, with the directional fit
 summarised beneath it when one is available. A direction whose fit was
 unusable is labelled with why (`directional_status`) and the range its
 fit reported (`directional_fitted`) when the object carries them, and
-`unidentified` otherwise.
+`unidentified` otherwise. A last line names the unit and the CRS the
+range is a length in (`attr(x, "crs")`, which for lon/lat input is the
+projected CRS the estimate chose; for a layer with no CRS, it says the
+range is in that layer's own coordinate units), and whether the
+variogram is of the response or of its residuals on `predictor_vars`
+(`detrended`, `detrend_method`).
 
 ## Usage
 

@@ -94,6 +94,14 @@ force rather than the default: <code>old &lt;- spatialkit_quiet();
     <p>These are log records, not R conditions: <code><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings()</a></code>
 and <code>tryCatch(warning = )</code> do not see them.  Conditions the package
 raises as real R warnings are unaffected by this function.</p>
+<p>While a document is being knitted (R Markdown, Quarto, a <span class="pkg">pkgdown</span>
+article) the console echo is also sent as an R message, because
+<span class="pkg">knitr</span> does not capture what is written to the console's error stream
+and the cautions would otherwise be missing from the output.  They appear
+as <code>## WARN [...]</code> lines, and the chunk option <code>message = FALSE</code>,
+like <code><a href="https://rdrr.io/r/base/message.html" class="external-link">suppressMessages()</a></code>, keeps them out of the document.  A line the
+package also raises as an R warning is not repeated, since the document
+shows the warning.  Outside <span class="pkg">knitr</span> nothing changes.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

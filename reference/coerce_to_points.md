@@ -28,7 +28,10 @@ coerce_to_points(
 - tmp_project:
 
   Logical; temporarily project for line-based midpoints. When `x` has no
-  CRS and its coordinates fall inside the lon/lat envelope, that
+  CRS and the lon/lat heuristic of
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  takes its coordinates for degrees (inside the lon/lat envelope and
+  more than one unit across, or with decimal-degree precision), that
   temporary projection interprets them as EPSG:4326 (with a warning) and
   the midpoints returned are geodesic ones brought back to the input's
   numbers, not planar midpoints. Set the CRS, or pass
@@ -36,15 +39,26 @@ coerce_to_points(
 
 ## Value
 
-An sf object with geometry coerced to POINTs.
+An sf object with geometry coerced to POINTs, row for row with `x`; an
+empty input geometry gives an empty POINT.
 
 ## Details
 
-LINESTRING midpoints are sampled with
-[`sf::st_line_sample()`](https://r-spatial.github.io/sf/reference/st_line_sample.html),
-which yields no point for an EMPTY LINESTRING. Rather than silently
-misaligning the result (or letting sf crash), such input raises an
-error; drop empty geometries first with `x <- x[!sf::st_is_empty(x), ]`.
+The result has one row per row of `x`, in the same order. An EMPTY
+geometry of any type, lines included, becomes an EMPTY POINT in its own
+row;
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+and
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+then drop such rows, as they drop any other empty geometry. Empty lines
+are never handed to
+[`sf::st_line_sample()`](https://r-spatial.github.io/sf/reference/st_line_sample.html):
+it yields no midpoint for them, which would misalign the result, and
+with sf 1.0.x an empty MULTILINESTRING (or an empty part of one) crashed
+the R session. An empty part inside a non-empty feature is ignored, so
+the feature gets the point its other parts give; GEOS's interior point,
+used by `"point_on_surface"` and by the temporary projection's choice of
+CRS, segfaulted on an empty line part too.
 
 ## See also
 

@@ -7,7 +7,10 @@ the random-fold reference as a dashed line, and the estimated
 autocorrelation range as a vertical marker. Blocks smaller than the
 range leak, so the curve rises from the reference towards the range and
 plateaus beyond it; the height of the rise is what the random-fold
-number overstated.
+number overstated. The caption says which way is better: higher for `R2`
+and `Adj_R2`, closer to the nominal level for a `coverage_*` column
+(0.975 for `coverage_97.5`), since over-coverage is miscalibration too,
+and lower for everything else.
 
 ## Usage
 

@@ -25,7 +25,37 @@
   [`print()`](https://rdrr.io/r/base/print.html) method closes with what
   that share means for the score. Nothing is estimated: the distances
   come from the geometry and the range is the one the folds already
-  carry or the one you pass.
+  carry or the one you pass. A range that records its CRS (the folds’
+  own `params$sac_range` and `params$crs`, or an
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  result) is compared with distances measured in that CRS, so a copy of
+  the layer in other units gives the same answer (a US-foot copy used to
+  report 19 percent of the hold-out inside a metre range where the metre
+  layer reported 89); `sac` and the distances are in the units of the
+  CRS the `crs` attribute names, metres for lon/lat input. `fold` is the
+  `fold_id` a `cv_*()` result’s `$folds` carries, so a join on it pairs
+  each fold’s error with its own distances (it was the list position,
+  which after a dropped fold paired one fold’s error with another’s
+  distances). A `units` object for `sac` is refused. As in `cv_*()`, a
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  result whose recorded rows sit at other locations in `data_sf` is
+  refused. Folds built on
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)’s
+  200 points and measured on the 195 that
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  kept used to be matched by position, and reported 100 percent of the
+  hold-out inside the range against 23–48 percent on the right layer.
+  The location check is skipped when one layer is POINT and the other is
+  not, so folds built on polygons still measure their pointized copy.
+  The [`print()`](https://rdrr.io/r/base/print.html) verdict now depends
+  on the fold scheme: “widen the blocks” is said only of blocked folds,
+  buffered leave-one-out is told to widen the buffer, and random,
+  leave-location-out and hand-made splits are told to use blocked or
+  buffered folds. NNDM folds are no longer called optimistic: they are
+  built to reproduce the prediction-to-data distances, so the share
+  describes the prediction task. The range line gives the CRS’s unit
+  (“in metres”), where it used to print the CRS code as if it were a
+  unit (“in EPSG:32617 units”).
 
 - [`summary()`](https://rdrr.io/r/base/summary.html) on a
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
@@ -65,7 +95,11 @@
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   removed before any fold was fitted. The four together account for
   every row and every fold, so `n_folds_attempted - n_folds_succeeded`
-  never has to be explained from the log.
+  never has to be explained from the log. A parallel worker that was
+  killed outright (for lack of memory, say) is a `"worker_error"` too
+  and enters the first-error text; it used to show as `"skipped"` (“no
+  result returned”) and was left out of that text. An `"ok"` row carries
+  a `message` when the fold’s `fold_info_fn` failed.
 
 - [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   records what it removed. `attr(x, "dropped")` is a list with `n`,
@@ -78,7 +112,29 @@
   post-cleaning row count with nothing saying how many rows were lost or
   why. Every fit now carries the count as `$info$n_dropped`, and every
   `cv_*()` result as `n_dropped`. Silently losing a third of the rows is
-  a classic cause of a suspiciously good score.
+  a classic cause of a suspiciously good score. The layer carries the
+  class `"spatialkit_rows"` after `"sf"`
+  (`c("sf", "spatialkit_rows", "data.frame")`): `[` returns a plain
+  layer without the record, and
+  [`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html),
+  [`vctrs::vec_rbind()`](https://vctrs.r-lib.org/reference/vec_bind.html)
+  and
+  [`dplyr::union_all()`](https://dplyr.tidyverse.org/reference/setops.html)
+  return a plain `sf` (with the class ahead of `"sf"` they failed on two
+  layers with the same record, ‘attr(obj, “sf_column”) does not point to
+  a geometry column’).
+  [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
+  [`slice()`](https://dplyr.tidyverse.org/reference/slice.html),
+  [`arrange()`](https://dplyr.tidyverse.org/reference/arrange.html) and
+  [`distinct()`](https://dplyr.tidyverse.org/reference/distinct.html)
+  now drop the record as `[` does (they kept it, so
+  [`filter()`](https://dplyr.tidyverse.org/reference/filter.html) down
+  to 3 of 5 rows still reported the parent’s counts). Each record
+  carries `n_rows`, the number of rows it was made for.
+  [`sf::st_drop_geometry()`](https://r-spatial.github.io/sf/reference/st_geometry.html)
+  keeps the rows and the record; binding such data frames keeps the
+  first one’s record, whose `n_rows` then no longer matches, and the
+  package’s readers ignore it.
 
 - `make_folds(method = "block_kfold")` returns the block design it built
   the folds from. `assignment` gains a third column, `block_id`;
@@ -105,7 +161,11 @@
   a fold is one contiguous region or several.
   [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
   now draws those outlines under the points when the folds carry them,
-  and takes `blocks = FALSE` to suppress them.
+  and takes `blocks = FALSE` to suppress them. Its subtitle states the
+  parameter that decides whether the scheme leaks (the block size, the
+  buffer, the number of location groups or the median NNDM exclusion),
+  with the units of the folds’ CRS; folds built from points without a
+  CRS get no units rather than “(NA units)”.
 
 - [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)’s
   returns are uniform. The four directional variograms and their fits
@@ -136,12 +196,27 @@
   is exactly the one where a user wants to know what the ICC came out as
   — and the `"variogram"` path adds `deff_rows`, the per-cell design
   effect at the cell’s row count that the log line reduced to a median
-  and a max.
+  and a max. A
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  call that requests a design effect (any `deff` other than 1) also
+  returns a logical `deff_applied` column, `TRUE` on every row when the
+  correction was applied and `FALSE` when it fell back to the
+  uncorrected standard errors; unlike the `"deff_applied"` attribute it
+  survives [`rbind()`](https://rdrr.io/r/base/cbind.html) and
+  [`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html)
+  of many results. The default frame is unchanged.
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   reports the features that matched more than one polygon and had the
   `tie_break` rule decide for them, as `attr(, "ties")` and a log line;
   a tie-break firing on a third of the features means the polygon layer
-  overlaps and every cell count built from it is suspect.
+  overlaps and every cell count built from it is suspect. The layer
+  carries the `"spatialkit_rows"` class after `"sf"`, as
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)’s
+  does, so binding such layers returns a plain `sf`. The `"ties"` record
+  is dropped by the same `dplyr` row verbs as
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)’s,
+  and with `largest = TRUE` it also counts features that overlap two or
+  more polygons by exactly the same area.
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
   attaches `crs_choice`, the projections it considered with each one’s
   measured worst-case distance error. Every path that picks a local
@@ -202,11 +277,12 @@
   `plot(estimate_sac_range(pts, "z"))` draws the empirical variogram,
   with the fitted model and the effective range overlaid where a range
   was identified, and a subtitle saying why not where it was not: the
-  variogram never reached a sill, both model fits were singular, or the
-  optimiser halted. Nothing is recomputed — the plot reads the
-  attributes the estimate already carries — and the same drawing routine
-  now serves `plot.spatial_fit(type = "variogram")`, so the two pictures
-  agree. The “attached for inspection” messages
+  variogram never reached a sill, both model fits were singular, the
+  optimiser halted, or a `range_frac` below 1 refused a range inside the
+  fitted lags. Nothing is recomputed — the plot reads the attributes the
+  estimate already carries — and the same drawing routine now serves
+  `plot.spatial_fit(type = "variogram")`, so the two pictures agree. The
+  “attached for inspection” messages
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   logs when it returns `NA` used to point at `plot(type = "variogram")`,
   which is the method for a fitted model and could not take the
@@ -237,7 +313,9 @@
         0.960 and 0.958 coverage at exponential ranges of 150 and 400 on
         a 1000-unit domain, against 0.931 and 0.918 with `n - 1`. The
         help page’s “Confidence intervals” section has the reasoning and
-        the numbers.
+        the numbers. `..neff_*`, like `..df_*` and the interval, is `NA`
+        for a column with a single non-missing value in the cell, where
+        `cell_weight` still counts it.
 
 - [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
   gains `block_size` and `auto_range`, and now hands `response_var` and
@@ -250,7 +328,14 @@
   was the one whose folds could never be checked against the range.
   [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
   gains `auto_range` for its inner folds for the same reason, and
-  records it in `$params`.
+  records it in `$params`. A shared fold set that cannot be built is an
+  error. It used to be a log line and a fall-back to each backend’s
+  default blocks, which were given neither argument: `block_size = 1e6`
+  (one block, which
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  refuses) returned a five-fold comparison on geometric blocks, and
+  `auto_range = TRUE` the small blocks it exists to prevent, with no R
+  condition.
 
 - `compare_models_cv()$overall` carries the Bayesian backend’s
   calibration when a Bayesian model ran: `coverage_50`, `coverage_80`,
@@ -270,7 +355,23 @@
   The defaults are ranger’s, so no forest changes. The help page carries
   Strobl et al.’s (2007) case for `replace = FALSE`. Passing the ranger
   spellings through `...` is now refused like the other arguments the
-  wrapper sets.
+  wrapper sets. `replace = FALSE` with `sample_fraction = 1` grows every
+  tree on every row, so no row is out of bag. The fit now warns that
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html), the OOB
+  error and the permutation importance are all `NaN` (they were `NaN` in
+  silence), and [`print()`](https://rdrr.io/r/base/print.html) on such a
+  fit says the OOB error and the permutation importance are undefined,
+  where it dropped the OOB line and printed the importance line empty.
+  `area_of_applicability(weights = pmax(imp, 0))` failed on that
+  importance with a hint to use the very
+  [`pmax()`](https://rdrr.io/r/base/Extremes.html) it had been given,
+  because [`pmax()`](https://rdrr.io/r/base/Extremes.html) keeps `NaN`;
+  it now names the predictors whose weight is `NaN`, says why (no row is
+  out of bag), and says what to do instead: refit with out-of-bag rows,
+  or pass `weights = NULL`. With permutation importance, the fit’s own
+  warning now says as much:
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  cannot be weighted by that importance, so pass `weights = NULL`.
 
 - [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
   records the method of the folds its threshold came from as
@@ -303,7 +404,26 @@
        GLS trend fits against variogram refits (Neuman and
        Jacobson 1984) was measured too and recovers only part of the
        bias (0.80 in the quadratic case), so it was not added. `nlme`
-       joins Suggests.
+       joins Suggests. A fitted range too short for enough pairs of
+       points to lie inside it is refused, with
+       `rejected_reason = "fitted range is below the shortest lag fitted"`
+       and the bound it fell short of as the `range_floor` attribute.
+       For the least-squares fits the bound is the shortest lag the
+       empirical variogram resolves (the mean separation in its first
+       bin); it did not fire on white noise or on fields with a 60 m
+       range. The REML range is fitted to the point pairs, not to those
+       bins, so its bound is the distance within which 30 pairs of the
+       points the REML fit used lie, or that first lag when it is
+       shorter. On white noise (n = 300, 30 draws) the REML fit returned
+       ranges of 0.18–23.6 m in 19 draws (one of 0.27 m sized a 3642 x
+       3676 block grid, refused as a unit mistake); the 16 of them up to
+       12.5 m are refused and the estimate is finite in 13 of 30. REML
+       estimates of a true 30 m range that the first lag alone would
+       have refused (14.5–28.8 m, in 10 of 20 draws at n = 400 and 6 of
+       15 at n = 300) are returned, and at n = 400 the same holds at
+       `cutoff = 0.5` and `0.1`. The bound is about identification, not
+       a test for spatial structure. A refused REML result keeps its
+       `reml` list.
 
 - [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
   returns the nugget variance behind an
@@ -342,16 +462,20 @@
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
   runs a log-spaced ladder of level counts from a floor the
   autocorrelation range implies (`ceiling(area / range^2)`) to a ceiling
-  the support implies (`floor(n / min_cell_n)`), fits each level as the
-  best of 25 k-means++ restarts, and returns a data.frame with the WSS
-  elbow statistic, Mallows’ C_p of the piecewise-constant approximation
-  of the response (or of its residuals on the predictors, with the
-  nugget from the fitted variogram as the noise variance), the
-  standardised residual Moran’s z of the cell means, and an analytic
-  reliability of the cell means — the share of their spread that is
-  between-cell signal rather than sampling noise, from the variogram
-  alone via Krige’s additivity relation (Cressie 1996), the shrinkage
-  factor of Fay and Herriot (1979) — plus the cell-support and
+  the support implies (`floor(n / min_cell_n)`, where `n` is every point
+  in the layer, not the `sample_n` subsample the k-means runs on), fits
+  each level as the best of 25 k-means++ restarts, and returns a
+  data.frame with the WSS elbow statistic (read on log-log axes, and
+  `NA` when the points have no cluster structure to bend the curve),
+  Mallows’ C_p of the piecewise-constant approximation of the response
+  (or of its residuals on the predictors, fitted on the rows with a
+  complete response and predictors, with the nugget from the fitted
+  variogram as the noise variance and the penalty set for the whole
+  layer), the standardised residual Moran’s z of the cell means, and an
+  analytic reliability of the cell means — the share of their spread
+  that is between-cell signal rather than sampling noise, from the
+  variogram alone via Krige’s additivity relation (Cressie 1996), the
+  shrinkage factor of Fay and Herriot (1979) — plus the cell-support and
   cell-diameter columns and the between-restart spread. A floor above
   the ceiling is reported as a finding rather than resolved silently.
   [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
@@ -369,7 +493,62 @@
   within 2 percent over a factor of 3–6 in the number of cells. Read the
   flat region.
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
-  is unchanged in shape and keeps its integer-vector interface.
+  is unchanged in shape and keeps its integer-vector interface. A
+  supplied `sac` whose range was refused (an `NA` with a
+  `rejected_reason`) is not read as accepted: `cp` keeps that fit’s
+  nugget and warns, naming the reason, `reliability` is `NA` (it needs
+  the range), and a fit that did not converge, or whose range is below
+  the shortest lag fitted, gives neither (the whole refused fit used to
+  be used, and a correlation function whose range could be many times
+  the extent pinned the reliability optimum to the first level, with no
+  R warning). A range below the shortest lag means the structure cannot
+  be told from a nugget, so the nugget is not identified either: on
+  white noise detrended by REML it was 6e-7 on a sill of 0.99, and C_p,
+  with no penalty, ran to the support ceiling (33 cells). A nugget of 0
+  (under 1e-4 of the sill, since a REML fit stops short of its bound:
+  6e-7 passed a test for exactly 0), on which C_p has no penalty and
+  falls to the ceiling, is warned about, and so is a `sac` whose
+  `detrended` flag does not match the variable scored (a residual
+  variogram on the raw response moved the C_p pick from 2–4 cells to the
+  ceiling of 44 in five of five simulated fields);
+  `attr(x, "variogram")` records `detrended`. When no `sac` is passed,
+  these warnings name the variogram the profile estimated (kept in
+  `attr(x, "sac")`), not a `sac` argument the caller never gave. A
+  supplied `sac` is read in its own CRS: the points are transformed to
+  `attr(sac, "crs")` first, as
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  does (a range in US feet put the floor of a metre layer at 2 where the
+  same range in metres put it at 8). A `sac` given as a `units` object
+  (`set_units(1.5, "km")`) or a character string is refused by name; a
+  `units` object used to be read as a number in the CRS units, so 1.5 km
+  became a range of 1.5 m and a floor of 41 million cells. A plain
+  number is taken as the range alone: it sets the floor, and `cp` and
+  `reliability` are `NA`. Reliability’s domain term is taken over the
+  convex hull the area is measured on, not the bounding box: on a 3000 x
+  120 strip the reliability pick is 6 cells whether the strip lies
+  axis-aligned or rotated by 45 degrees (it was 8 and 2), and 10 either
+  way on a square (it was 10 and 8), and reliability values shift
+  slightly on every profile. Row order does not change the profile (see
+  the
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  item under Bug fixes); over permutations of one 2000-point layer, WSS
+  used to move by up to 2.6 percent and the C_p pick across its flat
+  region (222, 173 and 135 cells). The ceiling reaches the number of
+  distinct locations when locations repeat (and explicit `levels` up to
+  it are kept) instead of stopping one short; with no location repeated,
+  the print says the ceiling is one short of the points rather than
+  crediting the distinct locations. Points with empty or non-finite
+  coordinates are dropped with an R warning, as in
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md);
+  it was a log line alone. `range_floor = FALSE` starts the ladder at 2
+  whatever the range and only reports the floor, so profiles whose range
+  estimates differ (cross-validation folds) have comparable ladders;
+  with the floor applying on one fold and not the next, reliability and
+  the elbow moved by a factor of 10–15 between folds. The default,
+  `range_floor = TRUE`, keeps the floor, and the help page describes
+  that regime switch. Under `select_on = "split"` a supplied `sac` is
+  flagged in the log, since it must be fitted on the selection half, and
+  the help page shows the two-call workflow.
 
 - `select_on = c("all", "split")` on
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
@@ -382,10 +561,28 @@
   post-selection, and its standard errors are descriptive rather than at
   nominal coverage (Gao, Bien and Witten 2022). `select_on = "split"` is
   sample splitting: the layer is cut into two spatially blocked halves
-  (`make_folds(k = 2, method = "block_kfold")`), the selection runs on
-  the first, and the row positions of both come back (as a `"split"`
-  attribute on the first two functions, as `$split` on the third) so the
-  estimation can be done on the half the selection never saw.
+  (`make_folds(k = 2, method = "block_kfold")`), the selection reads the
+  response on the first only, and the row positions of both come back
+  (as a `"split"` attribute on the first two functions, as `$split` on
+  the third) so the estimation can be done on the half the selection
+  never saw. The positions index the layer as passed, for all three
+  functions
+  ([`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)’s
+  were positions after its completeness filter, so with seven incomplete
+  rows `pts[fs$split$estimation, ]` held 47 rows of the selection half
+  and 4 of the dropped ones). When the default six-block split leaves
+  fewer than 10 points in a half (a small layer, or a small group far
+  from the rest), it is retried on grids of about 16, 36 and 100 blocks,
+  with a warning, instead of stopping, and the split records `grid`,
+  `n_blocks`, `balance` (a 2:1 split on clustered layers used to pass
+  silently) and each half’s `extent`. The halves are not independent:
+  blocking reduces the dependence across their shared border but does
+  not remove it (85 percent of the estimation points of the package’s
+  test layer lie within the fitted range of a selection point), and the
+  seed decides only which side selects, not where the cut falls. The
+  level-count functions still draw their cells on every point, so the
+  count they return is a count for the whole layer it will be applied
+  to.
   [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
   also returns `score_holdout`: the selected set fitted on the selection
   half and scored on the other, the honest number its selection-internal
@@ -416,9 +613,12 @@
   millionth of the extent of a block — an edge that reprojection moved
   by a rounding error; points inside more than one block take the first,
   with a warning when the blocks concerned overlap in area rather than
-  share an edge. `params` gains `n_blocks` (before empties were
-  dropped), `blocks_supplied` and `block_scale` on every `block_kfold`
-  result; `grid_nx`/`grid_ny` are `NA` for supplied blocks.
+  share an edge. `params` gains `n_blocks` (before empties were dropped;
+  for a grid, `grid_nx * grid_ny`, the cells a `boundary` clips away
+  included), `blocks_supplied` and `block_scale` on every `block_kfold`
+  result; `grid_nx`/`grid_ny` are `NA` for supplied blocks. A `blocks`
+  layer without a CRS is brought into the points’ CRS with an R warning
+  naming it, as `boundary` is.
 
 - [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
   gains `balance_tol`, the largest-to-smallest fold size ratio above
@@ -461,9 +661,14 @@
   number per name — anything else is an error, because a scoring
   function of the wrong shape is a mistake to surface) and forgiving
   where it should be (a function that throws on a fold is logged and its
-  columns are `NA` there; a fold is never dropped for it). The empty
-  frames of a run where every fold failed carry the columns, typed, when
-  the function can be called on zero-length input.
+  columns are `NA` there; a fold is never dropped for it). Nor may a
+  name reuse a per-fold extra (`CRPS`, `coverage_*`, `gp_k`,
+  `gp_n_basis`, `n_draws`, `bandwidth`, or a name the `fold_info_fn`
+  returns) or `mean_CRPS`: each used to replace the package’s value
+  silently, and `cv_bayes()$predictive_coverage` then reported the
+  user’s number. The empty frames of a run where every fold failed carry
+  the columns, typed, when the function can be called on zero-length
+  input.
   [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
   hands one function to every backend and protects it like the fold
   arguments, so the columns of its `overall` are comparable across rows.
@@ -486,19 +691,32 @@
   United States forced into one zone 14 percent, Web Mercator over 2.5
   degrees of latitude at 48N 4 percent, an equal-area projection a few
   tenths of a percent (the sphere the geodesic areas are computed on
-  against the ellipsoid).
+  against the ellipsoid). The measurement works whether
+  [`sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html) is
+  on or off (with it off and no lwgeom it returned `NA`, so
+  `summarize_by_cell(area = TRUE)` refused every grid and
+  `purpose = "area"` skipped its warning), and its probe polygons are
+  densified before their geodesic area is taken, so an equal-area grid
+  over a near-global extent no longer measures 10 percent. With
+  `purpose = "area"`, a single polygon’s candidates are scored rather
+  than falling back to the Lambert azimuthal unmeasured.
 
 - [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
   gains `area = TRUE`: with `cells_sf`, the result carries `cell_area`
-  (planar, in the squared units of the cells’ CRS) and `n_per_area`, a
-  point density; a rate of anything else is its `agg_funs` sum over
-  `cell_area`. The request is refused with an error — not answered with
-  a number — when the cells’ CRS distorts areas across them by more than
-  1 percent by the measurement above, because a density is a comparison
-  between cells and means nothing where the map scale differs from one
-  cell to the next; the message names the CRS, the figure and the
-  remedy. A cell with no observations gets `NA`, not zero. The measured
-  spread is attached as `attr(, "area_error")`.
+  (planar, in the squared units of the cells’ CRS; for lon/lat cells the
+  geodesic area in square metres, not a planar area in squared degrees)
+  and `n_per_area`, a point density; a rate of anything else is its
+  `agg_funs` sum over `cell_area`. The request is refused with an error
+  — not answered with a number — when the cells’ CRS distorts areas
+  across them by more than 1 percent by the measurement above, because a
+  density is a comparison between cells and means nothing where the map
+  scale differs from one cell to the next; the message names the CRS,
+  the figure and the remedy. A cell with no observations gets `NA`, not
+  zero. Lon/lat cells pass the distortion check by construction; with s2
+  switched off their area needs lwgeom, and the request is refused
+  without it. The measured spread is attached as `attr(, "area_error")`.
+  A `cells_sf` with no ID column the summaries can be joined on is an
+  error under `area = TRUE`, since the area columns cannot be produced.
 
 - `build_tessellation(approx_n_cells = )` and `get_voronoi_seeds(n = )`
   accept what the level-selection step returned: the integer vector of
@@ -516,7 +734,12 @@
   as `attr(seeds, "n_from")`. The two functions the pipeline documents
   as a pair are now connected:
   `get_voronoi_seeds(n = determine_optimal_levels(pts))` needs no number
-  carried between the calls by hand.
+  carried between the calls by hand. A hex or square lattice records
+  `params$cells_occupied` and `params$cells_empty`, and a count taken
+  from a profile or a selection warns when fewer than three quarters of
+  it end up occupied: the count is of k-means cells, all of them
+  occupied, and on clustered points a lattice leaves about half its
+  cells empty.
 
 - Five diagnostic plots that show the curve behind a chosen point, the
   folds behind a pooled number, or the distribution behind a count. None
@@ -531,26 +754,56 @@
     `metrics` function added; a column that is `NA` in every fold is
     refused with the reason (`Adj_R2` without `p`, coverage without
     draws) rather than drawn empty, and a per-fold extra with no pooled
-    counterpart draws without the line and says so.
+    counterpart draws without the line and says so. So does a count
+    (`n_pred`, `n_MAPE`, `n_SMAPE`), whose `overall` value is the total
+    over the folds; it was drawn as the pooled line, at 150 against
+    folds of 30. A model with no finite per-fold value gets no panel and
+    no pooled line, and the caption names it, whether or not `overall`
+    has a value for it (RF’s `bandwidth` was dropped without a mention).
+    A
+    [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+    result keeps its model strip when only one model is left to draw.
   - [`plot.aoa()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md):
     the dissimilarity index of the prediction locations against the
-    cross-validated training DI (ECDFs, or a histogram with the training
-    curve), threshold marked, with the share outside and how close the
-    inside ones run to the edge in the subtitle, and whether the
-    threshold came from cross-validated folds in the caption.
+    training DI — cross-validated over the `folds` passed, or else each
+    point’s distance to its nearest other training point; the legend
+    says which — as ECDFs, or a histogram with the training curve,
+    threshold marked, with the share outside and how close the inside
+    ones run to the edge in the subtitle, and whether the threshold came
+    from cross-validated folds in the caption. Prediction locations
+    outside on a predictor dropped for having no training variance
+    (`DI = Inf`) count in the prediction curve, which then tops out
+    below 1, and the caption says how many are off the axis. It counts
+    the `DI = NA` rows (a missing predictor) as well. The curve used to
+    leave the `Inf` rows out: it read 0.97 inside at the threshold while
+    the subtitle counted 11 of 40 outside. A result with every row at
+    `DI = Inf` was refused as “every row had a missing or non-finite
+    predictor”, and the error now gives the true reason.
   - `plot.spatial_fit(type = "variogram")` overlays the response’s own
     variogram (hollow points, dashed fit) on the residual variogram, on
     the same points and lags, so the structure the model absorbed is the
-    gap between the two curves. The caption compares the sills only when
-    both ranges were identified; `response = FALSE` restores the
-    residual curve alone.
+    gap between the two curves. The response curve is whichever
+    variogram
+    [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+    returns for the response, which is its widest single direction when
+    the all-pairs fit is unusable (a response with a trend, whose
+    residuals are fine). A single-direction response curve is labelled
+    with its azimuth, and the caption compares the sills only when both
+    ranges were identified and the two curves cover the same point pairs
+    (such a curve used to be labelled plainly as the response, its sill
+    set against the all-pairs residual curve’s: “Residual sill is 45% of
+    the response sill” from a quarter of the pairs). `response = FALSE`
+    restores the residual curve alone.
   - `plot_calibration(cv)`: observed against nominal coverage of
     [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)’s
     posterior predictive intervals, pooled (blue) and per fold (grey),
-    with the diagonal and a one-line verdict. The levels are read off
-    the `coverage_*` column names, so
+    with the diagonal and a one-line verdict. Each level is drawn at the
+    nominal value
+    [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+    records in `coverage_levels` (0.995 was drawn at 1.00), so
     `coverage_levels = seq(0.1, 0.9, by = 0.1)` gives a full curve; the
-    default three levels are unchanged.
+    default three levels are unchanged. Its error for all-`NA` coverage
+    names `compute_pred_intervals = FALSE` as well as failed draws.
   - One sweep drawer behind three methods:
     [`plot.resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.resolution_profile.md)
     (a panel per criterion, the level each selects marked, its flat
@@ -558,11 +811,13 @@
     choosing);
     [`plot.feature_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
     (the accepted variable’s score at each step as the path, every other
-    candidate faint, the stop in red, the hold-out score as a separate
-    mark when `select_on = "split"` computed one — and a caption saying
-    whether the intercept-only model was scored, since for the RF and
-    GWR backends it usually is not, so the path starts at the first
-    variable);
+    candidate faint, the stop in red, the best candidate at the step
+    after the stop, which was scored and not added, hollow and labelled
+    “not added” rather than drawn like the accepted variables, the
+    hold-out score as a separate mark when `select_on = "split"`
+    computed one — and a caption saying whether the intercept-only model
+    was scored, since for the RF and GWR backends it usually is not, so
+    the path starts at the first variable);
     [`plot.gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.gwr_model_selection.md)
     (every model’s AICc against its size, the best of each size joined,
     the winner marked, its lead over the runner-up in the subtitle).
@@ -586,32 +841,90 @@
   [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md),
   so a fit budget (`max_fits`, default
 
-  60. refuses to start rather than run past it, and the ladder drops
-      sizes at which the grid holds fewer than `k` blocks so every point
-      on the curve is a `k`-fold cross-validation of the same shape.
+  60. refuses to start rather than run past it. The default ladder runs
+      up to the largest size, at most half the shorter side, whose grid
+      still holds `k` cells. At the default `k = 5` half the side is a 2
+      x 2 grid of four cells on any extent less than 1.5 times as long
+      as it is wide, so that rung used to be dropped every time.
+      `n_sizes = 6` then ran five cross-validations, the last at 0.30 of
+      the side, and missed ranges up to a third of it that a 3 x 3 grid
+      reaches. The top is now about a third of the side on such an
+      extent. Sizes the caller passes in `block_sizes` whose grid holds
+      fewer than `k` cells are not run, and a warning names them and the
+      largest size that gives `k` blocks; they were dropped with only a
+      log line. A `units` object for `block_sizes` is refused by name.
+      On clustered data
+      [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+      can still lower `k` at the top sizes, which the `k` column shows.
+      The default ladder also skips sizes whose grid would exceed the
+      1,000,000 blocks
+      [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+      builds (a 6 km x 2 m transect used to abort with an error about
+      `block_size`), runs along the line for points on one axis-parallel
+      line (they were refused as having “no extent”), and warns when
+      every rung is below the estimated range while longer blocks would
+      still fit `k` times along the longer side (a 10 km x 100 m
+      corridor: rungs of 4 to 50 m against a 1.7 km range, a flat curve
+      that read as no leakage). On a roughly square extent at `k = 5`
+      that warning also fired, as in the block-size tour script on a 996
+      m square, with two wrong numbers. It called the top rung it had
+      run (300) “half the shorter side” (498). It said blocks only up to
+      the longer side over `k` (199, smaller than rungs already run)
+      still gave `k` blocks, when blocks up to 332 did. It now fires
+      only where a longer block would still give `k` blocks, and it
+      names the top rung run and the largest size that gives `k` blocks.
+      User-supplied `block_sizes` over the grid cap are refused before
+      any fit, and a `sac` estimated in another CRS is converted to the
+      sweep’s units with a warning (a metre range on a US-foot axis was
+      drawn 3.3 times too short). The plot’s caption reads every
+      `coverage_*` column as “closer to the nominal level is better”
+      (only `coverage_50`, `coverage_80` and `coverage_95` were known,
+      as higher-is-better, so `coverage_97.5` from
+      [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)’s
+      full-precision names was captioned “lower is better”).
 
 - [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
   keeps its local collinearity survey. Every fitting window — not a
-  sample of 30 — has its kernel-weighted local design’s scaled condition
-  index computed, the way Wheeler and Tiefelsdorf diagnose GWR
-  collinearity, and the fit carries it as `info$local_collinearity` (one
-  row per observation: coordinates, window size, condition index), with
-  `info$n_local_collinear`, `info$n_local_singular` and the global
-  `info$condition_index` beside `AICc`. The warning is now the exact
-  fraction of locations rather than a sampled one; its wording and its
-  thresholds (a quarter of the locations, or any) are unchanged. The
-  weighted survey sees what the unweighted spot-check could not: a
-  bisquare window’s edge points contribute almost nothing to the fit, so
-  they contribute almost nothing to its conditioning.
+  sample of 30 — has scaled condition indices of its kernel-weighted
+  local design computed, the way Wheeler and Tiefelsdorf diagnose GWR
+  collinearity, and the fit carries them as `info$local_collinearity`
+  (one row per observation: coordinates, window size, and two condition
+  indices: `cn`, Belsley’s uncentred index with the intercept, and
+  `cn_slopes`, the predictors centred in the window and scaled by their
+  study-area standard deviation), with `info$n_local_collinear`,
+  `info$n_local_singular` and the global `info$condition_index` (on the
+  centred predictors) beside `AICc`. `n_local_collinear` and the warning
+  count the windows whose slopes are collinear (`cn_slopes` above 30, or
+  `cn` above 1e6), so a predictor’s origin (degrees C or kelvin) does
+  not change the verdict. The warning is now the exact fraction of
+  locations rather than a sampled one, and its thresholds (a quarter of
+  the locations, or any) are unchanged; above a quarter it now says that
+  an exactly singular window stops the fit, instead of promising
+  non-finite coefficients. The weighted survey sees what the unweighted
+  spot-check could not: a bisquare window’s edge points contribute
+  almost nothing to the fit, so they contribute almost nothing to its
+  conditioning. The survey also runs with a single numeric predictor,
+  and its kernel weights equal
+  [`GWmodel::gw.weight()`](https://rdrr.io/pkg/GWmodel/man/gw.weight.html)
+  exactly: a boxcar keeps a point at the kernel’s edge, and a zero-width
+  adaptive kernel gives `NaN`, counted as singular, instead of weight 1
+  at the co-located points. (A grid with a boxcar bandwidth equal to its
+  spacing used to be reported collinear at every location while GWmodel
+  fitted windows of 3 to 5 points.)
 
 - `plot(fit, type = "coefficients")` for a GWR fit maps one local
   coefficient (`term`) at the training locations, which is the reason to
   fit GWR at all — and masks the locations where it is not to be
-  believed: a collinear local design (condition index above 30, or
-  singular) or a non-finite coefficient is drawn hollow and grey,
-  counted in the subtitle, because the smooth surface a naive map draws
-  over them is the picture of an unstable estimate. `mask = FALSE` draws
-  them anyway and says how many it is drawing.
+  believed: a collinear local design (for a slope, the slope condition
+  index above 30 or singular; for the intercept, the condition index
+  with the intercept above 30) or a non-finite coefficient is drawn
+  hollow and grey, counted in the subtitle, because the smooth surface a
+  naive map draws over them is the picture of an unstable estimate.
+  `mask = FALSE` draws them anyway and says how many it is drawing. A
+  fit with a duplicated predictor name is drawn rather than refused as
+  “every location is masked”. A slope map in kelvin is drawn like the
+  one in degrees C; before, every location was masked and the map
+  refused.
 
 - [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md):
   what a block-kriging aggregator would deliver on a set of cells,
@@ -619,26 +932,69 @@
   from a fitted variogram
   ([`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)’s,
   or estimated here): the block-kriging estimate and variance, that
-  variance as a share of the sill (`kr_ratio`, the coverage score — near
-  1 the estimate is the global mean), whether it exceeds the
-  design-based `s^2/n` of the plain mean (`kr_exceeds_design`), and the
-  kriged-minus-plain shift in standard errors (`kr_shift`); plus the
-  variance of the standardised errors from blocked cross-validation
-  (`attr(, "cv")$zscore_var`), which is about 1 when the kriging
-  variance is right. Measured on simulated exponential fields: 0.93–1.07
-  with the true variogram, 0.85–1.01 with the estimated one; under
-  blocked folds it checks the sill and range rather than the nugget
-  (0.95–1.24 with the nugget understated tenfold), and random folds are
-  the instrument for the nugget. The comparison the function exists for:
-  under uniform sampling kriged and plain means differed by more than
-  one standard error in 11–24 percent of cells; under clustered sampling
-  in 34–63 percent, with 3–27 of 16–64 cells empty and kriged anyway.
-  This is the first kriging path in the package
-  ([`gstat::krige()`](https://r-spatial.github.io/gstat/reference/krige.html)
-  and
-  [`gstat::krige.cv()`](https://r-spatial.github.io/gstat/reference/krige.cv.html));
+  variance as a share of the variance the cell’s mean would have with no
+  data at all (`kr_ratio`, the coverage score — near 1 the data tell the
+  cell nothing; a share of the point sill never came near 1 for cells
+  larger than the range), whether it exceeds the design-based `s^2/n` of
+  the plain mean (`kr_exceeds_design`), and the kriged-minus-plain shift
+  in standard errors (`kr_shift`); plus the variance of the standardised
+  errors from blocked cross-validation (`attr(, "cv")$zscore_var`),
+  which is about 1 when the kriging variance is right. Measured on
+  simulated exponential fields: 0.93–1.07 with the true variogram,
+  0.85–1.01 with the estimated one; under blocked folds it checks the
+  sill and range rather than the nugget (0.95–1.24 with the nugget
+  understated tenfold), and random folds are the instrument for the
+  nugget. The comparison the function exists for: under uniform sampling
+  kriged and plain means differed by more than one standard error in
+  11–24 percent of cells; under clustered sampling in 34–63 percent,
+  with 3–27 of 16–64 cells empty and kriged anyway. Repeat visits to one
+  location are kriged from their mean, with the part of the nugget that
+  varies between visits divided by their count; kriging them as separate
+  rows made every kriging system singular and returned `NA` everywhere.
+  Any cell or held-out location gstat still cannot solve is counted in a
+  warning. This is the first kriging path in the package
+  ([`gstat::krige()`](https://r-spatial.github.io/gstat/reference/krige.html));
   its model families are the ones the package interprets elsewhere, and
-  any other is refused by name.
+  any other is refused by name. The cross-validation runs each
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  split on its own training set, so `"buffered_loo"` and `"nndm"` keep
+  their exclusion zones (reduced to fold labels they ran as plain
+  leave-one-out: with a 250 m buffer, a standardised-error variance of
+  1.02 and RMSE 0.757, against 0.873 and 0.944 with the buffer kept),
+  and [`print()`](https://rdrr.io/r/base/print.html) names the scheme
+  instead of calling every one “blocked CV”. A cell holding locations
+  that the `nmax` nearest its centre leave out is kriged from all of its
+  own locations plus the `nmax` nearest outside it (a cell of 1,500
+  points was otherwise estimated from its middle 50: 0.43 off against
+  0.07), and the column `kr_n_used` says how many locations each cell
+  was kriged from. `max_neighbours` (default 2000) leaves out, with a
+  warning, a cell that would need a larger kriging system, and
+  `max_box_ratio` (default 1000) a cell whose bounding box exceeds its
+  area that many times, because gstat discretises over the whole box
+  (+592 MB for one strip at 7,072); both are counted in
+  `attr(, "cells_left_out")` and by
+  [`print()`](https://rdrr.io/r/base/print.html). The points are put in
+  the CRS the variogram was fitted in (`attr(sac, "crs")`), as
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  does: a `sac` fitted in metres used on points in km gave a CV
+  statistic of 3.05 against 0.85. A `sac` whose variogram is of
+  residuals (`detrended = TRUE`) is used with a warning that the
+  response is kriged without its predictors and the variances come out
+  too small (4.3–5.2 against 0.67–1.53). `attr(, "rejected_reason")`
+  records why a `sac`’s range was refused, and the warning and
+  [`print()`](https://rdrr.io/r/base/print.html) say it instead of “sill
+  never reached” for every refusal. The cell ID is found and matched as
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  finds it (cells keyed by `id` or `grid_id` too, and a double ID of 1e5
+  matches an integer 100000, where it used to leave that cell with n =
+  0), a point whose ID matches no cell is counted in a warning, and a
+  layer with no CRS is taken to be in the other’s. Folds whose recorded
+  rows sit at other locations in `assigned_points_sf` are refused, as in
+  `cv_*()`. Folds built before
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  dropped points used to be applied by position, holding out the wrong
+  points (cross-validation RMSE 1.82 against 2.11 with folds built on
+  the assigned layer), with nothing said.
 
 - `MAPE` and `SMAPE` now say how many rows they were averaged over.
   Every metrics frame —
@@ -655,18 +1011,248 @@
   [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
   — gains two trailing integer columns, `n_MAPE` and `n_SMAPE`: the rows
   each percentage error actually used once those where its denominator
-  is zero were dropped (`y == 0` for MAPE; `|y| + |yhat| == 0` for
-  SMAPE). They equal `n` (`n_pred` in the CV frames) when nothing was
-  dropped, and are `0` in an empty frame. The values themselves are
-  unchanged: a MAPE over 58 of 120 rows is the same number 2.0.0
-  reported, but it now arrives labelled, where before nothing in the
-  frame recorded that it was a subset average. `print(summary(fit))`
-  appends “(over k of n rows)” to its SMAPE line when the two differ.
-  The columns sit after `Adj_R2` so code addressing the seven metric
-  columns by position is unaffected; code pinning the exact column set
-  needs the two names added.
+  is zero were dropped (`y` for MAPE, `|y| + |yhat|` for SMAPE, zero
+  meaning no larger than 100 machine epsilons times the data’s own
+  magnitude). They equal `n` (`n_pred` in the CV frames) when nothing
+  was dropped, and are `0` in an empty frame. The values themselves are
+  unchanged, apart from what now counts as zero (see Bug fixes): a MAPE
+  over 58 of 120 rows is the same number 2.0.0 reported, but it now
+  arrives labelled, where before nothing in the frame recorded that it
+  was a subset average. `print(summary(fit))` appends “(over k of n
+  rows)” to its SMAPE line when the two differ. The columns sit after
+  `Adj_R2` so code addressing the seven metric columns by position is
+  unaffected; code pinning the exact column set needs the two names
+  added.
+
+- [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  gains `nstart`, the number of
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) starts
+  (default 10, as before).
+
+- [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  say when a Bayesian fit did not converge. Both scored such a fit like
+  any other, and only the fit’s WARN log lines (which
+  [`tryCatch()`](https://rdrr.io/r/base/conditions.html) and knitr never
+  see, and
+  [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+  hides) said that its posterior was not to be trusted.
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)’s
+  `fold_metrics` gains `convergence_ok`: `TRUE` or `FALSE` as
+  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+  judged that fold’s sampler (R-hat, effective sample size,
+  divergences), and `NA` when `fit_args` sets
+  `check_convergence = FALSE`. A run with any `FALSE` raises one warning
+  naming those folds.
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  gains the same column and warns once for each model that did not
+  converge. Code that pins the exact column set of either table needs
+  the new name added.
 
 ### Bug fixes
+
+- **[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+  crashed R on an empty line feature.** sf’s
+  [`st_cast()`](https://r-spatial.github.io/sf/reference/st_cast.html)
+  turns an empty MULTILINESTRING into one empty LINESTRING, not zero
+  parts, and
+  [`st_line_sample()`](https://r-spatial.github.io/sf/reference/st_line_sample.html)
+  on it segfaulted and took the session with it. A null geometry in a
+  line layer loads exactly like this from a GeoPackage or a shapefile,
+  and
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md),
+  every `cv_*()` function and
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  go through this path. GEOS’s
+  [`st_point_on_surface()`](https://r-spatial.github.io/sf/reference/geos_unary.html)
+  crashed the same way on a line feature holding an empty part beside
+  real ones, which
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  reached on ordinary lon/lat input. Empty parts are now removed before
+  either call, and an empty feature becomes an empty POINT in its own
+  row, which
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  and
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  drop like any empty geometry. An empty LINESTRING used to raise an
+  error; it now gives an empty POINT like every other geometry type.
+
+- **`cv_gwr(parallel = n)` hung forever once a GWR had been fitted in
+  the session.** GWmodel is built with OpenMP, and GNU libgomp is not
+  fork-safe: after
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
+  a sequential
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  or a bare
+  [`GWmodel::bw.gwr()`](https://rdrr.io/pkg/GWmodel/man/bw.gwr.html),
+  the forked `mclapply()` workers blocked on a futex and never returned,
+  with no timeout. That is the ordinary fit-then-validate order on
+  Linux.
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  now runs its folds one after another whenever `parallel` would fork,
+  and says so in a warning. This gives up the speed-up parallel folds
+  had in a fresh session; the other `cv_*()` functions still fork, since
+  ranger does not use libgomp. A
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+  `fit_fn` that calls GWmodel can still hang with `parallel`, which its
+  help page now says.
+
+- **When some folds failed, `overall` quietly left them out.** A partial
+  failure was only logged, so `overall` pooled the surviving folds with
+  no R condition, and the folds that fail are usually the hardest to
+  predict (a region or a factor level no training fold covers).
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md),
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md),
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+  and
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  now warn, naming each failed fold and how many rows `overall` covers.
+  Folds dropped before fitting are already warned about and are not
+  counted twice.
+
+- **[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+  could pick a variable for making folds fail.** Each candidate was
+  scored on whatever rows its CV run predicted, so a set whose fit
+  failed on a fold (a factor level found in one block, an ordinary case
+  under block folds) was scored on fewer, easier rows. A pure-noise
+  factor beat the true driver: RMSE 2.35 on 192 rows against 2.63 on
+  250, although the driver scored 1.73 on those same 192 rows. Every
+  candidate is now scored on one fixed row set (the rows the null model
+  predicts, or, with no null model, the rows the step-1 sets predict), a
+  set that leaves any of them unpredicted scores `NA` with a warning,
+  and `history` gains `n_pred`.
+
+- **[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+  ranked models scored on different rows.** Shared folds guarantee the
+  same splits, not the same scored rows: when one backend lost a fold or
+  returned `NA` predictions its `overall` row pooled a subset, and the
+  help page called the columns comparable. A fixed-bandwidth GWR scored
+  on 158 of 200 rows ranked above a random forest scored on all 200,
+  although the forest was 45 percent better on the 158 rows both
+  predicted. When the predicted row sets differ, every model is now
+  rescored on the rows all of them predicted, with a warning, `overall`
+  carries `n_pred`, and the all-rows numbers stay in
+  `attr(overall, "all_rows")`. The per-fold table and the Bayesian
+  coverage columns are not rescored.
+
+- **[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  read an elbow into points that have none.** The elbow was the level
+  furthest below the chord of the WSS curve on linear axes. For points
+  with no cluster structure WSS falls like `c / k`, and the furthest
+  point below that chord is exactly `sqrt(a * b)` for a ladder from `a`
+  to `b`, so the answer was set by the ladder’s ends: 1,500 uniform
+  points gave 4, 4, 7, 9 and 13 for `max_levels` of 12, 20, 40, 80
+  and 160. At the default `max_levels = 12` it also missed
+  well-separated clusters (four clusters came back as 3). The elbow is
+  now read on log-log axes, where `c / k` is a straight line, and counts
+  only when the curve sags clearly below it. Two, three, four, five,
+  eight and ten well-separated clusters are now recovered at the default
+  on every seed tried (six came back as five on one seed in five). With
+  no elbow the function still returns its linear-axis answer, but warns
+  that the ladder chose it;
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  and
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+  refuse a geometry-only
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  with no elbow instead of drawing a count from it. A ladder of two
+  levels (`max_levels` of 1 or 2, or three points) has no line to test.
+  The warning now says the ladder is too short to read an elbow from and
+  names what ended it. It used to say the curve fell in a straight line
+  “as it does for points with no cluster structure”, which two clusters
+  90 m apart at `max_levels = 2` were told.
+
+- **One invalid polygon changed the assignment rule for the whole
+  layer.**
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  wrapped `st_join(largest = TRUE)` in a retry without `largest` on any
+  error. The comment blamed a predicate that cannot take `largest`, but
+  sf never calls the predicate on that path; the retry fired when GEOS
+  threw on an invalid ring, and every straddling feature was then
+  assigned by `tie_break` instead: 95 of 200 buffered parcels changed
+  cell, and a polygon 91 percent inside one cell went to its neighbour,
+  with no warning. Invalid features and cells are now repaired with
+  [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html)
+  for the join only, with a warning counting them, and a join that still
+  fails stops and names `largest = FALSE`.
+
+- **Lon/lat polygons were assigned to projected cells on bent cell
+  edges.**
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  moved the cells into the features’ CRS, so lon/lat features pulled the
+  package’s own projected cells into lon/lat, and with s2 the
+  largest-overlap join failed and fell into the silent retry above: 55
+  of North Carolina’s 100 counties went to a cell other than their
+  largest overlap on a 36-cell grid. The join now runs in the cells’ CRS
+  whenever it is projected, and the features come back with the geometry
+  they arrived with. Lon/lat points near a cell edge can change cell as
+  a result; they now agree with a join done in the projected CRS.
+
+- **`build_tessellation(method = "triangles")` dropped most points at
+  UTM coordinates.** qhull lifts each point onto x^2 + y^2, and at
+  projected magnitudes (a northing near 5e6) the lift had no precision
+  left to separate points a few metres apart, so they never became
+  vertices: 200 points over 100 m gave 26 triangles instead of 386, and
+  the help page’s own example lost 8 of its 20 points. The points are
+  now centred before triangulation. Triangles that were already right
+  are the same triangles, but qhull returns them in a different order,
+  so triangle `cell_id` values change.
+
+- **Data around a pole were projected to Web Mercator.** A layer
+  spanning more than 180 degrees of longitude with no gap was treated as
+  global coverage. Antarctic stations came out with worst-case distance
+  errors near 20,000 percent (the South Pole at y = -2.4e8 m), and
+  Voronoi cells put 9.5 percent of Arctic locations in a station’s cell
+  that was not their nearest. A layer that lies wholly on one side of
+  the equator now gets a Lambert azimuthal equal-area projection centred
+  on its pole whenever that measures a smaller distance error than the
+  global fallback: about 2 percent on the same stations.
+
+- **GWR mixed elevation into its distances.**
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  kept the Z (and M) coordinate of POINT Z input, which GPS layers and
+  `st_as_sf(coords = c("x", "y", "z"))` produce.
+  [`predict.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md)
+  then handed GWmodel three coordinate columns, which it reshaped into
+  two, scrambling the prediction locations with no warning;
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  ranked models on 3-D distances; and
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  and
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  failed. Z and M are now dropped in
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  and again where the data are handed to GWmodel.
+
+- **[`predict.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md)
+  lost every prediction to one bad location.** It went through
+  [`GWmodel::gwr.predict()`](https://rdrr.io/pkg/GWmodel/man/gwr.predict.html),
+  which returns nothing for any row if one location’s window is empty or
+  singular, so fixed-bandwidth block CV failed every fold. It also never
+  assigns its distance matrix once training and new rows together exceed
+  10,000 (a 100 by 100 prediction grid came back all `NA`), and it built
+  the full training hat matrix for a variance it then discarded, which
+  is cubic in the training size. Predictions now come from
+  `gwr.basic(regression.points = )` in chunks, a failing chunk is redone
+  location by location, and only a truly singular location is `NA`, with
+  a warning counting them. Where the old path worked, the values are
+  identical.
+
+- **On brms 2.17 to 2.22, one far-off row moved every Bayesian
+  prediction in the call.** brms rebuilt the Hilbert-space GP’s boundary
+  from the rows being predicted, and the package’s padding rows could
+  only widen it, so a single row outside the training envelope changed
+  the basis for every row, interior ones included: a 40 by 40 grid
+  padded 15 percent moved the in-bbox cells by a mean of 22 percent of
+  the surface’s standard deviation, and
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  depended on `chunk_size`. On those versions the GP term’s boundary
+  factor is now rescaled per call so the boundary stays at its fitted
+  value, and a row beyond the boundary, where the basis means nothing,
+  is `NA` with a warning. brms 2.23 stores the boundary itself; there
+  only the `NA` rule applies. The help page no longer says the boundary
+  “has to grow”.
 
 - **A `bayesian_fit`’s cached fitted values could come from another
   model.** The cache lives in an environment, so it is shared by every
@@ -682,12 +1268,15 @@
   [`clear_fitted_cache()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clear_fitted_cache.md),
   which the help page offers for exactly this case, could not fix it,
   because clearing through one copy cleared the one shared entry and the
-  next call re-wrote it. The entry now carries the engine it was
-  computed from and is used only for that engine
+  next call re-wrote it. The entry now carries the environment rstan and
+  brms create for each sampling run (`@.MISC` on the stanfit), which
+  tells engines apart as well as the engine itself does and is written
+  once, and is used only for the engine it came from
   ([`identical()`](https://rdrr.io/r/base/identical.html), which settles
   the common case by pointer, so nothing is slower and no memory is held
-  that the fit did not already hold). A stale entry is no longer deleted
-  on a miss either: the fit that wrote it still wants it.
+  that the fit did not already hold, in a session or on disk). A stale
+  entry is no longer deleted on a miss either: the fit that wrote it
+  still wants it.
   [`new_spatial_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
   now always builds a fresh cache rather than adopting one that arrived
   in `info`, and [`summary()`](https://rdrr.io/r/base/summary.html) no
@@ -717,8 +1306,20 @@
   `fold_metrics$fold`, `predictions$fold` and `fold_status$fold` named
   different groups on different machines from the same data and the same
   seed. The partition was never affected, so pooled scores were right.
-  The levels are now sorted with `method = "radix"`, which is always C
-  collation, making the numbering a property of the labels alone.
+  Character levels are now sorted with `method = "radix"`, which is
+  always C collation, making the numbering a property of the labels
+  alone. The C order applies to character labels only: numeric labels
+  are numbered in numeric order, as in 2.0.0, and a factor by its own
+  level order (an earlier development build sorted numbers as strings
+  too, so with ten or more numeric labels fold 2 was the user’s label
+  10).
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  given a vector of fold labels now numbers them by the same rule; it
+  sorted character labels with
+  [`as.factor()`](https://rdrr.io/r/base/factor.html) under the
+  session’s collation, so a message could name a different fold from the
+  one `cv_*()` named for the same label. Its partition and threshold
+  were never affected.
 
 - **`residual_morans_i(k = )` silently answered a different question.**
   `k` reached the weight builder unvalidated, where
@@ -779,10 +1380,11 @@
 - **[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
   aborted on a list holding no `spatial_fit`.**
   [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
-  warns and skips a non-fit and returns `NULL` when every element was
-  skipped; the `NULL` then became a bare list and `seq_len(nrow(NULL))`
-  raised `"argument must be coercible to non-negative integer"`. It now
-  says which argument is wrong and what belongs there.
+  warns and skips a non-fit, and returned `NULL` when every element was
+  skipped (it is now an error, below); the `NULL` then became a bare
+  list and `seq_len(nrow(NULL))` raised
+  `"argument must be coercible to non-negative integer"`. It now says
+  which argument is wrong and what belongs there.
 
 - **`fit_rf_model(include_coords = TRUE)`’s caveat said “once per
   session” and was not.** `.log_warn_once()` records the key in a
@@ -825,7 +1427,10 @@
   degenerate”. The sort copy is now repaired after the transform as
   well. The geometry returned is still the caller’s own, and the same
   cell gets the same ID whether the layer arrives projected, in lon/lat
-  or in Web Mercator.
+  or in Web Mercator, except where two fine cells’ centres lie within
+  the sort key’s rounding step of the same longitude (36 of 2,500 100 m
+  cells straddling a UTM central meridian changed ID via EPSG:3035);
+  join such layers on geometry.
 
 - [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
   now says when `fit_fn` is ignoring the variables it is handed. The
@@ -866,13 +1471,13 @@
   variation and every standard error is `NA`. The warning names the
   argument and points at
   [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
-  which is where a Voronoi cell count is actually set. Under
-  `method = "voronoi"` it adds that `params` does not record the request
-  either, so a saved result carries no sign of it; that branch returns
+  which is where a Voronoi cell count is actually set. It adds that
+  `params` does not record the request either, so a saved result carries
+  no sign of it: the Voronoi branch returns
   [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)’s
-  own list, which has no slot for the argument, whereas the triangles
-  branch does echo `approx_n_cells` back. The warning fires under
-  `quiet = TRUE`, which gates this function’s
+  own list, which has no slot for the argument, and the triangles branch
+  no longer echoes `approx_n_cells` back (below). The warning fires
+  under `quiet = TRUE`, which gates this function’s
   [`message()`](https://rdrr.io/r/base/message.html)s and is documented
   not to silence R warnings.
 
@@ -892,7 +1497,14 @@
   a clean curve gives the same answer. Under a model-aware criterion the
   function also now warns *before* the sweep when `max_levels` leaves no
   k above the nine-cell floor, rather than fitting every k first and
-  falling back afterwards.
+  falling back afterwards. The seeding draws each centre by inverting
+  the cumulative squared distance rather than with
+  `sample.int(prob = )`: the same law, and a
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  of 3000 points takes 10 s instead of 35 s
+  ([`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  on 3000 points, 4 s instead of 13 s), but it gives different centres
+  for the same seed than earlier development builds did.
 
 - `make_folds(method = "block_kfold")` can now raise its “block
   dimension \< autocorrelation range” warning. The comparison was always
@@ -907,7 +1519,16 @@
   below the range raises the same warning. The estimate’s own log lines
   stay off the console, and the check is skipped (with an INFO log line
   saying so) when `gstat` is not installed or there are fewer than 30
-  points.
+  points. Only a grid dimension that is split is compared with the
+  range, because a single row (or column) of blocks borders no other
+  block across its width. On points along a line the comparison was with
+  0, so the warning fired on every call that had a response: a 10 km
+  line had 15 blocks 667 m long against a 499 m range. Its advice,
+  `block_size = 499`, made the blocks shorter (19 of 523 m). A 10 km x
+  100 m corridor was compared with its 100 m width in the same way. A
+  `response_var` that names no column of `points_sf` is now an error for
+  `block_kfold`, whether or not `auto_range` is set. With `auto_range`
+  off, a misspelt name used to switch the check off silently.
 
 - `fit_rf_model(include_coords = TRUE)` logs its caution once per
   session rather than once per fit. Inside a five-fold
@@ -937,7 +1558,1720 @@
   printed behind the caller’s back. Output from a call that succeeds is
   passed through unchanged, and when the stream is already diverted
   (under testthat, knitr or `capture.output(type = "message")`, where
-  only one sink is permitted) the call runs exactly as before.
+  only one sink is permitted) the call runs exactly as before. So does a
+  call made after the session temp directory has been deleted, when
+  there is nowhere to divert the stream to; it used to fail with “cannot
+  open the connection”.
+
+- **One empty point made
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  return 1.** The function reduced every feature to a point and
+  projected it but never dropped an empty or non-finite one, so a single
+  `POINT EMPTY` made the `k = 1` WSS `NA`, k-means failed at every `k`,
+  and the failure handler shrank the sweep to nothing: two
+  well-separated clusters that gave `2 1 3` gave `1` once one empty row
+  was added, with only a log line about interpolating the WSS. Such rows
+  are now dropped with a warning that gives their number, and under
+  `select_on = "split"` the returned positions still index the layer as
+  passed.
+
+- **A few missing predictor values took Moran’s I away from
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md).**
+  A cell mean over a row with one missing predictor was `NA` and dropped
+  the whole cell, and how many cells that removed depended on the points
+  per cell, so `z` was computed on a different subset of cells at each
+  `k`. Three missing values in 400 rows made every `z` in the evaluated
+  window `NA`, and the call fell back to the geometric ranking with a
+  warning that did not mention missing values. Rows with a missing or
+  non-finite response or predictor now stay in the WSS sweep and the
+  cells and are left out of Moran’s I, with a logged count, so every
+  cell mean uses the same rows.
+
+- **A misspelt `response_var` or `predictor_vars` in
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  silently changed the criterion.** A column that was not there counted
+  as “no model variables”: with the default criterion a typo kept
+  `"geometric"` where supplying both variables upgrades to `"combined"`
+  (on one 400-point layer `7 6 8` instead of `11 10 7`, with no warning
+  and no diagnostics), and under `"morans_i"` or `"combined"` the one
+  log line said the variables were required although both had been
+  supplied. A named column that is not in the layer is now an error, as
+  it is in
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  and a model-aware criterion given no `predictor_vars` (or no
+  `response_var`) falls back with an R warning that says which is
+  missing, rather than a log line.
+
+- **[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  stopped one level short when locations repeat.** The sweep was capped
+  one short of the number of distinct locations, the bound
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) needs only
+  when no location repeats: five stations visited thirty times each
+  could not reach `k = 5`. The cap is now the number of distinct
+  locations, and still one short of the number of points. A `k` whose
+  WSS is 0 (to within 1e-12 of the total: a cell on every location) is
+  left out of the log-log elbow line, and when the rest of the curve has
+  no elbow, the fall to zero is the elbow. Leaving the level out and
+  reading the rest made the call warn that the five stations had no
+  cluster structure and return `3 2 4` (one metre of jitter gave
+  `5 4 6`); it now returns `5 4`. Two stations visited thirty times each
+  give `2 1`, not `1 2`. Zero is relative because k-means leaves
+  floating-point residue: two groups of ten stations visited ten times
+  each have a WSS of 7.8e-17 at `k = 20`, which dragged the whole line
+  down and, at `max_levels = 30`, reported no cluster structure (still
+  answering 2).
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  reads its `elbow` column the same way. The no-elbow warning names the
+  bound that ended the ladder (the distinct locations, the points or
+  `max_levels`); it named `max_levels` whichever bound it was.
+
+- **The same layer with its rows in another order gave
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  another answer.** The subsample and every k-means start index rows, so
+  a permutation of the input moved the WSS curve and could move the
+  count. The rows are now put in coordinate order (response and
+  predictors breaking ties) before either, so any permutation of a layer
+  gives the same result. Results for a given seed differ from 2.0.0’s
+  for that reason too.
+
+- **[`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  blamed the wrong cause when its model-aware criteria had nothing to
+  score, and its help page understated the fix.** The model-aware pass
+  scores only the elbow’s neighbourhood, and on points with no cluster
+  structure the elbow sits near `sqrt(max_levels)`, so every candidate
+  stayed at or below the nine-cell floor until `max_levels` was about 40
+  (measured on 1000 uniform points: 12, 20 and 30 all fell back, and 40
+  scored `k` = 10 and 11 alone). The help page said “above roughly 10”,
+  and the fallback was logged as “Moran’s I could not be computed”. The
+  logged warning now names the window and the floor and points to
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  and the help page gives the measured numbers. Which candidates are
+  scored is unchanged.
+
+- **[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  could not tessellate CRS-less planar points inside a CRS-less
+  boundary.**
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  marks such points `crs_assumed = "none"` (“planar, leave alone”), and
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  read that mark as a CRS name: `st_crs("none")` failed with “invalid
+  crs: none” for every method, including the documented
+  `boundary = clip_target_for(pts)`, so CRS-less planar data could not
+  be gridded at all. Only a real assumption (EPSG:4326) is now given to
+  the boundary, which is refused if its coordinates cannot be degrees
+  (below); with no assumption both stay in the same unnamed space.
+
+- **When only one of the points and the boundary had a CRS, the
+  tessellation builders stopped on sf’s bare “st_crs(x) == st_crs(y) is
+  not TRUE”.** UTM points read from a CSV with a UTM boundary failed in
+  all four methods of
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  and in
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md);
+  projected points with a boundary that had lost its `.prj` failed in
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and `method = "triangles"`, and
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  returned a target with no CRS — for lon/lat points with a CRS-less
+  lon/lat boundary, in degrees, with `expand = 20` buffering by 20
+  degrees. The side without a CRS is now interpreted in the other’s, as
+  [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
+  does, with a warning: lon/lat-looking coordinates are reprojected from
+  EPSG:4326, others are stamped. CRS-less points that do not look like
+  lon/lat are refused, with a message saying what to do, when the
+  boundary is geographic, because stamping degrees on them would be
+  wrong; a CRS-less boundary beside geographic points is read as lon/lat
+  or refused (below).
+
+- **A `boundary` without a CRS got a log line in
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+  `cv_*()` and
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md),
+  where every other function raises an R warning, and
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  warned twice about one lon/lat boundary.** With projected points,
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md),
+  [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+  and the rest said “`boundary` has no CRS … stamping” as an R warning,
+  while
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+  `cv_*()` and
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  stamped it with a “WARN ensure_projected(): input has no CRS” log line
+  that [`tryCatch()`](https://rdrr.io/r/base/conditions.html) and knitr
+  never see and
+  [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+  hides, naming neither the function nor the argument. A boundary whose
+  coordinates looked like lon/lat got two R warnings from one
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  call, one from
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  and one from
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
+  both naming
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md).
+  All three now warn as the others do, naming themselves and `boundary`
+  ([`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  also `prediction_points`,
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  also `grid` and `covariates`), and a `cv_*()` call warns once, naming
+  the `cv_*()` function. Which CRS the layer ends up in is unchanged.
+  For
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  this matters most on `grid` and `covariates`: a layer stamped with the
+  wrong CRS puts every covariate lookup in the wrong place. The stamping
+  warning of every function now names the CRS it stamps (“stamping the
+  target CRS (‘EPSG:32632’) WITHOUT reprojection”) instead of “the
+  supplied `crs`”, an argument most of them do not have.
+
+- **A geographic `crs` made every tessellation method work in degrees.**
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  took `crs = 4326` as the CRS to compute in, so Voronoi cells stopped
+  being a nearest-point partition (150 points at 53-57N: 20 percent of
+  sampled locations lay in another point’s cell), grid cells were
+  neither square nor equal-area, and clipping them under s2 stopped with
+  “Edge 0 is degenerate” (hex) or left a point inside the boundary with
+  an `NA` index (square). A geographic `crs` is now the CRS the result
+  is returned in: the cells are built and indexed in the local projected
+  CRS
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  picks, then transformed with long edges densified. A hex or square
+  grid sized by an explicit `cellsize` is still laid in degrees, since
+  that is the unit `cellsize` is in.
+
+- **[`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  stopped on lon/lat polygons that s2 rejects, and chose its UTM zone
+  differently when
+  [`sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html) was
+  off.** The centre that places the zone was `st_centroid(st_union())`:
+  with s2 on, a polygon with a repeated vertex (valid for GEOS, common
+  in shapefiles) stopped
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  and `prep_model_data(boundary =)` with “Edge 1 is degenerate
+  (duplicate vertex)”; with s2 off it was planar in degrees, so two
+  clusters at 0N and 60N near -78 got UTM zone 17 in one session and
+  zone 18 in another, and sf’s warning and message about it got past
+  `quiet = TRUE`. The centre is now always taken on the sphere, a
+  geometry s2 rejects is repaired first, and a mean of unit vectors is
+  the last resort.
+
+- **A single study-area polygon was never scored, so
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  kept a UTM zone at any extent.** A polygon layer is scored on one
+  point per feature, and one point makes no pair: every candidate scored
+  `NA` and the selector fell back to the zone. A CONUS outline stayed in
+  UTM zone 15 (12.8 percent worst-case distance error) where a Lambert
+  azimuthal scores 2.1 percent, and `prep_model_data(boundary =)` moved
+  the whole analysis into the zone with it. Layers with fewer than 40
+  features are now scored on their outline’s vertices too.
+
+- **[`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  laid a grid over a near-global lon/lat boundary in Web Mercator.** The
+  cells were equal on the map and not on the ground: the true areas of
+  whole cells differed nearly five-fold. When the CRS picked for
+  distances distorts areas across the boundary by more than 1 percent,
+  the grid is now laid in the equal-area CRS
+  `ensure_projected(purpose = "area")` picks (Equal Earth here), with a
+  logged warning; a local extent keeps its UTM zone.
+  [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+  makes the same choice.
+
+- **With `sf_use_s2(FALSE)` the package needed lwgeom, which it does not
+  depend on.** The stable-ID sort key is measured in lon/lat, so every
+  Voronoi tessellation — projected ones included, and the examples of
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  — failed with “package lwgeom required”, as did
+  [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md),
+  [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+  on a cache miss, and random and k-means seeding on a lon/lat boundary.
+  These measurements now run on the sphere (s2) whatever the session’s
+  setting, which is restored afterwards; the IDs are the ones s2-on
+  sessions always got.
+
+- **Hex cell size depended on which way the boundary lay.**
+  [`st_make_grid()`](https://r-spatial.github.io/sf/reference/st_make_grid.html)
+  builds hexagons from `cellsize[1]` alone, and that was the box’s width
+  over a rounded column count: a 1 x 1000 strip at `target_cells = 9`
+  got 1734 hexagons where the same strip lying flat got
+
+  89. The size is now counted along the longer side, which leaves every
+      boundary at least as wide as it is tall with exactly the grid it
+      had.
+
+- **Voronoi with `expand > 0` returned the boundary before it was
+  grown.** The cells are clipped to the grown boundary, so they covered
+  1.93 km^2 against a returned `boundary` of 1 km^2, and points up to
+  `expand` outside it were indexed.
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and `build_tessellation(method = "voronoi")` now return the grown
+  boundary, and the documentation says `expand` grows the study area
+  too.
+
+- **Collinear points gave an empty Delaunay triangulation.**
+  `build_tessellation(method = "triangles")` on a transect returned no
+  cells and an index of `NA`s, after logging that `delaunayn()` had
+  failed, which it had not. It now stops with a message that says the
+  points are collinear and points to `method = "voronoi"`; the
+  fallback’s log line names the reason that applies.
+
+- **k-means seeding clustered CRS-less lon/lat points as if degrees were
+  metres.**
+  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  and `get_voronoi_seeds(method = "kmeans")` projected only when a CRS
+  said lon/lat, so 800 CRS-less points 89 km wide and 111 km tall were
+  split east-west where the same points tagged EPSG:4326 were split
+  north-south. They now apply the lon/lat heuristic
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  applies (with its warning) and return the seeds in the input’s own
+  coordinates.
+
+- **[`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
+  returned the same seeding on every call.** Its default
+  `set_seed = 456` reset the random-number stream inside the call, so
+  five calls under `set.seed(1)` to `set.seed(5)` gave one draw, and the
+  sensitivity comparison its help page recommends compared a seeding
+  with itself. The default is now `NULL`, as in
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md):
+  the draw comes from the session’s stream. Pass `set_seed` for a fixed
+  seeding. This changes the default.
+
+- **[`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
+  refused a layer as `target_crs`.** A multi-row sf failed with “the
+  condition has length \> 1” and a one-row one with “cannot create a crs
+  from an object of class sf”, where
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  accepts both. An sf or sfc target now means its CRS.
+
+- **[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  failed on `deff = NA` and mis-recorded `deff = Inf`.** The check on a
+  numeric `deff` came out `NA` for `NA_real_` and `NaN`, so the call
+  stopped with “missing value where TRUE/FALSE needed” instead of the
+  documented warning and fallback to 1. `Inf` passed the check: the
+  standard errors were the uncorrected ones, yet `cell_weight` was 0 in
+  every cell and `deff_applied` recorded `deff = Inf`. Any `deff` that
+  is not a single finite number of at least 1 now falls back to 1 with
+  the warning.
+
+- **`summarize_by_cell(deff = "variogram")` fell back to uncorrected
+  standard errors with no R warning when no model could be fitted.**
+  With predictors only and no `sac`, without gstat, or when
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  returned no fit (fewer than 30 points), the only signal was a log
+  line: no [`tryCatch()`](https://rdrr.io/r/base/conditions.html),
+  [`withCallingHandlers()`](https://rdrr.io/r/base/conditions.html) or
+  [`warnings()`](https://rdrr.io/r/base/warnings.html) saw it, and
+  [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+  hid it, while the standard errors came out about 5 times smaller than
+  the corrected ones in one check. It is now a warning that names the
+  reason. Every design-effect fallback (a refused `deff`, a rejected or
+  unsupported variogram, no model) is raised with class
+  `"spatialkit_deff_fallback"`, so a loop over many summaries can catch
+  exactly that case. A rejected `sac` that a variogram estimated from
+  `response_var` replaces is not a fallback: it gets a plain warning,
+  and the classed warning is raised only when nothing replaces it, once
+  per call, naming every reason. A pure-nugget model (no structured
+  component) implies that distinct observations are uncorrelated, so it
+  is applied as a design effect of 1 in every cell, with
+  `deff_applied = TRUE`; it was reported as “the supplied model could
+  not be read”, with the fallback warning.
+
+- **An empty point switched off `summarize_by_cell(deff = "variogram")`
+  for its cell.** Its missing coordinates made the cell’s mean
+  correlation `NA`, and the cell silently got a design effect of 1: the
+  standard error of that cell was a quarter of the corrected one in one
+  check. (In the development version the same input stopped the call
+  with “missing value where TRUE/FALSE needed”.) Points with empty or
+  non-finite coordinates now count towards their cell’s values but not
+  towards its correlation, with a warning.
+
+- **`summarize_by_cell(deff = "variogram")` read an anisotropic
+  variogram as isotropic.** Only `model`, `psill` and `range` were read,
+  so `vgm(0.8, "Exp", 300, 0.2, anis = c(0, 0.2))` gave a correlation of
+  0.677 at 50 m east-west where gstat’s is 0.348, and a median design
+  effect of 14.1 against 7.7: standard errors too wide by a factor of
+  1.7. A 2-D geometric anisotropy (`ang1`, `anis1`) is now applied as
+  gstat applies it.
+  ([`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  which uses the same correlation function on distances alone, still
+  reads the major range.)
+
+- **A misspelt or non-numeric `response_var` was dropped in silence.**
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  reported it through a progress message, which the default
+  `quiet = TRUE` suppresses, and returned a frame with no `resp_*`
+  column and `cell_weight` equal to `n`. A missing or non-numeric
+  `response_var` or predictor is now a warning, and a `response_var` of
+  more than one name is an error instead of “the condition has length \>
+  1”.
+
+- **A double cell ID of 100000 lost its cell in
+  `summarize_by_cell(cells_sf = )`.** When the points’ and the cells’ ID
+  columns had different classes (an integer `poly_id` against a double
+  from a GeoPackage Integer64 field or a CSV), both were converted with
+  [`as.character()`](https://rdrr.io/r/base/character.html), which
+  writes `1e+05` for the double and `100000` for the integer. That cell
+  came back with `NA` summaries and its points left the result: 11 of 30
+  points in one check, with no R warning. Whole numbers are now written
+  out in full, and a summarised ID that matches no cell is reported with
+  a warning.
+
+- **`summarize_by_cell(cells_sf = )` did not read the ID columns
+  [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  writes from.** Cells keyed by `id` or `grid_id` (common in shapefiles)
+  were assigned cleanly and then summarised to a plain table with no
+  geometry, `cell_area` or `n_per_area`, and a layer with `id` and a
+  differently numbered `cell_id` was joined on `cell_id`, putting 89
+  percent of the summaries on the wrong polygons in one check. The cells
+  are now searched in the order the assignment used, and a `cells_sf`
+  that cannot be joined is a warning (an error with `area = TRUE`)
+  rather than a log line. `agg_funs = median` or `"median"` is honoured
+  instead of being replaced by the mean. A single function is named
+  after the expression passed, so
+  [`stats::median`](https://rdrr.io/r/stats/median.html) gives
+  `resp_median_*` as `median` does (it gave `resp_agg1_*`).
+
+- **`assign_features_to_polygons(largest = TRUE)` assigned polygon
+  features that only touch the cells.** sf keeps the largest
+  intersection piece without checking its area, so under GEOS a feature
+  sharing only an edge or a corner with the cell layer went to that cell
+  with zero overlap, while under s2 (lon/lat) the same feature was
+  unassigned: sf’s nc counties against 50 of them as cells gave 70 rows
+  projected and 50 in lon/lat. A feature with no overlap area is now
+  unassigned in every CRS.
+
+- **`tie_break = "smallest_area"` depended on the row order after all.**
+  Candidates of equal area — the cells of any regular grid, for a point
+  on a shared edge — fell through to the first row, so reversing the
+  cells’ rows moved every edge point to the neighbouring cell (points at
+  x = 100 went to cells 1, 4 and 7, or to 2, 5 and 8), and on a cached
+  grid, whose IDs do not run row by row, one cell could take both of its
+  edges. Equal areas (to 9 digits) are now decided by the lowest, then
+  leftmost, bounding-box centre. On a
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  square grid that is the cell row order already picked (1,681 of 1,681
+  lattice points unchanged); on a hex grid 3 of 56 shared vertices move.
+
+- **[`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+  could return another site’s grid.** The cache key used the CRS’s
+  `input` name, which is `"unknown"` for any custom CRS read back from a
+  GeoPackage or shapefile, so two site-centred CRSs with the same local
+  boundary coordinates shared an entry, and the second site received the
+  first one’s grid 11,000 km away. The key now hashes the CRS’s WKT; the
+  only cost is a rebuild when one CRS arrives written two ways.
+  `target_cells` now defaults to `NULL`, as in
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+  so `cellsize =` or `n =` work without it.
+
+- **[`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+  could number cells differently with s2 off.** The sort key’s centroid
+  was taken planar in degrees when `sf::sf_use_s2(FALSE)`, which moves
+  it by far more than the key’s rounding step, so near-tied cells
+  swapped IDs between s2-on and s2-off sessions (4 of 2,000 Voronoi
+  cells), and without lwgeom the s2-off call stopped at the area. The
+  key is now taken on the sphere for the sort copy only, whatever the
+  session setting.
+
+- **`summarize_by_cell(deff = "variogram")` built each cell’s
+  correlation matrix up to five times per column.** The same call with
+  two partly missing columns and `conf_level` now builds 15 where it
+  built 45.
+
+- **[`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  returned the widest direction that reached a sill when the all-pairs
+  variogram had run past the fitted lags.** Under an unremoved trend the
+  pooled variogram rises without a sill, which the help page said the
+  fitted-lag bound catches; but when two of the four directional
+  variograms (those across the slope) did reach one, their maximum came
+  back as the range with `anisotropy_used = TRUE` and nothing on the
+  console. On an exponential field of range 150 with an east-west trend,
+  12 of 30 draws returned 131–596 this way and 16 others `NA`, so
+  `make_folds(auto_range = TRUE)` switched between a 2 x 2 grid of 430 m
+  and geometric blocks from one draw to the next. The directions that
+  reach a sill are the shorter ones, so their maximum is a lower bound,
+  not an estimate. A converged all-pairs fit past the fitted lags is now
+  refused whatever the directions found
+  (`rejected_reason = "fitted range exceeds the largest lag fitted"`,
+  the directional ranges still attached); the directional maximum stands
+  in only for an all-pairs fit that is singular or did not converge. On
+  stationary fields whose range is close to the cutoff this also turns a
+  few draws from a directional maximum into `NA` (3 of 30 at an
+  effective range of 570 on a 1000 m square).
+
+- **[`print()`](https://rdrr.io/r/base/print.html) on an
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  result showed a bare number.** For lon/lat input the number is in
+  metres of a CRS the estimate picked, and with `predictor_vars` it is
+  the range of the residuals rather than of the response; neither
+  showed, so a mismatch with the layer it was about to be used on could
+  not be seen. A last line now names the unit and the CRS
+  (`in metres of EPSG:32617`) and whether the variogram is of the
+  response or of its residuals (and by which `detrend` method). For a
+  layer with no CRS the line says the range is in that layer’s own
+  coordinate units (`in the coordinate units of a layer with no CRS`),
+  still with what was modelled; it used to be left out.
+
+- **`estimate_sac_range(predictor_vars = )` fitted its variogram to the
+  raw response, trend and all, when a single predictor or response value
+  was infinite.** [`lm()`](https://rdrr.io/r/stats/lm.html)’s
+  `na.exclude` drops `NA` but not `Inf`, so one `Inf` among 200 rows
+  stopped the detrending (“NA/NaN/Inf in ‘x’”), and the function fell
+  back to the raw response with a warning. The range came out at 2950
+  instead of 2168 (the answer with that row removed), and
+  `make_folds(auto_range = TRUE, predictor_vars = )` built blocks 37
+  percent larger.
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  which hides that warning, then warned that the variogram it had
+  estimated itself was of the raw response. With `detrend = "reml"`, a
+  `-Inf` predictor (a `log(0)` covariate) first gave a false warning
+  that the REML fit “did not converge”, and then the OLS fallback failed
+  the same way. Rows with a missing or non-finite response or predictor
+  are now left out of the detrending fit and the variogram, with a
+  logged count, as
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  and
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  already do. One `Inf` now gives the same range as that row set to `NA`
+  (2167.5 detrended on the example; 1598.4 under REML).
+
+- **`make_folds(drop_empty_blocks = FALSE)` could return folds with no
+  test points.** `k` was lowered only when the highest block id holding
+  a point was below it, and with empty blocks kept that id says nothing
+  about how many blocks hold points: two clusters on a 4 x 4 grid gave
+  id 16, so `k = 5` was kept for 2 occupied blocks and three folds came
+  back empty, with no warning (the imbalance check skipped an empty
+  fold). The `cv_*()` functions then ran on the two folds that had
+  points and `area_of_applicability(folds =)` failed. `k` is now lowered
+  to the number of blocks that hold points, as
+  [`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  already said, the log line names the numbers, and every point in a
+  single one of several blocks is the single-block error it always was
+  with the default.
+
+- **The automatic block grid gave an east-west corridor more than twice
+  as many blocks as the same corridor running north-south.** Only the
+  row count was capped, so a layer more than about
+  `block_multiplier * k` times as wide as it is tall got
+  `round(sqrt(15 * w/h))` columns at `k = 5`: 39 x 1 on a 10 km x 100 m
+  corridor against 1 x 15 turned on its side, blocks less than half as
+  long, and a scheme drifting towards random k-fold (1-NN CV RMSE 0.77
+  against 0.94 on the same values; lower in 16 of 20 seeds). Points on
+  one horizontal line were treated as a square and got a 4 x 4 grid that
+  collapsed onto the line, lowering `k` from 5 to 4. The column count is
+  now capped at `block_multiplier * k` as the row count was, so both
+  orientations and both lines get 15 blocks at `k = 5`. Folds change
+  only for extents more than about `block_multiplier * k + 1` times as
+  wide as they are tall.
+
+- **[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  ignored `block_nx` or `block_ny` given alone, and accepted invalid
+  ones.** Giving one dimension sent the call to the automatic grid
+  without a word (`block_nx = 10` alone gave a 3 x 4 grid); 0, a
+  negative, `NA` or a vector failed inside sf or base R, and 2.7 was
+  truncated to 2. The dimension given is now used and the other derived
+  from the extent’s aspect ratio (roughly square blocks), and each must
+  be a single whole number \>= 1.
+
+- **With a non-rectangular `boundary`, `make_folds(block_kfold)` kept
+  zero-area slivers as blocks.** Where the boundary only touches a grid
+  cell at a corner or along an edge, the clipped cell is a POINT or a
+  LINESTRING, and it was kept as a block: packed into a fold under
+  `drop_empty_blocks = FALSE` (3 of 13 blocks under a triangular
+  boundary), and able to catch a data point lying exactly on the
+  boundary as a one-point block of its own. Only the areal part of the
+  grid is kept now.
+
+- **[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  failed with R’s own errors on a missing `k` or an invalid `buffer`.**
+  `k = NULL` (or no `k`) reached `if (k < 2)` and failed with “argument
+  is of length zero”; a `buffer` of `NA`, `numeric(0)` or length 2
+  failed with “missing value where TRUE/FALSE needed” or a length error,
+  and an `NA` is exactly what
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  returns when no range is identified. Both are now refused by name (the
+  leave-one-out methods still need no `k`), and so is a `units` object
+  passed as `buffer`, `block_size` or `block_nx`/`block_ny`, which used
+  to fail inside the units package without naming the argument.
+
+- **`make_folds(method = "buffered_loo")` said nothing when the buffer
+  excluded no neighbour.** The buffer is in the units of the CRS the
+  folds are built in, which for lon/lat input is metres, so a buffer in
+  degrees (0.1) excluded nothing and the scheme was plain leave-one-out:
+  79 of 79 training points in every fold of an 80-point layer, no
+  condition raised. It now warns when no fold excludes any neighbour,
+  and
+  [`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  says what unit `buffer` is in.
+
+- **NNDM folds could be far more optimistic than their target with only
+  a log-file line to say so.** When `min_train` stops the matching —
+  samples clustered well inside the prediction domain, the layout NNDM
+  is meant for — the realised distances stay short: one cluster
+  predicted onto a 20 km grid kept a median of 1171 m against a target
+  of 6704 m, 96 of 100 folds held at the floor, while
+  [`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  said the result is never more optimistic than the target.
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  now warns when the floor leaves more than one point’s worth of excess
+  below `phi`, records `params$n_at_min_train`, and the documentation
+  states the guarantee only where neither `phi` nor `min_train` binds.
+
+- **`make_folds(auto_range = TRUE)` fell back to geometric blocks with
+  only a log line.** When no range was identified (an unremoved trend, a
+  range past the fitted lags, fewer than 30 points, gstat missing), the
+  blocks the caller asked to be sized from the data were not, and under
+  knitr, `spatialkit_quiet` or
+  [`tryCatch()`](https://rdrr.io/r/base/conditions.html) nothing showed
+  it. This is now a warning that gives the rejection reason.
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  can give up before it fits anything: fewer than 30 points, fewer than
+  30 finite values, a constant response (or residuals, when the
+  predictors explain the response exactly), points with no extent, or
+  gstat missing. It used to return a bare `NA` then, with the reason
+  only in a log line, and the warning said only “estimate_sac_range()
+  returned NA”. That `NA` now carries a `rejected_reason` attribute
+  saying which (it is still unclassed, with no other attribute). The
+  warning quotes it, as do
+  [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)’s
+  no-model error and
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)’s
+  fallback warning.
+
+- NNDM fold construction releases FNN’s copy of the neighbour tables as
+  soon as it has them, so a second `n` x `n/2` pair is no longer held
+  through the sweep and the construction of the folds. The peak inside
+  `get.knn()` is unchanged.
+
+- **[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  rounded coverage levels to a whole percent, so close levels overwrote
+  each other.** Coverage columns were named
+  `sprintf("coverage_%.0f", 100 * level)`:
+  `coverage_levels = c(0.5, 0.975, 0.985, 0.995)` gave three columns for
+  four levels, `coverage_98` holding the 0.985 value and the 0.975 value
+  lost, with no condition raised. Levels given as percentages,
+  `c(50, 80, 95)`, made every fold throw away its CRPS, `n_draws` and
+  coverage in silence. Columns are now named at full precision
+  (`coverage_97.5`; the default 50/80/95 names are unchanged), a level
+  outside (0, 1) or given twice is an error that suggests dividing by
+  100 where that fits, and the result carries `coverage_levels`, the
+  nominal level of each column.
+
+- **An error in a `fold_info_fn` threw away all of that fold’s extras
+  without a word.**
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+  caught it and dropped the whole list, so the columns were `NA` with
+  `fold_status` `"ok"` and nothing logged; in
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  one failing quantile cost `gp_k`, `n_draws`, CRPS and every coverage
+  column. The failure is now logged and named in `fold_status$message`,
+  and
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  computes coverage and CRPS in a step of their own, so `gp_k`,
+  `n_draws` and `yhat_sd` survive it. A `fold_info_fn` that returns the
+  wrong shape (a vector where a value belongs, an unnamed or duplicated
+  element, or a name `fold_metrics` already has, such as `RMSE`) is an
+  error that says so; `RMSE = -5` used to overwrite the fold’s real
+  RMSE.
+
+- **[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+  failed after fitting every fold when `..per_row` came back from some
+  folds only.** The prediction rows were stacked with
+  [`rbind()`](https://rdrr.io/r/base/cbind.html), which died on “numbers
+  of columns of arguments do not match” once every fold had been fitted,
+  so the work was lost and the message did not point at the cause. A
+  fold without `..per_row` (returned conditionally, of the wrong length,
+  or from a `fold_info_fn` that threw) now gets `NA` in those columns,
+  and one of the wrong length is logged.
+
+- **Parallel cross-validation discarded folds that shared a core with a
+  failure.** `mclapply()` ran prescheduled, handing each core a chunk of
+  folds: an error that escaped one fold was copied to every fold of its
+  chunk, and a worker killed for lack of memory took all of its folds
+  with it. With four folds on two cores, a failure on fold 2 lost fold 4
+  as well, and `overall` pooled 40 of 80 rows. Each fold now runs in its
+  own worker, so a failure costs that fold only, and an error that stops
+  a sequential run (a `metrics` or `fold_info_fn` return value of the
+  wrong shape) stops a parallel one too, naming the fold. A run in which
+  nothing fails gives the same numbers as before, since the per-fold
+  seeds are drawn before forking.
+
+- **`model_metrics(newdata = )` measured R-squared against a different
+  baseline from every `cv_*()` function.** It took the total sum of
+  squares about the new rows’ own mean, where cross-validation takes it
+  about the training mean, so the same predictions on a split across a
+  trend scored R-squared -0.89 here and 0.35 from
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+  [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+  and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  with `newdata` now use the training mean too, the out-of-sample
+  convention, and the help pages say which baseline R-squared uses.
+  In-sample numbers do not change.
+
+- **R-squared and MAPE depended on the units of the response.** The
+  thresholds below which a total sum of squares or a percentage-error
+  denominator counted as zero were absolute, so a response with standard
+  deviation below about 1.5e-8 got R-squared `NA` while RMSE and MAE
+  were fine (and `select_features_forward(metric = "R2")` selected
+  nothing), and one on a 1e-15 scale lost MAPE and SMAPE as well. “Zero”
+  is now 100 machine epsilons of the data’s own magnitude for every
+  metric: a rescaled response gets the same R-squared and MAPE, a
+  constant one still gets `NA`, and on a response spanning many orders
+  of magnitude a row whose denominator is no larger than 100 epsilons
+  times the largest (such as 1e-9 against 1e6) no longer enters MAPE.
+
+- **[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  set out-of-bag random-forest metrics beside in-sample ones without
+  saying so.** Without `newdata` an `rf_fit`’s fitted values are
+  out-of-bag and every other backend’s are in-sample, and the table
+  could rank the models the wrong way round: GWR RMSE 0.77 in-sample
+  against RF 0.82 out-of-bag, where the forest’s in-sample RMSE was
+  0.40.
+  [`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+  and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  now carry a `metric_basis` column (`"in-sample"`, `"out-of-bag"` or
+  `"newdata"`),
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  logs a note when a table mixes them, and both help pages say what the
+  metrics are computed on.
+
+- **[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  put LOOIC and AICc side by side for fits on different rows.** Both are
+  sums over the rows a model was fitted to, so a model that lost 20 rows
+  to a predictor’s missing values showed LOOIC 32.2 against 54.8 for the
+  model on all 70, and looked 22.6 better while it was worse on the rows
+  they share. A column whose models were fitted to different rows is now
+  set to `NA`, with a warning naming each model’s `n`. The same happens
+  to fits of the same rows with different responses (a response and its
+  log, say), since an information criterion compares models of one
+  response only, and the warning now says so. It used to say they were
+  “fitted to different rows (raw: n = 80, logged: n = 80)” and to “Refit
+  them on the same rows”.
+
+- **[`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  read significantly negative residual autocorrelation as missed spatial
+  structure.** The caution fired on a two-sided p-value whatever the
+  sign, so the alternating in-sample residuals of a GP or a
+  small-bandwidth GWR (Moran’s I -0.13, p = 0.02) were logged as “may
+  not fully capture the spatial structure”, the opposite diagnosis. A
+  negative z is now logged as what it usually means, a model tracking
+  its data closely.
+
+- **[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+  placed polygon rows in its shared blocks by a different point than
+  every model is fitted at.** The shared folds reduced polygons and
+  lines to their point-on-surface whatever `pointize` said, while each
+  backend fitted them at the `pointize` point: with
+  `pointize = "centroid"`, 119 of 150 L-shaped parcels were in a
+  different fold from a standalone
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  run. The shared blocks now use `pointize`; with the default `"auto"`
+  nothing changes.
+
+- **Saved folds on lon/lat polygons were refused after
+  [`sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html) was
+  toggled.** The provenance check located each probed row by its
+  centroid, which on a geographic CRS is spherical with s2 on and planar
+  with it off; the two differ by up to 5e-4 degrees on county polygons,
+  500 times the tolerance. Folds built before `sf_use_s2(FALSE)` (a
+  common workaround for invalid polygons), or saved and read in a
+  session set the other way, were rejected by every `cv_*()` as “built
+  from different data”. The probe now always takes the planar centroid;
+  folds saved by an older version are checked the way they were made.
+
+- **[`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+  gave the wrong reason when it could not use a fit’s residuals.** An
+  error from [`residuals()`](https://rdrr.io/r/stats/residuals.html) was
+  thrown away, and it and a fit with no
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html) method (the
+  [`?new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+  example has none) were both reported as “could not extract enough
+  residuals (n \< 4)”, on a 100-row fit; a residual vector of the wrong
+  length was reported as “coordinate extraction failed”. Each now has
+  its own warning, quoting the error where there is one, except that a
+  fit with no [`residuals()`](https://rdrr.io/r/stats/residuals.html)
+  method is now scored on the response minus
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) instead
+  (below).
+
+- **A GWR whose local regressions interpolate the data won on AICc.**
+  GWmodel’s AICc is defined only while the effective number of
+  parameters, tr(S), is below n - 2; past that its penalty turns
+  negative. A small adaptive bandwidth reached it, and so did any
+  bandwidth raised to the old floor, which for the bisquare and tricube
+  kernels (they give the farthest neighbour in a window weight 0) fitted
+  every window exactly. On 100 points
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  listed R2 = 1 and an AICc of -15033 against 292 for the automatic
+  bandwidth, and at n = 60
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  selected the real predictor plus three noise variables with -66689.
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  now reports such an AICc as `NA` and
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  ranks such models last, each with a warning giving tr(S). The adaptive
+  floor is one neighbour higher for bisquare and tricube, and raising a
+  supplied bandwidth to it is now a warning, not a log line.
+  `bandwidth = NULL` was not affected above 20 points. The raised floor
+  is enough unless several neighbours tie at the kernel’s edge (a
+  regular grid); the warning now says so. Where an adaptive bandwidth is
+  already every observation, the undefined-AICc warning suggests fewer
+  predictors, more observations or a gaussian or exponential kernel
+  instead of a larger bandwidth.
+
+- **[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  never checked a one-predictor model for local collinearity.** The
+  check ran only with two or more numeric predictors, but every local
+  design includes the intercept, and a predictor nearly constant inside
+  a window is collinear with it. A regional covariate nearly constant
+  within each of four clusters gave local slopes from -97 to 221 around
+  a true 3 with no warning, while adding a noise predictor to the same
+  data warned at every location. One numeric predictor is now enough.
+
+- **GWR said a singular window came back as `NaN` coefficients; it stops
+  the fit.** GWmodel’s matrix inverse throws on an exactly singular
+  window, so a 0/1 indicator constant within clusters failed the whole
+  fit with a bare “inv(): matrix is singular”, while the help page and
+  the collinearity warning promised masked `NaN` coefficients. The
+  non-finite coefficients GWmodel does return come from co-located
+  points, where an adaptive bandwidth no larger than the number of
+  observations at a site gives the kernel zero width (160 of 160 at 40
+  sites of 4 observations, 4 neighbours), and the warning blamed
+  singular windows for those. The fit error now says a window is
+  singular and how many the collinearity check found, and the non-finite
+  warning names co-located points when they are the cause.
+
+- **An adaptive GWR bandwidth above the number of points was capped in
+  silence.** `bandwidth = 1500`, meant as metres with `adaptive` left at
+  `TRUE`, became a 200-neighbour, near-global fit on 200 points without
+  a word; its local slopes varied less than half as much as the intended
+  fixed-distance fit’s.
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  and
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  now warn, naming n and pointing to `adaptive = FALSE`.
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  repeats the warning in each fold whose training set is smaller than
+  the bandwidth.
+
+- **Below 20 points, `bandwidth = NULL` did not fit at the bandwidth
+  `bw.gwr()` chose.** GWmodel searches adaptive bandwidths from 20
+  neighbours up to n, so with fewer points its choice exceeds n (18 for
+  12 points) and was capped at n, a different kernel with a worse AICc
+  (18.3 against 9.7), without a word. The cap stays and now raises a
+  warning in
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  and
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md);
+  supply `bandwidth` for data this small.
+
+- **A GWR predictor named twice raised false collinearity warnings.**
+  `fit_gwr_model(predictor_vars = c("a", "b", "a"))` fitted correctly,
+  but its collinearity checks ran on the duplicated column and warned
+  “exactly singular” and “100% of locations collinear”, once in every
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  fold, and the doubled count raised the bandwidth floor. Names are now
+  collapsed on entry, as
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  already did.
+
+- **A `gp_c` you set did not change the `gp_k` derived for it.** The
+  basis count was always sized for the boundary factor the package would
+  have chosen, so a wider boundary got the same number of basis
+  functions and could no longer resolve the lower length-scale bound it
+  was sized for. The advice under `gp_c` is to raise it for a long-range
+  surface, which is exactly the case that coarsened the basis. On 200
+  uniform points, `gp_c = 3` fitted with `gp_k = 23` where the rule
+  gives 43, and `gp_c = 5` with 23 where the rule gives 70 (capped at
+  50); the cap warning could never fire on this path. With `gp_k = NULL`
+  the derived `gp_k` is now sized for the `gp_c` actually used, and a
+  capped value is logged. An explicit `gp_k` still passes through
+  untouched.
+
+- **[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+  could not fit
+  [`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  or a `mixture()` family.** Those families give each distributional
+  parameter its own GP under the same coefficient names, and the
+  automatic length-scale prior kept only the names, so every coefficient
+  got two identical rows and brms stopped with “Duplicated prior
+  specifications are not allowed” before sampling. A user’s `lscale`
+  prior restricted to one `dpar` failed the same way, because it was
+  copied onto every category’s coefficients. The prior now carries each
+  coefficient’s `dpar`, `nlpar` and `resp`, and a global or `dpar`-level
+  `lscale` prior is expanded only onto the coefficients it addresses and
+  never over a coefficient-level one the user already gave. With
+  `standardize_predictors = TRUE` they still failed, on the automatic
+  `normal(0, 5)` slope prior, which carried no `dpar` and so matched no
+  slope of either family (brms: “The following priors do not correspond
+  to any model parameter: b ~ normal(0, 5)”, a prior the user never
+  wrote). That prior is now set on each distributional parameter’s
+  slopes, as the length-scale prior is; a family with one `mu` gets the
+  same single row as before.
+
+- **A two-level factor response under
+  [`brms::bernoulli()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  fitted, and then nothing could score it.** The response check refused
+  a non-numeric response only under gaussian, and the gaussian refusal
+  itself pointed at `bernoulli()`. brms fits the factor, but
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html) came back all
+  `NA`, [`summary()`](https://rdrr.io/r/base/summary.html),
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  stopped on “response is factor”, and
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  ran a full fold of MCMC before aborting in the fold scoring (with
+  `parallel = 2`, every fold ended as `worker_error`). A factor or
+  character response is now refused, before anything is compiled, under
+  every family except `categorical()` and the ordinal ones (cumulative,
+  sratio, cratio, acat), with a message saying to convert it to 0/1.
+  Numeric and logical 0/1 responses are unaffected.
+
+- **[`predict()`](https://rdrr.io/r/stats/predict.html) on an ordinal or
+  categorical `bayesian_fit` returned all `NA` as a “posterior draw
+  failed”.** brms returns `posterior_epred()` for those families as a
+  draws x rows x categories array, which the method took for a failed
+  draw: a real `cumulative()` fit returned `NA` for all five new rows,
+  with only a log line, while
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html),
+  [`summary()`](https://rdrr.io/r/base/summary.html) and
+  [`model_metrics()`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md)
+  said merely that they got an array.
+  [`predict()`](https://rdrr.io/r/stats/predict.html) under its default
+  `type = "epred"` and
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) now stop,
+  saying the family has a probability per category and pointing at
+  `type = "predict", draws = TRUE`, whose share of draws in each
+  category estimates its probability for any rows, and at
+  `brms::posterior_epred(<fit>$engine)` for the training rows
+  (`posterior_epred(<fit>$engine, newdata = )`, which the message used
+  to suggest, refuses new rows without the scaled coordinates the method
+  builds). The message now counts the caller’s rows, where it counted
+  the two GP-boundary rows as well (“150 x 7 x 3” for five rows).
+  `type = "predict"` without `draws = TRUE` on a
+  [`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  fit, which returned the mean of unordered category indices (1.46,
+  1.97, …), is now an error; for an ordinal family it is the expected
+  category index, as documented. A genuinely failed draw still returns
+  `NA` as documented, and the log line now carries the cause.
+
+- **[`predict()`](https://rdrr.io/r/stats/predict.html) on an `rf_fit`
+  turned every ranger error into an all-`NA` vector.**
+  `type = "quantiles"` on a forest grown without `quantreg = TRUE`, and
+  `type = "se"` without `keep.inbag = TRUE`, which the help page says
+  are rejected, returned ten `NA`s for ten rows with no R condition, and
+  `model_metrics(newdata =, type = "se")` then reported `n = 0`. A
+  failure in ranger’s predict method is now an error naming ranger’s
+  reason; the `cv_*()` fold loop records it as the fold’s cause and
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  stops naming the rows, as they already did for other backends. A
+  `newdata` with no complete row still returns all `NA` with a log line,
+  as for the other backends, rather than reaching ranger as a zero-row
+  frame; that had made a
+  [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  chunk outside the covariates’ coverage abort the whole surface.
+
+- **`check_convergence = FALSE` returned `convergence_ok = TRUE`.** The
+  flag started out `TRUE`, so a fit whose checks never ran (its max
+  R-hat was 1.28) claimed to have passed them over an empty diagnostics
+  list, and [`print()`](https://rdrr.io/r/base/print.html) had nothing
+  to caveat. It is now `NA` when nothing was checked, and
+  [`print()`](https://rdrr.io/r/base/print.html) on the fit and on its
+  [`summary()`](https://rdrr.io/r/base/summary.html) says “Convergence:
+  NOT CHECKED”; [`summary()`](https://rdrr.io/r/base/summary.html)’s
+  printout also repeats the “Convergence warnings present” flag, which
+  it carried and never showed. A failed PSIS-LOO is now logged with its
+  cause instead of “LOO computation failed.” alone, which had left
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  showing `LOOIC` `NA` with nothing saying why.
+
+- **The convergence check raised dozens of “The ESS has been capped”
+  warnings.**
+  [`brms::neff_ratio()`](https://mc-stan.org/bayesplot/reference/bayesplot-extractors.html)
+  runs posterior’s ESS over every GP basis weight, and posterior warns
+  once per well-mixed one: an `n = 80` fit raised 44 R warnings, 41 of
+  them this one. R keeps only the first 50 warnings, so a warning that
+  mattered and came later, loo’s Pareto-k among them, could be dropped.
+  That one message is now muffled around the R-hat and ESS accessors;
+  every other warning passes through, and the ratios are unchanged.
+
+- **A saved `rf_fit` or `bayesian_fit` carried its engine twice.** The
+  model formula was built in the fitting function’s frame and so
+  captured it, and that frame holds the forest or the `brmsfit` itself;
+  a formula serialises its environment, so
+  [`saveRDS()`](https://rdrr.io/r/base/readRDS.html) wrote the engine a
+  second time (1.62 MB for a 100-tree forest of 0.72 MB; about 80 MB for
+  a 40 MB `brmsfit`, which brms’s own copy of the formula doubled even
+  in `saveRDS(fit$engine)`). The formulas now carry the global
+  environment, as a formula typed at the console does.
+
+- **A forest with rows out of every tree’s bag said nothing.** ranger
+  returns `NaN` as the out-of-bag prediction of a row every tree
+  sampled, so with `num_trees = 5` 20 of 200 rows had `NaN` fitted
+  values and [`summary()`](https://rdrr.io/r/base/summary.html) printed
+  “n = 200” over an R-squared computed on 180.
+  [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
+  now warns with the count, and
+  [`summary()`](https://rdrr.io/r/base/summary.html) prints “(computed
+  on 180 of 200 rows …)” when its metrics use fewer rows than the fit
+  has.
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  does not use its fold forests’ out-of-bag predictions, so it warns
+  once per run with the number of fold forests affected, instead of once
+  per fold (each of which told the user to score the forest with
+  [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)).
+
+- **[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  counted rows that differ on a dropped zero-variance predictor as
+  inside the AOA.** A predictor constant in the training data — a
+  land-cover dummy absent from the training region — is dropped from the
+  distance, so new rows taking another value there were judged on the
+  other predictors alone: 37 of 40 urban rows came out inside, where a
+  single urban training row would have kept the predictor and put 1
+  inside. Such rows now get `DI = Inf` (their scaled distance along that
+  predictor is infinite), are counted outside, and a warning gives the
+  count; [`print()`](https://rdrr.io/r/base/print.html) says how many.
+
+- **[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  returned a threshold of 0 from duplicated training rows without saying
+  why.** Each training row’s reference is its nearest other row, so
+  exact duplicates in predictor space — repeat visits to a site with
+  static covariates, covariates from a raster coarser than the sampling
+  — have a training DI of 0; past about three quarters of the rows the
+  threshold is 0 and only exact copies count as inside (30 sites visited
+  four times: 0 of 200 new points inside, against 197 after
+  deduplication). The rule is unchanged; the result is now logged with
+  the remedy (leave-location-out folds, or deduplication) and
+  [`print()`](https://rdrr.io/r/base/print.html) shows the count of zero
+  training DI.
+
+- **[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  refused all-zero weights, which the advice `pmax(importance, 0)`
+  produces whenever the model found no useful predictor.** A
+  one-predictor forest gave all-zero weights in 9 fits of 20 when its
+  predictor carried no signal, so the AOA was lost in the folds where it
+  mattered most. With one predictor the weight cannot change the index
+  (it is scale-invariant) and zero is accepted silently; with several,
+  all are weighted equally, as `weights = NULL` would, with a warning.
+
+- **A fractional `chunk_size` in
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  marked extrapolation as inside the AOA.** On the dense path
+  (`use_fnn = FALSE`, or FNN not installed) block starts became
+  fractional and the rows between blocks kept an initial DI of 0: with
+  `chunk_size = 2.5`, 5 of 25 far-out points were reported inside and 16
+  training DI of 0 moved the threshold. `chunk_size` is now validated by
+  name and truncated to whole rows.
+
+- **`area_of_applicability(model = fit, folds = folds)` stopped with
+  “fold 1 refers to rows outside 1:n” whenever
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  had dropped a row, for the same folds `cv_*()` accepted.** One missing
+  response in 200 rows was enough:
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  numbers the rows of the layer it is given, the fit keeps only the 199
+  rows
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  returned, and the fold IDs were read as positions in those. The
+  documented workflow (“pass the same
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  result you passed to
+  [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)”)
+  therefore failed on any layer with a missing or non-finite modelling
+  value or an empty geometry. The rows the fit’s `"dropped"` record
+  names are now taken out of the folds, as `cv_*()` take them out, with
+  a log line giving the count; a label vector with one label per row of
+  the layer fitted from loses those labels. The threshold is the one you
+  get by removing the rows from the folds by hand. Folds built on the
+  model’s own training data (the
+  [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+  output) are still read as positions in it, and a fold ID naming a row
+  the data never had is still an error.
+
+- **[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  applied folds built on other rows without a word.** Fold splits are
+  row IDs, and `cv_*()` compare the sample of row locations
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  records against the data, refusing folds built on another layer.
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  did not: a model fitted on the same rows in another order took the
+  folds anyway and moved the threshold (0.2432 against 0.2404). It now
+  makes the same check on the training data and refuses such folds with
+  the `cv_*()` message. The check is skipped (logged) when the folds
+  were built on polygons and the training data are the points a fit
+  reduced them to, so a model fitted on polygons with folds built on
+  those polygons keeps working.
+
+- **[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  filled a polygon grid with covariates from an arbitrary point inside
+  each cell.**
+  [`st_nearest_feature()`](https://r-spatial.github.io/sf/reference/st_nearest_feature.html)
+  returns the first zero-distance match the spatial index yields, so a
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  grid got covariates that did not match the location predicted at
+  (predictions off by up to 2.6 on a 0-30 response) and that changed
+  with the row order of `covariates` (by up to 4.7), and the result was
+  a polygon layer where the manual promises points. The grid is now
+  reduced to one representative point per cell first.
+
+- **`predict_surface(..., draws = TRUE)` flattened the draw matrix into
+  `.pred`.** The argument was forwarded to
+  [`predict()`](https://rdrr.io/r/stats/predict.html), and a backend
+  that honours it returned an `n_draws x n` matrix that became `.pred`
+  column by column (correlation with the right values: 0.03); with
+  `se = TRUE` the duplicated argument was reported as “backend does not
+  expose posterior draws”. `draws` is now refused by name, and a
+  [`predict()`](https://rdrr.io/r/stats/predict.html) returning the
+  wrong number of values is an error.
+
+- **[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)’s
+  automatic grid could lose a whole column or row.** When the extent is
+  an exact multiple of the cell size,
+  [`floor()`](https://rdrr.io/r/base/Round.html) of the ratio landed one
+  short through rounding (0.3 / 0.1 gives 2 cells), leaving a cell-wide
+  strip uncovered; at the default `n_cells` this hit 1197 of 10000
+  random squares. The cell count now has a relative tolerance, so an
+  exact multiple gets exactly that many cells.
+
+- **[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  kept a reused grid’s old `.pred_se`.** Passing an earlier surface as
+  `grid` left that model’s `.pred_se` beside the new `.pred` unless this
+  call replaced it, even after logging “returning predictions only”. It
+  is now removed unless this call computes it.
+
+- **A `logger` configuration made before loading the package could still
+  abort its functions, and received its log lines.** `logger` seeds a
+  new namespace by copying *every* index of the user’s global
+  configuration, and 2.0.0 pinned the formatter on index 1 only. A user
+  with two global indices set up before
+  [`library(spatialkit)`](https://elkronos.github.io/gis_modeling_toolkit/)
+  got `formatter_sprintf` or `formatter_glue` on the console echo, so a
+  `%` or a `{` in a message
+  (`"fold 2 skipped: object 'cov_{x' not found"`) aborted the function
+  that logged it and the R warning the manual promises never arrived; a
+  third global index kept the user’s own appender and received
+  spatialkit’s WARN and INFO lines in the user’s log file. Both indices
+  now have formatter, layout, appender and threshold pinned, every
+  message is marked
+  [`logger::skip_formatter()`](https://daroczig.github.io/logger/reference/skip_formatter.html),
+  and copied indices beyond the second are deleted (on `logger` 0.2.2,
+  which cannot delete one, switched off). The global configuration is
+  still never touched.
+
+- **Deleting the session temp directory made every function that logs
+  fail until the package was reloaded.** The trace file’s path was fixed
+  in [`tempdir()`](https://rdrr.io/r/base/tempfile.html) at load time,
+  so after an OS cleaner or `unlink(tempdir())` every log call failed
+  with “cannot open the connection”, and a documented R warning
+  ([`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)’s
+  CRS assumption, say) became that error; `tempdir(check = TRUE)`, R’s
+  own recovery, did not help. The trace now resolves its path when a
+  line is written, recreates the directory if it has gone, and drops a
+  line it cannot write; no logging failure aborts the caller any more,
+  so the warning always arrives.
+
+- **Logged cautions were missing from knitted documents.** The console
+  echo wrote to stderr, which knitr does not capture, so an R Markdown,
+  Quarto or pkgdown document showed the package’s R warnings but none of
+  its logged cautions
+  ([`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)’s
+  significant residual autocorrelation, for one). While knitr is running
+  the line is now also sent as an R message, so it appears in the output
+  and `message = FALSE` hides it; a line that is raised as a warning too
+  is not repeated. stderr gets exactly what it got before, and nothing
+  changes outside knitr.
+
+- **`plot_tessellation_map(labels = TRUE)` drew no labels on any layer
+  this package builds.** `label_col` defaulted to `"grid_id"`, a column
+  no function produces: Voronoi and Delaunay cells carry `cell_id`,
+  grids `poly_id` and `cell_id`, and
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  output `poly_id`, so the map came back unlabelled with only a log line
+  to say why. `label_col` now defaults to `NULL`, which takes the first
+  of `grid_id`, `cell_id`, `poly_id`, `polygon_id` and `id` the layer
+  has; `grid_id` stays first, so a layer that has one is labelled as
+  before, and naming a column still works.
+
+- **[`plot_tessellation_map()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_tessellation_map.md)
+  failed at print on a units, Date, POSIXct or difftime fill column.**
+  The fill scale was chosen with
+  [`is.numeric()`](https://rdrr.io/r/base/numeric.html), so Date,
+  POSIXct and difftime columns got a discrete scale (“Continuous value
+  supplied to a discrete scale”), and an
+  [`st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html)
+  column (class units) passed the test and then broke the viridis
+  scale’s arithmetic. The function returned normally and the error came
+  only when the plot was drawn. Date and POSIXct now get the continuous
+  scale on a date or time axis, and units and difftime columns are drawn
+  as numbers with the unit in the legend title (`"area [m^2]"`) unless
+  `legend_title` is given.
+
+- **[`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+  failed at print when its layers disagreed on having a CRS.** A
+  CRS-less boundary beside projected points, or the reverse, aborted
+  inside
+  [`coord_sf()`](https://ggplot2.tidyverse.org/reference/ggsf.html) with
+  sf’s “cannot transform sfc object with missing crs”. Since
+  [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
+  began drawing the block outlines it also failed on the very layer the
+  folds were built from:
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  projects CRS-less lon/lat points to a UTM zone, and stamps CRS-less
+  points with a boundary’s CRS, so the stored blocks carry a CRS the
+  points do not. A CRS-less layer is now brought into the points’ CRS,
+  or failing that the folds’ own, or the first layer’s that has one:
+  reprojected when its coordinates look like lon/lat, and stamped with a
+  warning otherwise, as
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  does.
+
+- **[`plot()`](https://rdrr.io/r/graphics/plot.default.html) on a custom
+  `spatial_fit` without a
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html) method stopped
+  with “could not extract residuals”.**
+  [`?new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+  calls that method optional, but `residuals.default()` returns `NULL`
+  for a `spatial_fit`, so the residual map, the
+  observed-against-predicted plot and the residual variogram all refused
+  a backend that had the required
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) method. The
+  residuals are now the response minus
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html), which is
+  what the built-in backends return; without a
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html) method the
+  error names the method to define.
+
+- **`citation("spatialkit")` gave the year it was called in, not the
+  year of the release.** DESCRIPTION has no `Date` field, so
+  `inst/CITATION` fell back to
+  [`Sys.Date()`](https://rdrr.io/r/base/Sys.time.html). CRAN installs
+  got the right year only by accident: `meta$Date` partially matched
+  `Date/Publication`. The year is now looked up the way
+  [`utils::citation()`](https://rdrr.io/r/utils/citation.html) does it,
+  by exact field name: the CRAN publication date, then `Date`, then the
+  date `R CMD build` packaged the source (which a GitHub install via
+  remotes or pak has). Only an install straight from a source directory
+  records none of these, and only then does the current year appear.
+
+- **The plots’ size arguments did nothing on ggplot2 older than 3.4.0.**
+  The line layers pass `linewidth =`, which ggplot2 3.4.0 introduced;
+  older versions warn “Ignoring unknown parameters” and draw at the
+  default width, so `outline_size`, `boundary_size` and the other size
+  arguments were silently ignored. Suggests now asks for
+  `ggplot2 (>= 3.4.0)`.
+
+- The test suite calls `local_mocked_bindings()`, which testthat added
+  in 3.1.7, but Suggests allowed 3.1.5. On 3.1.5 or 3.1.6 every test
+  that mocks a function failed with “could not find function”. Suggests
+  now asks for `testthat (>= 3.1.7)`.
+
+- **`determine_optimal_levels(criterion = "combined")` could put first a
+  cell count that Moran’s I never scored, chosen by the rule the elbow
+  had stopped using.** On eight separated clusters (800 points,
+  `max_levels = 40`, four seeds) it returned `10 7 6`, `10 7 6`,
+  `6 5 10` and `6 10 7`. The geometric axis was still the chord on
+  linear axes across the elbow’s window, which ranked 6 or 7 above the
+  elbow of 8. The candidates below the nine-cell floor, which Moran’s I
+  cannot score, shared an average rank that shrank as more of them went
+  unscored (6 of 9 for seven of them), although the help page said they
+  ranked last. The geometric axis is now the log-log sag the elbow is
+  read from, and it is flat when the curve has no elbow, so Moran’s z
+  alone orders the window. Every unscored candidate takes the last place
+  on the Moran axis, and exact ties go to the `k` nearest the elbow. And
+  an elbow below ten cells, a count Moran’s I cannot score, is no longer
+  ranked against the counts it can: ranking it put ten, the smallest
+  count Moran’s I scores, first whatever the response did (a response of
+  noise and one varying by cluster gave the same answer). There
+  `"combined"` returns the geometric ranking, logs why, and records it
+  in the diagnostics (`criterion = "geometric"`, `fallback`). The same
+  layers now give `8 7 9`, `8 7 9`, `7 6 8` and `8 7 9`, the geometric
+  answer, and 800 uniform points, which have no elbow and are ordered by
+  Moran’s z, `10 11 7` where they gave `5 4 10`. Supplying both
+  `response_var` and `predictor_vars` selects this criterion by default.
+
+- **`build_tessellation(method = "hex")` or `"square"` laid its lattice
+  over a near-global lon/lat boundary in Web Mercator.** The points’ CRS
+  is chosen for distances, and handed on as the grid’s CRS it skipped
+  the area check
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  makes: on a boundary from 170W to 170E and 60S to 70N, the full
+  hexagons differed 5.75-fold in true area, where
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  on the same boundary used Equal Earth (0.7 percent). The lattice is
+  now laid where
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  lays it: in the CRS picked for the points unless that CRS distorts
+  areas across the boundary by more than 1 percent, and otherwise in the
+  equal-area CRS `ensure_projected(purpose = "area")` picks for the
+  boundary, with a logged warning, the points indexed in the same CRS.
+  This applies with no `crs` and with a geographic one; a local extent
+  keeps its UTM zone.
+
+- **A CRS-less study area given with lon/lat points could be read as a
+  one-metre square.**
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  resolved a boundary without a CRS against the UTM zone picked for the
+  points, after projecting them, so a one-degree tile with integer
+  corners (which the lon/lat heuristic declines) was stamped with that
+  zone: one Voronoi cell, or 27 hexagons, and all 50 points indexed
+  `NA`. A boundary in British National Grid metres was stamped with the
+  UTM zone too. Such a boundary is now read in the points’ own CRS when
+  its coordinates fit the lon/lat envelope, with a warning, and refused
+  with an error naming both layers when they do not;
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  read it the same way.
+
+- **CRS-less lon/lat points with a CRS-less boundary in metres failed
+  with “`boundary` must be polygonal”.**
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  stamped EPSG:4326 on the boundary without looking at its coordinates,
+  so a UTM polygon was transformed to nothing and the error named its
+  geometry type. It now stops with an error saying the two layers cannot
+  be placed in one space.
+
+- **[`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  tessellated CRS-less lon/lat points in degrees, silently.** It
+  projected only when a CRS said lon/lat, so 60 CRS-less points at 55N
+  got cells in which 17.7 percent of sampled locations were not nearest
+  to their cell’s point, while
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  on the same points warned, took them as EPSG:4326 and projected them.
+  It now applies the same lon/lat heuristic, with its warning, and
+  returns what
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  returns (0.1 percent, at the cell edges).
+  [`?build_tessellation`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  no longer says a CRS-less pair “stays in the same unnamed planar
+  space” whatever its coordinates.
+
+- **Delaunay triangles returned in a geographic `crs` did not contain
+  their own points.**
+  `build_tessellation(method = "triangles", crs = 4326)` on 150 points
+  left 9 of them touching no returned triangle, so a spatial join on the
+  result did not reproduce `index`. The corners of the returned
+  triangles are now put back on the input points after the round trip
+  through the working projection, and every point lies in its indexed
+  triangle.
+
+- **The tessellation builders failed on an sf layer as `crs`.**
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  stopped with an error from sf (“the condition has length \> 1”, or
+  “cannot create a crs from an object of class sf”). They now take the
+  layer’s CRS, as `ensure_projected(target_crs =)` and
+  [`harmonize_crs()`](https://elkronos.github.io/gis_modeling_toolkit/reference/harmonize_crs.md)
+  do.
+
+- **Random and k-means seeding on a lon/lat boundary warned “install
+  package lwgeom” on every call.** sf raises “coordinate ranges not
+  computed along great circles” for each lon/lat draw when lwgeom, which
+  this package does not depend on, is absent: one R warning per
+  [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
+  or `get_voronoi_seeds(method = "random")` call and two per k-means
+  call. That warning is muffled, and the draw is unchanged. The
+  boundary’s union is taken on the sphere as well, so with
+  `sf_use_s2(FALSE)` sf no longer prints its planar
+  [`st_union()`](https://r-spatial.github.io/sf/reference/geos_combine.html)
+  message and the seeds are the ones an s2-on session gets.
+
+- **A transect with sub-millimetre scatter got a sliver study area and a
+  166,536-cell grid for `approx_n_cells = 25`.**
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  called a bounding box degenerate only when its two ends were equal to
+  rounding, so 30 points along 1000 m with a y scatter of 1e-6 got a
+  1000 x 9e-7 rectangle, over which the square grid had 166,536 cells
+  (16 seconds) and the hexagonal one 154,980 (28 seconds); a little
+  thinner, and
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md)
+  stopped at `max_cells` telling the user to check the units of a
+  `cellsize` they had not passed. A box whose short side is below a
+  millionth of the long side is now degenerate too (a buffer around the
+  points: 34 squares or 45 hexagons for 25), and the `max_cells` error
+  names the argument the size came from, `target_cells`
+  (`approx_n_cells`), `n` or `cellsize`.
+
+- **A whole
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  result passed as `boundary` failed with sf’s
+  `no applicable method for 'st_geometry' applied to an object of class "list"`.**
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md),
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  now say that the object looks like a
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  result and to pass its `$boundary`, as `make_folds(blocks = )` already
+  did for `$cells`;
+  [`create_grid_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons.md),
+  [`create_grid_polygons_cached()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_grid_polygons_cached.md)
+  and
+  [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+  add the same hint to their type errors.
+
+- **`build_tessellation(method = "triangles")` recorded an
+  `approx_n_cells` it had ignored.** `params$approx_n_cells` held the
+  ignored count where the help page says the count used is kept; it is
+  now `NULL`, as for Voronoi, and the warning says so for both methods.
+
+- **`summarize_by_cell(deff = "variogram")` said it was “Falling back to
+  deff = 1” for a rejected `sac`, and then applied a design effect.** A
+  `sac` whose fit
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  had rejected was set aside with that warning, after which a variogram
+  estimated from `response_var` was fitted and applied: in one check
+  every row came back corrected, with a median design effect of 5.2, and
+  in the development version the warning carried the fallback class, so
+  `tryCatch(spatialkit_deff_fallback = )` threw the corrected result
+  away. When the estimate was rejected too, the one fallback raised two
+  R warnings. A `sac` that an estimate replaces now gets a plain warning
+  saying what replaced it, and the fallback warning is raised once per
+  call, only when the standard errors really are the uncorrected ones,
+  naming every reason, the rejected `sac` included.
+
+- **`summarize_by_cell(deff = "variogram")` ignored a `sac` that carried
+  no variogram model without saying so.** A plain number, or
+  `units::set_units(1.5, "km")`, was passed over and the design effect
+  came from a variogram estimated from `response_var`, with no
+  condition; the caller could not tell that the value given had not been
+  used. Such a `sac` is now set aside with a warning, as a rejected
+  `sac` is: a plain warning when a variogram is estimated instead, and
+  the classed `spatialkit_deff_fallback` warning, naming it, when `deff`
+  falls back to 1.
+
+- **`summarize_by_cell(deff = "kish")` recorded no correction when only
+  the predictor standard errors were corrected.** The `"deff_applied"`
+  attribute followed the primary variable’s ICC alone, so with an
+  unclustered response (ICC 0) and a clustered predictor (ICC 0.82) no
+  attribute was attached, and in the development version every row said
+  `deff_applied = FALSE`, while the predictor standard errors had been
+  inflated elevenfold. The attribute is now attached whenever either ICC
+  is positive; its `deff` stays the primary variable’s (all 1 in that
+  case).
+
+- **[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  corrected the response’s standard errors with a residual variogram
+  without a word.** A `sac` from
+  `estimate_sac_range(..., predictor_vars = )` describes what the
+  predictors leave unexplained, a weaker correlation than the response’s
+  own: the response standard errors came out at 0.60 of those from the
+  response variogram in one check, while
+  [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
+  warned about the same object. Such a `sac` is still used as given, as
+  documented, but a warning now says the response standard errors are
+  understated.
+
+- **[`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
+  dropped the features’ own `id` column when the cells were keyed by
+  `id`.** The polygons’ ID went through the spatial join under its own
+  name, so a site `id` collided with the cells’ `id` and was dropped,
+  with a warning about a collision the result never had: it only gains
+  `polygon_id_col`. Only a column named `polygon_id_col` is replaced
+  now.
+
+- **`assign_features_to_polygons(largest = TRUE)` let the polygon row
+  order decide an exact tie in overlap.** sf keeps the first of equal
+  largest overlaps, so a 40 m square split evenly across the edge of
+  cells 1 and 2 went to cell 1, or to cell 2 with the polygon rows
+  reversed. An exact tie (areas equal to 9 significant digits) is now
+  decided by `tie_break` among the equally largest polygons, and counted
+  in `attr(, "ties")`.
+
+- **Every largest-overlap assignment of polygon features raised sf’s
+  “attribute variables are assumed to be spatially constant” warning.**
+  `sf::st_join(largest = TRUE)` adds grouping columns of its own before
+  intersecting, so the warning came with every ordinary call (the
+  reporting vignette hid it with `warning = FALSE`), said nothing about
+  the data, and could not be avoided with
+  [`st_agr()`](https://r-spatial.github.io/sf/reference/st_agr.html).
+  That warning alone is now muffled.
+
+- **`summarize_by_cell(deff = "variogram")` accepted a `deff_max_n` of
+  less than 2.** A value of 1 or 0 subsampled every cell to one point or
+  none, so the mean correlation came out `NaN`, the design effect 1 and
+  the standard errors uncorrected (4.1 times smaller than with the
+  default in one check) with nothing to say so; `NA` stopped the call
+  with “missing value where TRUE/FALSE needed”. It must now be a single
+  number of at least 2, and anything else is an error that names it.
+
+- **The rows with no cell ID got a `cell_weight` of 0.** A layer
+  assigned with `keep_unassigned = TRUE` is summarised with its
+  unassigned rows as a group whose ID is `NA`, and
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  lost that group’s count of non-missing values: `cell_weight` was 0
+  beside `n = 5` and a finite standard error. The group is now counted
+  like any other.
+
+- **`attr(, "deff_applied")$deff` turned into a vector of `NA`s for a
+  fixed `deff` and one populated cell.** With `cells_sf`, the
+  realignment to the joined rows took a fixed `deff = 2` for a per-cell
+  vector whenever exactly one cell was summarised, and recorded
+  `c(2, NA, NA, ...)`. A fixed design effect is now recorded as the
+  number.
+
+- **`make_folds(method = "block_kfold")`’s refusal of a grid above
+  1,000,000 blocks told the caller to check a `block_size` they never
+  passed, and a `block_size` hundreds of orders of magnitude too small
+  slipped past it.** With `block_nx = 2000, block_ny = 1000` (or
+  `block_multiplier = 1e6`) the error read “Check that `block_size`
+  (unset) is expressed in the data’s CRS units”. With
+  `block_size = 1e-200` the cell count overflowed to `Inf`, which the
+  guard let through, and
+  [`st_make_grid()`](https://r-spatial.github.io/sf/reference/st_make_grid.html)
+  failed with “result would be too long a vector”. The message now names
+  what produced the grid: `block_size`, the range `auto_range`
+  estimated, `block_nx`/`block_ny`, or `block_multiplier` x `k`. A count
+  too large to represent is refused like any other.
+
+- **[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  accepted any `block_multiplier`, and a `units` object for `phi` or
+  `min_train` failed with an error that named no argument.**
+  `block_multiplier = NA` died inside
+  [`st_make_grid()`](https://r-spatial.github.io/sf/reference/st_make_grid.html)
+  with “‘length.out’ must be a non-negative number”. `c(1, 3)` silently
+  used 3, and `units::set_units(100, m)` was read as 100, giving a 32 x
+  16 grid aimed at 500 blocks. `phi = units::set_units(100, m)` failed
+  inside the units package with ‘both operands of the expression should
+  be “units” objects’. `block_multiplier` must now be a single positive
+  number, and `phi` and `min_train` refuse a `units` object by name, as
+  `block_size`, `buffer` and `block_nx`/`block_ny` already did.
+
+- **[`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+  and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  had no residual Moran’s I for a custom fit without a
+  [`residuals()`](https://rdrr.io/r/stats/residuals.html) method.**
+  [`?new_spatial_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/new_spatial_fit.md)
+  says [`residuals()`](https://rdrr.io/r/stats/residuals.html) is
+  optional, and such a fit falls through to `residuals.default()` and
+  gets `NULL`, so
+  [`residual_morans_i()`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+  returned `NULL` with a warning and
+  [`compare_models()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  reported all-`NA` `resid_morans_*` columns. On 80 points with an
+  east-west trend the predictor could not explain, that hid a residual
+  Moran’s I of 0.754 (z = 15.5, p = 4e-54). Such a fit is now scored on
+  the observed response minus
+  [`fitted()`](https://rdrr.io/r/stats/fitted.values.html), which is
+  what the built-in backends’ residuals are and what
+  [`plot()`](https://rdrr.io/r/graphics/plot.default.html) already used
+  for it. `NULL` is returned only when that cannot be formed either, and
+  the warning quotes the reason.
+
+- **Re-using a `cv_*()` result’s `$folds` renumbered every fold after a
+  dropped one.** The result’s `$folds` holds the splits that survived,
+  each carrying the `fold_id` it was reported under, so five folds with
+  fold 3 dropped are labelled 1, 2, 4 and 5. Handed to a second `cv_*()`
+  call, to score another learner on the same splits, they were numbered
+  by position as 1, 2, 3 and 4, so the second run’s fold 3 was the first
+  run’s fold 4 (RMSE 2.90 in both), and a join on `fold` with the first
+  run or with
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  paired different folds. Splits that carry a distinct whole-number
+  `fold_id` now keep it. Splits without one are still numbered by
+  position, as are splits whose ids repeat.
+
+- **A `fold_info_fn` whose `..per_row` reused a `predictions` column
+  name corrupted `predictions`.** A `..per_row` column called `yhat` (or
+  `y`, `fold`, `..row_id` or `y_train_mean`) was bound on beside the
+  original, and `predictions` came back with two `yhat` columns. In the
+  development version,
+  [`dplyr::bind_rows()`](https://dplyr.tidyverse.org/reference/bind_rows.html)
+  then renamed both (`yhat...4`, `yhat...6`) with only a message, so
+  `overall` found no `yhat` and was all `NA` with `n_pred = 0`, beside
+  per-fold RMSEs of 2.4 to 3.4 and no warning. Such a name is now an
+  error naming the column, as a clashing scalar extra already was.
+  Duplicated or empty `..per_row` names are errors too, in a parallel
+  run as in a sequential one.
+
+- **A `fold_info_fn` that returned a named vector lost its values
+  without a word.** `c(slope = 1.9)` in place of `list(slope = 1.9)`
+  (the shape `metrics` accepts) added no column, and `fold_status` read
+  `"ok"` with an empty message on every fold. A named vector is now
+  taken as the list it stands for. Any other return value that is not a
+  list or `NULL` (a function, an environment) is now an error.
+
+- **Folds built on a pointized copy of a polygon layer were refused as
+  “built from different data”.** `make_folds(coerce_to_points(parcels))`
+  applied to `parcels` itself, with the same rows and IDs, was refused
+  on 80 L-shaped parcels because “64 of 64 checked row IDs sit at a
+  different location here”. The error blamed “folds from another
+  dataset”. The provenance check compares each polygon’s centroid with
+  the point
+  [`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+  gave it, and under `"auto"` that is
+  [`st_point_on_surface()`](https://r-spatial.github.io/sf/reference/geos_unary.html),
+  which differs for every non-convex feature. The folds’
+  `params$row_probe` now records whether they were built on POINT
+  geometry. When that differs from the data, the error says so and tells
+  you to build the folds with
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  on the layer passed, which reduces polygons to points itself. Folds
+  from data that really differs get the old message.
+
+- **[`evaluate_insample()`](https://elkronos.github.io/gis_modeling_toolkit/reference/evaluate_insample.md)
+  returned `NULL` when no element of `fits` was a `spatial_fit`.** Its
+  help promises a data frame with one row per model, and the only sign
+  that every element had been skipped was a log line per element, which
+  [`spatialkit_quiet()`](https://elkronos.github.io/gis_modeling_toolkit/reference/spatialkit_quiet.md)
+  hides and `tryCatch(warning = )` never sees. It is now an error that
+  names `fits`.
+
+- **`cv_rf(parallel = )` printed its core-count message twice when asked
+  for more workers than the machine has.** `cv_rf(parallel = 16)` on a
+  4-core machine printed “cv parallel: 16 workers requested on a machine
+  with 4 cores; using 4.” twice. It resolved the count once for its
+  thread policy and once more when the folds ran. It now prints the
+  message once.
+
+- **[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  called local regressions unstable because of where a predictor’s units
+  start.** A temperature field in kelvin beside a second predictor drew
+  “global design (intercept + predictors) has scaled condition index 230
+  … (collinearity risk)” and “100% of 30 sampled locations have a
+  collinear local design … Local regressions there are unstable”, while
+  the same field in degrees C drew no global warning and 6 of 30; the
+  local slopes of the two fits agree to 1e-10. Both indices were
+  computed on the uncentred design, where a predictor far from 0 against
+  its spread (kelvin, a year, elevation in feet) is collinear with the
+  intercept. That makes the local intercept an extrapolation to 0, but a
+  slope’s precision does not depend on where the predictor’s origin is.
+  The global index is now computed on the centred predictors, so it is 1
+  for a single predictor and a change of origin does not move it. The
+  local survey keeps Belsley’s uncentred index with the intercept as
+  `info$local_collinearity$cn` and adds `cn_slopes`: the predictors
+  centred at their weighted mean in the window, each divided by its
+  standard deviation over the study area. A window’s slopes count as
+  collinear when `cn_slopes` is above 30 or singular, or when `cn` is
+  above 1e6, where GWmodel’s uncentred solve starts losing precision in
+  the slopes. `n_local_collinear` and the warning count those windows.
+  The kelvin and degrees C fits now get the same verdict (0 of 200
+  locations), and a regional covariate nearly constant within clusters
+  is still flagged everywhere (200 of 200). A window where only `cn` is
+  above 30 is logged, not warned about.
+
+- **[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  checked an adaptive bandwidth less strictly than
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md).**
+  `bandwidth = 3e9` with `adaptive = TRUE`, a distance passed as a
+  neighbour count, failed with “NAs introduced by coercion to integer
+  range” and then a bare “missing value where TRUE/FALSE needed”.
+  `bandwidth = 0.5` was rounded to 0 neighbours and quietly raised to
+  the floor, where
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  refuses it.
+  [`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  now runs
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)’s
+  check before it prepares anything: an adaptive count must be at least
+  1 and at most R’s largest integer.
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  runs the same check once, up front, instead of failing it in every
+  fold and returning “all folds failed”.
+
+- **[`gwr_model_selection()`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  with a fixed bandwidth in the wrong units failed with a bare “inv():
+  matrix is singular”.** On lon/lat data projected to EPSG:32617,
+  `bandwidth = 0.2, adaptive = FALSE` is 0.2 metres against an extent of
+  44720 metres, so every window is empty.
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  warned about exactly this and explained the singular window, but the
+  sweep said nothing. It now raises the same “less than a ten-thousandth
+  of the data’s extent” warning, and its error explains a singular
+  window as
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)’s
+  does.
+
+- **[`print()`](https://rdrr.io/r/base/print.html) on a GWR fit showed a
+  fixed bandwidth in scientific notation and without its unit.** A fixed
+  bandwidth of 122372 m printed as “Bandwidth: 1.224e+05 (fixed,
+  bisquare kernel)”, so the value was rounded to four digits and its
+  unit was missing, although the help page tells the reader to check it.
+  It now prints “122,372 metre (fixed, bisquare kernel)”, and an
+  adaptive one as “42 neighbours (adaptive, …)”.
+
+- **[`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  did not refuse a character or factor response, as the README says
+  every model function does.** A response read from a CSV as text went
+  into
+  [`GWmodel::bw.gwr()`](https://rdrr.io/pkg/GWmodel/man/bw.gwr.html),
+  which failed twice with “Not compatible with requested type”. That
+  drew the arbitrary-fallback bandwidth warning, and the fit then
+  stopped with “‘x’ must contain finite values only”, naming neither the
+  column nor the cause. It now stops first with “response ‘zc’ is not
+  numeric (it is character)”, as
+  [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
+  and
+  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+  do.
+
+- **[`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  under an ordinal or categorical family sampled every fold and then
+  scored none of them.** Such a family predicts a probability per
+  response category, and cross-validation scores one number per row, so
+  each fold compiled and sampled a full model and was then discarded:
+  under
+  [`brms::cumulative()`](https://paulbuerkner.com/brms/reference/brmsfamily.html),
+  `k = 2` on 50 rows took 4.35 minutes to return “all 2 folds failed to
+  produce predictions”.
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  now refuses
+  [`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  and the ordinal families (cumulative, sratio, cratio, acat) before
+  fitting anything, with a message naming the family, and the “Which
+  metrics survive a non-Gaussian response” section (in
+  [`?model_metrics`](https://elkronos.github.io/gis_modeling_toolkit/reference/model_metrics.md),
+  [`?cv_bayes`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  and
+  [`?compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md))
+  no longer calls CRPS and interval coverage meaningful for “any family
+  the backend accepts”.
+
+- **[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)’s
+  automatic grid left up to a cell of the training extent uncovered on
+  the east and north.** It took `floor(extent / cell_size)` cells from
+  the lower-left corner, so whenever the extent was not a whole number
+  of cells the rest of it got no prediction. `cell_size = 100` on a 980
+  x 956 extent covered 900 x 900: 13.5 percent of the box was uncovered,
+  and 14 of 120 training points lay in no cell. `cell_size = 334` gave 2
+  x 2 cells and left 65 of the 120 points out. The grid now has enough
+  cells to cover the box and is centred on it. It overhangs the box by
+  less than one cell, split evenly between the two sides, so every cell
+  centre still lies inside the box. An extent that is an exact multiple
+  of the cell size gets the same grid as before. At the default
+  `n_cells`, a grid usually gains one column or row (102 x 99 cells
+  instead of 101 x 98 on the extent above), and its centres move by less
+  than half a cell.
+
+- **`plot_tessellation_map(labels = TRUE)` warned at print on every
+  lon/lat layer, and failed at print on a units label column.** The
+  label points were computed with
+  [`st_point_on_surface()`](https://r-spatial.github.io/sf/reference/geos_unary.html),
+  and
+  [`geom_sf_text()`](https://ggplot2.tidyverse.org/reference/ggsf.html)
+  ran it again on those points when the plot was drawn. On
+  longitude/latitude cells that raised “st_point_on_surface may not give
+  correct results for longitude/latitude data”, although nothing was
+  wrong. A `label_col` holding
+  [`st_area()`](https://r-spatial.github.io/sf/reference/geos_measures.html)
+  values (class units) failed with “units package is not attached”, as a
+  units fill column did. The label points are now used as computed, and
+  a units or difftime label is drawn formatted, with its unit
+  (`"15073.393 [m^2]"`). A `fill_col` or `label_col` naming more than
+  one column, or `NA`, is now refused by name. It used to fail with R’s
+  “‘length = 2’ in coercion to ‘logical(1)’”.
 
 ### Documentation
 
@@ -1048,15 +3382,16 @@
   `fit_fn`, which the page now spells out.
 
 - [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-  documents that `family =` accepts any `brms` family — zero-inflated
-  and hurdle counts, negative binomial, Bernoulli, beta and ordinal
-  responses all reach
+  documents which `brms` families `family =` takes — zero-inflated and
+  hurdle counts, negative binomial, Bernoulli, beta, ordinal,
+  categorical and mixture families all reach
   [`brms::brm()`](https://paulbuerkner.com/brms/reference/brm.html) with
-  the spatial GP term intact — and gains a worked zero-inflated Poisson
-  example. The same page now records a trap: a family object `brms`
-  cannot name skips the response-type check entirely rather than falling
-  back to the gaussian rule, so a malformed `family` buys less
-  validation, not more.
+  the spatial GP term intact, and a factor response is taken only under
+  `categorical()` and the ordinal families — and gains a worked
+  zero-inflated Poisson example. The same page now records a trap: a
+  family object `brms` cannot name skips the response-type check
+  entirely rather than falling back to the gaussian rule, so a malformed
+  `family` buys less validation, not more.
 
 - [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
   gains a “Spatial confounding” section: a coefficient estimated beside
@@ -1098,6 +3433,293 @@
   documents its name collision with `blockCV::cv_spatial()`, which
   builds folds where this one runs them, and that `blockCV`’s
   `$folds_ids` is accepted directly as `folds` everywhere.
+
+- [`?determine_optimal_levels`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  no longer calls the Cliff and Ord moments behind Moran’s z exact: they
+  assume cell means of equal variance, and with single-point cells
+  beside cells of 70 or more points `z` ran slightly high (mean
+  0.2–0.34, 7–8% rejection at 5%);
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  says `cell_diam_median` is about 0.8 of the side of an equal-area
+  square cell, not a width (and
+  [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
+  no longer calls it one); the Post-selection inference section and the
+  vignette say that the estimation rows of a split leave cells in the
+  selection half empty and cells across the border estimated from part
+  of their points (coverage 0.88 against 0.97 in simulations), and how
+  to find the cells to trust;
+  [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
+  says the nugget is extrapolated from the first lag bin (about
+  `max_dist / 30` at the default cutoff), not observed below the closest
+  pair, and can be exactly 0 at the fit’s bound.
+
+- The tessellation help pages are corrected:
+  [`clip_target_for()`](https://elkronos.github.io/gis_modeling_toolkit/reference/clip_target_for.md)
+  returns the points’ bounding box, not their convex hull, and is not
+  the target `build_tessellation(method = "voronoi")` derives;
+  [`create_voronoi_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/create_voronoi_polygons.md)
+  and
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+  say that a multi-vertex MULTIPOINT feature gets one cell per vertex
+  and that `keep_duplicates` has no effect;
+  [`voronoi_seeds_random()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_random.md)
+  tops a short draw up to exactly `k`;
+  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  and
+  [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+  say that their
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html) partition is
+  not the k-means++ one
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  scored, and no longer promise equal counts per cell.
+
+- Documentation corrected:
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)’s
+  `sac` no longer identifies a rejected fit by a `status` attribute no
+  `sac_range` carries (it is an `NA` value with a `rejected_reason`),
+  and says a rejected `sac` is set aside and the variogram estimated as
+  if none had been given;
+  [`ensure_stable_poly_id()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_stable_poly_id.md)
+  and the reporting vignette say IDs are the same across projections
+  except for fine cells within the rounding step of one longitude (36 of
+  2,500 100 m cells via EPSG:3035), not always;
+  [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)’s
+  “Confidence intervals” says `..neff_*` is `NA` for a single
+  observation; the resolution vignette says the blocked split reduces
+  the leak between halves rather than removing it.
+
+- [`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  now says that the exponential model is kept whenever it converges and
+  so overestimates the range on smoother fields (about 1.8–2.1 times a
+  Gaussian practical range, 1.3–1.4 times a spherical one), and why the
+  family is not chosen by fit (that biases exponential fields low, to
+  0.82); that 15 lag bins make a range spanning one or two of them come
+  out long (60 m returned 89–102 m); that nothing tests for spatial
+  structure (white noise gave a finite range in 8 of 30 draws); that the
+  “decreases with distance” refusal also fires on small samples of
+  ordinary fields (7–9 of 60 at n = 30, 0–1 at n = 100), which its
+  warning now says below 100 points; that the anisotropy note goes to
+  the log file at INFO, not the console, and that the longest
+  directional range is read from `directional_fitted` after checking
+  `directional_status`, not `max(attr(, "directional"))`, which is `NA`
+  exactly when the major axis ran past the fitted lags (the note itself,
+  the nc_demo vignette and the help now say so); that an accepted range
+  can still exceed half the width of the layer, leaving
+  `make_folds(auto_range = TRUE)` room for one block (`range_frac`); and
+  a flat variogram’s refusal message no longer claims the data “never
+  reached a sill” without mentioning that a structureless variogram ends
+  there too. The README counts six refusals, not five.
+
+- [`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md):
+  the NNDM details now say how the procedure differs from `CAST::nndm()`
+  (a strict removal rule, one point more conservative per distance
+  value, and ties broken by coordinates rather than row index) instead
+  of calling it the same; the n \> 5000 refusal gives the worst-case
+  cost, O(n^3) time where `min_train` binds (about nine minutes at n =
+  3000), not O(n^2); `drop_empty_blocks`, `boundary` and
+  `block_multiplier` say what they do on the cases above.
+
+- [`?cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+  no longer says a `seed` passed through `...` overrides the per-fold
+  forest seed (`seed` is the function’s own argument and never reaches
+  `...`);
+  [`?cv_bayes`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  says `parallel = n` compiles `n` Stan models at once, at several GB
+  each, and what a fold killed for memory reports;
+  [`?residual_morans_i`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
+  and
+  [`?compare_models`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models.md)
+  say their methodological cautions are logged, not raised as warnings.
+
+- [`?fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)’s
+  “Collinearity diagnostics” section described the 30-location
+  unweighted spot check the survey replaced, a global index on the
+  predictors alone, and a caveat that only a subset of locations is
+  examined; it now describes the code (every location, kernel-weighted,
+  a global index on the centred predictors, and at each location one
+  index with the intercept and one for the slopes alone).
+  [`?fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  and
+  [`?gwr_model_selection`](https://elkronos.github.io/gis_modeling_toolkit/reference/gwr_model_selection.md)
+  now state the adaptive bandwidth’s floor and cap.
+
+- [`?fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md):
+  `check_convergence` says the checks write WARN log lines and set
+  `$info$convergence_ok` rather than “issue warnings”, and that under
+  cmdstanr nothing is raised as an R warning; the basis adequacy check
+  is described as logged, and as changing neither `convergence_ok` nor
+  [`print()`](https://rdrr.io/r/base/print.html) (the argument’s text
+  listed it among the checks that set `convergence_ok` to `FALSE`); the
+  `family` argument and the non-Gaussian section no longer promise that
+  any response type brms can fit works here; the spatial confounding
+  section warns that coefficients under `standardize_predictors = TRUE`
+  are per standard deviation before comparing with
+  [`lm()`](https://rdrr.io/r/stats/lm.html).
+  [`?coef.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/coef.bayesian_fit.md)
+  gains a section on standardised predictors, and
+  [`print()`](https://rdrr.io/r/base/print.html) on such a fit names
+  them.
+  [`?fitted.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/fitted.bayesian_fit.md)
+  no longer says a failed posterior draw returns `NA` (it has been an
+  error since before this release).
+  [`?gp_lengthscale_bounds`](https://elkronos.github.io/gis_modeling_toolkit/reference/gp_lengthscale_bounds.md)
+  says its bounds are the prior’s calibration range and do not shrink
+  with `n`.
+
+- [`?area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  states the outlier rule (type-7 quartiles) and how the threshold
+  differs from CAST’s (the fence itself, capped at the largest training
+  DI, which is larger whenever `n_outliers > 0`), with the `threshold =`
+  value that reproduces it; the internal note that CAST uses
+  [`boxplot.stats()`](https://rdrr.io/r/grDevices/boxplot.stats.html)
+  was out of date, and the package page no longer implies the threshold
+  matches CAST. `n_new` is documented as every row of `newdata`
+  (`n_inside + n_outside + n_na`), not the rows that passed the
+  finite-value filter.
+  [`?predict_surface`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+  and the README say that `se = TRUE` on a `bayesian_fit` gives the SD
+  of the mean surface and that `type = "predict"` gives the predictive
+  SD.
+
+- The diagnostics vignette’s area-of-applicability figure alt text no
+  longer calls the training curve cross-validated (no folds are passed
+  there);
+  [`?plot.aoa`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.aoa.md)
+  and
+  [`?plot.feature_selection`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.feature_selection.md)
+  describe the training DI and the rejected last step as drawn.
+
+- The examples that stamp EPSG:32632 (UTM zone 32N) on simulated points
+  now put the points inside that zone. The README quick start, the
+  [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+  example, the resolution, diagnostics and spatial cross-validation
+  vignettes, and the fixture the scripts in `inst/scripts/` share placed
+  them at x and y between 0 and 1000, which is on the equator about 4.5
+  degrees east, outside the zone. They are now offset by 500000 m east
+  and 5000000 m north, as the other examples already were. Every printed
+  result is unchanged, since the package works in planar units; only the
+  coordinates themselves, and the graticule on the maps, differ.
+
+- The examples of
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md),
+  [`summary()`](https://rdrr.io/r/base/summary.html) and
+  [`plot()`](https://rdrr.io/r/graphics/plot.default.html) on a profile
+  use `set.seed(4)`, on which their comments hold (C_p interior at 28
+  cells, reliability on the range floor); with `set.seed(2)` C_p had
+  moved to the support ceiling. The
+  [`plot()`](https://rdrr.io/r/graphics/plot.default.html) example no
+  longer promises four panels on points that have no elbow.
+
+- Tour script 02 runs to the end again: step 02.6 drew the elbow’s pick,
+  which its evenly spread points no longer have, and now draws the C_p
+  pick. It prints the bound each criterion’s optimum sits on, points to
+  `min_cell_n` and `range_floor` rather than `n_levels` for moving one,
+  and computes what the `select_on = "split"` comparison shows (both
+  picks on the range floor) instead of calling the difference tuning.
+  Script 08 no longer calls its held-out half untouched or its score gap
+  the selection effect, and says its block size of 300 is under the
+  range of about 357.
+
+- The README’s resolution figure labels its middle count as the one
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  rates most reliable, with the width of that criterion’s flat region;
+  it was
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)’s
+  count, which on those evenly spread sites the function now says the
+  ladder chose. The troubleshooting entry quotes the fallback messages
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  now gives, with their causes.
+
+- The resolution vignette’s criteria table describes the elbow as the
+  log-log sag it is, `NA` on points with no cluster structure, and its
+  introduction says
+  [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
+  still returns a count there, with a warning.
+
+- [`?coerce_to_points`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
+  (`tmp_project`) states the rule a CRS-less layer is read by: the
+  lon/lat heuristic of
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
+  not merely lying inside the lon/lat envelope.
+
+- [`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  now gives the derivation and the measured coverage of the small-sample
+  rescaling that goes with every data-derived design effect, which the
+  package page said were there; the package page lists it among the
+  defaults that were chosen, not cited.
+
+- [`?estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  now says when the directional maximum is logged (only when it stands
+  in for a singular or non-converged all-pairs fit, at WARN only above a
+  ratio of 1.5, naming the directional ranges), and that a range shorter
+  than the first lag bin can come back several times too long (a true 24
+  m returned 93–479 m at n = 1500, 19–32 m at `cutoff = 0.1`), so a
+  variogram at its sill in the first one or two bins calls for a smaller
+  `cutoff` whatever range was fitted.
+
+- [`?make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  no longer says `auto_range` “fits directional variograms to account
+  for anisotropy”. It sizes blocks from the omnidirectional range, and
+  for a field known to be anisotropic the page now points to
+  `directional_fitted`. An accepted range too wide for two blocks makes
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+  stop with an error, which the page now says; it had claimed the grid
+  “does not collapse to a single block”. The log line announcing a
+  lowered `k` just before that error is gone. The page no longer says
+  NNDM never pushes a point’s nearest-neighbour distance past `phi`: the
+  last exclusion can take it past by one neighbour step, as in
+  `CAST::nndm()`. The description lists all five methods. The page now
+  says that `k = 1` is raised to 2 by the three k-fold methods, and that
+  only `block_kfold` returns `params$blocks_supplied` and
+  `params$boundary_supplied`.
+
+- The README’s entry for “response ‘y’ is not numeric” notes that
+  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+  takes a factor or character response under
+  [`brms::categorical()`](https://paulbuerkner.com/brms/reference/brmsfamily.html)
+  and the ordinal families.
+
+- The README,
+  [`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+  and the getting-started, diagnostics, reporting and North Carolina
+  vignettes now say which estimand the design-effect-corrected standard
+  error is for. It is the standard error of a cell mean as an estimate
+  of the population mean. For a cell’s own mean, which is what a map
+  reports, the default `deff = 1` standard error is the right one when
+  the points are spread through the cell. Several of these pages had
+  presented the correction as the right standard error for the cells
+  themselves, and there it is too wide by `sqrt(deff / (1 - rho))` (4.6
+  at 20 points a cell and `rho = 0.5`). The getting-started pipeline,
+  which maps the cells, now aggregates at `deff = 1`.
+
+- Smaller corrections: the README’s troubleshooting list adds
+  `"compare_models_cv(): no recognised model requested."`, which is the
+  error when no requested name is recognised, and says that
+  `"no viable models."` means every recognised backend is uninstalled.
+  The getting-started install table no longer says `patchwork` is needed
+  for the `plot_*()` functions. The North Carolina vignette explains why
+  some local designs of its GWR fit have a high condition index with the
+  intercept (an uncentred `elevation`, nearly collinear with the
+  intercept inside each window), and why the fit raises no collinearity
+  warning: the slope index stays below 30, so the slopes are well
+  determined and only the local intercepts are not. Its fold-map alt
+  text now describes each blocked fold as whole blocks in separate parts
+  of the state, not as one contiguous area.
+
+- [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md):
+  the “Two ways to leak” example of selection inside the folds leaked
+  itself (blocks about 250 m across against an autocorrelation range of
+  about 330 m) and its learner could not fit the intercept-only model,
+  so `tol` did not apply to the first variable. It now passes
+  `block_size = 400`, fits `z ~ 1` for an empty predictor set, and shows
+  `sel$history`.
+
+- [`?fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
+  recommended
+  `area_of_applicability(weights = pmax(fit$info$importance, 0))`
+  without condition. It now says this works only when that importance is
+  finite, which it is not when no row is out of bag.
 
 ## spatialkit 2.0.0
 

@@ -36,14 +36,20 @@ create_grid_polygons(
 - target_cells:
 
   Optional approximate desired number of cells. The cell *size* is
-  derived from it as `sqrt(area / target_cells)`, so square grids get
-  square cells; for hex grids the count is adjusted for hexagonal
-  packing density. The word "approximate" is load bearing: a grid of
-  square cells over an elongated bounding box needs more of them than a
-  grid of rectangles would (a 1000 x 1 strip at `target_cells = 9`
-  yields cells of side 10.5 and about 95 of them), and clipping to an
-  irregular boundary moves the count again. Pass `cellsize` when the
-  count matters more than the shape.
+  derived from it as `sqrt(area / target_cells)`, where `area` is that
+  of the boundary's bounding box, so square grids get square cells; for
+  hex grids the count is adjusted for hexagonal packing density and the
+  size rounded so that a whole number of hexagon widths spans the longer
+  side of the box. The size does not depend on which way the boundary
+  lies; the count can, because hexagon rows are 0.87 `cellsize` apart
+  while columns are `cellsize` apart (about 10 percent on a moderately
+  elongated box, up to 1.7 times on a strip narrower than one hexagon).
+  The word "approximate" is load bearing: a grid of square cells over an
+  elongated bounding box needs more of them than a grid of rectangles
+  would (a 1000 x 1 strip at `target_cells = 9` yields cells of side
+  10.5 and about 95 of them), and clipping to an irregular boundary
+  moves the count again. Pass `cellsize` when the count matters more
+  than the shape.
 
 - type:
 
@@ -79,11 +85,23 @@ create_grid_polygons(
 
 - crs:
 
-  Optional target CRS. When `NULL` (default) the boundary is projected
-  with
+  Optional target CRS: anything
+  [`sf::st_crs()`](https://r-spatial.github.io/sf/reference/st_crs.html)
+  accepts, including an sf or sfc layer, whose CRS is used. When `NULL`
+  (default) a lon/lat boundary is projected with
   [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md),
   which changes the CRS of the returned grid; a message reports this
-  unless `quiet = TRUE`.
+  unless `quiet = TRUE`. When that CRS would distort cell areas across
+  the boundary by more than 1 percent (Web Mercator over a near-global
+  extent, a UTM zone stretched well past its width),
+  `ensure_projected(purpose = "area")` is used instead, with a logged
+  warning, so the cells stay equal-area; a local extent keeps its UTM
+  zone. A geographic `crs` (EPSG:4326, say) is the CRS the grid is
+  returned in: a grid sized by `target_cells` or `n` is laid in that
+  projected CRS and then transformed, with long edges densified. A
+  `cellsize` is in the units of `crs`, so with a geographic `crs` it is
+  in degrees and the grid is laid in degrees, as asked; such cells are
+  not equal-area.
 
 - quiet:
 

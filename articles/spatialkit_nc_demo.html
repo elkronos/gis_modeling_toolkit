@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">23 September 2026</h4>
+            <h4 data-toc-skip class="date">27 September 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatialkit_nc_demo.Rmd" class="external-link"><code>vignettes/spatialkit_nc_demo.Rmd</code></a></small>
       <div class="d-none name"><code>spatialkit_nc_demo.Rmd</code></div>
@@ -312,8 +312,11 @@ doing so loses the design-effect machinery below.</p>
 <span><span class="co">## 5       5 5    79.61205    5.327447    2.382507</span></span>
 <span><span class="co">## 6       6 4    84.14516    7.886035    3.943018</span></span></code></pre>
 <p>The <code>..se_*</code> columns are <strong>IID</strong> standard
-errors at the default <code>deff = 1</code>, which is anticonservative
-when points inside a cell are spatially correlated.
+errors at the default <code>deff = 1</code>. That is the right standard
+error for each cell’s own mean, the value a choropleth shows, when the
+points are spread through the cell. As a standard error for the
+population (grand) mean it is anticonservative when points inside a cell
+are spatially correlated. For that population-level use,
 <code>deff = "kish"</code> applies Kish’s design-effect correction from
 an estimated intra-class correlation, and
 <code>attr(., "deff_applied")</code> records what was used:</p>
@@ -451,16 +454,21 @@ all-pairs fit is the estimate whenever it is usable; the directional
 maximum stands in for it only when the all-pairs fit fails, and the
 <code>anisotropy_used</code> attribute is <code>TRUE</code> in that case
 alone. If you <em>know</em> the field is anisotropic, size blocks from
-<code>max(attr(sac, "directional"))</code> explicitly. It returns
-<code>NA</code> (still classed <code>sac_range</code>, so it prints as a
-bare <code>NA</code>) when the empirical variogram never reaches a sill,
-because an unidentified range must not be used to size blocks.</p>
+the longest directional range explicitly:
+<code>max(attr(sac, "directional_fitted"), na.rm = TRUE)</code>, after
+checking <code>attr(sac, "directional_status")</code>, since
+<code>directional</code> is <code>NA</code> for a direction that ran
+past the fitted lags, which on such a field is often the long one. It
+returns <code>NA</code> (still classed <code>sac_range</code>, so it
+prints as <code>NA</code>) when the empirical variogram never reaches a
+sill, because an unidentified range must not be used to size blocks.</p>
 <div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sac</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_sac_range.html">estimate_sac_range</a></span><span class="op">(</span><span class="va">points_sf</span>, response_var <span class="op">=</span> <span class="st">"y"</span>,</span>
 <span>                          predictor_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"elevation"</span>, <span class="st">"pop_density"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">sac</span></span></code></pre></div>
 <pre><code><span><span class="co">## NA </span></span>
-<span><span class="co">##   directional: 0 deg = 22475325 (past the fitted lags), 45 deg = 1243020, 90 deg = 1591410 (past the fitted lags), 135 deg = 3346918 (past the fitted lags)</span></span></code></pre>
+<span><span class="co">##   directional: 0 deg = 22475325 (past the fitted lags), 45 deg = 1243020, 90 deg = 1591410 (past the fitted lags), 135 deg = 3346918 (past the fitted lags)</span></span>
+<span><span class="co">##   in US survey feet of EPSG:2264; variogram of the residuals on predictor_vars (ols)</span></span></code></pre>
 <div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html" class="external-link">is.na</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="st">"no identified range:"</span>, <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">sac</span>, <span class="st">"rejected_reason"</span><span class="op">)</span>, <span class="st">"\n"</span><span class="op">)</span></span>
@@ -504,7 +512,7 @@ autocorrelation range and therefore leaking:</p>
 <span><span class="op">(</span><span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_random</span>,  <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span> <span class="op">/</span></span>
 <span> <span class="fu"><a href="../reference/plot_folds.html">plot_folds</a></span><span class="op">(</span><span class="va">folds_blocked</span>, <span class="va">points_sf</span>, boundary <span class="op">=</span> <span class="va">nc_boundary</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="fu"><a href="https://patchwork.data-imaginist.com/reference/plot_layout.html" class="external-link">plot_layout</a></span><span class="op">(</span>guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></code></pre></div>
-<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map each fold occupies a contiguous part of the state, with the block grid drawn behind." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="spatialkit_nc_demo_files/figure-html/plot-folds-1.png" class="r-plt" alt="Two maps of the same points, random folds above and blocked folds below, sharing one fold legend. In the random map the five colours are interleaved everywhere; in the blocked map, with the block grid drawn behind, every block holds a single fold and each fold is two to four whole blocks: four of the five folds fall in two separate parts of the state, and the fifth's two blocks meet only at a corner." width="100%" style="display: block; margin: auto;"></p>
 </div>
 <div class="section level3">
 <h3 id="c--the-number-the-fold-scheme-changes">5c. The number the fold scheme changes<a class="anchor" aria-label="anchor" href="#c--the-number-the-fold-scheme-changes"></a>
@@ -626,6 +634,21 @@ residuals; visible structure means unmodelled spatial autocorrelation.
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n"</span>,</span>
 <span>            <span class="va">gwr_fit</span><span class="op">$</span><span class="va">info</span><span class="op">$</span><span class="va">bandwidth</span>, <span class="va">gwr_met</span><span class="op">$</span><span class="va">R2</span>, <span class="va">gwr_met</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## Bandwidth: 42 neighbours | in-sample R2: 0.879 | RMSE: 4.664</span></span></code></pre>
+<p>The fit raises no collinearity warning, but its survey of the local
+designs (<code>gwr_fit$info$local_collinearity</code>, see “Collinearity
+diagnostics” in <code><a href="../reference/fit_gwr_model.html">?fit_gwr_model</a></code>) is worth a look: in 25 of
+the 300 windows the condition index that includes the intercept
+(<code>cn</code>) is above 30. The cause is <code>elevation</code>: it
+averages about 3,000 but has a standard deviation of only about 400
+inside a 42-neighbour window, so locally it is nearly collinear with the
+intercept. What that leaves poorly determined is the local intercepts,
+not the slopes: the slope index (<code>cn_slopes</code>), which centres
+the predictors in each window, stays below 30 everywhere, so no slope is
+masked and the fit does not warn.
+<code>plot(gwr_fit, type = "coefficients", term = "Intercept")</code>
+draws those 25 intercepts hollow. Centring the predictor
+(<code>elevation - mean(elevation)</code>) gives the same bandwidth and
+fitted values and determines the intercepts too.</p>
 </div>
 <div class="section level3">
 <h3 id="comparing-backends-on-identical-folds">Comparing backends on identical folds<a class="anchor" aria-label="anchor" href="#comparing-backends-on-identical-folds"></a>
@@ -689,7 +712,7 @@ with:</p>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n"</span>,</span>
 <span>            <span class="va">aoa</span><span class="op">$</span><span class="va">n_inside</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">n_outside</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">n_na</span>, <span class="va">aoa</span><span class="op">$</span><span class="va">threshold</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## inside: 1629 | outside: 0 | undetermined: 0 | DI threshold 0.184</span></span></code></pre>
+<pre><code><span><span class="co">## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.184</span></span></code></pre>
 <div class="sourceCode" id="cb52"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># AOA is NA wherever a predictor was missing or non-finite, and `!NA` is NA,</span></span>
 <span><span class="co"># which R silently skips in a subscripted assignment. Test for TRUE and let</span></span>
@@ -858,14 +881,14 @@ drawing it.</p>
 <span><span class="co">## [34] e1071_1.7-17          scales_1.4.0          MASS_7.3-65          </span></span>
 <span><span class="co">## [37] cli_3.6.6             mvtnorm_1.4-2         rmarkdown_2.32       </span></span>
 <span><span class="co">## [40] intervals_0.15.5      ragg_1.5.2            generics_0.1.4       </span></span>
-<span><span class="co">## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1          </span></span>
+<span><span class="co">## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1-1        </span></span>
 <span><span class="co">## [46] spdep_1.4-2           DBI_1.3.0             cachem_1.1.0         </span></span>
 <span><span class="co">## [49] proxy_0.4-29          splines_4.6.1         spatialreg_1.4-3     </span></span>
 <span><span class="co">## [52] parallel_4.6.1        s2_1.1.12             marginaleffects_1.0.0</span></span>
 <span><span class="co">## [55] vctrs_0.7.3           boot_1.3-32           Matrix_1.7-5         </span></span>
 <span><span class="co">## [58] sandwich_3.1-3        jsonlite_2.0.0        spData_2.3.5         </span></span>
 <span><span class="co">## [61] systemfonts_1.3.2     jquerylib_0.1.4       units_1.0-1          </span></span>
-<span><span class="co">## [64] glue_1.8.1            pkgdown_2.2.1         DEoptimR_1.2-1       </span></span>
+<span><span class="co">## [64] glue_1.8.1            pkgdown_2.2.1         DEoptimR_1.2-2       </span></span>
 <span><span class="co">## [67] codetools_0.2-20      gstat_2.1-6           gtable_0.3.6         </span></span>
 <span><span class="co">## [70] deldir_2.0-4          tibble_3.3.1          logger_0.4.3         </span></span>
 <span><span class="co">## [73] pillar_1.11.1         htmltools_0.5.9       R6_2.6.1             </span></span>
@@ -873,7 +896,7 @@ drawing it.</p>
 <span><span class="co">## [79] lattice_0.22-9        backports_1.5.1       bslib_0.12.0         </span></span>
 <span><span class="co">## [82] class_7.3-23          Rcpp_1.1.2            coda_0.19-4.1        </span></span>
 <span><span class="co">## [85] nlme_3.1-169          spacetime_1.3-4       ranger_0.18.0        </span></span>
-<span><span class="co">## [88] xfun_0.61             fs_2.1.0              zoo_1.9-0            </span></span>
+<span><span class="co">## [88] xfun_0.61             fs_2.1.0              zoo_1.9-1            </span></span>
 <span><span class="co">## [91] pkgconfig_2.0.3</span></span></code></pre>
 </div>
 </div>

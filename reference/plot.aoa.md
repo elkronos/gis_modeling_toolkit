@@ -4,13 +4,21 @@
 applicability; it does not say whether the rest sit comfortably inside
 or crowd against the threshold, nor how far outside the outsiders are.
 This draws the dissimilarity index of the prediction locations against
-that of the cross-validated training data, with the threshold marked, so
-the prediction set can be read as mostly inside, marginal or largely
-outside. The training curve is the reference the threshold was derived
-from: the threshold is the largest cross-validated training DI inside an
-outlier fence, so the curve reaches it exactly when no training value
-was fenced off and runs past it, by the tail the fence removed, when
-some were.
+that of the training data, with the threshold marked, so the prediction
+set can be read as mostly inside, marginal or largely outside. The
+training DI is cross-validated over the `folds` passed to
+[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
+or without them is each training point's distance to its nearest other
+training point; the legend and the caption say which. The training curve
+is the reference the threshold was derived from: the threshold is the
+largest training DI inside an outlier fence, so the curve reaches it
+exactly when no training value was fenced off and runs past it, by the
+tail the fence removed, when some were. A prediction location outside on
+a predictor dropped for having no training variance has `DI = Inf`: it
+counts in the prediction curve, which then tops out below 1, and the
+caption says how many are off the axis. A location with a missing
+predictor (`DI = NA`) is neither inside nor outside; it is left out of
+the curve and the caption counts it.
 
 ## Usage
 

@@ -29,7 +29,7 @@ library(spatialkit)
 
 set.seed(11)
 n  <- 350
-xy <- data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000))
+xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
 D  <- as.matrix(dist(xy))
 field <- as.numeric(t(chol(exp(-D / 70) + diag(1e-8, n))) %*% rnorm(n))
 xy$a  <- rnorm(n)
@@ -42,8 +42,9 @@ pts   <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 
 lm_fit <- function(train_sf, response_var = "z", predictor_vars = c("a", "b")) {
   d   <- st_drop_geometry(train_sf)
-  fml <- as.formula(paste(response_var, "~",
-                          paste(predictor_vars, collapse = " + ")))
+  # With no predictors the model is intercept-only: "z ~ 1", not "z ~ ".
+  rhs <- if (length(predictor_vars)) paste(predictor_vars, collapse = " + ") else "1"
+  fml <- as.formula(paste(response_var, "~", rhs))
   new_spatial_fit(
     subclass       = "lmsurf_fit",
     engine         = lm(fml, data = d),
@@ -127,9 +128,12 @@ always explained.
 ## 2. Standard errors on aggregated values
 
 Aggregate the points into cells and the naive standard error of each
-cell mean is $`s/\sqrt{n}`$, which assumes the points in a cell are
-independent. On an autocorrelated field they are not, and the effective
-sample size is smaller than the count.
+cell mean is $`s/\sqrt{n}`$, which treats the points in a cell as
+independent. For the cell’s own mean that is the right standard error
+when the points are spread through the cell. For the cell mean as an
+estimate of the population (grand) mean it is not: on an autocorrelated
+field the points in a cell share the cell’s departure from that mean,
+and the effective sample size is smaller than the count.
 
 ``` r
 
@@ -171,9 +175,12 @@ data.frame(n         = iid$n,
     ## 5  8 0.527 0.854     0.996
 
 The median cell’s standard error is 1.96 times wider under `kish` and
-2.35 times wider under `variogram` than the independent-sampling one. A
-confidence interval built on the naive number is about half the width it
-should be on this field.
+2.35 times wider under `variogram` than the independent-sampling one. As
+an estimate of the population mean, a confidence interval built on the
+naive number is about half the width it should be on this field. For the
+cell’s own mean the naive standard error is the right one, and section 3
+([`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md))
+covers that quantity.
 
 `deff = "kish"` estimates an intra-class correlation from the
 within-cell and between-cell variance and applies Kish’s factor.
@@ -226,7 +233,7 @@ ka
 
     ## Block-kriging adequacy over 25 cells (350 points, nmax 50)
     ##   variogram: Nug(2.34, 0) + Exp(1.49, 208); sill 3.83, nugget 2.34 (61%), range 623.7
-    ##   kriging variance / sill: median 0.031, range 0.021-0.054; 0 cell(s) above 0.5
+    ##   kriging variance / no-data variance of the cell mean (1 = nothing from the data): median 0.130, range 0.090-0.217; 0 cell(s) above 0.5
     ##   kriging variance exceeds s^2/n in 4 of the 25 cell(s) with two or more points
     ##   kriged minus plain mean: |shift| > 1 SE in 4 of 25 cell(s), > 2 SE in 0
     ##   empty cells: 0 (kriged estimate and variance available for each)
@@ -299,9 +306,10 @@ plot(aoa)
 ```
 
 ![Cumulative distribution of the dissimilarity index. The prediction
-locations rise far more slowly than the cross-validated training points,
-and most of them sit beyond the dashed threshold, so the cross-validated
-score does not apply to most of the
+locations rise far more slowly than the training points, each measured
+to its nearest other training point since no folds were passed, and most
+of them sit beyond the dashed threshold, so the cross-validated score
+does not apply to most of the
 grid.](diagnostics_files/figure-html/aoa-plot-1.png)
 
 Shifting one predictor three standard deviations moves most of the grid
@@ -326,8 +334,9 @@ c(inside = sum(inside), outside_or_unknown = sum(!inside))
 
 **Coordinates as predictors.** A model given `x` and `y` can reproduce
 the training surface by memorising location, and random folds will not
-detect it. `fit_rf_model(include_coords = TRUE)` warns for this reason.
-Score any such model with blocked folds, and read
+detect it. `fit_rf_model(include_coords = TRUE)` logs a caution (once
+per session) for this reason. Score any such model with blocked folds,
+and read
 [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md)
 for what the blocking has to be wide enough to do.
 
@@ -336,26 +345,51 @@ set and then cross-validating the chosen set gives the selection a look
 at every test row.
 [`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
 does the selection inside the resampling, and it takes the fold scheme
-as an argument for the same reason the outer loop does:
+as an argument for the same reason the outer loop does. Blocked folds
+only keep test rows apart from training rows if the blocks are at least
+as wide as the autocorrelation range.
+[`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+estimates that range for what the candidates leave unexplained, about
+330 m on this field, and warns when the blocks are narrower. The default
+grid here has blocks about 250 m across, so `block_size = 400` is
+passed:
 
 ``` r
 
 # select_features_forward() calls fit_fn(train_sf, vars), so the learner above
-# needs an adapter that puts `vars` in the predictor slot.
+# needs an adapter that puts `vars` in the predictor slot. Step 0 fits it with
+# no predictors at all, which is why lm_fit() builds "z ~ 1" for an empty set.
 sel_fn <- function(train_sf, vars) lm_fit(train_sf, "z", vars)
 
 sel <- select_features_forward(pts, "z", c("a", "b"), fit_fn = sel_fn,
-                               k = 4, method = "block_kfold", seed = 1)
+                               k = 4, method = "block_kfold",
+                               block_size = 400, seed = 1)
 sel$selected
 ```
 
     ## [1] "a"
 
+``` r
+
+sel$history
+```
+
+    ##   step variable    score n_pred
+    ## 1    0   <none> 1.886912    350
+    ## 2    1        a 1.113470    350
+    ## 3    1        b 1.887999    350
+    ## 4    2        b 1.116468    350
+
+`history` has one row per candidate scored at each step. Step 0 is the
+intercept-only model, so `a` had to beat it to be added, and at step 2
+adding the noise variable `b` made the cross-validated RMSE slightly
+worse, so the selection stopped at `a`. With `tol` set, a candidate has
+to improve the score by more than `tol`, from step 1 on.
+
 Its inner folds default to the scheme you pass. Passing `random_kfold`
-there produces a warning, because a leaky inner loop can select a
-variable for being spatially close to the response and an honest outer
-loop will then report a respectable number for a dishonestly chosen
-feature set.
+there logs a caution, because a leaky inner loop can select a variable
+for being spatially close to the response and an honest outer loop will
+then report a respectable number for a dishonestly chosen feature set.
 
 ## Next
 

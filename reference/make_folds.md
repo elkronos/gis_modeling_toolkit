@@ -1,7 +1,8 @@
 # Create spatial cross-validation folds
 
-Builds train/test splits using random K-fold, spatial block K-fold, or
-buffered leave-one-out strategies.
+Builds train/test splits by random k-fold, spatial block k-fold,
+leave-location-out, buffered leave-one-out or nearest-neighbour distance
+matching (NNDM) leave-one-out.
 
 ## Usage
 
@@ -46,17 +47,20 @@ make_folds(
 
 - k:
 
-  Integer; number of folds. Must be a single whole number \>= 1. A
-  fraction, `NA` or a vector is an error, because a non-integer used to
-  truncate silently and leave the last rows in no test set at all. Not
-  every method honours it. `"buffered_loo"` and `"nndm"` are
-  leave-one-out schemes and always return `k = n` regardless of what was
-  asked for; `"block_kfold"` lowers it when the grid yields fewer than
-  `k` non-empty blocks, and `"leave_location_out"` lowers it when there
-  are fewer than `k` distinct groups. Read the `k` element of the
-  returned list, and do not assume the requested value. A reduction is
-  written to the package log and raises no R warning, so
-  `tryCatch(warning = )` will not see it and
+  Integer; number of folds. Must be a single whole number \>= 1, and is
+  required except for the two leave-one-out methods. A fraction, `NA` or
+  a vector is an error, because a non-integer used to truncate silently
+  and leave the last rows in no test set at all. Not every method
+  honours it. `"buffered_loo"` and `"nndm"` are leave-one-out schemes
+  and always return `k = n` regardless of what was asked for;
+  `"block_kfold"` lowers it when the grid yields fewer than `k`
+  non-empty blocks, and `"leave_location_out"` lowers it when there are
+  fewer than `k` distinct groups. `k = 1` is raised to 2 by
+  `"random_kfold"`, `"block_kfold"` and `"leave_location_out"`, since
+  one fold has no training set. Read the `k` element of the returned
+  list, and do not assume the requested value. A reduction is written to
+  the package log and raises no R warning, so `tryCatch(warning = )`
+  will not see it and
   [`suppressWarnings()`](https://rdrr.io/r/base/warning.html) will not
   hide it.
 
@@ -72,21 +76,26 @@ make_folds(
 
 - block_nx, block_ny:
 
-  Optional grid dimensions for block_kfold. Ignored when `block_size` or
-  `auto_range` override them.
+  Optional grid dimensions for block_kfold, each a single whole number
+  \>= 1. Give both, or give one and the other is derived from the
+  extent's aspect ratio so that the blocks are roughly square. Ignored
+  when `block_size` or `auto_range` override them.
 
 - block_multiplier:
 
-  Numeric, default 3. When neither `block_size` nor
+  A single positive number, default 3. When neither `block_size` nor
   `block_nx`/`block_ny` is given, the automatic grid aims for
   `block_multiplier * k` blocks over the extent (aspect-preserving), so
-  each fold holds out about `block_multiplier` blocks. With 1, every
-  fold is one contiguous region and the score depends heavily on which
-  region each fold happened to get; with many, the blocks shrink towards
-  single points and the scheme drifts back towards random k-fold. 3 is a
-  compromise between those two, not a published constant. The block size
-  that matters for leakage is the autocorrelation range, which is what
-  `block_size` and `auto_range` control.
+  each fold holds out about `block_multiplier` blocks. An extent more
+  than about `block_multiplier * k` times as wide as it is tall (or as
+  tall as it is wide) gets a single row (or column) of that many blocks.
+  With 1, every fold is one contiguous region and the score depends
+  heavily on which region each fold happened to get; with many, the
+  blocks shrink towards single points and the scheme drifts back towards
+  random k-fold. 3 is a compromise between those two, not a published
+  constant. The block size that matters for leakage is the
+  autocorrelation range, which is what `block_size` and `auto_range`
+  control.
 
 - block_size:
 
@@ -114,16 +123,26 @@ make_folds(
 
   Logical. If `TRUE`, the spatial autocorrelation range is estimated via
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-  (which fits directional variograms to account for anisotropy) and used
-  as the minimum `block_size`. Requires `response_var`. An explicit
-  `block_size` takes precedence. Default `FALSE`. Sizing blocks from the
-  autocorrelation range is the recommendation of Roberts et al. (2017)
-  and what blockCV (Valavi et al. 2019) automates. blockCV takes the
-  fitted variogram's range *parameter* as the block size, whereas this
-  uses the *effective* range
+  (the omnidirectional, all-pairs range; the directional ranges it also
+  fits are a diagnostic only, so on a field known to be anisotropic pass
+  `block_size = max(attr(r, "directional_fitted"), na.rm = TRUE)`
+  yourself after checking `attr(r, "directional_status")`, see
+  [`estimate_sac_range`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md))
+  and used as the minimum `block_size`. Requires `response_var`. An
+  explicit `block_size` takes precedence. Default `FALSE`. Sizing blocks
+  from the autocorrelation range is the recommendation of Roberts et
+  al. (2017) and what blockCV (Valavi et al. 2019) automates. blockCV
+  takes the fitted variogram's range *parameter* as the block size,
+  whereas this uses the *effective* range
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   returns (three times that parameter for an exponential fit), so its
-  blocks are larger than blockCV's from the same variogram.
+  blocks are larger than blockCV's from the same variogram. When no
+  range is identified, the geometric grid is used instead, with a
+  warning that gives the reason. An identified range above half the
+  extent in both directions leaves room for a single block, and
+  `make_folds()` then stops with an error naming the size, rather than
+  return one fold with an empty training set: pass a smaller
+  `block_size`, or use `method = "nndm"`.
 
 - range_frac:
 
@@ -131,12 +150,17 @@ make_folds(
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   when `auto_range = TRUE`. A fitted range beyond the longest lag the
   empirical variogram was fitted over is rejected as unidentified, and
-  block sizing falls back to geometry, so the grid does not collapse to
-  a single block. Default 1.0.
+  block sizing falls back to geometry (with a warning). A range within
+  that bound can still be too wide for two blocks; see `auto_range`.
+  Default 1.0.
 
 - response_var:
 
   Character(1) response column name. Required when `auto_range = TRUE`.
+  For `"block_kfold"` a name that is not a column of `points_sf` is an
+  error, whether or not `auto_range` is set: with it off the response
+  still feeds the leakage warning, which a misspelt name would silently
+  disable.
 
 - group_var:
 
@@ -167,27 +191,43 @@ make_folds(
 
 - boundary:
 
-  Optional polygonal sf/sfc for block_kfold.
+  Optional polygonal sf/sfc for block_kfold. The grid is clipped to it;
+  a cell that the boundary only touches at a corner or along an edge is
+  not a block. A boundary without a CRS is brought into the points' CRS:
+  reprojected from EPSG:4326 when its coordinates look like lon/lat,
+  otherwise stamped, with a warning either way. The same goes for
+  `prediction_points` and `blocks`.
 
 - buffer:
 
-  Positive numeric distance for buffered_loo.
+  For `"buffered_loo"`: a single positive number, the distance within
+  which the held-out point's neighbours are excluded from its training
+  set. Like `block_size` it is in the units of the CRS the folds are
+  built in (`params$crs`), which for geographic (lon/lat) input is the
+  metre CRS
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  chooses: 0.1 means 0.1 m, not 0.1 degrees. A buffer that excludes no
+  neighbour from any fold makes the scheme plain leave-one-out, and is
+  warned about.
 
 - min_train:
 
   For `method = "nndm"`: the smallest fraction of the data any fold's
   training set may be reduced to by neighbour exclusion. Default `0.5`,
-  as in `CAST::nndm()`.
+  as in `CAST::nndm()`. Where it binds, the distance matching stops
+  short and the cross-validation stays optimistic; see **Details**.
 
 - phi:
 
   For `method = "nndm"`: the distance up to which the two
   nearest-neighbour distance distributions are matched, in the CRS the
-  folds are built in; the exclusion never pushes a held-out point's
-  nearest neighbour beyond it. In Mila et al. (2022), and in
-  `CAST::nndm()`, \\\phi\\ is the autocorrelation range of the outcome:
-  beyond it observations are effectively independent, so matching is
-  unnecessary.
+  folds are built in. Matching is attempted only while a held-out
+  point's nearest-neighbour distance is at most `phi`; the exclusion
+  that takes it past `phi` is the last one, so a realised distance can
+  exceed `phi` by up to one neighbour step, as in `CAST::nndm()`. In
+  Mila et al. (2022), and in `CAST::nndm()`, \\\phi\\ is the
+  autocorrelation range of the outcome: beyond it observations are
+  effectively independent, so matching is unnecessary.
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
   gives such a value. Default `NULL` = the largest
   prediction-to-training distance, which matches everywhere (`CAST`'s
@@ -195,7 +235,9 @@ make_folds(
 
 - drop_empty_blocks:
 
-  Logical. Default TRUE.
+  Logical. Default TRUE. With `FALSE` the blocks that hold no point are
+  kept and packed into folds too, but `k` is still lowered to the number
+  of blocks that hold points, so no fold is left without test points.
 
 - blocks:
 
@@ -243,24 +285,26 @@ the row each one came from in that original layer (a grid cell's index
 in the full `grid_nx` by `grid_ny` grid, or the row of the `blocks`
 argument), so `blocks[params$blocks$source_row, ]` recovers them with
 their own columns and in their own order. It runs from 1 to
-`params$n_blocks` and is the identity when nothing was dropped.
-`params$block_sizes` is the number of points in each block, indexed by
-`block_id` (zeros are empty blocks that `drop_empty_blocks = FALSE`
-kept), and `params$fold_blocks` is a list with one integer vector per
-fold naming the blocks packed into it. Between them the folds account
-for every block exactly once, empty ones included, so a fold's territory
-on the map is all of its blocks and not merely the ones that happen to
-hold points. So `table(assignment$fold)` can be traced back to the
-blocks it is made of, a fold can be seen to be one contiguous region or
-several, and the blocks can be drawn over the data
+`params$n_blocks` and is the identity when nothing was dropped. For a
+grid `params$n_blocks` is `grid_nx * grid_ny`, the cells a `boundary`
+clips away included, and `params$blocks_used` is the number of blocks
+returned. `params$block_sizes` is the number of points in each block,
+indexed by `block_id` (zeros are empty blocks that
+`drop_empty_blocks = FALSE` kept), and `params$fold_blocks` is a list
+with one integer vector per fold naming the blocks packed into it.
+Between them the folds account for every block exactly once, empty ones
+included, so a fold's territory on the map is all of its blocks and not
+merely the ones that happen to hold points. So `table(assignment$fold)`
+can be traced back to the blocks it is made of, a fold can be seen to be
+one contiguous region or several, and the blocks can be drawn over the
+data
 ([`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
 does so).
 
-For the methods that work in projected space (`"block_kfold"`,
-`"buffered_loo"` and `"nndm"`), `params` carries a
-`params$blocks_supplied` that says whether the blocks came from `blocks`
-or from a grid built here, and `params$boundary_supplied` whether a
-`boundary` was given; `params$row_probe` is a small sample of row IDs
+For `"block_kfold"`, `params` carries a `params$blocks_supplied` that
+says whether the blocks came from `blocks` or from a grid built here,
+and `params$boundary_supplied` whether a `boundary` was given. Every
+method's `params` carries `params$row_probe`, a small sample of row IDs
 and coordinates that every `cv_*()` compares against the data it is
 handed, so folds built from a different layer of the same size are
 refused, never applied silently.
@@ -302,22 +346,46 @@ arbitrary buffer, so that the resulting training-to-test distance
 distribution approaches the distribution of distances from your actual
 prediction locations to the training data.
 
-The procedure is the paper's own (as in `CAST::nndm()`), and it is
-deterministic. Let \\G\_{ij}\\ be the empirical distribution of
-prediction-to-nearest-training distances and \\G_j^\*\\ the distribution
-of each held-out point's nearest remaining training point. Starting from
-plain leave-one-out, the point with the smallest \\G_j^\*\\ at which the
-realised distribution exceeds the target (\\G_j^\*(r) \> G\_{ij}(r)\\)
-has its nearest training neighbour removed, and this repeats until no
-such point remains, subject to two limits: a point's nearest-neighbour
-distance is never pushed beyond `phi` (default: the largest prediction
-distance, since a training point already further than every prediction
-distance has nothing to match), and no fold's training set is stripped
-below `min_train` of the data.
+The procedure is the paper's, and it is deterministic. Let \\G\_{ij}\\
+be the empirical distribution of prediction-to-nearest-training
+distances and \\G_j^\*\\ the distribution of each held-out point's
+nearest remaining training point. Starting from plain leave-one-out, the
+point with the smallest \\G_j^\*\\ at which the realised distribution
+exceeds the target (\\G_j^\*(r) \> G\_{ij}(r)\\) has its nearest
+training neighbour removed, and this repeats until no such point
+remains, subject to two limits: a point is matched only while its
+nearest-neighbour distance is at most `phi` (default: the largest
+prediction distance, since a training point already further than every
+prediction distance has nothing to match), so the exclusion that takes
+it past `phi` is its last and a realised distance can exceed `phi` by up
+to one neighbour step; and no fold's training set is stripped below
+`min_train` of the data.
 
-The realised distribution is then never *more optimistic* than the
-target: \\G_j^\*(r) \le G\_{ij}(r)\\ up to the granularity of the
-neighbour distances, which is the property the method exists to deliver.
+It differs from `CAST::nndm()` in two details, so the folds agree
+closely with CAST's but not exactly. The removal rule is strict: a
+neighbour is removed whenever the realised distribution exceeds the
+target, whereas CAST removes one only while the realised distribution,
+less the point about to move, is still at or above the target. The rule
+here therefore removes up to one point more per distance value (a few
+percent more removals in all on clustered layouts), erring on the
+pessimistic side. And ties in \\G_j^\*\\ are broken by the points'
+coordinates, not by their row index as in CAST, so the folds do not
+depend on the order of the rows.
+
+Where neither limit binds, the realised distribution is then never *more
+optimistic* than the target: \\G_j^\*(r) \le G\_{ij}(r)\\ up to the
+granularity of the neighbour distances, which is the property the method
+exists to deliver. Beyond `phi` no matching is attempted, by design.
+`min_train` is different: when the prediction locations lie further from
+the samples than a fold can be made to hold out (clustered samples and a
+prediction domain well beyond them, the layout NNDM is meant for), it
+stops the matching early and the realised distances stay optimistic.
+`params$n_at_min_train` counts the folds that were held at the floor
+while still closer than the target allows, and `make_folds()` warns when
+that leaves more than one point's worth of excess at or below `phi`.
+Lower `min_train` to match further, or read the cross-validated score as
+an upper bound on performance at the prediction locations.
+
 An earlier version of this package drew one random radius per point from
 \\G\_{ij}\\ and excluded up to the order statistic *closest* to it,
 which rounds down half the time: on a two-cluster layout the realised

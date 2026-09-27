@@ -136,7 +136,10 @@ the setting is recorded in <code>$info</code> and printed with the fit.</p></dd>
 <dd><p>Fraction of rows drawn for each tree.  <code>NULL</code>
 (default) uses ranger's rule: all rows when <code>replace = TRUE</code>,
 0.632 (the expected share of distinct rows in a bootstrap sample)
-when <code>replace = FALSE</code>.  A single number in (0, 1] overrides it.</p></dd>
+when <code>replace = FALSE</code>.  A single number in (0, 1] overrides it.
+<code>replace = FALSE</code> with <code>sample_fraction = 1</code> grows every tree
+on every row, so nothing is out of bag: the fit warns, and see
+<strong>What fitted() returns</strong>.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -225,6 +228,17 @@ consequence is that <code><a href="https://rdrr.io/r/base/summary.html" class="e
 a <code>gwr_fit</code> or <code>bayesian_fit</code>, whose fitted values are in-sample:
 do not compare the two directly. <code><a href="compare_models_cv.html">compare_models_cv</a></code> exists for
 that.</p>
+<p>A row that every tree sampled has no out-of-bag prediction, and ranger
+reports <code>NaN</code> for it.  That is every row under <code>replace = FALSE</code>
+with <code>sample_fraction = 1</code>, and a few under a small <code>num_trees</code>.
+The fit warns with the count; <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> and <code><a href="https://rdrr.io/r/stats/residuals.html" class="external-link">residuals()</a></code> are
+<code>NaN</code> on those rows, and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> says how many rows its
+metrics were computed on.  With no row out of bag at all, the OOB error
+(<code>NA</code> in <code>$info$oob_rmse</code> and <code>$info$oob_r_squared</code>) and
+the permutation importance (<code>NaN</code>) are undefined too, and
+<code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> says so.  <code><a href="cv_rf.html">cv_rf()</a></code> scores its fold forests on
+the held-out rows, never out of bag, so it warns once with the number of
+folds affected rather than once per fold.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>
@@ -240,7 +254,9 @@ solution. <em>BMC Bioinformatics</em> 8, 25. <a href="https://doi.org/10.1186/14
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="cv_rf.html">cv_rf</a></code> for a spatially blocked performance estimate,
 <code><a href="area_of_applicability.html">area_of_applicability</a></code>, which can take
-<code>weights = pmax(fit$info$importance, 0)</code>.</p>
+<code>weights = pmax(fit$info$importance, 0)</code> when that importance is
+finite (it is <code>NaN</code> when no row is out of bag; see "What
+fitted() returns").</p>
 <p>Other model fitting:
 <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>,
 <code><a href="fit_gwr_model.html">fit_gwr_model()</a></code>,

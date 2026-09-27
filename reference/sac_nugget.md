@@ -3,7 +3,11 @@
 The nugget variance of the variogram model behind a
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 result: the semivariance at zero separation, i.e. measurement error plus
-variation at scales shorter than the closest pair. It is carried as the
+variation at scales shorter than the first lag bin of the empirical
+variogram (gstat's bins are `cutoff / 15` wide, about `max_dist / 30` at
+the default `cutoff`), which can be far wider than the spacing of close
+pairs. It is extrapolated to zero from that bin, not observed, and a fit
+that runs into its lower bound reports exactly 0. It is carried as the
 `nugget` attribute of every classed result, identified or rejected,
 because it is the number a resolution criterion for a tessellation needs
 (the short-lag variance that no cell can average away).

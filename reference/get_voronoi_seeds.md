@@ -68,12 +68,19 @@ get_voronoi_seeds(
   the distance calculation and dominate it; rows with empty or
   non-finite coordinates are dropped with a warning, so they never reach
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html), which fails
-  on them without naming a cause. A lon/lat cloud is projected before
-  clustering.
+  on them without naming a cause. A lon/lat cloud, or one with no CRS
+  whose coordinates look like lon/lat (the heuristic
+  [`ensure_projected()`](https://elkronos.github.io/gis_modeling_toolkit/reference/ensure_projected.md)
+  applies, with its warning), is projected before clustering.
 
 - kmeans_nstart:
 
-  Integer; nstart for kmeans(). Default 10.
+  Integer; nstart for kmeans(). Default 10. The partition is
+  [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html), not the
+  best-of-25 k-means++ run that
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  scored a count on, so it is not that partition; see
+  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md).
 
 - kmeans_iter:
 
