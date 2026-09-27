@@ -265,7 +265,9 @@ test_that("the builders take a layer's CRS as `crs`", {
 # ---------------------------------------------------------------------------
 
 test_that("random and k-means seeding on a lon/lat boundary raise no lwgeom warning", {
-  skip_if(requireNamespace("lwgeom", quietly = TRUE),
+  # Looked up with system.file() rather than requireNamespace(), which R CMD
+  # check counts as a use of a package DESCRIPTION would have to declare.
+  skip_if(nzchar(system.file(package = "lwgeom")),
           "with lwgeom installed sf does not warn")
   bnd <- .r3s2_box(9, 11, 54, 56, crs = 4326)
   for (s2 in c(TRUE, FALSE)) {
