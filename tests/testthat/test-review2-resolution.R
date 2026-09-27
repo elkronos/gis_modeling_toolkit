@@ -166,11 +166,15 @@ test_that("a rejected range gives cp its nugget and reliability nothing, and say
   expect_true(all(is.na(prof$reliability)))
   expect_equal(attr(prof, "variogram")$nugget, 0.5)
   expect_error(select_resolution(prof, "reliability"), "identified range")
-  # A model that did not converge gives neither.
+  expect_identical(attr(prof, "cp_noise")$source, "variogram nugget")
+  # A model that did not converge gives neither: reliability is NA and Cp
+  # takes its noise variance from the finest level.
   attr(rej, "rejected_reason") <- "variogram model did not converge"
   out <- r2_warnings(resolution_profile(pts, "z", sac = rej, n_levels = 4, nstart = 2))
   expect_true(any(grepl("did not converge", out$warnings)))
-  expect_true(all(is.na(out$value$cp)) && all(is.na(out$value$reliability)))
+  expect_true(all(is.na(out$value$reliability)))
+  expect_true(all(is.finite(out$value$cp)))
+  expect_identical(attr(out$value, "cp_noise")$source, "finest-level residual mean square")
 })
 
 

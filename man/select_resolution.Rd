@@ -32,8 +32,14 @@ or first of the levels this criterion was scored at, which for
 is, in words: the support ceiling, the subsample's ceiling, the range
 floor, the ladder's own end,
 or the first or last level the criterion is computable at; \code{NA} for
-an interior optimum), \code{n_levels} and \code{values} (the criterion
-at every level, \code{NA} where it could not be computed).
+an interior optimum), \code{n_levels}, \code{values} (the criterion
+at every level, \code{NA} where it could not be computed) and
+\code{seeds} (an sf POINT layer, with \code{seed_id}, of the centres of
+the partition the profile scored at \code{best}, in the CRS it was
+computed in; \code{NULL} for a profile that does not carry them).  Their
+Voronoi cells are the cells that were scored;
+\code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
+\code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.
 }
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:

@@ -228,7 +228,14 @@
 #'     only when the nugget is a large share of the sill.  With a nugget of 0
 #'     (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
 #'     bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
-#'     the field; the profile warns.}
+#'     the field; the profile warns.  When the variogram gives no nugget (none
+#'     was fitted, its fit did not converge, its range is below the shortest
+#'     lag, or \code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
+#'     choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
+#'     finest level whose cells hold at least two scored rows on average.  It
+#'     counts the structure within those cells as noise too, so on average it
+#'     is no smaller than the nugget and errs towards fewer cells; the profile warns,
+#'     and \code{attr(, "cp_noise")} records which was used.}
 #'   \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 #'     residuals of the cell means regressed on the cell-mean predictors (an
 #'     intercept alone when there are none): how much spatial structure the
@@ -303,7 +310,8 @@
 #'   \code{NA}, since that needs the range; one whose model did not converge,
 #'   or whose range is below the shortest lag fitted (a structure that
 #'   cannot be told from a nugget, so the nugget is not identified either),
-#'   gives neither.  Under \code{select_on = "split"} the sac must come from
+#'   gives neither, and \code{cp} takes its noise variance from the finest
+#'   level (see \code{cp} above).  Under \code{select_on = "split"} the sac must come from
 #'   the selection half alone: run the profile once without it, fit the sac
 #'   on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
 #'   call with the same \code{seed}, which makes the same split.  When
@@ -311,8 +319,9 @@
 #'   (its selection half under \code{"split"}) with the same
 #'   \code{predictor_vars}.  A plain number is taken as the range alone, in
 #'   the units of the CRS the profile is computed in (metres for lon/lat
-#'   input): it sets the floor, and \code{cp} and \code{reliability}, which
-#'   need a fitted model, are \code{NA}.  A \code{units} object is refused
+#'   input): it sets the floor, \code{reliability}, which needs a fitted
+#'   model, is \code{NA}, and \code{cp} takes its noise variance from the
+#'   finest level.  A \code{units} object is refused
 #'   rather than read as a number in whatever unit it was written in.
 #' @param select_on \code{"all"} (default) profiles every point;
 #'   \code{"split"} reads the response on one spatially blocked half only
@@ -353,7 +362,18 @@
 #'   \code{sac} (the range object used) and, with \code{select_on =
 #'   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 #'   and \code{estimation}, integer row positions in \code{data_sf}, with
-#'   the \code{method} and \code{seed} that made them).
+#'   the \code{method} and \code{seed} that made them), \code{cp_noise} (a
+#'   list with \code{source}, \code{"variogram nugget"} or
+#'   \code{"finest-level residual mean square"}, \code{value}, the
+#'   \eqn{\tau^2} used, and \code{level}, the level it was read at or
+#'   \code{NA}; \code{NULL} when \code{cp} has neither), \code{centres}
+#'   (a list named by level of the two-column matrices of the scored
+#'   partitions' centres) and \code{centres_crs} (the CRS they are in).  A
+#'   k-means partition is the Voronoi partition of its centres, so these
+#'   seed the very cells each level was scored on: \code{select_resolution()}
+#'   returns the chosen level's as \code{$seeds}, and
+#'   \code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
+#'   use them when given the selection or the profile.
 #' @references
 #' Cressie, N. (1996). Change of support and the modifiable areal unit
 #' problem. \emph{Geographical Systems}, 3(2--3), 159--180.
@@ -664,15 +684,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (grepl("converge", rejected, fixed = TRUE)) {
         .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s); ",
                              "its nugget and sill are where the optimiser stopped, not ",
-                             "fitted values, so `cp` and `reliability` are NA."),
+                             "fitted values, so neither is used: `reliability` is NA and ",
+                             "`cp` takes its noise variance from the finest level."),
                       sac_what, rejected)
         vg <- NULL
       } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
         .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s): ",
                              "a structure that dies out before the closest pairs of ",
                              "points cannot be told from a nugget, so its nugget (%.3g) ",
-                             "is not identified either, and `cp` and `reliability` ",
-                             "are NA."),
+                             "is not identified either: `reliability` is NA and `cp` ",
+                             "takes its noise variance from the finest level."),
                       sac_what, rejected, vg$nugget)
         vg <- NULL
       } else {
@@ -683,7 +704,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         vg$cor_fn <- NULL
       }
     } else if (is.null(vg)) {
-      .log_info("resolution_profile(): the variogram carries no usable model; `cp` and `reliability` are NA.")
+      .log_info("resolution_profile(): the variogram carries no usable model; `reliability` is NA and `cp` takes its noise variance from the finest level.")
     }
     # A nugget of 0 is usually the fit's lower bound, not an estimate (gstat
     # does not warn when it clips there), and with it Cp's penalty is 0: Cp
@@ -802,6 +823,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                     cell_n_median = NA_real_, cell_diam_median = NA_real_,
                     rss = NA_real_, cp = NA_real_, moran_i = NA_real_,
                     moran_z = NA_real_, reliability = NA_real_)
+  # The centres of the partition each level was scored on.  A k-means
+  # partition is the Voronoi partition of its centres, so these are the cells
+  # the criteria judged; get_voronoi_seeds() and voronoi_seeds_kmeans() hand
+  # them on (via select_resolution()) instead of running a k-means of their
+  # own, whose cells were not the ones scored.
+  centres <- vector("list", m)
+  names(centres) <- as.character(levels)
+  # Rows and occupied cells behind each level's RSS, for Cp's fallback noise
+  # estimate below.
+  m_ok_v <- rep(NA_real_, m); L_ok_v <- rep(NA_real_, m)
   for (i in seq_len(m)) {
     L  <- levels[i]
     kb <- .kmeans_best(xy, L, nstart = nstart)
@@ -810,6 +841,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       next
     }
     km <- kb$km
+    centres[[i]] <- unname(km$centers[, 1:2, drop = FALSE])
     out$wss[i]        <- kb$wss
     out$wss_spread[i] <- kb$spread
     sizes <- tabulate(km$cluster, nbins = L)
@@ -824,6 +856,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (m_ok > L_ok) {
         cm  <- stats::ave(y[okr], km$cluster[okr])
         out$rss[i] <- sum((y[okr] - cm)^2)
+        m_ok_v[i] <- m_ok; L_ok_v[i] <- L_ok
         # Cp for the cells of the whole layer, estimated from the subsample.
         # RSS / m + tau^2 L_ok / m estimates the approximation error plus
         # tau^2 (it adds back the optimism of the subsample's own cell means,
@@ -843,6 +876,47 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     if (!is.null(vg$cor_fn))
       out$reliability[i] <- .reliability_at(L, area, n_resp, vg$nugget, vg$psill,
                                             vg$cor_fn, rbar_V)
+  }
+
+  # Cp's noise variance.  From the variogram's nugget when it gives one; when
+  # it gives none (no variogram, a fit that did not converge, a range refused
+  # as below the shortest lag, no model at all) Cp used to be NA at every
+  # level, and a benchmark then scored whatever rule stood in for it, one
+  # training set in six on real data.  The fallback is Mallows' own choice:
+  # the residual mean square of the most flexible model, here the finest
+  # level whose cells hold at least two scored rows on average.  It counts
+  # the structure within those cells as noise as well, so on average it is
+  # no smaller than the nugget and errs towards fewer cells.
+  cp_noise <- if (!is.null(vg))
+    list(source = "variogram nugget", value = vg$nugget, level = NA_integer_)
+  else NULL
+  if (is.null(vg) && !is.null(y)) {
+    dfree <- m_ok_v - L_ok_v
+    cand  <- which(is.finite(out$rss) & is.finite(dfree) & dfree >= L_ok_v)
+    if (length(cand)) {
+      j  <- cand[which.max(levels[cand])]
+      s2 <- out$rss[j] / dfree[j]
+      if (is.finite(s2) && s2 > 0) {
+        fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
+        out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
+          s2 * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + levels[fin_cp] / n_resp)
+        cp_noise <- list(source = "finest-level residual mean square", value = s2,
+                         level = as.integer(levels[j]))
+        why <- if (is.null(sac))
+          "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
+        else if (!is.data.frame(attr(sac, "variogram_model")))
+          sprintf("%s carries no variogram model and so no nugget", sac_what)
+        else sprintf("%s gives no usable variogram model", sac_what)
+        .warn_and_log(paste0("resolution_profile(): %s, so `cp` takes its noise ",
+                             "variance from the residual mean square of the finest ",
+                             "level (%d cells: %.3g), Mallows' own choice. It counts ",
+                             "the structure within those cells as noise too, so it ",
+                             "errs towards fewer cells; attr(<profile>, \"cp_noise\") ",
+                             "records it. `reliability` needs the variogram's range ",
+                             "and is NA."),
+                      why, levels[j], s2)
+      }
+    }
   }
 
   # The elbow over the ladder, and the bumps on it.  The sag of log WSS below
@@ -890,7 +964,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
             wss_bumps  = wss_bumps,
             nstart     = nstart,
             sac        = sac,
-            split      = split)
+            split      = split,
+            cp_noise   = cp_noise,
+            centres    = centres,
+            centres_crs = sf::st_crs(data_sf))
 }
 
 
@@ -948,8 +1025,15 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               else if (isTRUE(b$floor > b$ceiling)) "  -- floor above ceiling: raise sample_n"
               else ""))
   vg <- attr(x, "variogram", exact = TRUE)
+  cn <- attr(x, "cp_noise", exact = TRUE)
   cat(sprintf("  variogram   : %s\n",
-              if (is.null(vg)) "none usable (cp and reliability are NA)" else
+              if (is.null(vg))
+                (if (identical(cn$source, "finest-level residual mean square"))
+                   sprintf(paste0("none usable (reliability is NA; cp's noise ",
+                                  "variance %.3g is the residual mean square at %d cells)"),
+                           cn$value, cn$level)
+                 else "none usable (cp and reliability are NA)")
+              else
                 sprintf("nugget %.3g, partial sill %.3g, range %s", vg$nugget, vg$psill,
                         if (is.finite(vg$range)) sprintf("%.0f", vg$range) else "unidentified")))
   cat(sprintf("  scored on   : %s; %d k-means++ restarts per level; WSS rises at %d step(s)\n",
@@ -1071,8 +1155,14 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   is, in words: the support ceiling, the subsample's ceiling, the range
 #'   floor, the ladder's own end,
 #'   or the first or last level the criterion is computable at; \code{NA} for
-#'   an interior optimum), \code{n_levels} and \code{values} (the criterion
-#'   at every level, \code{NA} where it could not be computed).
+#'   an interior optimum), \code{n_levels}, \code{values} (the criterion
+#'   at every level, \code{NA} where it could not be computed) and
+#'   \code{seeds} (an sf POINT layer, with \code{seed_id}, of the centres of
+#'   the partition the profile scored at \code{best}, in the CRS it was
+#'   computed in; \code{NULL} for a profile that does not carry them).  Their
+#'   Voronoi cells are the cells that were scored;
+#'   \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
+#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.
 #' @family aggregation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
@@ -1132,7 +1222,9 @@ select_resolution <- function(profile,
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level%s."),
                  criterion,
                  switch(criterion,
-                        cp = " (it needs a response and a usable variogram)",
+                        cp = paste0(" (it needs a response, and a level whose cells hold ",
+                                    "two scored rows each on average for its noise ",
+                                    "variance when the variogram gives no nugget)"),
                         reliability = " (it needs a usable variogram with an identified range)",
                         moran_z = " (it needs a response and more than nine cells)",
                         elbow = paste0(" (the WSS curve has no elbow: on log-log axes it ",
@@ -1168,10 +1260,35 @@ select_resolution <- function(profile,
                  criterion = criterion, value = opt,
                  at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,
                  n_levels = length(lv),
-                 values = stats::setNames(v, lv)),
+                 values = stats::setNames(v, lv),
+                 # The centres of the partition this level was scored on, for
+                 # get_voronoi_seeds() and voronoi_seeds_kmeans() to seed the
+                 # same cells from.  NULL for a profile made before they were
+                 # kept.
+                 seeds = .profile_seeds(profile, best)),
             class = "resolution_selection")
 }
 
+
+#' The scored partition's centres at one level, as an sf POINT layer
+#'
+#' @param profile A \code{resolution_profile}.
+#' @param L The level (cell count).
+#' @return An sf POINT layer of \code{L} centres in the CRS the profile was
+#'   computed in, or \code{NULL} when the profile does not carry them.
+#' @keywords internal
+#' @noRd
+.profile_seeds <- function(profile, L) {
+  cen <- attr(profile, "centres", exact = TRUE)
+  xy  <- if (is.list(cen)) cen[[as.character(L)]] else NULL
+  if (!is.matrix(xy) || nrow(xy) < 1L || ncol(xy) < 2L) return(NULL)
+  crs <- attr(profile, "centres_crs", exact = TRUE)
+  s <- sf::st_as_sf(data.frame(seed_id = seq_len(nrow(xy)), x = xy[, 1L], y = xy[, 2L]),
+                    coords = c("x", "y"),
+                    crs = if (inherits(crs, "crs")) crs else sf::NA_crs_)
+  attr(s, "nstart") <- attr(profile, "nstart", exact = TRUE)
+  s
+}
 
 # Which bound an optimum at the end of the scored levels is sitting on.  NA
 # when it is interior.  The wording is shared by the print methods, the
@@ -1363,8 +1480,8 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
            "); it is a column subset of a resolution profile. Pass the ",
            "profile resolution_profile() returned.", call. = FALSE)
     stop("summary.resolution_profile(): no criterion is finite at any level. ",
-         "cp and reliability need a usable variogram, moran_z a response and ",
-         "more than nine cells; a geometry-only profile carries elbow alone, ",
+         "cp needs a response, reliability a usable variogram, moran_z a ",
+         "response and more than nine cells; a geometry-only profile carries elbow alone, ",
          "and elbow is NA when the WSS curve has no elbow.",
          call. = FALSE)
   }
@@ -1507,13 +1624,16 @@ print.resolution_summary <- function(x, ...) {
 #'   \code{resolution_selection} or a \code{resolution_profile}.
 #' @param arg,caller Names for the messages.
 #' @return \code{NULL} when \code{x} is \code{NULL}; otherwise a list with
-#'   \code{n} (a single number) and \code{from} (a character description, or
-#'   \code{NULL} when \code{x} was a plain number).
+#'   \code{n} (a single number), \code{from} (a character description, or
+#'   \code{NULL} when \code{x} was a plain number) and \code{seeds} (the
+#'   centres of the partition the profile scored at \code{n} cells, from
+#'   \code{.profile_seeds()}, or \code{NULL} when \code{x} carries none).
 #' @keywords internal
 #' @noRd
 .resolve_cell_count <- function(x, arg, caller) {
   if (is.null(x)) return(NULL)
   from <- NULL
+  seeds <- NULL
   edge_note <- function(sel) {
     e <- sel$edge %||% NA_character_
     if (is.na(e)) "" else sprintf(", an optimum at %s", e)
@@ -1521,6 +1641,7 @@ print.resolution_summary <- function(x, ...) {
   if (inherits(x, "resolution_selection")) {
     n <- x$best
     from <- sprintf("select_resolution(criterion = \"%s\")%s", x$criterion, edge_note(x))
+    seeds <- x$seeds
   } else if (inherits(x, "resolution_profile")) {
     # The default criterion is cp, which a geometry-only profile cannot score;
     # fall through to the first criterion that is finite somewhere rather
@@ -1543,6 +1664,7 @@ print.resolution_summary <- function(x, ...) {
                    else ""), call. = FALSE)
     sel <- select_resolution(x, criterion = usable[[1L]])
     n <- sel$best
+    seeds <- sel$seeds
     from <- sprintf("resolution_profile() read with select_resolution(criterion = \"%s\")%s",
                     sel$criterion, edge_note(sel))
     .log_info("%s(): `%s` is a resolution profile; read with select_resolution(criterion = \"%s\"): %d cells.",
@@ -1573,5 +1695,8 @@ print.resolution_summary <- function(x, ...) {
   if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1)
     stop(sprintf("%s(): `%s` must resolve to a positive number of cells; got %s.",
                  caller, arg, paste(format(n), collapse = ", ")), call. = FALSE)
-  list(n = as.numeric(n), from = from)
+  # Seeds only when they are the partition at exactly this count; a selection
+  # edited by hand, or one whose level had no successful k-means, has none.
+  if (!inherits(seeds, "sf") || nrow(seeds) != n) seeds <- NULL
+  list(n = as.numeric(n), from = from, seeds = seeds)
 }
