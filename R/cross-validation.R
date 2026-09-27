@@ -5102,6 +5102,14 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   \code{compute_pred_intervals = FALSE} or the draws failed for that fold).
 #'   \code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
 #'   see \code{\link{cv_spatial}}.
+#'   \code{fold_metrics} carries, beyond the columns its siblings share,
+#'   \code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
+#'   \code{coverage_*} columns and \code{convergence_ok}: \code{TRUE} or
+#'   \code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
+#'   fold's sampler (R-hat, effective sample size, divergences), \code{NA}
+#'   when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
+#'   did not converge is scored like the others, so a run with any
+#'   \code{FALSE} raises one warning naming those folds.
 #'   The \code{predictive_coverage} entries (one per
 #'   \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
 #'   folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
@@ -5226,7 +5234,15 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
       gp_k       = as.integer(fit_obj$info$gp_k %||% NA_integer_),
       gp_n_basis = as.integer(fit_obj$info$gp_n_basis %||% NA_integer_),
       n_draws    = NA_integer_,
-      CRPS    = NA_real_
+      CRPS    = NA_real_,
+      # TRUE / FALSE as fit_bayesian_spatial_model() judged the fold's
+      # sampler (R-hat, ESS, divergences), NA when nothing was checked.  A
+      # fold whose posterior did not converge scores like any other, so the
+      # table has to say which ones those are.
+      convergence_ok = {
+        v <- fit_obj$info$convergence_ok
+        if (is.logical(v) && length(v) == 1L) v else NA
+      }
     )
     # Pre-initialise coverage columns so every fold emits the same schema
     # even when the posterior-draw step fails for some folds; heterogeneous
@@ -5311,7 +5327,8 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
                SMAPE = numeric(), R2 = numeric(), Adj_R2 = numeric(),
                n_MAPE = integer(), n_SMAPE = integer(),
                CRPS = numeric(), gp_k = integer(),
-               gp_n_basis = integer(), n_draws = integer())
+               gp_n_basis = integer(), n_draws = integer(),
+               convergence_ok = logical())
   if (!nrow(folds_df))
     for (cn in .user_metric_names(metrics)) folds_df[[cn]] <- numeric()
 
@@ -5329,6 +5346,26 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   } else {
     .cv_warn_failed_folds("cv_bayes", res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
+  }
+
+  # The convergence checks log each fold's R-hat, ESS and divergences, but a
+  # log line is invisible under knitr, spatialkit_quiet() and tryCatch(), and
+  # a fold whose sampler did not converge is scored like any other: its RMSE,
+  # CRPS and coverage enter `overall` with nothing in the result to say so.
+  # One R warning per run names those folds; fold_metrics$convergence_ok
+  # marks them.
+  if (nrow(folds_df) && "convergence_ok" %in% names(folds_df)) {
+    bad <- which(folds_df$convergence_ok %in% FALSE)
+    if (length(bad))
+      .warn_and_log(paste0("cv_bayes(): the sampler did not converge in %d of %d ",
+                           "fold(s) (fold %s); their scores enter `overall` like ",
+                           "the others but come from unreliable posteriors. ",
+                           "fold_metrics$convergence_ok marks them and the log ",
+                           "gives each fold's R-hat, ESS and divergences; raise ",
+                           "`iter` (or `control = list(adapt_delta = ...)`) in ",
+                           "`fit_args`."),
+                    length(bad), nrow(folds_df),
+                    paste(folds_df$fold[bad], collapse = ", "))
   }
 
   list(overall = .cv_overall_metrics(preds, metrics), fold_metrics = folds_df,

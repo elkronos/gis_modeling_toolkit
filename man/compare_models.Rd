@@ -24,7 +24,11 @@ models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
 is set to \code{NA}, with a warning, when the fits carrying it were
 fitted to different rows (a predictor with missing values drops rows,
 for example) or to different responses (a transformed response on the
-same rows), and the warning says which.  Alongside the metrics it
+same rows), and the warning says which.  \code{convergence_ok} is
+\code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
+checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
+otherwise; a fit that did not converge is ranked like the others, so it
+also raises a warning.  Alongside the metrics it
 carries
 \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 \code{resid_morans_null}, the last of which names the null

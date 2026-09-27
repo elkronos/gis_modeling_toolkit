@@ -26,7 +26,10 @@ at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
 on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
-takes the same nearest feature.  A grid of polygons
+takes the same nearest feature.  A grid still without a CRS after that
+is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
+when its coordinates look like lon/lat, otherwise stamped with the fit's
+CRS, with a warning either way.  A grid of polygons
 (\code{\link{create_grid_polygons}()} output, say) is reduced to one
 representative point per cell, as \code{\link{coerce_to_points}()} does,
 so covariates are taken at the location predicted for; \code{boundary}
@@ -54,7 +57,9 @@ is otherwise stamped with the fit's CRS, with a warning either way.}
 
 \item{covariates}{Optional \code{sf} layer carrying the model's predictors.
 Required when the model has predictors and \code{grid} does not already
-contain them.  Values are taken from the nearest feature.}
+contain them.  Values are taken from the nearest feature.  Aligned to
+the fit's CRS as \code{grid} is, with the same warning when it has no
+CRS.}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the

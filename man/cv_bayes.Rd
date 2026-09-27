@@ -122,6 +122,14 @@ that give the coverage below (\code{NA} when
 \code{compute_pred_intervals = FALSE} or the draws failed for that fold).
 \code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
 see \code{\link{cv_spatial}}.
+\code{fold_metrics} carries, beyond the columns its siblings share,
+\code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
+\code{coverage_*} columns and \code{convergence_ok}: \code{TRUE} or
+\code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
+fold's sampler (R-hat, effective sample size, divergences), \code{NA}
+when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
+did not converge is scored like the others, so a run with any
+\code{FALSE} raises one warning naming those folds.
 The \code{predictive_coverage} entries (one per
 \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
 folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
