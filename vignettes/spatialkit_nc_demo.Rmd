@@ -540,16 +540,18 @@ cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
             gwr_fit$info$bandwidth, gwr_met$R2, gwr_met$RMSE))
 ```
 
-When you run this, `fit_gwr_model()` also warns that 25 of the 300 local
-windows have a collinear design (scaled condition index above 30), and four of
-the five GWR fits inside `compare_models_cv()` below repeat the warning for
-their own training sets. The cause is `elevation`: it averages about 3,000 but
-has a standard deviation of only about 400 inside a 42-neighbour window, so
-locally it is nearly collinear with the intercept (see "Collinearity
-diagnostics" in `?fit_gwr_model`). What that leaves poorly determined is the
-local intercepts, not the fit: centring the predictor
-(`elevation - mean(elevation)`) gives the same bandwidth and fitted values and
-no warning, and a wider bandwidth clears it too.
+The fit raises no collinearity warning, but its survey of the local designs
+(`gwr_fit$info$local_collinearity`, see "Collinearity diagnostics" in
+`?fit_gwr_model`) is worth a look: in 25 of the 300 windows the condition
+index that includes the intercept (`cn`) is above 30. The cause is
+`elevation`: it averages about 3,000 but has a standard deviation of only about
+400 inside a 42-neighbour window, so locally it is nearly collinear with the
+intercept. What that leaves poorly determined is the local intercepts, not the
+slopes: the slope index (`cn_slopes`), which centres the predictors in each
+window, stays below 30 everywhere, so no slope is masked and the fit does not
+warn. `plot(gwr_fit, type = "coefficients", term = "Intercept")` draws those
+25 intercepts hollow. Centring the predictor (`elevation - mean(elevation)`)
+gives the same bandwidth and fitted values and determines the intercepts too.
 
 ### Comparing backends on identical folds
 

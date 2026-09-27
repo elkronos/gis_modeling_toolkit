@@ -3842,10 +3842,11 @@ make_folds <- function(points_sf, k,
         # knitr, spatialkit_quiet or tryCatch() a CV result could not show
         # that its blocks were never sized from the data.
         why <- attr(sac_range, "rejected_reason")
-        # A bare NA carries no reason: estimate_sac_range() returns one before
-        # fitting anything, and only its log line said why -- which
-        # spatialkit_quiet(), knitr and tryCatch() never see.  Name the two
-        # floors that are cheap to test here, and the rest of the short list.
+        # estimate_sac_range() attaches a rejected_reason to every NA it
+        # returns, including the ones it gives before fitting anything.  A
+        # `sac_range` without one (hand-built, or saved by an older version)
+        # still gets a reason: the two floors that are cheap to test here, and
+        # the rest of the short list.
         if (!(is.character(why) && length(why) == 1L && !is.na(why)))
           why <- if (!requireNamespace("gstat", quietly = TRUE))
             "package 'gstat', which the variogram needs, is not installed"
