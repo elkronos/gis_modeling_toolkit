@@ -80,8 +80,9 @@ pts   <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 ```{r learner}
 lm_fit <- function(train_sf, response_var = "z", predictor_vars = c("a", "b")) {
   d   <- st_drop_geometry(train_sf)
-  fml <- as.formula(paste(response_var, "~",
-                          paste(predictor_vars, collapse = " + ")))
+  # With no predictors the model is intercept-only: "z ~ 1", not "z ~ ".
+  rhs <- if (length(predictor_vars)) paste(predictor_vars, collapse = " + ") else "1"
+  fml <- as.formula(paste(response_var, "~", rhs))
   new_spatial_fit(
     subclass       = "lmsurf_fit",
     engine         = lm(fml, data = d),
@@ -277,17 +278,31 @@ enough to do.
 **Selection outside the fold.** Choosing predictors on the whole data set and
 then cross-validating the chosen set gives the selection a look at every test
 row. `select_features_forward()` does the selection inside the resampling, and
-it takes the fold scheme as an argument for the same reason the outer loop does:
+it takes the fold scheme as an argument for the same reason the outer loop does.
+Blocked folds only keep test rows apart from training rows if the blocks are at
+least as wide as the autocorrelation range. `make_folds()` estimates that range
+for what the candidates leave unexplained, about 330 m on this field, and warns
+when the blocks are narrower. The default grid here has blocks about 250 m
+across, so `block_size = 400` is passed:
 
 ```{r selection}
 # select_features_forward() calls fit_fn(train_sf, vars), so the learner above
-# needs an adapter that puts `vars` in the predictor slot.
+# needs an adapter that puts `vars` in the predictor slot. Step 0 fits it with
+# no predictors at all, which is why lm_fit() builds "z ~ 1" for an empty set.
 sel_fn <- function(train_sf, vars) lm_fit(train_sf, "z", vars)
 
 sel <- select_features_forward(pts, "z", c("a", "b"), fit_fn = sel_fn,
-                               k = 4, method = "block_kfold", seed = 1)
+                               k = 4, method = "block_kfold",
+                               block_size = 400, seed = 1)
 sel$selected
+sel$history
 ```
+
+`history` has one row per candidate scored at each step. Step 0 is the
+intercept-only model, so `a` had to beat it to be added, and at step 2 adding
+the noise variable `b` made the cross-validated RMSE slightly worse, so the
+selection stopped at `a`. With `tol` set, a candidate has to improve the score
+by more than `tol`, from step 1 on.
 
 Its inner folds default to the scheme you pass. Passing `random_kfold` there
 logs a caution, because a leaky inner loop can select a variable for being

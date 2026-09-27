@@ -496,8 +496,8 @@ cv <- cv_bayes(site, "price", "elev", k = 5, parallel = TRUE)  # auto-detect cor
 #> WARN  cross-validation: fold 1 fit failed; skipping.
 #>       Cause: fit_bayesian_spatial_model(): package 'brms' is required.
 #> ... (once per fold)
-#> WARN  cv_bayes(): all 5 folds failed to produce predictions; results are
-#> empty. First error: fit_bayesian_spatial_model(): package 'brms' is required.
+#> WARN  cv_bayes(): all folds failed; cross-validation results contain no
+#> predictions. First error: fit_bayesian_spatial_model(): package 'brms' is required.
 #> Warning message:
 #> cv_bayes(): all folds failed; cross-validation results contain no
 #> predictions. First error: fit_bayesian_spatial_model(): package 'brms' is required.

@@ -81,7 +81,11 @@ on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
 call with the same \code{seed}, which makes the same split.  When
 \code{NULL} and a response is given, one is estimated on the subsample
 (its selection half under \code{"split"}) with the same
-\code{predictor_vars}.}
+\code{predictor_vars}.  A plain number is taken as the range alone, in
+the units of the CRS the profile is computed in (metres for lon/lat
+input): it sets the floor, and \code{cp} and \code{reliability}, which
+need a fitted model, are \code{NA}.  A \code{units} object is refused
+rather than read as a number in whatever unit it was written in.}
 
 \item{select_on}{\code{"all"} (default) profiles every point;
 \code{"split"} reads the response on one spatially blocked half only
