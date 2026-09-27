@@ -1682,7 +1682,9 @@ sac_nugget <- function(x) {
 #'   the residual autocorrelation, the part a spatial model has to handle
 #'   once the covariates have done their work.  How the trend is removed is
 #'   set by \code{detrend}, and it matters: see "Detrending and the
-#'   residual-variogram bias".
+#'   residual-variogram bias".  Rows whose response or predictor is missing
+#'   or infinite are left out of that fit, and so of the variogram, with a
+#'   logged count.
 #' @param n_max Maximum number of points to subsample before fitting.
 #'   Variogram estimation is O(n²) so this keeps runtime bounded.
 #' @param cutoff Fraction of the maximum inter-point distance to use as the
@@ -1797,8 +1799,8 @@ sac_nugget <- function(x) {
 #' fitted range at all.
 #'
 #' @return A single number, of class \code{sac_range} in the first two of the
-#'   three shapes below and a bare \code{NA} in the third; all three behave
-#'   as an ordinary number.  The shapes carry different attributes:
+#'   three shapes below and an unclassed \code{NA} in the third; all three
+#'   behave as an ordinary number.  The shapes carry different attributes:
 #'   \describe{
 #'     \item{Success}{A positive effective range in projected coordinate units,
 #'       with the fit attached as attributes \code{directional} (the 0°, 45°,
@@ -1890,11 +1892,19 @@ sac_nugget <- function(x) {
 #'       noise it was the outcome in only 1 of 30 draws: see above);
 #'       \code{rejected_reason} says so and the empirical variogram is still
 #'       attached.}
-#'     \item{No fit}{A bare, attribute-less \code{NA_real_} when estimation
-#'       could not be attempted at all: \pkg{gstat} missing, fewer than 30
-#'       finite values, a variable with no variance, or a degenerate extent.
-#'       Without \pkg{gstat} nothing is fitted, so none of the attributes
-#'       above exist either.}
+#'     \item{No fit}{An unclassed \code{NA_real_} when estimation could not
+#'       be attempted at all, whose one attribute, \code{rejected_reason},
+#'       says why: \code{"package 'gstat', which the variogram needs, is not
+#'       installed"}, \code{"<n> points, fewer than the 30 a variogram range
+#'       is estimated from"}, \code{"<n> point(s) with a finite value to
+#'       model, fewer than the 30 a variogram range is estimated from"},
+#'       \code{"the response is constant"}, \code{"the residuals on
+#'       predictor_vars are constant: the predictors explain the response
+#'       exactly"} or \code{"the points have no extent (the largest distance
+#'       between them is zero or could not be computed)"}.  Nothing is
+#'       fitted, so none of the other attributes above exist: no
+#'       \code{variogram}, \code{variogram_model} or \code{rejected_range},
+#'       which is what tells it from a range that was fitted and refused.}
 #'   }
 #'   Attributes and the class do not affect \code{is.na()} or
 #'   \code{is.finite()}, so every downstream guard treats all three the same
@@ -1953,9 +1963,16 @@ estimate_sac_range <- function(points_sf, response_var,
       !is.finite(reml_max_n) || reml_max_n < 30)
     stop("estimate_sac_range(): `reml_max_n` must be a single number of at ",
          "least 30.", call. = FALSE)
+  # The early NA returns carry their reason as `rejected_reason`, so a caller
+  # (make_folds(auto_range = TRUE), kriging_adequacy(), summarize_by_cell())
+  # can say why no range came back: the log line alone is invisible under
+  # spatialkit_quiet(), knitr and tryCatch().  They carry nothing else -- no
+  # variogram, no rejected_range -- which is what tells them from a range that
+  # was fitted and refused.
   if (!requireNamespace("gstat", quietly = TRUE)) {
     .log_warn("estimate_sac_range(): package 'gstat' is required for variogram estimation; returning NA.")
-    return(NA_real_)
+    return(structure(NA_real_, rejected_reason =
+      "package 'gstat', which the variogram needs, is not installed"))
   }
   if (!inherits(points_sf, "sf"))
     stop("estimate_sac_range(): `points_sf` must be an sf object.", call. = FALSE)
@@ -2015,7 +2032,8 @@ estimate_sac_range <- function(points_sf, response_var,
 
   if (n < 30L) {
     .log_warn("estimate_sac_range(): fewer than 30 points; variogram estimate unreliable. Returning NA.")
-    return(NA_real_)
+    return(structure(NA_real_, rejected_reason = sprintf(
+      "%d points, fewer than the 30 a variogram range is estimated from", n)))
   }
 
   # Build the variable to model: raw response or OLS residuals.
@@ -2067,6 +2085,22 @@ estimate_sac_range <- function(points_sf, response_var,
            paste(sQuote(missing_preds), collapse = ", "),
            " not found in the data.", call. = FALSE)
     fml <- stats::reformulate(predictor_vars, response_var)
+    # The rows the trend is fitted on: a finite response and every predictor
+    # present and, if numeric, finite.  lm()'s na.exclude drops NA but not
+    # Inf, so one Inf predictor or response aborted the fit ("NA/NaN/Inf in
+    # 'x'") and the variogram fell back to the RAW response, a different
+    # estimand (2950 against 2168 with that row removed); complete.cases() let
+    # it into the REML fit too, which then "did not converge".
+    # prep_model_data() and resolution_profile() already leave such rows out.
+    fin <- is.finite(y) & Reduce(`&`, lapply(predictor_vars, function(v) {
+      x <- df[[v]]
+      if (is.numeric(x)) is.finite(x) else !is.na(x)
+    }), TRUE)
+    if (any(!fin))
+      .log_info(paste0("estimate_sac_range(): %d of %d row(s) have a missing or ",
+                       "non-finite response or predictor and are left out of ",
+                       "the detrending fit and the variogram."),
+                sum(!fin), length(fin))
     # REML: trend and covariance fitted together, so the trend is a GLS fit
     # under the fitted correlation and the range is the REML estimate, not a
     # variogram of residuals.  Measured on simulated fields (n = 300, true
@@ -2077,11 +2111,10 @@ estimate_sac_range <- function(points_sf, response_var,
     if (identical(detrend, "reml")) {
       xy_tr <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
       df$.sac_x <- xy_tr[, 1]; df$.sac_y <- xy_tr[, 2]
-      # Complete rows only, chosen here rather than by na.action so the same
+      # Finite rows only, chosen here rather than by na.action so the same
       # row set can carry the coordinates alongside the model frame and the
       # residuals can be put back at their positions afterwards.
-      keep <- stats::complete.cases(df[, c(response_var, predictor_vars), drop = FALSE]) &
-        is.finite(df$.sac_x) & is.finite(df$.sac_y)
+      keep <- fin & is.finite(df$.sac_x) & is.finite(df$.sac_y)
       mf <- df[keep, c(response_var, predictor_vars, ".sac_x", ".sac_y"), drop = FALSE]
       if (sum(keep) >= 30L) {
         extent <- max(diff(range(xy_tr[keep, 1])), diff(range(xy_tr[keep, 2])), 1)
@@ -2118,7 +2151,7 @@ estimate_sac_range <- function(points_sf, response_var,
       }
     }
     lm_fit <- if (is.null(reml_fit))
-      try(stats::lm(fml, data = df, na.action = stats::na.exclude), silent = TRUE)
+      try(stats::lm(fml, data = df[fin, , drop = FALSE]), silent = TRUE)
     else NULL
     if (is.null(lm_fit)) {
       # REML handled the trend above; nothing to do here.
@@ -2132,11 +2165,12 @@ estimate_sac_range <- function(points_sf, response_var,
                     .try_error_message(lm_fit))
     } else {
       resid <- stats::residuals(lm_fit)
-      if (length(resid) != nrow(pts)) {
+      if (length(resid) != sum(fin)) {
         .warn_and_log("estimate_sac_range(): OLS residual length (%d) does not match data rows (%d); the variogram is fitted to the RAW response instead.",
-                      length(resid), nrow(pts))
+                      length(resid), sum(fin))
       } else {
-        y <- resid
+        y <- rep(NA_real_, length(fin))
+        y[fin] <- as.numeric(resid)
         detrended <- TRUE
         detrend_method <- "ols"
       }
@@ -2147,7 +2181,9 @@ estimate_sac_range <- function(points_sf, response_var,
   pts <- pts[is.finite(pts$..sac_var), , drop = FALSE]
   if (nrow(pts) < 30L) {
     .log_warn("estimate_sac_range(): too few finite values after filtering; returning NA.")
-    return(NA_real_)
+    return(structure(NA_real_, rejected_reason = sprintf(paste0(
+      "%d point(s) with a finite value to model, fewer than the 30 a ",
+      "variogram range is estimated from"), nrow(pts))))
   }
   # A variable with no variance has no autocorrelation structure to estimate:
   # every semivariance is 0, and gstat's fit returned a finite "range" (168
@@ -2158,10 +2194,12 @@ estimate_sac_range <- function(points_sf, response_var,
     .log_warn(paste0("estimate_sac_range(): the variable being modelled is ",
                      "constant (zero variance%s), so it has no autocorrelation ",
                      "range. Returning NA."),
-              if (!is.null(predictor_vars) && length(predictor_vars) > 0L)
-                " -- the OLS residuals are all zero, so the predictors explain the response exactly"
+              if (detrended)
+                " -- the residuals are all zero, so the predictors explain the response exactly"
               else "")
-    return(NA_real_)
+    return(structure(NA_real_, rejected_reason = if (detrended)
+      "the residuals on predictor_vars are constant: the predictors explain the response exactly"
+      else "the response is constant"))
   }
 
   # Empirical variogram.  The lag cutoff is a fraction of the maximum
@@ -2177,8 +2215,12 @@ estimate_sac_range <- function(points_sf, response_var,
     if (nrow(hv) < 2L) 0 else max(stats::dist(hv))
   }, silent = TRUE)
 
-  if (inherits(max_dist, "try-error") || !is.finite(max_dist) || max_dist <= 0)
-    return(NA_real_)
+  if (inherits(max_dist, "try-error") || !is.finite(max_dist) || max_dist <= 0) {
+    .log_warn("estimate_sac_range(): the points have no extent to fit a variogram over. Returning NA.")
+    return(structure(NA_real_, rejected_reason = paste0(
+      "the points have no extent (the largest distance between them is zero ",
+      "or could not be computed)")))
+  }
 
   cutoff_dist <- as.numeric(cutoff * max_dist)
 
