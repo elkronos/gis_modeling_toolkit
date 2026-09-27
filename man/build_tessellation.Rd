@@ -65,7 +65,10 @@ and \code{params$cells_empty} report how the points filled the grid, and
 a count that came from a profile or selection warns when fewer than
 three quarters of it are occupied.  For cells that follow the points,
 seed a Voronoi tessellation with
-\code{get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)}.}
+\code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
+given the \code{select_resolution()} result or the profile itself, it
+returns the centres of the partition the profile scored, whose Voronoi
+cells are the cells the criteria judged.}
 
 \item{cellsize}{Numeric cell size, in the units of the working CRS.  Read by
 \code{method = "hex"} and \code{"square"} only; the other two methods warn

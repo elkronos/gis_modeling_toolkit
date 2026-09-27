@@ -75,7 +75,8 @@ range was rejected (\code{NA} with a \code{rejected_reason}) gives
 \code{NA}, since that needs the range; one whose model did not converge,
 or whose range is below the shortest lag fitted (a structure that
 cannot be told from a nugget, so the nugget is not identified either),
-gives neither.  Under \code{select_on = "split"} the sac must come from
+gives neither, and \code{cp} takes its noise variance from the finest
+level (see \code{cp} above).  Under \code{select_on = "split"} the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
 call with the same \code{seed}, which makes the same split.  When
@@ -83,8 +84,9 @@ call with the same \code{seed}, which makes the same split.  When
 (its selection half under \code{"split"}) with the same
 \code{predictor_vars}.  A plain number is taken as the range alone, in
 the units of the CRS the profile is computed in (metres for lon/lat
-input): it sets the floor, and \code{cp} and \code{reliability}, which
-need a fitted model, are \code{NA}.  A \code{units} object is refused
+input): it sets the floor, \code{reliability}, which needs a fitted
+model, is \code{NA}, and \code{cp} takes its noise variance from the
+finest level.  A \code{units} object is refused
 rather than read as a number in whatever unit it was written in.}
 
 \item{select_on}{\code{"all"} (default) profiles every point;
@@ -129,7 +131,18 @@ say); \code{NULL} when none was usable), \code{variable} (\code{"response"},
 \code{sac} (the range object used) and, with \code{select_on =
   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 and \code{estimation}, integer row positions in \code{data_sf}, with
-the \code{method} and \code{seed} that made them).
+the \code{method} and \code{seed} that made them), \code{cp_noise} (a
+list with \code{source}, \code{"variogram nugget"} or
+\code{"finest-level residual mean square"}, \code{value}, the
+\eqn{\tau^2} used, and \code{level}, the level it was read at or
+\code{NA}; \code{NULL} when \code{cp} has neither), \code{centres}
+(a list named by level of the two-column matrices of the scored
+partitions' centres) and \code{centres_crs} (the CRS they are in).  A
+k-means partition is the Voronoi partition of its centres, so these
+seed the very cells each level was scored on: \code{select_resolution()}
+returns the chosen level's as \code{$seeds}, and
+\code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
+use them when given the selection or the profile.
 }
 \description{
 A tessellation's resolution is the number of cells the points are cut
@@ -228,7 +241,14 @@ says so when that happens.  It becomes a genuine interior criterion
 only when the nugget is a large share of the sill.  With a nugget of 0
 (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
 bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
-the field; the profile warns.}
+the field; the profile warns.  When the variogram gives no nugget (none
+was fitted, its fit did not converge, its range is below the shortest
+lag, or \code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
+choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
+finest level whose cells hold at least two scored rows on average.  It
+counts the structure within those cells as noise too, so on average it
+is no smaller than the nugget and errs towards fewer cells; the profile warns,
+and \code{attr(, "cp_noise")} records which was used.}
 \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
