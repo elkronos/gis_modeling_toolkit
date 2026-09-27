@@ -127,10 +127,10 @@ test_that("the no-elbow warnings name the bound that ended the ladder", {
 })
 
 
-test_that("combined ranks geometry on the log-log sag and unscored candidates last", {
-  # Six separated clusters: the elbow is 6, its window 2 to 10, and only
-  # k = 10 clears the nine-cell floor.  The linear chord across the window
-  # used to rank a k next to the window's own middle first.
+test_that("combined returns the geometric ranking when the elbow is below ten cells", {
+  # Six separated clusters: the elbow is 6, a count Moran's I cannot score
+  # (the nine-cell floor).  Ranking the window anyway put the smallest count
+  # it scores, ten, first whatever the response did.
   set.seed(3)
   K <- 6; n <- 360
   cen <- cbind(c(0, 6000, 12000, 0, 6000, 12000), c(0, 0, 0, 7000, 7000, 7000))
@@ -139,11 +139,39 @@ test_that("combined ranks geometry on the log-log sag and unscored candidates la
                   y = 5e6 + cen[cl, 2] + rnorm(n, 0, 250), p = rnorm(n))
   d$z <- d$p + rnorm(n)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
-  expect_identical(determine_optimal_levels(pts, max_levels = 30)[1L], 6L)
+  geo <- determine_optimal_levels(pts, max_levels = 30)
+  expect_identical(geo[1L], 6L)
+  lines <- capture_spatialkit_log(
+    k <- suppressWarnings(determine_optimal_levels(pts, max_levels = 30,
+                                                   response_var = "z", predictor_vars = "p")))
+  dg <- attr(k, "diagnostics")
+  expect_identical(dg$knee_k, 6L)
+  expect_identical(as.integer(k), as.integer(geo))
+  expect_identical(dg$criterion, "geometric")
+  expect_match(dg$fallback, "below the ten cells Moran's I needs")
+  expect_null(dg$combined_rank)
+  expect_true(log_has(lines, "the WSS elbow is at k = 6, below the ten cells"))
+})
+
+
+test_that("combined ranks geometry on the log-log sag and unscored candidates last", {
+  # Twelve separated clusters: the elbow is 12, its window 8 to 16, and 8
+  # and 9 sit below the nine-cell floor.  The linear chord across the window
+  # used to rank a k next to the window's own middle first.
+  set.seed(1)
+  K <- 12; n <- 720
+  cen <- cbind(rep(c(0, 6000, 12000, 18000), 3), rep(c(0, 7000, 14000), each = 4))
+  cl  <- rep(seq_len(K), length.out = n)
+  d <- data.frame(x = 5e5 + cen[cl, 1] + rnorm(n, 0, 250),
+                  y = 5e6 + cen[cl, 2] + rnorm(n, 0, 250), p = rnorm(n))
+  d$z <- d$p + rnorm(n)
+  pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  expect_identical(determine_optimal_levels(pts, max_levels = 30)[1L], 12L)
   k  <- suppressWarnings(determine_optimal_levels(pts, max_levels = 30,
                                                   response_var = "z", predictor_vars = "p"))
   dg <- attr(k, "diagnostics")
-  expect_identical(dg$knee_k, 6L)
+  expect_identical(dg$knee_k, 12L)
+  expect_identical(dg$criterion, "combined")
   cr <- dg$combined_rank
   ks <- as.integer(names(cr))
   scored <- is.finite(dg$moran_z[ks])
@@ -151,8 +179,8 @@ test_that("combined ranks geometry on the log-log sag and unscored candidates la
   # Every unscored candidate takes the last place on the Moran axis, so a
   # scored one comes first ...
   expect_true(k[1L] %in% ks[scored])
-  # ... and among the unscored the elbow's own sag decides: the elbow first.
-  expect_identical(ks[!scored][which.min(cr[!scored])], 6L)
+  # ... and the unscored rank behind the elbow on the rank average.
+  expect_true(all(cr[!scored] > cr[ks == 12L]))
 })
 
 

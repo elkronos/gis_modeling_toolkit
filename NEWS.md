@@ -2230,12 +2230,16 @@
   geometric axis is now the log-log sag the elbow is read from, and it is
   flat when the curve has no elbow, so Moran's z alone orders the window.
   Every unscored candidate takes the last place on the Moran axis, and exact
-  ties go to the `k` nearest the elbow.  The same layers now give
-  `10 11 12`, `10 11 12`, `10 11 7` and `10 12 11`, and 800 uniform points
-  `10 11 7` where they gave `5 4 10`.  Ten is not the response's choice:
-  it is the smallest count Moran's I scores, and every candidate below the
-  nine-cell floor ranks last on that axis, so where the elbow lies below ten
-  cells this criterion returns ten or more whatever the response does.  Supplying both `response_var` and `predictor_vars` selects
+  ties go to the `k` nearest the elbow.  And an elbow below ten cells, a
+  count Moran's I cannot score, is no longer ranked against the counts it
+  can: ranking it put ten, the smallest count Moran's I scores, first
+  whatever the response did (a response of noise and one varying by
+  cluster gave the same answer).  There `"combined"` returns the geometric
+  ranking, logs why, and records it in the diagnostics (`criterion =
+  "geometric"`, `fallback`).  The same layers now give `8 7 9`, `8 7 9`,
+  `7 6 8` and `8 7 9`, the geometric answer, and 800 uniform points, which
+  have no elbow and are ordered by Moran's z, `10 11 7` where they gave
+  `5 4 10`.  Supplying both `response_var` and `predictor_vars` selects
   this criterion by default.
 
 * **`build_tessellation(method = "hex")` or `"square"` laid its lattice over

@@ -587,11 +587,23 @@
 #' \code{k} = 10 and 11 alone.  On such a layer
 #' \code{\link{resolution_profile}()}, which scores Moran's z at every level of
 #' its ladder, is the model-aware view.  Under \code{criterion = "combined"},
-#' the candidates below the floor that sit alongside candidates above it all
-#' take the last place on the Moran's I axis, after every candidate it
-#' scored, while still competing on the geometric axis.  That axis is the
-#' elbow's own log-log sag at each candidate; when the WSS curve has no elbow
-#' it is flat, every candidate tied, and Moran's I alone orders them.
+#' an elbow below ten cells is a count Moran's I cannot score, so it cannot
+#' weigh the response there: the geometric ranking is returned, with a
+#' logged warning, and the diagnostics record it (see Value).  (Ranking the
+#' window anyway put the smallest count Moran's I scores, ten, first whatever
+#' the response did.)  Otherwise the candidates below the floor that sit
+#' alongside candidates above it all take the last place on the Moran's I
+#' axis, after every candidate it scored, while still competing on the
+#' geometric axis.  That axis is the elbow's own log-log sag at each
+#' candidate; when the WSS curve has no elbow it is flat, every candidate
+#' tied, and Moran's I alone orders them.
+#'
+#' \code{"combined"} is not an estimate of the number of clusters.  Where the
+#' elbow is at ten cells or more, Moran's I can move the pick away from it
+#' when the response is still spatially structured at the elbow's
+#' resolution.  Use \code{"geometric"} when the cell count should follow the
+#' clustering of the points, and \code{\link{resolution_profile}()} when the
+#' response should drive it.
 #'
 #' @param data_sf An sf object.  Features with empty or non-finite
 #'   coordinates are dropped with a warning.
@@ -707,7 +719,10 @@
 #'   neighbourhood).  Under \code{"combined"} it also carries the WSS of the
 #'   re-run clustering at those \code{k} (\code{wss_eval}), the rank average
 #'   that ordered them (\code{combined_rank}, named by \code{k}) and
-#'   \code{criterion = "combined"}.  When the model-aware
+#'   \code{criterion = "combined"}; when \code{"combined"} returned the
+#'   geometric ranking because the elbow is below ten cells, it carries
+#'   \code{criterion = "geometric"} and \code{fallback} (the reason) in
+#'   place of \code{combined_rank}.  When the model-aware
 #'   path itself falls back to the geometric result (no viable k in the elbow
 #'   neighbourhood, or Moran's I could not be computed for any candidate), no
 #'   diagnostics are available and the attribute is absent. Both fallbacks are
@@ -1195,6 +1210,38 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # the data: on eight separated clusters it ranked 6 or 7 first where the
   # elbow is 8.  With no elbow the axis is flat, every candidate tied, and
   # Moran's z alone orders the window.
+  # An elbow below ten cells is a count Moran's I cannot score (the nine-cell
+  # floor), and every candidate below the floor ranks last on its axis, so
+  # the rank average put the smallest count it could score (ten) first
+  # whatever the response did: on eight separated clusters the geometric
+  # call returned 8 and "combined" 10, for a response that was noise and for
+  # one that varied by cluster alike.  Moran's I has nothing to say about the
+  # counts where the elbow lies, so it does not overrule it: the geometric
+  # ranking is returned, and the diagnostics say so.  (With no elbow the
+  # geometric axis carries nothing and Moran's I orders the window, below.)
+  if (isTRUE(elbow$structured) && knee_k <= 9L) {
+    .log_warn(paste0("determine_optimal_levels(): the WSS elbow is at k = %d, ",
+                     "below the ten cells Moran's I needs, so criterion = '%s' ",
+                     "cannot weigh the response there and returns the geometric ",
+                     "ranking. resolution_profile() scores the response at every ",
+                     "level of its ladder."), knee_k, criterion)
+    out <- as.integer(head(elbow$candidates, max(1L, as.integer(top_n))))
+    out[out < 1L] <- 1L; out[out > k_max] <- k_max
+    out <- unique(out)
+    attr(out, "diagnostics") <- list(
+      moran_i = moran_vals, moran_z = moran_z, wss = wss[1:k_max],
+      wss_eval = wss_eval[1:k_max],
+      wss_spread = wss_spread[1:k_max],
+      wss_bumps = wss_bumps, nstart = nstart,
+      knee_k = knee_k, failed_k = failed_k,
+      eval_ks = eval_ks,
+      criterion = "geometric",
+      fallback = sprintf(paste0("the elbow (k = %d) is below the ten cells ",
+                                "Moran's I needs"), knee_k)
+    )
+    return(.with_split(out))
+  }
+
   n_eval <- length(eval_ks)
   if (isTRUE(elbow$structured)) {
     w <- wss[seq_len(k_max)]
