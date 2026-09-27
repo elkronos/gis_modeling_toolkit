@@ -34,7 +34,12 @@ voronoi_seeds_kmeans(points_sf, k, set_seed = 456, nstart = 10)
   of distinct point positions and `nrow(points_sf) - 1`, because k-means
   can produce neither more centres than there are distinct points nor as
   many centres as there are rows. Check
-  [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result.
+  [`nrow()`](https://rdrr.io/r/base/nrow.html) on the result. A
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  result or a
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  is also accepted: its scored centres are returned when it carries
+  them, and otherwise its count is used.
 
 - set_seed:
 
@@ -77,8 +82,13 @@ and
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
 score each count on a different run, by default the best of 25 k-means++
 restarts, which usually reaches a lower within-cluster sum of squares;
-the seeds for a chosen count are therefore not the partition that count
-was scored on. Raising `nstart` narrows the gap but does not close it.
+the seeds for a count passed as a number are therefore not the partition
+that count was scored on. Raising `nstart` narrows the gap but does not
+close it. Pass the
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+result or the profile itself as `k` to close it: the centres of the
+scored partition are then returned (in the CRS of `points_sf`, with
+`attr(, "n_from")`), and no k-means is run.
 
 ## See also
 

@@ -180,7 +180,8 @@ range was rejected (<code>NA</code> with a <code>rejected_reason</code>) gives
 <code>NA</code>, since that needs the range; one whose model did not converge,
 or whose range is below the shortest lag fitted (a structure that
 cannot be told from a nugget, so the nugget is not identified either),
-gives neither.  Under <code>select_on = "split"</code> the sac must come from
+gives neither, and <code>cp</code> takes its noise variance from the finest
+level (see <code>cp</code> above).  Under <code>select_on = "split"</code> the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on <code>data_sf[attr(p, "split")$selection, ]</code> and pass it to a second
 call with the same <code>seed</code>, which makes the same split.  When
@@ -188,8 +189,9 @@ call with the same <code>seed</code>, which makes the same split.  When
 (its selection half under <code>"split"</code>) with the same
 <code>predictor_vars</code>.  A plain number is taken as the range alone, in
 the units of the CRS the profile is computed in (metres for lon/lat
-input): it sets the floor, and <code>cp</code> and <code>reliability</code>, which
-need a fitted model, are <code>NA</code>.  A <code>units</code> object is refused
+input): it sets the floor, <code>reliability</code>, which needs a fitted
+model, is <code>NA</code>, and <code>cp</code> takes its noise variance from the
+finest level.  A <code>units</code> object is refused
 rather than read as a number in whatever unit it was written in.</p></dd>
 
 
@@ -240,7 +242,18 @@ say); <code>NULL</code> when none was usable), <code>variable</code> (<code>"res
 <code>sac</code> (the range object used) and, with <code>select_on =
   "split"</code>, <code>split</code> (a <code>spatialkit_split</code>: <code>selection</code>
 and <code>estimation</code>, integer row positions in <code>data_sf</code>, with
-the <code>method</code> and <code>seed</code> that made them).</p>
+the <code>method</code> and <code>seed</code> that made them), <code>cp_noise</code> (a
+list with <code>source</code>, <code>"variogram nugget"</code> or
+<code>"finest-level residual mean square"</code>, <code>value</code>, the
+\(\tau^2\) used, and <code>level</code>, the level it was read at or
+<code>NA</code>; <code>NULL</code> when <code>cp</code> has neither), <code>centres</code>
+(a list named by level of the two-column matrices of the scored
+partitions' centres) and <code>centres_crs</code> (the CRS they are in).  A
+k-means partition is the Voronoi partition of its centres, so these
+seed the very cells each level was scored on: <code><a href="select_resolution.html">select_resolution()</a></code>
+returns the chosen level's as <code>$seeds</code>, and
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>
+use them when given the selection or the profile.</p>
     </div>
     <div class="section level2">
     <h2 id="the-ladder-and-its-bounds">The ladder and its bounds<a class="anchor" aria-label="anchor" href="#the-ladder-and-its-bounds"></a></h2>
@@ -329,7 +342,14 @@ says so when that happens.  It becomes a genuine interior criterion
 only when the nugget is a large share of the sill.  With a nugget of 0
 (under \(10^{-4}\) of the sill; usually a fit clipped at its lower
 bound) the penalty is 0 and \(C_p\) descends to the ceiling whatever
-the field; the profile warns.</p></dd>
+the field; the profile warns.  When the variogram gives no nugget (none
+was fitted, its fit did not converge, its range is below the shortest
+lag, or <code>sac</code> is a range alone), \(\tau^2\) is Mallows' own
+choice instead: the residual mean square \(RSS / (m - L_m)\) of the
+finest level whose cells hold at least two scored rows on average.  It
+counts the structure within those cells as noise too, so on average it
+is no smaller than the nugget and errs towards fewer cells; the profile warns,
+and <code>attr(, "cp_noise")</code> records which was used.</p></dd>
 
 <dt><code>moran_z</code></dt>
 <dd><p>The standardised deviate of Moran's I on the

@@ -122,8 +122,14 @@ or first of the levels this criterion was scored at, which for
 is, in words: the support ceiling, the subsample's ceiling, the range
 floor, the ladder's own end,
 or the first or last level the criterion is computable at; <code>NA</code> for
-an interior optimum), <code>n_levels</code> and <code>values</code> (the criterion
-at every level, <code>NA</code> where it could not be computed).</p>
+an interior optimum), <code>n_levels</code>, <code>values</code> (the criterion
+at every level, <code>NA</code> where it could not be computed) and
+<code>seeds</code> (an sf POINT layer, with <code>seed_id</code>, of the centres of
+the partition the profile scored at <code>best</code>, in the CRS it was
+computed in; <code>NULL</code> for a profile that does not carry them).  Their
+Voronoi cells are the cells that were scored;
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds</a>(method = "kmeans", n = &lt;this&gt;)</code> and
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans</a>(k = &lt;this&gt;)</code> return them.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

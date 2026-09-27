@@ -387,18 +387,23 @@ range estimated on the selection half.
 
 ## Next
 
-Hand the chosen number to whichever call decides the cell count. For a
+Hand the selection to whichever call decides the cell count. For a
 Voronoi tessellation that is
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
-and
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md).
+Given the
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+result itself, it returns the centres of the partition the profile
+scored, and a k-means partition is the Voronoi partition of its centres,
+so the cells built on those seeds are the cells the criteria judged; the
+bare count `sel$best` would run a new k-means, whose cells are not.
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 then works on the seeds:
 
 ``` r
 
 bnd   <- clip_target_for(pts, expand = 0.02, quiet = TRUE)
-seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = sel$best,
-                           sample_points = pts, set_seed = 1)
+seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = sel,
+                           sample_points = pts)
 cells <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
                             quiet = TRUE)
 nrow(cells$cells)

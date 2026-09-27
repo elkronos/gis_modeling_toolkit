@@ -57,6 +57,15 @@ get_voronoi_seeds(
   at its default criterion). The result then carries `attr(, "n_from")`
   saying which.
 
+  With `method = "kmeans"`, a selection or profile also carries the
+  centres of the partition the profile scored at that count, and those
+  are returned instead of a new k-means: a k-means partition is the
+  Voronoi partition of its centres, so their cells are the cells the
+  criteria judged. `sample_points`, when given, is then only assigned to
+  them (for `attr(, "kmeans")`), and `boundary` only sets the CRS;
+  `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used. Pass the
+  count as a number (`n = sel$best`) for a fresh k-means instead.
+
 - seeds:
 
   sf POINT object of user-provided seeds (method = "provided").
@@ -79,8 +88,8 @@ get_voronoi_seeds(
   [`stats::kmeans()`](https://rdrr.io/r/stats/kmeans.html), not the
   best-of-25 k-means++ run that
   [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-  scored a count on, so it is not that partition; see
-  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md).
+  scored a count on, so it is not that partition; pass the selection or
+  profile itself as `n` for that one (see `n`).
 
 - kmeans_iter:
 
@@ -98,7 +107,10 @@ the seeds: `cluster` (the `seed_id` each clustered cloud point was
 assigned to), `rows` (those points' positions in the cloud, since rows
 with unusable coordinates are dropped first), `size` (points per seed),
 `withinss` and `tot_withinss` (the within-cluster sums of squares),
-`iter` and `nstart`.
+`iter` and `nstart`. For the scored centres of a selection or profile
+(see `n`) it describes `sample_points` assigned to them, each point to
+its nearest seed, with `iter` `NA` and `nstart` the profile's restarts,
+and is absent when no `sample_points` were given.
 
 ## See also
 

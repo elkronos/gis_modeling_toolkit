@@ -51,8 +51,15 @@ was scored at, which for `moran_z` starts above nine cells), `edge`
 (which bound that is, in words: the support ceiling, the subsample's
 ceiling, the range floor, the ladder's own end, or the first or last
 level the criterion is computable at; `NA` for an interior optimum),
-`n_levels` and `values` (the criterion at every level, `NA` where it
-could not be computed).
+`n_levels`, `values` (the criterion at every level, `NA` where it could
+not be computed) and `seeds` (an sf POINT layer, with `seed_id`, of the
+centres of the partition the profile scored at `best`, in the CRS it was
+computed in; `NULL` for a profile that does not carry them). Their
+Voronoi cells are the cells that were scored;
+[`get_voronoi_seeds`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)`(method = "kmeans", n = <this>)`
+and
+[`voronoi_seeds_kmeans`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)`(k = <this>)`
+return them.
 
 ## See also
 

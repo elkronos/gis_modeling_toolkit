@@ -110,17 +110,18 @@ resolution_profile(
   since that needs the range; one whose model did not converge, or whose
   range is below the shortest lag fitted (a structure that cannot be
   told from a nugget, so the nugget is not identified either), gives
-  neither. Under `select_on = "split"` the sac must come from the
+  neither, and `cp` takes its noise variance from the finest level (see
+  `cp` above). Under `select_on = "split"` the sac must come from the
   selection half alone: run the profile once without it, fit the sac on
   `data_sf[attr(p, "split")$selection, ]` and pass it to a second call
   with the same `seed`, which makes the same split. When `NULL` and a
   response is given, one is estimated on the subsample (its selection
   half under `"split"`) with the same `predictor_vars`. A plain number
   is taken as the range alone, in the units of the CRS the profile is
-  computed in (metres for lon/lat input): it sets the floor, and `cp`
-  and `reliability`, which need a fitted model, are `NA`. A `units`
-  object is refused rather than read as a number in whatever unit it was
-  written in.
+  computed in (metres for lon/lat input): it sets the floor,
+  `reliability`, which needs a fitted model, is `NA`, and `cp` takes its
+  noise variance from the finest level. A `units` object is refused
+  rather than read as a number in whatever unit it was written in.
 
 - select_on:
 
@@ -164,7 +165,20 @@ when it does not say); `NULL` when none was usable), `variable`
 (`"response"`, `"residuals"` or `NA`), `wss_bumps`, `nstart`, `sac` (the
 range object used) and, with `select_on = "split"`, `split` (a
 `spatialkit_split`: `selection` and `estimation`, integer row positions
-in `data_sf`, with the `method` and `seed` that made them).
+in `data_sf`, with the `method` and `seed` that made them), `cp_noise`
+(a list with `source`, `"variogram nugget"` or
+`"finest-level residual mean square"`, `value`, the \\\tau^2\\ used, and
+`level`, the level it was read at or `NA`; `NULL` when `cp` has
+neither), `centres` (a list named by level of the two-column matrices of
+the scored partitions' centres) and `centres_crs` (the CRS they are in).
+A k-means partition is the Voronoi partition of its centres, so these
+seed the very cells each level was scored on:
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+returns the chosen level's as `$seeds`, and
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+and
+[`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+use them when given the selection or the profile.
 
 ## The ladder and its bounds
 
@@ -253,7 +267,14 @@ still reported.
   only when the nugget is a large share of the sill. With a nugget of 0
   (under \\10^{-4}\\ of the sill; usually a fit clipped at its lower
   bound) the penalty is 0 and \\C_p\\ descends to the ceiling whatever
-  the field; the profile warns.
+  the field; the profile warns. When the variogram gives no nugget (none
+  was fitted, its fit did not converge, its range is below the shortest
+  lag, or `sac` is a range alone), \\\tau^2\\ is Mallows' own choice
+  instead: the residual mean square \\RSS / (m - L_m)\\ of the finest
+  level whose cells hold at least two scored rows on average. It counts
+  the structure within those cells as noise too, so on average it is no
+  smaller than the nugget and errs towards fewer cells; the profile
+  warns, and `attr(, "cp_noise")` records which was used.
 
 - `moran_z`:
 

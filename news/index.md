@@ -498,19 +498,19 @@
   `rejected_reason`) is not read as accepted: `cp` keeps that fit’s
   nugget and warns, naming the reason, `reliability` is `NA` (it needs
   the range), and a fit that did not converge, or whose range is below
-  the shortest lag fitted, gives neither (the whole refused fit used to
-  be used, and a correlation function whose range could be many times
-  the extent pinned the reliability optimum to the first level, with no
-  R warning). A range below the shortest lag means the structure cannot
-  be told from a nugget, so the nugget is not identified either: on
-  white noise detrended by REML it was 6e-7 on a sill of 0.99, and C_p,
-  with no penalty, ran to the support ceiling (33 cells). A nugget of 0
-  (under 1e-4 of the sill, since a REML fit stops short of its bound:
-  6e-7 passed a test for exactly 0), on which C_p has no penalty and
-  falls to the ceiling, is warned about, and so is a `sac` whose
-  `detrended` flag does not match the variable scored (a residual
-  variogram on the raw response moved the C_p pick from 2–4 cells to the
-  ceiling of 44 in five of five simulated fields);
+  the shortest lag fitted, gives neither its nugget nor its range (the
+  whole refused fit used to be used, and a correlation function whose
+  range could be many times the extent pinned the reliability optimum to
+  the first level, with no R warning). A range below the shortest lag
+  means the structure cannot be told from a nugget, so the nugget is not
+  identified either: on white noise detrended by REML it was 6e-7 on a
+  sill of 0.99, and C_p, with no penalty, ran to the support ceiling (33
+  cells). A nugget of 0 (under 1e-4 of the sill, since a REML fit stops
+  short of its bound: 6e-7 passed a test for exactly 0), on which C_p
+  has no penalty and falls to the ceiling, is warned about, and so is a
+  `sac` whose `detrended` flag does not match the variable scored (a
+  residual variogram on the raw response moved the C_p pick from 2–4
+  cells to the ceiling of 44 in five of five simulated fields);
   `attr(x, "variogram")` records `detrended`. When no `sac` is passed,
   these warnings name the variogram the profile estimated (kept in
   `attr(x, "sac")`), not a `sac` argument the caller never gave. A
@@ -522,14 +522,26 @@
   (`set_units(1.5, "km")`) or a character string is refused by name; a
   `units` object used to be read as a number in the CRS units, so 1.5 km
   became a range of 1.5 m and a floor of 41 million cells. A plain
-  number is taken as the range alone: it sets the floor, and `cp` and
-  `reliability` are `NA`. Reliability’s domain term is taken over the
-  convex hull the area is measured on, not the bounding box: on a 3000 x
-  120 strip the reliability pick is 6 cells whether the strip lies
-  axis-aligned or rotated by 45 degrees (it was 8 and 2), and 10 either
-  way on a square (it was 10 and 8), and reliability values shift
-  slightly on every profile. Row order does not change the profile (see
-  the
+  number is taken as the range alone: it sets the floor, and
+  `reliability` is `NA`. Wherever the variogram gives no nugget (none
+  was fitted, its fit did not converge, its range is below the shortest
+  lag, or `sac` is a range alone), `cp` takes Mallows’ own noise
+  variance, the residual mean square RSS / (m - L) of the finest level
+  whose cells hold two scored rows each on average, and the profile
+  warns; `attr(x, "cp_noise")` records which variance was used, and the
+  print says so. It counts the structure within those cells as noise
+  too, so on average it is no smaller than the nugget and errs towards
+  fewer cells. `cp` used to be `NA` at every level in all four cases, so
+  a workflow that reads C_p by default
+  (`build_tessellation(approx_n_cells = <profile>)`,
+  [`summary()`](https://rdrr.io/r/base/summary.html)) fell through to
+  another criterion with a log line at most. Reliability’s domain term
+  is taken over the convex hull the area is measured on, not the
+  bounding box: on a 3000 x 120 strip the reliability pick is 6 cells
+  whether the strip lies axis-aligned or rotated by 45 degrees (it was 8
+  and 2), and 10 either way on a square (it was 10 and 8), and
+  reliability values shift slightly on every profile. Row order does not
+  change the profile (see the
   [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md)
   item under Bug fixes); over permutations of one 2000-point layer, WSS
   used to move by up to 2.6 percent and the C_p pick across its flat
@@ -1050,7 +1062,43 @@
   converge. Code that pins the exact column set of either table needs
   the new name added.
 
+- [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  returns `$seeds`, the centres of the partition the profile scored at
+  the chosen level, and `get_voronoi_seeds(method = "kmeans")` and
+  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  return those centres when given the selection or the profile, instead
+  of running a k-means of their own. A k-means partition is the Voronoi
+  partition of its centres, so these seeds rebuild the very cells the
+  criteria judged. The fresh k-means the seeding functions ran
+  (Hartigan-Wong, 10 starts, on whatever cloud they were given) was a
+  different partition: on 300 points it put 5–16 percent of them in a
+  different cell from the one they were scored in, and on 2000 points
+  (profiled on a 1500-point subsample) 26–29 percent, so the count was
+  defended on cells nobody built. The profile keeps every level’s
+  centres in `attr(x, "centres")` (with `attr(x, "centres_crs")`), the
+  seeds come back in the CRS of the boundary or points they are for, and
+  `attr(seeds, "kmeans")` assigns `sample_points` to them, each point to
+  its nearest seed. A count passed as a number (`n = sel$best`) still
+  runs a fresh k-means, as does a selection made before seeds were kept.
+  [`voronoi_seeds_kmeans()`](https://elkronos.github.io/gis_modeling_toolkit/reference/voronoi_seeds_kmeans.md)
+  did not accept a selection or profile as `k` before, and the advice in
+  [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)’s
+  occupancy warning now points at the selection rather than the bare
+  count.
+
 ### Bug fixes
+
+- **A clipped cell that also touched the boundary from outside was
+  dropped, and its points left with no cell.**
+  [`st_intersection()`](https://r-spatial.github.io/sf/reference/geos_binary_ops.html)
+  returns such a cell as a GEOMETRYCOLLECTION of its area and a line or
+  point (on an L-shaped boundary, the cell over the inner corner), and
+  the Voronoi, grid and Delaunay builders kept only POLYGON and
+  MULTIPOLYGON rows, so the whole cell went, area and all. On a 4 x 4 L
+  with square cells of side 2, ten of thirty points had no cell and the
+  cells covered 8 of the boundary’s 10 square units. Each collection is
+  now reduced to its polygonal part, one row per cell still; a piece
+  with no area is dropped as before.
 
 - **[`coerce_to_points()`](https://elkronos.github.io/gis_modeling_toolkit/reference/coerce_to_points.md)
   crashed R on an empty line feature.** sf’s
@@ -2121,6 +2169,11 @@
   now warns when the floor leaves more than one point’s worth of excess
   below `phi`, records `params$n_at_min_train`, and the documentation
   states the guarantee only where neither `phi` nor `min_train` binds.
+  The warning names the statistic that fires it, the largest excess of
+  the realised nearest-neighbour ECDF over the target at distances up to
+  `phi`, and gives the two medians only as context: they summarise all
+  the distances, and the realised median can sit above the target’s
+  while the short distances are over-represented.
 
 - **`make_folds(auto_range = TRUE)` fell back to geometric blocks with
   only a log line.** When no range was identified (an unremoved trend, a

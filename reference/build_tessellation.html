@@ -149,7 +149,10 @@ and <code>params$cells_empty</code> report how the points filled the grid, and
 a count that came from a profile or selection warns when fewer than
 three quarters of it are occupied.  For cells that follow the points,
 seed a Voronoi tessellation with
-<code>get_voronoi_seeds(method = "kmeans", n = &lt;the count&gt;, sample_points = &lt;the points&gt;)</code>.</p></dd>
+<code>get_voronoi_seeds(method = "kmeans", n = &lt;the selection&gt;, sample_points = &lt;the points&gt;)</code>:
+given the <code><a href="select_resolution.html">select_resolution()</a></code> result or the profile itself, it
+returns the centres of the partition the profile scored, whose Voronoi
+cells are the cells the criteria judged.</p></dd>
 
 
 <dt id="arg-cellsize">cellsize<a class="anchor" aria-label="anchor" href="#arg-cellsize"></a></dt>

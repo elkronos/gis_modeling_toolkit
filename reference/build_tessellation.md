@@ -97,7 +97,12 @@ build_tessellation(
   count that came from a profile or selection warns when fewer than
   three quarters of it are occupied. For cells that follow the points,
   seed a Voronoi tessellation with
-  `get_voronoi_seeds(method = "kmeans", n = <the count>, sample_points = <the points>)`.
+  `get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)`:
+  given the
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+  result or the profile itself, it returns the centres of the partition
+  the profile scored, whose Voronoi cells are the cells the criteria
+  judged.
 
 - cellsize:
 

@@ -99,7 +99,10 @@ name.</p>
 only. It is clamped, with a warning, to whichever is smaller of the number
 of distinct point positions and <code>nrow(points_sf) - 1</code>, because k-means can
 produce neither more centres than there are distinct points nor as many
-centres as there are rows. Check <code><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow()</a></code> on the result.</p></dd>
+centres as there are rows. Check <code><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow()</a></code> on the result. A
+<code><a href="select_resolution.html">select_resolution()</a></code> result or a <code><a href="resolution_profile.html">resolution_profile()</a></code> is also
+accepted: its scored centres are returned when it carries them, and
+otherwise its count is used.</p></dd>
 
 
 <dt id="arg-set-seed">set_seed<a class="anchor" aria-label="anchor" href="#arg-set-seed"></a></dt>
@@ -133,8 +136,11 @@ distinct positions.</p>
 starts. <code><a href="resolution_profile.html">resolution_profile()</a></code> and <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code> score each
 count on a different run, by default the best of 25 k-means++ restarts,
 which usually reaches a lower within-cluster sum of squares; the seeds for
-a chosen count are therefore not the partition that count was scored on.
-Raising <code>nstart</code> narrows the gap but does not close it.</p>
+a count passed as a number are therefore not the partition that count was
+scored on. Raising <code>nstart</code> narrows the gap but does not close it. Pass
+the <code><a href="select_resolution.html">select_resolution()</a></code> result or the profile itself as <code>k</code> to close
+it: the centres of the scored partition are then returned (in the CRS of
+<code>points_sf</code>, with <code>attr(, "n_from")</code>), and no k-means is run.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

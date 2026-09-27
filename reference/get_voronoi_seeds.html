@@ -100,7 +100,15 @@ the integer vector of ranked candidates from <code><a href="determine_optimal_le
 (its first element is used), a <code><a href="select_resolution.html">select_resolution()</a></code> result (its
 <code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code> (read with <code><a href="select_resolution.html">select_resolution()</a></code> at
 its default criterion). The result then carries <code>attr(, "n_from")</code>
-saying which.</p></dd>
+saying which.</p>
+<p>With <code>method = "kmeans"</code>, a selection or profile also carries the
+centres of the partition the profile scored at that count, and those
+are returned instead of a new k-means: a k-means partition is the
+Voronoi partition of its centres, so their cells are the cells the
+criteria judged. <code>sample_points</code>, when given, is then only assigned to
+them (for <code>attr(, "kmeans")</code>), and <code>boundary</code> only sets the CRS;
+<code>kmeans_nstart</code>, <code>kmeans_iter</code> and <code>set_seed</code> are not used. Pass the
+count as a number (<code>n = sel$best</code>) for a fresh k-means instead.</p></dd>
 
 
 <dt id="arg-seeds">seeds<a class="anchor" aria-label="anchor" href="#arg-seeds"></a></dt>
@@ -122,7 +130,7 @@ before clustering.</p></dd>
 <dd><p>Integer; nstart for kmeans(). Default 10. The
 partition is <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>, not the best-of-25 k-means++ run that
 <code><a href="resolution_profile.html">resolution_profile()</a></code> scored a count on, so it is not that partition;
-see <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>.</p></dd>
+pass the selection or profile itself as <code>n</code> for that one (see <code>n</code>).</p></dd>
 
 
 <dt id="arg-kmeans-iter">kmeans_iter<a class="anchor" aria-label="anchor" href="#arg-kmeans-iter"></a></dt>
@@ -141,7 +149,10 @@ the seeds: <code>cluster</code> (the <code>seed_id</code> each clustered cloud p
 assigned to), <code>rows</code> (those points' positions in the cloud, since rows
 with unusable coordinates are dropped first), <code>size</code> (points per seed),
 <code>withinss</code> and <code>tot_withinss</code> (the within-cluster sums of squares),
-<code>iter</code> and <code>nstart</code>.</p>
+<code>iter</code> and <code>nstart</code>. For the scored centres of a selection or profile
+(see <code>n</code>) it describes <code>sample_points</code> assigned to them, each point to
+its nearest seed, with <code>iter</code> <code>NA</code> and <code>nstart</code> the profile's restarts,
+and is absent when no <code>sample_points</code> were given.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
