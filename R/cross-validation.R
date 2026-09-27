@@ -4972,8 +4972,10 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .warn_and_log("cv_gwr(): all folds failed; cross-validation results contain no predictions.%s",
-                  why)
+    .warn_and_log(paste0("cv_gwr(): all folds failed (all %d folds failed to ",
+                         "produce predictions); cross-validation results ",
+                         "contain no predictions.%s"),
+                  n_attempted, why)
   } else {
     .cv_warn_failed_folds("cv_gwr", res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
@@ -5320,8 +5322,10 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .warn_and_log("cv_bayes(): all folds failed; cross-validation results contain no predictions.%s",
-                  why)
+    .warn_and_log(paste0("cv_bayes(): all folds failed (all %d folds failed to ",
+                         "produce predictions); cross-validation results ",
+                         "contain no predictions.%s"),
+                  n_attempted, why)
   } else {
     .cv_warn_failed_folds("cv_bayes", res, preds, length(keep_idx),
                           n_attempted, n_succeeded)
@@ -5705,8 +5709,10 @@ cv_spatial <- function(data_sf, response_var, predictor_vars,
   n_succeeded <- length(res$fold_stats)
   if (n_succeeded == 0L && n_attempted > 0L) {
     why <- .cv_first_error_suffix(res)
-    .warn_and_log("%s(): all folds failed; cross-validation results contain no predictions.%s",
-                  .caller, why)
+    .warn_and_log(paste0("%s(): all folds failed (all %d folds failed to ",
+                         "produce predictions); cross-validation results ",
+                         "contain no predictions.%s"),
+                  .caller, n_attempted, why)
   } else {
     .cv_warn_failed_folds(.caller, res, preds, length(keep_idx),
                           n_attempted, n_succeeded)

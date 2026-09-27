@@ -455,7 +455,7 @@ was recognised, but every recognised backend is uninstalled: each prints
 any unrecognised names are named in a warning printed with it. Install
 the backend, or request one you have.
 
-**`cv_*(): all folds failed; cross-validation results contain no predictions.`**
+**`cv_*(): all folds failed (all N folds failed to produce predictions); ...`**
 This is a warning: `$overall` comes back all-`NA` with `n_pred = 0`. The
 per-fold `WARN` lines name the cause, most often a missing backend,
 sometimes a degenerate training slice or a predictor constant within a
@@ -516,11 +516,13 @@ cv <- cv_bayes(site, "price", "elev", k = 5, parallel = TRUE)  # auto-detect cor
 #> WARN  cross-validation: fold 1 fit failed; skipping.
 #>       Cause: fit_bayesian_spatial_model(): package 'brms' is required.
 #> ... (once per fold)
-#> WARN  cv_bayes(): all folds failed; cross-validation results contain no
-#> predictions. First error: fit_bayesian_spatial_model(): package 'brms' is required.
+#> WARN  cv_bayes(): all folds failed (all 5 folds failed to produce
+#> predictions); cross-validation results contain no predictions. First error:
+#> fit_bayesian_spatial_model(): package 'brms' is required.
 #> Warning message:
-#> cv_bayes(): all folds failed; cross-validation results contain no
-#> predictions. First error: fit_bayesian_spatial_model(): package 'brms' is required.
+#> cv_bayes(): all folds failed (all 5 folds failed to produce predictions);
+#> cross-validation results contain no predictions. First error:
+#> fit_bayesian_spatial_model(): package 'brms' is required.
 
 cv <- cv_rf(site, "price", "elev", k = 5, parallel = 4L)       # explicit count
 ```
