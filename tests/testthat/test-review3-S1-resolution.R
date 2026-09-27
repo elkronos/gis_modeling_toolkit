@@ -218,16 +218,19 @@ test_that("resolution_profile() drops points with no coordinates with an R warni
 })
 
 
-test_that("a range below the shortest lag gives cp and reliability nothing", {
+test_that("a range below the shortest lag gives cp no nugget and reliability nothing", {
   # That refusal means the structure cannot be told from a nugget, so the
   # nugget is not identified either; on white noise detrended by REML it was
-  # 6e-7 on a sill of 0.99 and Cp ran to the support ceiling.
+  # 6e-7 on a sill of 0.99 and Cp ran to the support ceiling.  Cp takes its
+  # noise variance from the finest level instead.
   pts <- r3_pts(200)
   rej <- r3_sac(NA_real_, nugget = 6e-7, psill = 0.99)
   attr(rej, "rejected_reason") <- "fitted range is below the shortest lag fitted"
   out <- r3_warnings(resolution_profile(pts, "z", sac = rej, n_levels = 4, nstart = 2))
   expect_true(any(grepl("below the shortest lag fitted.*not identified", out$warnings)))
-  expect_true(all(is.na(out$value$cp)) && all(is.na(out$value$reliability)))
+  expect_true(all(is.na(out$value$reliability)))
+  expect_true(all(is.finite(out$value$cp)))
+  expect_identical(attr(out$value, "cp_noise")$source, "finest-level residual mean square")
   expect_null(attr(out$value, "variogram"))
   # The other refusals keep their rule: a range past the lags still gives Cp
   # its nugget.

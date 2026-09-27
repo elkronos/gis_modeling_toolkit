@@ -13,7 +13,10 @@ voronoi_seeds_kmeans(points_sf, k, set_seed = 456, nstart = 10)
 only. It is clamped, with a warning, to whichever is smaller of the number
 of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
 produce neither more centres than there are distinct points nor as many
-centres as there are rows. Check \code{nrow()} on the result.}
+centres as there are rows. Check \code{nrow()} on the result. A
+\code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
+accepted: its scored centres are returned when it carries them, and
+otherwise its count is used.}
 
 \item{set_seed}{Optional integer RNG seed. Default 456, so a call gives the
 same seeds every time whatever the session's random-number state; an
@@ -54,8 +57,11 @@ The partition is \code{\link[stats:kmeans]{stats::kmeans()}} (Hartigan-Wong) wit
 starts. \code{\link[=resolution_profile]{resolution_profile()}} and \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} score each
 count on a different run, by default the best of 25 k-means++ restarts,
 which usually reaches a lower within-cluster sum of squares; the seeds for
-a chosen count are therefore not the partition that count was scored on.
-Raising \code{nstart} narrows the gap but does not close it.
+a count passed as a number are therefore not the partition that count was
+scored on. Raising \code{nstart} narrows the gap but does not close it. Pass
+the \code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to close
+it: the centres of the scored partition are then returned (in the CRS of
+\code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
 }
 \examples{
 library(sf)
