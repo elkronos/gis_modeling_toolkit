@@ -619,12 +619,17 @@ test_that("summarize_by_cell falls back to deff = 1 with no fitted variogram", {
   # without uninstalling anything -- when nothing supplies a variogram to fit.
   pts <- .vgm_cell_points()
 
+  # A real R warning, classed, as well as the log line: the standard errors
+  # come back uncorrected although a correction was asked for.
   lines <- capture_spatialkit_log(
-    out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram")
+    expect_warning(
+      out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram"),
+      "requires a fitted variogram model", class = "spatialkit_deff_fallback")
   )
   expect_true(log_has(lines, "requires a fitted variogram model"))
   expect_true(log_has(lines, "Falling back to deff = 1"))
   expect_null(attr(out, "deff_applied"))
+  expect_false(any(out$deff_applied))
 
   iid <- summarize_by_cell(pts, predictor_vars = "z", deff = 1)
   expect_equal(out[["..se_pred_z"]], iid[["..se_pred_z"]])
@@ -634,7 +639,10 @@ test_that("summarize_by_cell falls back to deff = 1 with no fitted variogram", {
   lines2 <- capture_spatialkit_log({
     local_mocked_bindings(
       estimate_sac_range = function(...) stop("gstat unavailable"))
-    out2 <- summarize_by_cell(pts, response_var = "z", deff = "variogram")
+    expect_warning(
+      out2 <- summarize_by_cell(pts, response_var = "z", deff = "variogram"),
+      "estimate_sac_range\\(\\) failed: gstat unavailable",
+      class = "spatialkit_deff_fallback")
   })
   expect_true(log_has(lines2, "requires a fitted variogram model"))
   expect_null(attr(out2, "deff_applied"))
@@ -850,9 +858,12 @@ test_that("conf_level = NULL leaves the frame exactly as it was", {
     out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
                              deff = dv)
     expect_length(.interval_cols(out), 0L)
+    # A requested design effect adds its per-row `deff_applied` flag, with
+    # or without conf_level; the default deff = 1 frame has none.
     expect_named(out, c("poly_id", "n", "resp_mean_y", "..sd_resp_y",
                         "..se_resp_y", "pred_mean_e", "..sd_pred_e",
-                        "..se_pred_e", "cell_weight"))
+                        "..se_pred_e", "cell_weight",
+                        if (!identical(dv, 1)) "deff_applied"))
   }
 })
 

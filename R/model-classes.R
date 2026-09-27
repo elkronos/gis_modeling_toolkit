@@ -199,8 +199,18 @@ print.spatial_fit <- function(x, ...) {
   cat(sprintf("  CRS     : %s\n", .fold_crs_label(x$data_sf)))
 
   if (subclass == "gwr_fit") {
-    cat(sprintf("  Bandwidth: %.4g (%s, %s kernel)\n",
-                x$info$bandwidth,
+    # "%.4g" printed a fixed bandwidth of 122372 m as "1.224e+05", rounded and
+    # without the unit the help page tells the reader to check.  A count of
+    # neighbours for adaptive, a distance with the CRS's unit for fixed.
+    bw <- suppressWarnings(as.numeric(x$info$bandwidth %||% NA_real_))[1L]
+    bw_txt <- if (!is.finite(bw)) "unknown"
+      else if (isTRUE(x$info$adaptive)) sprintf("%s neighbours", format(bw))
+      else {
+        u <- tryCatch(sf::st_crs(x$data_sf)$units_gdal, error = function(e) NULL)
+        sprintf("%s %s", format(signif(bw, 6), big.mark = ",", scientific = FALSE),
+                if (length(u) != 1L || is.na(u) || !nzchar(u)) "CRS units" else u)
+      }
+    cat(sprintf("  Bandwidth: %s (%s, %s kernel)\n", bw_txt,
                 if (isTRUE(x$info$adaptive)) "adaptive" else "fixed",
                 x$info$kernel %||% "bisquare"))
     if (is.finite(x$info$AICc %||% NA_real_))
@@ -212,7 +222,19 @@ print.spatial_fit <- function(x, ...) {
                 x$info$gp_n_basis %||% NA_integer_))
     if (is.finite(x$info$looic %||% NA_real_))
       cat(sprintf("  LOOIC   : %.2f\n", x$info$looic))
-    if (!isTRUE(x$info$convergence_ok))
+    # The coefficients of a standardised fit are per SD of each predictor, and
+    # nothing coef() returns says so.
+    if (length(x$info$predictor_scaling) > 0L)
+      cat(sprintf(paste0("  Predictors standardised: %s (coef() is per SD; ",
+                         "see $info$predictor_scaling)\n"),
+                  paste(names(x$info$predictor_scaling), collapse = ", ")))
+    # NA is "not checked" (check_convergence = FALSE, or no diagnostic could be
+    # read), which is neither a pass nor a failure; NULL (nothing recorded)
+    # still reads as a failure.
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
       cat("  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
@@ -318,6 +340,14 @@ print.summary.spatial_fit <- function(x, ...) {
   else
     cat("\n  In-sample metrics:\n")
   m <- x$in_sample
+  # The metrics use the rows with a finite fitted value, which is not always
+  # all of them: an rf_fit has no out-of-bag prediction for a row every tree
+  # sampled (ranger returns NaN), so a 5-tree forest printed "n = 200" above
+  # an R^2 computed on 180 rows.
+  n_m <- m$n %||% NA_integer_
+  if (length(n_m) == 1L && is.finite(n_m) && is.finite(x$n) && n_m < x$n)
+    cat(sprintf("    (computed on %d of %d rows; the rest have no finite fitted value)\n",
+                n_m, x$n))
   # ASCII on purpose: a superscript two rendered as R<U+00B2> on every
   # non-UTF-8 console, and the labels were not aligned.
   cat(sprintf("    RMSE    = %.4f\n", m$RMSE))
@@ -332,6 +362,16 @@ print.summary.spatial_fit <- function(x, ...) {
     sub <- if (is.finite(n_s) && is.finite(m$n) && n_s < m$n)
       sprintf("  (over %d of %d rows)", n_s, m$n) else ""
     cat(sprintf("    SMAPE   = %.2f%%%s\n", m$SMAPE, sub))
+  }
+  # The same convergence verdict print() on the fit gives.  The summary carried
+  # it in $info and never showed it, so metrics from a posterior that had not
+  # converged printed exactly like metrics from one that had.
+  if (identical(x$class, "bayesian_fit") && "convergence_ok" %in% names(x$info)) {
+    cv_ok <- x$info$convergence_ok
+    if (length(cv_ok) == 1L && is.na(cv_ok))
+      cat("\n  Convergence: NOT CHECKED (fitted with check_convergence = FALSE?)\n")
+    else if (!isTRUE(cv_ok))
+      cat("\n  ** Convergence warnings present -- see $info$convergence_diagnostics\n")
   }
   invisible(x)
 }
@@ -360,16 +400,32 @@ print.summary.spatial_fit <- function(x, ...) {
 #' That is \strong{in-sample} for a \code{gwr_fit} or a \code{bayesian_fit},
 #' but \strong{out-of-bag} for an \code{rf_fit}, whose \code{fitted()} method
 #' returns out-of-bag predictions (see \code{\link{fit_rf_model}}).  The
-#' returned data.frame carries no label distinguishing the two, so check
-#' \code{object$info$fitted_are_oob} before comparing numbers across backends,
-#' or use \code{\link{compare_models_cv}}, which scores every backend the
-#' same way.
+#' data.frame \code{model_metrics()} returns carries no label distinguishing
+#' the two, so check \code{object$info$fitted_are_oob} before comparing
+#' numbers across backends; \code{\link{evaluate_insample}()} and
+#' \code{\link{compare_models}()} record it per model in a
+#' \code{metric_basis} column.  \code{\link{compare_models_cv}} scores every
+#' backend the same way.
+#'
+#' \eqn{R^2} is \eqn{1 - RSS/TSS} with the total sum of squares taken about
+#' the mean of the response the model was \emph{fitted} to.  In sample that
+#' is the ordinary \eqn{R^2}.  With \code{newdata} it is out-of-sample
+#' \eqn{R^2}, the convention every \code{cv_*()} function uses: the model is
+#' measured against the prediction it had to beat, the training mean, not
+#' against the new rows' own mean, which it could not have known.  It is
+#' below 0 when the model predicts the new rows worse than the training mean
+#' does, and it is \code{NA} when the response does not vary about that
+#' baseline by more than rounding error (100 machine epsilons of its
+#' magnitude, whatever its units).
 #'
 #' @section Percentage errors on responses with zeros:
 #' \code{MAPE} divides by the observed value and \code{SMAPE} by
 #' \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 #' Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 #' whose denominator is non-zero, and are \code{NA} when no row qualifies.
+#' Non-zero is judged at the scale of the data: a denominator no larger
+#' than 100 machine epsilons times the largest one counts as zero, so the
+#' rule does not depend on the units of the response.
 #' The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 #' the \code{n} column counts finite observation/prediction pairs.  Read a
 #' percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
@@ -408,8 +464,11 @@ print.summary.spatial_fit <- function(x, ...) {
 #' For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 #' CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 #' scoring rules computed from posterior draws, so they are meaningful for any
-#' \code{family} the backend accepts, and they are the numbers to compare when
-#' the response is not Gaussian.  When every fold fails, the
+#' \code{family} that predicts one number per row (a count, a rate, a binary
+#' or bounded outcome), and they are the numbers to compare when the response
+#' is not Gaussian.  A categorical or ordinal family predicts a probability
+#' per response category instead, so \code{cv_bayes()} refuses one before
+#' fitting anything.  When every fold fails, the
 #' \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 #' but not the \code{coverage_*} columns, so code that reads those columns
 #' must tolerate their absence.
@@ -462,10 +521,23 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
     y_obs <- sf::st_drop_geometry(newdata)[[object$response_var]]
   }
   y_obs <- .checked_response(y_obs, object$response_var, "model_metrics")
+  # R² on newdata is measured against the TRAINING mean, as every cv_*()
+  # measures it: the null prediction the model had to beat.  It used the
+  # held-out rows' own mean, so the same predictions scored R² -0.89 here and
+  # 0.35 from cv_spatial() on a trend split.  In sample the two means are the
+  # same number.  A fit whose data_sf lacks a usable response keeps the
+  # held-out mean.
+  ytm <- NULL
+  if (!is.null(newdata)) {
+    y_tr <- tryCatch(suppressWarnings(as.numeric(
+      sf::st_drop_geometry(object$data_sf)[[object$response_var]])),
+      error = function(e) NULL)
+    if (length(y_tr) && any(is.finite(y_tr))) ytm <- mean(y_tr[is.finite(y_tr)])
+  }
   # Adj R² is suppressed (p = NULL) because GWR's effective parameter count
   # far exceeds the global predictor count, and Bayesian GP models likewise
   # lack a simple p.  This is consistent with the CV evaluation path.
-  .compute_reg_metrics(y_obs, y_hat, p = NULL)
+  .compute_reg_metrics(y_obs, y_hat, p = NULL, y_train_mean = ytm)
 }
 
 # ---------------------------------------------------------------------------
@@ -513,7 +585,14 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #' Predict from a GWR spatial model
 #'
 #' When \code{newdata} is NULL, returns the in-sample fitted values.
-#' Otherwise uses \code{GWmodel::gwr.predict()} on the new locations.
+#' Otherwise estimates the local coefficients at each new location with
+#' \code{GWmodel::gwr.basic(regression.points = )}, with the fit's kernel and
+#' bandwidth (an adaptive bandwidth counts neighbours among the training
+#' points), and returns \eqn{x^\top\hat\beta(u)}{x'beta(u)}.  These are the
+#' values \code{GWmodel::gwr.predict()} returns, without its prediction
+#' variance, which this method never returned and which costs time cubic in
+#' the number of training points.  Each location stands alone: one that cannot
+#' be estimated does not affect the others.
 #' \code{newdata} is first transformed to the CRS used during fitting
 #' (via \code{ensure_projected()}), so predictions are computed in a
 #' single coordinate system regardless of the CRS newdata arrives in.
@@ -524,8 +603,11 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
 #'   is supported).  NULL = fitted values.
 #' @param ... Ignored.
 #' @return Numeric vector aligned to \code{nrow(newdata)}, with \code{NA} for
-#'   rows dropped as missing or non-finite.  If \code{GWmodel::gwr.predict()}
-#'   fails, every value is \code{NA} and a warning says why.  CRS-less
+#'   rows dropped as missing or non-finite, and for locations whose local
+#'   regression cannot be estimated (too few training points within a fixed
+#'   bandwidth, or a singular local design); a warning counts those.  If the
+#'   design matrix for \code{newdata} cannot be built, every value is
+#'   \code{NA} and a warning says why.  CRS-less
 #'   \code{newdata} first receives the interpretation the training data got, so
 #'   the same rows land where they did at fit time.
 #' @family methods on a fitted model
@@ -546,7 +628,7 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   # Align newdata to the CRS used during fitting BEFORE prep_model_data().
   # prep's own ensure_projected() call has no target and would leave
   # already-projected newdata in *its* CRS (or auto-pick a UTM zone for
-  # lon/lat input independent of training), after which gwr.predict()
+  # lon/lat input independent of training), after which the local regressions
   # would silently mix coordinates from two different systems.  This
   # mirrors predict.bayesian_fit().
   # CRS-less newdata first gets the interpretation the TRAINING data got
@@ -571,54 +653,57 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   newdata$..orig_row_id.. <- NULL
 
   # Degrade to an all-NA vector when nothing survived cleaning, matching
-  # predict.rf_fit() and predict.bayesian_fit().  Without this the .to_sp()
-  # call below -- which sits outside the tryCatch -- would surface a raw
-  # sf-to-Spatial coercion error instead.
+  # predict.rf_fit() and predict.bayesian_fit().  Without this a zero-row
+  # layer would reach the chunk loop below and come back as a warning about
+  # the local regressions, which are not what went wrong.
   if (n_new == 0L) {
     .log_warn(paste0("predict.gwr_fit(): every row of newdata was dropped as ",
                      "missing or non-finite; returning %d NA(s)."), n_orig)
     return(rep(NA_real_, n_orig))
   }
 
-  # .to_sp() uses intersect() internally, so it gracefully handles newdata
-  # that lacks the response column (true out-of-sample prediction).
   needed_cols <- unique(c(object$response_var, object$predictor_vars))
   sp_train <- .to_sp(object$data_sf, needed_cols)
-  sp_new   <- .to_sp(newdata, needed_cols)
 
   bw <- object$info$bandwidth
-  if (isTRUE(object$info$adaptive)) bw <- as.integer(round(bw))
+  adaptive <- object$info$adaptive %||% TRUE
+  if (isTRUE(adaptive)) bw <- as.integer(round(bw))
 
-  pred_obj <- tryCatch(
-    suppressWarnings(
-      GWmodel::gwr.predict(
-        object$formula, data = sp_train, predictdata = sp_new,
-        bw = bw, kernel = object$info$kernel %||% "bisquare",
-        adaptive = object$info$adaptive %||% TRUE
-      )
-    ),
-    error = function(e) {
-      # A real warning(), not only a logger line.  A logger line is invisible
-      # to tryCatch(warning = ), to withCallingHandlers(), to
-      # testthat::expect_warning() and to R CMD check, so a predict() that
-      # returns nothing but NA left no trace a caller could act on.  The
-      # commonest cause is a factor or character predictor: gwr.basic() expands
-      # contrasts via model.matrix() and fits, gwr.predict() does not and fails
-      # here.  fit_gwr_model() now rejects those at fit time, so reaching this
-      # generally means the fit was built by other means.
-      .log_warn("predict.gwr_fit(): gwr.predict() failed: %s", conditionMessage(e))
-      warning(sprintf(paste0("predict.gwr_fit(): GWmodel::gwr.predict() ",
-                             "failed, so every prediction is NA. Cause: %s"),
-                      conditionMessage(e)), call. = FALSE)
-      NULL
-    }
+  # One local regression per new location (see .gwr_predict_at()), not
+  # GWmodel::gwr.predict(), which returned every prediction as NA in three
+  # common cases: one location with an empty or singular window (a grid cell
+  # beyond a fixed bandwidth, a point inside a held-out block) threw inv()'s
+  # error for all of them; more than 10000 training plus new rows failed on
+  # "object 'DM3.given' not found", and more than 5000 training rows on "No
+  # regression point is fixed".  It also built the n_train x n_train hat
+  # matrix for a prediction variance this method never returned, cubic in the
+  # training size, on every call and so on every cv_gwr() fold.
+  preds_clean <- tryCatch(
+    .gwr_predict_at(object$formula, sp_train,
+                    newdata_df = sf::st_drop_geometry(newdata),
+                    rp = sf::st_coordinates(newdata)[, 1:2, drop = FALSE],
+                    bw = bw, kernel = object$info$kernel %||% "bisquare",
+                    adaptive = adaptive),
+    error = function(e) e
   )
-
-  preds_clean <- if (is.null(pred_obj)) {
-    rep(NA_real_, n_new)
-  } else {
-    .extract_gwr_values(pred_obj, newdata, object$formula, n_new,
-                         object$response_var, mode = "predict")
+  if (inherits(preds_clean, "error")) {
+    # A real warning(), not only a logger line.  A logger line is invisible
+    # to tryCatch(warning = ), to withCallingHandlers(), to
+    # testthat::expect_warning() and to R CMD check, so a predict() that
+    # returns nothing but NA left no trace a caller could act on.
+    .warn_and_log(paste0("predict.gwr_fit(): the local regressions could not ",
+                         "be evaluated, so every prediction is NA. Cause: %s"),
+                  conditionMessage(preds_clean))
+    preds_clean <- rep(NA_real_, n_new)
+  } else if (anyNA(preds_clean)) {
+    n_na <- sum(is.na(preds_clean))
+    .warn_and_log(paste0("predict.gwr_fit(): %d of %d location(s) have no ",
+                         "estimable local regression, so their predictions are ",
+                         "NA; the other %d are unaffected. Too few training ",
+                         "points carry weight within the %s bandwidth (%s) ",
+                         "there, or the local design is singular."),
+                  n_na, n_new, n_new - n_na,
+                  if (isTRUE(adaptive)) "adaptive" else "fixed", format(bw))
   }
 
   # Expand back to original length, filling dropped rows with NA.
@@ -674,15 +759,16 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 }
 
 
-#' Pin the GP boundary by appending the training coordinate extrema
+#' Hold the GP boundary at the value the model was fitted with
 #'
-#' brms 2.x stores \code{Xgp}, \code{dmax} and \code{cmeans} in a fit's GP
-#' basis but \strong{not} the Hilbert-space boundary \code{L}, so
+#' brms 2.17 to 2.22 store \code{Xgp}, \code{dmax} and \code{cmeans} in a fit's
+#' GP basis but \strong{not} the Hilbert-space boundary \code{L}, so
 #' \code{brms:::.data_gp()} recomputes
 #' \code{L = c * max(1, diff(range(centred Xgp)))} from whatever rows
 #' \code{predict()} is handed.  Every eigenfunction and eigenvalue of the
 #' approximation therefore moves with the newdata bounding box while the fitted
-#' basis coefficients stay put.
+#' basis coefficients stay put.  brms 2.23.0 stores \code{L} in the basis and
+#' reuses it, so there the two repairs below are unnecessary and harmless.
 #'
 #' Measured on a fitted model: \code{L} was 5.57 at fit time, 4.02 for a
 #' five-row \code{newdata} and 3.63 for one row; \code{predict_surface()} on the
@@ -691,41 +777,58 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #' predicts each test fold separately, scored every fold against a basis the
 #' model was never fitted with.
 #'
-#' The repair is to make the pooled centred range of the rows brms sees equal
-#' the training one: append two synthetic rows at the training extrema, predict,
-#' then drop their columns.  \code{cmeans} already comes from the stored basis,
-#' so pinning the range reproduces the fitted \code{L} exactly for any newdata
-#' inside the training envelope.
+#' The first repair makes the pooled centred range of the rows brms sees at
+#' least the training one: append two synthetic rows at the training extrema,
+#' predict, then drop their columns.  \code{cmeans} already comes from the
+#' stored basis, so for newdata inside the training envelope that reproduces
+#' the fitted \code{L} exactly.  Appending rows cannot narrow the range,
+#' though: one row past the pooled extremes still widened \code{L}, and with it
+#' the prediction of EVERY row in the call (on brms 2.20.4 one row 100 m past
+#' the bbox moved interior predictions by up to 0.08, and a grid padded 15\%
+#' past it moved in-bbox cells by 0.31 on average).  The second repair is for
+#' that case: \code{c_scale = S_fit / S_new} (\code{.gp_c_scale()}), by which
+#' \code{predict()} multiplies the \code{c} of the gp() term
+#' (\code{.scale_gp_c()}), so brms rebuilds
+#' \code{L = c * c_scale * S_new = c * S_fit}, the fitted value.
+#'
+#' Rows further than \code{L} from the training centre on either axis are
+#' flagged in \code{beyond}.  The Dirichlet eigenfunctions vanish at
+#' \code{+/- L} and continue past it as an odd reflection of the fitted
+#' surface, so a prediction there means nothing on any brms version.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param pred_df The prediction data.frame from
 #'   \code{.prepare_brms_pred_df()}.
-#' @return A list with \code{df} (possibly with rows appended) and \code{n_pad}
-#'   (how many were appended, to be dropped from the draw matrix).
+#' @return A list with \code{df} (possibly with rows appended), \code{n_pad}
+#'   (how many were appended, to be dropped from the draw matrix),
+#'   \code{c_scale} (the factor for the gp() term's \code{c}; 1 when the rows
+#'   do not widen the range or the fit lacks what computing it needs) and
+#'   \code{beyond} (logical, one per row of \code{pred_df}).
 #' @keywords internal
 #' @noRd
 .pin_gp_boundary_rows <- function(object, pred_df) {
+  none <- list(df = pred_df, n_pad = 0L, c_scale = 1,
+               beyond = rep(FALSE, nrow(pred_df)))
   rng <- object$info$gp_xy_range
   if (is.null(rng) || !all(c("..x", "..y") %in% names(pred_df)) ||
       !nrow(pred_df))
-    return(list(df = pred_df, n_pad = 0L))
+    return(none)
   xr <- suppressWarnings(as.numeric(rng$x))
   yr <- suppressWarnings(as.numeric(rng$y))
   if (length(xr) != 2L || length(yr) != 2L || !all(is.finite(c(xr, yr))))
-    return(list(df = pred_df, n_pad = 0L))
+    return(none)
 
-  # Warn when newdata reaches outside the training envelope: the boundary then
-  # has to grow past the fitted one whatever we do, and the predictions there
-  # are extrapolation from a basis that was not built for them.
+  # Say when newdata reaches outside the training envelope: with the boundary
+  # held, those predictions no longer depend on the other rows, but they are
+  # still extrapolation from a basis fitted without data there.
   ox <- range(pred_df[["..x"]], na.rm = TRUE)
   oy <- range(pred_df[["..y"]], na.rm = TRUE)
   if (any(is.finite(c(ox, oy))) &&
       (ox[1L] < xr[1L] || ox[2L] > xr[2L] ||
        oy[1L] < yr[1L] || oy[2L] > yr[2L]))
     .log_info(paste0("predict.bayesian_fit(): `newdata` reaches outside the ",
-                     "training coordinate envelope, so the GP basis is ",
-                     "evaluated beyond the boundary it was fitted with; those ",
-                     "predictions are extrapolation."))
+                     "training coordinate envelope; those predictions are ",
+                     "extrapolation."))
 
   pad <- pred_df[c(1L, 1L), , drop = FALSE]
   pad[["..x"]] <- xr
@@ -733,28 +836,156 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
   rownames(pad) <- NULL
   out <- rbind(pred_df, pad)
   rownames(out) <- NULL
-  list(df = out, n_pad = 2L)
+  res <- list(df = out, n_pad = 2L, c_scale = 1, beyond = none$beyond)
+
+  # The centre brms uses.  A fit saved before gp_cmeans was stored gets it the
+  # way brms got it: from the unique training rows it was fitted on.
+  cm <- object$info$gp_cmeans
+  ed <- object$engine$data
+  if (is.null(cm) && is.data.frame(ed) && all(c("..x", "..y") %in% names(ed)))
+    cm <- colMeans(unique(cbind(ed[["..x"]], ed[["..y"]])))
+  cm    <- suppressWarnings(as.numeric(cm))
+  S_fit <- suppressWarnings(as.numeric(object$info$gp_S))
+  c_fit <- suppressWarnings(as.numeric(object$info$gp_c))
+  if (length(cm) != 2L || !all(is.finite(cm)) ||
+      length(S_fit) != 1L || !isTRUE(S_fit > 0) ||
+      length(c_fit) != 1L || !isTRUE(c_fit > 0))
+    return(res)
+
+  L_fit <- c_fit * S_fit
+  res$beyond  <- abs(pred_df[["..x"]] - cm[1L]) > L_fit |
+                 abs(pred_df[["..y"]] - cm[2L]) > L_fit
+  res$c_scale <- .gp_c_scale(cbind(out[["..x"]], out[["..y"]]), cm, S_fit)
+  res
 }
+
+
+#' The factor that makes brms rebuild the fitted GP boundary from new rows
+#'
+#' brms 2.17 to 2.22 build \code{L = c * S_new} at predict time, where
+#' \code{S_new = max(1, pooled range)} of the unique newdata rows centred on
+#' the training \code{cmeans} (\code{brms:::.data_gp()},
+#' \code{brms:::choose_L()}).  Handing brms \code{c * S_fit / S_new} in place
+#' of \code{c} therefore gives back \code{L = c * S_fit}.  Pure arithmetic, so
+#' it is tested without Stan.
+#'
+#' @param xy Numeric matrix; its first two columns are the scaled coordinates
+#'   of every row brms will be handed.
+#' @param cmeans Length-2 training column means.
+#' @param S_fit The pooled centred training range (\code{$info$gp_S}).
+#' @return \code{S_fit / S_new}; 1 when no coordinate is finite.
+#' @keywords internal
+#' @noRd
+.gp_c_scale <- function(xy, cmeans, S_fit) {
+  xy <- unique(as.matrix(xy)[, 1:2, drop = FALSE])
+  Xc <- sweep(xy, 2L, cmeans)
+  if (!any(is.finite(Xc))) return(1)
+  S_new <- max(1, max(Xc[is.finite(Xc)]) - min(Xc[is.finite(Xc)]))
+  S_fit / S_new
+}
+
+
+#' Scale the boundary factor of the gp() term in a brmsfit's formula
+#'
+#' brms re-reads \code{c} from the gp() term of \code{$formula} at every
+#' predict call, so a copy of the fit with a rescaled \code{c} is how
+#' \code{predict()} holds the boundary on brms < 2.23.0; see
+#' \code{.pin_gp_boundary_rows()}.  Only the terms of the right-hand-side sum
+#' are searched, which is where \code{fit_bayesian_spatial_model()} puts it.
+#'
+#' @param model_obj A \code{brmsfit}, or anything with \code{$formula$formula}.
+#' @param c_scale Positive factor.
+#' @return \code{model_obj} with the gp() term's \code{c} multiplied by
+#'   \code{c_scale}, or \code{NULL} when there is no such term.
+#' @keywords internal
+#' @noRd
+.scale_gp_c <- function(model_obj, c_scale) {
+  found <- FALSE
+  rw <- function(e) {
+    if (is.call(e) && identical(e[[1L]], as.name("gp")) && !is.null(e[["c"]])) {
+      e[["c"]] <- eval(e[["c"]], baseenv()) * c_scale
+      found <<- TRUE
+    } else if (is.call(e) && identical(e[[1L]], as.name("+"))) {
+      for (i in seq_along(e)[-1L]) e[[i]] <- rw(e[[i]])
+    }
+    e
+  }
+  f <- model_obj$formula$formula
+  if (!inherits(f, "formula") || length(f) != 3L) return(NULL)
+  f[[3L]] <- rw(f[[3L]])
+  if (!found) return(NULL)
+  model_obj$formula$formula <- f
+  model_obj
+}
+
+
+#' Refuse a per-category posterior_epred() with a message that says why
+#'
+#' For an ordinal or categorical family \code{brms::posterior_epred()} returns
+#' a draws x rows x categories \emph{array}: a probability per category, not
+#' one expected value per row.  \code{predict.bayesian_fit()} took anything
+#' that was not a matrix for a failed draw, so a real \code{cumulative()} fit
+#' returned all-\code{NA} predictions under "posterior draw failed", and
+#' \code{fitted()} said only that it got an array where it wanted a matrix --
+#' though the fit's own documentation listed ordinal families as supported.
+#'
+#' @param draws What \code{posterior_epred()} returned.
+#' @param engine The \code{brmsfit}, to name its family.
+#' @param caller Method name for the message.
+#' @param hint What to do instead, appended to the message.
+#' @return \code{NULL}, invisibly, when \code{draws} is not a 3-D array.
+#' @keywords internal
+#' @noRd
+.stop_if_category_epred <- function(draws, engine, caller, hint) {
+  if (!is.array(draws) || length(dim(draws)) != 3L) return(invisible(NULL))
+  fam <- .brms_family_name(tryCatch(engine$family, error = function(e) NULL))
+  stop(sprintf(paste0("%s(): %s gives a probability per response category, ",
+                      "so brms::posterior_epred() returned a %s array (draws x ",
+                      "rows x categories), not one expected value per row. %s"),
+               caller,
+               if (is.na(fam)) "this fit's family"
+               else sprintf("the %s family", sQuote(fam)),
+               paste(dim(draws), collapse = " x "), hint), call. = FALSE)
+}
+
+# What predict.bayesian_fit() offers instead for a category family: the
+# posterior predictive draws, which go through the method's own newdata
+# pipeline.  A draw of Y is category k with the posterior mean probability of
+# k, so the share of draws in k estimates exactly what posterior_epred()
+# would average to.
+.category_draws_hint <- paste0(
+  "Use type = \"predict\", draws = TRUE for posterior draws of the predicted ",
+  "category (as category indices); the share of draws in each category ",
+  "estimates its probability. brms::posterior_epred(<fit>$engine) gives the ",
+  "probabilities for the training rows.")
 
 
 #' Predict from a Bayesian spatial GP model
 #'
-#' @section The GP boundary is pinned:
-#' brms 2.x does not store the Hilbert-space boundary \eqn{L} in a fitted GP
-#' basis, so \code{brms:::.data_gp()} recomputes it from whatever rows
-#' \code{predict()} is handed, which moved every eigenfunction of the
+#' @section The GP boundary is held at its fitted value:
+#' brms 2.17 to 2.22 do not store the Hilbert-space boundary \eqn{L} in a
+#' fitted GP basis, so \code{brms:::.data_gp()} recomputes it from whatever
+#' rows \code{predict()} is handed, which moved every eigenfunction of the
 #' approximation with the newdata bounding box while the fitted basis
 #' coefficients stayed put.  Two synthetic rows at the training coordinate
-#' extrema are therefore appended before the posterior draw and dropped from the
-#' result, reproducing the boundary the model was fitted with, so chunked,
-#' fold-wise and single-call predictions agree.
+#' extrema are therefore appended before the posterior draw and dropped from
+#' the result, and when \code{newdata} reaches past the training range the
+#' \code{c} of the \code{gp()} term is scaled down by as much as the range
+#' grew, so brms rebuilds exactly the boundary the model was fitted with.  A
+#' prediction therefore does not depend on which other rows share the call:
+#' chunked, fold-wise and single-call predictions agree, and
+#' \code{\link{predict_surface}()} does not depend on \code{chunk_size}.
+#' brms 2.23.0 and later store \eqn{L} and reuse it, so there \code{c} is left
+#' alone and the two extra rows change nothing.
 #'
-#' That is exact only for \code{newdata} \strong{inside} the training
-#' coordinate envelope.  Beyond it the boundary has to grow whatever is done, so
-#' predictions there are extrapolation from a basis that was not built for them
-#' \emph{and} depend on which other rows share the call, including on
-#' \code{\link{predict_surface}()}'s \code{chunk_size}.  A notice is written to
-#' the log (not raised as a warning) when it happens.
+#' Predictions outside the training coordinate envelope are extrapolation (a
+#' notice is written to the log).  A row further than \eqn{L} from the centre
+#' of the training coordinates on either axis is past the edge of the basis,
+#' where the approximate GP is an odd reflection of the fitted surface rather
+#' than an estimate of anything, so it is returned as \code{NA} (a column of
+#' \code{NA} with \code{draws = TRUE}) with a warning.  The default boundary
+#' factor puts that edge well outside the training data, so only
+#' \code{newdata} reaching far past it is affected.
 #'
 #' @description
 #' Applies the same newdata preparation pipeline as \code{predict.gwr_fit()}:
@@ -775,10 +1006,19 @@ predict.gwr_fit <- function(object, newdata = NULL, ...) {
 #'   point summary.  Default FALSE.
 #' @param ... Ignored.
 #' @return Numeric vector of length \code{nrow(newdata)}, or a
-#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE} (a 1-row
-#'   all-\code{NA} matrix if the posterior draw fails).  With
-#'   \code{newdata = NULL} the cached \code{fitted()} values are returned only
-#'   for the default \code{summary = "mean"}, \code{type = "epred"},
+#'   \code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  If the
+#'   posterior draw fails the result is all \code{NA} (a 1-row matrix for
+#'   \code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
+#'   family is not a failed draw and is an error under
+#'   \code{type = "epred"}: its expected value is a probability per response
+#'   category, not one number per row.  Use \code{type = "predict",
+#'   draws = TRUE} for posterior draws of the predicted category, as category
+#'   indices; the share of draws in each category estimates its probability.
+#'   Without \code{draws = TRUE}, \code{type = "predict"} returns the mean (or
+#'   median) category index, an expected rank for an ordinal family and an
+#'   error for \code{brms::categorical()}, whose categories have no order.
+#'   With \code{newdata = NULL} the cached \code{fitted()} values are returned
+#'   only for the default \code{summary = "mean"}, \code{type = "epred"},
 #'   \code{draws = FALSE} combination; any other combination is recomputed
 #'   against the training data, because the cache holds epred column means and
 #'   nothing else.
@@ -813,6 +1053,19 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   if (!inherits(model_obj, "brmsfit"))
     stop("predict.bayesian_fit(): engine is not a brmsfit object.", call. = FALSE)
 
+  # type = "predict" draws category INDICES for a category family.  Their
+  # mean (or median) is an expected rank for an ordinal family, but nothing
+  # at all for brms::categorical(), whose categories have no order: it came
+  # back as 1.46, 1.97, 1.48, ... with no word.
+  if (type == "predict" && !isTRUE(draws) &&
+      identical(.brms_family_name(tryCatch(model_obj$family,
+                                           error = function(e) NULL)),
+                "categorical"))
+    stop(paste0("predict.bayesian_fit(): the 'categorical' family's categories ",
+                "have no order, so the ", summary, " of the predicted category ",
+                "indices is not a prediction. ", .category_draws_hint),
+         call. = FALSE)
+
   # ---- Preprocessing: match the pipeline used during fitting ----
   # Ensure newdata is in the same projected CRS that was used for training,
   # BEFORE prep_model_data(): prep's own ensure_projected() has no target and
@@ -845,18 +1098,58 @@ predict.bayesian_fit <- function(object, newdata = NULL,
   # Build prediction data.frame with scaled coordinates & standardised predictors
   pred_df <- .prepare_brms_pred_df(object, newdata)
 
-  # Draw from posterior.  The two padding rows pin the GP boundary to the one
-  # the model was fitted with -- see .pin_gp_boundary_rows() -- and their
-  # columns are dropped again immediately.
-  pinned   <- .pin_gp_boundary_rows(object, pred_df)
+  # Draw from posterior.  The two padding rows and, on brms < 2.23.0, the
+  # rescaled gp(c = ) hold the GP boundary at the one the model was fitted
+  # with -- see .pin_gp_boundary_rows() -- and the padding columns are dropped
+  # again immediately.  brms >= 2.23.0 reuses the fitted boundary itself.
+  pinned <- .pin_gp_boundary_rows(object, pred_df)
+  if (pinned$c_scale < 1 && utils::packageVersion("brms") < "2.23.0") {
+    held <- .scale_gp_c(model_obj, pinned$c_scale)
+    if (is.null(held))
+      .warn_and_log(paste0("predict.bayesian_fit(): `newdata` widens the GP ",
+                           "boundary and the engine's formula has no gp(c = ) ",
+                           "term to hold it with, so these predictions depend ",
+                           "on which rows share the call."))
+    else model_obj <- held
+  }
+  if (any(pinned$beyond))
+    .warn_and_log(paste0("predict.bayesian_fit(): %d of %d row(s) of `newdata` ",
+                         "lie beyond the GP boundary the model was fitted with ",
+                         "(further than L = %.3g scaled units from the centre ",
+                         "of the training coordinates), where the approximate ",
+                         "GP means nothing; they are returned as NA."),
+                  sum(pinned$beyond), length(pinned$beyond),
+                  object$info$gp_c * object$info$gp_S)
   draw_fn <- if (type == "epred") brms::posterior_epred else brms::posterior_predict
   draw_mat <- try(draw_fn(model_obj, newdata = pinned$df), silent = TRUE)
   if (is.matrix(draw_mat) && pinned$n_pad > 0L &&
       ncol(draw_mat) == nrow(pinned$df))
     draw_mat <- draw_mat[, seq_len(ncol(draw_mat) - pinned$n_pad), drop = FALSE]
+  # An ordinal or categorical epred is a draws x rows x categories array; the
+  # padding rows are dropped from it too, so the message below counts the
+  # caller's rows (it said "150 x 7 x 3" for five).
+  if (is.array(draw_mat) && length(dim(draw_mat)) == 3L && pinned$n_pad > 0L &&
+      dim(draw_mat)[2L] == nrow(pinned$df))
+    draw_mat <- draw_mat[, seq_len(dim(draw_mat)[2L] - pinned$n_pad), ,
+                         drop = FALSE]
+  if (is.matrix(draw_mat) && ncol(draw_mat) == length(pinned$beyond))
+    draw_mat[, pinned$beyond] <- NA_real_
 
+  # Not a failed draw: an ordinal or categorical family's epred.  Raised, not
+  # returned as NA, because no retry will produce one number per row.  The
+  # probabilities for new rows are not offered through
+  # brms::posterior_epred(<fit>$engine, newdata = ): the engine needs the
+  # scaled ..x/..y (and standardised predictors) this method builds, and it
+  # refused the user's newdata.  The share of predicted-category draws in
+  # each category estimates the same posterior mean probability.
+  if (type == "epred")
+    .stop_if_category_epred(draw_mat, model_obj, "predict.bayesian_fit",
+                            hint = .category_draws_hint)
   if (inherits(draw_mat, "try-error") || !is.matrix(draw_mat)) {
-    .log_warn("predict.bayesian_fit(): posterior draw failed.")
+    .log_warn("predict.bayesian_fit(): posterior draw failed: %s",
+              if (inherits(draw_mat, "try-error")) .try_error_message(draw_mat)
+              else sprintf("brms returned a %s, not a draws x rows matrix",
+                           class(draw_mat)[1L]))
     # Honour the documented return shape: a matrix when draws = TRUE, so a
     # caller that indexes columns is not handed a vector on the failure path.
     return(if (draws) matrix(NA_real_, nrow = 1L, ncol = n_orig)
@@ -939,13 +1232,18 @@ fitted.gwr_fit <- function(object, ...) {
 #' here: \code{\link{clear_fitted_cache}} on one copy empties the cache both
 #' share (harmless, since the other simply recomputes), and \code{identical()}
 #' cannot distinguish two fits by their caches.  The digest covers
-#' \code{data_sf} only, not \code{$engine}: a hand-mutated \code{brmsfit} is
-#' what \code{\link{clear_fitted_cache}} is for.
+#' \code{data_sf} only.  The entry is also tied to the engine that computed
+#' it -- a refit or \code{update()} of the \code{brmsfit} is a different
+#' sampling run and recomputes -- but a \code{brmsfit} edited by hand in place
+#' is what \code{\link{clear_fitted_cache}} is for.  The entry holds only the
+#' values and a small identifier of the sampling run, so a fit saved with
+#' \code{saveRDS()} after \code{fitted()} is no larger for it.
 #'
 #' @param object A \code{bayesian_fit}.
 #' @param ... Ignored.
-#' @return Numeric vector of length \code{object$n} (all \code{NA} if the
-#'   posterior draw failed).
+#' @return Numeric vector of length \code{object$n}.  A posterior that cannot
+#'   be drawn is an error, as is a family with a probability per response
+#'   category (ordinal, categorical), which has no single fitted value per row.
 #' @family methods on a fitted model
 #' @export
 fitted.bayesian_fit <- function(object, ...) {
@@ -966,12 +1264,13 @@ fitted.bayesian_fit <- function(object, ...) {
     # SAME data hash identically however different their engines are -- and
     # because the cache is shared by every copy of a fit, `refit <- fit;
     # refit$engine <- <re-estimated>` then read the original engine's fitted
-    # values back out.  identical() is cheap here: for the common case it is
-    # the same object, which R settles by pointer.  Holding the reference
-    # costs no memory -- the fit already holds the engine.
+    # values back out.  It holds .fitted_engine_token(), not necessarily the
+    # engine itself: see there for why holding the engine doubled saveRDS().
+    # identical() is cheap here: for the common case it is the same object,
+    # which R settles by pointer.
     if (is.list(hit) && identical(hit$n, object$n) &&
         identical(hit$key, key) &&
-        identical(hit$engine, object$engine) &&
+        identical(hit$engine, .fitted_engine_token(object$engine)) &&
         is.numeric(hit$values) && length(hit$values) == object$n)
       return(hit$values)
     # Stale: a copy carrying different data or a different engine, or an entry
@@ -992,11 +1291,20 @@ fitted.bayesian_fit <- function(object, ...) {
   # An error here is an error: a posterior that cannot be drawn used to come
   # back as all-NA fitted values with nothing said, and summary() and
   # model_metrics() then reported n = 0 as though the data were missing.
-  # predict.bayesian_fit() has always raised; this matches it.
+  # (predict.bayesian_fit() differs on purpose: it documents an all-NA result
+  # for a failed draw on newdata, and logs the cause.)
   if (inherits(draws, "try-error"))
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() failed ",
                         "on the training data: %s"),
                  conditionMessage(attr(draws, "condition"))), call. = FALSE)
+  .stop_if_category_epred(draws, model_obj, "fitted.bayesian_fit",
+                          hint = paste0("fitted(), residuals(), summary() and ",
+                                        "model_metrics() need one number per ",
+                                        "row; use predict(<fit>, type = ",
+                                        "\"predict\", draws = TRUE) for ",
+                                        "predicted categories, or ",
+                                        "brms::posterior_epred(<fit>$engine) ",
+                                        "for the probabilities."))
   if (!is.matrix(draws) || ncol(draws) != object$n)
     stop(sprintf(paste0("fitted.bayesian_fit(): brms::posterior_epred() returned ",
                         "%s where a draws x %d matrix was expected."),
@@ -1009,12 +1317,41 @@ fitted.bayesian_fit <- function(object, ...) {
   # data cannot read it back.  A wrong-length result is never cached.
   if (!is.null(cache) && length(fitted_vals) == object$n) {
     assign(".fitted_values",
-           list(n = object$n, key = key, engine = object$engine,
+           list(n = object$n, key = key,
+                engine = .fitted_engine_token(object$engine),
                 values = fitted_vals),
            envir = cache)
   }
 
   fitted_vals
+}
+
+
+#' What a fitted() cache entry keeps to tell one engine from another
+#'
+#' The entry must belong to the engine that produced it (see
+#' \code{fitted.bayesian_fit}), and it used to hold the engine itself.  That
+#' costs nothing in memory, but \code{serialize()} tracks environments by
+#' reference and lists not at all, so \code{saveRDS()} on a fit whose cache was
+#' warm -- after any \code{summary()}, \code{residuals()} or
+#' \code{model_metrics()} -- wrote the whole brmsfit a second time: a 40 MB
+#' engine saved as 80 MB before \code{fitted()} and 120 MB after.
+#'
+#' A brmsfit carries a stanfit, and every stanfit carries an environment
+#' (\code{@.MISC}) that rstan's sampler, and brms's reader for CmdStan output,
+#' create afresh for each run.  Copies of the engine share it, a refit or an
+#' \code{update()} gets a new one, and it is serialised once however many
+#' references point at it, so it tells engines apart as well as the engine
+#' does and adds nothing to a saved fit.  Any other engine (a custom backend,
+#' a test double) is its own token, as before.
+#'
+#' @param engine The fit's \code{$engine}.
+#' @return An environment, or \code{engine}.
+#' @keywords internal
+#' @noRd
+.fitted_engine_token <- function(engine) {
+  misc <- tryCatch(engine$fit@.MISC, error = function(e) NULL)
+  if (is.environment(misc)) misc else engine
 }
 
 
@@ -1213,10 +1550,29 @@ coef.gwr_fit <- function(object, ...) {
 #' already absorbed the spatially structured part of the signal, so these are
 #' effects net of location.
 #'
+#' @section Standardised predictors:
+#' The summaries are on the scale the model was fitted on.  A fit made with
+#' \code{standardize_predictors = TRUE} was fitted on centred and scaled
+#' numeric predictors, so each slope is the change in the linear predictor per
+#' \emph{standard deviation} of its predictor and the intercept is its value
+#' at the predictor \emph{means}, not the raw-unit numbers \code{stats::lm()}
+#' reports on the same formula.  Nothing on the returned matrix says so;
+#' \code{print()} on the fit does, and the centre and scale of each predictor
+#' are in \code{object$info$predictor_scaling}.  To put a slope back in raw
+#' units divide its \code{Estimate}, \code{Est.Error} and interval bounds by
+#' that predictor's \code{scale}.  The intercept's \code{Estimate} follows by
+#' linearity (subtract each raw-unit slope times its predictor's
+#' \code{center}), but its \code{Est.Error} and interval depend on the
+#' posterior covariance of the coefficients: transform the draws from
+#' \code{brms::as_draws_df(object$engine)} for those, or refit without
+#' standardising.
+#'
 #' @param object A \code{bayesian_fit} object.
 #' @param ... Ignored.
 #' @return A matrix of fixed-effect posterior summaries, as returned by
-#'   \code{brms::fixef()}.  Never \code{NULL}: a missing 'brms' or a failing
+#'   \code{brms::fixef()}, on the fitted scale (per standard deviation of each
+#'   predictor under \code{standardize_predictors = TRUE}; see above).  Never
+#'   \code{NULL}: a missing 'brms' or a failing
 #'   \code{fixef()} call errors, following the \code{coef()} contract described
 #'   in \code{\link{new_spatial_fit}}.
 #' @family methods on a fitted model

@@ -595,8 +595,9 @@
 #'     \item{\code{"randomisation"}}{Always the exchangeable moments.}
 #'     \item{\code{"residual"}}{Always the Cliff & Ord residual moments.  Falls
 #'       back to \code{"randomisation"} with a logged warning if the design
-#'       cannot be rebuilt, and warns (but proceeds) if the residuals are not
-#'       the OLS residuals on it, in which case the moments are approximate.}
+#'       cannot be rebuilt, and logs a warning (but proceeds) if the residuals
+#'       are not the OLS residuals on it, in which case the moments are
+#'       approximate.}
 #'   }
 #'   Both \code{"auto"} and \code{"residual"} also fall back to
 #'   \code{"randomisation"} when the residual degrees of freedom
@@ -659,8 +660,15 @@
 #'   so the console shows the statistic and its null without printing the
 #'   \eqn{n \times n} \code{weights} matrix; \code{[} drops the class, and
 #'   \code{$}, \code{[[} and \code{unlist()} are unaffected.
-#'   Returns \code{NULL} with a warning if computation fails (e.g. fewer
-#'   than 4 valid residuals).
+#'   A custom fit whose class has no \code{residuals()} method (which
+#'   \code{\link{new_spatial_fit}} calls optional) is scored on the
+#'   observed response minus \code{fitted()}, as \code{plot()} does for it.
+#'   Returns \code{NULL} with a warning if computation fails, saying why:
+#'   \code{residuals()} raised an error (its message is quoted), or returned
+#'   \code{NULL} and the response minus \code{fitted()} could not be
+#'   formed either (the reason is quoted), fewer than 4 valid
+#'   residuals, or a residual vector whose length does not match the fit's
+#'   \code{data_sf}.
 #' @references Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 #'   Models and Applications}. Pion, London. Section 8.3.
 #' @family model evaluation
@@ -709,8 +717,52 @@ residual_morans_i <- function(fit,
   }
 
   # --- Extract residuals & coordinates ---
-  resid <- tryCatch(residuals(fit), error = function(e) NULL)
-  if (is.null(resid) || length(resid) < 4L) {
+  # Three failures told apart, each with its own reason.  They all used to
+  # read "could not extract enough residuals (n < 4)" -- on a 100-row fit --
+  # or, for a residual vector of the wrong length, "coordinate extraction
+  # failed", and the error residuals() raised was thrown away.
+  resid <- tryCatch(residuals(fit), error = function(e) e)
+  if (inherits(resid, "error")) {
+    .warn_and_log("residual_morans_i(): residuals() failed on this fit: %s",
+                  conditionMessage(resid))
+    return(NULL)
+  }
+  # A custom subclass without a residuals.<subclass>() method -- which
+  # ?new_spatial_fit calls optional -- gets residuals.default(), i.e.
+  # fit$residuals, i.e. NULL.  plot.spatial_fit() falls back to the observed
+  # response minus fitted() there, which is what the built-in backends'
+  # residuals are; this returned NULL instead, so compare_models() reported
+  # all-NA Moran's I columns for a fit whose residuals were strongly
+  # autocorrelated.  Only when that cannot be formed either is there nothing
+  # to test.
+  if (is.null(resid) && is.character(fit$response_var) &&
+      length(fit$response_var) == 1L && inherits(fit$data_sf, "sf")) {
+    resid <- tryCatch({
+      y <- sf::st_drop_geometry(fit$data_sf)[[fit$response_var]]
+      if (is.null(y))
+        stop(sprintf("the fit's data_sf has no column '%s'.", fit$response_var),
+             call. = FALSE)
+      as.numeric(y) -
+        as.numeric(.fitted_checked(fit, .caller = "residual_morans_i"))
+    }, error = function(e) e)
+    if (inherits(resid, "error")) {
+      .warn_and_log(paste0("residual_morans_i(): residuals() returned NULL for ",
+                           "a fit of class %s, which has no residuals() method, ",
+                           "and the observed response minus fitted() could not ",
+                           "be formed either: %s"),
+                    class(fit)[1L],
+                    sub("^residual_morans_i\\(\\): ", "", conditionMessage(resid)))
+      return(NULL)
+    }
+  }
+  if (is.null(resid)) {
+    .warn_and_log(paste0("residual_morans_i(): residuals() returned NULL for a ",
+                         "fit of class %s, which has no residuals() method; see ",
+                         "?new_spatial_fit for the methods a custom fit needs."),
+                  class(fit)[1L])
+    return(NULL)
+  }
+  if (length(resid) < 4L) {
     .warn_and_log("residual_morans_i(): could not extract enough residuals (n < 4).")
     return(NULL)
   }
@@ -720,8 +772,15 @@ residual_morans_i <- function(fit,
     sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   }, error = function(e) NULL)
 
-  if (is.null(coords) || nrow(coords) != length(resid)) {
+  if (is.null(coords)) {
     .warn_and_log("residual_morans_i(): coordinate extraction failed.")
+    return(NULL)
+  }
+  if (nrow(coords) != length(resid)) {
+    .warn_and_log(paste0("residual_morans_i(): residuals() returned %d value(s) ",
+                         "for the %d row(s) of the fit's data_sf, so they cannot ",
+                         "be matched to locations."),
+                  length(resid), nrow(coords))
     return(NULL)
   }
 
@@ -1113,9 +1172,16 @@ print.morans_i <- function(x, ...) {
 #'   Must contain the response variable and all predictors.
 #'   If NULL, in-sample metrics are computed.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics What the metrics are computed on
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @return A data.frame with one row per model and columns for
-#'   model name and all regression metrics.
+#'   model name, all regression metrics, and \code{metric_basis}: what the
+#'   row's metrics were computed on, \code{"in-sample"} (fitted values),
+#'   \code{"out-of-bag"} (an \code{rf_fit}'s fitted values, see "What the
+#'   metrics are computed on") or \code{"newdata"}.  Rows with different
+#'   bases do not compare like for like.  An element that is not a
+#'   \code{spatial_fit} is skipped, with a logged warning, and has no row;
+#'   a list in which no element is a \code{spatial_fit} is an error.
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1179,10 +1245,38 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
       return(NULL)
     }
     met <- model_metrics(obj, newdata = newdata, ...)
-    cbind(data.frame(model = nm, stringsAsFactors = FALSE), met)
+    # What the numbers were computed on, per row.  Without newdata a forest's
+    # fitted() values are out-of-bag and every other backend's are in-sample,
+    # and a table that set the two side by side unlabelled could rank the
+    # models the wrong way round (GWR 0.77 in-sample against RF 0.82
+    # out-of-bag, where RF's in-sample RMSE was 0.40).
+    basis <- if (!is.null(newdata)) "newdata"
+             else if (isTRUE(obj$info$fitted_are_oob)) "out-of-bag"
+             else "in-sample"
+    cbind(data.frame(model = nm, stringsAsFactors = FALSE), met,
+          data.frame(metric_basis = basis, stringsAsFactors = FALSE))
   })
 
-  do.call(rbind, Filter(Negate(is.null), rows))
+  # With every element skipped this returned NULL, not the documented
+  # data.frame, and said so only in the log, which spatialkit_quiet() and
+  # tryCatch(warning =) never see.
+  out <- do.call(rbind, Filter(Negate(is.null), rows))
+  if (is.null(out)) .stop_no_spatial_fit("evaluate_insample", "evaluate")
+  out
+}
+
+
+#' Refuse a list of fits in which nothing is a spatial_fit
+#'
+#' @param caller The exported function's name, for the message.
+#' @param verb What there is nothing to do ("evaluate", "compare").
+#' @keywords internal
+#' @noRd
+.stop_no_spatial_fit <- function(caller, verb) {
+  stop(sprintf(paste0("%s(): no element of `fits` is a spatial_fit, so there ",
+                      "is nothing to %s. Pass fits from fit_rf_model(), ",
+                      "fit_gwr_model(), fit_bayesian_spatial_model() or ",
+                      "new_spatial_fit()."), caller, verb), call. = FALSE)
 }
 
 
@@ -1193,22 +1287,40 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #' Side-by-side comparison of fitted spatial models
 #'
 #' Takes a named list of already-fit \code{spatial_fit} objects and produces
-#' a tidy comparison table including in-sample metrics and model-specific
-#' information criteria (AICc, LOOIC).
+#' a tidy comparison table including in-sample (for a forest, out-of-bag)
+#' metrics and model-specific information criteria (AICc, LOOIC).
 #'
 #' @param fits A named list of \code{spatial_fit} objects.  Names must be
 #'   unique; see \code{\link{evaluate_insample}}.
 #' @param newdata Optional sf for out-of-sample evaluation.
 #' @param ... Extra arguments passed to predict().
+#' @inheritSection model_metrics What the metrics are computed on
 #' @inheritSection model_metrics Percentage errors on responses with zeros
-#' @return A data.frame comparing all models.  Alongside the metrics it carries
+#' @return A data.frame comparing all models.  Its \code{metric_basis}
+#'   column says what each row's metrics were computed on (see
+#'   \code{\link{evaluate_insample}}); a table that mixes
+#'   \code{"out-of-bag"} and \code{"in-sample"} rows does not rank the
+#'   models, and says so in the log.  \code{AICc} (GWR) and \code{LOOIC}
+#'   (Bayesian) are sums over the rows a model was fitted to, so each column
+#'   is set to \code{NA}, with a warning, when the fits carrying it were
+#'   fitted to different rows (a predictor with missing values drops rows,
+#'   for example) or to different responses (a transformed response on the
+#'   same rows), and the warning says which.  \code{convergence_ok} is
+#'   \code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
+#'   checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
+#'   otherwise; a fit that did not converge is ranked like the others, so it
+#'   also raises a warning.  Alongside the metrics it
+#'   carries
 #'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
 #'   \code{resid_morans_null}, the last of which names the null
 #'   \code{\link{residual_morans_i}} scored each model against, since that
-#'   choice is per-fit and governs how much the p-value is worth.  The
-#'   significant-autocorrelation warning below is driven by that p-value, so
-#'   read its caveats in \code{?residual_morans_i} before treating silence as
-#'   evidence of no residual structure.
+#'   choice is per-fit and governs how much the p-value is worth.  A
+#'   significant p-value is noted in the log (not raised as an R warning):
+#'   positive autocorrelation as structure the model may have missed,
+#'   negative (\code{resid_morans_z < 0}) as the alternating residuals of a
+#'   model that tracks its data closely.  Read the caveats in
+#'   \code{?residual_morans_i} before treating silence as evidence of no
+#'   residual structure.
 #' @family model evaluation
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -1240,23 +1352,23 @@ compare_models <- function(fits, newdata = NULL, ...) {
     fits <- stats::setNames(list(fits), class(fits)[1L])
   if (!is.list(fits) || length(fits) == 0L)
     stop("compare_models(): `fits` must be a spatial_fit or a non-empty named list of them.")
+  # evaluate_insample() warns-and-skips any element that is not a spatial_fit,
+  # and when EVERY element is skipped it now stops -- in its own name.  Say it
+  # here in this function's, before the call.  (It used to return NULL, which
+  # `met_df$AICc <- NA_real_` turned into a bare list, and seq_len(nrow(NULL))
+  # aborted with "argument must be coercible to non-negative integer".)
+  if (!any(vapply(fits, inherits, logical(1), what = "spatial_fit")))
+    .stop_no_spatial_fit("compare_models", "compare")
 
   met_df <- evaluate_insample(fits, newdata = newdata, ...)
 
   # Append model-specific information criteria
-  # evaluate_insample() warns-and-skips any element that is not a spatial_fit
-  # and returns NULL when EVERY element was skipped.  `met_df$AICc <- NA_real_`
-  # then turns that NULL into a bare list, nrow() is NULL, and seq_len(NULL)
-  # aborts with "argument must be coercible to non-negative integer" -- the
-  # same failure the comment above records as fixed for the unnamed-list case.
-  if (is.null(met_df) || !is.data.frame(met_df) || nrow(met_df) == 0L)
-    stop(paste0("compare_models(): no element of `models` is a spatial_fit, ",
-                "so there is nothing to compare. Pass fits from fit_rf_model(), ",
-                "fit_gwr_model(), fit_bayesian_spatial_model() or ",
-                "new_spatial_fit()."), call. = FALSE)
   met_df$AICc  <- NA_real_
   met_df$LOOIC <- NA_real_
   met_df$bandwidth_is_fallback <- NA
+  # TRUE / FALSE as fit_bayesian_spatial_model() judged the sampler, NA for
+  # other backends and for a Bayesian fit whose checks were not run.
+  met_df$convergence_ok <- NA
   for (i in seq_len(nrow(met_df))) {
     nm <- met_df$model[i]
     # By index, not fits[[nm]]: name lookup returns the FIRST match, so with two
@@ -1279,31 +1391,172 @@ compare_models <- function(fits, newdata = NULL, ...) {
         )
       }
     }
-    if (inherits(obj, "bayesian_fit"))
+    if (inherits(obj, "bayesian_fit")) {
       met_df$LOOIC[i] <- obj$info$looic %||% NA_real_
+      ok <- obj$info$convergence_ok
+      met_df$convergence_ok[i] <- if (is.logical(ok) && length(ok) == 1L) ok else NA
+      # The fit logged its R-hat, ESS and divergences, but a log line is
+      # invisible under knitr, spatialkit_quiet() and tryCatch(), and the
+      # row is ranked like the others.
+      if (isFALSE(ok))
+        .warn_and_log(paste0("compare_models(): the sampler of Bayesian model ",
+                             "'%s' did not converge (see print() on the fit, ",
+                             "or its $info$convergence_diagnostics); its ",
+                             "metrics and LOOIC come from an unreliable ",
+                             "posterior."), nm)
+    }
   }
+
+  # AICc and LOOIC are sums over the observations a model was fitted to, so
+  # they compare only between fits of the SAME rows: a predictor with missing
+  # values drops rows, and model B on 50 rows showed LOOIC 32.2 against A's
+  # 54.8 on 70, where on B's 50 rows A scored 30.9 -- the better model read as
+  # 22.6 worse.  loo::loo_compare() refuses that comparison; here a column
+  # whose fits differ in their rows is blanked, with a warning.
+  for (ic in c("AICc", "LOOIC")) {
+    has <- which(is.finite(met_df[[ic]]))
+    if (length(has) < 2L) next
+    rs <- lapply(has, function(i) .fit_rowset(fits[[match(met_df$model[i], names(fits))]]))
+    if (any(vapply(rs, is.null, logical(1)))) next
+    if (all(vapply(rs[-1L], .same_rowset, logical(1), rs[[1L]]))) next
+    # The fingerprint includes the response, so two fits of the same rows with
+    # different responses (price and log(price)) fail it too.  Blanking is
+    # right there as well, but the warning said "different rows" and advised
+    # refitting on the same rows, which they already were.
+    if (all(vapply(rs[-1L], .same_rowset_xy, logical(1), rs[[1L]]))) {
+      resp <- vapply(has, function(i) {
+        rv <- fits[[match(met_df$model[i], names(fits))]]$response_var
+        if (is.character(rv) && length(rv) >= 1L) rv[1L] else NA_character_
+      }, character(1))
+      .warn_and_log(paste0(
+        "compare_models(): %s is a sum over the rows a model was fitted to, ",
+        "and the models carrying it were fitted to the same rows but to ",
+        "different responses (%s), so it is set to NA: an information ",
+        "criterion compares models of the same response only."),
+        ic,
+        if (length(unique(resp)) > 1L)
+          paste(sprintf("%s: %s", met_df$model[has], resp), collapse = ", ")
+        else sprintf("the values of '%s' differ between %s", resp[1L],
+                     paste(met_df$model[has], collapse = ", ")))
+      met_df[[ic]] <- NA_real_
+      next
+    }
+    .warn_and_log(paste0(
+      "compare_models(): %s is a sum over the rows a model was fitted to, and ",
+      "the models carrying it were fitted to different rows (%s), so it is ",
+      "set to NA: compared across different rows it can rank the models the ",
+      "wrong way round. Refit them on the same rows to compare them."),
+      ic, paste(sprintf("%s: n = %d", met_df$model[has],
+                        vapply(rs, `[[`, integer(1), "n")), collapse = ", "))
+    met_df[[ic]] <- NA_real_
+  }
+
+  # A table mixing out-of-bag and in-sample rows (a forest beside anything
+  # else, without newdata) compares unlike numbers; metric_basis says which is
+  # which, and this says that it matters.
+  if (length(unique(met_df$metric_basis)) > 1L)
+    .log_warn(paste0("compare_models(): the metrics mix bases (%s); ",
+                     "out-of-bag and in-sample errors are not comparable, so ",
+                     "use newdata or compare_models_cv() to rank these models."),
+              paste(sprintf("%s: %s", met_df$model, met_df$metric_basis),
+                    collapse = ", "))
 
   # --- Post-fit residual spatial autocorrelation check ---
   moran_df <- .residual_morans_table(fits)
   met_df   <- merge(met_df, moran_df, by = "model", all.x = TRUE, sort = FALSE)
 
-  # Emit warnings for models whose residuals still show significant
-
-  # spatial autocorrelation (alpha = 0.05)
+  # Log a caution for models whose residuals still show significant spatial
+  # autocorrelation (alpha = 0.05, two-sided).  The direction decides what it
+  # means, and it is read from z, not from I: E[I] is negative, so an I just
+  # below 0 can still be positive autocorrelation.  Negative z -- residuals
+  # anti-correlated with their neighbours -- is what in-sample residuals of a
+  # GP or GWR fit that tracks the data closely look like, the opposite of
+  # structure the model missed, and was reported as the latter.
   for (i in seq_len(nrow(met_df))) {
     p_val <- met_df$resid_morans_p[i]
     I_val <- met_df$resid_morans_I[i]
+    z_val <- met_df$resid_morans_z[i]
     if (is.finite(p_val) && p_val < 0.05) {
-      .log_warn(
-        paste0("compare_models(): residuals of '%s' show significant ",
-               "spatial autocorrelation (Moran's I = %.4f, p = %.4g). ",
-               "The model may not fully capture the spatial structure."),
-        met_df$model[i], I_val, p_val
-      )
+      if (is.finite(z_val) && z_val < 0)
+        .log_warn(
+          paste0("compare_models(): residuals of '%s' show significant ",
+                 "negative spatial autocorrelation (Moran's I = %.4f, ",
+                 "p = %.4g): neighbouring residuals alternate in sign, as ",
+                 "in-sample residuals of a model that tracks the data closely ",
+                 "(a GP, a small-bandwidth GWR) do. That points to ",
+                 "over-fitting, not to missed spatial structure."),
+          met_df$model[i], I_val, p_val)
+      else
+        .log_warn(
+          paste0("compare_models(): residuals of '%s' show significant ",
+                 "spatial autocorrelation (Moran's I = %.4f, p = %.4g). ",
+                 "The model may not fully capture the spatial structure."),
+          met_df$model[i], I_val, p_val
+        )
     }
   }
 
   met_df
+}
+
+
+#' The rows a fit was fitted to, as a comparable fingerprint
+#'
+#' For \code{compare_models()}'s information-criterion check.  Fits do not
+#' reliably carry \code{..row_id}, so the fingerprint is the row count, the
+#' sorted response and the sorted coordinates (in EPSG:4326 when the data
+#' has a CRS).  Sorting each margin separately keeps the comparison stable
+#' under the last-digit noise of a reprojection.
+#'
+#' @param fit A \code{spatial_fit}.
+#' @return A list, or \code{NULL} when the fit's data cannot be read.
+#' @keywords internal
+#' @noRd
+.fit_rowset <- function(fit) {
+  tryCatch({
+    d <- fit$data_sf
+    y <- as.numeric(sf::st_drop_geometry(d)[[fit$response_var]])
+    g <- sf::st_geometry(d)
+    if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
+      g <- suppressWarnings(sf::st_centroid(g))
+    lonlat <- !is.na(sf::st_crs(g))
+    if (lonlat) g <- suppressWarnings(sf::st_transform(g, 4326))
+    xy <- sf::st_coordinates(g)
+    if (!length(y) || nrow(xy) != length(y)) return(NULL)
+    list(n = length(y), y = sort(y, na.last = TRUE),
+         x1 = sort(xy[, 1L], na.last = TRUE), x2 = sort(xy[, 2L], na.last = TRUE),
+         lonlat = lonlat)
+  }, error = function(e) NULL)
+}
+
+#' Do two \code{.fit_rowset()} fingerprints describe the same rows?
+#'
+#' The same rows with the same response: \code{.same_rowset_xy()} compares
+#' the locations alone, so that a caller can tell a different response on the
+#' same rows from different rows.
+#' @keywords internal
+#' @noRd
+.same_rowset <- function(a, b) {
+  .same_rowset_xy(a, b) &&
+    .rowset_close(a$y, b$y, 1e-10 * max(1, abs(a$y), na.rm = TRUE))
+}
+
+#' Do two \code{.fit_rowset()} fingerprints sit at the same locations?
+#' @keywords internal
+#' @noRd
+.same_rowset_xy <- function(a, b) {
+  if (a$n != b$n || !identical(a$lonlat, b$lonlat)) return(FALSE)
+  tol_xy <- if (a$lonlat) 1e-6
+            else 1e-9 * max(1, abs(c(a$x1, a$x2)), na.rm = TRUE)
+  .rowset_close(a$x1, b$x1, tol_xy) && .rowset_close(a$x2, b$x2, tol_xy)
+}
+
+#' Two sorted margins equal within \code{tol}, \code{NA} matching \code{NA}
+#' @keywords internal
+#' @noRd
+.rowset_close <- function(u, v, tol) {
+  d <- abs(u - v)
+  all((is.na(u) & is.na(v)) | (!is.na(d) & d <= tol))
 }
 
 
@@ -1340,7 +1593,9 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
 #' @param boundary Optional polygon sf/sfc.
-#' @param pointize Geometry coercion strategy.
+#' @param pointize Geometry coercion strategy.  It also decides where a
+#'   polygon or line row falls in the shared blocks, so each row is placed by
+#'   the point every model is fitted at.
 #' @param gwr_args Extra arguments for \code{\link{cv_gwr}}.  Only names that
 #'   are formal arguments of \code{cv_gwr()} are forwarded (it has no
 #'   \code{...}), so entries meant for \code{fit_gwr_model()} alone (e.g.
@@ -1366,15 +1621,18 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \code{predictor_vars}) is estimated and used as the minimum block size of
 #'   the shared folds, as in \code{\link{make_folds}()}.  Default
 #'   \code{FALSE}: geometric blocks, as before this argument existed.  Either
-#'   way the fold set is built once and every backend is scored on it.
+#'   way the fold set is built once and every backend is scored on it.  When
+#'   it cannot be built (a \code{block_size} or estimated range that leaves a
+#'   single block, say) the call is an error, as it is for each backend on
+#'   its own; no model is scored on a design other than the one asked for.
 #' @param metrics Optional scoring function of your own, handed to every
 #'   backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
 #'   numeric vector, applied per fold and to each backend's pooled
 #'   predictions, whose names become columns of \code{by_fold} and
 #'   \code{overall} beside the built-in ones.  See \strong{Your own metrics}
-#'   on \code{\link{cv_spatial}()} for the contract.  Because the three
-#'   backends are scored on the same folds, the columns are comparable across
-#'   rows of \code{overall}.
+#'   on \code{\link{cv_spatial}()} for the contract.  Because the backends
+#'   are scored on the same folds and, in \code{overall}, on the same rows
+#'   (see Value), the columns are comparable across rows of \code{overall}.
 #' @inheritSection model_metrics Percentage errors on responses with zeros
 #' @inheritSection model_metrics Which metrics survive a non-Gaussian response
 #' @section Coverage and CRPS in the overall table:
@@ -1394,9 +1652,21 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #' overconfident, well above it is wider than it needs to be.
 #' @return A list with overall, by_fold, and per-model cv_results
 #'   (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
-#'   \code{overall} has one row per model with the pooled metrics, the
+#'   \code{overall} has one row per model with the pooled metrics,
+#'   \code{n_pred} (the rows they are computed on), the
 #'   coverage and CRPS columns described above when a Bayesian model ran, and
 #'   \code{model} as its last column.
+#'   Shared folds do not guarantee shared rows: a model that fails on a fold
+#'   (GWR with a fixed bandwidth across a gap in the data, say) or predicts
+#'   \code{NA} for some rows pools fewer rows, usually without the hardest
+#'   ones.  When the models predicted different rows, the function warns and
+#'   recomputes every model's pooled metrics, your own \code{metrics}
+#'   included, on the rows all of them predicted, so \code{n_pred} is the same
+#'   on every row that has predictions; a model that predicted nothing stays
+#'   an \code{NA} row.  Each model's metrics over all the rows it predicted
+#'   stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
+#'   a table of the same shape.  \code{by_fold} and the Bayesian coverage and
+#'   CRPS columns are per fold and are not recomputed.
 #'   Only the models that actually ran appear, so check which names are
 #'   present; there is not always one entry per requested model, because a
 #'   backend whose package is missing is dropped with a message.  When \strong{no} requested backend
@@ -1489,21 +1759,35 @@ compare_models_cv <- function(
   # the leakage diagnostic that compares the blocks to the estimated range.
   # Before they were forwarded, this -- the one function that compares models
   # -- was also the one whose folds could never be checked against the range.
+  #
+  # A failure to build them is an error.  It used to be a log line and a
+  # fall-back to each backend's own DEFAULT folds, which none of them was
+  # handed block_size or auto_range for: block_size = 1e6 (a single block,
+  # which cv_rf() refuses) came back as a five-fold comparison on geometric
+  # blocks, and auto_range = TRUE as the small, leaky blocks it exists to
+  # prevent, with no R condition either way.  The backends would fail on the
+  # same design, so say so once, here.
+  #
+  # Blocks are assigned to the points the models are fitted at.  make_folds()
+  # reduces polygons and lines with pointize = "auto", so under another
+  # `pointize` it placed rows by a different point than every backend fits
+  # them at (119 of 150 L-shaped parcels changed fold against a standalone
+  # cv_gwr(pointize = "centroid")).  The provenance probe stays on the geometry
+  # as supplied, which is what each cv_*() checks it against.
   if (is.null(folds)) {
+    pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
+    fold_src  <- if (pointized) coerce_to_points(data_sf, pointize) else data_sf
     folds <- tryCatch(
-      make_folds(data_sf, k = k, method = "block_kfold",
+      make_folds(fold_src, k = k, method = "block_kfold",
                  seed = if (is.null(seed)) 123L else seed,
                  boundary = boundary, block_size = block_size,
                  auto_range = auto_range, response_var = response_var,
                  predictor_vars = predictor_vars),
-      error = function(e) {
-        .log_warn(paste0("compare_models_cv(): could not build a shared fold ",
-                         "set (%s); each backend will build its own, so the ",
-                         "models may not be scored on identical splits."),
-                  conditionMessage(e))
-        NULL
-      }
-    )
+      error = function(e)
+        stop("compare_models_cv(): could not build the shared fold set, so no ",
+             "model can be scored on the design asked for: ",
+             conditionMessage(e), call. = FALSE))
+    if (pointized) folds$params$row_probe <- .fold_row_probe(data_sf)
   }
 
   comparison_rows <- list(); by_fold_rows <- list(); cv_results <- list()
@@ -1523,7 +1807,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(gwr_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     ov$model <- "GWR"
     comparison_rows[["GWR"]] <- ov
     bf <- try(as.data.frame(gwr_cv$fold_metrics), silent = TRUE)
@@ -1544,7 +1828,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(bayes_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     # The calibration of the one backend that has any: coverage at each level
     # and mean CRPS, already pooled across folds by cv_bayes().  bind_rows()
     # below leaves them NA on the point-prediction rows.
@@ -1577,7 +1861,7 @@ compare_models_cv <- function(
     ov <- try(as.data.frame(rf_cv$overall), silent = TRUE)
     if (inherits(ov, "try-error") || nrow(ov) == 0L)
       ov <- data.frame(RMSE = NA_real_, MAE = NA_real_, MAPE = NA_real_, SMAPE = NA_real_,
-                       R2 = NA_real_, Adj_R2 = NA_real_)
+                       R2 = NA_real_, Adj_R2 = NA_real_, n_pred = 0L)
     ov$model <- "RF"
     comparison_rows[["RF"]] <- ov
     bf <- try(as.data.frame(rf_cv$fold_metrics), silent = TRUE)
@@ -1586,10 +1870,53 @@ compare_models_cv <- function(
     }
   }
 
-  overall <- as.data.frame(dplyr::bind_rows(comparison_rows))
   # `model` last whatever order the backends ran in: a Bayesian row that came
   # after a GWR row would otherwise put its coverage columns after `model`.
-  overall <- overall[, c(setdiff(names(overall), "model"), "model"), drop = FALSE]
+  as_table <- function(rows) {
+    tab <- as.data.frame(dplyr::bind_rows(rows))
+    tab[, c(setdiff(names(tab), "model"), "model"), drop = FALSE]
+  }
+
+  # Shared folds are not shared rows.  Each backend's `overall` pools the rows
+  # IT predicted, and a backend that loses a fold -- GWR with a fixed
+  # bandwidth across a gap in the data, a factor level one block holds alone
+  # -- loses the hardest rows, the extrapolation block, and looks better for
+  # it: GWR RMSE 1.82 on 158 rows against RF 1.95 on 200, where RF scores 0.99
+  # on the same 158.  When the row sets differ, every backend that predicted
+  # anything is re-scored on the rows all of them predicted (an all-failed
+  # backend stays an NA row), and the table as each reported it is kept.
+  ids <- lapply(cv_results, function(r) {
+    pr <- r$predictions
+    if (!is.data.frame(pr) || !nrow(pr)) return(NULL)
+    pr$`..row_id`[is.finite(pr$y) & is.finite(pr$yhat)]
+  })
+  ids <- ids[lengths(ids) > 0L]
+  all_rows <- NULL
+  if (length(ids) >= 2L) {
+    common <- Reduce(intersect, ids)
+    if (!all(vapply(ids, setequal, logical(1), common))) {
+      lab <- c(gwr_cv = "GWR", bayes_cv = "Bayesian", rf_cv = "RF")[names(ids)]
+      all_rows <- as_table(comparison_rows)
+      .warn_and_log(paste0(
+        "compare_models_cv(): the models predicted different rows (%s), so ",
+        "`overall` scores each of them on the %d rows they all predicted: the ",
+        "rows a model fails on are usually the hardest, and leaving them out ",
+        "flatters it. Each model's own pooled metrics are in ",
+        "attr(overall, \"all_rows\") and its *_cv element; `by_fold` and the ",
+        "Bayesian coverage and CRPS columns are not re-scored."),
+        paste(sprintf("%s %d", lab, lengths(ids)), collapse = ", "),
+        length(common))
+      for (nm in names(ids)) {
+        pr <- cv_results[[nm]]$predictions
+        re <- .cv_overall_metrics(pr[pr$`..row_id` %in% common, , drop = FALSE],
+                                  metrics)
+        for (cn in names(re)) comparison_rows[[lab[[nm]]]][[cn]] <- re[[cn]]
+      }
+    }
+  }
+
+  overall <- as_table(comparison_rows)
+  if (!is.null(all_rows)) attr(overall, "all_rows") <- all_rows
   c(list(overall = overall,
          by_fold = dplyr::bind_rows(by_fold_rows)),
     cv_results)

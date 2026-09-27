@@ -70,11 +70,13 @@ spatial autocorrelation range.}
 estimate the autocorrelation range and use it as the minimum block size.
 Default \code{FALSE}.}
 
-\item{parallel}{Logical or positive integer.  If \code{TRUE},
-auto-detect the number of cores and fit folds in parallel via
-\code{parallel::mclapply()} (macOS / Linux; falls back to sequential
-on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).}
+\item{parallel}{Accepted so that every \code{cv_*()} function takes the
+same arguments, but the GWR folds always run one after another in this
+R process.  GWmodel is built with OpenMP, and OpenMP (GNU libgomp)
+deadlocks \code{parallel::mclapply()}'s forked workers once a GWR has
+been fitted in the session, for example by \code{fit_gwr_model()}, so
+forking would hang the call.  A value asking for more than one core
+raises a warning saying so.  Default \code{FALSE}.}
 
 \item{metrics}{Optional scoring function of your own, a
 \code{function(y, yhat)} returning a named numeric vector; its names
@@ -124,6 +126,9 @@ folds.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is

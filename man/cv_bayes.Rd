@@ -58,13 +58,21 @@ different posteriors even on identical \code{folds}. A \code{seed} in
 A user-supplied \code{gp_k} is respected in every fold; when omitted, the
 GP rank is auto-selected per training fold.  \code{compute_loo},
 \code{boundary}, and \code{pointize} are always overridden by the CV
-internals.}
+internals.  A categorical or ordinal \code{family}
+(\code{brms::categorical()}, \code{cumulative}, \code{sratio},
+\code{cratio}, \code{acat}) is refused before anything is fitted: its
+prediction is a probability per response category, and every score
+here needs one number per row.}
 
 \item{summary}{"mean" or "median" for posterior predictions.}
 
 \item{compute_pred_intervals}{Logical; compute predictive intervals.}
 
-\item{coverage_levels}{Numeric vector of coverage levels.}
+\item{coverage_levels}{Numeric vector of the nominal coverage levels to
+score, as proportions strictly between 0 and 1 (\code{0.95}, not
+\code{95}), each given once; anything else is an error.  Each becomes a
+column \code{coverage_<percent>} of \code{fold_metrics}, named at full
+precision (\code{0.975} gives \code{coverage_97.5}).}
 
 \item{block_size}{Optional minimum block edge length for spatial CV blocks
 (projected CRS units).}
@@ -78,7 +86,12 @@ auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
 \code{FALSE} (sequential).  Bayesian folds with full MCMC runs
-are the primary beneficiary of this option.}
+are the primary beneficiary of this option.  Mind the memory: every
+fold compiles its own Stan model, and one compilation can take several
+GB (3.6 GB was measured), so \code{parallel = n} runs \code{n} of them
+at once.  A compiler killed for lack of memory fails its fold with
+rstan's \code{"invalid connection"} error, which \code{fold_status}
+records; use fewer cores if you see it.}
 
 \item{metrics}{Optional scoring function of your own, a
 \code{function(y, yhat)} returning a named numeric vector; its names
@@ -93,8 +106,9 @@ and \code{CRPS}, which this function computes itself.}
 A list with \code{overall}, \code{fold_metrics},
 \code{predictions}, \code{folds}, \code{n_folds_attempted},
 \code{n_folds_succeeded}, \code{fold_status}, \code{orphan_rows},
-\code{n_unknown_ids}, \code{n_dropped}, \code{formula} and
-\code{predictive_coverage}.
+\code{n_unknown_ids}, \code{n_dropped}, \code{formula},
+\code{predictive_coverage} and \code{coverage_levels} (the nominal
+levels, named by their \code{coverage_*} column).
 The two fold counts make a run where every fold failed visible in the
 return value itself, beyond the warning, and \code{fold_status} (one
 row per fold: \code{fold}, \code{status}, \code{message}) keeps the
@@ -108,6 +122,14 @@ that give the coverage below (\code{NA} when
 \code{compute_pred_intervals = FALSE} or the draws failed for that fold).
 \code{overall$Adj_R2} is always \code{NA}, as for every \code{cv_*()}:
 see \code{\link{cv_spatial}}.
+\code{fold_metrics} carries, beyond the columns its siblings share,
+\code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
+\code{coverage_*} columns and \code{convergence_ok}: \code{TRUE} or
+\code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
+fold's sampler (R-hat, effective sample size, divergences), \code{NA}
+when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
+did not converge is scored like the others, so a run with any
+\code{FALSE} raises one warning naming those folds.
 The \code{predictive_coverage} entries (one per
 \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
 folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
@@ -139,6 +161,9 @@ has settled.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
@@ -174,8 +199,11 @@ be read as a rough summary rather than a score.
 For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
-\code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  When every fold fails, the
+\code{family} that predicts one number per row (a count, a rate, a binary
+or bounded outcome), and they are the numbers to compare when the response
+is not Gaussian.  A categorical or ordinal family predicts a probability
+per response category instead, so \code{cv_bayes()} refuses one before
+fitting anything.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.

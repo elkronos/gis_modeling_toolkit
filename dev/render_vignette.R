@@ -27,15 +27,16 @@ cat("spatialkit loaded from: ",
              error = function(e) NA_character_), "\n", sep = "")
 
 # -- 2. Dependencies ---------------------------------------------------------
-# 'sp' and 'GWmodel' are Suggests, and the vignette degrades gracefully when
-# they are absent -- but it degrades by SKIPPING the GWR fit and the
-# cross-validation, which are exactly the sections whose metric output this
-# render exists to verify.  A render without them would show no metric lines
-# and look identical to a broken accessor.  So they are required here even
-# though they are optional for the package.
+# 'sp', 'GWmodel' and 'ranger' are Suggests, and the vignette degrades
+# gracefully when they are absent -- but it degrades by SKIPPING the GWR fit
+# (sp, GWmodel) and the cross-validation contrast (ranger), which are exactly
+# the sections whose metric output this render exists to verify.  A render
+# without them would show no metric lines and look identical to a broken
+# accessor.  So they are required here even though they are optional for
+# the package.
 required <- c("sf", "dplyr", "ggplot2", "logger", "digest",
               "knitr", "rmarkdown",
-              "sp", "GWmodel")
+              "sp", "GWmodel", "ranger")
 optional <- c("geometry",   # true Delaunay; otherwise falls back to the hull
               "patchwork")  # the 3-panel side-by-side comparison
 
@@ -85,8 +86,11 @@ rmarkdown::render(
 html <- readLines(file.path("docs", "spatialkit_nc_demo.html"),
                   warn = FALSE, encoding = "UTF-8")
 html <- paste(html, collapse = "\n")
+# One line from the GWR chunk and the sentence the cross-validation contrast
+# writes under its table.  Keep these in step with the vignette: a pattern for
+# a line it no longer prints fails every render, right or wrong.
 ok <- TRUE
-for (pat in c("Bandwidth: [0-9]", "CV RMSE: [0-9]")) {
+for (pat in c("Bandwidth: [0-9]", "Random folds report R<sup>2</sup> = [0-9]")) {
   if (!grepl(pat, html)) {
     ok <- FALSE
     cat(sprintf("FAIL: no rendered output matching /%s/\n", pat))
@@ -97,4 +101,6 @@ if (ok) {
 } else {
   cat("\nThe metric lines are still empty. Either an accessor is wrong or the",
       "\nGWR/CV chunks were skipped. Check the render before committing.\n")
+  # A non-zero exit under Rscript; source()d interactively, leave the session.
+  if (!interactive()) quit(status = 1)
 }

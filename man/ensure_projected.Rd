@@ -70,7 +70,9 @@ extent of the data. It is \strong{not} always UTM:
 \item{Local extents}{The UTM zone containing the data's centre
 (EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
 are close to true over a few degrees of longitude, which is the case
-this package is usually in.}
+this package is usually in. The centre is the centroid on the sphere,
+computed with s2 whatever \code{\link[sf:s2]{sf::sf_use_s2()}} is set to, so data near a
+zone edge get the same zone in every session.}
 \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 a UTM zone is designed for, a single zone can distort distances by
 several percent, and that error propagates straight into variogram
@@ -79,16 +81,28 @@ projection is actually best is then \strong{measured, not assumed}: the zone,
 a Lambert azimuthal equal-area centred on the data and (where its
 standard parallels do not degenerate) an Albers conic are each scored by
 projecting representative points of the data (a non-POINT layer is
-reduced to points first) and comparing planar with geodesic pairwise
-distances, and the one that distorts least is used.
+reduced to one point per feature, plus the vertices of its outline when
+it has fewer than 40 features, so a single study-area polygon is scored
+too) and comparing planar with geodesic pairwise distances, and the one
+that distorts least is used.
 The choice, both error figures and this argument are \strong{logged} (see the
 logging note under \code{\link[=spatialkit_quiet]{spatialkit_quiet()}}); they are not R warnings, so
 \code{tryCatch(warning = )} does not see them.}
 \item{Antimeridian}{Data straddling ±180° have a bounding box wider than a
 hemisphere. The wrap is detected from the coordinates (one very large
 gap in the sorted longitudes) and an equal-area projection centred on
-the true extent is used. Only truly global coverage falls back to
-EPSG:3857.}
+the true extent is used.}
+\item{Around a pole}{Data spanning more than 180 degrees of longitude
+with no such gap surround a pole. When every point also lies on one
+side of the equator (Antarctic stations, a pan-Arctic network), a
+Lambert azimuthal equal-area centred on that pole is used, provided it
+measures a smaller distance error than the global fallback. Web
+Mercator splits such a layer at +/-180 degrees and stretches it
+towards the pole: a ring of Antarctic stations measured a worst-case
+distance error near 20,000 percent in it, against about 2 percent in
+the polar projection. Only the coverage left over, spanning both
+hemispheres or a low-latitude belt the polar projection fits worse,
+falls back to EPSG:3857 (Equal Earth for \code{purpose = "area"}).}
 \item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
 lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 then apply; coordinates the heuristic declines are left exactly as they

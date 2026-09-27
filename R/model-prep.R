@@ -6,6 +6,8 @@
 #' backend can use.  All non-POINT geometries (including MULTIPOINT) are
 #' coerced to representative points via \code{coerce_to_points()}, so
 #' downstream coordinate extraction always aligns one row per observation.
+#' Any Z or M coordinate (POINT Z from a GPS, a GeoPackage or KML) is
+#' dropped, because every backend works in 2-D map distance.
 #'
 #' The response may not appear in \code{predictor_vars}.  Using it as its own
 #' predictor is leakage no backend catches: an out-of-bag R^2 near 1 in the
@@ -34,20 +36,27 @@
 #' @param require_response Logical; if FALSE the response column is not
 #'   required to be present (useful for out-of-sample prediction where the
 #'   response is unknown).  Default TRUE.
-#' @return An sf object with POINT geometry, cleaned of rows carrying missing
-#'   or non-finite values in the modelling columns or in the coordinates.  What
+#' @return An sf object with 2-D (XY) POINT geometry, cleaned of rows
+#'   carrying missing or non-finite values in the modelling columns or in the
+#'   coordinates.  What
 #'   was removed is recorded on the attribute \code{"dropped"}, a list with
 #'   \code{n} (rows dropped), \code{n_geometry} (how many of them for an
 #'   empty or non-finite geometry), \code{which} (their positions in
 #'   \code{data_sf}), \code{row_id} (their \code{..row_id} values when the
 #'   layer carries that column, else \code{NULL}) and \code{reason} (one per
 #'   dropped row: \code{"geometry"}, \code{"missing"} or
-#'   \code{"non_finite"}, in that order of precedence when several apply).
+#'   \code{"non_finite"}, in that order of precedence when several apply),
+#'   plus \code{n_rows}, the number of rows returned, which the record was
+#'   made for.
 #'   Every fit stores \code{n} as \code{$info$n_dropped}.  The record
 #'   describes the rows this call returned and does not survive subsetting:
-#'   \code{clean[i, ]} is a plain layer with no \code{"dropped"} attribute,
-#'   and a fit given such a subset with \code{.already_prepped = TRUE} reports
-#'   \code{n_dropped = 0} even when the parent layer dropped rows.  The CRS is
+#'   \code{clean[i, ]}, like \code{dplyr::filter()}, \code{slice()} or
+#'   \code{arrange()} of it, is a plain layer with no \code{"dropped"}
+#'   attribute, and a fit given such a subset with \code{.already_prepped =
+#'   TRUE} reports \code{n_dropped = 0} even when the parent layer dropped
+#'   rows.  \code{sf::st_drop_geometry()} keeps the record, since the rows are
+#'   the same; see \code{\link{[.spatialkit_rows}} for what binding such data
+#'   frames does.  The CRS is
 #'   projected whenever one can be established.  A CRS-less layer is decided by
 #'   the lon/lat heuristic (see \code{\link{ensure_projected}}): if its bounding
 #'   box fits the lon/lat envelope \emph{and} it either spans more than one unit
@@ -140,6 +149,16 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     data_sf <- coerce_to_points(data_sf, pointize)
   }
 
+  # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but
+  # POINT Z is ordinary input (GPS and GeoPackage elevations, KML's altitude,
+  # PointZ shapefiles) and the sf -> sp coercion GWmodel needs keeps the third
+  # column.  GWmodel then refused the data ("Please input correct coordinates
+  # of data points"), fitted on 3-D distances above 2500 rows, and in
+  # predict() on POINT Z newdata reshaped XYZ with matrix(, ncol = 2) into the
+  # wrong prediction locations, with no error.  make_folds(),
+  # estimate_sac_range() and the fold-separation check already drop ZM.
+  data_sf <- .drop_zm(data_sf)
+
   if (!is.null(boundary)) {
     bnd <- if (inherits(boundary, "sfc")) sf::st_as_sf(boundary) else boundary
     if (!inherits(bnd, "sf"))
@@ -221,6 +240,28 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 }
 
 
+#' Drop the Z and M coordinates of a POINT layer, when it has any
+#'
+#' Tested on the coordinates themselves.  A POINT is a numeric vector of two
+#' values (XY), three (XYZ or XYM) or four (XYZM), so a third coordinate on
+#' any row shows as more than two values per feature.  sf's
+#' \code{z_range}/\code{m_range} attributes are not enough: sf does not set
+#' them on points built with \code{st_as_sf(coords = c("x", "y", "z"))}.  And
+#' \code{sf::st_zm()} rebuilds every geometry with an R call each, too slow to
+#' spend on every 2-D layer a \code{predict()} call prepares.
+#'
+#' @param x An sf object with POINT geometry.
+#' @return \code{x}, with XY geometry.
+#' @keywords internal
+#' @noRd
+.drop_zm <- function(x) {
+  g <- sf::st_geometry(x)
+  if (length(unlist(g, use.names = FALSE)) > 2L * length(g))
+    x <- sf::st_zm(x, drop = TRUE, what = "ZM")
+  x
+}
+
+
 #' Heuristic length-scale bounds for a squared-exponential GP
 #'
 #' Computes sensible prior bounds for the GP length-scale parameter \eqn{\ell}
@@ -230,6 +271,15 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #' \eqn{\ell \sqrt{2 \ln 20} \approx 2.45\,\ell}{l * sqrt(2 log(20)) ≈ 2.45 l}.
 #'
 #' Subsamples large datasets to avoid O(n^2) memory and time cost.
+#'
+#' These are the bounds a length-scale \emph{prior} is calibrated over, not
+#' the scales a fitted model can resolve: that depends on the basis size
+#' (\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
+#' it as \code{$info$gp_ell_min}).  Both bounds are fixed fractions of the
+#' spread of pairwise distances, so they do not shrink as points are added to
+#' the same area.  A surface whose range sits below what the basis resolves
+#' needs a larger \code{gp_k}: more points help the data identify a short
+#' range, but they make neither these bounds nor the derived basis finer.
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
@@ -354,15 +404,23 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @param max_basis Integer cap on the TOTAL basis count (\code{k^2}).  The
 #'   per-dimension ceiling is derived from this as \code{floor(sqrt(max_basis))},
 #'   so there is a single cap, with no second one to contradict it.
-#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric),
+#' @param c Optional boundary factor, already validated, that \code{k} must be
+#'   sized for; \code{NULL} (default) derives it here.  \code{k} grows with
+#'   \code{c}, so a caller that fixes the boundary must size the basis for
+#'   \emph{that} boundary: the \code{k} derived for the default \code{c} cannot
+#'   resolve the lower bound inside a wider one.
+#' @return A list with \code{k} (integer, per dimension), \code{c} (numeric;
+#'   the \code{c} argument when one was given),
 #'   \code{S} (numeric; the pooled full range of the column-centred coordinates
 #'   AFTER collapsing replicated rows, i.e. exactly what \code{brms::gp(c = )}
-#'   multiplies under its default \code{gr = TRUE}) and \code{capped}
-#'   (logical).
+#'   multiplies under its default \code{gr = TRUE}), \code{capped}
+#'   (logical) and \code{cmeans} (the column means the coordinates were
+#'   centred on, which brms stores in the fit's GP basis and centres every
+#'   later \code{newdata} on).
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
-                           k_min = 10L, max_basis = 2500L) {
+                           k_min = 10L, max_basis = 2500L, c = NULL) {
   # Reproduce brms::choose_L()'s domain measure exactly: centre each column,
   # then take the range over the POOLED matrix.  na.rm mirrors brms.
   xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]
@@ -376,7 +434,8 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   # same factor.  Mirror the reduction.
   xy <- xy[!duplicated(xy), , drop = FALSE]
   if (!nrow(xy)) xy <- matrix(0, nrow = 1L, ncol = 2L)
-  Xc <- sweep(xy, 2L, colMeans(xy, na.rm = TRUE))
+  cmeans <- colMeans(xy, na.rm = TRUE)
+  Xc <- sweep(xy, 2L, cmeans)
   S  <- suppressWarnings(
     max(1, max(Xc, na.rm = TRUE) - min(Xc, na.rm = TRUE)))
   if (!is.finite(S) || S <= 0) S <- 1
@@ -387,7 +446,11 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 
   # 1.25, not 1.2: the floor is stated on the half-range convention by
   # Riutort-Mayol et al., and 5/4 is brms's own default on this one.
-  c_val <- max(3.2 * r_hi, 1.25)
+  # A caller's own c replaces the derived one BEFORE k is sized from it: k was
+  # once always sized for the derived c, so gp_c = 3 on a layer whose derived
+  # c was 1.63 kept k = 23 where the rule gives 43, and the basis could not
+  # resolve the lower length-scale bound it was supposed to.
+  c_val <- if (is.null(c)) max(3.2 * r_hi, 1.25) else as.numeric(c)
   k_raw <- ceiling(1.75 * c_val / r_lo)
 
   k_max  <- as.integer(floor(sqrt(max_basis)))
@@ -395,7 +458,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   capped <- k_raw > k_max
 
   list(k = as.integer(k_val), c = as.numeric(c_val),
-       S = as.numeric(S), capped = capped)
+       S = as.numeric(S), capped = capped, cmeans = as.numeric(cmeans))
 }
 
 

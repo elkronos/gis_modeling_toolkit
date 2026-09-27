@@ -77,9 +77,19 @@
   # were unreachable.  Build the axis explicitly instead.
   .axis <- function(lo, hi) {
     lo <- as.numeric(lo); hi <- as.numeric(hi)
-    n <- floor((hi - lo) / cell_size)
-    if (!is.finite(n) || n < 1L) return(lo + (hi - lo) / 2)   # one centred cell
-    lo + cell_size / 2 + seq.int(0L, n - 1L) * cell_size
+    # Enough cells to cover the extent, centred on it.  floor() cells anchored
+    # at the lower bound left the remainder -- up to a cell wide -- uncovered
+    # on the east and north: cell_size = 100 on a 980 x 956 extent covered
+    # 900 x 900, and 14 of 120 training points lay in no cell.  The grid now
+    # overhangs the box by less than one cell, split evenly on both sides, so
+    # every centre stays inside it.  The relative tolerance keeps an exact
+    # multiple exact: 0.3 / 0.1 is 2.9999999999999996, and a ratio a hair
+    # above an integer must not gain a column either.
+    r <- (hi - lo) / cell_size
+    n <- ceiling(r - sqrt(.Machine$double.eps) * max(1, r))
+    if (!is.finite(n) || n < 1L) n <- 1L     # a cell wider than the extent
+    offset <- (hi - lo - n * cell_size) / 2
+    lo + offset + cell_size / 2 + seq.int(0L, n - 1L) * cell_size
   }
   xs <- .axis(bb[["xmin"]], bb[["xmax"]])
   ys <- .axis(bb[["ymin"]], bb[["ymax"]])
@@ -115,33 +125,55 @@
 #'   is given the interpretation the training data got (the assumption recorded
 #'   on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 #'   grid can land thousands of kilometres from the covariates and every cell
-#'   takes the same nearest feature.
+#'   takes the same nearest feature.  A grid still without a CRS after that
+#'   is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
+#'   when its coordinates look like lon/lat, otherwise stamped with the fit's
+#'   CRS, with a warning either way.  A grid of polygons
+#'   (\code{\link{create_grid_polygons}()} output, say) is reduced to one
+#'   representative point per cell, as \code{\link{coerce_to_points}()} does,
+#'   so covariates are taken at the location predicted for; \code{boundary}
+#'   then keeps the cells whose point falls inside it.
 #' @param cell_size Grid resolution in CRS units.  Ignored when \code{grid} is
 #'   supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 #'   would produce more than 5,000,000 cells is refused, naming the implied
-#'   count and the CRS units.  The usual cause is a value in the wrong unit.  A
-#'   \code{cell_size} wider than the extent yields a single centred cell.
+#'   count and the CRS units.  The usual cause is a value in the wrong unit.
+#'   The grid is centred on the training bounding box and covers it: when the
+#'   extent is not a whole number of cells, it overhangs the box by less than
+#'   one cell, split evenly between the two sides.  A \code{cell_size} wider
+#'   than the extent yields a single centred cell.
 #' @param n_cells Approximate cell count used to derive \code{cell_size}.
 #'   Default 10000.  Must be a single positive finite number and at most
 #'   5,000,000; anything else is an error.  Also ignored when \code{grid} is
 #'   supplied.  The grid you pass is used verbatim.
 #' @param boundary Optional polygonal \code{sf}/\code{sfc}; grid points outside
 #'   it are dropped.  Put through the same CRS replay and reprojection as
-#'   \code{grid}.
+#'   \code{grid}.  One still without a CRS after the replay is taken as
+#'   EPSG:4326 and reprojected when its coordinates look like lon/lat, and
+#'   is otherwise stamped with the fit's CRS, with a warning either way.
 #' @param covariates Optional \code{sf} layer carrying the model's predictors.
 #'   Required when the model has predictors and \code{grid} does not already
-#'   contain them.  Values are taken from the nearest feature.
+#'   contain them.  Values are taken from the nearest feature.  Aligned to
+#'   the fit's CRS as \code{grid} is, with the same warning when it has no
+#'   CRS.
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
-#'   performance knob for the GWR and random-forest backends, whose rows do not
-#'   interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
-#'   grid stays inside the training extent.  Beyond it the GP boundary has to
-#'   grow and predictions depend on which rows share the call; see
+#'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
+#'   GP boundary is held at its fitted value whatever the chunk holds; see
 #'   \code{\link{predict.bayesian_fit}}.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
-#'   backend supports it.  Default FALSE.
-#' @param ... Passed to \code{predict()}.
+#'   backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
+#'   the SD of the posterior draws \code{predict()} returns, and those are of
+#'   the expected value by default (\code{type = "epred"}): the uncertainty
+#'   of the mean surface, not of a new observation, which also carries the
+#'   observation noise.  For the predictive SD, the one that goes with
+#'   prediction intervals and \code{cv_bayes()}'s calibration, pass
+#'   \code{type = "predict"} as well.
+#' @param ... Passed to \code{predict()}, e.g. \code{type = "predict"} for a
+#'   \code{bayesian_fit}.  Not \code{draws}, which this function sets itself
+#'   and refuses here.
 #' @return An \code{sf} POINT layer with a \code{.pred} column (and
-#'   \code{.pred_se} when \code{se = TRUE} and available).  For an
+#'   \code{.pred_se} when \code{se = TRUE} and available; one a supplied
+#'   \code{grid} already carried, from an earlier surface, is removed
+#'   otherwise).  For an
 #'   auto-generated grid the resolution is attached as attribute
 #'   \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
 #'   \code{"cell_size"} attribute that object already carried.  That is usually
@@ -180,10 +212,41 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   if (!inherits(object, "spatial_fit"))
     stop("predict_surface(): `object` must be a spatial_fit.", call. = FALSE)
 
+  # `draws` is this function's to set: it asks for the draw matrix itself when
+  # se = TRUE.  Passed through `...` it reached predict() too, and a backend
+  # that honours it returned an n_draws x n matrix that as.numeric() flattened
+  # into .pred column by column -- cell 1's draws, then cell 2's -- with only
+  # a cryptic length warning; with se = TRUE the duplicated argument failed
+  # inside try() and was reported as a backend without draws.  A prefix
+  # counts, since R's argument matching would complete it.
+  dot_nms <- names(list(...))
+  if (!is.null(dot_nms) && any(nzchar(dot_nms) & startsWith("draws", dot_nms)))
+    stop("predict_surface(): `draws` cannot be passed through `...`; ",
+         "predict_surface() requests the posterior draws itself when se = TRUE ",
+         "and returns their SD as .pred_se. For the draw matrix, call ",
+         "predict(object, newdata = grid, draws = TRUE).", call. = FALSE)
+
   train <- object$data_sf
   if (!inherits(train, "sf"))
     stop("predict_surface(): the fit carries no training geometry.", call. = FALSE)
   target_crs <- sf::st_crs(train)
+
+  # A `grid` or `covariates` layer still without a CRS once the fit's own
+  # assumption has been replayed is aligned to the fit's CRS as `boundary`
+  # is, and as the other functions align such a layer: reprojected from
+  # EPSG:4326 when it looks like lon/lat, otherwise stamped, either way with
+  # an R warning naming this function and the argument.  ensure_projected()
+  # stamped it with a log line naming neither, which knitr,
+  # spatialkit_quiet() and tryCatch() never show -- and a wrongly stamped
+  # layer puts every covariate lookup in the wrong place.  A layer the
+  # replay marked as belonging to a CRS-less fit's own space is left there.
+  .align_to_fit <- function(x, what) {
+    if (is.na(sf::st_crs(x)) && !is.null(.crs_or_null(target_crs)) &&
+        !identical(attr(x, "crs_assumed"), "none"))
+      .transform_or_stamp(x, target_crs, what = what, caller = "predict_surface")
+    else
+      ensure_projected(x, target_crs = .crs_or_null(target_crs))
+  }
 
   # ---- grid ----------------------------------------------------------------
   if (is.null(grid)) {
@@ -205,7 +268,18 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     # handed every cell the same covariate row and the whole surface collapsed
     # to one constant -- silently, with no error anywhere.
     grid <- .replay_crs_assumption(grid, train, "predict_surface", "grid")
-    grid <- ensure_projected(grid, target_crs = .crs_or_null(target_crs))
+    grid <- .align_to_fit(grid, "grid")
+    # A polygon grid -- create_grid_polygons() output, say -- was used as it
+    # was.  st_nearest_feature() then gave each cell whichever covariate point
+    # inside it the spatial index returned first, not the one at its centre,
+    # while predict() pointized the cell by itself, so the covariates and the
+    # location predicted at no longer matched: predictions off by up to 2.6 on
+    # a 0-30 response, and a row shuffle of `covariates` moved them by up to
+    # 4.7.  Reduce it to representative points first, as
+    # area_of_applicability() does, so the surface is the POINT layer the
+    # manual promises.
+    if (!all(sf::st_geometry_type(grid, by_geometry = TRUE) == "POINT"))
+      grid <- coerce_to_points(grid, "auto")
   }
   res <- attr(grid, "cell_size")
 
@@ -213,7 +287,13 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
   if (!is.null(boundary)) {
     bnd <- .replay_crs_assumption(sf::st_geometry(boundary), train,
                                   "predict_surface", "boundary")
-    bnd <- ensure_projected(bnd, target_crs = .crs_or_null(target_crs))
+    # A boundary still without a CRS is aligned to the fit's as other
+    # functions align one: an R warning naming this function and argument.
+    # ensure_projected()'s stamp was a log line naming neither.
+    bnd <- if (is.null(.crs_or_null(target_crs)))
+      ensure_projected(bnd)
+    else .transform_or_stamp(bnd, target_crs, what = "boundary",
+                             caller = "predict_surface")
     keep <- lengths(sf::st_intersects(grid, bnd)) > 0L
     grid <- grid[keep, , drop = FALSE]
     if (nrow(grid) == 0L)
@@ -245,7 +325,7 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
 
     covariates <- .replay_crs_assumption(covariates, train, "predict_surface",
                                         "covariates")
-    covariates <- ensure_projected(covariates, target_crs = .crs_or_null(target_crs))
+    covariates <- .align_to_fit(covariates, "covariates")
     nn  <- sf::st_nearest_feature(grid, covariates)
     cdf <- sf::st_drop_geometry(covariates)[nn, missing_preds, drop = FALSE]
     for (cn in missing_preds) grid[[cn]] <- cdf[[cn]]
@@ -310,6 +390,14 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
       if (inherits(p, "try-error"))
         stop("predict_surface(): prediction failed on rows ", s, "-", e, ": ",
              as.character(p), call. = FALSE)
+      # One value per row, or the assignment below recycles or truncates
+      # whatever came back into .pred without a word that means anything.
+      if (length(p) != length(idx))
+        stop(sprintf(paste0("predict_surface(): predict() returned %d value(s) ",
+                            "for the %d rows %d-%d; expected one per row. Check ",
+                            "what the backend's predict() returns for the ",
+                            "arguments passed through `...`."),
+                     length(p), length(idx), s, e), call. = FALSE)
       preds_vec[idx] <- as.numeric(p)
     }
   }
@@ -319,7 +407,10 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
                      "expose posterior draws; returning predictions only."))
 
   grid$.pred <- preds_vec
-  if (isTRUE(se) && se_ok) grid$.pred_se <- se_vec
+  # A grid that is an earlier surface carries that model's .pred_se.  It was
+  # kept whenever this call did not replace it -- beside the new .pred, and
+  # even after the log said "returning predictions only".
+  grid$.pred_se <- if (isTRUE(se) && se_ok) se_vec else NULL
 
   attr(grid, "cell_size") <- res
   grid

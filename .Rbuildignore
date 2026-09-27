@@ -19,3 +19,8 @@
 (^|/)Rplots\.pdf$
 \.DS_Store$
 ^Claude outputs$
+# Local files a build from a working tree would otherwise ship: the internal
+# review notes (kept out of git by .gitignore) and the .claude/ directory of
+# assistant settings and worktrees.
+^CODE_REVIEW\.md$
+^\.claude$

@@ -78,22 +78,27 @@ cleanly.
 
 * Optional model backends (`GWmodel`, `brms`, `ranger`) and other heavy
   dependencies live in Suggests and are used strictly conditionally. All package
-  code, examples, tests **and the vignette** guard their use with
+  code, examples, tests **and the six vignettes** guard their use with
   `requireNamespace()` and skip or degrade gracefully when the package is
-  absent. The vignette resolves every optional backend in its setup chunk and
-  gates the relevant chunks on the result; the `ggplot2` gate is global, since
-  every chunk in it either draws something or feeds something that does, so on a
-  machine without `ggplot2` the vignette builds as code without output rather
-  than failing `R CMD build`. It has been built both with every optional
-  backend present and with `GWmodel` absent, and re-builds cleanly either way.
+  absent. Each vignette resolves the optional packages it uses in its setup
+  chunk and gates the relevant chunks on the result. Where every chunk depends
+  on a package -- `ggplot2` in the North Carolina demo; `gstat` and `ggplot2`
+  in the resolution, diagnostics and spatial cross-validation vignettes -- the
+  gate is global, so on a machine without it the vignette builds as code
+  without output rather than failing `R CMD build`. The `R-CMD-check.yaml`
+  matrix builds the vignettes with the hard dependencies plus `ggplot2` and
+  `gstat` (and what `gstat` pulls in), so the chunks gated on `GWmodel`,
+  `ranger`, `geometry` or `patchwork` are skipped there; the pkgdown workflow
+  builds them with every package they gate on.
 
-* Exactly two examples are wrapped in `\dontrun{}`: `fit_bayesian_spatial_model()`
-  and `cv_bayes()`. These are the "missing additional software" case the CRAN
-  cookbook gives for `\dontrun{}`: both compile a Stan model, which needs a
-  working C++ toolchain (or a CmdStan build) that neither this package nor
-  `brms` can supply, and then run minutes of MCMC. Each block opens with a
-  comment saying so, and `brms` itself wraps its own fitting examples the same
-  way.
+* Exactly three examples are wrapped in `\dontrun{}`:
+  `fit_bayesian_spatial_model()`, `cv_bayes()` and `plot_calibration()`, whose
+  example has to run `cv_bayes()` to have something to plot. These are the
+  "missing additional software" case the CRAN cookbook gives for `\dontrun{}`:
+  all three compile a Stan model, which needs a working C++ toolchain (or a
+  CmdStan build) that neither this package nor `brms` can supply, and then run
+  minutes of MCMC. Each block opens with a comment saying so, and `brms` itself
+  wraps its own fitting examples the same way.
 
   `\donttest{}` would be the wrong tag here rather than a more conservative
   one: `--run-donttest` is exercised on several CRAN platforms, so tagging
@@ -124,8 +129,7 @@ cleanly.
   sample under a constant seed, now draws no random numbers at all. Where
   `seed` is `NULL`, nothing is seeded and
   nothing is restored: unseeded functions advance the caller's stream the way
-  any other unseeded R function does, rather than re-initialising it. That
-  distinction is the subject of fix 5 above.
+  any other unseeded R function does, rather than re-initialising it.
 
 * Core use is bounded. No function defaults to `parallel::detectCores()`:
   `fit_bayesian_spatial_model(cores = )` and `fit_rf_model(num_threads = )`

@@ -41,6 +41,11 @@ test_that(".elbow_from_wss finds a hand-placed knee", {
   # implementation.
   later <- c(100, 90, 80, 70, 60, 50, 10, 9, 8, 7)
   expect_equal(eb(later)$knee_k, 7L)
+  # (On log-log axes that shoulder-then-cliff curve sags only 0.06 below its
+  # chord, short of an elbow, so 7 is the flagged linear-axis answer; a
+  # k-means WSS curve does not have a shoulder like that.)
+  expect_false(eb(later)$structured)
+  expect_true(eb(.knee_curve)$structured)
   earlier <- c(100, 20, 19, 18, 17, 16, 15, 14, 13, 12)
   expect_equal(eb(earlier)$knee_k, 2L)
 })
@@ -65,9 +70,12 @@ test_that("determine_optimal_levels() puts the elbow first on the geometric path
 })
 
 test_that(".elbow_from_wss is invariant to an affine rescaling of WSS", {
-  # Both axes are min-max normalised before the perpendicular distance is
-  # taken, so a * wss + b (a > 0) cannot move the knee.  WSS is in squared CRS
-  # units, so this is what makes the answer independent of the projection.
+  # The elbow is read on log-log axes, where a * wss (a > 0) is a shift and
+  # cannot move it; WSS is in squared CRS units, so this is what makes the
+  # answer independent of the projection.  A shift b can flatten the log-log
+  # bend below the threshold, and then the linear-axis answer is returned,
+  # which min-max normalisation makes invariant to both; on this curve the
+  # two readings agree.
   eb <- spatialkit:::.elbow_from_wss
   base <- eb(.knee_curve)$knee_k
   for (a in c(1e-6, 0.5, 1000)) {

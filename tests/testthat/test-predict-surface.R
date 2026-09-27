@@ -172,12 +172,16 @@ test_that(".make_prediction_grid returns cell CENTRES, not corners", {
   expect_gt(min(xs), bb[["xmin"]])
   expect_gt(min(ys), bb[["ymin"]])
 
-  # A cell size that does not divide the extent evenly keeps the same rule:
-  # 100 / 30 -> 3 cells, centres 15, 45, 75, with the remainder left at the top.
+  # A cell size that does not divide the extent evenly still covers it, and
+  # the grid stays symmetric about the box: 100 / 30 -> 4 cells spanning 120,
+  # overhanging by 10 on each side, centres 5, 35, 65, 95.  (Three cells
+  # anchored at the lower bound left the top 10 uncovered.)
   g2  <- grid_fn(bb, sf::st_crs(32632), cell_size = 30)
   xs2 <- sort(unique(g2$..grid_x))
-  expect_equal(xs2, c(15, 45, 75))
-  expect_equal(min(xs2) - bb[["xmin"]], 30 / 2)
+  expect_equal(xs2, c(5, 35, 65, 95))
+  expect_equal(min(xs2) - bb[["xmin"]], bb[["xmax"]] - max(xs2))
+  expect_lte(min(xs2) - 30 / 2, bb[["xmin"]])
+  expect_gte(max(xs2) + 30 / 2, bb[["xmax"]])
 
   # A cell wider than the extent collapses to one point at the centre of the
   # box, not at its corner.

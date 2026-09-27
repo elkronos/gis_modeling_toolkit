@@ -744,8 +744,11 @@ test_that("summarize_by_cell(deff = 'variogram') corrects the response SE with t
   explicit <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
                                 sac = sac_resp)
   expect_equal(with_pred[["..se_resp_z"]], explicit[["..se_resp_z"]], tolerance = 1e-10)
-  residual <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
-                                sac = sac_resid)
+  # Used as given, but with a warning that the response SEs are understated.
+  expect_warning(
+    residual <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
+                                  sac = sac_resid),
+    "residuals on predictors")
   expect_false(isTRUE(all.equal(with_pred[["..se_resp_z"]], residual[["..se_resp_z"]],
                                 tolerance = 1e-6)))
 })

@@ -180,13 +180,54 @@
     stop("area_of_applicability(): `weights` has no entry for: ",
          paste(sQuote(missing_w), collapse = ", "), call. = FALSE)
   w <- weights[vars]
-  if (anyNA(w) || any(!is.finite(w)) || any(w < 0))
+  # A non-finite weight got the negative-weight advice, pmax(importance, 0),
+  # which keeps NaN: a forest with no out-of-bag rows has NaN permutation
+  # importance, and following the hint reproduced the same error.
+  bad <- !is.finite(w)
+  if (any(bad))
+    stop(sprintf("area_of_applicability(): `weights` is %s for %s.%s",
+                 if (all(is.nan(w[bad]))) "NaN" else "not finite",
+                 paste(sQuote(names(w)[bad]), collapse = ", "),
+                 if (any(is.nan(w[bad])))
+                   paste0(" Permutation importance is NaN when no row is out ",
+                          "of bag (a forest grown with replace = FALSE and ",
+                          "sample_fraction = 1), and pmax() keeps NaN; refit ",
+                          "with out-of-bag rows (replace = TRUE or ",
+                          "sample_fraction < 1), or pass weights = NULL.")
+                 else ""), call. = FALSE)
+  if (any(w < 0))
     stop("area_of_applicability(): `weights` must be finite and non-negative. ",
          "Permutation importance is slightly negative for predictors that do ",
          "not help, so pass pmax(importance, 0).", call. = FALSE)
-  if (all(w == 0))
-    stop("area_of_applicability(): all `weights` are zero.", call. = FALSE)
+  w <- .aoa_equal_if_all_zero(w)
   w * (length(w) / sum(w))
+}
+
+#' Replace all-zero weights with equal ones
+#'
+#' The advice above, \code{pmax(importance, 0)}, is all zero whenever the
+#' model found no predictor useful, which a forest with one predictor does
+#' often (9 fits in 20 when that predictor carried no signal).  That used to
+#' be an error, and it lost the AOA in exactly the folds where the predictor
+#' was weakest.  With ONE predictor the weight cannot matter: the index is
+#' invariant to the scale of the weights, so zero is just a degenerate way of
+#' writing any positive value, and it is accepted silently.  With several,
+#' all-zero weights say nothing about how the predictors compare, so they are
+#' weighted equally, as \code{weights = NULL} would, with a warning.
+#'
+#' @keywords internal
+#' @noRd
+.aoa_equal_if_all_zero <- function(w) {
+  if (length(w) == 0L || any(w != 0)) return(w)
+  if (length(w) > 1L)
+    .warn_and_log(paste0("area_of_applicability(): every weight is zero (%s), ",
+                         "which says nothing about how the predictors compare; ",
+                         "weighting them equally, as weights = NULL does. ",
+                         "pmax(importance, 0) is all zero when the model found ",
+                         "no predictor useful."),
+                  paste(names(w), collapse = ", "))
+  w[] <- 1
+  w
 }
 
 
@@ -218,6 +259,10 @@
   # against the quantity it is divided by.
   if (is.null(chunk_size))
     chunk_size <- max(1L, min(10000L, as.integer(floor(4e6 / max(1L, nd)))))
+  # A whole number of rows per block.  A fractional chunk_size gave fractional
+  # block starts, the s:e ranges below truncated, and the rows between blocks
+  # kept the 0 they were initialised with: a DI of 0, inside the AOA.
+  chunk_size <- max(1L, as.integer(chunk_size))
   out  <- numeric(nq)
   dsq  <- rowSums(data^2)
   for (s in seq.int(1L, nq, by = chunk_size)) {
@@ -276,9 +321,15 @@
 #'   VALUES and resolved to row positions with \code{match()}; when
 #'   \code{NULL} they are treated as positions, as before.  Fold labels are
 #'   always positional: they are one label per row by definition.
+#' @param removed_ids Optional \code{..row_id} values of rows that
+#'   \code{prep_model_data()} removed from the training data (read from its
+#'   \code{"dropped"} record).  They are taken out of every train and test
+#'   slot before the IDs are resolved, as \code{.remap_folds()} does for
+#'   \code{cv_*()}, and a fold left with no test row is dropped.  Any other
+#'   unknown ID is still an error.
 #' @keywords internal
 #' @noRd
-.aoa_fold_splits <- function(folds, n, row_ids = NULL) {
+.aoa_fold_splits <- function(folds, n, row_ids = NULL, removed_ids = NULL) {
   if (is.null(folds)) return(NULL)
 
   if (is.atomic(folds) && !is.list(folds)) {
@@ -286,24 +337,18 @@
       stop(sprintf(paste0("area_of_applicability(): `folds` has %d labels but ",
                           "the training data has %d rows."),
                    length(folds), n), call. = FALSE)
-    # droplevels() matters: a factor subset from a larger data set keeps its
-    # unused levels, and each one would otherwise become an empty fold that
-    # inflates the reported fold count and reaches .aoa_min_dist() with no
-    # test rows.
-    f <- droplevels(as.factor(folds))
-    if (anyNA(f))
-      stop("area_of_applicability(): `folds` contains missing labels.",
-           call. = FALSE)
-    if (nlevels(f) < 2L)
-      stop("area_of_applicability(): `folds` must define at least two ",
-           "non-empty folds.", call. = FALSE)
-    # Fall through to the shared validation below rather than returning here,
-    # so label-built splits get the same checks as hand-built ones.
-    sp <- lapply(levels(f), function(lv) {
-      te <- which(f == lv)
-      list(test = te, train = setdiff(seq_len(n), te))
-    })
-    # which() already returns positions, so there is nothing to resolve.
+    # Labels are grouped and numbered by .folds_from_labels(), the helper
+    # every cv_*() uses, so fold k here is fold k in a cv_*() result built
+    # from the same labels: numbers in numeric order, a factor by its own
+    # used levels, anything else in C (radix) order.  A copy of that rule
+    # here drifted: two doubles that print alike (0.3 and 0.1 + 0.2) stopped
+    # with R's "factor level [2] is duplicated" where cv_*() made them one
+    # fold.  The helper also refuses missing labels and fewer than two
+    # non-empty folds.  With ..row_id = 1..n its IDs are row positions, so
+    # there is nothing to resolve.  Fall through to the shared validation
+    # below, so label-built splits get the same checks as hand-built ones.
+    sp <- .folds_from_labels(folds, data.frame(..row_id = seq_len(n)),
+                             "area_of_applicability")
     row_ids <- NULL
   } else {
     sp <- if (is.list(folds) && !is.null(folds$folds)) folds$folds else folds
@@ -318,6 +363,41 @@
     stop("area_of_applicability(): `folds` must be a make_folds() result, a ",
          "list of train/test splits, or a vector of fold labels.",
          call. = FALSE)
+
+  # Folds built on the layer a model was fitted from name every row of it,
+  # including those prep_model_data() then removed (a missing response, a
+  # non-finite predictor, an empty geometry).  cv_*() drops such IDs from the
+  # splits (.remap_folds()); here they were resolved against the shorter
+  # training data and every one of them stopped the call with "refers to rows
+  # outside 1:n" -- for the same folds cv_*() had just accepted.  Drop them,
+  # and say how many.
+  if (length(removed_ids) && !is.null(row_ids)) {
+    named <- unique(unlist(lapply(sp, function(z) c(z$train, z$test)),
+                           use.names = FALSE))
+    n_hit <- sum(named %in% removed_ids)
+    if (n_hit > 0L) {
+      sp <- lapply(sp, function(z) {
+        z$train <- z$train[!(z$train %in% removed_ids)]
+        z$test  <- z$test[!(z$test %in% removed_ids)]
+        z
+      })
+      no_test <- vapply(sp, function(z) length(z$test) == 0L, logical(1))
+      .log_info(paste0("area_of_applicability(): `folds` name %d row(s) that ",
+                       "prep_model_data() removed from the training data ",
+                       "(missing or non-finite values, or an empty geometry); ",
+                       "they were dropped from every fold%s."),
+                n_hit,
+                if (any(no_test))
+                  sprintf(", and the %d fold(s) left with no test row with them",
+                          sum(no_test))
+                else "")
+      sp <- sp[!no_test]
+      if (length(sp) == 0L)
+        stop("area_of_applicability(): no fold has a test row left once the ",
+             "rows prep_model_data() removed are taken out of `folds`.",
+             call. = FALSE)
+    }
+  }
 
   # Every make_folds() branch emits ..row_id VALUES in its train/test slots, as
   # its @return documents, and those coincide with row POSITIONS only when the
@@ -334,7 +414,10 @@
       stop(sprintf(paste0("area_of_applicability(): fold %d's %s set names %d ",
                           "..row_id value(s) that are not in the training data ",
                           "(first: %s). `folds` was built on a different data ",
-                          "set, or on rows that have since been removed."),
+                          "set, or on rows that have since been removed other ",
+                          "than by prep_model_data(), whose removals are ",
+                          "dropped from the folds while the training data ",
+                          "carries its \"dropped\" record."),
                    j, slot, sum(is.na(pos)),
                    format(v[is.na(pos)][1L])), call. = FALSE)
     as.integer(pos)
@@ -349,7 +432,11 @@
       stop(sprintf(paste0("area_of_applicability(): fold %d refers to rows ",
                           "outside 1:%d. `folds` was probably built on a ",
                           "different data set, or on data carrying its own ",
-                          "..row_id."), j, n), call. = FALSE)
+                          "..row_id. (Rows prep_model_data() removed are ",
+                          "dropped from the folds when the training data ",
+                          "carries its \"dropped\" record, as a fit's data_sf ",
+                          "does; a subset or a re-ordering of it does not.)"),
+                   j, n), call. = FALSE)
     if (length(te) == 0L)
       stop(sprintf("area_of_applicability(): fold %d has an empty test set.",
                    j), call. = FALSE)
@@ -379,6 +466,104 @@
                         "test fold, so they have no reference distance."),
                  sum(seen == 0L)), call. = FALSE)
   out
+}
+
+
+#' Line the folds up with a training layer prep_model_data() removed rows from
+#'
+#' A fit's \code{data_sf} is the \code{prep_model_data()} output: rows with a
+#' missing or non-finite modelling value or an empty geometry are gone, and
+#' it carries no \code{..row_id} unless its input did.  Folds built on the
+#' layer the model was fitted FROM -- the ones passed to \code{cv_*()} -- name
+#' the input's rows.  The \code{"dropped"} record says which those were, so
+#' the input's row IDs of the kept rows can be rebuilt: positions when the
+#' input had no \code{..row_id} (make_folds() numbers the rows then), the
+#' recorded IDs otherwise.
+#'
+#' When the training data carries \code{..row_id}, list-shaped folds are
+#' resolved by ID already, and only the removed rows' IDs are needed.
+#' Without it, the IDs of folds built on the training data itself are its
+#' row positions, \code{1:n}; folds built on the layer fitted from name that
+#' layer's rows, and so name a row past \code{n} whenever a row before its
+#' end was removed (a trailing row's removal leaves the numbering the same).
+#' So a fold list naming a row past \code{n} is read in the input's
+#' numbering, and one that does not is left as positions.  A label vector
+#' with one label per input row is cut down to the kept rows; one with one
+#' label per training row is left alone.
+#'
+#' @return A list: \code{folds}, \code{row_ids} (the training rows' IDs, or
+#'   the \code{row_ids} given) and \code{removed_ids} (the IDs of the removed
+#'   rows, or \code{NULL}).
+#' @keywords internal
+#' @noRd
+.aoa_rows_for_folds <- function(folds, train_sf, row_ids) {
+  out <- list(folds = folds, row_ids = row_ids, removed_ids = NULL)
+  rec <- if (is.data.frame(train_sf)) .get_row_record(train_sf, "dropped") else NULL
+  n_rm <- suppressWarnings(as.integer(rec$n %||% 0L))
+  if (is.null(rec) || length(n_rm) != 1L || is.na(n_rm) || n_rm < 1L)
+    return(out)
+  n    <- as.integer(nrow(train_sf))
+  n_in <- n + n_rm
+  kept <- setdiff(seq_len(n_in), as.integer(rec$which))
+  # A record that does not add up describes other rows; ignore it.
+  if (length(kept) != n) return(out)
+  if (is.atomic(folds) && !is.list(folds)) {
+    if (length(folds) == n_in) {
+      .log_info(paste0("area_of_applicability(): `folds` has one label per row ",
+                       "of the layer the model was fitted from; the %d label(s) ",
+                       "of the row(s) prep_model_data() removed were dropped."),
+                n_rm)
+      out$folds <- folds[kept]
+    }
+    return(out)
+  }
+  if (!is.null(row_ids)) {
+    if (length(rec$row_id)) out$removed_ids <- rec$row_id
+    return(out)
+  }
+  sp <- if (is.list(folds) && is.list(folds$folds)) folds$folds else folds
+  named <- if (is.list(sp))
+    suppressWarnings(as.numeric(unlist(lapply(sp, function(z)
+      if (is.list(z)) c(z$train, z$test)), use.names = FALSE)))
+  else numeric(0)
+  if (length(named) && any(named > n, na.rm = TRUE)) {
+    out$row_ids     <- kept
+    out$removed_ids <- as.integer(rec$which)
+  }
+  out
+}
+
+
+#' The fold provenance check of cv_*(), for area_of_applicability()
+#'
+#' \code{.check_fold_probe()} on the training data, with its row IDs as the
+#' folds are resolved against them.  A fit's \code{data_sf} holds the points
+#' \code{prep_model_data()} reduced its layer to, so folds built on the
+#' polygons it was fitted from carry a probe taken on polygon centroids: the
+#' two cannot be compared location by location, and the check is skipped
+#' (logged) rather than refusing a documented workflow.
+#' @keywords internal
+#' @noRd
+.aoa_check_fold_probe <- function(folds, train_sf, row_ids) {
+  probe <- tryCatch(folds$params$row_probe, error = function(e) NULL)
+  if (!is.list(probe) || !inherits(train_sf, "sf") || nrow(train_sf) == 0L)
+    return(invisible(NULL))
+  tr_points <- tryCatch(
+    all(sf::st_geometry_type(train_sf, by_geometry = TRUE) == "POINT"),
+    error = function(e) NA)
+  if (is.logical(probe$points) && length(probe$points) == 1L &&
+      !is.na(probe$points) && !identical(probe$points, tr_points)) {
+    .log_info(paste0("area_of_applicability(): `folds` were built on %s ",
+                     "geometry and the training data has %s geometry, so their ",
+                     "row locations cannot be compared; skipping the ",
+                     "provenance check."),
+              if (probe$points) "POINT" else "non-POINT",
+              if (isTRUE(tr_points)) "POINT" else "non-POINT")
+    return(invisible(NULL))
+  }
+  chk <- train_sf
+  chk[["..row_id"]] <- if (is.null(row_ids)) seq_len(nrow(train_sf)) else row_ids
+  .check_fold_probe(folds, chk, "area_of_applicability")
 }
 
 
@@ -416,11 +601,15 @@
 #' Outlier-removed maximum of the training dissimilarity index
 #'
 #' The threshold is the largest training DI that is not an upper outlier by the
-#' usual rule, i.e. the largest value at or below \code{Q3 + 1.5 * IQR}.  That
-#' is the "(outlier-removed) maximum" of Meyer & Pebesma (2021).  CAST obtains
-#' it via \code{grDevices::boxplot.stats()}, which uses Tukey's hinges;
-#' \code{stats::quantile()} returns the type-7 quantiles, and the two agree
-#' closely but not exactly.
+#' usual rule, i.e. the largest value at or below \code{Q3 + 1.5 * IQR}, with
+#' \code{stats::quantile()}'s default (type 7) quartiles.  That is the
+#' "(outlier-removed) maximum" of Meyer & Pebesma (2021).  CAST, the reference
+#' implementation, uses the same type-7 fence since it stopped calling
+#' \code{grDevices::boxplot.stats()} (whose upper whisker is this rule on
+#' Tukey's hinges), but takes the FENCE itself, capped at the largest training
+#' DI, as the threshold.  The two agree whenever nothing lies above the fence;
+#' otherwise CAST's threshold is the larger.  The paper's definition is kept,
+#' and the help page says how to reproduce CAST's value.
 #'
 #' @keywords internal
 #' @noRd
@@ -479,12 +668,35 @@
 #' that holds it out}. That means everything outside its own fold for random
 #' and block folds, and the smaller training set that buffered and NNDM folds
 #' actually leave (see the next section). The threshold is then the largest
-#' training DI that is not an upper outlier. Prediction points at or below that
-#' threshold are inside the AOA.
+#' training DI that is not an upper outlier, i.e. not above the fence
+#' \code{Q3 + 1.5 * IQR} of the training DI, with the quartiles of
+#' \code{stats::quantile()}'s default type 7. Prediction points at or below
+#' that threshold are inside the AOA.
+#'
+#' That is the paper's "outlier-removed maximum". \pkg{CAST}, the reference
+#' implementation, computes the same fence with the same quartiles but uses the
+#' fence itself as the threshold, capped at the largest training DI. The two
+#' agree whenever no training DI lies above the fence (\code{n_outliers} is 0);
+#' otherwise \pkg{CAST}'s threshold is the larger, and so is its AOA. (Earlier
+#' \pkg{CAST} releases used \code{grDevices::boxplot.stats()}, which gives the
+#' rule used here but with Tukey's hinges as the quartiles, so they can also
+#' differ when the number of training points is even.) To apply the current
+#' \pkg{CAST} rule to the same training DI, pass
+#' \code{threshold = min(quantile(res$train_DI, 0.75) + 1.5 * IQR(res$train_DI),
+#' max(res$train_DI))} for an earlier result \code{res}.
 #'
 #' The DI is invariant to the overall scale of \code{weights}: the numerator
 #' and the normaliser carry the same factor. Importance values can be passed
 #' as-is.
+#'
+#' Each training point's reference is its nearest \emph{other} training row, so
+#' an exact duplicate in predictor space (repeat visits to a site with static
+#' covariates, or covariates read off a raster coarser than the sampling) has a
+#' training DI of 0. Once about three quarters of the rows have a twin among
+#' their reference rows the threshold is 0, and only exact copies of a
+#' training row count as inside. That is logged as a caution; folds that keep
+#' the duplicates together (\code{make_folds(method = "leave_location_out",
+#' group_var = ...)}), or removing them, give the threshold its meaning back.
 #'
 #' @section The fold scheme changes the answer, and should:
 #' With \code{folds = NULL} the training reference is each point's nearest
@@ -502,11 +714,14 @@
 #' silently dummy-coded. Predictors whose variance is negligible \emph{relative
 #' to their own magnitude} (the test is
 #' \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
-#' metres and in gigametres is treated identically) are dropped, and a
-#' prediction point taking a different value there is a form of extrapolation
-#' this index cannot express. Without \code{weights} every predictor counts
-#' equally, which overstates dissimilarity along directions the model barely
-#' uses.
+#' metres and in gigametres is treated identically) are dropped from the
+#' distance. A prediction point taking a value there outside the training
+#' range (with the same relative tolerance) is extrapolation along a direction
+#' the training data never varied in: its scaled distance along it is
+#' infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
+#' gives the count. A point missing that value is judged on the other
+#' predictors. Without \code{weights} every predictor counts equally, which
+#' overstates dissimilarity along directions the model barely uses.
 #'
 #' @section Models fitted with the coordinates as predictors:
 #' When \code{model} was fitted with \code{include_coords = TRUE} the model
@@ -546,16 +761,38 @@
 #'   mean of the weights you did supply, so location counts about as much as a
 #'   typical predictor. Naming them explicitly overrides that. An unnamed
 #'   vector may have one value per predictor either with or without the two
-#'   coordinate columns.
+#'   coordinate columns. Weights must be finite and non-negative, so pass
+#'   permutation importance as \code{pmax(importance, 0)}. (A forest with no
+#'   out-of-bag rows, \code{replace = FALSE} with \code{sample_fraction = 1},
+#'   has \code{NaN} importance, which \code{pmax()} keeps and which is
+#'   refused; refit it with out-of-bag rows or use \code{weights = NULL}.)
+#'   \code{pmax(importance, 0)} is all zero when the model found no
+#'   predictor useful, and then the weights cannot say anything: with a
+#'   single predictor any weight gives the same index and zero
+#'   is accepted; with several, all of them are weighted equally, as with
+#'   \code{weights = NULL}, and a warning says so. The coordinate default
+#'   above is the mean of the supplied weights, so a zero weight on the only
+#'   covariate of a coordinate-using model zeroes the coordinates too, and
+#'   that equal weighting applies.
 #' @param folds Cross-validation folds: a \code{\link{make_folds}} result, a
 #'   list of \code{train}/\code{test} splits, or a vector of fold labels with
 #'   one entry per training row. Default \code{NULL} (plain nearest neighbour).
+#'   The folds you passed to \code{cv_*()}, built on the layer \code{model}
+#'   was fitted from, may name rows that \code{prep_model_data()} removed
+#'   (a missing or non-finite value, an empty geometry): as in \code{cv_*()},
+#'   they are dropped from the folds, and a label vector with one entry per
+#'   row of that layer loses theirs. Also
+#'   as in \code{cv_*()}, a \code{make_folds()} result built on other data --
+#'   another layer, or these rows in another order -- is refused. That check
+#'   is skipped when the folds were built on polygons and the training data
+#'   are the points a fit reduced them to.
 #' @param threshold Optional numeric override for the DI threshold.
 #' @param normalizer_max_n Subsample the training data to this many points when
 #'   computing the mean pairwise distance, which is quadratic. Default 5000.
 #' @param seed Seed for that subsample. Default 123.
 #' @param chunk_size Query rows per distance block on the dense path. Default
-#'   \code{NULL} (chosen from the training size).
+#'   \code{NULL} (chosen from the training size). Otherwise a single number of
+#'   at least 1; a fractional value is truncated to a whole number of rows.
 #' @param use_fnn Use \pkg{FNN} for nearest-neighbour search when available.
 #'   Exposed so the dense fallback can be tested.
 #'
@@ -566,7 +803,9 @@
 #'       computation ran on, which for a coordinate-using model is
 #'       \code{newdata} after pointizing, CRS reconciliation and the addition
 #'       of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
-#'       are not all finite gets \code{NA} in both columns.
+#'       are not all finite gets \code{NA} in both columns, and a row outside
+#'       the training range of a predictor in \code{dropped_vars} gets
+#'       \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 #'     \item \code{threshold}: the DI cut-off used.
 #'     \item \code{train_DI}: the training points' own DI values.
 #'     \item \code{normalizer}: the mean pairwise training distance.
@@ -586,8 +825,10 @@
 #'       aside (the "outlier-removed" in its name); computed whether or not
 #'       \code{threshold} was supplied.
 #'     \item \code{n_train}, \code{n_new}, \code{n_inside},
-#'       \code{n_outside}, \code{n_na}: row counts; \code{n_train} and
-#'       \code{n_new} count the rows that survived the finite-value filter.
+#'       \code{n_outside}, \code{n_na}: row counts. \code{n_train} counts the
+#'       training rows that survived the finite-value filter; \code{n_new} is
+#'       every row of \code{newdata}, so
+#'       \code{n_new = n_inside + n_outside + n_na}.
 #'     \item \code{params} records the call: \code{folds_supplied},
 #'       \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
 #'       \code{normalizer_max_n}, \code{normalizer_n_used},
@@ -672,6 +913,33 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
          "installed. Install it with install.packages(\"FNN\"), or pass ",
          "use_fnn = FALSE to use the dense fallback.", call. = FALSE)
 
+  # chunk_size reached seq.int(1, nq, by = chunk_size) unvalidated.  A computed
+  # value such as 1e3 / nrow(train) = 12.5 left some rows of each block at the
+  # 0 they were initialised with, so extrapolation read as inside the AOA; 0,
+  # NA or a length-2 vector failed in base R without naming the argument.
+  if (!is.null(chunk_size)) {
+    .check_scalar(chunk_size, "chunk_size", "area_of_applicability", min = 1,
+                  max = .Machine$integer.max, what = "a single positive number")
+    chunk_size <- as.integer(chunk_size)
+  }
+
+  # Fold train/test slots from make_folds() are ..row_id VALUES, not row
+  # positions; keep the IDs alongside so .aoa_fold_splits() can resolve them.
+  tr_meta <- if (inherits(train_sf, "sf")) sf::st_drop_geometry(train_sf) else
+    as.data.frame(train_sf)
+  tr_row_ids <- if ("..row_id" %in% names(tr_meta)) tr_meta[["..row_id"]] else NULL
+  removed_ids <- NULL
+  if (!is.null(folds)) {
+    fr <- .aoa_rows_for_folds(folds, train_sf, tr_row_ids)
+    folds       <- fr$folds
+    tr_row_ids  <- fr$row_ids
+    removed_ids <- fr$removed_ids
+    # The provenance check cv_*() make: fold splits are row IDs, so folds
+    # built on another layer of the same size, or on these rows in another
+    # order, applied silently and moved the threshold.
+    .aoa_check_fold_probe(folds, train_sf, tr_row_ids)
+  }
+
   # A model fitted with the coordinates as predictors splits on location, so
   # the dissimilarity index has to measure location too.  Without this, a
   # prediction point far outside the training extent but with ordinary
@@ -708,12 +976,6 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   X_tr_full <- .aoa_matrix(train_sf, predictor_vars, "the training data")
   X_nw_full <- .aoa_matrix(newdata,  predictor_vars, "`newdata`")
 
-  # Fold train/test slots from make_folds() are ..row_id VALUES, not row
-  # positions; keep the IDs alongside so .aoa_fold_splits() can resolve them.
-  tr_meta <- if (inherits(train_sf, "sf")) sf::st_drop_geometry(train_sf) else
-    as.data.frame(train_sf)
-  tr_row_ids <- if ("..row_id" %in% names(tr_meta)) tr_meta[["..row_id"]] else NULL
-
   # Training rows carrying NA or Inf cannot define a reference distance.
   # complete.cases() alone would let an Inf through, and it would then poison
   # that predictor's mean and sd, so .aoa_scaling() would drop the whole
@@ -741,8 +1003,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   if (length(dropped) > 0L)
     .log_warn(paste0("area_of_applicability(): dropping predictor(s) with no ",
                      "variance in the training data: %s. A prediction point ",
-                     "taking a different value there is extrapolation the ",
-                     "dissimilarity index cannot represent."),
+                     "taking a different value there is extrapolation along ",
+                     "it, and is marked outside the AOA with DI = Inf."),
               paste(dropped, collapse = ", "))
   used_vars <- names(sc$keep)[sc$keep]
 
@@ -756,12 +1018,16 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # numbers.  Multiplying by sqrt(w) instead (contributing w to the squared
   # distance) is the other defensible reading of "weighted Euclidean" and is
   # NOT what is used here.
-  w_vec <- unname(w <- .aoa_weight_vector(weights, predictor_vars,
-                                          fill_vars = coord_vars)[used_vars])
+  # The weights that matter are those of the predictors kept; if the only
+  # non-zero ones sat on predictors dropped above, the rest are all zero.
+  w_vec <- unname(w <- .aoa_equal_if_all_zero(
+    .aoa_weight_vector(weights, predictor_vars,
+                       fill_vars = coord_vars)[used_vars]))
   Z_tr  <- sweep(Z_tr, 2L, w_vec, "*")
   Z_nw  <- sweep(Z_nw, 2L, w_vec, "*")
 
-  splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids)
+  splits <- .aoa_fold_splits(folds, nrow(Z_tr), row_ids = tr_row_ids,
+                             removed_ids = removed_ids)
 
   # What KIND of folds these are is part of what the threshold means: Meyer
   # and Pebesma define it from the cross-validated training DI, so a threshold
@@ -792,6 +1058,26 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     as.numeric(threshold)
   }
 
+  # Each training row's reference is its nearest OTHER training row, so an
+  # exact duplicate in predictor space -- repeat measurements at a site with
+  # static covariates, covariates read off a raster coarser than the sampling
+  # -- has a training DI of 0, and random folds put twins on both sides.  Once
+  # about three quarters of the rows have one, Q3 and the IQR are 0 and so is
+  # the threshold: 30 sites visited 4 times put 0 of 200 new points inside,
+  # against 197 after deduplication, with nothing said.  The rule is applied
+  # as defined; the caution says why it came out that way.
+  if (is.null(threshold) && thr == 0)
+    .log_warn(paste0("area_of_applicability(): the DI threshold is 0 because ",
+                     "%d of %d training rows have an exact duplicate in ",
+                     "predictor space among their reference rows (training ",
+                     "DI = 0), so only prediction points identical to a ",
+                     "training row count as inside. Repeat measurements at a ",
+                     "site, or covariates coarser than the sampling, do this: ",
+                     "pass folds that keep the duplicates together ",
+                     "(make_folds(method = \"leave_location_out\", group_var = ",
+                     "...)), or remove the duplicate rows."),
+              sum(train_DI == 0), length(train_DI))
+
   # NA or Inf predictors in newdata give NA DI rather than a misleading number.
   # Same test as the training side above, deliberately: complete.cases() alone
   # lets an Inf through, and an Inf predictor then produces Inf - Inf = NaN in
@@ -804,6 +1090,39 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     DI[nw_ok] <- .aoa_min_dist(Z_nw[nw_ok, , drop = FALSE], Z_tr,
                                use_fnn = use_fnn,
                                chunk_size = chunk_size) / norm$value
+
+  # A predictor dropped for having no training variance is not in the
+  # distance, so a prediction row taking a different value there was judged
+  # on the other predictors alone: a land-cover dummy that is 0 throughout the
+  # training region put 37 of 40 urban rows inside the AOA, while ONE urban
+  # training row would have kept the predictor and put 1 inside.  Along that
+  # direction the scaled distance is (x - c) / 0, infinite, so that is the DI.
+  # "Different" means outside the training range by more than the relative
+  # tolerance .aoa_scaling() drops the predictor with; a missing value cannot
+  # be compared and leaves the row to the other predictors.
+  if (length(dropped) > 0L) {
+    Xd_tr <- X_tr_full[, dropped, drop = FALSE]
+    lo    <- apply(Xd_tr, 2L, min)
+    hi    <- apply(Xd_tr, 2L, max)
+    mag   <- pmax(abs(lo), abs(hi))
+    mag[!is.finite(mag) | mag <= 0] <- 1
+    slack <- .Machine$double.eps^0.5 * mag
+    Xd_nw <- X_nw_full[, dropped, drop = FALSE]
+    off   <- sweep(Xd_nw, 2L, lo - slack, "<") | sweep(Xd_nw, 2L, hi + slack, ">")
+    off[is.na(off)] <- FALSE
+    beyond <- rowSums(off) > 0L & !is.na(DI)
+    if (any(beyond)) {
+      DI[beyond] <- Inf
+      .warn_and_log(paste0("area_of_applicability(): %d of %d prediction ",
+                           "row(s) take a value the training data never has on ",
+                           "%s, dropped for having no training variance; they ",
+                           "are extrapolation along it and are marked outside ",
+                           "the AOA with DI = Inf."),
+                    sum(beyond), length(DI),
+                    paste(sQuote(dropped[colSums(off[beyond, , drop = FALSE]) > 0L]),
+                          collapse = ", "))
+    }
+  }
   inside <- DI <= thr
 
   out <- newdata
@@ -920,6 +1239,13 @@ print.aoa <- function(x, ...) {
   cat(sprintf("  threshold   : %.4f%s\n", x$threshold,
               if (isTRUE(x$params$threshold_supplied)) " (supplied)" else
                 " (outlier-removed max of training DI)"))
+  # A zero threshold reads as "nothing is inside" with no reason given; the
+  # reason is duplicated training rows, and the count says how many.
+  n_zero <- sum(x$train_DI == 0, na.rm = TRUE)
+  if (!isTRUE(x$params$threshold_supplied) && isTRUE(x$threshold == 0))
+    cat(sprintf(paste0("                (%d of %d training DI are 0: exact ",
+                       "duplicates in predictor space)\n"),
+                n_zero, length(x$train_DI)))
   cat("\n")
 
   pct <- if (x$n_new > 0L) 100 * x$n_inside / x$n_new else NA_real_
@@ -927,6 +1253,9 @@ print.aoa <- function(x, ...) {
               x$n_inside, x$n_new, pct))
   if (x$n_na > 0L)
     cat(sprintf("  %d with missing predictors (DI = NA)\n", x$n_na))
+  n_inf <- sum(is.infinite(x$aoa$DI))
+  if (n_inf > 0L)
+    cat(sprintf("  %d outside on a dropped predictor (DI = Inf)\n", n_inf))
   if (x$n_outside > 0L)
     cat("\nPredictions outside the AOA are extrapolations; the ",
         "cross-validated\nperformance estimate does not cover them.\n",

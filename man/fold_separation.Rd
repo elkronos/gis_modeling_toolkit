@@ -13,21 +13,38 @@ element (a list of \code{train}/\code{test} splits).}
 \item{data_sf}{The layer the folds were built on.  Row identifiers are
 matched through \code{..row_id} when the layer carries one, and by row
 position otherwise, which is what \code{make_folds()} and every
-\code{cv_*()} do.}
+\code{cv_*()} do.  As in \code{cv_*()}, a \code{make_folds()} result
+whose recorded rows sit at other locations here (folds built on another
+layer, such as the points before
+\code{\link{assign_features_to_polygons}()} dropped some) is refused;
+the location check is skipped when one of the two layers is POINT and
+the other is not.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
-single number, in the CRS units of \code{data_sf}.  Defaults to the range
-the folds carry, if any.  Supplying one adds the \code{within_range}
-column and the closing verdict.}
+single number.  Defaults to the range the folds carry, if any.  Supplying
+one adds the \code{within_range} column and the closing verdict.  A
+range that records its CRS (the folds' own, or an
+\code{estimate_sac_range()} result) is compared with distances measured
+in that CRS, whatever CRS \code{data_sf} is in.  A bare number is taken
+to be in the units the distances are otherwise measured in: those of
+\code{data_sf} if it is projected, and for geographic (lon/lat) input
+metres, in the CRS \code{\link{ensure_projected}()} chooses (as for
+\code{make_folds()}'s \code{block_size}), not degrees.  A \code{units}
+object is refused.}
 }
 \value{
 A data.frame of class \code{fold_separation}, one row per fold:
-\code{fold}, \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
+\code{fold} (the fold's number: for the \code{$folds} of a
+\code{cv_*()} result, the \code{fold_id} its \code{fold_metrics} use,
+which differs from the list position once a fold has been dropped),
+\code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
 for a scheme with no blocks), \code{min_dist} and \code{median_dist}
-(distance from a held-out point to its nearest training point, in CRS
-units), and \code{within_range} (the share of held-out points closer to
+(distance from a held-out point to its nearest training point, in the
+units of the CRS the \code{crs} attribute names), and
+\code{within_range} (the share of held-out points closer to
 training data than \code{sac}; \code{NA} without one).  Attributes:
-\code{method}, \code{sac_range}, \code{crs} and \code{n_unknown_ids}.
+\code{method}, \code{sac_range}, \code{crs} (the CRS the distances were
+measured in) and \code{n_unknown_ids}.
 }
 \description{
 Blocked cross-validation exists to put distance between a test point and
@@ -56,7 +73,7 @@ library(sf)
 set.seed(1)
 n <- 200
 pts <- st_as_sf(
-  data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000)),
+  data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000)),
   coords = c("x", "y"), crs = 32632
 )
 

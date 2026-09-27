@@ -19,7 +19,8 @@ fit_gwr_model(
 
 \item{response_var}{Response column name.}
 
-\item{predictor_vars}{Predictor column names.}
+\item{predictor_vars}{Predictor column names (numeric columns; a name given
+twice counts once).}
 
 \item{adaptive}{Logical; use adaptive bandwidth. Default TRUE. When TRUE,
 bandwidth is an integer number of nearest neighbours. When FALSE,
@@ -37,7 +38,19 @@ If NULL (default), bandwidth is selected automatically via
 smaller than a ten-thousandth of the data's extent raises a warning naming
 the extent and the CRS the fit runs in: every local window is then likely
 to be empty, which used to produce a fit whose coefficients were all
-\code{NaN} with nothing raised anywhere.}
+\code{NaN} with nothing raised anywhere.  With \code{adaptive = TRUE}
+the count is rounded, and one too small for the model is raised, with a
+warning, to the smallest that gives every local regression more points
+of non-zero weight than parameters: the number of predictors plus 3 for
+the bisquare and tricube kernels (which give the farthest neighbour in a
+window weight 0), plus 2 for the others.  That floor is enough unless
+several neighbours tie at the kernel's edge (a regular grid), which
+leaves a window fewer weighted points; then use a larger bandwidth.
+A count above the number of
+observations is capped at it, with a warning (a distance meant for
+\code{adaptive = FALSE}, most often).  \code{bw.gwr()} searches adaptive
+bandwidths from 20 neighbours up, so below 20 observations its choice is
+capped the same way, with a warning, and is not an optimised bandwidth.}
 
 \item{kernel}{Kernel function type. One of "bisquare" (default),
 "gaussian", "tricube", "boxcar", "exponential".}
@@ -53,10 +66,18 @@ A \code{gwr_fit} object (inherits from \code{spatial_fit}).
 Supports \code{predict()}, \code{fitted()}, \code{residuals()},
 \code{coef()}, \code{summary()}, and \code{model_metrics()}.
 Model-specific metadata lives in \code{$info}: bandwidth, adaptive,
-kernel, AICc, \code{bandwidth_is_fallback} (\code{TRUE} when automatic
+kernel, AICc (\code{NA}, with a warning, where GWmodel's AICc is
+undefined: its effective number of parameters \eqn{tr(S)} is not below
+\eqn{n - 2}, the local regressions all but interpolate the data, and the
+large negative value GWmodel reports would rank the fit above any
+other), \code{bandwidth_is_fallback} (\code{TRUE} when automatic
 selection failed and the arbitrary fallback was used),
-\code{condition_index}, \code{local_collinearity},
-\code{n_local_collinear}, \code{n_local_singular},
+\code{condition_index} (the global index), \code{local_collinearity}
+(one row per observation: \code{row}, \code{x}, \code{y},
+\code{n_window}, \code{cn} and \code{cn_slopes}; see
+\strong{Collinearity diagnostics}), \code{n_local_collinear} (the
+locations whose slopes count as collinear), \code{n_local_singular}
+(the locations whose local coefficients came back non-finite),
 \code{nonfinite_coef} (a logical matrix, one row per observation and
 one column per term, with \code{Intercept} first, \code{TRUE} where the
 local coefficient came back non-finite, so the count in
@@ -71,47 +92,72 @@ bandwidth.
 }
 \section{Collinearity diagnostics}{
 
-The function computes the \strong{scaled condition index} of the design and
-warns when it exceeds 30, the conventional threshold, which Wheeler &
-Tiefelsdorf (2005) carry over to the local designs of GWR.  The index is
-the ratio of the largest to the smallest singular value after each column
-is scaled to unit length (Belsley, Kuh & Welsch 1980).  Scaling makes the
-index independent of the predictors' units; \code{kappa()} on the raw matrix
-is not, and a threshold on it is a threshold on nothing in particular.
-A \strong{global} index is computed on the full design (intercept plus
-predictors).
-In addition, a \strong{local} spot-check is performed at up to 30 locations:
-every location when there are 30 or fewer, otherwise 30 spread evenly over
-the extent (evenly spaced ranks of the observations ordered by x, then y),
-so the diagnostic is reproducible, draws no random numbers, does not depend
-on the row order of the data, and the count is not configurable.  For each
-sampled point the nearest neighbours within the bandwidth window (the
-bandwidth the model is actually fitted with, not a stand-in) are selected
-and the condition number of that local design sub-matrix is evaluated.
-That sub-matrix is the predictors \strong{plus an
-intercept column}, matching the design GWmodel fits, and is unweighted; the
-global condition number is computed on the predictors alone, so the two
-numbers are not directly comparable.  An indicator that is constant inside a
-window is collinear with the intercept and with nothing else, which is why
-the intercept has to be there.  A non-finite condition number counts as
-extreme: \code{kappa()} returns \code{Inf} for an exactly singular design, which is the
-worst case, not an exempt one.
+The function computes \strong{scaled condition indices} of the design and
+warns when one exceeds 30, the conventional threshold, which Wheeler &
+Tiefelsdorf (2005) carry over to the local designs of GWR.  An index is
+the ratio of the largest to the smallest singular value (from an SVD) after
+each column is scaled (Belsley, Kuh & Welsch 1980); an exactly singular
+design gives \code{Inf}, which counts as the worst case, not an exempt one.
+Scaling makes the index independent of the predictors' units;
+\code{kappa()} on the raw matrix is not, and a threshold on it is a
+threshold on nothing in particular.
 
-A warning is issued whenever \strong{any} sampled location has a singular or
-near-singular local design; the wording reports a percentage when more than
-25\% of sampled locations are affected and a count otherwise.  Both are real
-R warnings, not log lines.
+A \strong{global} index is computed on the predictors centred at their means
+(with the intercept, which centring makes orthogonal to them), and kept as
+\code{info$condition_index}.  It measures how nearly the predictors are
+collinear with one another over the whole study area; it is 1 for a single
+predictor, and a change of origin (degrees C or kelvin, a year or years
+since 2000) does not move it.
+
+\strong{Local} indices are then computed at \strong{every} location, on the design
+the local regression there inverts: each row weighted by the square root
+of its kernel weight at the bandwidth the model is fitted with (supplied or
+selected), with rows of negligible weight dropped.  A window left with
+fewer rows than columns counts as singular.  Two indices are kept for each
+window, as columns of \code{info$local_collinearity}:
+\describe{
+\item{\code{cn}}{Belsley's index of the intercept plus the predictors,
+scaled to unit length but not centred.  A predictor whose values in the
+window are far from 0 against their spread (a year, a temperature in
+kelvin) is collinear with the intercept and raises it: the local
+intercept is then an extrapolation to 0 and is ill-determined, but the
+slopes are not.  It is what GWmodel's own solve sees.}
+\item{\code{cn_slopes}}{The index for the slopes: the predictors centred at
+their weighted mean in the window and each divided by its standard
+deviation over the whole study area.  It is 1 when the predictors vary
+as much, and as independently, inside the window as they do across the
+study area; it grows as a predictor becomes nearly constant inside the
+window (a regional covariate) or two predictors move together there.
+It does not depend on the predictors' origin or units.}
+}
+A window's slopes count as collinear when \code{cn_slopes} is above 30 or
+singular, or when \code{cn} is above 1e6, where GWmodel's uncentred solve starts
+to lose precision in the slopes too.  Those windows are counted in
+\code{info$n_local_collinear}.  A predictor that is constant, or nearly so,
+inside a window is caught this way whether it is alone or has company, so a
+single predictor is surveyed too.
+
+A warning is issued whenever \strong{any} location has collinear slopes; the
+wording reports a percentage when more than 25\% of locations are affected
+and a count otherwise.  Both are real R warnings, not log lines.
+Coefficients at a near-singular window are unstable and can be implausibly
+large.  An \strong{exactly} singular window (an indicator that is constant
+inside it, or fewer observations than parameters) makes GWmodel stop, so
+the fit fails with an error that says so; the window is not returned as
+\code{NaN}.  A window with only \code{cn} above 30 raises no warning:
+\code{plot(fit, type = "coefficients", term = "Intercept")} masks it, and slope
+maps do not.  Centre such a predictor if you want an interpretable local
+intercept.
 
 After the fit, the local coefficient surfaces are scanned and a further
-warning counts local regressions that came back non-finite.  Their windows
-were singular.  \code{fitted()}, \code{residuals()}, \code{summary()} and
-\code{\link[=model_metrics]{model_metrics()}} all drop those rows, so when this warning fires the
-metrics describe only the part of the study area that fitted.
-
-Because the local spot-check examines only a subset of locations, it may not
-detect every problematic neighbourhood.  Users working with highly clustered
-data or near-collinear predictors should consider a full local-collinearity
-audit as a post-fit diagnostic.
+warning counts local regressions that came back non-finite.  GWmodel
+returns those where the kernel weights are undefined: with an adaptive
+bandwidth of \code{k}, a location where \code{k} or more observations share the same
+coordinates has a kernel of zero width, and every kernel but the boxcar
+divides 0 by 0 there.  The warning names that cause when it applies.
+\code{fitted()}, \code{residuals()}, \code{summary()} and \code{\link[=model_metrics]{model_metrics()}} all drop those
+rows, so when this warning fires the metrics describe only the part of the
+study area that fitted.
 }
 
 \examples{

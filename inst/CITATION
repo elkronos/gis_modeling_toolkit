@@ -1,7 +1,20 @@
 ## The version is read from the installed DESCRIPTION, so it cannot go stale.
-## DESCRIPTION carries no Date field; fall back to the current year.
-year <- if (!is.null(meta$Date) && nzchar(meta$Date))
-  sub("-.*", "", meta$Date) else format(Sys.Date(), "%Y")
+## The year is looked up the way utils::citation() does it: the CRAN
+## publication date, then a Date field (DESCRIPTION has none), then the date
+## R CMD build packaged the source, which a GitHub install normally has since
+## remotes and pak build the package before installing it. Only an install
+## straight from a source directory records none of them and falls back to
+## the current year. [[ ]] matches exactly: meta$Date would silently pick up
+## Date/Publication by partial matching.
+year <- NA_character_
+for (field in c("Date/Publication", "Date", "Packaged")) {
+  value <- trimws(as.character(meta[[field]]))[1L]
+  if (!is.na(value) && grepl("^[0-9]{4}-", value)) {
+    year <- substr(value, 1L, 4L)
+    break
+  }
+}
+if (is.na(year)) year <- format(Sys.Date(), "%Y")
 
 bibentry(
   bibtype  = "Manual",

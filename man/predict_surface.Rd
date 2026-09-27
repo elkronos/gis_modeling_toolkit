@@ -26,13 +26,23 @@ at least one row.  It is brought into the fit's CRS first: a CRS-less grid
 is given the interpretation the training data got (the assumption recorded
 on the fit), with a warning, and then reprojected.  Otherwise a CRS-less
 grid can land thousands of kilometres from the covariates and every cell
-takes the same nearest feature.}
+takes the same nearest feature.  A grid still without a CRS after that
+is treated as \code{boundary} is: taken as EPSG:4326 and reprojected
+when its coordinates look like lon/lat, otherwise stamped with the fit's
+CRS, with a warning either way.  A grid of polygons
+(\code{\link{create_grid_polygons}()} output, say) is reduced to one
+representative point per cell, as \code{\link{coerce_to_points}()} does,
+so covariates are taken at the location predicted for; \code{boundary}
+then keeps the cells whose point falls inside it.}
 
 \item{cell_size}{Grid resolution in CRS units.  Ignored when \code{grid} is
 supplied; when \code{NULL}, derived from \code{n_cells}.  A value that
 would produce more than 5,000,000 cells is refused, naming the implied
-count and the CRS units.  The usual cause is a value in the wrong unit.  A
-\code{cell_size} wider than the extent yields a single centred cell.}
+count and the CRS units.  The usual cause is a value in the wrong unit.
+The grid is centred on the training bounding box and covers it: when the
+extent is not a whole number of cells, it overhangs the box by less than
+one cell, split evenly between the two sides.  A \code{cell_size} wider
+than the extent yields a single centred cell.}
 
 \item{n_cells}{Approximate cell count used to derive \code{cell_size}.
 Default 10000.  Must be a single positive finite number and at most
@@ -41,27 +51,39 @@ supplied.  The grid you pass is used verbatim.}
 
 \item{boundary}{Optional polygonal \code{sf}/\code{sfc}; grid points outside
 it are dropped.  Put through the same CRS replay and reprojection as
-\code{grid}.}
+\code{grid}.  One still without a CRS after the replay is taken as
+EPSG:4326 and reprojected when its coordinates look like lon/lat, and
+is otherwise stamped with the fit's CRS, with a warning either way.}
 
 \item{covariates}{Optional \code{sf} layer carrying the model's predictors.
 Required when the model has predictors and \code{grid} does not already
-contain them.  Values are taken from the nearest feature.}
+contain them.  Values are taken from the nearest feature.  Aligned to
+the fit's CRS as \code{grid} is, with the same warning when it has no
+CRS.}
 
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
-performance knob for the GWR and random-forest backends, whose rows do not
-interact.  For a \code{bayesian_fit} it is also that, \emph{provided} the
-grid stays inside the training extent.  Beyond it the GP boundary has to
-grow and predictions depend on which rows share the call; see
+performance knob: rows do not interact, and for a \code{bayesian_fit} the
+GP boundary is held at its fitted value whatever the chunk holds; see
 \code{\link{predict.bayesian_fit}}.}
 
 \item{se}{Logical; also return a standard-error/posterior-SD column where the
-backend supports it.  Default FALSE.}
+backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
+the SD of the posterior draws \code{predict()} returns, and those are of
+the expected value by default (\code{type = "epred"}): the uncertainty
+of the mean surface, not of a new observation, which also carries the
+observation noise.  For the predictive SD, the one that goes with
+prediction intervals and \code{cv_bayes()}'s calibration, pass
+\code{type = "predict"} as well.}
 
-\item{...}{Passed to \code{predict()}.}
+\item{...}{Passed to \code{predict()}, e.g. \code{type = "predict"} for a
+\code{bayesian_fit}.  Not \code{draws}, which this function sets itself
+and refuses here.}
 }
 \value{
 An \code{sf} POINT layer with a \code{.pred} column (and
-\code{.pred_se} when \code{se = TRUE} and available).  For an
+\code{.pred_se} when \code{se = TRUE} and available; one a supplied
+\code{grid} already carried, from an earlier surface, is removed
+otherwise).  For an
 auto-generated grid the resolution is attached as attribute
 \code{"cell_size"}.  For a user-supplied \code{grid} it is only whatever
 \code{"cell_size"} attribute that object already carried.  That is usually

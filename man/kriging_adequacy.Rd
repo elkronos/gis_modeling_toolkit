@@ -14,6 +14,8 @@ kriging_adequacy(
   k = 5L,
   seed = 123L,
   nmax = 50L,
+  max_neighbours = 2000L,
+  max_box_ratio = 1000,
   quiet = TRUE
 )
 }
@@ -23,20 +25,48 @@ kriging_adequacy(
 
 \item{response_var}{The response column.}
 
-\item{cells_sf}{The cell polygons, with the matching ID column.}
+\item{cells_sf}{The cell polygons, with the matching ID column.  A layer
+with no CRS is taken to be in the points' CRS (and points with none in
+the cells'), with a warning.}
 
-\item{id_col}{Preferred name of the ID column.  Default \code{"poly_id"}.}
+\item{id_col}{Preferred name of the ID column, found as
+\code{\link{summarize_by_cell}()} finds it: on the points the first of
+\code{id_col}, \code{"poly_id"}, \code{"polygon_id"} and
+\code{"cell_id"}; on the cells the first of that column,
+\code{"poly_id"}, \code{"polygon_id"}, \code{"id"}, \code{"cell_id"}
+and \code{"grid_id"}.  IDs are matched as text, whole numbers written
+out in full, so a double \code{1e5} matches an integer \code{100000};
+a point whose ID matches no cell is counted in no cell, with a
+warning.  Default \code{"poly_id"}.}
 
 \item{sac}{Optional \code{sac_range} carrying a variogram model.}
 
 \item{folds}{Optional \code{\link{make_folds}()} result on
 \code{assigned_points_sf} for the cross-validation statistic; built here
-with \code{block_kfold} when \code{NULL}.}
+with \code{block_kfold} when \code{NULL}.  As in \code{cv_*()}, folds
+whose recorded rows sit at other locations in
+\code{assigned_points_sf} (built on another layer, such as the points
+before \code{\link{assign_features_to_polygons}()} dropped some) are
+refused.}
 
 \item{k, seed}{Folds and seed for that construction.}
 
-\item{nmax}{The largest number of neighbours each kriging system uses
-(\code{gstat}'s \code{nmax}).  Default 50.}
+\item{nmax}{The number of neighbours each kriging system uses
+(\code{gstat}'s \code{nmax}): the locations nearest the cell's centre,
+or, for a cell those leave some of its own locations out of, all of its
+own plus this many outside it (see "The kriging neighbourhood").  The
+cross-validation kriges each held-out point from its \code{nmax} nearest
+training locations.  Default 50.}
+
+\item{max_neighbours}{The largest kriging system a cell is given when its
+neighbourhood has to grow to hold all its own locations; a cell that
+would need more is left out (\code{kr_} columns \code{NA}) with a
+warning.  Never below \code{nmax}.  Default 2000.}
+
+\item{max_box_ratio}{A cell whose bounding box is more than this many
+times its area is left out (\code{kr_} columns \code{NA}) with a
+warning, because \pkg{gstat}'s discretisation of it costs memory in
+proportion.  Default 1000.}
 
 \item{quiet}{Suppress progress messages.  Default \code{TRUE}.}
 }
@@ -45,11 +75,19 @@ An \code{sf} object of class \code{"kriging_adequacy"}, one row
 per cell with the cell geometry and: the ID column, \code{n} (points in
 the cell), \code{mean} (the plain mean), \code{se} (its naive standard
 error), \code{kr_pred}, \code{kr_var}, \code{kr_ratio},
-\code{kr_exceeds_design} and \code{kr_shift}.  Attributes:
+\code{kr_exceeds_design}, \code{kr_shift} and \code{kr_n_used} (how many
+locations the cell was kriged from; \code{NA} for a cell left out).
+Attributes:
 \code{variogram} (the model frame), \code{sill}, \code{nugget},
-\code{range}, \code{range_identified}, \code{cv} (a list:
+\code{range}, \code{range_identified}, \code{rejected_reason} (why the
+range was refused, from \code{sac}; \code{NA} when it was identified),
+\code{cv} (a list:
 \code{zscore_var}, \code{zscore_mean}, \code{rmse}, \code{n_pred},
-\code{k}, \code{method}), \code{nmax} and \code{n_points}.
+\code{k}, \code{method}), \code{nmax}, \code{n_points} (the points
+used), \code{n_locations} (the distinct locations among them, which
+the kriging used) and \code{cells_left_out} (counts of cells left out,
+named \code{shape} for \code{max_box_ratio} and \code{size} for
+\code{max_neighbours}).
 }
 \description{
 \code{\link{summarize_by_cell}()} aggregates by plain means inside cell
@@ -59,7 +97,8 @@ and a variance for every cell, thin or empty.  Whether that is worth
 having on a given layer is a question with a measurable answer, and this
 function measures it, changing no cell value: for every cell it reports
 the block-kriging estimate and variance implied by a fitted variogram,
-that variance as a share of the total sill, and, where the cell has points,
+that variance as a share of the variance the cell's mean would have with
+no data at all, and, where the cell has points,
 whether it exceeds the design-based variance of the plain mean,
 \eqn{s^2/n}; and it scores the variogram itself by blocked
 cross-validation.
@@ -67,12 +106,23 @@ cross-validation.
 \section{Reading the columns}{
 
 \describe{
-\item{\code{kr_ratio}}{The block-kriging variance over the total sill,
-in \eqn{[0, 1]}.  It is the coverage score, and it needs no hand-set
-threshold in metres or point counts: as it approaches 1 the estimate
-carries almost no information from the data and is reverting to
-the global mean.  A cell at 0.05 is well determined; a cell at 0.8 is
-mostly prior.}
+\item{\code{kr_ratio}}{The block-kriging variance over the cell's prior
+variance, in \eqn{[0, 1]}.  The prior variance is the variance the
+cell's mean would have with no data at all, \eqn{\bar C(B,B)}: the
+covariance averaged over pairs of points in the cell, on the
+discretisation \pkg{gstat} block-kriges with, and without the nugget,
+which averages out over a block (\pkg{gstat} leaves it out of the
+block variance too).  Each cell has its own: a cell's mean varies less
+than a single point does, and far less once the cell is wider than the
+range, so the point sill is not the scale.  It is the coverage score,
+and it needs no hand-set threshold in metres or point counts: as it
+approaches 1 the estimate carries almost no information from the data
+about the cell and is reverting to the estimated mean.  Ordinary
+kriging adds the variance of that estimated mean, so a cell the data do
+not reach comes out at or above its prior variance and reads 1.  A
+cell at 0.05 is well determined; a cell at 0.8 is mostly prior.
+\code{NA} when the model is a pure nugget, where a cell mean has no
+prior variance to be a share of.}
 \item{\code{kr_exceeds_design}}{\code{TRUE} where the kriging variance is
 larger than \eqn{s^2/n} from the cell's own points: kriging is not
 earning its keep there, and that is said per cell instead of
@@ -104,9 +154,14 @@ sill whatever the nugget, so the blocked statistic checks the sill and
 range.  To check the nugget, pass random folds
 (\code{make_folds(method = "random_kfold")}) as \code{folds}: the
 held-out points are then close to their neighbours, where the nugget
-decides the variance.  \code{gstat::krige.cv()} computes the statistic on
-the fold labels \code{\link{make_folds}()} built, so the folds carry the
-same separation the package uses everywhere else.
+decides the variance.  The statistic is computed fold by fold with
+\code{gstat::krige()} on the splits \code{\link{make_folds}()} built, each
+held-out point kriged from that split's own training set, so the folds
+carry the same separation the package uses everywhere else:
+\code{"buffered_loo"} and \code{"nndm"} keep the points they exclude
+around each held-out one out of its kriging, and \code{print()} names the
+scheme that ran.  A vector of fold labels is run as k-fold, each fold
+kriged from all the others.
 }
 
 \section{What it said about block kriging as an aggregator}{
@@ -132,9 +187,74 @@ result carrying one (\code{attr(, "variogram_model")}); when \code{NULL}
 it is estimated here from the response.  The model families are the ones
 the package interprets elsewhere: exponential, spherical and Gaussian
 components with a nugget.  Anything else is refused by name.  A
-model whose range was not identified (a bare \code{NA} estimate with the
-model attached) is used with a warning: its sill was never reached by the
-data, so the ratios rest on an extrapolation.  Requires \pkg{gstat}.
+model whose range was not identified (an \code{NA} estimate with the
+model attached) is used with a warning that says why it was refused, and
+the reason is kept as \code{attr(, "rejected_reason")}: a range past the
+fitted lags means the sill was never reached and the ratios rest on an
+extrapolation; a fit that did not converge stopped wherever the optimiser
+halted; a variogram that falls with distance, or a range below the
+shortest lag, describes the data poorly at some lags.
+
+The model has to be of the response itself.  A variogram of residuals
+(\code{estimate_sac_range(predictor_vars = ...)}, \code{attr(,
+"detrended")} \code{TRUE}) leaves out the variance the predictors
+explain, while the response is kriged here without them, so
+\code{kr_var}, \code{kr_ratio} and the cross-validation statistic come out
+too small (the statistic at 4.3--5.2 against 0.67--1.53 with a spatially
+structured covariate); it is used with a warning.  The points are put in
+the CRS the variogram was fitted in (\code{attr(sac, "crs")}), because
+its range is a length in that CRS's units.  Requires \pkg{gstat}.
+}
+
+\section{The kriging neighbourhood}{
+
+\pkg{gstat} kriges a cell from the \code{nmax} locations nearest its
+centre.  A cell holding more locations than that would be estimated from
+its middle alone, which describes the middle rather than the cell (in one
+simulated case a cell of 1,500 points came out 0.43 off at
+\code{nmax = 50}, against 0.07 from all of them and 0.02 for its plain
+mean).  So wherever the \code{nmax} locations nearest a cell's centre
+leave out any of the cell's own locations, the cell is kriged from all of
+its own locations plus the \code{nmax} nearest outside it;
+\code{kr_n_used} says how many locations each cell was kriged from.  The
+cost of a kriging system grows with the cube of its size (about 1 s at
+2,000 locations and 17 s at 5,000), so a cell that would need more than
+\code{max_neighbours} is left out with a warning, its \code{kr_} columns
+\code{NA}.
+
+\pkg{gstat} also discretises each cell into 500 points on a regular grid
+laid over the cell's whole bounding box, keeping those inside, so the
+memory a cell takes grows with the ratio of that box to its area: about
+54 MB more for a thin diagonal strip at a ratio of 708, and 592 MB at
+7,072.  A cell whose bounding box exceeds its area more than
+\code{max_box_ratio} times (a sliver, parts far apart, a cell that is
+mostly hole) is left out the same way.  \code{attr(, "cells_left_out")}
+counts both kinds, and \code{print()} says how many cells have no
+estimate and why.
+}
+
+\section{Repeat measurements at one location}{
+
+Two observations at the same coordinates (visits to a station, records
+geocoded to one address) make a kriging system singular, because
+\pkg{gstat} gives them the full sill, nugget included, as their
+covariance, as if they were one observation.  The kriging and its
+cross-validation therefore use one observation per location, the mean of
+its replicates, with a warning; \code{n} and \code{mean} still count every
+point.  How much of the nugget \eqn{c_0} a mean of \eqn{m} replicates
+keeps is read off the replicates: their pooled within-location variance
+\eqn{s_w^2}, capped at \eqn{c_0}, is the part that differs from visit to
+visit and averages down, and the rest is micro-scale variation the visits
+share, so the mean carries error variance \eqn{c_0 - s_w^2 + s_w^2/m}.
+That goes to \pkg{gstat} as a known measurement error (its
+\code{weights}) on the model with the nugget set to zero.  For replicates
+that differ only by measurement error this is exactly the kriging of every
+observation, and for identical replicates it is the kriging of one; a
+location seen once is kriged as before.  In the cross-validation a
+location is held out whole, under the fold of its first row, and its
+error variance is part of its standardised error.  A cell or held-out
+location \pkg{gstat} still cannot krige is reported \code{NA} with a
+warning, and \code{print()} says how many.
 }
 
 \examples{

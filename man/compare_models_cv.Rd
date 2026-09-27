@@ -55,7 +55,9 @@ the folds came from other data when they were not).}
 
 \item{boundary}{Optional polygon sf/sfc.}
 
-\item{pointize}{Geometry coercion strategy.}
+\item{pointize}{Geometry coercion strategy.  It also decides where a
+polygon or line row falls in the shared blocks, so each row is placed by
+the point every model is fitted at.}
 
 \item{gwr_args}{Extra arguments for \code{\link{cv_gwr}}.  Only names that
 are formal arguments of \code{cv_gwr()} are forwarded (it has no
@@ -88,23 +90,38 @@ the autocorrelation range of the response (detrended on
 \code{predictor_vars}) is estimated and used as the minimum block size of
 the shared folds, as in \code{\link{make_folds}()}.  Default
 \code{FALSE}: geometric blocks, as before this argument existed.  Either
-way the fold set is built once and every backend is scored on it.}
+way the fold set is built once and every backend is scored on it.  When
+it cannot be built (a \code{block_size} or estimated range that leaves a
+single block, say) the call is an error, as it is for each backend on
+its own; no model is scored on a design other than the one asked for.}
 
 \item{metrics}{Optional scoring function of your own, handed to every
 backend's \code{cv_*()}: a \code{function(y, yhat)} returning a named
 numeric vector, applied per fold and to each backend's pooled
 predictions, whose names become columns of \code{by_fold} and
 \code{overall} beside the built-in ones.  See \strong{Your own metrics}
-on \code{\link{cv_spatial}()} for the contract.  Because the three
-backends are scored on the same folds, the columns are comparable across
-rows of \code{overall}.}
+on \code{\link{cv_spatial}()} for the contract.  Because the backends
+are scored on the same folds and, in \code{overall}, on the same rows
+(see Value), the columns are comparable across rows of \code{overall}.}
 }
 \value{
 A list with overall, by_fold, and per-model cv_results
 (\code{gwr_cv}, \code{bayes_cv}, \code{rf_cv} for the models that ran).
-\code{overall} has one row per model with the pooled metrics, the
+\code{overall} has one row per model with the pooled metrics,
+\code{n_pred} (the rows they are computed on), the
 coverage and CRPS columns described above when a Bayesian model ran, and
 \code{model} as its last column.
+Shared folds do not guarantee shared rows: a model that fails on a fold
+(GWR with a fixed bandwidth across a gap in the data, say) or predicts
+\code{NA} for some rows pools fewer rows, usually without the hardest
+ones.  When the models predicted different rows, the function warns and
+recomputes every model's pooled metrics, your own \code{metrics}
+included, on the rows all of them predicted, so \code{n_pred} is the same
+on every row that has predictions; a model that predicted nothing stays
+an \code{NA} row.  Each model's metrics over all the rows it predicted
+stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
+a table of the same shape.  \code{by_fold} and the Bayesian coverage and
+CRPS columns are per fold and are not recomputed.
 Only the models that actually ran appear, so check which names are
 present; there is not always one entry per requested model, because a
 backend whose package is missing is dropped with a message.  When \strong{no} requested backend
@@ -141,6 +158,9 @@ overconfident, well above it is wider than it needs to be.
 \eqn{|y| + |\hat{y}|}, so neither is defined where its denominator is zero.
 Neither returns \code{Inf} or \code{NaN}.  Both are averaged over the rows
 whose denominator is non-zero, and are \code{NA} when no row qualifies.
+Non-zero is judged at the scale of the data: a denominator no larger
+than 100 machine epsilons times the largest one counts as zero, so the
+rule does not depend on the units of the response.
 The \code{n_MAPE} and \code{n_SMAPE} columns record how many rows that was;
 the \code{n} column counts finite observation/prediction pairs.  Read a
 percentage error next to its count: when \code{n_MAPE < n}, \code{MAPE} is
@@ -176,8 +196,11 @@ be read as a rough summary rather than a score.
 For the Bayesian backend, \code{\link{cv_bayes}()} additionally reports
 CRPS and interval coverage at 50, 80 and 95 percent.  Both are proper
 scoring rules computed from posterior draws, so they are meaningful for any
-\code{family} the backend accepts, and they are the numbers to compare when
-the response is not Gaussian.  When every fold fails, the
+\code{family} that predicts one number per row (a count, a rate, a binary
+or bounded outcome), and they are the numbers to compare when the response
+is not Gaussian.  A categorical or ordinal family predicts a probability
+per response category instead, so \code{cv_bayes()} refuses one before
+fitting anything.  When every fold fails, the
 \code{fold_metrics} frame \code{cv_bayes()} returns carries the CRPS column
 but not the \code{coverage_*} columns, so code that reads those columns
 must tolerate their absence.

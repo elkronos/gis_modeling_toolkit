@@ -94,17 +94,16 @@ the length-scale-to-domain ratio in
 \code{make_folds(method = "nndm")} and their \code{min_train = 0.5}:
 Mila et al. (2022).
 \item The area-of-applicability threshold as the outlier-removed maximum
-of the training dissimilarity, with importance weights applied directly,
-without taking their square root, matching the reference
-implementation: Meyer and Pebesma (2021).
+of the training dissimilarity, as the paper defines it (the reference
+implementation, CAST, uses the outlier fence itself, which is larger
+whenever a training value lies above it), with importance weights
+applied directly, without taking their square root, as CAST does:
+Meyer and Pebesma (2021).
 \item The effective range of an exponential variogram as three times its
 range parameter, and the identifiability guard against ranges beyond
 half the maximum separation, in \code{estimate_sac_range()}.
 \item Cliff and Ord moments for the residual Moran's I in
 \code{residual_morans_i()}, with \code{null = "auto"}.
-\item The small-sample rescaling applied with every data-derived design
-effect in \code{summarize_by_cell()}, whose derivation and measured
-coverage are on that help page.
 }
 
 Defaults that were chosen, and are defensible, but do not rest on a
@@ -133,6 +132,11 @@ and the figure sits in the gap.
 length-scale in \code{fit_bayesian_spatial_model()}, which is this
 package's own operationalisation of a check the reference recommends,
 not a figure from the paper.
+\item The small-sample rescaling applied with every data-derived design
+effect in \code{summarize_by_cell()}: the package's own derivation from
+Kish's exchangeable-correlation model, not taken from a reference.
+The derivation and its measured coverage are in the section "Spatial
+autocorrelation and standard-error bias" of that help page.
 }
 }
 

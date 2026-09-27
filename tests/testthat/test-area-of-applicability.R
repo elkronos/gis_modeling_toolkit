@@ -135,7 +135,12 @@ test_that(".aoa_weight_vector rejects unusable weights", {
   expect_error(.aoa_weight_vector(c(1, 2, 3), v), "one value per predictor")
   expect_error(.aoa_weight_vector(c(a = 1), v), "no entry for")
   expect_error(.aoa_weight_vector(c(a = 1, b = -1), v), "non-negative")
-  expect_error(.aoa_weight_vector(c(a = 0, b = 0), v), "all .weights. are zero")
+  # All-zero weights -- pmax(importance, 0) of a model that found no useful
+  # predictor -- are no longer refused: they are weighted equally, with a
+  # warning (test-review2-aoa.R).
+  expect_warning(w0 <- .aoa_weight_vector(c(a = 0, b = 0), v),
+                 "every weight is zero")
+  expect_equal(w0, c(a = 1, b = 1))
   expect_error(.aoa_weight_vector(c(a = "x", b = "y"), v), "must be numeric")
   expect_error(.aoa_weight_vector(c(a = 1, b = NA_real_), v), "finite")
 })

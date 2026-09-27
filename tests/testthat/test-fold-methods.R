@@ -152,10 +152,12 @@ test_that("nndm leaves LOO alone when it already matches the target", {
   expect_true(all(vapply(f$folds, function(z) length(z$train), integer(1)) >= 2L))
 })
 
-# A hand-coded transcription of the paper's algorithm (Mila et al. 2022, as
-# in CAST::nndm): recompute both ECDFs after every removal and push the
-# smallest violator.  Slow but obviously correct, so the package's sweep can
-# be held to it.
+# A hand-coded transcription of the paper's algorithm (Mila et al. 2022):
+# recompute both ECDFs after every removal and push the smallest violator.
+# Slow but obviously correct, so the package's sweep can be held to it.  The
+# violation test is the package's strict one (realised ECDF > target);
+# CAST::nndm() instead removes only while (count - 1)/n >= target, one point
+# fewer per distance value, so this is not a transcription of CAST.
 #
 # Ties in the smallest violator -- every mutual-nearest-neighbour pair shares
 # one distance, and pushed points pile up at one cluster-to-cluster distance
@@ -288,7 +290,12 @@ test_that("nndm is deterministic and honours min_train and phi", {
 
   # min_train caps how far any training set can be stripped ...
   for (mt in c(0.5, 0.8)) {
-    f <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, min_train = mt)
+    # At 0.8 the floor stops the matching short, which is warned about.
+    f <- withCallingHandlers(
+      make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, min_train = mt),
+      warning = function(w) if (mt > 0.5 && grepl("stopped the distance matching",
+                                                  conditionMessage(w)))
+        invokeRestart("muffleWarning"))
     expect_true(all(vapply(f$folds, function(z) length(z$train), integer(1)) >= mt * 80 - 1))
     expect_equal(f$params$min_train, mt)
   }

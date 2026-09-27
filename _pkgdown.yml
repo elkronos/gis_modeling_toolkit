@@ -22,7 +22,8 @@ navbar:
       href: articles/getting-started.html
 
 # Articles, in the order to read them. The fifth vignette is the end-to-end
-# run; the three between it and "Getting started" each take one topic.
+# run and the sixth, on reporting, covers what leaves the session; the three
+# between "Getting started" and the end-to-end run each take one topic.
 articles:
 - title: Get started
   navbar: ~

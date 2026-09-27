@@ -93,7 +93,11 @@ test_that("a successful bandwidth selection is not labelled a fallback", {
                     kernel = "bisquare", adaptive = TRUE)))
   expect_equal(auto$info$bandwidth, ref)
   expect_true(is.finite(auto$info$AICc))
-  small <- fit_gwr_model(dat, "y", "x1", bandwidth = 5, adaptive = TRUE)
+  # Four-point windows: the local collinearity survey (which covers a single
+  # predictor, since the intercept is in every design) flags a couple of them.
+  small <- suppressWarnings(
+    fit_gwr_model(dat, "y", "x1", bandwidth = 5, adaptive = TRUE))
+  expect_true(is.finite(small$info$AICc))
   expect_lt(auto$info$AICc, small$info$AICc)
 })
 
@@ -125,19 +129,21 @@ test_that("fit_gwr_model fits a two-valued NON-INTEGER response with a warning",
   expect_equal(length(unique(censored$z)), 2L)
   expect_false(all(censored$z == round(censored$z)))
 
-  expect_warning(fit <- fit_gwr_model(censored, "z", "a", bandwidth = 300),
+  # 60 neighbours of 60 points: the widest adaptive window.  (300 was capped
+  # to 60 in silence; a count above n now warns.)
+  expect_warning(fit <- fit_gwr_model(censored, "z", "a", bandwidth = 60),
                  "has only 2 distinct finite values")
   expect_s3_class(fit, "gwr_fit")
   # Warned, not refused: it is the design that is degenerate, not the model.
-  expect_warning(fit_gwr_model(censored, "z", "a", bandwidth = 300),
+  expect_warning(fit_gwr_model(censored, "z", "a", bandwidth = 60),
                  "genuinely continuous \\(e.g. censored at a detection limit\\)")
 
   # An integer-valued pair is still a hard error, with the binomial advice.
   binary <- .gwr2v_points(c(0, 1))
   expect_true(all(binary$z == round(binary$z)))
-  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 300),
+  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 60),
                "is binary \\(2 distinct values")
-  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 300),
+  expect_error(fit_gwr_model(binary, "z", "a", bandwidth = 60),
                "family = 'binomial'")
 })
 
@@ -151,7 +157,7 @@ test_that("the two-valued response guard sits behind the GWmodel requirement", {
           "GWmodel is installed, so the backend check passes")
 
   for (z in list(c(0.0031, 12.7401), c(0, 1), c(1.5, 2.5, 3.5))) {
-    expect_error(fit_gwr_model(.gwr2v_points(z), "z", "a", bandwidth = 300),
+    expect_error(fit_gwr_model(.gwr2v_points(z), "z", "a", bandwidth = 60),
                  "package 'GWmodel' is required")
   }
 })

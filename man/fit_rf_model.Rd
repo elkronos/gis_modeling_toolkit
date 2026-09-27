@@ -55,7 +55,10 @@ the setting is recorded in \code{$info} and printed with the fit.}
 \item{sample_fraction}{Fraction of rows drawn for each tree.  \code{NULL}
 (default) uses ranger's rule: all rows when \code{replace = TRUE},
 0.632 (the expected share of distinct rows in a bootstrap sample)
-when \code{replace = FALSE}.  A single number in (0, 1] overrides it.}
+when \code{replace = FALSE}.  A single number in (0, 1] overrides it.
+\code{replace = FALSE} with \code{sample_fraction = 1} grows every tree
+on every row, so nothing is out of bag: the fit warns, and see
+\strong{What fitted() returns}.}
 
 \item{seed}{Seed passed to ranger. Default 123.}
 
@@ -136,6 +139,18 @@ consequence is that \code{summary()} means something different here than for
 a \code{gwr_fit} or \code{bayesian_fit}, whose fitted values are in-sample:
 do not compare the two directly. \code{\link{compare_models_cv}} exists for
 that.
+
+A row that every tree sampled has no out-of-bag prediction, and ranger
+reports \code{NaN} for it.  That is every row under \code{replace = FALSE}
+with \code{sample_fraction = 1}, and a few under a small \code{num_trees}.
+The fit warns with the count; \code{fitted()} and \code{residuals()} are
+\code{NaN} on those rows, and \code{summary()} says how many rows its
+metrics were computed on.  With no row out of bag at all, the OOB error
+(\code{NA} in \code{$info$oob_rmse} and \code{$info$oob_r_squared}) and
+the permutation importance (\code{NaN}) are undefined too, and
+\code{print()} says so.  \code{\link{cv_rf}()} scores its fold forests on
+the held-out rows, never out of bag, so it warns once with the number of
+folds affected rather than once per fold.
 }
 
 \examples{
@@ -167,7 +182,9 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 \seealso{
 \code{\link{cv_rf}} for a spatially blocked performance estimate,
 \code{\link{area_of_applicability}}, which can take
-\code{weights = pmax(fit$info$importance, 0)}.
+\code{weights = pmax(fit$info$importance, 0)} when that importance is
+finite (it is \code{NaN} when no row is out of bag; see "What
+fitted() returns").
 
 Other model fitting: 
 \code{\link{fit_bayesian_spatial_model}()},

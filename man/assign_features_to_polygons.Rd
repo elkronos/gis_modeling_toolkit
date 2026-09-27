@@ -25,36 +25,62 @@ assign_features_to_polygons(
 polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
 them.}
 
-\item{predicate}{Binary spatial predicate function. Default sf::st_intersects.}
+\item{predicate}{Binary spatial predicate function. Default sf::st_intersects.
+Not used when \code{largest} applies: sf then assigns polygon features by
+overlap area and never calls the predicate.}
 
 \item{largest}{Logical; when \code{features_sf} is itself polygonal, keep
 the polygon with the largest overlap. Default TRUE. Ignored for point and
-line features, and silently dropped if the \code{predicate} does not
-support it (\code{sf::st_intersects} does).}
+line features. A feature that only touches the polygon layer (shares an
+edge or a corner with it, with no overlap area) has no largest overlap
+and is unassigned, in any CRS; with \code{largest = FALSE} the default
+\code{st_intersects} counts touching, so such a feature is assigned.
+A feature that overlaps two or more polygons by exactly the same area
+(to 9 significant digits; a square split evenly across a cell edge) is
+given to one of them by \code{tie_break} and counted in \code{"ties"},
+so the choice does not depend on the order of the polygon rows.
+Invalid geometries (usually a self-intersecting ring),
+whose overlap is undefined, are repaired with \code{sf::st_make_valid()}
+for the join, with a warning, and returned as they arrived. If the
+overlap still cannot be computed the function stops: falling back to
+\code{predicate} and \code{tie_break} would change the rule for every
+feature in the layer, so pass \code{largest = FALSE} to ask for that.}
 
 \item{tie_break}{Strategy for resolving features that match multiple
-polygons: \code{"smallest_area"} (default) keeps the polygon with the
-smallest area, \code{"first"} keeps the first match (original order-dependent
+polygons (with \code{largest}, that overlap several polygons equally):
+\code{"smallest_area"} (default) keeps the polygon with the
+smallest area and, among polygons of equal area (a point on the shared
+edge of two grid cells), the one whose bounding-box centre is lowest,
+then leftmost, so the choice does not depend on the order of the rows;
+\code{"first"} keeps the first match (original order-dependent
 behavior).}
 }
 \value{
 An sf object with \code{polygon_id_col} attached, one row per input
 feature (fewer if \code{keep_unassigned = FALSE} dropped unmatched ones), in
-the CRS \code{features_sf} arrived in. Any column of \code{features_sf} whose name
-would collide with the polygon ID column is dropped before the spatial
-join (with a warning), so re-assigning an already-assigned layer replaces
-the old IDs and does not fail. If \emph{no} feature falls inside any polygon
+the CRS \code{features_sf} arrived in. A column of \code{features_sf} already
+called \code{polygon_id_col} is dropped before the spatial join (with a
+warning), so re-assigning an already-assigned layer replaces the old IDs
+and does not fail. Every other column is kept, including one named like
+the polygons' own ID column when that is read from a fallback such as
+\code{"id"} (a site \code{id} joined to cells keyed by \code{id}). If \emph{no} feature
+falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
 places (a CRS that could only be stamped, not reprojected). The
 attribute \code{"ties"} records how many features matched more than one
-polygon and had the \code{tie_break} rule decide for them: a list with \code{n},
-\code{which} (their row positions in \code{features_sf}) and \code{rule}. A large \code{n}
-means the polygon layer overlaps, and per-cell counts built from the
+polygon (with \code{largest}, overlapped several by exactly the same area)
+and had the \code{tie_break} rule decide for them: a list with \code{n},
+\code{which} (their row positions in \code{features_sf}), \code{rule} and \code{n_rows}
+(the number of rows returned, which the record was made for). A large
+\code{n} means the polygon layer overlaps, and per-cell counts built from the
 result depend on the rule. The record describes the rows this call
-returned and does not survive subsetting: \code{joined[i, ]} is a plain layer
+returned and does not survive subsetting: \code{joined[i, ]}, like
+\code{dplyr::filter()}, \code{slice()} or \code{arrange()} of it, is a plain layer
 with no \code{"ties"} attribute, so nothing reports the parent's count
-against row positions that no longer resolve.
+for a different set of rows. \code{sf::st_drop_geometry()} keeps the record,
+since the rows are the same; see \code{\link{[.spatialkit_rows}} for
+what binding such data frames does.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
@@ -67,6 +93,13 @@ when the join has to be \emph{unambiguous}. It resolves features matching
 several polygons by an explicit \code{tie_break} rule instead of silently
 duplicating rows, so the assigned layer keeps one row per input feature
 and cell-level counts mean what they say.
+
+The join runs in the CRS of \code{polygons_sf} whenever that CRS is projected,
+so cell edges are the straight lines the cells were drawn with and overlap
+areas are planar. A copy of \code{features_sf} is transformed for it, and the
+features come back with the coordinates they arrived with. Otherwise (the
+polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
+\code{features_sf}.
 }
 \examples{
 library(sf)

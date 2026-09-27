@@ -4,7 +4,8 @@
 # Builds the pkgdown site and pushes it to the gh-pages branch, from which
 # GitHub Pages serves https://elkronos.github.io/gis_modeling_toolkit/.
 # Pull requests build the site (so a broken _pkgdown.yml or vignette fails
-# the check) but do not deploy it.
+# the check) but do not deploy it, and neither does a manual run from any
+# branch but main.
 on:
   push:
     branches: [main, master]
@@ -36,7 +37,7 @@ jobs:
         with:
           use-public-rspm: true
 
-      # Hard dependencies plus the optional packages the five vignettes gate
+      # Hard dependencies plus the optional packages the six vignettes gate
       # their chunks on: ggplot2, gstat, sp and GWmodel, geometry, ranger and
       # patchwork.  Every gate is requireNamespace()-guarded, so a missing
       # package does not fail the build -- it silently renders that article
@@ -80,8 +81,15 @@ jobs:
         run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)
         shell: Rscript {0}
 
+      # Publish from main, and from a published release as the r-lib template
+      # does.  A pull request builds the site without publishing it, and so
+      # does a manual run started from any other branch: without the ref test
+      # a workflow_dispatch on an unmerged branch would replace the live site.
+      # The job-level `contents: write` above exists for this step.  Pull
+      # requests from forks get a read-only token whatever it says, and the
+      # deploy action is pinned to a commit rather than a tag.
       - name: Deploy to GitHub pages 🚀
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
         uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
         with:
           clean: false

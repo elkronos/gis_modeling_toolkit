@@ -4,7 +4,7 @@
 \alias{voronoi_seeds_kmeans}
 \title{K-means seed generation from point coordinates}
 \usage{
-voronoi_seeds_kmeans(points_sf, k, set_seed = 456)
+voronoi_seeds_kmeans(points_sf, k, set_seed = 456, nstart = 10)
 }
 \arguments{
 \item{points_sf}{An sf object with POINT geometries.}
@@ -15,7 +15,14 @@ of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
 produce neither more centres than there are distinct points nor as many
 centres as there are rows. Check \code{nrow()} on the result.}
 
-\item{set_seed}{Optional integer RNG seed. Default 456.}
+\item{set_seed}{Optional integer RNG seed. Default 456, so a call gives the
+same seeds every time whatever the session's random-number state; an
+outer \code{\link[=set.seed]{set.seed()}} does not change them, and the caller's random-number
+stream is left as it was. Pass \code{NULL} to draw the k-means starts from
+the session's stream instead (the default of \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).}
+
+\item{nstart}{Number of random starts for \code{\link[stats:kmeans]{stats::kmeans()}}; the best is
+kept. Default 10.}
 }
 \value{
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
@@ -26,16 +33,29 @@ An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
 Places \code{k} seed points at k-means cluster centres of the observed
 coordinates, so seeds (and the Voronoi cells built from them) follow the
 sampling density: clusters of observations attract seeds, empty ground gets
-none. Reach for this when you want cells that each carry a comparable number
-of observations, which is what makes per-cell aggregates in
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} similarly precise. Use \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
-instead when you want coverage of the study area rather than of the data,
-and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} to pick between them by name.
+none. Reach for this when you want cells that follow the data, so that
+counts per cell vary far less than on a fixed grid over clustered points
+(k-means does not equalise them, it minimises the spread of points around
+each centre), which is what keeps per-cell aggregates in
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} from resting on one or two observations. Use
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}} instead when you want coverage of the study area
+rather than of the data, and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} to pick between them by
+name.
 }
 \details{
 Lon/lat input is projected first so the k-means distances are metric and not
-degrees. Rows with empty or non-finite coordinates are dropped with a
-warning, and \code{k} is clamped to the number of distinct positions.
+degrees; so is input with no CRS whose coordinates look like lon/lat (the
+heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), and the seeds
+come back in the input's own coordinates. Rows with empty or non-finite
+coordinates are dropped with a warning, and \code{k} is clamped to the number of
+distinct positions.
+
+The partition is \code{\link[stats:kmeans]{stats::kmeans()}} (Hartigan-Wong) with \code{nstart} random
+starts. \code{\link[=resolution_profile]{resolution_profile()}} and \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} score each
+count on a different run, by default the best of 25 k-means++ restarts,
+which usually reaches a lower within-cluster sum of squares; the seeds for
+a chosen count are therefore not the partition that count was scored on.
+Raising \code{nstart} narrows the gap but does not close it.
 }
 \examples{
 library(sf)

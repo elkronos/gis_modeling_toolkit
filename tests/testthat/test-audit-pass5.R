@@ -195,7 +195,11 @@ test_that("nndm excludes a held-out point's co-located duplicate", {
   grid <- sf::st_as_sf(data.frame(x = c(-500, 900), y = 0),
                        coords = c("x", "y"), crs = 3857)
 
-  f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
+  # Six points against targets 500 away: every fold reaches min_train while
+  # still closer than the target, which make_folds() now says.
+  expect_warning(
+    f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid)),
+    "stopped the distance matching")
   D <- as.matrix(sf::st_distance(pts)); units(D) <- NULL
 
   expect_false(2L %in% f$folds[[1]]$train)        # the twin is excluded
@@ -224,7 +228,11 @@ test_that("nndm honours min_train exactly when n * min_train is fractional", {
   grid <- sf::st_as_sf(data.frame(x = c(-8000, 9000), y = c(-8000, 9000)),
                        coords = c("x", "y"), crs = 3857)
 
-  f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid))
+  # Reaching the floor is the point of this layout, so the floor warning is
+  # expected.
+  expect_warning(
+    f <- suppressMessages(make_folds(pts, method = "nndm", prediction_points = grid)),
+    "stopped the distance matching")
   sizes <- vapply(f$folds, function(z) length(z$train), integer(1))
   # The rule is (n - 1 - removed) > n * min_train, so the smallest permitted
   # training set is 37 -- floor() left the matrix one column short and stopped
@@ -498,13 +506,13 @@ test_that("a rejected sac cannot size a design effect", {
                                  nugget = 0),
     crs = sf::st_crs(32632))
 
-  # Two: the supplied `sac` is refused, and the internal re-estimate on this
-  # small fixture is refused too.
+  # The supplied `sac` is refused, and the internal re-estimate on this small
+  # fixture is refused too: one fallback, so one warning, naming both.
   expect_warning(
-    expect_warning(out <- summarize_by_cell(pts, response_var = "resp",
-                                            deff = "variogram", sac = fake),
-                   "no usable range"),
-    "no usable range")
+    out <- summarize_by_cell(pts, response_var = "resp",
+                             deff = "variogram", sac = fake),
+    "supplied `sac` reports no usable range.*estimated from `response_var` reports no usable range",
+    class = "spatialkit_deff_fallback")
   expect_null(attr(out, "deff_applied"))
   iid <- summarize_by_cell(pts, response_var = "resp", deff = 1)
   expect_equal(out[["..se_resp_resp"]], iid[["..se_resp_resp"]], tolerance = 1e-10)
@@ -530,8 +538,12 @@ test_that("duplicate cell IDs are reported", {
   pts <- .p5_assigned(nc = 3, np = 10)
   cells <- .p5_cells(nc = 3)
   cells$poly_id[3] <- 2L
-  expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells),
-                 "duplicated value")
+  # Renumbering cell 3 as 2 also leaves the points summarised under ID 3
+  # with no cell, which is reported too.
+  expect_warning(
+    expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells),
+                   "duplicated value"),
+    "match no `cells_sf\\$poly_id`")
 })
 
 
@@ -719,10 +731,13 @@ test_that("the local collinearity check sees the intercept and singular windows"
                          adaptive = TRUE, bandwidth = 20)))))
 
   # And quiet where there is nothing to report: a bandwidth wide enough to span
-  # the clusters gives every window both values of `urban`.
+  # the clusters gives every window both values of `urban`.  .warns() swallows
+  # errors, so the fit is captured and checked: a fit that failed before the
+  # survey would also raise no warning, and pass for the wrong reason.
   expect_false(any(grepl("collinear local design",
-    .warns(fit_gwr_model(d, "z", c("a", "urban"),
-                         adaptive = TRUE, bandwidth = 199)))))
+    .warns(fit199 <- fit_gwr_model(d, "z", c("a", "urban"),
+                                   adaptive = TRUE, bandwidth = 199)))))
+  expect_s3_class(fit199, "gwr_fit")
 
   # The intercept is what makes the constant indicator collinear, so a check on
   # the predictors alone cannot see it -- assert the arithmetic directly rather
@@ -819,9 +834,13 @@ test_that("an implausible fixed bandwidth is called out", {
                         .warns(fit_gwr_model(d, "z", "a", bandwidth = 0.2,
                                              adaptive = FALSE)))))
   # A bandwidth in the units the fit actually runs in draws no such warning.
+  # Captured and checked, since .warns() swallows errors: a fit that failed
+  # before the check would also raise no warning.
   expect_false(any(grepl("ten-thousandth",
-                         .warns(fit_gwr_model(d, "z", "a", bandwidth = 5000,
-                                              adaptive = FALSE)))))
+                         .warns(fit5k <- fit_gwr_model(d, "z", "a",
+                                                       bandwidth = 5000,
+                                                       adaptive = FALSE)))))
+  expect_s3_class(fit5k, "gwr_fit")
 })
 
 

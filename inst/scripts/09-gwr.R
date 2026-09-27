@@ -38,10 +38,14 @@ step("09.3", "Check for local collinearity before believing any of it")
 # Two predictors that are globally independent can be nearly collinear inside a
 # small neighbourhood. Where that happens the local coefficients are unstable
 # and their signs are arbitrary.
-cat(sprintf("  local condition number above threshold: %d of %d fits\n",
+# n_local_collinear counts the locations whose local SLOPES are collinear (a
+# slope condition index above 30); n_local_singular counts the locations whose
+# coefficients came back non-finite, which is undefined kernel weights (several
+# observations at one point), not a singular window: that stops the fit.
+cat(sprintf("  locations with collinear local slopes: %d of %d\n",
             gw$info$n_local_collinear, nrow(cf)))
-cat(sprintf("  locally singular: %d, non-finite coefficients: %d\n",
-            gw$info$n_local_singular, sum(gw$info$nonfinite_coef)))
+cat(sprintf("  locations with non-finite coefficients (undefined kernel weights): %d\n",
+            gw$info$n_local_singular))
 if (gw$info$n_local_collinear > 0)
   cat("  Widen the bandwidth or drop a predictor before reading the maps.\n")
 

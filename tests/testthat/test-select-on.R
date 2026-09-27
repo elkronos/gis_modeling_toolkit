@@ -53,32 +53,35 @@ test_that(".spatial_half_split makes two disjoint, exhaustive, spatially blocked
   expect_output(print(sp), "Spatial half-split")
 })
 
-test_that("determine_optimal_levels(select_on = 'split') selects on one half and returns both", {
+test_that("determine_optimal_levels(select_on = 'split') reads one half's response and returns both", {
   pts <- so_field(300)
-  out <- determine_optimal_levels(pts, max_levels = 8, response_var = "z",
-                                  predictor_vars = "w", select_on = "split")
+  # The fixture's locations are uniform, so every call warns that the WSS
+  # curve has no elbow; that is not what this test is about.
+  dol <- function(...) suppressWarnings(determine_optimal_levels(...))
+  out <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w",
+             select_on = "split")
   sp <- attr(out, "split")
   expect_s3_class(sp, "spatialkit_split")
   expect_setequal(c(sp$selection, sp$estimation), seq_len(300))
-  # The selection is the one made on the selection half alone.
-  half <- determine_optimal_levels(pts[sp$selection, ], max_levels = 8,
-                                   response_var = "z", predictor_vars = "w")
-  expect_identical(as.integer(out), as.integer(half))
+  # The count is for a tessellation of every point, so the WSS curve and the
+  # cells use every point; only Moran's I is held to the selection half.
+  # With max_levels = 8 no candidate clears the nine-cell floor, the call
+  # falls back to the geometric elbow, and that is the whole layer's elbow.
+  # (It used to be the selection half's, chosen for half the extent.)
+  expect_identical(as.integer(out), as.integer(dol(pts, max_levels = 8)))
   # The default path is unchanged and carries no split.
-  all_pts <- determine_optimal_levels(pts, max_levels = 8, response_var = "z",
-                                      predictor_vars = "w")
+  all_pts <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w")
   expect_null(attr(all_pts, "split"))
-  # The geometric path with a split: same integer vector, plus the attribute.
-  geo <- determine_optimal_levels(pts, max_levels = 6, select_on = "split")
+  # The geometric path with a split reads no response and sees every point:
+  # same integer vector as without, plus the attribute.
+  geo <- dol(pts, max_levels = 6, select_on = "split")
   expect_type(geo, "integer")
   expect_s3_class(attr(geo, "split"), "spatialkit_split")
-  expect_identical(as.integer(geo),
-                   as.integer(determine_optimal_levels(pts[attr(geo, "split")$selection, ],
-                                                       max_levels = 6)))
+  expect_identical(as.integer(geo), as.integer(dol(pts, max_levels = 6)))
   expect_error(determine_optimal_levels(pts, select_on = "half"), "'arg' should be one of")
 })
 
-test_that("resolution_profile(select_on = 'split') profiles the selection half", {
+test_that("resolution_profile(select_on = 'split') reads the selection half's response", {
   skip_if_not_installed("gstat")
   pts <- so_field(400)
   prof <- resolution_profile(pts, response_var = "z", predictor_vars = "w",
@@ -86,7 +89,10 @@ test_that("resolution_profile(select_on = 'split') profiles the selection half",
   sp <- attr(prof, "split")
   expect_s3_class(sp, "spatialkit_split")
   expect_setequal(c(sp$selection, sp$estimation), seq_len(400))
-  expect_identical(attr(prof, "bounds")$n, length(sp$selection))
+  # The levels are cell counts for the whole layer, so its bounds are the
+  # layer's: every point, floor(400 / 9) = 44 at most.
+  expect_identical(attr(prof, "bounds")$n, 400L)
+  expect_identical(attr(prof, "bounds")$ceiling, 44L)
   expect_output(print(prof), "estimate on the other")
   expect_null(attr(resolution_profile(pts, n_levels = 4), "split"))
 })
