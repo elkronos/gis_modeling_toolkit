@@ -81,7 +81,7 @@ ok <- close_to(tab$col3, tab$ref_AICc) && !close_to(tab$col2, tab$ref_AICc)
 cat("\n", if (ok)
   "PASS: AICc is column 3, and column 2 is not AICc. The fix reads the right column."
   else
-  "FAIL: this GWmodel does NOT lay GWR.df out as c(bandwidth, AIC, AICc, RSS). Do not submit; tell Claude.",
+  "FAIL: this GWmodel does NOT lay GWR.df out as c(bandwidth, AIC, AICc, RSS). Do not submit.",
   "\n", sep = "")
 
 if (grepl("noise", pick(tab$col2)) && !grepl("noise", pick(tab$col3)))
