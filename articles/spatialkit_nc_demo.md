@@ -897,7 +897,7 @@ figure before drawing it.
     ## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1-1        
     ## [46] spdep_1.4-2           DBI_1.3.0             cachem_1.1.0         
     ## [49] proxy_0.4-29          splines_4.6.1         spatialreg_1.4-3     
-    ## [52] parallel_4.6.1        s2_1.1.12             marginaleffects_1.0.0
+    ## [52] parallel_4.6.1        s2_1.1.13             marginaleffects_1.0.0
     ## [55] vctrs_0.7.3           boot_1.3-32           Matrix_1.7-5         
     ## [58] sandwich_3.1-3        jsonlite_2.0.0        spData_2.3.5         
     ## [61] systemfonts_1.3.2     jquerylib_0.1.4       units_1.0-1          

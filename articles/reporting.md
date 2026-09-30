@@ -490,7 +490,7 @@ phylogenetic structure. *Ecography* 40(8), 913-929.
     ## [1] ggplot2_4.0.3         spatialkit_2.0.0.9000 sf_1.1-3             
     ## 
     ## loaded via a namespace (and not attached):
-    ##  [1] s2_1.1.12          sass_0.4.10        generics_0.1.4     class_7.3-23      
+    ##  [1] s2_1.1.13          sass_0.4.10        generics_0.1.4     class_7.3-23      
     ##  [5] KernSmooth_2.23-26 lattice_0.22-9     digest_0.6.39      magrittr_2.0.5    
     ##  [9] evaluate_1.0.5     grid_4.6.1         RColorBrewer_1.1-3 fastmap_1.2.0     
     ## [13] Matrix_1.7-5       jsonlite_2.0.0     e1071_1.7-17       DBI_1.3.0         
