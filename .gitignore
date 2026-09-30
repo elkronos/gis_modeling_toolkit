@@ -34,10 +34,15 @@ CODE_REVIEW.md
 # Internal planning notes (not for distribution)
 dev/BACKLOG*.md
 
-# Scratch output from assistant sessions (not for distribution)
-Claude outputs/
+# Local scratch output (not for distribution)
+local-outputs/
 
 # pkgdown output. The site is built by .github/workflows/pkgdown.yaml and
 # served from the gh-pages branch; a local pkgdown::build_site() or
 # dev/render_vignette.R writes here and nothing in docs/ is committed.
 docs/
+
+# The benchmark study: pilot, registration and the national run (see
+# dev/study/README.md). Kept out of git; the registration archives its code
+# on OSF with sha256 hashes.
+dev/study/
