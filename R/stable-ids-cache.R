@@ -22,6 +22,8 @@
 #' @param id_col Character scalar; name of the identifier column.
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
+#'   The copy the sort key is measured on is repaired as well, after it has
+#'   been transformed (see Details); with \code{FALSE} neither is.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
 #'   Default 4326. This is the whole mechanism by which the IDs are stable
 #'   (sorting in one common CRS is what makes the same layer get the same IDs
@@ -39,6 +41,33 @@
 #'   \code{sf::sf_use_s2()} is on, so the session setting does not change the
 #'   IDs. Set to NULL to sort in the input CRS, which gives IDs that are
 #'   reproducible but not comparable across projections.
+#' @details
+#' A feature that is valid in its own CRS is not always one s2 can measure.
+#' Only the vertices are transformed to the sort CRS, and on the sphere they
+#' are joined by great-circle arcs, so a long edge that is straight in the
+#' layer's CRS and passes about a metre from another vertex of the same ring
+#' can end up on the other side of that vertex. The ring then crosses itself,
+#' and s2 refuses it (1 of 291 Voronoi cells of Texas clipped to the state
+#' outline in EPSG:5070; "Loop 1 is not valid: Edge 36 crosses edge 52"). The
+#' repair of the sort copy does not split crossing edges, so a feature s2
+#' still refuses is handled on its own. Its sort copy is repaired a second
+#' time with the crossing edges split. If s2 refuses that as well, or with
+#' \code{make_valid = FALSE}, which asks for no repair, the feature's
+#' centroid and area are measured as plane geometry in the layer's own CRS
+#' and the centroid is transformed to the sort CRS. With the methods
+#' \code{"surface_point"} and \code{"bbox_center"} only the area needs this,
+#' because those points are not taken with s2.
+#'
+#' The function warns once, saying how many features took each route. Their
+#' keys are close to the spherical ones and not equal to them. The second
+#' repair moved the Texas cell's area by about 40 square metres in 2,949
+#' square kilometres. Its centroid taken in the plane lay 20 m from the one
+#' the second repair gave on the sphere, and the two kinds of centroid lay
+#' 5 m apart at the median and 61 m at most for the other 290 cells. A
+#' feature measured in the plane can therefore sort on the other side of a
+#' neighbour whose centre is that close to its own in longitude. Every other
+#' feature's key is unaffected, and the geometry returned is never the sort
+#' copy.
 #' @return An sf polygon layer re-ordered with sequential IDs in id_col.
 #'   Non-polygonal rows are **dropped** (with a warning), so the result can
 #'   have fewer rows than the input; if no polygonal rows remain, an error is
@@ -137,8 +166,11 @@ ensure_stable_poly_id <- function(polygons_sf,
   if (isTRUE(make_valid))
     sort_sf <- .safe_make_valid(sort_sf)
 
-  # Representative points — all paths produce an sfc_POINT vector
-  rep_sfc <- switch(method,
+  # Representative points — all paths produce an sfc_POINT vector.  The
+  # points and the area are each taken under tryCatch(), so that an error s2
+  # raises over one feature can be dealt with below rather than ending the
+  # call; when neither stops, they are what they always were.
+  rep_sfc <- tryCatch(switch(method,
     centroid      = suppressWarnings(sf::st_geometry(sf::st_centroid(sort_sf))),
     surface_point = sf::st_geometry(sf::st_point_on_surface(.drop_empty_parts(sort_sf))),
     bbox_center   = {
@@ -152,14 +184,37 @@ ensure_stable_poly_id <- function(polygons_sf,
         crs = sf::st_crs(sort_sf)
       )
     }
-  )
+  ), error = function(e) e)
+  area <- tryCatch(suppressWarnings(as.numeric(sf::st_area(sort_sf))),
+                   error = function(e) e)
+
+  # The repair of the sort copy does not make every feature measurable on the
+  # sphere.  st_transform() moves the vertices only, and in lon/lat s2 joins
+  # them with great-circle arcs, so an edge that is straight in the layer's
+  # own CRS takes a slightly different course.  Where a long edge passes
+  # about a metre from another vertex of the same ring, that vertex can come
+  # out on the other side of it, and the ring crosses itself.  s2 refuses
+  # such a ring ("Loop 1 is not valid: Edge 36 crosses edge 52"), the repair
+  # above rebuilds rings without splitting the edges that cross, and
+  # st_centroid() and st_area() both stopped on it: 1 of 291 Voronoi cells of
+  # Texas clipped to the state outline in EPSG:5070, valid there, in which a
+  # 36.9 km cell edge passes 1.47 m from a vertex of the coastline and the
+  # great circle through the edge's ends passes 0.37 m beyond that vertex.
+  # A tessellation this package had just built therefore got no IDs at all.
+  # .sort_key_with_refusals() measures the features s2 refuses another way
+  # and leaves every other feature's key exactly as it is computed above.
+  if (inherits(rep_sfc, "error") || inherits(area, "error")) {
+    key <- .sort_key_with_refusals(sort_sf, polygons_sf, method, rep_sfc, area,
+                                   repair = isTRUE(make_valid))
+    rep_sfc <- key$points
+    area    <- key$area
+  }
 
   # Sort key: x, y, area, original index
   xy <- suppressWarnings(sf::st_coordinates(rep_sfc))
   if (!is.matrix(xy) || nrow(xy) != nrow(polygons_sf))
     stop("ensure_stable_poly_id(): failed to compute representative coordinates.")
 
-  area <- suppressWarnings(as.numeric(sf::st_area(sort_sf)))
   area[!is.finite(area)] <- 0
   idx0 <- seq_len(nrow(polygons_sf))
 
@@ -185,6 +240,195 @@ ensure_stable_poly_id <- function(polygons_sf,
   out <- polygons_sf[ord, , drop = FALSE]
   out[[id_col]] <- seq_len(nrow(out))
   out
+}
+
+
+#' Positions of the features s2 refuses to take
+#'
+#' The conversion tried is the one \code{sf::st_centroid()} and
+#' \code{sf::st_area()} make on lon/lat data with s2 on
+#' (\code{sf::st_as_s2()}), so "refused" means exactly "the measurement
+#' stops on this feature".  \code{sf::st_is_valid()} puts the same question
+#' to s2 in one call but by another route, and a feature the two disagreed
+#' about would bring the error back.  The whole vector is tried first and a
+#' part that fails is halved, so one refused feature in a large layer costs a
+#' few passes over it rather than one conversion per feature (0.8 s against
+#' 17 s for one refused cell among 30,000).
+#'
+#' @param g An sfc vector in a geographic CRS.
+#' @param idx Positions in \code{g} to examine.
+#' @return Integer positions in \code{g}, ascending; \code{integer(0)} when
+#'   s2 takes every feature.
+#' @keywords internal
+#' @noRd
+.s2_refused <- function(g, idx = seq_along(g)) {
+  if (!length(idx)) return(integer(0))
+  # suppressMessages(): st_as_s2() announces a dropped Z or M coordinate on
+  # every call, and this makes many.
+  taken <- tryCatch({ suppressMessages(sf::st_as_s2(g[idx])); TRUE },
+                    error = function(e) FALSE)
+  if (taken) return(integer(0))
+  if (length(idx) == 1L) return(idx)
+  half <- seq_len(length(idx) %/% 2L)
+  c(.s2_refused(g, idx[half]), .s2_refused(g, idx[-half]))
+}
+
+
+#' Second repair of one lon/lat feature: rebuild it with crossing edges split
+#'
+#' On lon/lat data with s2 on, \code{sf::st_make_valid()} is s2's rebuild and
+#' passes its \code{...} to the rebuild's options, so
+#' \code{split_crossing_edges = TRUE} has s2 put a vertex where two edges of
+#' a ring cross and assemble the loops from the pieces.  This package does
+#' not import s2 and needs no call into it for this.  The Texas cell (see
+#' \code{ensure_stable_poly_id()}) comes back in four parts where it had two:
+#' the part the long edge cut through is now two lobes and the 4 square
+#' metres where the coastline vertex poked through, and the parts' areas sum
+#' to within 40 square metres, in 2,949 square kilometres, of the signed area
+#' of the rings as they stood.
+#'
+#' The result is for s2 to measure and for nothing else.  s2 can write loops
+#' that meet at a vertex as the rings of one polygon, which GEOS does not
+#' read as the same shape.
+#'
+#' @param g1 An sfc vector of length one in a geographic CRS; s2 must be on.
+#' @return The repaired sfc of length one, or \code{NULL} when the repair
+#'   stops, gives something other than a non-empty polygon, or gives a
+#'   polygon s2 refuses as well.
+#' @keywords internal
+#' @noRd
+.split_crossing_edges <- function(g1) {
+  fixed <- tryCatch(
+    suppressWarnings(sf::st_make_valid(g1, split_crossing_edges = TRUE)),
+    error = function(e) NULL)
+  if (is.null(fixed) || length(fixed) != 1L) return(NULL)
+  polygonal <- as.character(sf::st_geometry_type(fixed)) %in%
+    c("POLYGON", "MULTIPOLYGON")
+  if (!polygonal || sf::st_is_empty(fixed) || length(.s2_refused(fixed)))
+    return(NULL)
+  fixed
+}
+
+
+#' Sort-key points and areas for a layer in which s2 refuses some features
+#'
+#' Called by \code{ensure_stable_poly_id()} when the representative points or
+#' the areas of the sort copy could not be taken in one call.  The features
+#' s2 refuses are found; each gets a second repair of its own
+#' (\code{.split_crossing_edges()}), and one that s2 refuses after that too
+#' is measured as plane geometry in the layer's own CRS.  Every other
+#' feature is measured by the calls \code{ensure_stable_poly_id()} makes,
+#' feature by feature the same numbers, so its key does not change.  One
+#' warning says how many features took each route.
+#'
+#' @param sort_sf The sort copy: the layer in the sort CRS, repaired once
+#'   when \code{repair} is \code{TRUE}.
+#' @param own_sf The layer in its own CRS, row for row with \code{sort_sf}.
+#' @param method The representative-point method.
+#' @param points,area What the caller's attempt gave: the sfc of points and
+#'   the numeric areas, or the error either one raised.
+#' @param repair Whether repairs were asked for (\code{make_valid}).  When
+#'   \code{FALSE} the second repair is not tried either.
+#' @return A list of \code{points}, an sfc_POINT vector in the sort CRS, and
+#'   \code{area}, numeric; one of each per feature.
+#' @keywords internal
+#' @noRd
+.sort_key_with_refusals <- function(sort_sf, own_sf, method, points, area,
+                                    repair = TRUE) {
+  cause <- if (inherits(points, "error")) points else area
+  g <- sf::st_geometry(sort_sf)
+
+  # Not every error is s2's, and one that is not is raised again as it was.
+  # sf sends lon/lat data to s2 and nothing else, and of the three kinds of
+  # representative point only the centroid is taken there:
+  # st_point_on_surface() is GEOS whatever the CRS, and the box centre is
+  # arithmetic on the coordinates.  The area is s2's for all three.
+  if (inherits(points, "error") && !identical(method, "centroid")) stop(points)
+  refused <- if (isTRUE(sf::st_is_longlat(g))) .s2_refused(g) else integer(0)
+  if (!length(refused)) stop(cause)
+
+  # The second repair goes to the refused features alone and to a copy that
+  # only s2 measures.  Repairing the whole layer a second time happened to
+  # leave the centroids and areas of the other 290 Texas cells bit for bit
+  # the same, but nothing promises that of a rebuild, and a feature the
+  # function could already key must keep the key it had.  With
+  # make_valid = FALSE the caller asked for no repair, so none is tried and
+  # the refused features go straight to the plane.
+  s2_g  <- g
+  split <- integer(0)
+  if (isTRUE(repair)) {
+    for (i in refused) {
+      fixed <- .split_crossing_edges(g[i])
+      if (is.null(fixed)) next
+      s2_g[i] <- fixed
+      split   <- c(split, i)
+    }
+  }
+  planar <- setdiff(refused, split)
+  sphere <- setdiff(seq_along(g), planar)
+
+  n    <- length(g)
+  pts  <- vector("list", n)
+  area <- rep(NA_real_, n)
+  if (length(sphere)) {
+    area[sphere] <- suppressWarnings(as.numeric(sf::st_area(s2_g[sphere])))
+    if (identical(method, "centroid"))
+      pts[sphere] <- sf::st_centroid(s2_g[sphere])
+  }
+
+  if (length(planar)) {
+    # Plane geometry on the layer's own coordinates.  The CRS is taken off
+    # first, so that GEOS does the arithmetic whatever the CRS is: a layer
+    # that arrived in lon/lat would otherwise go back to s2 for its centroid,
+    # the very call that stopped, and to lwgeom, which is not a dependency,
+    # for its area.  The area is therefore in the square of the layer's own
+    # unit (square degrees for a lon/lat layer), not in square metres.  It is
+    # the third key, consulted only between features whose points agree to
+    # the centimetre, where all it has to be is the same number on every
+    # call.
+    own_g <- sf::st_geometry(own_sf)[planar]
+    flat  <- sf::st_set_crs(own_g, NA)
+    area[planar] <- suppressWarnings(as.numeric(sf::st_area(flat)))
+    if (identical(method, "centroid")) {
+      ctr <- sf::st_set_crs(sf::st_centroid(flat), sf::st_crs(own_g))
+      if (sf::st_crs(ctr) != sf::st_crs(g))
+        ctr <- sf::st_transform(ctr, sf::st_crs(g))
+      pts[planar] <- ctr
+    }
+  }
+
+  # The surface point and the box centre never went near s2: they are the
+  # caller's, taken from the sort copy as on any other call.
+  if (identical(method, "centroid"))
+    points <- sf::st_sfc(pts, crs = sf::st_crs(g))
+
+  .warn_and_log(
+    paste0("ensure_stable_poly_id(): s2 refused %d of %d feature(s) on the ",
+           "lon/lat copy the sort key is measured on (\"%s\"). Keyed from a ",
+           "second repair of that copy with crossing edges split: %d%s. ",
+           "Keyed from plane geometry in the layer's own CRS instead: %d. ",
+           "These keys are close to the spherical ones but not exactly equal ",
+           "to them.%s The keys of the features s2 accepted are the ones they ",
+           "always had, their IDs follow from the order of all the keys, and ",
+           "the geometry returned is the caller's own."),
+    length(refused), n, conditionMessage(cause), length(split),
+    if (isTRUE(repair)) "" else " (none is tried with make_valid = FALSE)",
+    length(planar),
+    # The second repair is made on the lon/lat copy, so its key is the same
+    # whichever projection the layer arrives in.  The plane route is not: it
+    # measures in the layer's own CRS, and the plane centroid of the Texas
+    # cell this guard was written for lies 9 to 73 m from the spherical one
+    # depending on that CRS.  A neighbour whose key falls inside that gap
+    # changes places with it, which is the one promise of this function the
+    # route cannot keep, so the warning says so whenever the route is taken.
+    if (length(planar))
+      paste0(" A feature keyed in the plane is measured in the CRS the layer ",
+             "arrived in, so it can take another place in the order when the ",
+             "same layer arrives in another projection, and the IDs between ",
+             "the two places move with it.")
+    else "")
+
+  list(points = points, area = area)
 }
 
 # -----------------------------------------------------------------------------
