@@ -895,6 +895,85 @@
 
 ## Bug fixes
 
+* **`ensure_stable_poly_id()` stopped on a cell that is valid in its own CRS
+  and crosses itself in lon/lat, and took `build_tessellation(method =
+  "voronoi")` with it.**  The sort key is measured on a lon/lat copy with s2.
+  Only the vertices are transformed, and s2 joins them with great-circle
+  arcs, so a long straight edge that passes about a metre from another vertex
+  of the same ring can come out on the other side of that vertex.  s2 refuses
+  such a ring, the repair of the lon/lat copy does not split crossing edges,
+  and `st_centroid()` and `st_area()` stopped with "Loop 1 is not valid: Edge
+  36 crosses edge 52".  Met on 1 of 291 Voronoi cells of Texas clipped to the
+  state outline in EPSG:5070, where a 36.9 km cell edge passes 1.47 m from a
+  vertex of the coastline and the great circle through its ends passes 0.37 m
+  beyond that vertex: no cell of the state got an ID.  A feature s2 still
+  refuses after the repair now gets a second repair of its own sort copy with
+  the crossing edges split, and if s2 refuses that too its centroid and area
+  are measured as plane geometry in the layer's own CRS and the centroid is
+  transformed to the sort CRS.  The function warns once, saying how many
+  features took each route, and `create_voronoi_polygons()` and
+  `build_tessellation(method = "voronoi")` pass the warning on.  Those
+  features' keys are close to the spherical ones and not equal to them: the
+  second repair moved the Texas cell's area by about 40 square metres in
+  2,949 square kilometres, and its centroid taken in the plane of EPSG:5070
+  lay 20 m from the one the second repair gave on the sphere.  Every other
+  feature keeps exactly the key it had, so the other 290 Texas cells are
+  numbered in the order they always would have been, the geometry returned
+  is still the caller's own, and the same 291 cells get the same IDs in
+  EPSG:5070, EPSG:3083, UTM zone 14N, Web Mercator and lon/lat.  A feature
+  keyed in the plane is measured in the CRS the layer arrived in (the Texas
+  cell's plane centroid lies 9 to 73 m from the spherical one depending on
+  that CRS), so it can take another place in the order when the same layer
+  arrives in another projection, and the IDs between the two places move
+  with it; the warning says so whenever that route is taken.  With
+  `make_valid = FALSE` no repair is tried, as the caller asked, and a
+  feature s2 refuses goes straight to the plane: such a call used to stop
+  with s2's error and now returns IDs with the warning.  All three `method`s
+  are covered: for `"surface_point"` and `"bbox_center"` the point never
+  went to s2, but the area, the third key of each, did, and both stopped
+  there.  An error that is not s2 refusing a feature is raised as it was.
+
+* **`resolution_profile()` took the noise variance of C_p from the nugget of
+  a variogram fit that had not converged, whenever the range was refused for
+  another reason.**  Its documentation says a model that did not converge
+  gives `cp` no nugget, the nugget and sill being where the optimiser
+  stopped, and the profile decided that by looking for "converge" in
+  `rejected_reason`.  `estimate_sac_range()` gives a refused range one
+  reason, and a falling variogram and a range past the largest lag come
+  before the optimiser in it, so a fit that stopped at gstat's iteration
+  limit with a range past the fitted lags is recorded as `"fitted range
+  exceeds the largest lag fitted"`.  That is most fits that do not converge:
+  over 200 simulated layers (trends, ranges longer than the extent, 40--60
+  points, white noise) 96 of the 102 all-pairs fits that did not converge
+  carried that reason and 6 `"variogram model did not converge"`.  With an
+  east-west trend on an exponential field (300 points, nugget 0.1, 25 draws)
+  every all-pairs fit stopped at the limit, every one was refused as past
+  the lags, and C_p was given nuggets of 1.18--1.62; in the first draw the
+  range reported was 29,180 against a largest lag of 647.  Whether the model
+  converged is now read from the model
+  (`attr(attr(sac, "variogram_model"), "converged")`, which
+  `estimate_sac_range()` already set); a sac that carries no such flag (made
+  by hand, or built from REML parameters) is judged by its reason, as
+  before, and a reason that says the fit did not converge is believed
+  whatever the flag says.  For a refused range whose model did not converge,
+  `cp` takes its noise variance from the finest level whose cells hold at
+  least two scored rows on average, `attr(x, "cp_noise")$source` reads
+  `"finest-level residual mean square"`, `attr(x, "variogram")` is `NULL`,
+  and the warning names both facts: why the range was refused, and that the
+  model did not converge.  The existing notice that names the level and the
+  variance `cp` was given follows it, so such a profile raises two warnings
+  where it raised one.  The finest-level value can be larger or smaller than
+  the nugget it replaces (larger in 41 of 52 simulated layers, smaller in
+  11), so the `cp` pick can move either way: it stayed in 49, moved to fewer
+  cells in 2 and to more in 1.  When no level holds two scored rows a cell,
+  `cp` is `NA` at every level for such a sac, where it was finite; the
+  warning's last clause says so, and the notice is not raised.  A fit that
+  converged to a range past the lags, or on a falling variogram, still gives
+  `cp` its nugget.  `estimate_sac_range()` returns what it did;
+  `?estimate_sac_range` now says that the count of `"variogram model did not
+  converge"` reasons understates how many fits did not converge, and where
+  to read it.
+
 * **A clipped cell that also touched the boundary from outside was dropped,
   and its points left with no cell.**  `st_intersection()` returns such a
   cell as a GEOMETRYCOLLECTION of its area and a line or point (on an
