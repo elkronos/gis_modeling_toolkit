@@ -6,34 +6,14 @@ sill; for the spherical model (fitted only when the exponential fit is
 singular or does not converge) the fitted range itself, which is where the
 spherical semivariance reaches its sill exactly.  Both are the distance
 beyond which two observations are (near) uncorrelated, which is what a
-block or a buffer has to exceed.
-The exponential model is kept whenever it converges, without comparing it
-with the spherical fit, and on fields smoother than exponential that makes
-the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
-30 draws each): about 1.8–2.1 times the practical range of a Gaussian
-covariance, and 1.3–1.4 times the range of a spherical one, while an
-exponential field came back at 0.97 of its effective range.  The error is
-on the safe side (blocks too large, cross-validation pessimistic), and it
-is kept on purpose: choosing the family by the smaller weighted sum of
-squares corrects the spherical case but sends exponential fields low, to
-about 0.82 of the truth, which is the direction that leaks."><meta property="og:description" content="Fits exponential (or spherical) variogram models and returns the
+block or a buffer has to exceed."><meta property="og:description" content="Fits exponential (or spherical) variogram models and returns the
 effective range: for the exponential model, three times the fitted
 range parameter, which is where the semivariance reaches ~95 % of the
 sill; for the spherical model (fitted only when the exponential fit is
 singular or does not converge) the fitted range itself, which is where the
 spherical semivariance reaches its sill exactly.  Both are the distance
 beyond which two observations are (near) uncorrelated, which is what a
-block or a buffer has to exceed.
-The exponential model is kept whenever it converges, without comparing it
-with the spherical fit, and on fields smoother than exponential that makes
-the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
-30 draws each): about 1.8–2.1 times the practical range of a Gaussian
-covariance, and 1.3–1.4 times the range of a spherical one, while an
-exponential field came back at 0.97 of its effective range.  The error is
-on the safe side (blocks too large, cross-validation pessimistic), and it
-is kept on purpose: choosing the family by the smaller weighted sum of
-squares corrects the spherical case but sends exponential fields low, to
-about 0.82 of the truth, which is the direction that leaks."></head><body>
+block or a buffer has to exceed."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -90,16 +70,6 @@ singular or does not converge) the fitted range itself, which is where the
 spherical semivariance reaches its sill exactly.  Both are the distance
 beyond which two observations are (near) uncorrelated, which is what a
 block or a buffer has to exceed.</p>
-<p>The exponential model is kept whenever it converges, without comparing it
-with the spherical fit, and on fields smoother than exponential that makes
-the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
-30 draws each): about 1.8–2.1 times the practical range of a Gaussian
-covariance, and 1.3–1.4 times the range of a spherical one, while an
-exponential field came back at 0.97 of its effective range.  The error is
-on the safe side (blocks too large, cross-validation pessimistic), and it
-is kept on purpose: choosing the family by the smaller weighted sum of
-squares corrects the spherical case but sends exponential fields low, to
-about 0.82 of the truth, which is the direction that leaks.</p>
     </div>
 
     <div class="section level2">
@@ -213,7 +183,7 @@ converge the <code>"ols"</code> path runs instead with an R warning saying so.</
 
 <dt id="arg-reml-max-n">reml_max_n<a class="anchor" aria-label="anchor" href="#arg-reml-max-n"></a></dt>
 <dd><p>Positive integer, at least 30.  With <code>detrend =
-  "reml"</code>, the trend and covariance are fitted on a seeded random subsample
+"reml"</code>, the trend and covariance are fitted on a seeded random subsample
 of this many points when the layer has more (exact duplicate locations
 are dropped first); the fitted trend is then removed from every point.
 Default 400.  Raise it for a better-determined fit at the cost above.</p></dd>
@@ -313,7 +283,19 @@ what <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="externa
 <code>detrend_method</code>, <code>reml</code> (as on success) and, for
 <code>"fitted range is below the shortest lag fitted"</code>,
 <code>range_floor</code> (the distance the refused range fell short of).
-It carries <code>directional</code>,
+The reason names one ground for the refusal: a falling variogram
+first, then a range past the largest lag, and the fit not having
+converged only when neither holds.  A fit that did not converge is
+therefore most often recorded as past the largest lag, and the count
+of <code>"variogram model did not converge"</code> understates how many
+did not.  The model itself says:
+<code>attr(attr(range, "variogram_model"), "converged")</code> is
+<code>FALSE</code> when no start of either model family converged
+(<span class="pkg">gstat</span> stopped at its iteration limit), whatever the reason,
+and its nugget and sill are then where the optimiser halted, as its
+range is.  A model built from REML parameters carries no such
+attribute.  <code><a href="resolution_profile.html">resolution_profile()</a></code> reads it.
+The refused range carries <code>directional</code>,
 <code>anisotropy</code>, <code>anisotropy_used</code>, <code>directional_status</code>,
 <code>directional_fitted</code> and, with
 <code>keep_directional_fits = TRUE</code>, <code>directional_fits</code> as well:
@@ -333,13 +315,13 @@ attached.</p></dd>
 <dd><p>An unclassed <code>NA_real_</code> when estimation could not
 be attempted at all, whose one attribute, <code>rejected_reason</code>,
 says why: <code>"package 'gstat', which the variogram needs, is not
-installed"</code>, <code>"&lt;n&gt; points, fewer than the 30 a variogram range
-is estimated from"</code>, <code>"&lt;n&gt; point(s) with a finite value to
-model, fewer than the 30 a variogram range is estimated from"</code>,
+      installed"</code>, <code>"&lt;n&gt; points, fewer than the 30 a variogram range
+      is estimated from"</code>, <code>"&lt;n&gt; point(s) with a finite value to
+      model, fewer than the 30 a variogram range is estimated from"</code>,
 <code>"the response is constant"</code>, <code>"the residuals on
-predictor_vars are constant: the predictors explain the response
-exactly"</code> or <code>"the points have no extent (the largest distance
-between them is zero or could not be computed)"</code>.  Nothing is
+      predictor_vars are constant: the predictors explain the response
+      exactly"</code> or <code>"the points have no extent (the largest distance
+      between them is zero or could not be computed)"</code>.  Nothing is
 fitted, so none of the other attributes above exist: no
 <code>variogram</code>, <code>variogram_model</code> or <code>rejected_range</code>,
 which is what tells it from a range that was fitted and refused.</p></dd>
@@ -351,7 +333,17 @@ way it always did.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>The estimate is the <strong>omnidirectional</strong> (all-pairs) fit.  Directional
+    <p>The exponential model is kept whenever it converges, without comparing it
+with the spherical fit, and on fields smoother than exponential that makes
+the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
+30 draws each): about 1.8–2.1 times the practical range of a Gaussian
+covariance, and 1.3–1.4 times the range of a spherical one, while an
+exponential field came back at 0.97 of its effective range.  The error is
+on the safe side (blocks too large, cross-validation pessimistic), and it
+is kept on purpose: choosing the family by the smaller weighted sum of
+squares corrects the spherical case but sends exponential fields low, to
+about 0.82 of the truth, which is the direction that leaks.</p>
+<p>The estimate is the <strong>omnidirectional</strong> (all-pairs) fit.  Directional
 variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
 azimuths with a ±22.5° tolerance.  Those four windows tile all 180 distinct
 azimuths exactly once, and their ranges are returned in the

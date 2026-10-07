@@ -111,8 +111,15 @@ resolution_profile(
   range is below the shortest lag fitted (a structure that cannot be
   told from a nugget, so the nugget is not identified either), gives
   neither, and `cp` takes its noise variance from the finest level (see
-  `cp` above). Under `select_on = "split"` the sac must come from the
-  selection half alone: run the profile once without it, fit the sac on
+  `cp` above). Whether the model converged is read from the model
+  (`attr(attr(sac, "variogram_model"), "converged")`, which
+  [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
+  sets), not from the reason: the reason names one ground for the
+  refusal, and a fit that did not converge is most often refused as past
+  the largest lag. The warning then names both. A sac that carries no
+  such flag (one made by hand, say) is judged by its reason. Under
+  `select_on = "split"` the sac must come from the selection half alone:
+  run the profile once without it, fit the sac on
   `data_sf[attr(p, "split")$selection, ]` and pass it to a second call
   with the same `seed`, which makes the same split. When `NULL` and a
   response is given, one is estimated on the subsample (its selection
@@ -274,7 +281,8 @@ still reported.
   level whose cells hold at least two scored rows on average. It counts
   the structure within those cells as noise too, so on average it is no
   smaller than the nugget and errs towards fewer cells; the profile
-  warns, and `attr(, "cp_noise")` records which was used.
+  warns, and `attr(, "cp_noise")` records which was used. When no
+  level's cells hold that many, `cp` is `NA` at every level.
 
 - `moran_z`:
 

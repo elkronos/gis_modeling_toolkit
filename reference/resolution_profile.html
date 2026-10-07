@@ -169,7 +169,7 @@ either, so the profile does not depend on the order they come in.</p></dd>
 <dd><p>Optional <code>sac_range</code> object from
 <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> to take the range, nugget and
 correlation function from.  Pass one fitted with <code>detrend =
-  "reml"</code>, say.  It must describe the variable the profile scores: the
+"reml"</code>, say.  It must describe the variable the profile scores: the
 raw response without <code>predictor_vars</code>, the residuals on them with;
 a sac whose <code>detrended</code> attribute says otherwise is used with a
 warning.  Its range is read in its own CRS (<code>attr(sac, "crs")</code>),
@@ -181,7 +181,13 @@ range was rejected (<code>NA</code> with a <code>rejected_reason</code>) gives
 or whose range is below the shortest lag fitted (a structure that
 cannot be told from a nugget, so the nugget is not identified either),
 gives neither, and <code>cp</code> takes its noise variance from the finest
-level (see <code>cp</code> above).  Under <code>select_on = "split"</code> the sac must come from
+level (see <code>cp</code> above).  Whether the model converged is read from
+the model (<code>attr(attr(sac, "variogram_model"), "converged")</code>, which
+<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> sets), not from the reason: the reason names
+one ground for the refusal, and a fit that did not converge is most
+often refused as past the largest lag.  The warning then names both.  A
+sac that carries no such flag (one made by hand, say) is judged by its
+reason.  Under <code>select_on = "split"</code> the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on <code>data_sf[attr(p, "split")$selection, ]</code> and pass it to a second
 call with the same <code>seed</code>, which makes the same split.  When
@@ -349,7 +355,8 @@ choice instead: the residual mean square \(RSS / (m - L_m)\) of the
 finest level whose cells hold at least two scored rows on average.  It
 counts the structure within those cells as noise too, so on average it
 is no smaller than the nugget and errs towards fewer cells; the profile warns,
-and <code>attr(, "cp_noise")</code> records which was used.</p></dd>
+and <code>attr(, "cp_noise")</code> records which was used.  When no level's
+cells hold that many, <code>cp</code> is <code>NA</code> at every level.</p></dd>
 
 <dt><code>moran_z</code></dt>
 <dd><p>The standardised deviate of Moran's I on the

@@ -9,18 +9,6 @@ the spherical semivariance reaches its sill exactly. Both are the
 distance beyond which two observations are (near) uncorrelated, which is
 what a block or a buffer has to exceed.
 
-The exponential model is kept whenever it converges, without comparing
-it with the spherical fit, and on fields smoother than exponential that
-makes the range long. Measured on simulated fields (n = 300 on a 1000 m
-square, 30 draws each): about 1.8–2.1 times the practical range of a
-Gaussian covariance, and 1.3–1.4 times the range of a spherical one,
-while an exponential field came back at 0.97 of its effective range. The
-error is on the safe side (blocks too large, cross-validation
-pessimistic), and it is kept on purpose: choosing the family by the
-smaller weighted sum of squares corrects the spherical case but sends
-exponential fields low, to about 0.82 of the truth, which is the
-direction that leaks.
-
 ## Usage
 
 ``` r
@@ -228,19 +216,31 @@ ordinary number. The shapes carry different attributes:
   [`plot()`](https://rdrr.io/r/graphics/plot.default.html) labels its
   axis from), `detrend_method`, `reml` (as on success) and, for
   `"fitted range is below the shortest lag fitted"`, `range_floor` (the
-  distance the refused range fell short of). It carries `directional`,
-  `anisotropy`, `anisotropy_used`, `directional_status`,
-  `directional_fitted` and, with `keep_directional_fits = TRUE`,
-  `directional_fits` as well: the directional sweep runs whatever
-  becomes of the all-pairs fit, and its per-azimuth outcome is what says
-  whether any direction reached a sill the pooled variogram did not, or
-  whether every direction ran past the fitted lags alike. The same
-  shape, with `rejected_range = NA`, `variogram_model = NULL` and
-  `nugget = NA`, is returned when no variogram model could be fitted at
-  all (both the exponential and the spherical fit singular, which a
-  flat, nugget-only variogram can produce, though on white noise it was
-  the outcome in only 1 of 30 draws: see above); `rejected_reason` says
-  so and the empirical variogram is still attached.
+  distance the refused range fell short of). The reason names one ground
+  for the refusal: a falling variogram first, then a range past the
+  largest lag, and the fit not having converged only when neither holds.
+  A fit that did not converge is therefore most often recorded as past
+  the largest lag, and the count of `"variogram model did not converge"`
+  understates how many did not. The model itself says:
+  `attr(attr(range, "variogram_model"), "converged")` is `FALSE` when no
+  start of either model family converged (gstat stopped at its iteration
+  limit), whatever the reason, and its nugget and sill are then where
+  the optimiser halted, as its range is. A model built from REML
+  parameters carries no such attribute.
+  [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+  reads it. The refused range carries `directional`, `anisotropy`,
+  `anisotropy_used`, `directional_status`, `directional_fitted` and,
+  with `keep_directional_fits = TRUE`, `directional_fits` as well: the
+  directional sweep runs whatever becomes of the all-pairs fit, and its
+  per-azimuth outcome is what says whether any direction reached a sill
+  the pooled variogram did not, or whether every direction ran past the
+  fitted lags alike. The same shape, with `rejected_range = NA`,
+  `variogram_model = NULL` and `nugget = NA`, is returned when no
+  variogram model could be fitted at all (both the exponential and the
+  spherical fit singular, which a flat, nugget-only variogram can
+  produce, though on white noise it was the outcome in only 1 of 30
+  draws: see above); `rejected_reason` says so and the empirical
+  variogram is still attached.
 
 - No fit:
 
@@ -263,6 +263,18 @@ Attributes and the class do not affect
 downstream guard treats all three the same way it always did.
 
 ## Details
+
+The exponential model is kept whenever it converges, without comparing
+it with the spherical fit, and on fields smoother than exponential that
+makes the range long. Measured on simulated fields (n = 300 on a 1000 m
+square, 30 draws each): about 1.8–2.1 times the practical range of a
+Gaussian covariance, and 1.3–1.4 times the range of a spherical one,
+while an exponential field came back at 0.97 of its effective range. The
+error is on the safe side (blocks too large, cross-validation
+pessimistic), and it is kept on purpose: choosing the family by the
+smaller weighted sum of squares corrects the spherical case but sends
+exponential fields low, to about 0.82 of the truth, which is the
+direction that leaks.
 
 The estimate is the **omnidirectional** (all-pairs) fit. Directional
 variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°

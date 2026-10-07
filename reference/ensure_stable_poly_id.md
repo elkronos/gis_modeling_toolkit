@@ -33,7 +33,9 @@ ensure_stable_poly_id(
 
 - make_valid:
 
-  Logical; apply st_make_valid() first. Default TRUE.
+  Logical; apply st_make_valid() first. Default TRUE. The copy the sort
+  key is measured on is repaired as well, after it has been transformed
+  (see Details); with `FALSE` neither is.
 
 - transform_for_sort:
 
@@ -63,6 +65,35 @@ An sf polygon layer re-ordered with sequential IDs in id_col.
 Non-polygonal rows are **dropped** (with a warning), so the result can
 have fewer rows than the input; if no polygonal rows remain, an error is
 raised.
+
+## Details
+
+A feature that is valid in its own CRS is not always one s2 can measure.
+Only the vertices are transformed to the sort CRS, and on the sphere
+they are joined by great-circle arcs, so a long edge that is straight in
+the layer's CRS and passes about a metre from another vertex of the same
+ring can end up on the other side of that vertex. The ring then crosses
+itself, and s2 refuses it (1 of 291 Voronoi cells of Texas clipped to
+the state outline in EPSG:5070; "Loop 1 is not valid: Edge 36 crosses
+edge 52"). The repair of the sort copy does not split crossing edges, so
+a feature s2 still refuses is handled on its own. Its sort copy is
+repaired a second time with the crossing edges split. If s2 refuses that
+as well, or with `make_valid = FALSE`, which asks for no repair, the
+feature's centroid and area are measured as plane geometry in the
+layer's own CRS and the centroid is transformed to the sort CRS. With
+the methods `"surface_point"` and `"bbox_center"` only the area needs
+this, because those points are not taken with s2.
+
+The function warns once, saying how many features took each route. Their
+keys are close to the spherical ones and not equal to them. The second
+repair moved the Texas cell's area by about 40 square metres in 2,949
+square kilometres. Its centroid taken in the plane lay 20 m from the one
+the second repair gave on the sphere, and the two kinds of centroid lay
+5 m apart at the median and 61 m at most for the other 290 cells. A
+feature measured in the plane can therefore sort on the other side of a
+neighbour whose centre is that close to its own in longitude. Every
+other feature's key is unaffected, and the geometry returned is never
+the sort copy.
 
 ## See also
 
