@@ -260,32 +260,45 @@ test_that("with no null model the rows every step-1 set predicted are the refere
 # ---------------------------------------------------------------------------
 
 test_that("compare_models_cv() re-scores the models on the rows they all predicted", {
-  # GWR with a fixed bandwidth cannot reach the outlying valley block, so it
-  # lost that fold -- the hardest rows -- and its pooled RMSE (1.81 on 158
-  # rows) beat RF's (1.95 on 200) although RF scored 0.99 on the same 158.
+  # The valley lies 320 m and more from every other point and is held out as
+  # one fold.  GWR with a fixed bandwidth of 300 has no training point within
+  # reach of it, so every local regression there has an empty window, X'WX is
+  # the zero matrix, and the fold's 50 rows are lost whatever the linear
+  # algebra underneath.  A window that is thin without being empty would not
+  # do: with one training point for two parameters X'WX is [1, a; a, a^2],
+  # singular only as far as a * a is computed without rounding, and GWmodel
+  # stops there or returns coefficients according to the platform's
+  # arithmetic.  The other four folds are drawn at random among the remaining
+  # 150 rows, each of which keeps eight or more training points within reach,
+  # so GWR predicts exactly those rows and RF all 200.
   skip_if_not_installed("ranger")
   skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   set.seed(4); n <- 200
   xy <- rbind(cbind(runif(150, 0, 600), runif(150, 0, 1000)),
-              cbind(runif(50, 850, 1000), runif(50, 0, 1000)))
+              cbind(runif(50, 920, 1000), runif(50, 0, 1000)))
+  valley <- xy[, 1] > 900
   d <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], a = runif(n, -2, 2)),
                     coords = c("x", "y"), crs = 32632)
   d$z <- 10 + 3 * sign(d$a) + rnorm(n, 0, 0.3)
+  lab <- ifelse(valley, 1L, sample(2:5, n, replace = TRUE))
   mae <- function(y, yhat) c(MedAE = stats::median(abs(y - yhat)))
   r <- .rv_warnings(suppressMessages(compare_models_cv(
-    d, "z", "a", models = c("RF", "GWR"), k = 5, seed = 1, quiet = TRUE,
+    d, "z", "a", models = c("RF", "GWR"), folds = lab, seed = 1, quiet = TRUE,
     metrics = mae, rf_args = list(num_trees = 100),
     gwr_args = list(adaptive = FALSE, bandwidth = 300))))
   cmp <- r$value
+  # GWR reports the valley fold as lost, and the comparison names both counts.
+  expect_identical(cmp$gwr_cv$fold_status$status,
+                   c("skipped", "ok", "ok", "ok", "ok"))
   expect_true(any(grepl(paste0("^compare_models_cv\\(\\): the models predicted ",
-                               "different rows \\(GWR [0-9]+, RF 200\\)"),
+                               "different rows \\(GWR 150, RF 200\\)"),
                         r$warnings)))
   gp <- cmp$gwr_cv$predictions; rp <- cmp$rf_cv$predictions
   common <- intersect(gp$`..row_id`[is.finite(gp$yhat)], rp$`..row_id`)
-  expect_lt(length(common), 200L)
+  expect_setequal(common, which(!valley))
   ov <- cmp$overall
-  expect_identical(ov$n_pred, rep(length(common), 2L))
+  expect_identical(ov$n_pred, rep(150L, 2L))
   # Each row is exactly the backend's metrics over the common rows ...
   for (m in c("GWR", "RF")) {
     p <- if (m == "GWR") gp else rp

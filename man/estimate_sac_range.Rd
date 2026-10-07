@@ -92,7 +92,7 @@ and so runs on at most \code{reml_max_n} points; when it does not
 converge the \code{"ols"} path runs instead with an R warning saying so.}
 
 \item{reml_max_n}{Positive integer, at least 30.  With \code{detrend =
-  "reml"}, the trend and covariance are fitted on a seeded random subsample
+"reml"}, the trend and covariance are fitted on a seeded random subsample
 of this many points when the layer has more (exact duplicate locations
 are dropped first); the fitted trend is then removed from every point.
 Default 400.  Raise it for a better-determined fit at the cost above.}
@@ -187,7 +187,19 @@ what \code{plot()} labels its axis from),
 \code{detrend_method}, \code{reml} (as on success) and, for
 \code{"fitted range is below the shortest lag fitted"},
 \code{range_floor} (the distance the refused range fell short of).
-It carries \code{directional},
+The reason names one ground for the refusal: a falling variogram
+first, then a range past the largest lag, and the fit not having
+converged only when neither holds.  A fit that did not converge is
+therefore most often recorded as past the largest lag, and the count
+of \code{"variogram model did not converge"} understates how many
+did not.  The model itself says:
+\code{attr(attr(range, "variogram_model"), "converged")} is
+\code{FALSE} when no start of either model family converged
+(\pkg{gstat} stopped at its iteration limit), whatever the reason,
+and its nugget and sill are then where the optimiser halted, as its
+range is.  A model built from REML parameters carries no such
+attribute.  \code{\link{resolution_profile}()} reads it.
+The refused range carries \code{directional},
 \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
 \code{directional_fitted} and, with
 \code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
@@ -205,13 +217,13 @@ attached.}
 \item{No fit}{An unclassed \code{NA_real_} when estimation could not
 be attempted at all, whose one attribute, \code{rejected_reason},
 says why: \code{"package 'gstat', which the variogram needs, is not
-installed"}, \code{"<n> points, fewer than the 30 a variogram range
-is estimated from"}, \code{"<n> point(s) with a finite value to
-model, fewer than the 30 a variogram range is estimated from"},
+      installed"}, \code{"<n> points, fewer than the 30 a variogram range
+      is estimated from"}, \code{"<n> point(s) with a finite value to
+      model, fewer than the 30 a variogram range is estimated from"},
 \code{"the response is constant"}, \code{"the residuals on
-predictor_vars are constant: the predictors explain the response
-exactly"} or \code{"the points have no extent (the largest distance
-between them is zero or could not be computed)"}.  Nothing is
+      predictor_vars are constant: the predictors explain the response
+      exactly"} or \code{"the points have no extent (the largest distance
+      between them is zero or could not be computed)"}.  Nothing is
 fitted, so none of the other attributes above exist: no
 \code{variogram}, \code{variogram_model} or \code{rejected_range},
 which is what tells it from a range that was fitted and refused.}
@@ -229,7 +241,8 @@ singular or does not converge) the fitted range itself, which is where the
 spherical semivariance reaches its sill exactly.  Both are the distance
 beyond which two observations are (near) uncorrelated, which is what a
 block or a buffer has to exceed.
-
+}
+\details{
 The exponential model is kept whenever it converges, without comparing it
 with the spherical fit, and on fields smoother than exponential that makes
 the range long.  Measured on simulated fields (n = 300 on a 1000 m square,
@@ -240,8 +253,7 @@ on the safe side (blocks too large, cross-validation pessimistic), and it
 is kept on purpose: choosing the family by the smaller weighted sum of
 squares corrects the spherical case but sends exponential fields low, to
 about 0.82 of the truth, which is the direction that leaks.
-}
-\details{
+
 The estimate is the \strong{omnidirectional} (all-pairs) fit.  Directional
 variograms are fitted as well, at 0° (N–S), 45°, 90° (E–W) and 135°
 azimuths with a ±22.5° tolerance.  Those four windows tile all 180 distinct
@@ -432,17 +444,17 @@ levels. \emph{Mathematical Geology}, 16(5), 499--521.
 \code{\link{sac_nugget}} for the nugget behind the estimate,
 \code{\link{plot.sac_range}} to see the variogram the estimate rests on.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

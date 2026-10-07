@@ -151,20 +151,66 @@ test_that("a far-from-zero predictor beside a second one no longer draws the glo
 # the kernel's edge (a regular grid); the warning and the fit error say so.
 # ---------------------------------------------------------------------------
 
+# A 10 x 10 grid of spacing 100 with predictor `a`.  Away from the four
+# corners a point has three or four neighbours at 100 and none nearer, so at
+# the bisquare floor of 4 neighbours, the point itself counted, the kernel's
+# edge is at 100: they all get weight 0, and 96 local regressions hold their
+# own point alone.  X'WX is then [1, a; a, a^2], of rank 1 for two parameters.
+.r3_tied_grid <- function(a) {
+  g <- expand.grid(x = 5e5 + (0:9) * 100, y = 5e6 + (0:9) * 100)
+  g$a <- a; g$z <- 1 + 2 * g$a + rnorm(100)
+  sf::st_as_sf(g, coords = c("x", "y"), crs = 32632)
+}
+
 test_that("the floor warning and the singular-fit error name ties at the kernel's edge", {
   skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  # Whether GWmodel calls a one-point window singular is a matter of rounding.
+  # Eliminating [1, a; a, a^2] leaves a^2 - a * a as the last pivot: 0 where
+  # the product is rounded before the subtraction, and the rounding error of
+  # a * a where the two are fused into one operation (as on arm64), unless
+  # a * a is exact.  The predictor takes multiples of 1/8 in [-1, 1]: their
+  # squares are exact and none outranks the 1 as first pivot, so every step is
+  # exact, the pivot is 0 and the fit stops on any platform.
   set.seed(2)
-  g <- expand.grid(x = 5e5 + (0:9) * 100, y = 5e6 + (0:9) * 100)
-  g$a <- rnorm(100); g$z <- 1 + 2 * g$a + rnorm(100)
-  d <- sf::st_as_sf(g, coords = c("x", "y"), crs = 32632)
+  d <- .r3_tied_grid(sample(seq(-1, 1, by = 0.125), 100, replace = TRUE))
   r <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2))
   expect_true(any(grepl("using 4\\. That is enough unless several neighbours tie at the kernel's edge",
                         r$warnings)))
   expect_type(r$value, "character")
+  expect_match(r$value, "survey found 96 singular window")
   expect_match(r$value, "neighbours tied at the kernel's edge \\(a regular grid\\)")
   # Kernels that keep the edge point are not told about ties.
   rg <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2, kernel = "gaussian"))
   expect_false(any(grepl("tie at the kernel's edge", rg$warnings)))
+})
+
+test_that("a continuous predictor on the tied grid is flagged whether or not GWmodel stops", {
+  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  # The squares of normal draws are rounded, so GWmodel stops on the 96
+  # one-point windows or returns coefficients for them according to the
+  # platform's arithmetic.  The survey does not depend on that: it counts the
+  # points that carry weight, and warns before the fit.
+  set.seed(2)
+  d <- .r3_tied_grid(rnorm(100))
+  r <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2))
+  expect_true(any(grepl("using 4\\. That is enough unless several neighbours tie at the kernel's edge",
+                        r$warnings)))
+  expect_true(any(grepl("local collinearity: 96% of 100 locations have a collinear local design",
+                        r$warnings)))
+  if (is.character(r$value)) {
+    expect_match(r$value, "survey found 96 singular window")
+    expect_match(r$value, "neighbours tied at the kernel's edge \\(a regular grid\\)")
+  } else {
+    # The fit that comes back carries the survey: the 96 windows are there to
+    # be read, each with one point and an infinite condition index.
+    expect_s3_class(r$value, "gwr_fit")
+    lc <- r$value$info$local_collinearity
+    expect_identical(sum(lc$n_window == 1L & is.infinite(lc$cn)), 96L)
+    expect_identical(r$value$info$n_local_collinear, 96L)
+    skip(paste0("GWmodel returned coefficients for the 96 one-point windows ",
+                "instead of stopping, so the singular-fit error is not reached ",
+                "with a continuous predictor on this platform"))
+  }
 })
 
 

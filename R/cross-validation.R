@@ -1913,7 +1913,19 @@ sac_nugget <- function(x) {
 #'       \code{detrend_method}, \code{reml} (as on success) and, for
 #'       \code{"fitted range is below the shortest lag fitted"},
 #'       \code{range_floor} (the distance the refused range fell short of).
-#'       It carries \code{directional},
+#'       The reason names one ground for the refusal: a falling variogram
+#'       first, then a range past the largest lag, and the fit not having
+#'       converged only when neither holds.  A fit that did not converge is
+#'       therefore most often recorded as past the largest lag, and the count
+#'       of \code{"variogram model did not converge"} understates how many
+#'       did not.  The model itself says:
+#'       \code{attr(attr(range, "variogram_model"), "converged")} is
+#'       \code{FALSE} when no start of either model family converged
+#'       (\pkg{gstat} stopped at its iteration limit), whatever the reason,
+#'       and its nugget and sill are then where the optimiser halted, as its
+#'       range is.  A model built from REML parameters carries no such
+#'       attribute.  \code{\link{resolution_profile}()} reads it.
+#'       The refused range carries \code{directional},
 #'       \code{anisotropy}, \code{anisotropy_used}, \code{directional_status},
 #'       \code{directional_fitted} and, with
 #'       \code{keep_directional_fits = TRUE}, \code{directional_fits} as well:
@@ -2937,6 +2949,29 @@ estimate_sac_range <- function(points_sf, response_var,
   if (!is.data.frame(vm) || !all(c("model", "psill") %in% names(vm))) return(NA_real_)
   v <- sum(as.numeric(vm$psill[as.character(vm$model) == "Nug"]))
   if (length(v) != 1L || !is.finite(v)) NA_real_ else v
+}
+
+
+#' Whether the gstat fit behind a variogram model converged, or NA
+#'
+#' estimate_sac_range() marks every model gstat fits with a `converged`
+#' attribute (see .fit_one_vgm()): FALSE when the optimiser stopped at its
+#' iteration limit from every start, so that the range, the sill and the
+#' nugget are where it halted.  This is the record of non-convergence to read.
+#' `rejected_reason` names one ground for a refusal, and a falling variogram
+#' and a range past the largest lag come before the optimiser in it, so a fit
+#' that did not converge and whose range also runs past the fitted lags is
+#' "fitted range exceeds the largest lag fitted".  That is most of them: 96
+#' of the 102 all-pairs fits that did not converge over 200 simulated layers
+#' (trends, ranges longer than the extent, 40-60 points, white noise) carried
+#' that reason, and 6 "variogram model did not converge".  NA when the model
+#' says nothing either way: one built from REML parameters, one made by hand,
+#' or no model at all.
+#' @keywords internal
+#' @noRd
+.vgm_converged <- function(vm) {
+  v <- attr(vm, "converged", exact = TRUE)
+  if (is.logical(v) && length(v) == 1L && !is.na(v)) v else NA
 }
 
 
