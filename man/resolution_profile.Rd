@@ -64,7 +64,7 @@ either, so the profile does not depend on the order they come in.}
 \item{sac}{Optional \code{sac_range} object from
 \code{\link{estimate_sac_range}()} to take the range, nugget and
 correlation function from.  Pass one fitted with \code{detrend =
-  "reml"}, say.  It must describe the variable the profile scores: the
+"reml"}, say.  It must describe the variable the profile scores: the
 raw response without \code{predictor_vars}, the residuals on them with;
 a sac whose \code{detrended} attribute says otherwise is used with a
 warning.  Its range is read in its own CRS (\code{attr(sac, "crs")}),
@@ -76,7 +76,13 @@ range was rejected (\code{NA} with a \code{rejected_reason}) gives
 or whose range is below the shortest lag fitted (a structure that
 cannot be told from a nugget, so the nugget is not identified either),
 gives neither, and \code{cp} takes its noise variance from the finest
-level (see \code{cp} above).  Under \code{select_on = "split"} the sac must come from
+level (see \code{cp} above).  Whether the model converged is read from
+the model (\code{attr(attr(sac, "variogram_model"), "converged")}, which
+\code{estimate_sac_range()} sets), not from the reason: the reason names
+one ground for the refusal, and a fit that did not converge is most
+often refused as past the largest lag.  The warning then names both.  A
+sac that carries no such flag (one made by hand, say) is judged by its
+reason.  Under \code{select_on = "split"} the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
 call with the same \code{seed}, which makes the same split.  When
@@ -248,7 +254,8 @@ choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
 finest level whose cells hold at least two scored rows on average.  It
 counts the structure within those cells as noise too, so on average it
 is no smaller than the nugget and errs towards fewer cells; the profile warns,
-and \code{attr(, "cp_noise")} records which was used.}
+and \code{attr(, "cp_noise")} records which was used.  When no level's
+cells hold that many, \code{cp} is \code{NA} at every level.}
 \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 residuals of the cell means regressed on the cell-mean predictors (an
 intercept alone when there are none): how much spatial structure the
@@ -317,12 +324,12 @@ integer-vector interface; \code{\link{build_tessellation}()} and
 \code{select_resolution()} result directly as \code{approx_n_cells}
 and \code{n}.
 
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

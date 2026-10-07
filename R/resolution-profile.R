@@ -235,7 +235,8 @@
 #'     finest level whose cells hold at least two scored rows on average.  It
 #'     counts the structure within those cells as noise too, so on average it
 #'     is no smaller than the nugget and errs towards fewer cells; the profile warns,
-#'     and \code{attr(, "cp_noise")} records which was used.}
+#'     and \code{attr(, "cp_noise")} records which was used.  When no level's
+#'     cells hold that many, \code{cp} is \code{NA} at every level.}
 #'   \item{\code{moran_z}}{The standardised deviate of Moran's I on the
 #'     residuals of the cell means regressed on the cell-mean predictors (an
 #'     intercept alone when there are none): how much spatial structure the
@@ -311,7 +312,13 @@
 #'   or whose range is below the shortest lag fitted (a structure that
 #'   cannot be told from a nugget, so the nugget is not identified either),
 #'   gives neither, and \code{cp} takes its noise variance from the finest
-#'   level (see \code{cp} above).  Under \code{select_on = "split"} the sac must come from
+#'   level (see \code{cp} above).  Whether the model converged is read from
+#'   the model (\code{attr(attr(sac, "variogram_model"), "converged")}, which
+#'   \code{estimate_sac_range()} sets), not from the reason: the reason names
+#'   one ground for the refusal, and a fit that did not converge is most
+#'   often refused as past the largest lag.  The warning then names both.  A
+#'   sac that carries no such flag (one made by hand, say) is judged by its
+#'   reason.  Under \code{select_on = "split"} the sac must come from
 #'   the selection half alone: run the profile once without it, fit the sac
 #'   on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
 #'   call with the same \code{seed}, which makes the same split.  When
@@ -670,6 +677,23 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # penalty, ran to the support ceiling (7 cells with the nugget at 0.98).
     rejected <- attr(sac, "rejected_reason")
     rejected <- if (!is.finite(r) && length(rejected)) as.character(rejected)[1L] else NULL
+    # Whether the model converged is read off the model, not off the reason.
+    # estimate_sac_range() gives a refusal one reason, and a fit that stopped
+    # at its iteration limit with a range past the largest lag is "fitted
+    # range exceeds the largest lag fitted"; one whose variogram also falls
+    # with distance is "empirical variogram decreases with distance".  Looking
+    # for "converge" in the reason alone took those fits' nuggets for Cp as
+    # fitted values, which is most of the fits that do not converge: with an
+    # east-west trend on an exponential field (300 points, 25 draws) every
+    # all-pairs fit stopped at the limit, every one was refused as past the
+    # lags, and Cp was given nuggets of 1.18-1.62 where the field's was 0.1.
+    # gstat's own verdict rides on every model estimate_sac_range() fits (see
+    # .vgm_converged()).  A sac that carries none (made by hand, built from
+    # REML parameters, or saved before the flag existed) is judged by its
+    # reason, as every sac used to be; and a reason that says the fit did not
+    # converge is believed whatever the flag says.
+    not_converged <- !is.null(rejected) &&
+      (isFALSE(.vgm_converged(vm)) || grepl("converge", rejected, fixed = TRUE))
     cor_fn <- if (is.data.frame(vm)) .vgm_correlation_fn(vm) else NULL
     if (!is.null(cor_fn)) {
       vg <- list(nugget = .vgm_nugget_of(vm),
@@ -681,12 +705,27 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (!is.finite(vg$psill) || vg$psill <= 0) vg <- NULL
     }
     if (!is.null(vg) && !is.null(rejected)) {
-      if (grepl("converge", rejected, fixed = TRUE)) {
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s); ",
+      if (not_converged) {
+        # Both facts are named: why the range was refused, and that the fit
+        # behind it did not converge, which the reason leaves out whenever it
+        # names the other ground.  The close says what `cp` is left with in
+        # every case.  The fallback further down reads the residual mean
+        # square of the finest level whose cells hold at least two scored
+        # rows on average, and where no level does (only finer `levels` were
+        # asked for, or the response is missing on most rows) `cp` is NA at
+        # every level.  "From the finest level" alone was untrue there, and
+        # more sacs arrive here now that the model's own verdict is read: one
+        # refused as past the lags gave `cp` 0.82 and 0.87 from its nugget of
+        # 0.5 at 200 and 250 cells of 300 points, and gives NA.
+        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s)%s; ",
                              "its nugget and sill are where the optimiser stopped, not ",
                              "fitted values, so neither is used: `reliability` is NA and ",
-                             "`cp` takes its noise variance from the finest level."),
-                      sac_what, rejected)
+                             "`cp` takes its noise variance from the finest level whose ",
+                             "cells hold at least two scored rows on average, and is NA ",
+                             "at every level when none does."),
+                      sac_what, rejected,
+                      if (grepl("converge", rejected, fixed = TRUE)) ""
+                      else ", and its variogram model did not converge")
         vg <- NULL
       } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
         .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s): ",
