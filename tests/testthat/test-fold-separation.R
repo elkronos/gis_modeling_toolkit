@@ -50,8 +50,8 @@ test_that("a supplied range gives the correlation-weighted share of the hold-out
   pts <- make_pts()
   f <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
   s <- fold_separation(f, pts, sac = 200)
-  expect_false(any(is.na(s$within_range)))
-  expect_true(all(s$within_range >= 0 & s$within_range <= 1))
+  expect_false(any(is.na(s$mean_cor)))
+  expect_true(all(s$mean_cor >= 0 & s$mean_cor <= 1))
   # On random folds over a 1000-unit square, every held-out point has a
   # training neighbour far closer than 200 units.  The column used to count
   # each such point as 1, so it read exactly 1 for every fold whatever the
@@ -62,15 +62,15 @@ test_that("a supplied range gives the correlation-weighted share of the hold-out
   d  <- apply(xy[te, , drop = FALSE], 1L, function(p)
     min(sqrt((xy[tr, 1] - p[1])^2 + (xy[tr, 2] - p[2])^2)))
   expect_true(all(d < 200))
-  expect_equal(s$within_range[1], mean(exp(-3 * d / 200)))
-  expect_true(all(s$within_range > 0.3 & s$within_range < 1))
+  expect_equal(s$mean_cor[1], mean(exp(-3 * d / 200)))
+  expect_true(all(s$mean_cor > 0.3 & s$mean_cor < 1))
   # Without a range the column is present but empty, and the print method
   # then omits it rather than showing a column of NAs.
   s0 <- fold_separation(f, pts)
-  expect_true(all(is.na(s0$within_range)))
-  expect_false(grepl("within_range", paste(utils::capture.output(print(s0)),
+  expect_true(all(is.na(s0$mean_cor)))
+  expect_false(grepl("mean_cor", paste(utils::capture.output(print(s0)),
                                            collapse = " ")))
-  expect_true(grepl("within_range", paste(utils::capture.output(print(s)),
+  expect_true(grepl("mean_cor", paste(utils::capture.output(print(s)),
                                           collapse = " ")))
 })
 

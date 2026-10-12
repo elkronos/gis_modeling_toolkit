@@ -41,7 +41,7 @@
 #' distributions), and the Wasserstein distance \eqn{W_1} (the unsigned
 #' area).  When a range is available both are also given on the correlation
 #' scale, after each distance \eqn{d} is replaced by \eqn{1 - \rho(d)}, with
-#' \eqn{\rho} the correlation the range implies (see \code{within_range}
+#' \eqn{\rho} the correlation the range implies (see \code{mean_cor}
 #' under Value).  That scale counts a difference between two distances well
 #' inside the range and ignores one between two distances beyond it.
 #'
@@ -88,7 +88,7 @@
 #'   the other is not.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
 #'   single number.  Defaults to the range the folds carry, if any.  Supplying
-#'   one adds the \code{within_range} column and, with a prediction target,
+#'   one adds the \code{mean_cor} column and, with a prediction target,
 #'   the gap on the correlation scale.  A
 #'   range that records its CRS (the folds' own, or an
 #'   \code{estimate_sac_range()} result) is compared with distances measured
@@ -121,14 +121,14 @@
 #'   \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
 #'   for a scheme with no blocks), \code{min_dist} and \code{median_dist}
 #'   (distance from a held-out point to its nearest training point, in the
-#'   units of the CRS the \code{crs} attribute names), \code{within_range},
+#'   units of the CRS the \code{crs} attribute names), \code{mean_cor},
 #'   \code{target_median_dist} (the median distance from the prediction
 #'   points to the fold's training data) and \code{dist_gap} (the fold's mean
 #'   held-out distance minus its mean prediction distance); the last two are
 #'   \code{NA} without a target, and \code{print()} shows them under the
 #'   headings \code{target} and \code{gap}.
 #'
-#'   \code{within_range} is a correlation-weighted share, \code{NA} without a
+#'   \code{mean_cor} is a mean correlation, \code{NA} without a
 #'   range: the mean over the fold's held-out points of \eqn{\rho(d)}, the
 #'   correlation the range leaves between a point and its nearest training
 #'   point at distance \eqn{d}.  It is 1 for a point on top of training data
@@ -137,9 +137,10 @@
 #'   \eqn{\exp(-3 d / range)}, the exponential model whose effective range is
 #'   the range given (0.05 at the range), or the spherical model when the
 #'   range comes from an \code{estimate_sac_range()} fit that was spherical;
-#'   the \code{range_model} attribute says which.  Before this version the
-#'   column was the share of held-out points closer than the range, which
-#'   counted every such point the same.
+#'   the \code{range_model} attribute says which.  Earlier development
+#'   versions had a column \code{within_range} in its place: the share of
+#'   held-out points closer than the range, which counted every such point
+#'   the same.
 #'
 #'   Attributes: \code{method}, \code{sac_range}, \code{range_model},
 #'   \code{crs} (the CRS the distances were measured in),
@@ -147,7 +148,7 @@
 #'   \code{data_sf} does not have, each counted once however many folds
 #'   mention it, as in the \code{cv_*()} field of the same name),
 #'   \code{pooled} (a list with the number, minimum, median and mean of the
-#'   held-out distances over all folds, and the pooled \code{within_range})
+#'   held-out distances over all folds, and the pooled \code{mean_cor})
 #'   and \code{target}: \code{NULL} without a prediction target, otherwise a
 #'   list with \code{n_prediction_points}, \code{source}, \code{basis}
 #'   (\code{"each fold's training data"} or \code{"all sites"}),
@@ -213,7 +214,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
   # Which is what happened when the folds came from another layer: built on
   # prep_model_data()'s 200 points and measured on the 195 that
   # assign_features_to_polygons() kept, every row after the first dropped one
-  # was paired with its neighbour's folds, and within_range read 1.0 against
+  # was paired with its neighbour's folds, and the range column read 1.0 against
   # 0.23-0.48 on the right layer, with nothing said.  cv_*() refuse such folds
   # through the probe make_folds() records; so does this.
   .check_fold_provenance(folds, data_sf, "fold_separation")
@@ -352,7 +353,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
                        length(fold_blocks[[j]]) else NA_integer_,
       min_dist     = if (length(d)) min(d) else NA_real_,
       median_dist  = if (length(d)) stats::median(d) else NA_real_,
-      within_range = if (length(d) && !is.null(rho)) mean(rho(d)) else NA_real_,
+      mean_cor = if (length(d) && !is.null(rho)) mean(rho(d)) else NA_real_,
       target_median_dist = if (length(tg)) stats::median(tg) else NA_real_,
       dist_gap     = if (length(d) && length(tg)) mean(d) - mean(tg) else NA_real_,
       stringsAsFactors = FALSE
@@ -371,7 +372,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
     min_dist     = if (length(cv_all)) min(cv_all) else NA_real_,
     median_dist  = if (length(cv_all)) stats::median(cv_all) else NA_real_,
     mean_dist    = if (length(cv_all)) mean(cv_all) else NA_real_,
-    within_range = if (length(cv_all) && !is.null(rho)) mean(rho(cv_all)) else NA_real_)
+    mean_cor = if (length(cv_all) && !is.null(rho)) mean(rho(cv_all)) else NA_real_)
 
   target <- NULL
   if (!is.null(d_all) && length(cv_all)) {
@@ -496,7 +497,7 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
 
 #' The correlation a range leaves at a distance
 #'
-#' The weight behind \code{within_range} and the correlation-scale gap: 1 at
+#' The weight behind \code{mean_cor} and the correlation-scale gap: 1 at
 #' distance 0, falling towards 0 beyond the range.  The range is an effective
 #' range, so the exponential form is \code{exp(-3 d / range)}.  A range that
 #' carries a single-structure spherical \code{variogram_model} (an
@@ -628,9 +629,9 @@ print.fold_separation <- function(x, ...) {
   if (!is.null(tgt) && !all(is.na(tgt))) df$target <- signif(tgt, 4)
   if (!is.null(gap) && !all(is.na(gap))) df$gap <- signif(gap, 4)
   # A mean correlation, so two decimals, not a percentage of points.
-  wr <- df$within_range; df$within_range <- NULL
+  wr <- df$mean_cor; df$mean_cor <- NULL
   if (!is.null(wr) && !all(is.na(wr)))
-    df$within_range <- ifelse(is.na(wr), "NA", sprintf("%.2f", wr))
+    df$mean_cor <- ifelse(is.na(wr), "NA", sprintf("%.2f", wr))
   if (all(is.na(df$n_blocks))) df$n_blocks <- NULL
   # A leave-one-out design has one row per point.  Printing hundreds of
   # one-point folds pushed the summary below off the screen; the object
@@ -648,7 +649,8 @@ print.fold_separation <- function(x, ...) {
   if (!is.list(pl))
     pl <- list(min_dist = suppressWarnings(min(x$min_dist, na.rm = TRUE)),
                median_dist = NA_real_,
-               within_range = stats::weighted.mean(x$within_range, x$n_test, na.rm = TRUE))
+               mean_cor = if (is.null(x$mean_cor)) NA_real_ else
+                 stats::weighted.mean(x$mean_cor, x$n_test, na.rm = TRUE))
   # Every fold can be unmeasurable at once: no test rows anywhere, or none
   # with a usable coordinate.  Say there is nothing to report.
   if (!is.finite(pl$min_dist)) {
@@ -663,11 +665,11 @@ print.fold_separation <- function(x, ...) {
                 num(pl$median_dist), num(pl$min_dist))
       else sprintf("The closest held-out point is %s from its nearest training point.",
                    num(pl$min_dist)),
-      if (is.finite(sac) && is.finite(pl$within_range))
+      if (is.finite(sac) && is.finite(pl$mean_cor))
         sprintf(paste0(" Under the range of %s that leaves a mean correlation ",
                        "of %.2f between a held-out point and its nearest ",
                        "training point (%s)."),
-                format(sac, digits = 4), pl$within_range,
+                format(sac, digits = 4), pl$mean_cor,
                 if (identical(attr(x, "range_model"), "Sph"))
                   "the spherical correlation, averaged over the hold-out: 1 at distance 0, 0 at the range"
                 else "exp(-3 d / range) averaged over the hold-out: 1 at distance 0, 0.05 at the range")

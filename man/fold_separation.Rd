@@ -22,7 +22,7 @@ the other is not.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying
-one adds the \code{within_range} column and, with a prediction target,
+one adds the \code{mean_cor} column and, with a prediction target,
 the gap on the correlation scale.  A
 range that records its CRS (the folds' own, or an
 \code{estimate_sac_range()} result) is compared with distances measured
@@ -58,14 +58,14 @@ which differs from the list position once a fold has been dropped),
 \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
 for a scheme with no blocks), \code{min_dist} and \code{median_dist}
 (distance from a held-out point to its nearest training point, in the
-units of the CRS the \code{crs} attribute names), \code{within_range},
+units of the CRS the \code{crs} attribute names), \code{mean_cor},
 \code{target_median_dist} (the median distance from the prediction
 points to the fold's training data) and \code{dist_gap} (the fold's mean
 held-out distance minus its mean prediction distance); the last two are
 \code{NA} without a target, and \code{print()} shows them under the
 headings \code{target} and \code{gap}.
 
-\code{within_range} is a correlation-weighted share, \code{NA} without a
+\code{mean_cor} is a mean correlation, \code{NA} without a
 range: the mean over the fold's held-out points of \eqn{\rho(d)}, the
 correlation the range leaves between a point and its nearest training
 point at distance \eqn{d}.  It is 1 for a point on top of training data
@@ -74,9 +74,10 @@ range counts for more than one at nine tenths of it.  \eqn{\rho(d)} is
 \eqn{\exp(-3 d / range)}, the exponential model whose effective range is
 the range given (0.05 at the range), or the spherical model when the
 range comes from an \code{estimate_sac_range()} fit that was spherical;
-the \code{range_model} attribute says which.  Before this version the
-column was the share of held-out points closer than the range, which
-counted every such point the same.
+the \code{range_model} attribute says which.  Earlier development
+versions had a column \code{within_range} in its place: the share of
+held-out points closer than the range, which counted every such point
+the same.
 
 Attributes: \code{method}, \code{sac_range}, \code{range_model},
 \code{crs} (the CRS the distances were measured in),
@@ -84,7 +85,7 @@ Attributes: \code{method}, \code{sac_range}, \code{range_model},
 \code{data_sf} does not have, each counted once however many folds
 mention it, as in the \code{cv_*()} field of the same name),
 \code{pooled} (a list with the number, minimum, median and mean of the
-held-out distances over all folds, and the pooled \code{within_range})
+held-out distances over all folds, and the pooled \code{mean_cor})
 and \code{target}: \code{NULL} without a prediction target, otherwise a
 list with \code{n_prediction_points}, \code{source}, \code{basis}
 (\code{"each fold's training data"} or \code{"all sites"}),
@@ -146,7 +147,7 @@ held-out minus prediction (the signed area between the two cumulative
 distributions), and the Wasserstein distance \eqn{W_1} (the unsigned
 area).  When a range is available both are also given on the correlation
 scale, after each distance \eqn{d} is replaced by \eqn{1 - \rho(d)}, with
-\eqn{\rho} the correlation the range implies (see \code{within_range}
+\eqn{\rho} the correlation the range implies (see \code{mean_cor}
 under Value).  That scale counts a difference between two distances well
 inside the range and ignores one between two distances beyond it.
 

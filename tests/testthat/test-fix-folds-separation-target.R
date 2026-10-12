@@ -54,7 +54,7 @@ test_that("without a prediction target there are distances and no verdict", {
   expect_match(st_flat(fold_separation(rnd, pts)), "No prediction target is given")
 })
 
-test_that("within_range is the correlation-weighted share, not a count inside the range", {
+test_that("mean_cor is a mean correlation, not a count inside the range", {
   pts <- st_even(120, seed = 7)
   f <- st_q(make_folds(pts, k = 4, method = "random_kfold", seed = 2))
   rng <- 6e4
@@ -62,15 +62,15 @@ test_that("within_range is the correlation-weighted share, not a count inside th
   xy <- sf::st_coordinates(pts)
   for (j in 1:4) {
     d <- st_nn(xy[f$folds[[j]]$test, , drop = FALSE], xy[f$folds[[j]]$train, , drop = FALSE])
-    expect_equal(s$within_range[j], mean(exp(-3 * d / rng)))
+    expect_equal(s$mean_cor[j], mean(exp(-3 * d / rng)))
     # Every one of these points is inside the range, which the old column
     # reported as 1 for each fold whatever the distances were.
     expect_true(all(d < rng))
-    expect_lt(s$within_range[j], 1)
+    expect_lt(s$mean_cor[j], 1)
   }
   expect_identical(attr(s, "range_model"), "Exp")
   d_all <- unlist(lapply(f$folds, function(sp) st_nn(xy[sp$test, , drop = FALSE], xy[sp$train, , drop = FALSE])))
-  expect_equal(attr(s, "pooled")$within_range, mean(exp(-3 * d_all / rng)))
+  expect_equal(attr(s, "pooled")$mean_cor, mean(exp(-3 * d_all / rng)))
   expect_equal(attr(s, "pooled")$median_dist, stats::median(d_all))
   # A point at a twentieth of the range weighs more than one at nine tenths.
   expect_gt(exp(-3 * 0.05), 5 * exp(-3 * 0.9))
@@ -82,7 +82,7 @@ test_that("within_range is the correlation-weighted share, not a count inside th
   s2 <- fold_separation(f, pts, sac = sph)
   expect_identical(attr(s2, "range_model"), "Sph")
   d1 <- st_nn(xy[f$folds[[1]]$test, , drop = FALSE], xy[f$folds[[1]]$train, , drop = FALSE])
-  expect_equal(s2$within_range[1], mean(1 - 1.5 * (d1 / rng) + 0.5 * (d1 / rng)^3))
+  expect_equal(s2$mean_cor[1], mean(1 - 1.5 * (d1 / rng) + 0.5 * (d1 / rng)^3))
 })
 
 test_that("the three clear cases read matched, farther and closer", {
@@ -226,4 +226,16 @@ test_that("crossing distributions read as mixed, and no reading names a verdict"
   expect_match(adv(tg("mixed"), "block_kfold"), "give no single direction")
   expect_match(adv(NULL, "block_kfold"), "No prediction target is given")
   expect_match(adv(tg("matched"), "random_kfold"), "do not make a score unbiased by themselves")
+})
+
+test_that("the old column name within_range is gone from the table and its pooled record", {
+  pts <- sf::st_as_sf(data.frame(x = 5e5 + 1000 * c(0, 1, 2, 3, 10, 11, 12, 13),
+                                 y = 4e6 + 1000 * c(0, 1, 0, 1, 0, 1, 0, 1)),
+                      coords = c("x", "y"), crs = 32617)
+  folds <- list(list(train = 1:4, test = 5:8), list(train = 5:8, test = 1:4))
+  s <- fold_separation(folds, pts, sac = 5000)
+  expect_true("mean_cor" %in% names(s))
+  expect_false("within_range" %in% names(s))
+  expect_true("mean_cor" %in% names(attr(s, "pooled")))
+  expect_false("within_range" %in% names(attr(s, "pooled")))
 })
