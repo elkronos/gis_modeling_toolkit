@@ -12,7 +12,7 @@ spatialkit_quiet(quiet = TRUE)
 threshold (\code{logger::ERROR}, or the value a previous call returned)
 sets that level instead, which is how to put back exactly what was in
 force rather than the default: \code{old <- spatialkit_quiet();
-  spatialkit_quiet(old)}.}
+spatialkit_quiet(old)}.}
 }
 \value{
 Invisibly, the threshold that was in force before the change, a
@@ -46,9 +46,9 @@ spatialkit_quiet(old)          # back to whatever it was
 spatialkit_quiet(FALSE)        # or back to the WARN+ default
 }
 \seealso{
-Other package options and caches: 
-\code{\link{clear_fitted_cache}()},
-\code{\link{clear_grid_cache}()},
-\code{\link{create_grid_polygons_cached}()}
+Other package options and caches:
+\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}}
 }
 \concept{package options and caches}

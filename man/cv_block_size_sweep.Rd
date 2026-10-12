@@ -72,7 +72,9 @@ cross-validation: \code{block_size} (\code{NA} for the random
 reference), \code{method}, \code{blocks_used}, \code{k} (the folds
 actually built), \code{n_folds_succeeded}, \code{value} (the pooled
 metric), \code{fold_min}, \code{fold_max} and \code{fold_sd} (its spread
-across folds).  Attributes: \code{metric}, \code{sac_range} (the
+across folds), and \code{block_width} and \code{block_height} (the
+width and height of the grid cells built at that size, \code{NA} for
+the random reference).  Attributes: \code{metric}, \code{sac_range} (the
 effective range, or \code{NA}), \code{crs}, \code{k} (the folds
 requested, which \code{print()} and \code{plot()} report),
 \code{n_fits}, \code{response_var}, and \code{results}, the full
@@ -117,7 +119,7 @@ grid would hold more than the 1,000,000 \code{make_folds()} will build is
 dropped.  The count is of grid cells: on clustered data a grid
 of \code{k} or more cells can have fewer than \code{k} that hold points,
 and \code{make_folds()} then lowers \code{k} at that size, which the
-\code{k} column shows.  On an extent much longer than it is wide every
+\code{k} column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every
 rung can fall below the autocorrelation range while longer blocks would
 still fit \code{k} times along the longer side; the sweep warns when
 that happens, and \code{block_sizes} is then the way to reach past the
@@ -125,8 +127,27 @@ range.  Sizes are in the units of the CRS the folds are built in
 (\code{make_folds()}'s \code{params$crs}, metres for geographic input),
 and the returned table records that CRS.  Each is the \emph{minimum} block
 edge handed to \code{make_folds()}, which fits a whole number of cells
-across the extent, so the cells are somewhat longer than the size on the
-axis (up to twice as long).
+across each axis of the extent, so on an axis at least as long as the
+size the cells are somewhat longer than it (up to just under twice as
+long).  An axis shorter than the size is spanned by one row or column of
+cells, which are then shorter than the size there.  The
+\code{block_width} and \code{block_height} columns give the cells built
+at each size.
+}
+
+\section{Warnings raised once for the sweep}{
+
+Every size is a \code{\link{cv_spatial}()} on the same layer.  The
+warnings \code{\link{prep_model_data}()} raises about that layer (class
+\code{spatialkit_rows_dropped}, counting the incomplete rows dropped, and
+\code{spatialkit_constant_predictor}) are raised once, not once per
+size.  With a GWR learner, the two warnings in
+which \code{predict()} counts held-out locations
+(\code{"spatialkit_gwr_not_estimable"} and
+\code{"spatialkit_gwr_extrapolation"}) are raised once each, under this
+function's name, with the totals over every size; the same rows are
+predicted at every size, so a location can be counted once per size (see
+\code{\link{predict.gwr_fit}}).
 }
 
 \examples{
@@ -152,17 +173,17 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 \seealso{
 \code{\link{plot.block_size_sweep}()}.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

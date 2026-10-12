@@ -78,7 +78,7 @@ test_that("the survey is the weighted condition index at every location", {
 })
 
 test_that("fit_gwr_model() keeps the survey and the global index on the fit", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   pts <- lc_points()
   fit <- suppressWarnings(suppressMessages(
     fit_gwr_model(pts, "z", c("a", "b"), adaptive = TRUE, bandwidth = 60)))
@@ -112,7 +112,7 @@ test_that("fit_gwr_model() keeps the survey and the global index on the fit", {
 })
 
 test_that("the collinearity warning is the exact fraction, and quiet when there is nothing", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   d <- lc_clusters()
   # Every warning raised while evaluating `expr`, muffled; the value comes
   # back beside them, so a fit that fails is a test failure rather than a
@@ -134,7 +134,7 @@ test_that("the collinearity warning is the exact fraction, and quiet when there 
 })
 
 test_that("the coefficient map draws the local coefficient and masks collinear windows", {
-  skip_if_not_installed("ggplot2"); skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("ggplot2"); skip_if_not_installed("sp")
   pts <- lc_points()
   fit <- suppressWarnings(suppressMessages(
     fit_gwr_model(pts, "z", c("a", "b"), adaptive = TRUE, bandwidth = 60)))

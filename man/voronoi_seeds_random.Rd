@@ -22,7 +22,10 @@ loop over \code{\link[=set.seed]{set.seed()}}.}
 \value{
 An sf object of \code{k} random POINTs (fewer only in the degenerate
 case above), with \code{seed_id} and \code{method = "random"} columns matching
-\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and \code{attr(, "cover")}, the polygons of \code{boundary}:
+\code{\link[=build_tessellation]{build_tessellation()}} clips the cells to it (grown by 2 percent of its
+diagonal) when no \code{boundary} is passed there, so the cells fill the area
+the seeds were drawn in and not only the seeds' own hull.
 }
 \description{
 Draws \code{k} seed points uniformly at random inside \code{boundary}, ignoring where
@@ -54,14 +57,14 @@ identical(st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)),
           st_coordinates(voronoi_seeds_random(bnd, k = 10, set_seed = 7)))
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}
 }
 \concept{tessellation}

@@ -82,7 +82,9 @@ test_that("auto-generated block folds stay aligned when prep_model_data drops ro
   data_sf <- sf::st_as_sf(df, coords = c("px", "py"), crs = 32632)
   data_sf$..row_id <- seq_len(n)
 
-  dat_sf   <- prep_model_data(data_sf, "y", "x1")
+  # The drop is said with a classed warning.
+  expect_warning(dat_sf <- prep_model_data(data_sf, "y", "x1"),
+                 class = "spatialkit_rows_dropped")
   keep_idx <- dat_sf$..row_id
   expect_length(keep_idx, n - 2L)
   expect_false(any(c(3L, 17L) %in% keep_idx))
@@ -169,7 +171,9 @@ test_that("the probe survives dropping rows and reprojection", {
   # prep_model_data() drops incomplete cases, so the probe must tolerate
   # missing probe rows rather than treating them as a mismatch.
   a2 <- a; a2$a[c(2, 5, 11)] <- NA
-  expect_no_error(cv_rf(a2, "z", "a", folds = folds_a, num_trees = 30, seed = 1))
+  expect_warning(
+    expect_no_error(cv_rf(a2, "z", "a", folds = folds_a, num_trees = 30, seed = 1)),
+    class = "spatialkit_rows_dropped")
 
   # The probe is taken in EPSG:4326, so folds built on geographic input still
   # match after make_folds()/prep_model_data() project to their own CRS.
@@ -272,8 +276,12 @@ test_that("n_folds_attempted counts the folds supplied, and a dropped fold warns
   a$a[a$..row_id %in% kill] <- NA
   if (!("..row_id" %in% names(a))) a$..row_id <- seq_len(nrow(a))
   a$a[kill] <- NA
-  expect_warning(cv <- cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1),
-                 "dropped before fitting")
+  # Two warnings: the rows prep_model_data() dropped, and the fold that was
+  # left with nothing to test on.
+  expect_warning(
+    expect_warning(cv <- cv_rf(a, "z", "a", folds = f, num_trees = 30, seed = 1),
+                   "dropped before fitting"),
+    class = "spatialkit_rows_dropped")
   expect_equal(cv$n_folds_attempted, 5L)
   expect_equal(cv$n_folds_succeeded, 4L)
 })

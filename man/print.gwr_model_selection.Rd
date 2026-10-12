@@ -18,17 +18,25 @@
 }
 \description{
 Shows the forward-selection trail: the response, the candidate predictors,
-and the top-ranked models with their criterion values, so you can see both
-which model won and by how much.  A shallow gap between the first few rows
-means the ranking is not well identified and the choice of predictors should
-not be treated as settled.  Check the gap before reporting one model as the
-selected one.
+and the top-ranked models with their criterion values and, in the
+\code{delta} column, how far each is from the best.  Below the table it
+lists the models within 2 of the best, which a difference in AICc does not
+separate (Burnham and Anderson 2002), and names the smallest of them.  When
+several models are that close the ranking is not well identified and the
+choice of predictors should not be treated as settled; when the model
+without predictors (\code{<none>}) is among them, no candidate has been
+shown to help.
+}
+\references{
+Burnham, K. P. and Anderson, D. R. (2002). \emph{Model Selection and
+Multimodel Inference: A Practical Information-Theoretic Approach}, 2nd
+edition. Springer.
 }
 \seealso{
-Other print methods: 
-\code{\link{print.aoa}()},
-\code{\link{print.morans_i}()},
-\code{\link{print.resolution_profile}()},
-\code{\link{print.sac_range}()}
+Other print methods:
+\code{\link[=print.aoa]{print.aoa()}},
+\code{\link[=print.morans_i]{print.morans_i()}},
+\code{\link[=print.resolution_profile]{print.resolution_profile()}},
+\code{\link[=print.sac_range]{print.sac_range()}}
 }
 \concept{print methods}

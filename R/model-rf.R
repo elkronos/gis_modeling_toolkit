@@ -22,12 +22,22 @@
 #' @noRd
 .warn_include_coords <- function() {
   .log_warn_once("rf_include_coords",
-                 paste0("fit_rf_model(): include_coords = TRUE. A forest given ",
-                        "the coordinates can reproduce the training surface by ",
-                        "memorising location and then fail wherever it has not ",
-                        "been; random cross-validation will not detect this. ",
-                        "Score the result with cv_rf() and blocked folds, not ",
-                        "with the out-of-bag error (Meyer et al. 2019)."))
+                 paste0("fit_rf_model(): include_coords = TRUE. The forest ",
+                        "splits on location and can fit the training surface ",
+                        "by memorising location, so the out-of-bag error and ",
+                        "random cross-validation overstate its accuracy. How ",
+                        "much the coordinates help depends on ",
+                        "how far from the training data the predictions are: ",
+                        "the gain is largest between sampled points, fades ",
+                        "with distance, and can reverse in a region the data ",
+                        "never visited (Meyer et al. 2019). Score the forest ",
+                        "with cv_rf() and blocked or distance-matched folds ",
+                        "(make_folds(method = \"block_kfold\") or \"nndm\"), ",
+                        "and compare it on the same folds with the forest ",
+                        "fitted without coordinates: build the folds once ",
+                        "with make_folds() and pass them as `folds` to two ",
+                        "cv_rf() calls, one with include_coords = TRUE and ",
+                        "one without. ?cv_rf shows the two calls."))
 }
 
 
@@ -156,18 +166,65 @@
 #' \code{\link{predict_surface}}, \code{\link{area_of_applicability}} and the
 #' \code{plot()} method like any other backend.
 #'
-#' @section Coordinates are not predictors by default:
-#' Handing a random forest the x and y coordinates lets it reproduce the
-#' training surface almost exactly by memorising location, and then fail badly
-#' anywhere it has not seen. Random cross-validation will not catch this:
-#' nearby points leak between folds, so the memorised surface scores well.
-#' That is how the practice became common. Meyer et al. (2019) show the
-#' collapse directly. \code{include_coords} therefore defaults to
-#' \code{FALSE}, and setting it to \code{TRUE} logs a caution, once per
-#' session (it is a deliberate choice, so it is not raised as an R warning,
-#' and it is not repeated for every fold of a cross-validation). If you do use it,
-#' score the model with \code{\link{cv_spatial}} and blocked folds, never with
-#' the out-of-bag error.
+#' @section Coordinates as predictors:
+#' \code{include_coords = TRUE} adds the x and y coordinates to the
+#' predictors. They are the only spatial information a forest can be given:
+#' without them it sees the covariates alone, and \code{print()} says "no
+#' spatial information used". The default is \code{FALSE}.
+#'
+#' What the coordinates buy depends on where the predictions are wanted. A
+#' forest splits on location as on any column, so it follows the training
+#' surface closely between sampled points, and has nothing but the nearest
+#' edge of the data to go on beyond them. Between sampled points the
+#' coordinates can lower the error, most where the covariates carry little
+#' of the spatial structure themselves, and the gain fades with distance
+#' from the training data.
+#' Beyond the autocorrelation range, or in a region the data never visited,
+#' it can reverse: in a simulated hold-out of an unvisited strip the forest
+#' with coordinates was 5.2\% worse on average and 31\% worse in the worst
+#' run. Meyer et al. (2019) report larger failures of the same kind. With
+#' covariates that carry the spatial structure themselves, expect less from
+#' the coordinates.
+#'
+#' What does not change is how such a forest has to be scored. It fits
+#' location closely, nearby points leak between random folds, and the
+#' out-of-bag error is a random hold-out too, so both overstate its
+#' accuracy. Score it with \code{\link{cv_rf}} and
+#' blocked folds (\code{make_folds(method = "block_kfold")}) or folds
+#' matched to the prediction distance (\code{method = "nndm"}), at the
+#' distances the map will be used at, never with the out-of-bag error, and
+#' compare the two forests on the same folds. That comparison is two calls:
+#' build the folds once and hand them to \code{cv_rf()} with and without
+#' the coordinates.
+#' \preformatted{
+#' folds   <- make_folds(dat, k = 5, method = "block_kfold")
+#' plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)
+#' with_xy <- cv_rf(dat, "z", c("a", "b"), folds = folds,
+#'                  include_coords = TRUE)
+#' c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+#' }
+#' \code{\link{cv_rf}} runs the same comparison in its example and reads it
+#' fold by fold. Setting
+#' \code{include_coords = TRUE} logs that advice, once per session (it is a
+#' deliberate choice, so it is not raised as an R warning, and it is not
+#' repeated for every fold of a cross-validation).
+#'
+#' @section Categorical predictors:
+#' A predictor that is an unordered factor or a character column is split
+#' with \code{respect.unordered.factors = "order"}: ranger orders its levels
+#' by mean response once, before growing, and splits on that order. That is
+#' the handling ranger's own help recommends. ranger's default for a
+#' regression forest, \code{"ignore"}, splits on the order the levels happen
+#' to be stored in (alphabetical, for most data), which for a nominal
+#' variable is arbitrary: with a 40-level factor carrying random level
+#' effects, the test RMSE was 1.05 by level order against 0.57 by response
+#' order, lower in 10 draws of 10. Pass \code{respect.unordered.factors}
+#' through \code{...} to choose otherwise (\code{"ignore"}, or
+#' \code{"partition"} for every two-way split of the levels, which is slow
+#' beyond a few levels). Ordered factors are left alone and split on their
+#' own order, and with \code{splitrule = "extratrees"} ranger's own default
+#' for that rule, \code{"partition"}, is kept. The setting is recorded in
+#' \code{$info$respect_unordered_factors} and printed with the fit.
 #'
 #' @section The out-of-bag error is a random hold-out:
 #' \code{ranger}'s OOB error holds each observation out of the trees that did
@@ -210,7 +267,8 @@
 #'   high-cardinality predictors (Strobl et al. 2007), which is why permutation
 #'   is the default despite costing more.
 #' @param include_coords Add the coordinates as predictors. Default
-#'   \code{FALSE}; see above.
+#'   \code{FALSE}, which leaves the forest with no spatial information; see
+#'   \emph{Coordinates as predictors}.
 #' @param replace Logical; grow each tree on a bootstrap sample drawn
 #'   \emph{with} replacement (\code{TRUE}, ranger's default and this one) or
 #'   on a subsample drawn without replacement (\code{FALSE}).  Strobl et al.
@@ -245,11 +303,18 @@
 #'   \code{sample.fraction}, \code{x}, \code{y}) are rejected with a
 #'   message naming the wrapper argument to use instead.  Passing them here
 #'   would reach \code{ranger()} twice and fail the call.
+#'   \code{respect.unordered.factors} passed here overrides the
+#'   \code{"order"} this function sets when a predictor is categorical; see
+#'   \emph{Categorical predictors}.
 #'
 #' @return An \code{rf_fit} object (inherits from \code{spatial_fit}).
 #'   \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
 #'   \code{importance_type}, \code{importance} (a named numeric, or
 #'   \code{NULL} when \code{importance = "none"}), \code{include_coords},
+#'   \code{categorical_predictors} (the unordered factor and character
+#'   predictors, possibly none) and \code{respect_unordered_factors} (how
+#'   ranger was told to split them: \code{"order"} unless overridden through
+#'   \code{...}, and \code{NA} when there is none and nothing was passed),
 #'   \code{replace} and \code{sample_fraction} (the sampling each tree was
 #'   grown on, with \code{sample_fraction} resolved to the number ranger
 #'   used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
@@ -272,10 +337,12 @@
 #' solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 #'
 #' @seealso \code{\link{cv_rf}} for a spatially blocked performance estimate,
-#'   \code{\link{area_of_applicability}}, which can take
-#'   \code{weights = pmax(fit$info$importance, 0)} when that importance is
-#'   finite (it is \code{NaN} when no row is out of bag; see "What
-#'   fitted() returns").
+#'   \code{\link{area_of_applicability}}, which weights the predictors by
+#'   \code{pmax(fit$info$importance, 0)} by default when that importance is
+#'   finite and the forest has out-of-bag skill (it is \code{NaN} when no row
+#'   is out of bag; see "What fitted() returns"), and which needs
+#'   \code{categorical = "indicator"} or \code{"drop"} for a forest with a
+#'   factor predictor.
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {
@@ -393,16 +460,51 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
   num_threads <- .sanitize_core_count(
     if (is.null(num_threads)) getOption("mc.cores", 1L) else num_threads)
 
+  # Unordered factors and character columns.  ranger's default for a
+  # regression forest, respect.unordered.factors = "ignore", splits them on
+  # the order their levels are stored in, which for a nominal variable is
+  # usually the alphabet: a 40-level factor with random level effects gave a
+  # test RMSE of 1.05 that way against 0.57 with "order" (levels ordered by
+  # mean response once, before growing), lower in 10 draws of 10.  ranger's
+  # help recommends "order", so that is what a categorical predictor gets
+  # unless the caller says otherwise through `...`.  Ordered factors carry an
+  # order of their own and are untouched by the setting.  The one case left
+  # to ranger is splitrule = "extratrees", where its own default is already
+  # "partition" and not "ignore".
+  cat_pred <- names(X)[vapply(X, function(v)
+    (is.factor(v) && !is.ordered(v)) || is.character(v), logical(1))]
+  ruf_set    <- "respect.unordered.factors" %in% dot_names
+  extratrees <- "splitrule" %in% dot_names &&
+    identical(list(...)[["splitrule"]], "extratrees")
+  ruf_order  <- !ruf_set && !extratrees && length(cat_pred) > 0L
+  ruf <- if (ruf_set) {
+    v <- list(...)[["respect.unordered.factors"]]
+    if (is.null(v)) NA_character_
+    else if (is.logical(v)) (if (isTRUE(v)) "order" else "ignore")
+    else as.character(v)[1L]
+  } else if (length(cat_pred) == 0L) NA_character_
+  else if (extratrees) "partition" else "order"
+
   # .call_capturing_stderr(): ranger diagnoses a bad argument on stderr from
   # C++ and then throws "User interrupt or internal error.", so the message
   # this reported named nothing a caller could act on while the real reason
   # printed itself to the console past every handler.
+  # Two spelled-out calls rather than do.call(): ranger keeps its call, and
+  # do.call() would put the whole predictor frame inside it.
   rr <- .call_capturing_stderr(function()
-    ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
-                   mtry = mtry, min.node.size = min_node_size,
-                   importance = importance, seed = seed,
-                   replace = replace, sample.fraction = sample_fraction,
-                   num.threads = num_threads, ...))
+    if (ruf_order)
+      ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
+                     mtry = mtry, min.node.size = min_node_size,
+                     importance = importance, seed = seed,
+                     replace = replace, sample.fraction = sample_fraction,
+                     num.threads = num_threads,
+                     respect.unordered.factors = "order", ...)
+    else
+      ranger::ranger(x = X, y = y, num.trees = as.integer(num_trees),
+                     mtry = mtry, min.node.size = min_node_size,
+                     importance = importance, seed = seed,
+                     replace = replace, sample.fraction = sample_fraction,
+                     num.threads = num_threads, ...))
   if (!is.null(rr$error))
     stop(sprintf("fit_rf_model(): ranger() failed: %s",
                  .stderr_reason(rr$error, rr$stderr)), call. = FALSE)
@@ -448,7 +550,9 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
                   # suggests for area_of_applicability() are refused too.
                   if (identical(importance, "permutation"))
                     paste0(" area_of_applicability() cannot be weighted by ",
-                           "that importance either: pass weights = NULL.")
+                           "that importance either: pass weights = NULL, or ",
+                           "leave its default weights = \"auto\", which uses ",
+                           "equal weights for this fit.")
                   else "")
   } else if (!fold_fit && n_no_oob > 0L) {
     .warn_and_log(paste0("fit_rf_model(): %d of %d rows were sampled by every ",
@@ -484,6 +588,10 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
       importance_type  = importance,
       importance       = imp,
       include_coords   = isTRUE(include_coords),
+      # The unordered factor and character predictors, and how ranger was
+      # told to split them (NA: none, and nothing passed).
+      categorical_predictors    = cat_pred,
+      respect_unordered_factors = ruf,
       replace          = isTRUE(replace),
       sample_fraction  = sample_fraction,
       oob_rmse         = if (is.finite(oob_mse)) sqrt(oob_mse) else NA_real_,
@@ -583,6 +691,22 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #' whole spatial blocks, so neighbours of a held-out point are not sitting in
 #' the training set.
 #'
+#' @section Comparing the forest with and without coordinates:
+#' Whether \code{include_coords = TRUE} lowers the error depends on how far
+#' from the training data the predictions are (see \emph{Coordinates as
+#' predictors} in \code{\link{fit_rf_model}}), so it is a comparison to make
+#' on your own data, at the block size the map will be used at. Score the
+#' two forests on the same folds: build the folds once with
+#' \code{\link{make_folds}} and pass the result as \code{folds} to two
+#' calls, one with \code{include_coords = TRUE} and one without. Each fold
+#' then holds out the same rows in both, so the two \code{overall} rows
+#' compare like with like and the two \code{fold_metrics} tables pair up
+#' fold by fold. A difference in \code{overall} that is small beside the
+#' spread of the per-fold differences is not evidence for either forest.
+#' The example below runs the comparison. \code{\link{compare_models_cv}}
+#' takes one set of forest arguments (\code{rf_args}) per call, so it scores
+#' one of the two forests, not both.
+#'
 #' @param data_sf An sf object.
 #' @param response_var Response column name.
 #' @param predictor_vars Predictor column names.
@@ -609,6 +733,10 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   four threads in total, where it would otherwise mean four times the
 #'   session's \code{mc.cores}.
 #' @param block_size,auto_range,boundary Passed to \code{\link{cv_spatial}}.
+#'   \code{block_size} and \code{auto_range = TRUE} size the blocks built
+#'   when \code{folds} is \code{NULL}; beside supplied \code{folds} they
+#'   have nothing to size and raise a warning of class
+#'   \code{spatialkit_fold_args_ignored}.
 #' @param pointize How non-POINT geometry is reduced to a point before
 #'   fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.
 #' @param metrics Optional scoring function of your own, passed to
@@ -636,6 +764,18 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   )
 #'   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
 #'   cv_rf(dat, "z", "a", k = 4)$overall
+#'
+#'   # The forest with and without the coordinates, on the same blocked
+#'   # folds.  (The second call logs the include_coords caution, once per
+#'   # session; this comparison is what it asks for.)  This response has no
+#'   # spatial structure, so here the coordinates can only cost accuracy.
+#'   folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+#'   plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+#'   with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+#'                    include_coords = TRUE)
+#'   c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+#'   # Fold by fold: positive where the coordinates lowered the error.
+#'   plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
 #' }
 #' @export
 cv_rf <- function(data_sf, response_var, predictor_vars, folds = NULL, k = 5,
@@ -895,9 +1035,14 @@ coef.rf_fit <- function(object, ...) {
 #'
 #' Shows the forest's shape (formula, n, number of trees, \code{mtry}, node
 #' size) along with the out-of-bag error and, prominently, whether the
-#' coordinates were used as predictors.  That last line is the one to check:
-#' a forest fitted with \code{include_coords = TRUE} can memorise location and
-#' score well out-of-bag while failing everywhere it has not been.
+#' coordinates were used as predictors.  That line is the one to check.  A
+#' forest fitted without them prints "no spatial information used": it sees
+#' the covariates alone.  One fitted with \code{include_coords = TRUE} fits
+#' location closely, so its out-of-bag error overstates its accuracy and it
+#' has to be scored with blocked or distance-matched folds; see
+#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}.  When a
+#' predictor is an unordered factor or a character column, a line says how
+#' ranger was told to split it.
 #'
 #' @param x An \code{rf_fit}.
 #' @param ... Ignored.
@@ -918,7 +1063,21 @@ print.rf_fit <- function(x, ...) {
               x$info$num_trees %||% NA_integer_,
               format(x$info$mtry %||% NA), format(x$info$min_node_size %||% NA)))
   cat(sprintf("  Coords as predictors: %s\n",
-              if (isTRUE(x$info$include_coords)) "YES - see ?fit_rf_model" else "no"))
+              if (isTRUE(x$info$include_coords))
+                "YES - score with blocked folds; see ?fit_rf_model"
+              else "no - no spatial information used; see ?fit_rf_model"))
+  # Only when the fit recorded it and there is something to say.
+  catp <- x$info$categorical_predictors
+  ruf  <- x$info$respect_unordered_factors
+  if (length(catp) > 0L && is.character(ruf) && length(ruf) == 1L && !is.na(ruf))
+    cat(sprintf("  Categorical: %s split by %s (respect.unordered.factors = \"%s\")\n",
+                paste(catp, collapse = ", "),
+                switch(ruf,
+                       order     = "levels ordered by mean response",
+                       ignore    = "stored level order",
+                       partition = "every two-way partition of the levels",
+                       "ranger's rule"),
+                ruf))
   # Only when the fit recorded it: an rf_fit built before these fields
   # existed prints as it did.
   if (!is.null(x$info$replace)) {

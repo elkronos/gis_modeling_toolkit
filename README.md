@@ -73,9 +73,9 @@ coarse blurs the hotspot, too fine chases noise with near-empty cells,
 and the middle count, the one `resolution_profile()` rates most
 reliable, keeps the trend without tracing the sampling pattern. It is a
 reading, not a verdict: the reliability of the cell means stays within 2
-percent of its best from 3 to 25 cells here, and the sites are spread
+percent of its best from 2 to 15 cells here, and the sites are spread
 evenly, so there is no elbow for `determine_optimal_levels()` to find.
-`vignette("resolution")` covers how that number is chosen and the four
+`vignette("resolution")` covers how that number is chosen and the
 criteria that disagree about it.
 
 <figure>
@@ -136,7 +136,7 @@ produces a message naming it.
 |--------------------------------|---------------------------------------------------------------------------|
 | `gstat`                        | variogram fitting: `estimate_sac_range()`, design effects, kriging checks |
 | `ranger`                       | `fit_rf_model()`, `cv_rf()`                                               |
-| `sp`, `GWmodel`                | `fit_gwr_model()`, `cv_gwr()`                                             |
+| `sp`                           | `fit_gwr_model()`, `cv_gwr()`                                             |
 | `brms` (plus a Stan toolchain) | `fit_bayesian_spatial_model()`, `cv_bayes()`                              |
 | `geometry`                     | Delaunay triangle tessellations                                           |
 | `ggplot2`                      | every `plot_*()` function and `plot()` method                             |
@@ -276,7 +276,7 @@ approximate.
 | check whether a cell mean is the best estimate of that cell             | `kriging_adequacy()`                                                                                        |
 | draw the result                                                         | `plot_tessellation_map()`                                                                                   |
 | know how far spatial correlation reaches                                | `estimate_sac_range()`, and `sac_nugget()` for its nugget                                                   |
-| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`)                |
+| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`)       |
 | see whether my folds actually separate                                  | `plot_folds()`                                                                                              |
 | size the blocks by measurement                                          | `cv_block_size_sweep()`, and `plot()` on the result                                                         |
 | fit a model                                                             | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`                                         |
@@ -313,8 +313,8 @@ afternoon comparing them:
 
 | Backend                                                          | Reach for it when you want                                                                                                                                                                                                                                                 | Cost                                              |
 |------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
-| **GWR** (`fit_gwr_model()`, `GWmodel` + `sp`)                    | spatially varying **coefficients** you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east”                                                                                                                | moderate; grows quickly with n                    |
-| **Bayesian spatial GP** (`fit_bayesian_spatial_model()`, `brms`) | calibrated **uncertainty**: posterior predictive intervals, `se = TRUE` surfaces (the SD of the mean surface; add `type = "predict"` for the predictive SD), CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
+| **GWR** (`fit_gwr_model()`, `sp`)                                | spatially varying **coefficients** you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east”                                                                                                                | moderate; grows quickly with n                    |
+| **Bayesian spatial GP** (`fit_bayesian_spatial_model()`, `brms`) | **uncertainty**: posterior predictive intervals (check their coverage with `cv_bayes()`), `se = TRUE` surfaces (the SD of the mean surface; add `type = "predict"` for the predictive SD), CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
 | **Random forest** (`fit_rf_model()`, `ranger`)                   | **nonlinearity and interactions** without specifying them, and no inference: you get permutation importance in place of coefficients                                                                                                                                       | far the lowest; the one to prototype with         |
 
 Two things that are not backend choices. First, none of them fixes bad
@@ -333,8 +333,8 @@ in them is computed on the spot.
 | vignette                               | covers                                                                                                                  |
 |----------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
 | `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
-| `vignette("resolution")`               | choosing a cell count, the four criteria, and why they disagree                                                         |
-| `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                       |
+| `vignette("resolution")`               | choosing a cell count, the criteria, and why they disagree                                                              |
+| `vignette("spatial-cross-validation")` | the six fold schemes, block sizing, and reading a CV result down to the last row                                        |
 | `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak    |
 | `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                             |
 | `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report                  |
@@ -365,14 +365,14 @@ source(file.path(dir, "00-run-all.R"))  # all ten, seven minutes or so
 | script                | topic                                                              | needs, beyond ggplot2                                   |
 |-----------------------|--------------------------------------------------------------------|---------------------------------------------------------|
 | `01-tessellations.R`  | Voronoi, hex, square and Delaunay cells, and what seeding changes  | geometry for the Delaunay part                          |
-| `02-resolution.R`     | the range, the ladder, four criteria that disagree, and the leak   | gstat                                                   |
+| `02-resolution.R`     | the range, the ladder, the criteria that disagree, and the leak    | gstat                                                   |
 | `03-folds.R`          | random against blocked folds, plus buffered leave-one-out and NNDM |                                                         |
 | `04-block-size.R`     | sweeping the block size, and the two shapes the curve takes        | gstat, for the range marker                             |
 | `05-fit-diagnose.R`   | wrapping your own model, residual autocorrelation, cell means      | gstat, for the residual variogram and the kriging check |
-| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                  | ranger and GWmodel, for the backend comparison          |
+| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                  | ranger and sp, for the backend comparison               |
 | `07-surface-aoa.R`    | predicting onto a grid, and where the map stops meaning anything   | stars for the raster part                               |
 | `08-feature-select.R` | forward selection, and measuring the selection effect              |                                                         |
-| `09-gwr.R`            | coefficients that vary over space                                  | GWmodel                                                 |
+| `09-gwr.R`            | coefficients that vary over space                                  | sp                                                      |
 | `10-bayes.R`          | a Bayesian GP, and whether its intervals are calibrated            | brms and a Stan toolchain; slow                         |
 
 Every script draws with ggplot2. When a package a script needs is absent
@@ -395,7 +395,7 @@ telling you.
 lattice has no extent of its own. Pass `boundary =` a polygon;
 dissolving your source polygons with `st_union()` is the usual way to
 get one. Voronoi and `"triangles"` do not need it; Voronoi falls back to
-the convex hull of the points.
+the convex hull of the points, or of their cover for seeds.
 
 **`prep_model_data(): missing required column(s): X`** A `response_var`
 or `predictor_vars` name that is not in the data. Usually a typo, a case
@@ -466,7 +466,7 @@ asked for.
 
 **`estimate_sac_range()` returned `NA`.** The range was not identified,
 so nothing is reported. `attr(x, "rejected_reason")` names which of the
-six refusals it was, `?estimate_sac_range` says what each one means,
+seven refusals it was, `?estimate_sac_range` says what each one means,
 and `plot()` on the returned object draws the variogram behind it.
 `vignette("spatial-cross-validation")` covers what an `NA` there leaves
 you to decide about the block size.
@@ -503,9 +503,8 @@ changed, and seeing what the package is doing.
 for fold-level parallelism via `parallel::mclapply()` (macOS/Linux; falls
 back to sequential on Windows with a message). `cv_gwr()` accepts it too
 but always runs its folds one after another, with a warning if you ask
-for more: GWmodel runs OpenMP code, which deadlocks forked workers once a
-GWR has been fitted in the session. Parallel folds matter most for
-`cv_bayes()`, where every fold is a full MCMC run:
+for more. Parallel folds matter most for `cv_bayes()`, where every fold
+is a full MCMC run:
 
 ``` r
 # cv_bayes() needs `brms`. Without it every fold fails and you get an empty
@@ -657,7 +656,8 @@ the method references you should cite alongside it if you rely on
 `make_folds(method = "nndm")` (Milà et al. 2022), the Bayesian GP basis
 (Riutort-Mayol et al. 2023), permutation importance in `fit_rf_model()`
 (Strobl et al. 2007), coordinate predictors and blocked validation
-(Meyer et al. 2019), or GWR via `GWmodel` (Lu et al. 2014).
+(Meyer et al. 2019), or GWR, whose kernels and diagnostics follow
+`GWmodel` (Lu et al. 2014).
 
 ### Maintainer
 

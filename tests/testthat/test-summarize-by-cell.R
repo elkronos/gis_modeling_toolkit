@@ -305,10 +305,11 @@ test_that("summarize_by_cell deff='kish' estimates separate ICC for response and
 })
 
 
-test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate", {
-  # Regression test: if predictors are NOT standardised before pooling,
-  # a large-scale variable dominates and the predictor ICC reflects only
-  # that variable.  After z-scoring, both contribute equally.
+test_that("summarize_by_cell gives each predictor its own ICC, whatever its scale", {
+  # This test used to pin ONE pooled predictor ICC (the mean of the
+  # per-column ICCs, z-scored so scale did not dominate).  A pooled value is
+  # right for a column only when every predictor shares it, so each predictor
+  # now has its own, and the assertions below are the per-column ones.
   set.seed(42)
   n_cells <- 10; n_per <- 30
   ids <- rep(seq_len(n_cells), each = n_per)
@@ -335,7 +336,7 @@ test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate"
     )
   )
 
-  # ICC with both predictors (pooled, z-scored)
+  # ICCs with both predictors listed: one per column
   out_both <- summarize_by_cell(pts, response_var = "y",
                                 predictor_vars = c("x_small", "x_big"),
                                 deff = "kish")
@@ -347,11 +348,9 @@ test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate"
                                  deff = "kish")
   da_small <- attr(out_small, "deff_applied")
 
-  # --- The property z-scoring exists for: unit invariance -------------------
-  # Re-express either predictor in units 10^6 times larger.  Standardising
-  # before pooling makes the pooled ICC EXACTLY unchanged.  Without it the
-  # rescaled column carries essentially all the pooled variance, so the answer
-  # would be that column's own ICC.
+  # --- Unit invariance, per column -------------------------------------------
+  # Re-express either predictor in units 10^6 times larger: an ICC is a ratio
+  # of variances of one column, so neither column's ICC moves.
   .rescaled <- function(small_mult, big_mult) {
     p <- pts
     p$x_small <- p$x_small * small_mult
@@ -363,30 +362,25 @@ test_that("summarize_by_cell ICC z-scores predictors so scale does not dominate"
   expect_equal(.rescaled(1, 1e6), da_both$icc_pred, tolerance = 1e-10)
   expect_equal(.rescaled(1e6, 1), da_both$icc_pred, tolerance = 1e-10)
 
-  # --- The pooled value is the (weighted) MEAN of the per-column ICCs -------
-  # Each z-scored column contributes its own cells as separate groups to one
-  # pooled one-way ANOVA, so with equal cell sizes the pooled ICC is the
-  # average of the per-column ICCs.  x_big has essentially no intra-cell
-  # correlation, so the pooled value sits near rho_small / 2.
-  #
-  # An earlier version of this test bracketed rho_small / 4 and derived it
-  # from pooling the two columns under the SAME cell labels.  That derivation
-  # was correct about the code and wrong about the statistic: independent
-  # per-column cell effects average away in a shared cell mean, and the
-  # between-cell sum of squares shrinks by about 1/m.  Measured with four
-  # columns at true rho = 0.5, the old pooled ICC was 0.12 (per-column ANOVA
-  # 0.495), so every predictor SE was ~44% too small.
+  # --- One ICC per predictor column, named by column --------------------------
+  expect_named(da_both$icc_pred, c("x_small", "x_big"))
+  # Each equals the ICC the column gets when it is the only predictor: the
+  # clustered column keeps its own, and the unclustered one is not pulled up
+  # to a pooled value (which was their mean, 0.46, for both).
   out_big <- summarize_by_cell(pts, response_var = "y",
                                predictor_vars = "x_big", deff = "kish")
-  icc_big <- attr(out_big, "deff_applied")$icc_pred
-  if (is.null(icc_big)) icc_big <- 0            # deff not applied when ICC <= 0
-  expect_equal(da_both$icc_pred, (da_small$icc_pred + icc_big) / 2,
-               tolerance = 0.06)
-  # Regression guard against the shared-label pooling: that gave ~rho/4.
-  expect_gt(da_both$icc_pred, 0.35 * da_small$icc_pred)
-
-  # And it is genuinely pulled by BOTH: strictly under the small-only ICC.
-  expect_lt(da_both$icc_pred, da_small$icc_pred)
+  expect_equal(da_both$icc_pred[["x_small"]], da_small$icc_pred[["x_small"]],
+               tolerance = 1e-12)
+  expect_equal(da_both$icc_pred[["x_big"]], attr(out_big, "icc")$pred[["x_big"]],
+               tolerance = 1e-12)
+  expect_gt(da_both$icc_pred[["x_small"]], 0.8)
+  expect_lt(da_both$icc_pred[["x_big"]], 0.05)
+  # And the standard errors follow: each column's SE is the one-predictor
+  # call's, so listing the other predictor changes nothing.
+  expect_equal(out_both[["..se_pred_x_small"]], out_small[["..se_pred_x_small"]],
+               tolerance = 1e-12)
+  expect_equal(out_both[["..se_pred_x_big"]], out_big[["..se_pred_x_big"]],
+               tolerance = 1e-12)
 })
 
 
@@ -614,26 +608,34 @@ test_that(".se_with_deff returns NA, not Inf, at the bound deff == n", {
 })
 
 
-test_that("summarize_by_cell falls back to deff = 1 with no fitted variogram", {
+test_that("summarize_by_cell falls back to Kish with no fitted variogram", {
   # Reachable whenever gstat is unavailable, and also -- deterministically,
   # without uninstalling anything -- when nothing supplies a variogram to fit.
+  # This test used to pin a fallback to deff = 1 (no `deff_applied`, SEs equal
+  # to the uncorrected ones, cell_weight equal to n).  The fallback is Kish
+  # now: the uncorrected interval is the one with the worst coverage of the
+  # grand mean, and Kish needs no variogram.
   pts <- .vgm_cell_points()
 
-  # A real R warning, classed, as well as the log line: the standard errors
-  # come back uncorrected although a correction was asked for.
+  # A real R warning, classed, as well as the log line.
   lines <- capture_spatialkit_log(
     expect_warning(
       out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram"),
       "requires a fitted variogram model", class = "spatialkit_deff_fallback")
   )
   expect_true(log_has(lines, "requires a fitted variogram model"))
-  expect_true(log_has(lines, "Falling back to deff = 1"))
-  expect_null(attr(out, "deff_applied"))
-  expect_false(any(out$deff_applied))
+  expect_true(log_has(lines, "Falling back to deff = \"kish\""))
+  expect_false(log_has(lines, "Falling back to deff = 1"))
+  expect_identical(attr(out, "deff_applied")$method, "kish")
+  expect_identical(attr(out, "deff_applied")$requested, "variogram")
+  expect_true(all(out$deff_applied))
+  expect_identical(unique(out$deff_method), "kish (variogram fallback)")
 
+  kish <- summarize_by_cell(pts, predictor_vars = "z", deff = "kish")
+  expect_equal(out[["..se_pred_z"]], kish[["..se_pred_z"]])
+  expect_equal(out$cell_weight, kish$cell_weight)
   iid <- summarize_by_cell(pts, predictor_vars = "z", deff = 1)
-  expect_equal(out[["..se_pred_z"]], iid[["..se_pred_z"]])
-  expect_equal(out$cell_weight, out$n)
+  expect_true(all(out[["..se_pred_z"]] > iid[["..se_pred_z"]]))
 
   # Same when the estimation attempt itself fails (a broken or absent gstat).
   lines2 <- capture_spatialkit_log({
@@ -645,7 +647,8 @@ test_that("summarize_by_cell falls back to deff = 1 with no fitted variogram", {
       class = "spatialkit_deff_fallback")
   })
   expect_true(log_has(lines2, "requires a fitted variogram model"))
-  expect_null(attr(out2, "deff_applied"))
+  expect_identical(attr(out2, "deff_applied")$method, "kish")
+  expect_identical(unique(out2$deff_method), "kish (variogram fallback)")
 })
 
 
@@ -820,10 +823,11 @@ test_that("deff = 'kish' tolerates rows with no cell id", {
   expect_true(all(is.finite(out[["..se_resp_val"]][!is.na(out$poly_id)])))
 })
 
-test_that("the pooled ICC groups by (variable, cell), not by cell alone", {
-  # Pooling m z-scored columns under one cell label averages independent cell
-  # effects away and shrinks the ICC by ~1/m.  With m = 4 columns at a common
-  # true rho, the pooled estimate must sit near rho, not rho / 4.
+test_that("four predictors at a common ICC each get an estimate near it", {
+  # This test used to pin ONE pooled ICC for the four columns, near rho and
+  # not rho / 4 (what pooling them under one cell label gave).  Each column
+  # has its own estimate now; they scatter round rho, their mean is the old
+  # pooled value, and none is anywhere near rho / 4.
   set.seed(77)
   n_cells <- 40; n_per <- 12; rho <- 0.5
   ids <- rep(seq_len(n_cells), each = n_per)
@@ -836,8 +840,16 @@ test_that("the pooled ICC groups by (variable, cell), not by cell alone", {
                                             predictor_vars = c("p1", "p2", "p3", "p4"),
                                             deff = "kish"))
   icc <- attr(out, "deff_applied")$icc_pred
-  expect_gt(icc, 0.35)                        # rho/4 = 0.125 would fail this
-  expect_lt(icc, 0.65)
+  expect_named(icc, c("p1", "p2", "p3", "p4"))
+  expect_gt(mean(icc), 0.35)                  # rho/4 = 0.125 would fail this
+  expect_lt(mean(icc), 0.65)
+  expect_true(all(icc > 0.25 & icc < 0.75))
+  # Each is the estimate the column gets on its own.
+  for (v in names(icc)) {
+    one <- suppressMessages(summarize_by_cell(pts, response_var = "y",
+                                              predictor_vars = v, deff = "kish"))
+    expect_equal(icc[[v]], attr(one, "icc")$pred[[v]], tolerance = 1e-12)
+  }
 })
 
 
@@ -858,12 +870,13 @@ test_that("conf_level = NULL leaves the frame exactly as it was", {
     out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
                              deff = dv)
     expect_length(.interval_cols(out), 0L)
-    # A requested design effect adds its per-row `deff_applied` flag, with
-    # or without conf_level; the default deff = 1 frame has none.
+    # A requested design effect adds its per-row `deff_applied` flag and the
+    # `deff_method` label (added with the Kish fallback for "variogram"), with
+    # or without conf_level; the default deff = 1 frame has neither.
     expect_named(out, c("poly_id", "n", "resp_mean_y", "..sd_resp_y",
                         "..se_resp_y", "pred_mean_e", "..sd_pred_e",
                         "..se_pred_e", "cell_weight",
-                        if (!identical(dv, 1)) "deff_applied"))
+                        if (!identical(dv, 1)) c("deff_applied", "deff_method")))
   }
 })
 

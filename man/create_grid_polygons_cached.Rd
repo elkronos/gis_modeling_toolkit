@@ -64,20 +64,20 @@ same_cell <- match(st_as_text(st_geometry(g2)), st_as_text(st_geometry(g)))
 all(g2$poly_id == g$poly_id[same_cell])
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 
-Other package options and caches: 
-\code{\link{clear_fitted_cache}()},
-\code{\link{clear_grid_cache}()},
-\code{\link{spatialkit_quiet}()}
+Other package options and caches:
+\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
+\code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
 \concept{package options and caches}
 \concept{tessellation}

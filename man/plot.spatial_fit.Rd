@@ -36,10 +36,10 @@ the model absorbed: a residual sill well below the response sill
 means most of it, two curves that coincide mean none.  When both
 effective ranges were identified over the same point pairs the caption
 gives the residual sill as a share of the response sill and the two
-ranges; when either variogram has no identified range, or the two are
-not over the same pairs, the caption says so and compares nothing: a sill the
-data never reached is not a number to divide by, and one direction's
-sill is not comparable with all directions'.
+ranges; when either variogram has no identified range, or the two
+are not over the same pairs, the caption says so and compares
+nothing: a sill the data never reached is not a number to divide by,
+and one direction's sill is not comparable with all directions'.
 The residual range is expected to come out shorter and the residual
 sill lower even when the model is right, because residuals of a
 fitted trend understate the variogram (see
@@ -48,10 +48,8 @@ residual-variogram bias").
 The distance axis is labelled in the units of the CRS the variogram
 was actually fitted in, which is not necessarily the fit's own CRS
 (lon/lat data are projected first). Each curve is the variogram
-\code{estimate_sac_range()} returns for its variable: all point pairs,
-or, when the all-pairs fit was unusable, the widest of four directions,
-which is named with its azimuth (in the title for the residuals, in the
-caption for the response). A fit that identified no range says why in
+\code{estimate_sac_range()} returns for its variable, which is over
+all point pairs. A fit that identified no range says why in
 the subtitle, since the overlaid model line is then not a fit to believe.
 Requires 'gstat'.}
 \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
@@ -60,8 +58,10 @@ reason to fit GWR at all.  Locations where the local design is
 collinear for that term are drawn hollow and grey
 (\code{mask = TRUE}): for a slope, where the kernel-weighted
 window's slope condition index (\code{cn_slopes}, predictors
-centred in the window) is above 30 or the window is singular, or
-where the index with the intercept (\code{cn}) is above 1e6; for
+centred in the window) is above 30 or the window is singular; a
+predictor far from zero is not masked, because the local solve
+centres each window and the index with the intercept (\code{cn})
+does not enter; for
 the Intercept, where \code{cn} is above 30 (a predictor far from 0
 against its local spread makes the local intercept an
 extrapolation).  They are masked because the smooth surface a naive map draws
@@ -74,7 +74,7 @@ sequential one.}
 }}
 
 \item{response}{Logical, default \code{TRUE}: for \code{type =
-  "variogram"}, overlay the response's own variogram.  Ignored by the
+"variogram"}, overlay the response's own variogram.  Ignored by the
 other types.}
 
 \item{term}{For \code{type = "coefficients"}: which local coefficient to
@@ -127,15 +127,15 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 \seealso{
 \code{\link{coef.gwr_fit}()} for the coefficients themselves.
 
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

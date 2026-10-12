@@ -14,7 +14,8 @@ build_tessellation(
   clip = TRUE,
   keep_duplicates = FALSE,
   crs = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  cover = NULL
 )
 }
 \arguments{
@@ -25,8 +26,12 @@ build_tessellation(
 own to lay a grid over and error without it; supply the study-area polygon,
 or build one from the points with \code{\link[=clip_target_for]{clip_target_for()}}. \strong{Optional} for
 \code{method = "voronoi"} and \code{method = "triangles"}, which derive their extent
-from the points themselves and use \code{boundary} only to clip the result when
-\code{clip = TRUE}. When exactly one of \code{points_sf} and \code{boundary} has a CRS,
+from the points themselves (for \code{"voronoi"}, from \code{cover} when there is
+one) and use \code{boundary} only to clip the result when
+\code{clip = TRUE}. When \code{points_sf} holds seeds and not the observations,
+pass the study area here or the observations as \code{cover}: seeds lie
+inside the data, and cells clipped to the seeds' own hull leave its edge
+uncovered. When exactly one of \code{points_sf} and \code{boundary} has a CRS,
 the other is interpreted in it, with a warning. CRS-less points, and a
 CRS-less boundary given with projected points, are read as
 \code{\link[=harmonize_crs]{harmonize_crs()}} does; CRS-less points that do not look like lon/lat
@@ -46,7 +51,10 @@ unnamed planar space.}
 one cell per input point and \code{"triangles"} one triangle per
 neighbouring triple, so neither has a count to set, and both warn that the
 argument was ignored.  For a Voronoi cell count, place the seeds with
-\code{\link{get_voronoi_seeds}()} and tessellate those.  For hex
+\code{\link{get_voronoi_seeds}()} and tessellate those, passing the
+study area as \code{boundary} or the observations as \code{cover}
+(seeds made from a boundary or from \code{sample_points} carry their
+cover with them).  For hex
 grids the target is adjusted for packing density; the actual count after
 clipping to an irregular boundary may differ noticeably.  Besides a
 number, this accepts what the level-selection step returned: the integer
@@ -56,6 +64,12 @@ vector of ranked candidates from \code{\link{determine_optimal_levels}()}
 \code{select_resolution()} at its default criterion).  The count used
 is returned as \code{params$approx_n_cells} and where it came from as
 \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
+A count read off a selection or a profile raises a warning of class
+\code{"spatialkit_bound_chosen"} when its optimum sits on a bound of the
+ladder and one of class \code{"spatialkit_no_structure"} when one cell
+for the whole layer scores as well; a profile with no \code{cp} to read
+is an error (class \code{"spatialkit_no_default_criterion"} when another
+criterion is finite).  See \code{\link{resolution_profile}()}.
 A count read off a profile or selection is a number of k-means cells:
 every one occupied, and small where the points are dense.  A lattice
 lays that many equal cells over the whole boundary, so on clustered
@@ -68,7 +82,10 @@ seed a Voronoi tessellation with
 \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 given the \code{select_resolution()} result or the profile itself, it
 returns the centres of the partition the profile scored, whose Voronoi
-cells are the cells the criteria judged.}
+cells are the cells the criteria judged.  Seeds made that way carry the
+hull of \code{sample_points} as their cover, so the cells built on them
+hold every point; made with neither \code{sample_points} nor a boundary,
+they carry the hull of the points the profile was computed on.}
 
 \item{cellsize}{Numeric cell size, in the units of the working CRS.  Read by
 \code{method = "hex"} and \code{"square"} only; the other two methods warn
@@ -112,6 +129,25 @@ does, so the cells stay equal-area.}
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
 (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
+
+\item{cover}{Optional sf or sfc layer the cells have to hold: the
+observations (points), or a polygon. Read by \code{method = "voronoi"} when
+there is no \code{boundary}: the boundary is then derived from the cover (the
+convex hull of its points, or its polygons, grown by 2 percent of the
+diagonal) instead of from the hull of \code{points_sf}. Pass it when
+\code{points_sf} holds seeds. When \code{NULL}, the cover the seeding functions
+attach to their result is used (\code{attr(points_sf, "cover")}: the boundary
+the seeds were drawn in, or the hull of the points they were clustered
+from), so \code{build_tessellation(voronoi_seeds_kmeans(obs, k))} holds every
+observation without it; \code{rbind()} of seed layers drops that attribute.
+Seeds with neither a boundary nor a cover are tessellated over their own
+hull, with a warning of class \code{"spatialkit_no_cover"}. A cover with no
+CRS is read in the coordinates of \code{points_sf}; one in another CRS is
+transformed. With a \code{boundary} (and for the other methods) the cover
+sizes nothing: when it is a point layer, the number of its points that
+fall outside every cell is returned as \code{params$cover_outside}, with a
+warning of class \code{"spatialkit_unassigned"} when it is not 0. See
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 }
 \value{
 A list with components:
@@ -125,14 +161,23 @@ one outside the study area. Only a point within a thousandth of the
 median cell width of a cell is snapped to it. That covers points
 sitting exactly on a shared edge, and leaves points outside the study
 area as \code{NA}. A summary built from \code{index} therefore counts only the
-points the tessellation actually covers.}
+points the tessellation actually covers. When any point is \code{NA}, a
+warning of class \code{"spatialkit_unassigned"} gives the number
+(\code{tryCatch(spatialkit_unassigned = )} catches it; the condition
+carries \code{n} and \code{total}).}
 \item{\code{boundary}}{The boundary used (possibly derived and/or
 reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units). For \code{"hex"} and
+outside every cell each sat, in CRS units); \code{n_outside}, the number
+of points of \code{points_sf} that fall in no cell (the \code{NA}s of
+\code{index}); and \code{cover_outside}, the number of \code{cover} points in no
+cell when a point \code{cover} was checked against the cells (\code{NULL}
+otherwise). For \code{"voronoi"} also \code{boundary_source}, where the
+boundary came from: \code{"boundary"}, \code{"cover"}, \code{"seeds' cover"} or
+\code{"points"}. For \code{"hex"} and
 \code{"square"} also \code{cells_occupied} and \code{cells_empty}, the number of
 cells that hold at least one point and that hold none.}
 }
@@ -177,14 +222,14 @@ tess <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
 tess$cells
 }
 \seealso{
-Other tessellation: 
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

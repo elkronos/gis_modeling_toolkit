@@ -28,7 +28,6 @@ test_that("cv_gwr(parallel = 2) returns after a GWR has been fitted in the sessi
   # here (status 124) instead of hanging the whole suite.
   skip_on_cran()
   skip_on_os("windows")
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   skip_if(parallel::detectCores() < 2L, "fewer than two cores: nothing forks")
   skip_if(!nzchar(Sys.which("timeout")), "coreutils `timeout` not found")
@@ -66,7 +65,7 @@ test_that("cv_gwr(parallel = 2) returns after a GWR has been fitted in the sessi
     "    w <<- c(w, conditionMessage(x)); invokeRestart('muffleWarning') })",
     "cat('RESULT', par_res$n_folds_succeeded,",
     "    isTRUE(all.equal(par_res$overall, seq_res$overall)),",
-    "    any(grepl('OpenMP', w)), '\\n')"
+    "    any(grepl('`parallel` is ignored', w, fixed = TRUE)), '\\n')"
   ), script)
 
   rscript <- file.path(R.home("bin"), "Rscript")
@@ -94,7 +93,6 @@ test_that("compare_models_cv(gwr_args = list(parallel = 2)) never forks GWR fold
   # replaced by a stub that errors, so the old code fails here at once
   # instead of hanging on the GWR fits earlier tests have left in the session.
   skip_on_os("windows")
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   skip_if(parallel::detectCores() < 2L, "fewer than two cores: nothing forks")
 
@@ -110,7 +108,7 @@ test_that("compare_models_cv(gwr_args = list(parallel = 2)) never forks GWR fold
     res <- suppressMessages(
       compare_models_cv(d, "price", "elev", models = "GWR", k = 3, seed = 7,
                         quiet = TRUE, gwr_args = list(parallel = 2L))),
-    "cv_gwr\\(\\): `parallel` is ignored.*OpenMP")
+    "cv_gwr\\(\\): `parallel` is ignored.*not run in forked workers")
   expect_identical(res$gwr_cv$n_folds_succeeded, 3L)
   expect_equal(res$overall, ref$overall)
 })
@@ -176,6 +174,12 @@ test_that("a fold dropped before fitting is not warned about twice", {
   fitf <- function(tr) lm_spatial_fit(tr, "z", c("w", "zone"))
   r <- .rv_warnings(suppressMessages(
     cv_spatial(d, "z", c("w", "zone"), fit_fn = fitf, folds = d$lab)))
+  # prep_model_data() now raises its own (classed) warning for the rows it
+  # drops, once, ahead of the two about folds; it is not a second warning
+  # about the fold.
+  is_prep <- grepl("^prep_model_data\\(\\): dropped 3 of ", r$warnings)
+  expect_identical(sum(is_prep), 1L)
+  r$warnings <- r$warnings[!is_prep]
   expect_length(r$warnings, 2L)
   expect_match(r$warnings[1], "1 of 5 fold\\(s\\) dropped before fitting")
   expect_match(r$warnings[2], paste0("^cv_spatial\\(\\): 1 of 5 fold\\(s\\) ",
@@ -188,6 +192,8 @@ test_that("a fold dropped before fitting is not warned about twice", {
   r2 <- .rv_warnings(suppressMessages(
     cv_spatial(d2, "z", "w", fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
                folds = d2$lab)))
+  r2$warnings <- r2$warnings[!grepl("^prep_model_data\\(\\): dropped ",
+                                    r2$warnings)]
   expect_length(r2$warnings, 1L)
   expect_match(r2$warnings, "dropped before fitting")
 })
@@ -251,7 +257,11 @@ test_that("with no null model the rows every step-1 set predicted are the refere
     "step 1: \\{lc\\}")
   expect_identical(sel$selected, "a")
   expect_identical(sel$params$n_scored, 250L)
-  expect_identical(sel$history$n_pred, c(250L, 192L))
+  # A step-0 row leads the history now: the training-fold mean, the baseline
+  # for a learner that cannot fit an empty set.  (This asserted the two
+  # step-1 rows alone, from when such a learner had no baseline.)
+  expect_identical(sel$history$step, c(0L, 1L, 1L))
+  expect_identical(sel$history$n_pred, c(250L, 250L, 192L))
 })
 
 
@@ -272,7 +282,6 @@ test_that("compare_models_cv() re-scores the models on the rows they all predict
   # 150 rows, each of which keeps eight or more training points within reach,
   # so GWR predicts exactly those rows and RF all 200.
   skip_if_not_installed("ranger")
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   set.seed(4); n <- 200
   xy <- rbind(cbind(runif(150, 0, 600), runif(150, 0, 1000)),

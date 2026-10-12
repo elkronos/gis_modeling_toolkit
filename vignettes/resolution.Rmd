@@ -1,7 +1,7 @@
 ---
 title: "Choosing a resolution"
 description: >
-  How many cells the data support: the ladder, four criteria that disagree, and how to read the flat region.
+  How many cells the data support: the ladder, the criteria that disagree, and how to read the flat region.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -64,9 +64,10 @@ Three functions answer the question, in increasing order of how much they tell
 you. `determine_optimal_levels()` reads an elbow off the coordinates alone and
 runs on the hard dependencies; it is the quick answer and the one
 `build_tessellation()` accepts directly. `resolution_profile()` scores every
-cell count on a ladder against four criteria at once and needs gstat for two
-of them. `select_resolution()` reads one criterion off that profile, and
-`summary()` on the profile reads all four side by side. If the cells will feed
+cell count on a ladder in four columns at once, three count criteria and one
+diagnostic, and needs gstat for two of them. `select_resolution()` reads one
+criterion off that profile, and `summary()` on the profile reads the count
+criteria side by side. If the cells will feed
 a model, the profile is the one to use. If you need a count now and the data
 are all you have, the elbow is defensible when the points cluster, and this
 article says where it falls short. On points spread evenly there is no elbow
@@ -122,12 +123,15 @@ it, which is why the count is set when you place the seeds rather than when you
 tessellate them. The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
-`criterion = "morans_i"` and `criterion = "combined"` settings need both
-`response_var` and `predictor_vars`; give it only a response and it warns
-and falls back to `"geometric"`. And its ladder runs from 1 to
-`max_levels` with no lower bound from the spatial correlation of the data, so it
-can prefer cells wider than the field's own correlation range. The profile below
-does impose that bound, which is why the two can disagree.
+`criterion = "morans_i"` and `criterion = "combined"` settings rank the counts
+around the elbow by Moran's z of the cell means, which is a diagnostic and not
+a count rule; the call returns the ranking with a warning of class
+`spatialkit_diagnostic_ranking` that says so. They need a `response_var`;
+without one the call warns and falls back to `"geometric"`. And its ladder
+runs from 1 to `max_levels` with no lower bound from the spatial correlation
+of the data, so it can prefer cells wider than the field's own correlation
+range. The profile below reports that bound, and `select_resolution()` reads
+`reliability` from it up, which is why the two can disagree.
 
 ## The profile
 
@@ -149,7 +153,7 @@ cell of the same area, so compare it against something you already know about
 your own data, such as the spacing of a sampling grid or the size of a field,
 with that factor in mind.
 
-### The four criteria
+### Three criteria and a diagnostic
 
 ```{r criteria-table, echo=FALSE, results='asis'}
 cat(
@@ -157,7 +161,7 @@ cat(
 "|---|---|---|---|\n",
 "| `elbow` | how far the log of the within-cluster sum of squares sags below a power law (the straight log-log line from one cell to the last level); `NA` at every level when the points have no cluster structure | coordinates only | larger |\n",
 "| `cp` | Mallows' \\(C_p\\) of the piecewise-constant approximation of the response by cell means | a response, and a variogram for the nugget | smaller |\n",
-"| `moran_z` | spatial structure surviving in the residuals of the cell means | a response | nearer zero |\n",
+"| `moran_z` | Moran's z of the cell means (of their regression residuals when predictors are given): whether neighbouring cells resemble each other | a response | a diagnostic, not a count rule |\n",
 "| `reliability` | the share of the spread in the cell means that is signal, not sampling noise | a variogram | larger |\n",
 sep = "")
 ```
@@ -165,10 +169,14 @@ sep = "")
 `elbow` sees the coordinates and knows nothing about what you measured. `cp` and
 `reliability` split the practical question in half: how well the cells represent
 the field, and whether the cell values can be told apart from noise. `moran_z`
-is the diagnostic, and a large deviate says the cells are still leaving spatial
-pattern on the table.
+is a diagnostic of the cell means and not a count rule. It grows as the cells
+get finer than the range, because neighbouring cells then resemble each other,
+and it is near zero at the coarsest counts it is computed at whatever the data.
+It does not say how well the cells represent the response, so
+`select_resolution()` refuses it unless asked with `diagnostic = TRUE`, and
+`summary()` leaves it out unless it is named.
 
-```{r plot-profile, fig.height=8, fig.alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 49 cells and turns up at 55, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 20 cells and climbs past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are one to three levels wide, none has a gap, and no level sits inside all three."}
+```{r plot-profile, fig.height=8, fig.alt="Three stacked panels against the number of cells on a shared axis, from 2 to 55; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls across the ladder and is lowest at the last level, 55 cells. Reliability rises to a peak near 5 cells and declines after it. The absolute Moran's z of the cell means is drawn from 12 cells on, stays near 1 or below up to 28 cells and climbs past 3 at 55. A red dot and dotted line mark the level selected for Cp, at 55 cells, and for reliability, at 17 cells, with a shaded band over the levels within tolerance of each; the Moran panel has no selected level."}
 plot(prof)
 ```
 
@@ -177,20 +185,29 @@ Two behaviours are worth knowing before reading the numbers.
 ```{r cp-context, echo=FALSE}
 vg  <- attr(prof, "variogram")
 nug <- round(vg$nugget, 2); psl <- round(vg$psill, 2)
+cp_sel <- select_resolution(prof, criterion = "cp")
 ```
 
 **`cp` needs a nugget to have an interior optimum.** On a smooth field the
 piecewise-constant approximation keeps improving as cells shrink, the penalty is
 too small to stop it, and the minimum lands wherever `min_cell_n` stops the
 ladder. The support ceiling is then doing the choosing, and
-`select_resolution()` flags it. This fixture has a fitted nugget of
-`r if (runs) nug else NA` against a partial sill of `r if (runs) psl else NA`,
-which is why `cp` turns around inside the ladder here.
+`select_resolution()` flags it.
 
-**`reliability` rises as cells get larger**, because bigger cells hold more
-points and average away more noise. Its optimum can therefore sit on the coarse
-end of whatever the ladder allows, which makes the answer a bound on the
-analysis. The next section is about spotting that.
+```{r cp-text, echo=FALSE, results='asis'}
+cat(sprintf("This fixture has a fitted nugget of %s against a partial sill of %s,", nug, psl),
+    if (isTRUE(cp_sel$at_ceiling))
+      "and `cp` still falls to the last level of the ladder here: its minimum is the support ceiling, as `summary()` says below.\n"
+    else
+      "which is why `cp` turns around inside the ladder here.\n")
+```
+
+**`reliability` is highest at a coarse count**, because bigger cells hold more
+points and average away more noise. Its maximum usually lies below the range
+floor, where cells are wider than the range. `select_resolution()` therefore
+reads it from the floor up, and what it returns is then the floor: a bound on
+the analysis, with the range choosing and not the curve. The next section is
+about spotting that.
 
 ## Choosing, and the flat region
 
@@ -227,8 +244,8 @@ if (isTRUE(sel$at_floor)) {
 ```
 
 Criteria can prefer different levels while agreeing on a region. `summary()`
-on the profile reads all four at once, and closes with the levels that every
-band contains:
+on the profile reads the count criteria at once, and closes with the levels
+that every band contains:
 
 ```{r compare-criteria}
 summary(prof)
@@ -280,18 +297,23 @@ was better.
 
 ## What the ladder can support
 
-The ladder runs between two bounds the data impose, both recorded on the profile.
+The ladder runs from 2 cells to a ceiling the data impose. The profile records
+that ceiling and, beside it, a floor from the autocorrelation range.
 
 ```{r bounds}
 str(attr(prof, "bounds"))
 ```
 
-The ceiling is `floor(n / min_cell_n)`, or the number of distinct locations
+The ceiling is `floor(n / min_cell_n)`, with `n` the rows that carry a
+response when one is given, or the number of distinct locations
 when that is smaller (one short of it when no location repeats); `ceiling_from`
 says which. Past it the average cell holds too few points to estimate anything
 from, or k-means has more centres to place than distinct points. The floor is `ceiling(area / range^2)`, from
 the fitted autocorrelation range: cells wider than the range average over more
-than one patch of the field, mixing values the field itself keeps apart.
+than one patch of the field, mixing values the field itself keeps apart. The
+range is an estimate, so by default the floor is reported and not applied: it
+is a level of the ladder, `select_resolution(criterion = "reliability")` reads
+from it up, and `range_floor = TRUE` starts the ladder there.
 
 When the floor exceeds the ceiling, the data cannot support a tessellation that
 respects their own correlation structure. `supported` is `FALSE`, a warning says
@@ -346,8 +368,10 @@ tessellation that is `get_voronoi_seeds()`. Given the `select_resolution()`
 result itself, it returns the centres of the partition the profile scored, and a
 k-means partition is the Voronoi partition of its centres, so the cells built on
 those seeds are the cells the criteria judged; the bare count `sel$best` would
-run a new k-means, whose cells are not. `build_tessellation()` then works on the
-seeds:
+run a new k-means, whose cells are not. This selection sits on the range floor,
+so the call warns that a bound chose the count (class
+`spatialkit_bound_chosen`; warnings are not shown in this article).
+`build_tessellation()` then works on the seeds:
 
 ```{r next-step}
 bnd   <- clip_target_for(pts, expand = 0.02, quiet = TRUE)

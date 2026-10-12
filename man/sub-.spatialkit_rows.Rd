@@ -20,8 +20,9 @@ subset that is not a data frame (a single column taken with
 \description{
 \code{\link{prep_model_data}()} and
 \code{\link{assign_features_to_polygons}()} return a layer with an
-attribute recording what happened to its rows (\code{"dropped"} and
-\code{"ties"} respectively).  Those records describe the rows the layer was
+attribute recording what happened to its rows (\code{"dropped"} for the
+first; \code{"ties"} and \code{"unassigned"} for the second).  Those
+records describe the rows the layer was
 built with, and \code{[} on an \code{sf} object copies attributes through
 unchanged, which would leave a subset reporting its parent's numbers for a
 different set of rows.  Subsetting therefore returns a plain layer with the
@@ -40,8 +41,9 @@ Binding such data frames with
 and class, so the record then describes only the first input's rows: its
 \code{n_rows} no longer equals \code{nrow()} of the result.  The
 package's own readers ignore a record whose \code{n_rows} does not match;
-when reading \code{attr(x, "dropped")} or \code{attr(x, "ties")} yourself
-from a layer that has been through such steps, check it the same way.
+when reading \code{attr(x, "dropped")}, \code{attr(x, "ties")} or
+\code{attr(x, "unassigned")} yourself from a layer that has been through
+such steps, check it the same way.
 }
 \examples{
 library(sf)
@@ -50,7 +52,7 @@ dat <- st_as_sf(
              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-clean <- prep_model_data(dat, "resp", "pred")
+clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
 attr(clean, "dropped")$n          # 2
 attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
 }

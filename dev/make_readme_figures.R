@@ -145,7 +145,7 @@ ggsave("man/figures/readme-spatial-cv.png", p2,
 # used to supply it, but these sites are spread evenly: its WSS curve has no
 # elbow, and it warns that the count it returns (4 at max_levels = 15) was set
 # by the ladder rather than by the data.  Reliability's flat region on this
-# field is wide (within 2 percent of the optimum from 3 to 25 cells), and the
+# field is wide (within 2 percent of the optimum from 2 to 15 cells), and the
 # README says so rather than presenting the count as the answer.  The
 # profile's warning about a zero nugget concerns Cp, which is not read here.
 prof_res <- suppressWarnings(resolution_profile(pts, response_var = "val",

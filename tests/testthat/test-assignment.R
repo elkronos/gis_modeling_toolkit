@@ -35,8 +35,23 @@
 }
 
 
+# The fixture's third point lies in neither polygon, so every default call on
+# it leaves one feature out, with a warning of class "spatialkit_unassigned"
+# that gives the count (it was one INFO line in the log).  This asserts the
+# warning and hands back the assigned layer.
+.assign_dropping_one <- function(...) {
+  expect_warning(out <- assign_features_to_polygons(...),
+                 "1 of 3 feature\\(s\\) \\(33.3%\\) fall inside no polygon",
+                 class = "spatialkit_unassigned")
+  out
+}
+
+
 test_that("assign_features_to_polygons attaches the polygon id and drops misses", {
-  out <- assign_features_to_polygons(.three_points(), .nested())
+  out <- .assign_dropping_one(.three_points(), .nested())
+  # The feature left out is on the result too, by its row in the input.
+  expect_identical(attr(out, "unassigned")$n, 1L)
+  expect_identical(attr(out, "unassigned")$which, 3L)
 
   expect_s3_class(out, "sf")
   # The unassigned point is dropped by default.
@@ -48,9 +63,10 @@ test_that("assign_features_to_polygons attaches the polygon id and drops misses"
   expect_false(any(grepl("^\\.\\.", names(out))))
   expect_equal(sf::st_crs(out), sf::st_crs(32632))
 
-  # keep_unassigned retains the miss, with an NA id.
-  kept <- assign_features_to_polygons(.three_points(), .nested(),
-                                      keep_unassigned = TRUE)
+  # keep_unassigned retains the miss, with an NA id, and nothing is left
+  # out, so nothing is warned about.
+  expect_no_warning(kept <- assign_features_to_polygons(.three_points(), .nested(),
+                                                        keep_unassigned = TRUE))
   expect_equal(nrow(kept), 3L)
   expect_true(is.na(kept$poly_id[3]))
 })
@@ -60,13 +76,13 @@ test_that("tie_break = 'smallest_area' is independent of polygon order", {
   # The point at (6, 6) is inside BOTH nested polygons.  The smallest-area
   # rule must pick the 9-unit polygon whichever row it occupies -- the previous
   # keep-the-first-duplicate behaviour depended on the join order.
-  fwd <- assign_features_to_polygons(.three_points(), .nested(c(1L, 2L)))
-  rev <- assign_features_to_polygons(.three_points(),
-                                     sf::st_sf(poly_id = c(2L, 1L),
-                                               geometry = sf::st_sfc(
-                                                 .sq(5, 5, 8, 8),
-                                                 .sq(0, 0, 10, 10),
-                                                 crs = 32632)))
+  fwd <- .assign_dropping_one(.three_points(), .nested(c(1L, 2L)))
+  rev <- .assign_dropping_one(.three_points(),
+                              sf::st_sf(poly_id = c(2L, 1L),
+                                        geometry = sf::st_sfc(
+                                          .sq(5, 5, 8, 8),
+                                          .sq(0, 0, 10, 10),
+                                          crs = 32632)))
 
   # In both layers the SMALL polygon carries id 2 and the big one id 1.
   expect_equal(fwd$poly_id[fwd$v == 1L], 2L)
@@ -86,16 +102,14 @@ test_that("tie_break = 'first' keeps the first match, which is order-dependent",
                                                  .sq(0, 0, 10, 10),
                                                  crs = 32632))
 
-  a <- assign_features_to_polygons(.three_points(), big_first,
-                                   tie_break = "first")
-  b <- assign_features_to_polygons(.three_points(), small_first,
-                                   tie_break = "first")
+  a <- .assign_dropping_one(.three_points(), big_first, tie_break = "first")
+  b <- .assign_dropping_one(.three_points(), small_first, tie_break = "first")
 
   expect_equal(a$poly_id[a$v == 1L], 1L)      # big listed first -> big wins
   expect_equal(b$poly_id[b$v == 1L], 1L)      # small listed first -> small wins
 
   # The two strategies genuinely differ on this input.
-  smallest <- assign_features_to_polygons(.three_points(), big_first)
+  smallest <- .assign_dropping_one(.three_points(), big_first)
   expect_false(identical(a$poly_id[a$v == 1L], smallest$poly_id[smallest$v == 1L]))
 
   expect_error(assign_features_to_polygons(.three_points(), big_first,
@@ -131,8 +145,7 @@ test_that("largest = TRUE resolves a straddling polygon by overlap area", {
 
   # `largest` is only applicable to polygon features; point input must not
   # error on it (st_join rejects largest= for some predicates).
-  expect_equal(nrow(assign_features_to_polygons(.three_points(), cells,
-                                                largest = TRUE)), 2L)
+  expect_equal(nrow(.assign_dropping_one(.three_points(), cells, largest = TRUE)), 2L)
 })
 
 
@@ -141,7 +154,7 @@ test_that("re-assigning an already-assigned layer drops the colliding column", {
   # (poly_id.x / poly_id.y), so the rename below it never found `poly_id` and
   # the function returned ZERO ROWS -- silently, for the completely ordinary
   # case of re-assigning points that came out of a previous call.
-  first  <- assign_features_to_polygons(.three_points(), .nested())
+  first  <- .assign_dropping_one(.three_points(), .nested())
   expect_true("poly_id" %in% names(first))
 
   # A real warning as well as the log line: a user column is being dropped.
@@ -175,7 +188,7 @@ test_that("re-assigning an already-assigned layer drops the colliding column", {
 test_that("assign_features_to_polygons invents ids when the layer has none", {
   bare <- sf::st_sf(geometry = sf::st_sfc(.sq(0, 0, 10, 10),
                                           .sq(10, 0, 20, 10), crs = 32632))
-  out <- assign_features_to_polygons(.three_points(), bare)
+  out <- suppressMessages(.assign_dropping_one(.three_points(), bare))
 
   expect_true("poly_id" %in% names(out))
   expect_equal(out$poly_id, c(1L, 1L))         # both surviving points in cell 1
@@ -187,12 +200,12 @@ test_that("assign_features_to_polygons harmonises CRS and restores the input's",
   cells  <- .two_cells()                       # EPSG:32632
   pts_ll <- sf::st_transform(.three_points(), 4326)
 
-  out <- assign_features_to_polygons(pts_ll, cells)
+  out <- .assign_dropping_one(pts_ll, cells)
 
   # Result comes back in the CRS the features arrived in, not the polygons'.
   expect_equal(sf::st_crs(out), sf::st_crs(4326))
   # The assignment itself is the same one the projected input gets.
-  ref <- assign_features_to_polygons(.three_points(), cells)
+  ref <- .assign_dropping_one(.three_points(), cells)
   expect_equal(out$poly_id, ref$poly_id)
   expect_equal(out$v, ref$v)
 })
@@ -210,7 +223,7 @@ test_that("assign_features_to_polygons rejects unusable input", {
 
   # An sfc polygon layer is accepted and given sequential ids.
   sfc_cells <- sf::st_geometry(.two_cells())
-  out <- assign_features_to_polygons(.three_points(), sfc_cells)
+  out <- suppressMessages(.assign_dropping_one(.three_points(), sfc_cells))
   expect_equal(nrow(out), 2L)
   expect_true("poly_id" %in% names(out))
 })

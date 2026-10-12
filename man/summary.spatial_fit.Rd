@@ -36,6 +36,14 @@ one it is holding, driven by \code{$info$fitted_are_oob}.  Use
 
 Adjusted R-squared is suppressed: GWR's effective parameter count far
 exceeds the global predictor count, and a GP model has no simple \code{p}.
+
+For a \code{gwr_fit}, \code{print()} on the result adds what the
+in-sample metrics are to be read against: the effective number of
+parameters and residual degrees of freedom, the number of local windows
+of deficient rank, the number of locations when observations share one,
+and the AICc and RMSE of one global least-squares
+regression on the same rows beside the fit's own AICc
+(\code{$info$global_ols}; see \code{\link{fit_gwr_model}}).
 }
 
 \section{Percentage errors on responses with zeros}{
@@ -69,21 +77,21 @@ coverage, which are proper scoring rules and have no such failure mode.
 }
 
 \seealso{
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.gwr_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{model_metrics}()},
-\code{\link{predict.bayesian_fit}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.rf_fit}()},
-\code{\link{print.spatial_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}}
 }
 \concept{methods on a fitted model}

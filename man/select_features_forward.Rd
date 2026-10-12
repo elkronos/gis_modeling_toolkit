@@ -19,7 +19,10 @@ select_features_forward(
   seed = 123,
   quiet = FALSE,
   auto_range = FALSE,
-  select_on = c("all", "split")
+  select_on = c("all", "split"),
+  rule = c("se", "tol"),
+  se_mult = 1,
+  null_fn = NULL
 )
 }
 \arguments{
@@ -43,13 +46,14 @@ size so inner and outer blocks are on the same spatial scale.}
 \item{metric}{Score to optimise: \code{"RMSE"}, \code{"MAE"} (minimised) or
 \code{"R2"} (maximised). Default \code{"RMSE"}.}
 
-\item{tol}{Minimum improvement required to accept a variable.  Default 0,
-meaning any improvement is accepted. The first variable is judged against
-the null (intercept-only) model, so \code{tol} bites from step 1, but
-only when that null model can be scored. Backends that refuse a
-zero-length \code{predictor_vars} (\code{\link{fit_rf_model}} and
-\code{\link{fit_gwr_model}} both do) have no null score, and there the
-first variable is accepted unconditionally.}
+\item{tol}{Minimum improvement of the pooled score required to accept a
+variable, in the units of \code{metric}.  Default 0.  It is a floor
+under both rules: with \code{rule = "tol"} it is the whole test, and
+with \code{rule = "se"} the per-fold test applies as well. The first
+variable is judged against a baseline with every learner; see \emph{The
+baseline for the first variable}.  Any single number is accepted:
+\code{Inf} leaves nothing selected, and \code{-Inf} puts no floor under
+a step.}
 
 \item{max_vars}{Optional cap on how many predictors to select.}
 
@@ -88,25 +92,66 @@ rows near it are still correlated with the selection half.
 Both halves come back in \code{$split}.  See the "Post-selection
 inference" section of \code{\link{determine_optimal_levels}} for the
 trade: coverage for half the sample.}
+
+\item{rule}{How a step is judged. \code{"se"} (default) accepts the best
+candidate when its pooled gain exceeds \code{tol} and its mean per-fold
+gain exceeds \code{se_mult} standard errors of that mean;
+\code{"tol"} accepts any pooled gain above \code{tol}, the behaviour
+before this argument existed. See \emph{When a variable is accepted}.}
+
+\item{se_mult}{Number of standard errors the mean per-fold gain must
+exceed under \code{rule = "se"}. Default 1; 0 asks only that the mean
+per-fold gain be positive.}
+
+\item{null_fn}{Optional function \code{(train_sf)} returning a fitted
+model with no predictors, used as the baseline for the first variable
+when \code{fit_fn} cannot fit an empty predictor set. Default
+\code{NULL}: \code{fit_fn(train_sf, character(0))} is tried, and the
+training-fold mean is used when that fails. The example builds one.}
 }
 \value{
 A list of class \code{"feature_selection"} (so that
 \code{\link{plot.feature_selection}()} draws the selection path) with
-\code{selected} (the chosen predictors, in the order they were added),
-\code{score}, \code{score_holdout}, \code{history}, \code{params} and
-\code{split}.
+\code{selected} (the chosen predictors, in the order they were added;
+possibly none), \code{score}, \code{score_holdout}, \code{history},
+\code{params}, \code{split}, \code{baseline} and \code{fold_scores}.
 \code{score} is the winning set's cross-validated \code{metric} at the
 final step: the \strong{selection-internal} optimum, optimistically
 biased because it was chosen as the best of many (see the section above),
 and \code{NA} when nothing was selected.  \code{history} is a data.frame
-with \code{step}, \code{variable}, \code{score} and \code{n_pred},
-holding every candidate evaluated at every step; when the null model
-could be scored it also carries a \code{step = 0} row named
-\code{"<none>"} giving that baseline, so the first variable's gain can be
-read off directly.  Every set is scored on the same rows: those the null
-model's cross-validation predicted or, when there is no null model,
-those any step-1 set predicted; \code{params$n_scored} counts them (a
-warning says so when that is fewer than all).  \code{n_pred} is how many
+with \code{step}, \code{variable}, \code{score}, \code{n_pred},
+\code{gain}, \code{fold_gain} and \code{fold_gain_se},
+holding every candidate evaluated at every step, and a \code{step = 0}
+row named \code{"<none>"} giving the baseline, so the first variable's
+gain can be read off directly.  \code{gain} is the candidate set's
+improvement in the pooled score over the set it was added to (the
+baseline at step 1), \code{fold_gain} the mean of the per-fold
+improvements and \code{fold_gain_se} its standard error: the three
+numbers the rule reads.  \code{fold_scores} is a data.frame with
+\code{step}, \code{variable}, \code{fold} and \code{score}: the metric
+of every set in every fold.  \code{baseline} is a list with
+\code{type} (\code{"null model"}, \code{"null_fn"} or
+\code{"fold mean"}), \code{score}, \code{path} (the set the sweep
+reached), \code{gain}, \code{fold_gain} and \code{fold_gain_se} (that
+set against the baseline), \code{kept} (\code{FALSE} when the path
+did not beat a fold-mean baseline and \code{selected} is empty for that
+reason; \code{NA} when the path is empty) and \code{first}.
+\code{first} is \code{NULL} unless the baseline is the fold mean and a
+path of two or more variables was kept; it is then the test of the
+first variable, a list with \code{variable}; \code{gain},
+\code{fold_gain} and \code{fold_gain_se} (the path against the path
+without that variable); \code{rest}, a list with \code{vars},
+\code{score}, \code{gain}, \code{fold_gain} and \code{fold_gain_se}
+(the path without it, and that set against the baseline);
+\code{dropped} (\code{TRUE} when the variable was taken out:
+\code{selected} is then \code{path[-1]} and \code{score} is
+\code{rest$score}); and \code{note}, the verdict in words.  The set
+scored for that test is not a step of the sweep, so it is not in
+\code{history} or \code{fold_scores}.  Every set is scored on the
+same rows: those the null model's cross-validation predicted or, when
+the baseline is the fold mean, those any step-1 set predicted;
+\code{params$n_scored} counts them (a warning says so when that is
+fewer than all).  \code{n_pred} is how many
 rows the set's cross-validation predicted.  A set that left some of the
 scored rows unpredicted, because a fold failed for it, has \code{score}
 \code{NA}, with a warning naming it: scored on the rows it did predict
@@ -123,12 +168,16 @@ in \code{train_sf} as passed; rows the completeness filter above dropped
 are in neither.
 \code{params} records \code{metric}, \code{method}, \code{k},
 \code{tol}, \code{seed}, \code{auto_range}, \code{select_on},
-\code{n_candidates}, \code{estimated_fits} and \code{n_scored}.
+\code{n_candidates}, \code{estimated_fits}, \code{n_scored},
+\code{rule}, \code{se_mult} and \code{baseline} (its type).
 }
 \description{
 Selects predictors by repeatedly adding whichever candidate most improves a
-cross-validated score, stopping when no candidate improves it by more than
-\code{tol}.
+cross-validated score, stopping when the best candidate's improvement is
+no larger than the fold-to-fold noise in it (\code{rule = "se"}, the
+default) or no larger than \code{tol} (\code{rule = "tol"}). The first
+variable has a baseline to beat with every learner, so the selection can
+be empty.
 }
 \details{
 \strong{The inner folds must be spatial, and that is the entire point.}
@@ -150,6 +199,166 @@ leak-free; no extra plumbing is needed.  The cost grows fast: a sweep over
 that inside \code{n} outer leave-one-out folds multiplies it by \code{n}.
 \code{max_fits} guards against that.
 }
+\section{When a variable is accepted}{
+
+Each candidate set is scored by cross-validation on the same inner folds,
+and the candidate with the best pooled score is the one considered. Under
+\code{rule = "se"} it is accepted when two things hold: the pooled score
+improves by more than \code{tol}, and the mean of the per-fold
+improvements (the metric computed in each fold for the set with and
+without the candidate, and differenced) exceeds \code{se_mult} times the
+standard error of that mean across the folds. This is the
+one-standard-error idea of Breiman et al. (1984) applied to a step: a gain
+the folds do not agree on is not evidence that the variable predicts. The
+fold is the unit because under spatially blocked folds the errors within a
+block are correlated, so a standard error over rows would understate the
+noise. With \code{tol = 0} and any gain accepted (the previous default,
+still available as \code{rule = "tol"}), a GWR sweep over one real
+predictor and six noise candidates added a noise variable in 11 runs of
+20; the default rule added one in 4 of 20 and kept the real predictor in
+all 20. The rule costs power on weak predictors: a second real predictor
+with a coefficient of 0.3 against 1 was kept in 14 runs of 20, against 18
+of 20 when any gain was accepted. With few folds the standard error is
+itself noisy, so raise \code{k} before lowering \code{se_mult}.
+\code{history} records each candidate's pooled gain, mean per-fold gain
+and its standard error, and \code{fold_scores} the per-fold scores
+themselves, so every decision can be checked.
+}
+
+\section{The baseline for the first variable}{
+
+The first variable is compared with a model that has no predictors, which
+is recorded as step 0 of \code{history}. Which model that is depends on
+the learner, and \code{baseline$type} says which was used:
+\describe{
+\item{\code{"null model"}}{\code{fit_fn(train_sf, character(0))}, when
+the learner can fit it. Step 1 is tested against it like any other
+step.}
+\item{\code{"null_fn"}}{the model \code{null_fn(train_sf)} returns, for
+a learner that cannot fit an empty set but has a natural
+no-predictor model. Step 1 is tested against it.}
+\item{\code{"fold mean"}}{the mean response of each fold's training
+rows, when neither is available; \code{\link{fit_rf_model}} refuses
+an empty predictor set. Here
+the first variable is \emph{provisional}: it is added without a test,
+the sweep continues by the rule, and the finished set is kept only if
+it beats the fold mean by the same rule; otherwise nothing is
+selected, and \code{baseline$path} holds the set that was reached.
+The test is at the end of the path, not at step 1, because a forest
+on a single variable can lose to the mean when two variables together
+beat it clearly (at a true \eqn{R^2} of 0.33 the best single-variable
+forest had RMSE 1.276 against 1.206 for the mean and 1.101 for the
+pair), so a test at step 1 would select nothing there. The first
+variable of a kept path then gets a test of its own; see \emph{The
+first variable under a fold-mean baseline}.}
+}
+Without a baseline, as before, at least one variable was always selected:
+with a forest, in 10 draws of 10 on a response unrelated to every
+candidate.
+}
+
+\section{The first variable under a fold-mean baseline}{
+
+The test at the end of the path is of the whole set, so it does not show
+that the first variable belongs in it: two real predictors and an
+unrelated candidate that happened to score best alone beat the mean as
+the two real ones do. A kept path of two or more variables is therefore
+scored once more without its first variable (one more set, \code{k} more
+fits). That variable is dropped from \code{selected} when the set is no
+better with it by the rule and the rest of the path still beats the fold
+mean by the rule. \code{baseline$first} records the test and
+\code{baseline$path} keeps the set as the sweep reached it, so
+\code{selected} is \code{baseline$path[-1]} after a drop. A path of one
+variable needs no second test: the test against the fold mean was the
+test of that variable.
+
+This test is the one every later variable passed, an improvement of the
+set by the rule, and it has the same limit. In 20 forest sweeps at a true
+\eqn{R^2} of 0.33, with two real predictors and three unrelated
+candidates, the path began with an unrelated candidate in 3: it was
+dropped in 2 and kept in 1, where the forest scored better with it than
+without (\emph{Selection with a random forest} says why it can). At a
+true \eqn{R^2} of 0.15, 9 selections of 20 were kept, 3 of them began
+with an unrelated candidate, and all 3 kept it for that reason. So in a
+selection of two or more variables from a learner that falls back to the
+fold mean, \code{selected[1]} has been shown to improve the set, not to
+predict on its own. The test also costs power on a weak first predictor,
+as the rule does at every step: with one real predictor of coefficient
+0.3 and five unrelated candidates, a linear learner that refuses the
+empty set kept the real predictor in 77 sweeps of 100, against 80 before
+this test existed and 77 for the same learner fitting its own null model
+(in the 3 sweeps that differ it was the first variable, its gain was
+within one standard error, and the learner with a null model selected
+nothing). When the set is no better with the first variable but
+the rest of the path does not beat the fold mean by the rule either, the
+two cannot be told apart: the set is kept whole, a caution is logged, and
+\code{baseline$first$note} says the variable is unproven. A learner that
+fits its own null model gets no such test: its first variable passed one
+at step 1.
+}
+
+\section{The baseline for a GWR}{
+
+For a GWR the fold mean is a weak baseline, because every GWR carries a
+local intercept and beats a global mean on any smooth response whatever
+its predictors are: on a smooth response unrelated to six candidates, a
+GWR sweep against the fold mean selected one of them in 20 runs of 20.
+Each of those paths had one variable, which the test of the first
+variable above does not reach. The comparison that matters there is with
+the kernel-weighted local mean at the same bandwidth, a GWR with a local
+intercept and no predictors: against it the same sweeps selected a
+variable in 4 runs of 20. \code{\link{fit_gwr_model}} fits that model
+when its \code{predictor_vars} is \code{character(0)}, so a
+\code{fit_fn} that hands its variables to \code{fit_gwr_model()} gets it
+as the null model, and the first variable is tested against it at step 1
+(\code{baseline$type} is \code{"null model"}). Give such a \code{fit_fn}
+a fixed \code{bandwidth}, so that every set is fitted under the kernel
+the baseline has; with \code{bandwidth = NULL} each set, the empty one
+included, searches for its own. A \code{fit_fn} that refuses an empty
+set falls back to the fold mean, and the sweep logs a caution: read a GWR
+selection of one variable made that way as unproven, or supply the local
+mean as \code{null_fn}, as the second half of the example at the end of
+this page does for a learner written by hand.
+
+\code{predict()} on a GWR warns about held-out locations it cannot
+estimate and about those beyond the reach of a fold's fit (classes
+\code{"spatialkit_gwr_not_estimable"} and
+\code{"spatialkit_gwr_extrapolation"}; see
+\code{\link{predict.gwr_fit}}).  The sweep raises each once, under this
+function's name, with the totals over the candidate sets it scored; every
+set is predicted on the same rows, so a location can be counted once per
+set.
+}
+
+\section{Selection with a random forest}{
+
+A forest confounds selection with tuning. Adding a predictor that carries
+no signal still changes how the trees split, and with ranger's default
+node size that regularises the forest: in one test the cross-validated
+RMSE was 1.458 with the real predictor alone, 1.340 with a noise variable
+added, and 1.341 with the real predictor alone and
+\code{min_node_size = 20}. The noise variable bought what tuning the node
+size buys. That gain is real, so no acceptance rule refuses it: with one
+real predictor and six noise candidates a forest sweep kept the real one
+in 20 runs of 20 and added 1.35 noise variables per run under the default
+rule (2.4 per run, over 10 runs, when any gain was accepted). Setting the
+node size in
+\code{fit_fn} reduces this without removing it (0.8 per run at
+\code{min_node_size = 20}). So a variable in a forest selection may be
+there as a tuning effect wherever in the order it was added: later
+additions with small gains are the usual case, and the first variable is
+another, because a forest sweep starts from the fold mean and its first
+variable is tested as an addition to the others (see \emph{The first
+variable under a fold-mean baseline}). Compare the selected set with a
+tuned forest on the variables you have other reasons to believe in:
+\preformatted{
+fit_fn <- function(train_sf, vars)
+  fit_rf_model(train_sf, "z", vars, min_node_size = 20)
+}
+On a response unrelated to every candidate the same sweeps selected
+nothing in 20 runs of 20 (19 of 20 with the larger node size).
+}
+
 \section{The score is not a performance estimate}{
 
 \code{$score} is the cross-validated \code{metric} of the winning set at
@@ -168,8 +377,7 @@ or pass \code{select_on = "split"}, which selects on one spatial half of
 }
 
 \examples{
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE)) {
+if (requireNamespace("sp", quietly = TRUE)) {
   library(sf)
   set.seed(1)
   n <- 120
@@ -180,30 +388,72 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
   )
   pts$resp <- 3 * pts$a + 2 * pts$b + rnorm(n, 0, 0.3)
 
+  # The learner: a GWR with an adaptive bisquare kernel reaching the 30th
+  # nearest training point.  With no variables it is the kernel-weighted
+  # local mean, which is the baseline: a GWR's local intercept beats a
+  # global mean on any smooth response, so the first variable has to beat
+  # the local mean under the same kernel.
   fit_fn <- function(tr, vars) fit_gwr_model(tr, "resp", vars, bandwidth = 30)
   sel <- select_features_forward(pts, "resp", c("a", "b", "noise"), fit_fn,
                                  k = 3, quiet = TRUE)
   sel$selected
+  sel$baseline$type        # "null model": step 1 was tested against it
+  sel$history[sel$history$step <= 1, c("step", "variable", "score", "gain")]
+
+  # A learner that cannot fit an empty set takes its no-predictor model
+  # through `null_fn`.  Here the same local mean, written as a spatial_fit
+  # of its own with a predict() method, for a learner that insists on a
+  # variable.  Without `null_fn` that sweep would start from the mean of
+  # each training fold.
+  needs_one <- function(tr, vars) {
+    if (!length(vars)) stop("this learner needs a predictor")
+    fit_gwr_model(tr, "resp", vars, bandwidth = 30)
+  }
+  local_mean <- function(tr, bandwidth = 30) {
+    new_spatial_fit("local_mean_fit",
+                    engine = list(xy = st_coordinates(tr), y = tr$resp,
+                                  bandwidth = bandwidth),
+                    formula = resp ~ 1, response_var = "resp",
+                    predictor_vars = character(0), data_sf = tr)
+  }
+  predict.local_mean_fit <- function(object, newdata = NULL, ...) {
+    e  <- object$engine
+    at <- if (is.null(newdata)) e$xy else st_coordinates(newdata)
+    vapply(seq_len(nrow(at)), function(i) {
+      d <- sqrt((e$xy[, 1] - at[i, 1])^2 + (e$xy[, 2] - at[i, 2])^2)
+      h <- sort(d)[min(e$bandwidth, length(d))]  # the kernel's reach here
+      w <- ifelse(d > h, 0, (1 - d^2 / h^2)^2)   # bisquare weights
+      sum(w * e$y) / sum(w)
+    }, numeric(1))
+  }
+  registerS3method("predict", "local_mean_fit", predict.local_mean_fit)
+  sel2 <- select_features_forward(pts, "resp", c("a", "b", "noise"), needs_one,
+                                  k = 3, quiet = TRUE, null_fn = local_mean)
+  sel2$baseline$type       # "null_fn"
+  all.equal(sel2$baseline$score, sel$baseline$score)  # the same baseline
 }
 }
 \references{
+Breiman, L., Friedman, J. H., Olshen, R. A. and Stone, C. J. (1984).
+\emph{Classification and Regression Trees}. Wadsworth.
+
 Cawley, G. C. and Talbot, N. L. C. (2010). On over-fitting in model
 selection and subsequent selection bias in performance evaluation.
 \emph{Journal of Machine Learning Research}, 11, 2079--2107.
 \url{https://jmlr.org/papers/v11/cawley10a.html}
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}}
 }
 \concept{cross-validation}

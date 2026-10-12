@@ -4,6 +4,22 @@
 #' supported: user-provided points, uniform random sampling within a boundary,
 #' or k-means clustering of a sampling cloud.
 #'
+#' Seeds lie inside the ground they stand for, so Voronoi cells clipped to the
+#' seeds' own hull would leave its edge uncovered. The result therefore
+#' carries that ground as `attr(, "cover")`: the `boundary` when one was
+#' given, otherwise the convex hull of `sample_points`, otherwise (for the
+#' scored centres of a [resolution_profile()] or a [select_resolution()]
+#' result passed as `n`) the hull of the points the profile was computed on.
+#' [build_tessellation()] and
+#' [create_voronoi_polygons()] derive their default boundary from it, so
+#' `build_tessellation(seeds, method = "voronoi")` holds every observation
+#' without a `boundary`. Seeds with no cover are tessellated over their own
+#' hull unless a `boundary` or `cover` is passed then: `method = "provided"`
+#' seeds given with neither `boundary` nor `sample_points` have none, and no
+#' warning is raised for them, since they may be the observation sites
+#' themselves. The attribute survives
+#' `sf::st_transform()` and row subsetting; `rbind()` drops it.
+#'
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
@@ -24,14 +40,21 @@
 #'   (its first element is used), a [select_resolution()] result (its
 #'   `$best`), or a [resolution_profile()] (read with `select_resolution()` at
 #'   its default criterion). The result then carries `attr(, "n_from")`
-#'   saying which.
+#'   saying which. A count read off a selection or a profile comes with what
+#'   the selection found: a warning of class `"spatialkit_bound_chosen"` when
+#'   the optimum sits on a bound of the ladder, so the bound chose the count,
+#'   and one of class `"spatialkit_no_structure"` when one cell for the whole
+#'   layer scores as well. A profile with no `cp` to read is an error (class
+#'   `"spatialkit_no_default_criterion"` when another criterion is finite);
+#'   see [resolution_profile()].
 #'
 #'   With `method = "kmeans"`, a selection or profile also carries the
 #'   centres of the partition the profile scored at that count, and those
 #'   are returned instead of a new k-means: a k-means partition is the
 #'   Voronoi partition of its centres, so their cells are the cells the
 #'   criteria judged. `sample_points`, when given, is then only assigned to
-#'   them (for `attr(, "kmeans")`), and `boundary` only sets the CRS;
+#'   them (for `attr(, "kmeans")`) and gives the cover, and `boundary` only
+#'   sets the CRS and the cover (see "Details");
 #'   `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used. Pass the
 #'   count as a number (`n = sel$best`) for a fresh k-means instead.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
@@ -58,7 +81,10 @@
 #'   `iter` and `nstart`. For the scored centres of a selection or profile
 #'   (see `n`) it describes `sample_points` assigned to them, each point to
 #'   its nearest seed, with `iter` `NA` and `nstart` the profile's restarts,
-#'   and is absent when no `sample_points` were given.
+#'   and is absent when no `sample_points` were given. Every method also
+#'   attaches `attr(, "cover")` when the call says what ground the seeds stand
+#'   for (see "Details"): an sfc holding the boundary's polygons or the hull
+#'   of the clustered points, in its own CRS.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -80,6 +106,7 @@ get_voronoi_seeds <- function(boundary = NULL,
   # --- validation ---
   if (!is.null(boundary)) .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
   # The level-selection step's own answer is accepted as `n`.
+  n_arg  <- n
   n_res  <- .resolve_cell_count(n, "n", "get_voronoi_seeds")
   n      <- if (is.null(n_res)) NULL else n_res$n
   n_from <- if (is.null(n_res)) NULL else n_res$from
@@ -107,10 +134,22 @@ get_voronoi_seeds <- function(boundary = NULL,
   # algorithm, different starts, a different cloud) gave other cells, and
   # the count was then defended on a partition nobody built.
   if (identical(method, "kmeans") && !is.null(n_res$seeds)) {
+    # The ground these centres stand for: the boundary, else the points they
+    # are for, else the hull of the points the profile was computed on, which
+    # a profile keeps and a selection's centres carry as their cover.
+    scored_cover <- if (!is.null(boundary)) boundary
+                    else if (!is.null(sample_points)) sample_points
+                    else if (inherits(n_arg, "resolution_profile"))
+                      attr(n_arg, "hull", exact = TRUE)
+                    else NULL
     out <- .use_scored_seeds(n_res$seeds,
                              like  = if (!is.null(boundary)) boundary else sample_points,
-                             cloud = sample_points, caller = "get_voronoi_seeds")
+                             cloud = sample_points, caller = "get_voronoi_seeds",
+                             cover = scored_cover)
+    cov <- attr(out, "cover", exact = TRUE)
     out <- .align_crs(out, boundary)
+    # Kept across the CRS alignment whatever sf does with custom attributes.
+    attr(out, "cover") <- cov
     attr(out, "n_from") <- n_from
     return(out)
   }
@@ -252,7 +291,34 @@ get_voronoi_seeds <- function(boundary = NULL,
   if (!is.null(n_from)) attr(out, "n_from") <- n_from
   # The k-means run behind the seeds, on the kmeans path only.
   if (identical(method, "kmeans")) attr(out, "kmeans") <- km_record
-  out
+  # The ground the seeds stand for, set after the alignment so it is kept
+  # whatever a transform does with custom attributes: the boundary when one
+  # was given (random seeds, a cloud sampled in it, and a cloud the caller
+  # placed in it), otherwise the hull of the clustered cloud.
+  .set_cover(out, if (!is.null(boundary)) boundary else sample_points)
+}
+
+
+#' Attach the cover of the ground a layer of seeds stands for
+#'
+#' Seeds lie inside the data, or inside the boundary they were drawn in, so
+#' the hull of the seeds is smaller than the ground their Voronoi cells have
+#' to hold.  The cover is that ground: the polygons of a boundary, or the
+#' convex hull of the points that were clustered (see \code{.cover_of()}),
+#' in its own CRS.  \code{create_voronoi_polygons()} reads it when no
+#' boundary is passed.
+#'
+#' @param seeds The sf POINT layer of seeds.
+#' @param src An sf/sfc layer of polygons or points, or \code{NULL} when the
+#'   call does not say what ground the seeds stand for.
+#' @return \code{seeds}, with \code{attr(, "cover")} set when \code{src}
+#'   gives one.
+#' @keywords internal
+#' @noRd
+.set_cover <- function(seeds, src) {
+  cov <- tryCatch(.cover_of(src), error = function(e) NULL)
+  if (!is.null(cov)) attr(seeds, "cover") <- cov
+  seeds
 }
 
 
@@ -335,6 +401,12 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' it: the centres of the scored partition are then returned (in the CRS of
 #' `points_sf`, with `attr(, "n_from")`), and no k-means is run.
 #'
+#' The centres lie inside the points, so their own hull is smaller than the
+#' data's. The result carries the convex hull of `points_sf` as
+#' `attr(, "cover")`, and [build_tessellation()] clips the cells to that hull
+#' (grown by 2 percent of its diagonal) when no `boundary` is passed, so every
+#' point of `points_sf` falls in a cell.
+#'
 #' @param points_sf An sf object with POINT geometries.
 #' @param k Integer; requested number of clusters, treated as an upper bound
 #'   only. It is clamped, with a warning, to whichever is smaller of the number
@@ -343,7 +415,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   centres as there are rows. Check `nrow()` on the result. A
 #'   [select_resolution()] result or a [resolution_profile()] is also
 #'   accepted: its scored centres are returned when it carries them, and
-#'   otherwise its count is used.
+#'   otherwise its count is used. Such a count raises the warnings and the
+#'   error described under `n` in [get_voronoi_seeds()] (classes
+#'   `"spatialkit_bound_chosen"`, `"spatialkit_no_structure"` and
+#'   `"spatialkit_no_default_criterion"`).
 #' @param set_seed Optional integer RNG seed. Default 456, so a call gives the
 #'   same seeds every time whatever the session's random-number state; an
 #'   outer [set.seed()] does not change them, and the caller's random-number
@@ -353,7 +428,8 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   kept. Default 10.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
-#'   `method = "kmeans"` columns matching [get_voronoi_seeds()].
+#'   `method = "kmeans"` columns matching [get_voronoi_seeds()], and
+#'   `attr(, "cover")`, the convex hull of `points_sf` (an sfc in its CRS).
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -375,7 +451,7 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10) {
     k_res <- .resolve_cell_count(k, "k", "voronoi_seeds_kmeans")
     if (!is.null(k_res$seeds)) {
       out <- .use_scored_seeds(k_res$seeds, like = points_sf, cloud = NULL,
-                               caller = "voronoi_seeds_kmeans")
+                               caller = "voronoi_seeds_kmeans", cover = points_sf)
       attr(out, "n_from") <- k_res$from
       return(out)
     }
@@ -452,7 +528,8 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10) {
   # functions are drop-in interchangeable.
   result$seed_id <- seq_len(nrow(result))
   result$method  <- "kmeans"
-  result
+  # The ground the centres stand for: the hull of the points clustered.
+  .set_cover(result, points_sf)
 }
 
 
@@ -483,7 +560,10 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10) {
 #'   loop over [set.seed()].
 #' @return An sf object of `k` random POINTs (fewer only in the degenerate
 #'   case above), with `seed_id` and `method = "random"` columns matching
-#'   [get_voronoi_seeds()].
+#'   [get_voronoi_seeds()], and `attr(, "cover")`, the polygons of `boundary`:
+#'   [build_tessellation()] clips the cells to it (grown by 2 percent of its
+#'   diagonal) when no `boundary` is passed there, so the cells fill the area
+#'   the seeds were drawn in and not only the seeds' own hull.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -523,7 +603,8 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # functions are drop-in interchangeable.
   out$seed_id <- seq_len(nrow(out))
   out$method  <- "random"
-  out
+  # The ground the seeds stand for: the area they were drawn in.
+  .set_cover(out, boundary)
 }
 
 
@@ -559,12 +640,19 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' @param cloud Optional sf POINT layer to assign to the seeds for
 #'   \code{attr(, "kmeans")}; \code{NULL} for none.
 #' @param caller Name for the log line.
+#' @param cover The ground the centres stand for, as \code{.set_cover()}
+#'   takes it: the boundary, the points being seeded, or the hull the profile
+#'   kept of the points it was computed on.  \code{NULL} falls back to a
+#'   cover the centres themselves carry (\code{attr(seeds, "cover")}), and
+#'   to none when there is none.
 #' @return An sf POINT layer with \code{seed_id} and \code{method = "kmeans"}
-#'   columns, and \code{attr(, "kmeans")} when \code{cloud} is given.
+#'   columns, \code{attr(, "kmeans")} when \code{cloud} is given, and
+#'   \code{attr(, "cover")} when a cover is known.
 #' @keywords internal
 #' @noRd
-.use_scored_seeds <- function(seeds, like, cloud, caller) {
+.use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL) {
   nstart <- attr(seeds, "nstart", exact = TRUE)
+  if (is.null(cover)) cover <- attr(seeds, "cover", exact = TRUE)
   moved  <- .seeds_in_crs_of(seeds, like)
   out <- sf::st_sf(seed_id = seq_len(nrow(moved)), method = "kmeans",
                    geometry = sf::st_geometry(moved))
@@ -574,7 +662,9 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
                    "criteria judged. Pass the count as a number for a fresh k-means."),
             caller, nrow(out), if (is.null(nstart)) "its" else format(nstart))
   if (!is.null(cloud)) attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart)
-  out
+  # The centres lie inside the points they were fitted to; their cells have
+  # to reach the points' own hull, not the centres'.
+  .set_cover(out, cover)
 }
 
 

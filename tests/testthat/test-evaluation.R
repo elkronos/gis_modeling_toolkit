@@ -366,9 +366,10 @@ test_that("compare_models_cv warns on unknown model names and errors when none r
 
 test_that("compare_models_cv drops a recognised model whose backend is absent", {
   skip_if_not_installed("ranger")
+  # GWR needs sp alone: the local regressions are the package's own, and
+  # GWmodel, which this used to ask for as well, is not called.
   absent <- c("GWR", "Bayesian")[
-    !c(requireNamespace("GWmodel", quietly = TRUE) &&
-         requireNamespace("sp", quietly = TRUE),
+    !c(requireNamespace("sp", quietly = TRUE),
        requireNamespace("brms", quietly = TRUE))]
   skip_if(length(absent) == 0L, "both optional backends are installed")
 

@@ -188,7 +188,12 @@ test_that("prep_model_data() records what it dropped, and why, with the rows' id
   expect_equal(nrow(out), 4L)
   dr <- attr(out, "dropped")
   expect_type(dr, "list")
-  expect_named(dr, c("n", "n_geometry", "which", "row_id", "reason", "n_rows"))
+  # by_column, response_std_diff and the two marks on the kept rows were added
+  # with the classed drop warning; the first five fields and n_rows are as
+  # they were.
+  expect_named(dr, c("n", "n_geometry", "which", "row_id", "reason",
+                     "by_column", "response_std_diff", "constant_predictors",
+                     "n_duplicate_locations", "n_rows"))
   expect_identical(dr$n_rows, 4L)
   expect_identical(dr$n, 4L)
   expect_identical(dr$n_geometry, 1L)
@@ -299,7 +304,7 @@ test_that("every fit carries n_dropped, and a CV run reports it too", {
   cv <- suppressMessages(suppressWarnings(cv_rf(d, "a", "z", folds = fo, num_trees = 50)))
   expect_identical(cv$n_dropped, 3L)
   expect_identical(cv$n_unknown_ids, 3L)
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   g <- suppressWarnings(suppressMessages(fit_gwr_model(d, "a", "z", adaptive = TRUE, bandwidth = 30)))
   expect_identical(g$info$n_dropped, 3L)
 })
@@ -683,7 +688,7 @@ test_that("residual_morans_i() returns its weights, the kurtosis, the design ran
 })
 
 test_that("fit_gwr_model() keeps the mask of non-finite local coefficients", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   pts <- surf_test_points(n = 120)
   pts$v <- rnorm(120)
   fit <- suppressWarnings(suppressMessages(fit_gwr_model(pts, "z", c("w", "v"), adaptive = TRUE, bandwidth = 40)))
@@ -709,8 +714,11 @@ test_that("determine_optimal_levels() reports the elbow and the failed k in its 
   pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], w = rnorm(640)),
                       coords = c("x", "y"), crs = 32632)
   pts$z <- pts$w + rnorm(640)
-  out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
-                                  predictor_vars = "w", criterion = "combined")
+  # Moran's z takes part in this ranking, and the call says so with a class.
+  expect_warning(
+    out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
+                                    predictor_vars = "w", criterion = "combined"),
+    class = "spatialkit_diagnostic_ranking")
   d <- attr(out, "diagnostics")
   expect_false(is.null(d))
   expect_true(is.numeric(d$knee_k) && length(d$knee_k) == 1L)
@@ -729,7 +737,11 @@ test_that("build_tessellation() records the points it snapped to a nearest cell"
   all_pts <- rbind(pts, extra)
   bnd <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
     c(0, 0), c(1000, 0), c(1000, 1000), c(0, 1000), c(0, 0)))), crs = 3857))
-  tess <- build_tessellation(all_pts, boundary = bnd, method = "square", approx_n_cells = 16, quiet = TRUE)
+  # The point well outside is NA in `index`: counted, and warned about.
+  expect_warning(
+    tess <- build_tessellation(all_pts, boundary = bnd, method = "square", approx_n_cells = 16, quiet = TRUE),
+    "1 of 62 point\\(s\\) \\(1.6%\\) fall in no cell", class = "spatialkit_unassigned")
+  expect_identical(tess$params$n_outside, 1L)
   sn <- tess$params$snapped
   expect_named(sn, c("n", "which", "distance"))
   expect_identical(sn$n, 1L)
@@ -785,7 +797,7 @@ test_that("get_voronoi_seeds(kmeans) returns the clustering behind the seeds", {
 })
 
 test_that("gwr_model_selection() says how its criterion column was found", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   pts <- surf_test_points(n = 100)
   pts$v <- rnorm(100)
   sel <- suppressWarnings(suppressMessages(

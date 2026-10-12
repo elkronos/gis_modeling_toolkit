@@ -19,7 +19,7 @@ envelope, and refused with an error otherwise.}
 
 \item{expand}{Numeric expansion distance or fraction (0–1 = fraction of
 extent). Absolute values are expressed in the units of the CRS the clip
-target is built in. Because \code{\link[sf:geos_unary]{sf::st_buffer()}} interprets \code{dist} as
+target is built in. Because \code{\link[sf:st_buffer]{sf::st_buffer()}} interprets \code{dist} as
 \strong{metres} for lon/lat data while the fraction-of-extent form is derived
 from a bounding box measured in \strong{degrees}, lon/lat input is projected to
 a local projected CRS first (see \verb{@return}), so both forms agree.}
@@ -50,7 +50,8 @@ identical ground.
 \details{
 It is not the target \code{\link[=build_tessellation]{build_tessellation()}} derives on its own:
 \code{method = "voronoi"} without a boundary clips to the convex hull of the
-points buffered by 2 percent of its diagonal, and there \code{expand} is always
+points (or of their \code{cover}, for seeds) buffered by 2 percent of its
+diagonal, and there \code{expand} is always
 a distance. A bounding box over a non-rectangular point cloud includes
 corners with no data, so a hex or square grid laid over it has cells that
 hold no points; pass the study-area polygon when there is one.
@@ -67,10 +68,10 @@ box <- clip_target_for(pts, expand = 0.1, quiet = TRUE)
 st_area(box)
 }
 \seealso{
-Other spatial data preparation: 
-\code{\link{coerce_to_points}()},
-\code{\link{ensure_projected}()},
-\code{\link{harmonize_crs}()},
-\code{\link{prep_model_data}()}
+Other spatial data preparation:
+\code{\link[=coerce_to_points]{coerce_to_points()}},
+\code{\link[=ensure_projected]{ensure_projected()}},
+\code{\link[=harmonize_crs]{harmonize_crs()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{spatial data preparation}

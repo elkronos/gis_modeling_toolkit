@@ -39,7 +39,7 @@
 #' dropped.  The count is of grid cells: on clustered data a grid
 #' of \code{k} or more cells can have fewer than \code{k} that hold points,
 #' and \code{make_folds()} then lowers \code{k} at that size, which the
-#' \code{k} column shows.  On an extent much longer than it is wide every
+#' \code{k} column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every
 #' rung can fall below the autocorrelation range while longer blocks would
 #' still fit \code{k} times along the longer side; the sweep warns when
 #' that happens, and \code{block_sizes} is then the way to reach past the
@@ -47,8 +47,25 @@
 #' (\code{make_folds()}'s \code{params$crs}, metres for geographic input),
 #' and the returned table records that CRS.  Each is the \emph{minimum} block
 #' edge handed to \code{make_folds()}, which fits a whole number of cells
-#' across the extent, so the cells are somewhat longer than the size on the
-#' axis (up to twice as long).
+#' across each axis of the extent, so on an axis at least as long as the
+#' size the cells are somewhat longer than it (up to just under twice as
+#' long).  An axis shorter than the size is spanned by one row or column of
+#' cells, which are then shorter than the size there.  The
+#' \code{block_width} and \code{block_height} columns give the cells built
+#' at each size.
+#'
+#' @section Warnings raised once for the sweep:
+#' Every size is a \code{\link{cv_spatial}()} on the same layer.  The
+#' warnings \code{\link{prep_model_data}()} raises about that layer (class
+#' \code{spatialkit_rows_dropped}, counting the incomplete rows dropped, and
+#' \code{spatialkit_constant_predictor}) are raised once, not once per
+#' size.  With a GWR learner, the two warnings in
+#' which \code{predict()} counts held-out locations
+#' (\code{"spatialkit_gwr_not_estimable"} and
+#' \code{"spatialkit_gwr_extrapolation"}) are raised once each, under this
+#' function's name, with the totals over every size; the same rows are
+#' predicted at every size, so a location can be counted once per size (see
+#' \code{\link{predict.gwr_fit}}).
 #'
 #' @param data_sf An sf object with the response and predictors.
 #' @param response_var,predictor_vars Column names.
@@ -86,7 +103,9 @@
 #'   reference), \code{method}, \code{blocks_used}, \code{k} (the folds
 #'   actually built), \code{n_folds_succeeded}, \code{value} (the pooled
 #'   metric), \code{fold_min}, \code{fold_max} and \code{fold_sd} (its spread
-#'   across folds).  Attributes: \code{metric}, \code{sac_range} (the
+#'   across folds), and \code{block_width} and \code{block_height} (the
+#'   width and height of the grid cells built at that size, \code{NA} for
+#'   the random reference).  Attributes: \code{metric}, \code{sac_range} (the
 #'   effective range, or \code{NA}), \code{crs}, \code{k} (the folds
 #'   requested, which \code{print()} and \code{plot()} report),
 #'   \code{n_fits}, \code{response_var}, and \code{results}, the full
@@ -136,6 +155,13 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   if (length(fixed))
     stop("cv_block_size_sweep(): ", paste(sQuote(fixed), collapse = ", "),
          " cannot be passed through `...`; the sweep sets them.", call. = FALSE)
+
+  # The layer is prepared here, for the ladder, and again by cv_spatial() at
+  # every size.  Each preparation finds the same incomplete rows and the same
+  # constant predictors, so the warnings that report them are raised by the
+  # first and not repeated by the others.
+  end_run <- .once_per_run(.prep_warning_classes)
+  on.exit(end_run(), add = TRUE)
 
   # The extent the ladder is built over, in the CRS the folds will use.
   pts <- prep_model_data(data_sf, response_var, predictor_vars)
@@ -315,11 +341,18 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   # response is handed to make_folds(): its leakage warning would fire at
   # every size below the range, and this sweep is that diagnostic drawn out.
   if (!("..row_id" %in% names(data_sf))) data_sf$..row_id <- seq_len(nrow(data_sf))
+  # make_folds() warns, with the class spatialkit_k_reduced, when it returns
+  # fewer folds than asked.  In a sweep that can happen at several sizes (a
+  # grid of k or more cells can have fewer than k that hold points), so the
+  # warnings are caught here by class and raised once, after the last size,
+  # naming the sizes; the `k` column carries the count at each.
   run_one <- function(bs, method) {
-    f <- if (identical(method, "random_kfold"))
-      make_folds(data_sf, k = k, method = "random_kfold", seed = seed)
-    else
-      make_folds(data_sf, k = k, method = "block_kfold", block_size = bs, seed = seed)
+    f <- withCallingHandlers(
+      if (identical(method, "random_kfold"))
+        make_folds(data_sf, k = k, method = "random_kfold", seed = seed)
+      else
+        make_folds(data_sf, k = k, method = "block_kfold", block_size = bs, seed = seed),
+      spatialkit_k_reduced = function(w) invokeRestart("muffleWarning"))
     args <- c(list(data_sf = data_sf, response_var = response_var,
                    predictor_vars = predictor_vars, fit_fn = fit_fn,
                    folds = f, k = k, seed = seed), dots)
@@ -340,24 +373,52 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
       fold_min = if (length(fv)) min(fv) else NA_real_,
       fold_max = if (length(fv)) max(fv) else NA_real_,
       fold_sd  = if (length(fv) > 1L) stats::sd(fv) else NA_real_,
+      # The cells built.  A whole number of them is fitted across each axis,
+      # so they are 1 to under 2 times `block_size` on an axis at least that
+      # long, and as long as the extent (shorter than `block_size`) on an
+      # axis that is not.
+      block_width  = as.numeric(f$params$block_width %||% NA_real_),
+      block_height = as.numeric(f$params$block_height %||% NA_real_),
       stringsAsFactors = FALSE))
   }
 
+  # A GWR learner counts, at every size, the held-out locations it cannot
+  # estimate and those beyond the reach of a fold's fit, and cv_spatial()
+  # raises each count once per cross-validation.  Collected over the sweep,
+  # each is raised once, with the totals: the same rows are predicted at
+  # every size, so a location can be counted once per size.
   rows <- list(); results <- list()
-  if (isTRUE(include_random)) {
-    .msg("cv_block_size_sweep(): random folds (the leaky reference) ...")
-    one <- suppressMessages(run_one(NA_real_, "random_kfold"))
-    results[["random_kfold"]] <- one$cv
-    rows[[length(rows) + 1L]] <- one$row
-  }
-  for (bs in block_sizes) {
-    .msg(sprintf("cv_block_size_sweep(): block size %s ...", format(signif(bs, 4))))
-    one <- suppressMessages(run_one(bs, "block_kfold"))
-    results[[as.character(signif(bs, 6))]] <- one$cv
-    rows[[length(rows) + 1L]] <- one$row
-  }
+  .gwr_tally_predict_warnings({
+    if (isTRUE(include_random)) {
+      .msg("cv_block_size_sweep(): random folds (the leaky reference) ...")
+      one <- suppressMessages(run_one(NA_real_, "random_kfold"))
+      results[["random_kfold"]] <- one$cv
+      rows[[length(rows) + 1L]] <- one$row
+    }
+    for (bs in block_sizes) {
+      .msg(sprintf("cv_block_size_sweep(): block size %s ...", format(signif(bs, 4))))
+      one <- suppressMessages(run_one(bs, "block_kfold"))
+      results[[as.character(signif(bs, 6))]] <- one$cv
+      rows[[length(rows) + 1L]] <- one$row
+    }
+  }, caller = "cv_block_size_sweep", refits = TRUE)
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
+  fewer <- which(is.finite(out$k) & out$k < k)
+  if (length(fewer))
+    .warn_and_log(paste0("cv_block_size_sweep(): fewer than the k = %d folds ",
+                         "asked for in %d of the %d cross-validations (%s), ",
+                         "where fewer than %d blocks hold points. Those rows ",
+                         "are not %d-fold results like the others; the `k` ",
+                         "column gives the folds built. Pass `block_sizes` ",
+                         "without those sizes, or a smaller `k`, to compare ",
+                         "like with like."),
+                  k, length(fewer), nrow(out),
+                  paste(sprintf("%s: %d folds",
+                                ifelse(is.na(out$block_size[fewer]), "random folds",
+                                       paste("block size", format(signif(out$block_size[fewer], 4)))),
+                                out$k[fewer]), collapse = "; "),
+                  k, k)
   structure(out,
             metric = metric, sac_range = sac_range,
             crs = .fold_crs_label(pts), k = k, n_fits = n_fits,

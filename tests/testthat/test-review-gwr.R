@@ -2,7 +2,6 @@
 # GWR regressions from the adversarial review.
 # ===========================================================================
 
-skip_if_not_installed("GWmodel")
 skip_if_not_installed("sp")
 
 

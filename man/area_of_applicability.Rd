@@ -9,32 +9,44 @@ area_of_applicability(
   model = NULL,
   train_sf = NULL,
   predictor_vars = NULL,
-  weights = NULL,
+  weights = "auto",
   folds = NULL,
   threshold = NULL,
   normalizer_max_n = 5000L,
   seed = 123L,
   chunk_size = NULL,
-  use_fnn = requireNamespace("FNN", quietly = TRUE)
+  use_fnn = requireNamespace("FNN", quietly = TRUE),
+  coords = c("auto", "yes", "no"),
+  categorical = c("refuse", "indicator", "drop")
 )
 }
 \arguments{
 \item{newdata}{Prediction locations: an \code{sf} object (typically from
 \code{\link{predict_surface}}) or a data.frame, carrying the predictor
-columns. For a model fitted with \code{include_coords = TRUE} an
-\code{sf} object is required, non-\code{POINT} geometry is reduced to
-representative points, and a CRS mismatch with the training data is
-reconciled; see \emph{Models fitted with the coordinates as predictors}.}
+columns. When location is measured (a \code{gwr_fit}, a
+\code{bayesian_fit}, a forest fitted with \code{include_coords = TRUE},
+or \code{coords = "yes"}) an \code{sf} object is required,
+non-\code{POINT} geometry is reduced to representative points, and a CRS
+mismatch with the training data is reconciled; see \emph{Models whose
+predictions depend on location}.}
 
 \item{model}{A fitted \code{spatial_fit}, supplying the training data and
-predictor names. Optional if \code{train_sf} and \code{predictor_vars} are
-given directly, which lets this be used with any model.}
+predictor names, the importance \code{weights = "auto"} reads, and
+whether its predictions depend on location. Optional if \code{train_sf}
+and \code{predictor_vars} are given directly, which lets this be used
+with any model.}
 
 \item{train_sf}{Training data, if not taken from \code{model}.}
 
 \item{predictor_vars}{Predictor names, if not taken from \code{model}.}
 
-\item{weights}{Optional named numeric vector of predictor importances. Any
+\item{weights}{\code{"auto"} (default), \code{NULL}, or a named numeric
+vector of predictor importances. \code{"auto"} uses
+\code{pmax(model$info$importance, 0)} when \code{model} carries a finite
+importance with at least one positive value, naming every predictor in
+use, from a model with out-of-bag skill; otherwise every predictor counts
+equally and a logged note says why (see \emph{Weights}). \code{NULL} is
+the explicit request for equal weights. For a vector of your own, any
 positive scale works. When \code{model} was fitted with
 \code{include_coords = TRUE}, the coordinates \code{"..x"} and
 \code{"..y"} are measured as predictors too (see below), and you are not
@@ -46,10 +58,10 @@ coordinate columns. Weights must be finite and non-negative, so pass
 permutation importance as \code{pmax(importance, 0)}. (A forest with no
 out-of-bag rows, \code{replace = FALSE} with \code{sample_fraction = 1},
 has \code{NaN} importance, which \code{pmax()} keeps and which is
-refused; refit it with out-of-bag rows or use \code{weights = NULL}.)
+refused when passed by hand; \code{"auto"} uses equal weights for it.)
 \code{pmax(importance, 0)} is all zero when the model found no
-predictor useful, and then the weights cannot say
-anything: with a single predictor any weight gives the same index and zero
+predictor useful, and then the weights cannot say anything: with a
+single predictor any weight gives the same index and zero
 is accepted; with several, all of them are weighted equally, as with
 \code{weights = NULL}, and a warning says so. The coordinate default
 above is the mean of the supplied weights, so a zero weight on the only
@@ -69,7 +81,9 @@ another layer, or these rows in another order -- is refused. That check
 is skipped when the folds were built on polygons and the training data
 are the points a fit reduced them to.}
 
-\item{threshold}{Optional numeric override for the DI threshold.}
+\item{threshold}{Optional numeric override for the DI threshold of the
+predictor index. The location index, when there is one, always takes its
+threshold from the rule.}
 
 \item{normalizer_max_n}{Subsample the training data to this many points when
 computing the mean pairwise distance, which is quadratic. Default 5000.}
@@ -81,46 +95,97 @@ computing the mean pairwise distance, which is quadratic. Default 5000.}
 at least 1; a fractional value is truncated to a whole number of rows.}
 
 \item{use_fnn}{Use \pkg{FNN} for nearest-neighbour search when available.
-Exposed so the dense fallback can be tested.}
+Exposed so the dense fallback can be tested. The two paths return the
+same distances: the dense one searches with a fast formula and then
+recomputes the nearest distance exactly, so an exact copy of a training
+row is at distance 0 on both.}
+
+\item{coords}{Whether location is measured: \code{"auto"} (default)
+measures it for a model whose predictions depend on it (a
+\code{gwr_fit}, a \code{bayesian_fit}, a forest fitted with
+\code{include_coords = TRUE}) and not otherwise; \code{"yes"} measures
+it whatever the model, and with no \code{model}; \code{"no"} never
+does, and logs a caution for a model that depends on it. See
+\emph{Models whose predictions depend on location}.}
+
+\item{categorical}{What to do with factor and character predictors:
+\code{"refuse"} (default) stops with a message naming them and the two
+alternatives; \code{"indicator"} codes each level as a 0/1 column and
+marks a prediction row on a level no training row has as outside
+(\code{DI = Inf}); \code{"drop"} computes the index on the other
+predictors and logs which were left out. See \emph{Limitations} for the
+scaling \code{"indicator"} uses.}
 }
 \value{
 An object of class \code{aoa}: a list with
 \itemize{
 \item \code{aoa}: \code{newdata} with a numeric \code{DI} column
-and a logical \code{AOA} column added. This is the object the
-computation ran on, which for a coordinate-using model is
-\code{newdata} after pointizing, CRS reconciliation and the addition
-of the \code{"..x"} and \code{"..y"} columns. A row whose predictors
-are not all finite gets \code{NA} in both columns, and a row outside
-the training range of a predictor in \code{dropped_vars} gets
+and a logical \code{AOA} column added, and between them a numeric
+\code{DI_location} column when location has an index of its own.
+For a forest fitted with \code{include_coords = TRUE} it is the
+object the computation ran on: \code{newdata} after pointizing, CRS
+reconciliation and the addition of the \code{"..x"} and \code{"..y"}
+columns. With a location index it is \code{newdata} as passed. A
+row whose predictors are not all finite gets \code{NA} in \code{DI},
+and a row outside the training range of a predictor in
+\code{dropped_vars}, or on a level no training row has, gets
 \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
+\code{AOA} is \code{DI <= threshold}, and with a location index
+also \code{DI_location <= location$threshold}: a row outside on
+either index is \code{FALSE}, and a row with one index missing and
+the other inside is \code{NA}.
 \item \code{threshold}: the DI cut-off used.
 \item \code{train_DI}: the training points' own DI values.
 \item \code{normalizer}: the mean pairwise training distance.
 \item \code{weights}: the weight vector actually applied, named by
 \code{predictor_vars}.
 \item \code{predictor_vars}: the predictors used, including
-\code{"..x"}/\code{"..y"} when the model uses coordinates and
-excluding \code{dropped_vars}.
+\code{"..x"}/\code{"..y"} when a forest uses the coordinates and
+excluding \code{dropped_vars} and, under
+\code{categorical = "drop"}, \code{categorical_vars}.
 \item \code{dropped_vars}: predictors dropped for negligible
 variance.
 \item \code{scaling}: a list with \code{center} and \code{scale},
 each named by \code{predictor_vars}: the training means and standard
 deviations the index is computed in, so a location's DI can be
-traced to the predictor that put it outside.
+traced to the predictor that put it outside. A predictor coded as
+indicators has one entry per level, named
+\code{"<predictor>=<level>"}.
 \item \code{n_outliers}: the number of training DI values above the
 \code{Q3 + 1.5 * IQR} fence, which the default threshold rule sets
 aside (the "outlier-removed" in its name); computed whether or not
 \code{threshold} was supplied.
+\item \code{n_duplicates}: with \code{folds = NULL}, the number of
+training rows that repeat an earlier row's predictor values exactly
+and so share its reference distance; \code{NA} when folds were
+supplied (see \emph{Training rows with identical predictor values}).
+\item \code{location}: \code{NULL}, or for a location index a list
+with \code{threshold}, \code{train_DI}, \code{normalizer} (the mean
+distance between training points, in map units, so
+\code{threshold * normalizer} is the cut-off as a distance),
+\code{n_duplicates} (training rows at an earlier row's location;
+\code{NA} when folds were supplied) and \code{n_outside} (prediction
+rows beyond the location threshold).
+\item \code{categorical_vars}: the factor and character predictors
+found, coded or left out as \code{params$categorical} says.
 \item \code{n_train}, \code{n_new}, \code{n_inside},
 \code{n_outside}, \code{n_na}: row counts. \code{n_train} counts the
 training rows that survived the finite-value filter; \code{n_new} is
 every row of \code{newdata}, so
-\code{n_new = n_inside + n_outside + n_na}.
+\code{n_new = n_inside + n_outside + n_na}, with \code{n_na} the
+rows whose \code{AOA} is \code{NA}.
+\code{n_outside_predictors} counts the rows beyond the predictor
+threshold, which is \code{n_outside} unless there is a location
+index.
 \item \code{params} records the call: \code{folds_supplied},
 \code{n_folds}, \code{folds_method}, \code{threshold_supplied},
 \code{normalizer_max_n}, \code{normalizer_n_used},
-\code{normalizer_subsampled}, \code{weights_supplied} and
+\code{normalizer_subsampled}, \code{weights_supplied} (the caller
+passed a vector), \code{weights_source} (\code{"model importance"},
+\code{"supplied"} or \code{"equal"}), \code{weights_note} (the kind
+of importance, or why the weights are equal), \code{coords}
+(\code{"location index"}, \code{"predictors"} or \code{"none"}),
+\code{categorical} and
 \code{seed}.  \code{folds_method} is the \code{method} of a
 \code{\link{make_folds}()} result (\code{"block_kfold"},
 \code{"random_kfold"}, ...), \code{"labels"} for a vector of fold
@@ -152,14 +217,17 @@ AOA marks where the score applies.
 \section{How it is computed}{
 
 Predictors are centred and scaled using the training data's own means and
-standard deviations, then optionally weighted by variable importance. For a
+standard deviations, then weighted by variable importance when the model
+carries one (see \emph{Weights}). For a
 prediction point \eqn{p}, the DI is the distance to its nearest training
 point in that space, divided by the mean pairwise distance among training
 points. The same quantity is computed for the training data itself, using
 each point's nearest neighbour \emph{among the training rows of the fold
 that holds it out}. That means everything outside its own fold for random
 and block folds, and the smaller training set that buffered and NNDM folds
-actually leave (see the next section). The threshold is then the largest
+actually leave (see \emph{The fold scheme changes the answer}); without
+folds it is the nearest training row with different predictor values. The
+threshold is then the largest
 training DI that is not an upper outlier, i.e. not above the fence
 \code{Q3 + 1.5 * IQR} of the training DI, with the quartiles of
 \code{stats::quantile()}'s default type 7. Prediction points at or below
@@ -180,15 +248,36 @@ max(res$train_DI))} for an earlier result \code{res}.
 The DI is invariant to the overall scale of \code{weights}: the numerator
 and the normaliser carry the same factor. Importance values can be passed
 as-is.
+}
 
-Each training point's reference is its nearest \emph{other} training row, so
-an exact duplicate in predictor space (repeat visits to a site with static
-covariates, or covariates read off a raster coarser than the sampling) has a
-training DI of 0. Once about three quarters of the rows have a twin among
-their reference rows the threshold is 0, and only exact copies of a
-training row count as inside. That is logged as a caution; folds that keep
-the duplicates together (\code{make_folds(method = "leave_location_out",
-group_var = ...)}), or removing them, give the threshold its meaning back.
+\section{Training rows with identical predictor values}{
+
+Repeat visits to a site with static covariates, or covariates read off a
+raster coarser than the sampling, give training rows that are exact copies
+of each other in predictor space. A copy is the same point of that space,
+not a neighbour. Counted as a neighbour it gives a training DI of 0, and
+once about three quarters of the rows have one the threshold is 0 and only
+exact copies of a training row count as inside (60 sites visited 4 times
+put 30 of 200 new points inside; the same sites counted once put 188).
+
+With \code{folds = NULL} each training row's reference is therefore its
+nearest row with \emph{different} values: the search runs on the distinct
+rows and every row takes its point's distance. \code{n_duplicates} counts
+the rows that repeat an earlier one, and a layer with none is computed
+exactly as before. The normaliser stays the mean pairwise distance over
+all the training rows, so a prediction point's DI is the same with and
+without folds.
+
+With \code{folds} supplied the definition is applied as it stands: a
+held-out row whose copy is on the training side of its fold has a DI of 0,
+because that hold-out did have an identical row to learn from. If the
+threshold comes out 0 that way, a warning of class
+\code{spatialkit_aoa_zero_threshold} gives the count, so a script or a
+cross-validation loop can catch it with
+\code{tryCatch(..., spatialkit_aoa_zero_threshold = )}. Folds that keep
+the copies together (\code{make_folds(method = "leave_location_out",
+group_var = ...)}) give the threshold its meaning back. The same applies
+to the location index when training rows share a location.
 }
 
 \section{The fold scheme changes the answer, and should}{
@@ -204,10 +293,54 @@ to \code{\link{cv_spatial}}. Buffered and NNDM folds use the training set
 they actually left available, not merely "everything outside the fold".
 }
 
+\section{Weights}{
+
+Meyer and Pebesma weight the predictors by the model's variable
+importance, and with the default \code{weights = "auto"} so does this
+function whenever \code{model} carries an importance that means
+something: \code{pmax(model$info$importance, 0)}, which a forest from
+\code{\link{fit_rf_model}} has. Equal weights are used, with a logged
+note, when it does not: no \code{model}; a model with no importance
+(\code{importance = "none"}, a GWR, a Bayesian fit); an importance that is
+not finite (\code{NaN} for a forest with no out-of-bag rows); one that
+names fewer predictors than are in use; no positive value; or a forest
+with no out-of-bag skill (\code{oob_r_squared} missing or at most 0),
+whose positive importances are noise. \code{print()} says which it was.
+\code{weights = NULL} asks for equal weights whatever the model carries.
+
+What the weights buy: with 2 predictors the forest uses and 8 it does not,
+equal weights put about 70\\% of rows shifted 3 SD along a used predictor
+(4 times the in-sample RMSE) inside the AOA and importance weights about
+26\\%; of rows shifted 4 SD along an unused predictor (error unchanged),
+43\\% against 93\\%. What they cost: a weight multiplies the scaled column,
+so its square enters the distance, and a weak but real predictor is
+down-weighted by the square of its relative importance. A shift along one
+can then go unseen (94\\% inside at 1.9 times the in-sample RMSE in one
+test, against 19\\% with equal weights).
+\code{weights = sqrt(pmax(importance, 0))} is the gentler alternative: it
+kept most of the gain on used predictors and put 46\\% of that weak-predictor
+shift inside, at the cost of 77\\% in place of 93\\% inside for harmless
+shifts.
+}
+
 \section{Limitations}{
 
-Predictors must be numeric; categorical variables are refused and never
-silently dummy-coded. Predictors whose variance is negligible \emph{relative
+Categorical predictors (factor or character columns) have no distance of
+their own, and by default they are refused and never silently
+dummy-coded. \code{categorical = "indicator"} codes each level that
+occurs in the training rows as a 0/1 column. The columns of one predictor
+share one scale, \code{sqrt(1 - sum(p^2))} with \code{p} the levels'
+shares of the training rows, so two rows on different levels are the same
+distance apart whichever levels they are, two on the same level are 0
+apart, and the predictor adds as much to the mean squared distance between
+training rows as one standardised numeric predictor. That scaling is a
+choice, not a result, which is why it is not the default. A prediction row
+on a level no training row has gets \code{DI = Inf}, is outside the AOA,
+and a warning gives the count. \code{categorical = "drop"} leaves the
+categorical predictors out and computes the index on the others; a level
+the training data never has then goes unseen.
+
+Predictors whose variance is negligible \emph{relative
 to their own magnitude} (the test is
 \code{sd < sqrt(.Machine$double.eps) * max(abs(x))}, so the same variable in
 metres and in gigametres is treated identically) are dropped from the
@@ -216,21 +349,67 @@ range (with the same relative tolerance) is extrapolation along a direction
 the training data never varied in: its scaled distance along it is
 infinite, so it gets \code{DI = Inf}, is outside the AOA, and a warning
 gives the count. A point missing that value is judged on the other
-predictors. Without \code{weights} every predictor counts equally, which
-overstates dissimilarity along directions the model barely uses.
+predictors. With equal weights every predictor counts the same, which
+overstates dissimilarity along directions the model barely uses; see
+\emph{Weights}.
 }
 
-\section{Models fitted with the coordinates as predictors}{
+\section{Models whose predictions depend on location}{
 
-When \code{model} was fitted with \code{include_coords = TRUE} the model
-splits on location, so the dissimilarity index has to measure location too:
-the coordinates are added to both sides as the predictors \code{"..x"} and
-\code{"..y"} and are then centred, scaled and weighted like any other
-column. Without this a prediction point far outside the training extent but
-with ordinary covariate values reads as \emph{inside} the area of
-applicability. That is exactly the extrapolation this index exists to catch.
+For three kinds of model the prediction is a function of where the point
+is, not only of its covariates, so the index has to measure location too.
+Without that a prediction point far outside the training extent but with
+ordinary covariate values reads as \emph{inside} the area of
+applicability, which is exactly the extrapolation this index exists to
+catch. \code{coords = "auto"} (the default) measures location for all
+three; \code{coords = "no"} turns it off, with a logged caution;
+\code{coords = "yes"} measures it for any model, or for none.
 
-This path needs geometry on both sides, so \code{train_sf} and
+\strong{A geographically weighted regression} (\code{gwr_fit}) has
+coefficients that vary over the map, and \strong{a Bayesian spatial model}
+(\code{bayesian_fit}) has a Gaussian-process term in the coordinates. For
+these, and under \code{coords = "yes"}, location gets an index of its own,
+built like the predictor index but in map space: \code{DI_location} is the
+distance to the nearest training point over the mean distance between
+training points; the training points' own values use the same folds; and
+the threshold is the same outlier-removed maximum. A prediction point is
+inside the AOA only if it is inside on both indices, and both DI columns
+are returned so the cause can be read off. Location is kept apart from the
+covariates because, as two more equally weighted columns, it is diluted as
+covariates are added: with 12 of them, 89\\% of points 200 to 500 units
+beyond a 1000-unit training extent still read as inside, against none with
+the separate index. In a test with a GWR whose slope rises eastward, points
+one half to one and a half extents beyond the data had 13 times the
+in-extent RMSE; 84\\% of them were inside on the covariates alone and none
+with location measured.
+
+Inside the extent the index marks an unsampled gap only where the gap is
+wider than the distance its threshold allows, and that distance depends
+on \code{folds}. With \code{folds = NULL} it is the spacing of the
+training points (the outlier-removed largest nearest-neighbour distance).
+With blocked folds it is the largest distance from a held-out point to
+the nearest row its fold trained on, outliers removed, which grows with
+the block size; a gap narrower than about twice that distance has no
+cell beyond it and reads as inside. In a test with 400 training points
+in two strips 400 units apart, the cut-off without folds was 46 to 54
+units and no grid cell in the middle half of the gap, 100 units or more
+from either strip, was inside. That held although the prediction grid
+took its covariates from the nearest observation, so that every cell's
+covariate DI was 0. With five block folds the cut-off was 199 to 251
+units and 76 to 100\\% of the same cells were inside (87\\% on average over
+three draws). This follows from the definition and is not a fault of the
+index: the cross-validated error it is paired with was earned on
+hold-outs that far from their training rows. It does mean that with
+blocked folds the location index says nothing about a gap narrower than
+about twice the cut-off; \code{location$threshold * location$normalizer}
+is the cut-off in map units, and \code{print()} shows it.
+
+\strong{A forest fitted with \code{include_coords = TRUE}} splits on the
+coordinates like on any other column, so there they join the predictor
+index as \code{"..x"} and \code{"..y"} and are centred, scaled and weighted
+with the rest.
+
+Either way geometry is needed on both sides, so \code{train_sf} and
 \code{newdata} must both be \code{sf} objects; a data.frame is refused
 rather than quietly measured without location. Non-\code{POINT}
 \code{newdata} (grid polygons, say) is reduced to representative points
@@ -238,7 +417,8 @@ first, as \code{\link{coerce_to_points}} would. If exactly one side carries
 a CRS the other is brought into it: reprojected when its coordinates look
 like longitude/latitude, stamped otherwise, with a warning either way. This
 is done because degrees fed into a metre-space index silently understate the
-distances.
+distances. The location index is a map distance and refuses training data
+in a geographic CRS.
 }
 
 \examples{
@@ -273,21 +453,21 @@ Ecology and Evolution} 12(9), 1620--1633. \doi{10.1111/2041-210X.13650}
 \code{\link{predict_surface}} to build the grid,
 \code{\link{make_folds}} for the fold scheme.
 
-Other cross-validation: 
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 
-Other prediction: 
-\code{\link{predict_surface}()}
+Other prediction:
+\code{\link[=predict_surface]{predict_surface()}}
 }
 \concept{cross-validation}
 \concept{prediction}

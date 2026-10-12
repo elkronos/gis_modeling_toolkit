@@ -158,7 +158,11 @@
 #' @param chunk_size Rows per prediction call. Default 5000.  A pure
 #'   performance knob: rows do not interact, and for a \code{bayesian_fit} the
 #'   GP boundary is held at its fitted value whatever the chunk holds; see
-#'   \code{\link{predict.bayesian_fit}}.
+#'   \code{\link{predict.bayesian_fit}}.  The two warnings in which
+#'   \code{\link{predict.gwr_fit}()} counts locations (classes
+#'   \code{"spatialkit_gwr_extrapolation"} and
+#'   \code{"spatialkit_gwr_not_estimable"}) are raised once for the grid,
+#'   with its totals, whatever the number of chunks.
 #' @param se Logical; also return a standard-error/posterior-SD column where the
 #'   backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
 #'   the SD of the posterior draws \code{predict()} returns, and those are of
@@ -365,42 +369,49 @@ predict_surface <- function(object, grid = NULL, cell_size = NULL,
     any(nzchar(dot_names) & startsWith("summary", dot_names))
   derive_pred <- se_ok && !supplied_summary
 
-  for (s in starts) {
-    e   <- min(s + chunk_size - 1L, n)
-    idx <- s:e
-    blk <- grid[idx, , drop = FALSE]
+  # A GWR's predict() counts, per call, the locations it cannot estimate and
+  # those beyond the reach of the fit, and warns with that call's counts.
+  # Predicting in chunks would pass on one warning per chunk; collected here,
+  # each class is raised once with the totals over the grid.  Other backends
+  # signal neither class, so for them this only evaluates the loop.
+  .gwr_tally_predict_warnings({
+    for (s in starts) {
+      e   <- min(s + chunk_size - 1L, n)
+      idx <- s:e
+      blk <- grid[idx, , drop = FALSE]
 
-    got_pred <- FALSE
-    if (se_ok) {
-      d <- try(stats::predict(object, newdata = blk, draws = TRUE, ...),
-               silent = TRUE)
-      if (inherits(d, "try-error") || !is.matrix(d)) {
-        se_ok <- FALSE          # backend has no draw interface; report once
-      } else {
-        se_vec[idx] <- apply(d, 2L, stats::sd)
-        if (derive_pred) {
-          preds_vec[idx] <- colMeans(d)
-          got_pred <- TRUE
+      got_pred <- FALSE
+      if (se_ok) {
+        d <- try(stats::predict(object, newdata = blk, draws = TRUE, ...),
+                 silent = TRUE)
+        if (inherits(d, "try-error") || !is.matrix(d)) {
+          se_ok <- FALSE          # backend has no draw interface; report once
+        } else {
+          se_vec[idx] <- apply(d, 2L, stats::sd)
+          if (derive_pred) {
+            preds_vec[idx] <- colMeans(d)
+            got_pred <- TRUE
+          }
         }
       }
-    }
 
-    if (!got_pred) {
-      p <- try(stats::predict(object, newdata = blk, ...), silent = TRUE)
-      if (inherits(p, "try-error"))
-        stop("predict_surface(): prediction failed on rows ", s, "-", e, ": ",
-             as.character(p), call. = FALSE)
-      # One value per row, or the assignment below recycles or truncates
-      # whatever came back into .pred without a word that means anything.
-      if (length(p) != length(idx))
-        stop(sprintf(paste0("predict_surface(): predict() returned %d value(s) ",
-                            "for the %d rows %d-%d; expected one per row. Check ",
-                            "what the backend's predict() returns for the ",
-                            "arguments passed through `...`."),
-                     length(p), length(idx), s, e), call. = FALSE)
-      preds_vec[idx] <- as.numeric(p)
+      if (!got_pred) {
+        p <- try(stats::predict(object, newdata = blk, ...), silent = TRUE)
+        if (inherits(p, "try-error"))
+          stop("predict_surface(): prediction failed on rows ", s, "-", e, ": ",
+               as.character(p), call. = FALSE)
+        # One value per row, or the assignment below recycles or truncates
+        # whatever came back into .pred without a word that means anything.
+        if (length(p) != length(idx))
+          stop(sprintf(paste0("predict_surface(): predict() returned %d value(s) ",
+                              "for the %d rows %d-%d; expected one per row. Check ",
+                              "what the backend's predict() returns for the ",
+                              "arguments passed through `...`."),
+                       length(p), length(idx), s, e), call. = FALSE)
+        preds_vec[idx] <- as.numeric(p)
+      }
     }
-  }
+  }, caller = "predict_surface", n_total = n)
 
   if (isTRUE(se) && !se_ok)
     .log_warn(paste0("predict_surface(): `se = TRUE` but this backend does not ",

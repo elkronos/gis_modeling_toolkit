@@ -52,7 +52,8 @@ error.  IDs naming no row in the prepared data are dropped with
 a logged count.
 Built via \code{block_kfold} when \code{NULL}.}
 
-\item{k}{Number of folds.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
+read when \code{folds} is supplied.}
 
 \item{seed}{RNG seed.}
 
@@ -84,21 +85,25 @@ is logged, its columns are \code{NA} for that fold, and
 for models with a fixed global parameter count; pass NULL for models
 with spatially varying coefficients (e.g. GWR).}
 
-\item{block_size}{Optional minimum block edge length for spatial CV blocks
-(projected CRS units).}
+\item{block_size}{Optional minimum block edge length (projected CRS
+units) for the blocks built when \code{folds} is \code{NULL}; see
+\code{\link{make_folds}()}.  Beside supplied \code{folds} it has
+nothing to size and raises a warning (class
+\code{spatialkit_fold_args_ignored}).}
 
 \item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.}
+Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
+the same warning as \code{block_size}.}
 
 \item{parallel}{Logical or positive integer.  If \code{TRUE},
 auto-detect the number of cores and fit folds in parallel via
 \code{parallel::mclapply()} (macOS / Linux; falls back to sequential
 on Windows).  If an integer > 1, use that many cores.  Default
-\code{FALSE} (sequential).  A learner that runs OpenMP code (GWmodel,
-or an xgboost built with GNU libgomp) can hang the forked workers once
-it has run in the session; keep such a \code{fit_fn} sequential, as
-\code{\link{cv_gwr}()} does.}
+\code{FALSE} (sequential).  A learner that runs OpenMP code (a
+function of GWmodel, or an xgboost built with GNU libgomp) can hang the
+forked workers once it has run in the session; keep such a
+\code{fit_fn} sequential.}
 
 \item{metrics}{Optional scoring function of your own; see \strong{Your
 own metrics} below.  Default \code{NULL}: the built-in metrics only.}
@@ -228,6 +233,28 @@ hands one \code{metrics} to every backend, so the columns are comparable
 across the rows of its \code{overall}.
 }
 
+\section{Warnings a learner raises in every fold}{
+
+A warning from a fold's fit or from its \code{predict()} reaches the
+caller as it is raised, so a learner that warns in every fold warns once
+per fold.  Two groups of the package's own warnings are collected over the
+folds instead and raised once per call, under this function's name and
+with the class they had:
+\itemize{
+\item the two in which \code{predict()} on a GWR counts locations
+(\code{"spatialkit_gwr_not_estimable"} and
+\code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
+that had any, as \code{\link{cv_gwr}()} raises them (see
+\code{\link{predict.gwr_fit}});
+\item the four \code{\link{fit_bayesian_spatial_model}()} raises about
+a fit, naming the folds, as \code{\link{cv_bayes}()} raises them (see
+\strong{Warnings from the folds} there).
+}
+With \code{parallel} above one core a fold's warnings are raised after
+the folds have run, once per distinct text; one of the package's own
+classes keeps its class and its fields.
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -310,17 +337,17 @@ must use; \code{\link{cv_gwr}()}, \code{\link{cv_bayes}()} and
 \code{\link{cv_rf}()} for the built-in backends, which are thin wrappers
 over this function.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

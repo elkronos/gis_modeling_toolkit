@@ -462,7 +462,8 @@
 #' choose between candidate projections by measurement rather than by rule of
 #' thumb.
 #'
-#' The sample is taken by evenly spaced index (no RNG), so the result is
+#' The sample is taken at even spacing along the points sorted by coordinate
+#' (no RNG, and no dependence on the order of the rows), so the result is
 #' reproducible; \code{max_n} keeps the pairwise work bounded.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
@@ -567,7 +568,18 @@
     }
     n <- length(g)
     if (n < 2L) return(NA_real_)
-    if (n > max_n) g <- g[unique(round(seq(1, n, length.out = max_n)))]
+    if (n > max_n) {
+      # Evenly spaced along the points sorted by coordinate, not along the
+      # rows as they come.  By row, the 40 points measured changed with the
+      # order of the layer, the candidates' errors with them, and near a tie
+      # the projection chosen: 400 points over the conterminous United States
+      # got an Albers CRS in some row orders and a Lambert azimuthal one in
+      # others, and everything measured in that CRS afterwards (a variogram
+      # range, the blocks sized from it) moved with the order of the rows.
+      cc  <- sf::st_coordinates(g)[, 1:2, drop = FALSE]
+      ord <- order(cc[, 1L], cc[, 2L])
+      g   <- g[ord[unique(round(seq(1, n, length.out = max_n)))]]
+    }
     # Ellipsoidal geodesics, not sf's s2 sphere: the sphere is itself
     # 0.24-0.56% off WGS84, which is the size of the errors being ranked.
     ll  <- sf::st_coordinates(sf::st_transform(g, 4326))[, 1:2, drop = FALSE]
@@ -706,7 +718,7 @@
 #' with \code{fitted(fit)} by up to the response's standard deviation.
 #'
 #' Coordinates are taken to be lon/lat when the bounding box fits the
-#' [-180, 180] x [-90, 90] envelope AND the data look \emph{positively}
+#' \code{[-180, 180] x [-90, 90]} envelope AND the data look \emph{positively}
 #' geographic: an extent above one degree on some axis, OR fractional
 #' coordinates with the precision of decimal degrees.
 #'
@@ -719,7 +731,7 @@
 #' reading a small planar survey as degrees produces coordinates that are
 #' obviously wrong and a warning that names the assumption.  Requiring BOTH
 #' tests would not help: a genuine study area 0.01 degrees across passes only
-#' the precision test, and a [0, 1]-normalised planar layer passes it too.
+#' the precision test, and a \code{[0, 1]}-normalised planar layer passes it too.
 #' When the data are planar, set the CRS explicitly, as the warning says.
 #'
 #' @param x An sf/sfc object with no CRS.

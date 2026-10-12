@@ -349,7 +349,6 @@ test_that("the no-sill subtitle does not claim a range range_frac refused ran pa
 
 test_that("the GWR coefficient subtitle is right with mask = FALSE", {
   skip_if_not_installed("ggplot2")
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   # A clean survey is not a missing one.
   set.seed(3); n <- 200

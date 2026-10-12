@@ -19,10 +19,25 @@
 #'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
-#' @param polygon_id_col Name of the polygon identifier column. Default "poly_id".
+#' @param polygon_id_col Name of the polygon identifier column: the column of
+#'   `polygons_sf` the IDs are read from, and the name they are returned
+#'   under. Default "poly_id". When `polygons_sf` has no column of that name,
+#'   the IDs are read from the first of `"poly_id"`, `"polygon_id"`, `"id"`,
+#'   `"cell_id"` and `"grid_id"` it carries, and a message names the column
+#'   that was used; when it has none of them, the polygons are numbered
+#'   `1, 2, ...` in row order, and a message says so. The column the IDs are
+#'   read from must hold one distinct, non-missing value per polygon: a
+#'   duplicated or missing ID is an error, because features in different
+#'   polygons would come back under one ID. That includes a unit stored as
+#'   several rows that share its ID (a region split into `POLYGON` parts):
+#'   merge the parts into one row per ID first, for example with
+#'   `dplyr::summarise(dplyr::group_by(polygons_sf, <ID column>))`, which
+#'   keeps the unit one cell. Numbering the rows would make each part a cell
+#'   of its own.
 #' @param keep_unassigned Logical; retain features that fall inside no
 #'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
-#'   them.
+#'   them with a warning of class \code{"spatialkit_unassigned"} that gives
+#'   their number.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
 #'   Not used when \code{largest} applies: sf then assigns polygon features by
 #'   overlap area and never calls the predicate.
@@ -50,6 +65,9 @@
 #'   then leftmost, so the choice does not depend on the order of the rows;
 #'   \code{"first"} keeps the first match (original order-dependent
 #'   behavior).
+#' @param quiet Logical; suppress this function's \code{message()}s (the one
+#'   naming a fallback ID column). It does not silence R warnings. Default
+#'   \code{FALSE}.
 #' @return An sf object with `polygon_id_col` attached, one row per input
 #'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
 #'   the CRS `features_sf` arrived in. A column of `features_sf` already
@@ -61,7 +79,21 @@
 #'   falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
-#'   places (a CRS that could only be stamped, not reprojected). The
+#'   places (a CRS that could only be stamped, not reprojected).
+#'
+#'   Features that fall inside no polygon are counted on the attribute
+#'   `"unassigned"`: a list with `n`, `which` (their row positions in
+#'   `features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
+#'   in the result, and a warning of class `"spatialkit_unassigned"` gives
+#'   their number (`tryCatch(spatialkit_unassigned = )` catches it without
+#'   matching the message; the condition carries `n` and `total`). The usual
+#'   causes are a polygon layer that stops short of the data (a coastline
+#'   drawn at another scale, a tessellation of seeds built without a
+#'   `boundary` or `cover`; see [build_tessellation()]) and points outside
+#'   the study area. With `keep_unassigned = TRUE` they are kept with an
+#'   `NA` ID and no warning is raised, unless every feature is unassigned.
+#'
+#'   The
 #'   attribute `"ties"` records how many features matched more than one
 #'   polygon (with `largest`, overlapped several by exactly the same area)
 #'   and had the `tie_break` rule decide for them: a list with `n`,
@@ -74,7 +106,8 @@
 #'   with no `"ties"` attribute, so nothing reports the parent's count
 #'   for a different set of rows. `sf::st_drop_geometry()` keeps the record,
 #'   since the rows are the same; see \code{\link{[.spatialkit_rows}} for
-#'   what binding such data frames does.
+#'   what binding such data frames does. The `"unassigned"` record is
+#'   stamped and removed the same way.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -98,8 +131,10 @@ assign_features_to_polygons <- function(
     features_sf, polygons_sf, polygon_id_col = "poly_id",
     keep_unassigned = FALSE, predicate = sf::st_intersects,
     largest = TRUE,
-    tie_break = c("smallest_area", "first")
+    tie_break = c("smallest_area", "first"),
+    quiet = FALSE
 ) {
+  .msg <- function(...) if (!isTRUE(quiet)) message(...)
   if (!inherits(features_sf, "sf"))
     stop("assign_features_to_polygons(): `features_sf` must be an sf object.")
   if (!inherits(polygons_sf, "sf")) {
@@ -128,12 +163,66 @@ assign_features_to_polygons <- function(
   # CRS and returned there, as before.
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
 
-  id_candidates <- c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id")
+  id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
   id_col <- id_candidates[id_candidates %in% names(p)][1]
+  # Which column the IDs came from is said whenever it is not the one asked
+  # for.  A fallback used to be taken without a word: nine polygons carrying a
+  # zone attribute called `id` came back as three "polygons", and nine keyed
+  # by `GEOID` came back numbered 1 to 9 with the GEOIDs unused.
+  id_source <- "the column named by `polygon_id_col`"
   if (length(id_col) == 0L || is.na(id_col)) {
     id_col <- polygon_id_col
     p[[id_col]] <- seq_len(nrow(p))
+    id_source <- "row numbers"
+    .log_info(paste0("assign_features_to_polygons(): `polygons_sf` has no '%s' ",
+                     "column and none of the fallback ID columns; polygons numbered ",
+                     "1 to %d in row order."), polygon_id_col, nrow(p))
+    .msg(sprintf(paste0(
+      "assign_features_to_polygons(): `polygons_sf` has no '%s' column, and none ",
+      "of the fallback ID columns (%s); the polygons are numbered 1 to %d in row ",
+      "order. To use an ID the polygons already carry, name its column with ",
+      "`polygon_id_col`."),
+      polygon_id_col,
+      paste(sprintf("'%s'", setdiff(id_candidates, polygon_id_col)), collapse = ", "),
+      nrow(p)))
+  } else if (!identical(id_col, polygon_id_col)) {
+    id_source <- sprintf("read because `polygons_sf` has no '%s' column", polygon_id_col)
+    .log_info(paste0("assign_features_to_polygons(): `polygons_sf` has no '%s' ",
+                     "column; polygon IDs read from its '%s' column."),
+              polygon_id_col, id_col)
+    .msg(sprintf(paste0(
+      "assign_features_to_polygons(): `polygons_sf` has no '%s' column; the ",
+      "polygon IDs are read from its '%s' column and returned as `%s`."),
+      polygon_id_col, id_col, polygon_id_col))
   }
+  # One distinct, non-missing ID per polygon.  A duplicated ID merged the
+  # features of two polygons under one label (a `poly_id` repeated once gave 8
+  # IDs for 9 polygons), and a missing one made the features inside that
+  # polygon look unassigned, so they were dropped: neither raised a condition.
+  # Rows that share an ID on purpose (one unit stored as several POLYGON
+  # rows) are refused with the rest, since the two cases look the same from
+  # here; the message says how to keep such a unit whole, because numbering
+  # the rows would split it into one cell per part.
+  ids_p  <- p[[id_col]]
+  id_na  <- sum(is.na(ids_p))
+  id_dup <- sum(duplicated(ids_p[!is.na(ids_p)]))
+  if (id_na > 0L || id_dup > 0L)
+    stop(sprintf(paste0(
+      "assign_features_to_polygons(): the polygon ID column '%s' (%s) holds %d ",
+      "duplicated and %d missing value(s) among %d polygon(s), so features in ",
+      "different polygons would share an ID or lose theirs. Give every polygon ",
+      "its own ID (polygons_sf$%s <- seq_len(nrow(polygons_sf)), or ",
+      "ensure_stable_poly_id()), or name the column that holds one with ",
+      "`polygon_id_col`.%s"),
+      id_col, id_source, id_dup, id_na, nrow(p), polygon_id_col,
+      if (id_dup > 0L) sprintf(paste0(
+        " If the rows that share an ID are the parts of one unit (a region ",
+        "stored as several polygons), merge them into one row per ID first, so ",
+        "the unit stays one cell: dplyr::summarise(dplyr::group_by(polygons_sf, ",
+        "%s)). Numbering the rows would make each part a cell of its own."),
+        if (identical(make.names(id_col), id_col)) id_col
+        else sprintf("`%s`", id_col))
+      else ""), call. = FALSE)
 
   # The polygons' ID travels through the join under a reserved name and is
   # renamed to `polygon_id_col` afterwards.  Under its source name, a
@@ -343,24 +432,45 @@ assign_features_to_polygons <- function(
   } else {
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
   }
+  # Which features matched no polygon, by their row in `features_sf`, read
+  # before the row key goes.
+  unassigned_rows <- sort(joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])])
   joined[["..pre_join_row_id"]] <- NULL
 
-  n_unassigned <- sum(is.na(joined[[polygon_id_col]]))
+  n_unassigned <- length(unassigned_rows)
+  n_features   <- nrow(joined)
   # Zero matches is almost never what the caller meant, and it is silent: the
   # function returns an empty sf and every downstream step reports zero rows
   # without saying why.  The usual cause is a CRS mismatch that could only be
   # stamped rather than reprojected, which puts the two layers in different
   # places.
-  if (n_unassigned == nrow(joined) && nrow(joined) > 0L)
-    .warn_and_log(paste0("assign_features_to_polygons(): none of the %d ",
+  if (n_unassigned == n_features && n_features > 0L)
+    .warn_classed("spatialkit_unassigned",
+                  paste0("assign_features_to_polygons(): none of the %d ",
                          "feature(s) fall inside any polygon. Check that the ",
                          "two layers cover the same ground -- a CRS that had to ",
                          "be stamped rather than reprojected is the usual ",
                          "cause -- or pass a different `predicate`."),
-                  nrow(joined))
+                  n_features, data = list(n = n_unassigned, total = n_features))
+  else if (n_unassigned > 0L && !keep_unassigned)
+    # Rows removed from the result are data dropped, which the caller has to
+    # be able to catch: this was one INFO line in the temp log, and a
+    # tessellation of 25 k-means seeds built without a boundary lost 764 of
+    # 3,000 observations (the edge of the study area, so the cell means moved
+    # too) with no condition raised and nothing on the result.
+    .warn_classed("spatialkit_unassigned",
+                  paste0("assign_features_to_polygons(): %d of %d feature(s) ",
+                         "(%.1f%%) fall inside no polygon and are left out of ",
+                         "the result; attr(, \"unassigned\")$which gives their ",
+                         "rows in `features_sf`. Check that the polygons cover ",
+                         "the features (cells built from seeds need a ",
+                         "`boundary` or a `cover`; see build_tessellation()), or ",
+                         "pass keep_unassigned = TRUE to keep them with an NA ID."),
+                  n_unassigned, n_features, 100 * n_unassigned / n_features,
+                  data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L)
-    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon.",
-              n_unassigned, nrow(joined))
+    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID.",
+              n_unassigned, n_features)
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -373,6 +483,12 @@ assign_features_to_polygons <- function(
                             list(n = length(tie_rows),
                                  which = as.integer(tie_rows),
                                  rule = tie_break))
+  # The features no polygon holds, beside the ties: the count used to exist
+  # only in a log line.  Stamped the same way, and removed by a subset with
+  # the other records named in .row_record_attrs (R/utils.R).
+  joined <- .set_row_record(joined, "unassigned",
+                            list(n = n_unassigned,
+                                 which = as.integer(unassigned_rows)))
   joined
 }
 
@@ -792,23 +908,17 @@ assign_features_to_polygons <- function(
 }
 
 
-#' Warn that a requested design effect fell back to 1
+#' Warn that a requested design effect was not the one applied
 #'
-#' \code{.warn_and_log()} with a condition class, so that a caller running
-#' many summaries can catch exactly this case -- the standard errors are the
-#' uncorrected ones although a correction was asked for -- with
-#' \code{tryCatch(spatialkit_deff_fallback = )} or
-#' \code{withCallingHandlers()}, rather than by matching message text.
+#' The classed warning for a design effect that fell back: to 1 for a refused
+#' number, and to \code{"kish"} (or, when its ICCs are 0, to nothing) for a
+#' \code{"variogram"} request with no usable model.  The class is
+#' \code{"spatialkit_deff_fallback"} in both cases.
 #'
 #' @keywords internal
 #' @noRd
-.warn_deff_fallback <- function(fmt, ...) {
-  msg <- sprintf(fmt, ...)
-  # raising = TRUE: the warning below shows it, so a knitted document must
-  # not repeat the line as a message (see .sk_console_appender()).
-  .sk_log(logger::WARN, msg, raising = TRUE)
-  warning(warningCondition(msg, class = "spatialkit_deff_fallback"))
-  invisible(msg)
+.warn_deff_fallback <- function(fmt, ..., data = list()) {
+  .warn_classed("spatialkit_deff_fallback", fmt, ..., data = data)
 }
 
 
@@ -843,6 +953,18 @@ assign_features_to_polygons <- function(
 #' `deff` applied one. With `deff = 1` and no missing values it equals `n`.
 #' Pass it as the `weights` argument of a downstream regression.
 #'
+#' An infinite value (`Inf`, `-Inf`) in a response or predictor column is
+#' treated as missing, as `NA` and `NaN` are, in every statistic of that
+#' column: the `agg_funs` results, `..sd_*`, `..se_*`, the interval columns,
+#' `..neff_*`, `cell_weight` and the design effect. `n` still counts the row.
+#' A warning of class `"spatialkit_nonfinite"` names the columns and gives the
+#' number of rows and cells affected (the condition carries `n` and
+#' `columns`). [kriging_adequacy()], [resolution_profile()],
+#' [estimate_sac_range()] and [prep_model_data()] leave such rows out too, so
+#' the steps of one pipeline agree on a cell's mean. A function in `agg_funs`
+#' therefore never sees an infinite value: `max` returns the largest finite
+#' value, and infinities cannot be counted through `agg_funs`.
+#'
 #' @section Spatial autocorrelation and standard-error bias:
 #' By default (`deff = 1`), the `..se_*` columns are computed as
 #' `sd / sqrt(n)`, which treats the observations within each cell as
@@ -859,13 +981,13 @@ assign_features_to_polygons <- function(
 #' wide; see "What the standard error estimates" before setting `deff`.
 #'
 #' Setting `deff = "kish"` applies an approximate correction using Kish's
-#' design effect. Separate intra-class correlations (ICCs) are estimated for
-#' response and predictor variables via a one-way random-effects decomposition
-#' across all cells. Each variable type's ICC is used for its own SE
-#' adjustment, and each cell's effective sample size is reduced to
-#' `n_i / (1 + (n_i - 1) * rho)`. This is a first-order correction that
-#' does not require a full spatial covariance model but does require enough
-#' cells and observations for a stable ICC estimate.
+#' design effect. An intra-class correlation (ICC) is estimated for every
+#' summarised column on its own, the response and each predictor, via a
+#' one-way random-effects decomposition across all cells. Each column's ICC
+#' is used for that column's SE adjustment, and each cell's effective sample
+#' size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a first-order
+#' correction that does not require a full spatial covariance model but does
+#' require enough cells and observations for a stable ICC estimate.
 #'
 #' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
 #' with a second, small-sample correction. The within-cell correlation that
@@ -921,8 +1043,13 @@ assign_features_to_polygons <- function(
 #' is reasonably uniform.
 #'
 #' @section Design effects and variable types:
-#' `deff = "kish"` estimates a separate ICC for response and predictor
-#' variables and applies each to its own columns. `deff = "variogram"` fits or
+#' `deff = "kish"` estimates a separate ICC for each summarised column, the
+#' response and every predictor, and applies each to that column alone:
+#' listing or removing a predictor leaves every other column's standard error,
+#' effective n and interval as they were. (One ICC used to be pooled over all
+#' the predictors, which was right for a column only when they all shared it:
+#' beside a predictor with an ICC of 0.87, one with an ICC of 0 had its
+#' standard error multiplied by 3.1.) `deff = "variogram"` fits or
 #' accepts **one** correlation function and applies it to every numeric column,
 #' because a variogram is a property of the field being modelled rather than of
 #' a variable type; a predictor whose spatial structure differs markedly from
@@ -998,7 +1125,10 @@ assign_features_to_polygons <- function(
 #'   \code{f} for a variable \code{f} holding a function),
 #'   \code{stats::median} gives \code{median}, and any other expression gives
 #'   \code{agg1}; pass a named list to choose the name. Anything else falls
-#'   back to the default mean with a warning.
+#'   back to the default mean with a warning. The functions receive each
+#'   column with its infinite values already set to \code{NA} (see
+#'   "Details"), so they need \code{na.rm = TRUE} as they do for missing
+#'   values.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
 #'   the polygon geometry from cells_sf, with one row per cell in `cells_sf`.
@@ -1030,40 +1160,46 @@ assign_features_to_polygons <- function(
 #'       supported, with a nugget and with several structured components
 #'       (each weighted by its partial sill) and with gstat's 2-D geometric
 #'       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
-#'       applies it. A model of any other family falls back to `deff = 1`
-#'       with a warning naming it, and so does a request with no usable
-#'       model (none supplied and none could be estimated, or a rejected
-#'       fit that could not be replaced by an estimate); see "Value" for how
-#'       to detect a fallback. A model with no structured component (a pure
+#'       applies it. A request that cannot be met falls back to `"kish"`,
+#'       with a warning of class `"spatialkit_deff_fallback"` that gives the
+#'       reason and the ICCs: a model of any other family (named in the
+#'       warning), or no usable model (none supplied and none could be
+#'       estimated, or a rejected fit that could not be replaced by an
+#'       estimate). The standard errors, intervals and `cell_weight` are then
+#'       Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+#'       `deff_method` column says which on every row (see "Value"). The
+#'       variogram route needs an identified range, which a layer does not
+#'       always have, so read `deff_method` for the fallback. A model with
+#'       no structured component (a pure
 #'       nugget) implies that distinct observations are uncorrelated, so it
 #'       is applied as a design effect of 1 in every cell, not treated as a
-#'       fallback. Points with empty
+#'       fallback. That includes the model [estimate_sac_range()] returns
+#'       when it finds no spatial structure (an `NA` range whose
+#'       `rejected_reason` says so): the answer is then a design effect of
+#'       1, `deff_method` reads `"variogram"`, and no fallback warning is
+#'       raised. Points with empty
 #'       geometry count towards their cells' values but not towards the
 #'       correlation, with a warning.}
-#'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
-#'       (ICCs) from the grouped data using a one-way random-effects ANOVA
-#'       decomposition (one ICC for the response variable and a separate
-#'       ICC for the predictor variables), then apply Kish's formula per
+#'     \item{`"kish"`}{Estimate an intra-class correlation (ICC) for each
+#'       summarised column from the grouped data using a one-way
+#'       random-effects ANOVA decomposition (one ICC for the response and one
+#'       for each predictor), then apply Kish's formula per
 #'       cell: `deff_i = 1 + (n_i - 1) * rho`. The ICC is the ANOVA
 #'       (method-of-moments) estimator with Donner's `n0` for unequal cell
 #'       sizes, not the REML estimate a mixed model returns: on a single
 #'       unbalanced draw the two can differ by 0.1--0.2 (one check with cell
 #'       sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
 #'       while balanced designs agree to about 0.01. Neither is wrong, so do
-#'       not read the difference as a defect. When multiple columns are
-#'       pooled for a single ICC estimate (e.g. several predictor variables),
-#'       each column is z-scored before pooling so that variables with
-#'       different scales contribute equally to the variance decomposition.
-#'       The response-specific ICC
-#'       is used for response SEs and the predictor-specific ICC for
-#'       predictor SEs. The response's ICC is never applied to predictor
-#'       columns or vice versa, and it is the response's ICC (not the
-#'       predictors') that sets `cell_weight` whenever a response was given.
+#'       not read the difference as a defect. Each column's ICC is used
+#'       for that column's SEs and for no other: the response's ICC is never
+#'       applied to a predictor, nor one predictor's to another. It is the
+#'       response's ICC that sets `cell_weight` whenever a response was
+#'       given, and the first predictor's own ICC otherwise.
 #'       Requires at least 2 cells with 2+ observations and at least 2 residual
 #'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 (no
-#'       correction for that variable type) otherwise, and likewise when the
+#'       correction for that column) otherwise, and likewise when the
 #'       estimate itself comes out at or below 0. The `"deff_applied"`
-#'       attribute is attached when either ICC is positive, so when both are
+#'       attribute is attached when any ICC is positive, so when all are
 #'       0 there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
@@ -1081,8 +1217,10 @@ assign_features_to_polygons <- function(
 #'   it is set aside rather than correcting by a shape that was not trusted
 #'   enough to report a range: the variogram is then estimated as if no `sac`
 #'   had been given, with a plain warning saying so, or, where that is not
-#'   possible, `deff` falls back to 1 with the fallback warning, which names
-#'   the rejection. A `sac` with no `variogram_model` attribute -- a plain
+#'   possible, `deff` falls back to `"kish"` with the fallback warning, which
+#'   names the rejection. The exception is a `sac` refused because no spatial
+#'   structure was found, whose model is a pure nugget: it is used, and gives
+#'   a design effect of 1. A `sac` with no `variogram_model` attribute -- a plain
 #'   number or a `units` object, say -- is a range without a correlation
 #'   function, and is set aside the same way. A `sac` fitted to residuals
 #'   (`attr(sac, "detrended")` `TRUE`) is used as given, with a warning when
@@ -1125,30 +1263,41 @@ assign_features_to_polygons <- function(
 #'   `agg_funs` entry per variable, `..sd_*` / `..se_*` for every numeric
 #'   response and predictor, `..neff_*` / `..df_*` / `..ci_lo_*` /
 #'   `..ci_hi_*` for the same columns when `conf_level` is given,
-#'   `cell_weight`, `deff_applied` when a design effect was requested (any
-#'   `deff` other than 1), and `cell_area` / `n_per_area` when
-#'   `area = TRUE`. An input column also called `n` is not allowed to shadow
-#'   the count.
+#'   `cell_weight`, `deff_applied` and `deff_method` when a design effect
+#'   was requested (any `deff` other than 1), and `cell_area` / `n_per_area`
+#'   when `area = TRUE`. An input column also called `n` is not allowed to
+#'   shadow the count.
 #'
-#'   `deff_applied` is `TRUE` on every row when the requested correction was
-#'   applied (exactly when the `"deff_applied"` attribute below is attached;
-#'   under `"kish"`, when any standard-error column was corrected)
-#'   and `FALSE` when it fell back to the uncorrected standard errors: a
-#'   refused `deff`, a `"variogram"` request with no usable model, or
-#'   `"kish"` ICCs of 0 for every variable type (and `NA` on a `cells_sf`
-#'   row no point fell in).
-#'   Unlike the attribute it survives `rbind()` and
+#'   `deff_applied` is `TRUE` on every row when a design-effect correction
+#'   was applied (exactly when the `"deff_applied"` attribute below is
+#'   attached; under `"kish"`, when any standard-error column was corrected)
+#'   and `FALSE` when the standard errors are the uncorrected ones: a
+#'   refused `deff`, or `"kish"` ICCs of 0 for every column (and `NA` on a
+#'   `cells_sf` row no point fell in). `deff_method` names the correction
+#'   the standard errors carry, since their column names do not change with
+#'   it: `"variogram"`, `"kish"` or `"fixed"` when the one requested was
+#'   applied, `"none"` when none was, and `"kish (variogram fallback)"` or
+#'   `"none (variogram fallback)"` when a `"variogram"` request could not be
+#'   met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+#'   So `deff_applied` is `TRUE` on a Kish fallback row: test
+#'   `deff_method == "variogram"` to keep only rows the variogram corrected.
+#'   Unlike the attribute, both columns survive `rbind()` and
 #'   `dplyr::bind_rows()` of many results. A fallback is also signalled by a
-#'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 is
-#'   reported on `attr(, "icc")` instead), which
+#'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 under a
+#'   `"kish"` request is reported on `attr(, "icc")` instead), which
 #'   `tryCatch(spatialkit_deff_fallback = )` catches without matching the
-#'   message; it is raised only when the standard errors really are the
-#'   uncorrected ones.
+#'   message. It is raised when the correction requested was not the one
+#'   applied: a refused number (the standard errors are then the uncorrected
+#'   ones) or a `"variogram"` request that fell back to Kish; the condition
+#'   of the second carries `requested` and `used`.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
-#'   for `"kish"` (`deff` is the primary variable's per-cell design effect,
-#'   all 1 when only the predictor ICC was positive),
+#'   for `"kish"` (`icc_pred` is a vector named by predictor column, one ICC
+#'   each; `deff` is the primary variable's per-cell design effect,
+#'   all 1 when only a predictor's ICC was positive; `requested` and
+#'   `fallback_reason` are added when a `"variogram"` request fell back to
+#'   it),
 #'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
 #'   the design effect at the primary variable's non-missing count per cell,
 #'   `deff_rows` at the cell's row count, which is the vector the log line
@@ -1157,12 +1306,14 @@ assign_features_to_polygons <- function(
 #'   (`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
 #'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
-#'   applied: `deff = 1`, a `deff = "kish"` request whose ICCs are all 0, or
-#'   a `"variogram"` request that could not be fitted. A `deff = "kish"` request always
-#'   records the ICCs it estimated on an attribute `"icc"` (`resp` and
-#'   `pred`, `NA` for a variable type with no numeric column), whether or not
+#'   applied: `deff = 1`, or a `deff = "kish"` request (or Kish fallback)
+#'   whose ICCs are all 0. A `deff = "kish"` request, and a `"variogram"`
+#'   request that fell back to it, always
+#'   records the ICCs it estimated on an attribute `"icc"` (`resp`, and
+#'   `pred`, a vector named by predictor column; `NA` for a variable type
+#'   with no numeric column), whether or not
 #'   they were positive enough to apply, so a result with no `"deff_applied"`
-#'   still says what the ICC came out as.
+#'   still says what the ICCs came out as.
 #'
 #'   The ID column keeps its input type when `cells_sf`'s ID column and the
 #'   summarised IDs already have the same class. When the classes differ, both
@@ -1361,8 +1512,15 @@ summarize_by_cell <- function(assigned_points_sf,
 
   # Helper: estimate intra-class correlation via one-way random-effects ANOVA.
   # Returns a single rho in [0, 1] or 0 if estimation fails.
+  #
+  # Called with ONE column at a time (see .kish_iccs() below): an ICC is a
+  # property of a variable, and one pooled value for several predictors was
+  # right for none of them unless they all shared it.  With an ICC-0 and an
+  # ICC-0.87 predictor on 60 cells of 12, the pooled 0.42 multiplied both
+  # standard errors by 3.13 where their own ICCs give 1.00 and 8.96, so the
+  # grand-mean interval covered 1.000 and 0.492 against 0.958 and 0.950.
+  # The body still accepts several columns, and what follows describes that.
   .estimate_icc <- function(df, id_col, var_cols) {
-    # Pool across all supplied numeric columns for a single global ICC estimate.
     # Each variable is z-scored before pooling so that variables with larger
     # scales do not dominate the between/within variance decomposition.
     #
@@ -1463,39 +1621,92 @@ summarize_by_cell <- function(assigned_points_sf,
     if (length(present)) pred_num <- .resolve_numeric(df, present, "predictor")
   }
 
+  # --- infinite values are missing values ---
+  # One rule, applied once, before anything reads the columns: an infinite
+  # value in a summarised column is treated as NA is.  Left in, one Inf made
+  # its cell's mean Inf and its SE NA while ..neff_ and cell_weight still
+  # counted the row, and under deff = "kish" it set the ICC to 0 (sd() of the
+  # column is NaN), so EVERY cell's standard error came back uncorrected (0.169
+  # against 1.365 on the clean cells) with no condition raised.
+  # kriging_adequacy(), resolution_profile(), estimate_sac_range() and
+  # prep_model_data() already drop such rows, so one pipeline reported two
+  # means for the same cell.  Masking `df` here, and not at each site that
+  # counts or averages, is what keeps the mean, sd, se, interval, effective n,
+  # cell_weight, the Kish ICC and the variogram's row selection on the same
+  # rows.  NaN is missing already (is.na(NaN) is TRUE), so it is not counted.
+  inf_cols <- character(0)
+  inf_note <- character(0)
+  inf_rows <- 0L
+  for (v in unique(c(resp_num, pred_num))) {
+    is_inf <- is.infinite(df[[v]])
+    if (!any(is_inf)) next
+    inf_cols <- c(inf_cols, v)
+    inf_rows <- inf_rows + sum(is_inf)
+    inf_note <- c(inf_note, sprintf(
+      "%s '%s' %d row(s) in %d cell(s)",
+      if (v %in% resp_num) "response" else "predictor", v, sum(is_inf),
+      length(unique(df[[id_col]][is_inf]))))
+    df[[v]][is_inf] <- NA
+  }
+  if (length(inf_cols))
+    .warn_classed("spatialkit_nonfinite", paste0(
+      "summarize_by_cell(): %d infinite value(s) are treated as missing: %s. ",
+      "Every statistic of %s (`agg_funs`, sd, se, the interval, the effective ",
+      "n, cell_weight and the design effect) leaves them out, as it leaves out ",
+      "NA; `n` still counts the rows. Recode or remove them to silence this."),
+      inf_rows, paste(inf_note, collapse = "; "),
+      if (length(inf_cols) > 1L) "those columns" else "that column",
+      data = list(n = inf_rows, columns = inf_cols))
+
   # --- estimate ICC for Kish correction if requested ---
+  # One ICC per summarised column, the response's and each predictor's own.
+  # Called here for deff = "kish", and from the variogram block below when a
+  # "variogram" request cannot be met and falls back to Kish.
   resp_rho <- NULL
   pred_rho <- NULL
-  if (use_kish) {
+  .kish_iccs <- function() {
+    resp <- NULL
+    pred <- NULL
     if (length(resp_num) > 0L) {
-      resp_rho <- .estimate_icc(df, id_col, resp_num)
-      if (resp_rho > 0) {
+      resp <- .estimate_icc(df, id_col, resp_num)
+      if (resp > 0) {
         .msg(sprintf(
-          "summarize_by_cell(): Kish deff using response ICC = %.4f", resp_rho
+          "summarize_by_cell(): Kish deff using response ICC = %.4f", resp
         ))
       } else {
         .msg("summarize_by_cell(): response ICC estimate <= 0; Kish deff not applied for response.")
       }
     }
     if (length(pred_num) > 0L) {
-      pred_rho <- .estimate_icc(df, id_col, pred_num)
-      if (pred_rho > 0) {
-        .msg(sprintf(
-          "summarize_by_cell(): Kish deff using predictor ICC = %.4f", pred_rho
-        ))
-      } else {
-        .msg("summarize_by_cell(): predictor ICC estimate <= 0; Kish deff not applied for predictors.")
+      # Named by column; the SE closures look their own column up.
+      pred <- vapply(pred_num, function(v) .estimate_icc(df, id_col, v),
+                     numeric(1))
+      names(pred) <- pred_num
+      for (v in pred_num) {
+        if (pred[[v]] > 0) {
+          .msg(sprintf(
+            "summarize_by_cell(): Kish deff using predictor ICC = %.4f for '%s'",
+            pred[[v]], v
+          ))
+        } else {
+          .msg(sprintf(paste0("summarize_by_cell(): predictor ICC estimate <= 0 for ",
+                              "'%s'; Kish deff not applied for it."), v))
+        }
       }
     }
-    if (is.null(resp_rho) && is.null(pred_rho)) {
+    if (is.null(resp) && is.null(pred))
       .msg("summarize_by_cell(): no numeric columns for ICC estimation; deff = 1.")
-      resp_rho <- 0
-      pred_rho <- 0
-    }
-    # Fill in zeros for the type that has no columns
-    if (is.null(resp_rho)) resp_rho <- 0
-    if (is.null(pred_rho)) pred_rho <- 0
+    # Zero for the type that has no columns
+    list(resp = if (is.null(resp)) 0 else resp,
+         pred = if (is.null(pred)) 0 else pred)
   }
+  if (use_kish) {
+    icc_est  <- .kish_iccs()
+    resp_rho <- icc_est$resp
+    pred_rho <- icc_est$pred
+  }
+  # Set when a "variogram" request fell back to Kish: why, for the record.
+  vgm_fallback <- NULL
 
   # --- build combined function list for across() ---
   # Each prefix (resp_, pred_) gets user agg_funs + sd + se, with names
@@ -1551,7 +1762,11 @@ summarize_by_cell <- function(assigned_points_sf,
         # NA row contributes nothing to the mean, so it cannot contribute to
         # the mean's clustering either.
         if (.kish) {
-          deff_i <- max(1, 1 + (n_valid - 1) * .rho)
+          # A named `.rho` holds one ICC per column (the predictors'); each
+          # column takes its own.  across() runs one closure list over all
+          # the predictor columns, so the column is asked for here.
+          rho_i  <- if (!is.null(names(.rho))) .rho[[dplyr::cur_column()]] else .rho
+          deff_i <- max(1, 1 + (n_valid - 1) * rho_i)
         } else if (!is.null(.rbar)) {
           # Variogram path.  The mean pairwise correlation is over the
           # locations of the observations that ENTER this column's mean, so
@@ -1663,7 +1878,19 @@ summarize_by_cell <- function(assigned_points_sf,
     no_fit    <- NULL       # why no model is available, for the warning below
     set_aside <- NULL       # why a supplied `sac` was not used
     set_aside_so <- ""      # and what that means, for the replacement warning
-    if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
+    # One refusal is an answer and not a failed fit.  When
+    # estimate_sac_range() finds no spatial structure it returns NA with a
+    # pure-nugget model at the variance of the variable (.sac_no_structure(),
+    # R/utils.R).  Under that model distinct observations are uncorrelated and
+    # the design effect is 1 exactly, which is the pure-nugget route below.
+    # Set aside with the other refusals, it raised the fallback warning and
+    # handed the request to Kish for a layer the variogram had just answered.
+    no_structure <- function(s)
+      .sac_no_structure(s) && .vgm_is_pure_nugget(attr(s, "variogram_model"))
+    structure_note <- NULL  # the refusal that gave the pure nugget, for the log
+    if (no_structure(sac)) {
+      structure_note <- as.character(attr(sac, "rejected_reason"))[1L]
+    } else if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
       set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
                            as.character(attr(sac, "rejected_reason"))[1L])
@@ -1714,6 +1941,11 @@ summarize_by_cell <- function(assigned_points_sf,
         if (inherits(est, "try-error")) {
           no_fit <- sprintf("estimate_sac_range() failed: %s",
                             conditionMessage(attr(est, "condition")))
+        } else if (no_structure(est)) {
+          # No structure in the response: the pure nugget is the model.
+          structure_note <- as.character(attr(est, "rejected_reason"))[1L]
+          vgm_model <- attr(est, "variogram_model")
+          vgm_crs   <- attr(est, "crs")
         } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
                    !is.null(attr(est, "rejected_reason"))) {
           no_fit <- sprintf(paste0("the variogram estimated from `response_var` ",
@@ -1734,8 +1966,10 @@ summarize_by_cell <- function(assigned_points_sf,
       # be reported as "the supplied model could not be read", with the
       # fallback warning and deff_applied FALSE.
       .log_info(paste0("summarize_by_cell(): the variogram model is a pure ",
-                       "nugget, so distinct observations are uncorrelated and ",
-                       "the design effect is 1 in every cell."))
+                       "nugget%s, so distinct observations are uncorrelated and ",
+                       "the design effect is 1 in every cell."),
+                if (is.null(structure_note)) ""
+                else sprintf(" (the variogram's verdict: %s)", structure_note))
       cor_fn <- function(h) 0 * h
     }
     if (is.null(cor_fn)) {
@@ -1744,25 +1978,52 @@ summarize_by_cell <- function(assigned_points_sf,
       other <- if (is.data.frame(vgm_model) && "model" %in% names(vgm_model))
         setdiff(unique(as.character(vgm_model$model)),
                 c("Nug", names(.vgm_shape_fns))) else character(0)
-      if (length(other)) {
-        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" ",
-                                   "supports exponential, spherical and Gaussian ",
-                                   "variogram models (plus a nugget); the supplied ",
-                                   "model uses %s. Falling back to deff = 1."),
-                            paste(sQuote(other, FALSE), collapse = ", "))
-      } else {
-        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" requires ",
-                                   "a fitted variogram model; none was available (%s). ",
-                                   "Pass one via `sac = estimate_sac_range(...)`. ",
-                                   "Falling back to deff = 1, so the standard errors ",
-                                   "are the uncorrected ones."),
-                            paste(c(set_aside,
-                                    if (is.null(no_fit)) "the supplied model could not be read"
-                                    else no_fit),
-                                  collapse = "; "))
-      }
-      use_vgm <- FALSE
-      deff <- 1
+      why <- if (length(other))
+        sprintf(paste0("deff = \"variogram\" supports exponential, spherical and ",
+                       "Gaussian variogram models (plus a nugget); the supplied ",
+                       "model uses %s."),
+                paste(sQuote(other, FALSE), collapse = ", "))
+      else
+        sprintf(paste0("deff = \"variogram\" requires a fitted variogram model; ",
+                       "none was available (%s). Pass one via ",
+                       "`sac = estimate_sac_range(...)`."),
+                paste(c(set_aside,
+                        if (is.null(no_fit)) "the supplied model could not be read"
+                        else no_fit),
+                      collapse = "; "))
+      # The request cannot be met.  It used to fall back to deff = 1, the
+      # uncorrected interval, under the same column names: the interval with
+      # no correction at all for a caller who asked for one.  A range goes
+      # unidentified often enough that this is an ordinary case, not a
+      # corner.  Kish needs no variogram, so it is the fallback; the
+      # uncorrected SE is returned only when Kish's own ICC is 0, and either
+      # way the rows say which.
+      use_vgm  <- FALSE
+      use_kish <- TRUE
+      deff     <- 1
+      vgm_fallback <- why
+      icc_est  <- .kish_iccs()
+      resp_rho <- icc_est$resp
+      pred_rho <- icc_est$pred
+      icc_txt <- paste(c(
+        if (length(resp_num)) sprintf("response '%s' %.3f", resp_num[[1L]], resp_rho),
+        if (length(pred_num)) sprintf("predictor '%s' %.3f", pred_num, pred_rho)),
+        collapse = ", ")
+      if (max(resp_rho, pred_rho, 0) > 0)
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\" (ICC: %s): ",
+          "the standard errors carry Kish's correction in place of the ",
+          "variogram's, and `deff_method` reads \"kish (variogram fallback)\" ",
+          "on every row."),
+          why, icc_txt, data = list(requested = "variogram", used = "kish"))
+      else
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
+          "is 0 (%s), so the standard errors are the uncorrected ones; ",
+          "`deff_method` reads \"none (variogram fallback)\" on every row."),
+          why,
+          if (nzchar(icc_txt)) icc_txt else "no numeric column to estimate it from",
+          data = list(requested = "variogram", used = "none"))
     } else {
       if (!is.null(set_aside))
         .warn_and_log(paste0("summarize_by_cell(): %s%s. It was set aside, ",
@@ -1907,23 +2168,31 @@ summarize_by_cell <- function(assigned_points_sf,
     # 20), deflating a cell whose response is uncorrelated on the strength of a
     # predictor that happens to be clustered.  The response SE is already left
     # at deff = 1 in that case, as documented; cell_weight has to agree with it.
+    # With no response the primary variable is the FIRST predictor, and the
+    # weight is built from that predictor's own ICC.  From an ICC pooled over
+    # every predictor listed, an unclustered primary predictor's weight fell
+    # from 12 to 2.12 when a clustered one was listed after it.
     primary_rho <- if (has_resp) max(resp_rho, 0)
-                   else if (has_pred) max(pred_rho, 0)
+                   else if (has_pred) max(pred_rho[[1L]], 0)
                    else 0
     deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
     if (primary_rho > 0)
       out$cell_weight <- n_valid_primary / deff_per_cell
-    # Recorded whenever EITHER ICC corrected its columns.  Keyed on the
+    # Recorded whenever ANY ICC corrected its column.  Keyed on the
     # primary variable alone, a clustered predictor beside an unclustered
     # response had its SEs inflated 11x on rows marked deff_applied = FALSE,
     # with no attribute.  `deff` stays the primary variable's (all 1 then).
     if (max(resp_rho, pred_rho, 0) > 0) {
-      attr(out, "deff_applied") <- list(
+      attr(out, "deff_applied") <- c(list(
         method   = "kish",
         icc_resp = if (has_resp) resp_rho else NA_real_,
+        # One ICC per predictor column, named by column.
         icc_pred = if (has_pred) pred_rho else NA_real_,
         deff     = deff_per_cell
-      )
+      ),
+      # A "variogram" request that fell back here says so, and why.
+      if (!is.null(vgm_fallback))
+        list(requested = "variogram", fallback_reason = vgm_fallback))
     }
   } else if (use_vgm && !is.null(vgm_rbar)) {
     # The ..se_ closures have already applied the per-column design effect
@@ -1979,7 +2248,8 @@ summarize_by_cell <- function(assigned_points_sf,
   if (use_kish)
     attr(out, "icc") <- list(
       resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
-      pred = if (has_pred) as.numeric(pred_rho) else NA_real_)
+      # Named by predictor column: each has its own.
+      pred = if (has_pred) pred_rho else NA_real_)
   # The same fact per row.  The attribute does not survive rbind(),
   # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
   # (a simulation, a benchmark over many layers) could not tell a row whose
@@ -1987,8 +2257,19 @@ summarize_by_cell <- function(assigned_points_sf,
   # fires when the variogram is rejected -- often when correlation is
   # strongest.  Only when a design effect was requested, so the default
   # frame is unchanged.
-  if (deff_requested)
-    out$deff_applied <- !is.null(attr(out, "deff_applied"))
+  if (deff_requested) {
+    applied <- !is.null(attr(out, "deff_applied"))
+    out$deff_applied <- applied
+    # Which correction the standard errors carry, by name, since the columns
+    # keep their names whatever was applied: "variogram", "kish" or "fixed"
+    # when the one asked for was applied, "none" when it was not (a refused
+    # number, Kish ICCs of 0), and "kish (variogram fallback)" or
+    # "none (variogram fallback)" when a "variogram" request could not be
+    # met and Kish stood in for it.
+    out$deff_method <- paste0(
+      if (applied) attr(out, "deff_applied")$method else "none",
+      if (!is.null(vgm_fallback)) " (variogram fallback)" else "")
+  }
 
   if (!is.null(cells_sf)) {
     if (!inherits(cells_sf, "sf")) {

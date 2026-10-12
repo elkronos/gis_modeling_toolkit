@@ -23,7 +23,13 @@ kriging_adequacy(
 \item{assigned_points_sf}{Points with a cell identifier column, as
 \code{\link{assign_features_to_polygons}()} returns.}
 
-\item{response_var}{The response column.}
+\item{response_var}{The response column: numeric or logical. A logical
+column is kriged as 0/1, so its cell mean is a share. Any other class
+(a factor, an ordered factor, character, a date) is an error naming the
+column and its class, and is never converted: a factor's level codes are
+an arbitrary relabelling, and kriging them gave a variogram, kriged
+estimates and plain means that all changed with the order of the
+levels. For a category, pass an indicator (\code{x == "level"}).}
 
 \item{cells_sf}{The cell polygons, with the matching ID column.  A layer
 with no CRS is taken to be in the points' CRS (and points with none in
@@ -74,8 +80,9 @@ proportion.  Default 1000.}
 An \code{sf} object of class \code{"kriging_adequacy"}, one row
 per cell with the cell geometry and: the ID column, \code{n} (points in
 the cell), \code{mean} (the plain mean), \code{se} (its naive standard
-error), \code{kr_pred}, \code{kr_var}, \code{kr_ratio},
-\code{kr_exceeds_design}, \code{kr_shift} and \code{kr_n_used} (how many
+error), \code{plain_var} (the plain mean's error variance under the
+variogram), \code{kr_pred}, \code{kr_var}, \code{kr_ratio},
+\code{kr_gain}, \code{kr_shift} and \code{kr_n_used} (how many
 locations the cell was kriged from; \code{NA} for a cell left out).
 Attributes:
 \code{variogram} (the model frame), \code{sill}, \code{nugget},
@@ -85,9 +92,16 @@ range was refused, from \code{sac}; \code{NA} when it was identified),
 \code{zscore_var}, \code{zscore_mean}, \code{rmse}, \code{n_pred},
 \code{k}, \code{method}), \code{nmax}, \code{n_points} (the points
 used), \code{n_locations} (the distinct locations among them, which
-the kriging used) and \code{cells_left_out} (counts of cells left out,
+the kriging used), \code{cells_left_out} (counts of cells left out,
 named \code{shape} for \code{max_box_ratio} and \code{size} for
-\code{max_neighbours}).
+\code{max_neighbours}) and \code{replicates} (\code{NULL} when no two
+points share a location; otherwise a list with \code{n_points}, the
+points that share one, \code{within_var}, their pooled within-location
+variance, \code{df}, its degrees of freedom, \code{nugget}, the
+variogram's, \code{nugget_used}, the larger of the two, which is the
+error variance a location seen once is kriged with, and
+\code{above_nugget}, \code{TRUE} when the replicate variance exceeds
+the variogram's nugget).
 }
 \description{
 \code{\link{summarize_by_cell}()} aggregates by plain means inside cell
@@ -98,10 +112,9 @@ having on a given layer is a question with a measurable answer, and this
 function measures it, changing no cell value: for every cell it reports
 the block-kriging estimate and variance implied by a fitted variogram,
 that variance as a share of the variance the cell's mean would have with
-no data at all, and, where the cell has points,
-whether it exceeds the design-based variance of the plain mean,
-\eqn{s^2/n}; and it scores the variogram itself by blocked
-cross-validation.
+no data at all, and, where the cell has points, the error variance of its
+plain mean under the same variogram and the share of that variance kriging
+removes; and it scores the variogram itself by blocked cross-validation.
 }
 \section{Reading the columns}{
 
@@ -123,15 +136,55 @@ not reach comes out at or above its prior variance and reads 1.  A
 cell at 0.05 is well determined; a cell at 0.8 is mostly prior.
 \code{NA} when the model is a pure nugget, where a cell mean has no
 prior variance to be a share of.}
-\item{\code{kr_exceeds_design}}{\code{TRUE} where the kriging variance is
-larger than \eqn{s^2/n} from the cell's own points: kriging is not
-earning its keep there, and that is said per cell instead of
-globally.  \code{NA} for cells with fewer than two points, where
-\eqn{s^2} does not exist.}
-\item{\code{kr_shift}}{The kriged estimate minus the plain mean, in
-units of the plain mean's standard error (\code{NA} where that is not
-defined).  How much the aggregator would move the value, against the
-precision the value has.}
+\item{\code{plain_var}}{The error variance of the cell's plain mean as
+an estimate of the cell's average, under the same variogram and the
+same discretisation of the cell as \code{kr_var}:
+\eqn{a' C a - 2 a' \bar c(B) + \bar C(B,B)}, with \eqn{a} the plain
+mean's weights on the cell's observations, \eqn{C} their covariances
+(the nugget on the diagonal), \eqn{\bar c(B)} their covariances with
+the cell and \eqn{\bar C(B,B)} the covariance within it.  It is the
+model's counterpart of \code{se^2}.  \eqn{s^2/n} is the variance the
+plain mean would have if the cell's points were independent draws;
+under spatial correlation it understates the error, most where a
+cell's points sit close together, so \code{se^2 / plain_var} below 1
+says the naive standard error is too small if the variogram is right.
+Defined from one point up.  \code{NA} for a cell with no point and for
+a cell left out of the kriging.}
+\item{\code{kr_gain}}{\code{1 - kr_var / plain_var}: the share of the
+plain mean's error variance that kriging removes in the cell.  Both
+variances come from the one variogram, so the gain does not move when
+sill and nugget are multiplied by a constant (unless locations are
+repeated, whose replicate variance is read off the data and does not
+scale with the model).  It is at least 0: the
+kriging neighbourhood always holds the cell's own points, the plain
+mean is one unbiased combination of them, and kriging is the best
+such combination.  It is what the variogram expects, not what
+happened: read it beside \code{attr(, "cv")$zscore_var}, which says
+whether the variogram's variances are the right size.  \code{NA}
+where \code{plain_var} is.  \code{kr_var} is not compared with
+\eqn{s^2/n}.  That comparison
+sets a variance from the model against one from the cell's own
+spread, so it moves with the fitted sill: the same data with the same
+kriged estimates put 4, 27 and 67 of 70 cells above as sill and
+nugget were multiplied by 1/3, 1 and 3.  And it does not mark cells
+where kriging fails to pay: against known cell averages on simulated
+fields (eight runs, clustered and uniform layouts, estimated and true
+variograms) kriging cut the plain mean's error by 20--53 percent in
+the cells above and by 27--60 percent in the rest.}
+\item{\code{kr_shift}}{The kriged estimate minus the plain mean, over
+the standard deviation the variogram gives that difference,
+\code{sqrt(plain_var - kr_var)} (the kriging error is uncorrelated
+with the difference, so the two variances subtract).  Under the right
+variogram it has variance 1: about 32 percent of cells beyond 1 and 5
+percent beyond 2.  More than that says the plain means and the
+variogram disagree, so the counts \code{print()} gives are a check of
+the variogram on the cells themselves, beside the cross-validation
+statistic.  In units of the naive standard error \eqn{s/\sqrt{n}}
+the same shift has a variance of 1.4--8.4 on clustered layouts, so
+counts beyond 1 and 2 in that unit overstate the disagreement.
+\code{NA} for a cell with no point, and where the two variances agree
+to within a ten-thousandth, which is where kriging returns the plain
+mean.}
 }
 }
 
@@ -166,18 +219,32 @@ kriged from all the others.
 
 \section{What it said about block kriging as an aggregator}{
 
-On the same simulated fields, with 16, 36 and 64 square cells: under
-uniform sampling the kriged and plain cell means differed by more than
-one standard error in 11--24 percent of cells and by more than two in
-0--7 percent, the kriging variance exceeded \eqn{s^2/n} in 10--26 percent
-of populated cells, and at most one cell was empty.  Under clustered
-sampling (eight clusters of 60-unit spread) the two aggregators parted:
-shifts above one standard error in 34--63 percent of cells and above two
-in 9--25 percent, the kriging variance below \eqn{s^2/n} in only
-13--52 percent of populated cells, and 3--27 of the cells empty, each with
-a kriged estimate and variance where the plain mean has nothing.
-So a block-kriging aggregator earns its place on clustered layers and
-rarely on uniform ones, and this function says which kind a layer is.
+On the same simulated fields, with 16, 36 and 64 square cells, under
+uniform sampling and under clustered sampling (eight clusters of 60-unit
+spread), eight draws each, with the true variogram and with the estimated
+one (96 runs, 2,978 cells with points among them).  \code{kr_var} was
+below \code{plain_var} in every such cell, and \code{kr_gain} ran from
+0.14 to 0.86 (median 0.48 uniform, 0.52 clustered).  Against the true
+cell averages kriging cut the plain mean's squared error by 54--56
+percent (its RMSE by 33 percent) on both layouts, where mean
+\code{kr_var} over mean \code{plain_var} predicted 55--58 percent.  In
+the third of cells with the lowest \code{kr_gain} the cut in squared
+error was 39--49 percent and in the third with the highest 59--66
+percent, in all four combinations of layout and variogram, so the column
+ranks cells by what kriging buys.  \code{kr_shift} had a mean square of
+0.99--1.10, with 33--36 percent of cells beyond 1 and 4--6 percent beyond
+2.
+
+What the layout changed was the naive standard error and the empty cells.
+Under uniform sampling \eqn{s^2/n} was below \code{plain_var} in 52--57
+percent of cells with two or more points (median ratio 0.88--0.96), and at
+most two cells were empty.  Under clustered sampling it was below in
+76--98 percent (median ratio 0.19--0.58), and 1--5 of 16 cells, 8--17 of
+36 and 23--36 of 64 were empty, each with a kriged estimate and variance
+where the plain mean has nothing.  So on these fields kriging removed
+about half of the plain mean's error variance on either layout;
+clustering decides how far the naive standard error can be trusted and
+how many cells have no plain mean at all.
 }
 
 \section{What this needs}{
@@ -191,9 +258,10 @@ model whose range was not identified (an \code{NA} estimate with the
 model attached) is used with a warning that says why it was refused, and
 the reason is kept as \code{attr(, "rejected_reason")}: a range past the
 fitted lags means the sill was never reached and the ratios rest on an
-extrapolation; a fit that did not converge stopped wherever the optimiser
-halted; a variogram that falls with distance, or a range below the
-shortest lag, describes the data poorly at some lags.
+extrapolation; a variogram that falls with distance, or a range below the
+shortest lag, describes the data poorly at some lags; and a response in
+which \code{estimate_sac_range()} found no spatial structure comes with a
+pure-nugget model, which gives kriging no correlation to use.
 
 The model has to be of the response itself.  A variogram of residuals
 (\code{estimate_sac_range(predictor_vars = ...)}, \code{attr(,
@@ -243,18 +311,37 @@ cross-validation therefore use one observation per location, the mean of
 its replicates, with a warning; \code{n} and \code{mean} still count every
 point.  How much of the nugget \eqn{c_0} a mean of \eqn{m} replicates
 keeps is read off the replicates: their pooled within-location variance
-\eqn{s_w^2}, capped at \eqn{c_0}, is the part that differs from visit to
-visit and averages down, and the rest is micro-scale variation the visits
-share, so the mean carries error variance \eqn{c_0 - s_w^2 + s_w^2/m}.
-That goes to \pkg{gstat} as a known measurement error (its
-\code{weights}) on the model with the nugget set to zero.  For replicates
-that differ only by measurement error this is exactly the kriging of every
-observation, and for identical replicates it is the kriging of one; a
-location seen once is kriged as before.  In the cross-validation a
-location is held out whole, under the fold of its first row, and its
-error variance is part of its standardised error.  A cell or held-out
-location \pkg{gstat} still cannot krige is reported \code{NA} with a
-warning, and \code{print()} says how many.
+\eqn{s_w^2} is the part that differs from visit to visit and averages
+down, and what the nugget holds beyond it is micro-scale variation the
+visits share, so the mean carries error variance
+\eqn{\max(c_0 - s_w^2, 0) + s_w^2/m}.  That goes to \pkg{gstat} as a known
+measurement error (its \code{weights}) on the model with the nugget set
+to zero.  For replicates that differ only by measurement error this is
+exactly the kriging of every observation, and for identical replicates it
+is the kriging of one.  \code{plain_var} uses the same error variances:
+the observations a cell has at one location share the micro-scale part
+and average the rest.
+
+When \eqn{s_w^2} is above \eqn{c_0} the replicates show more variation
+between visits than the model has room for (with a zero nugget, any at
+all).  The replicate variance is then used as it is: a mean of \eqn{m} is
+kriged with error variance \eqn{s_w^2/m}, and a location seen once with
+\eqn{s_w^2} where the model gives it \eqn{c_0}.  Capping it at
+\eqn{c_0} would krige the means as more exact than their replicates show
+them to be: on ten simulated layers of 200 stations visited twice with a
+measurement variance of 0.5, under the field's own variogram with no
+nugget, the cross-validation statistic reads 2.96--4.42 with the cap and
+0.84--1.15 without it.  The warning then carries the class
+\code{"spatialkit_replicate_var_above_nugget"} and both numbers, which
+\code{attr(, "replicates")} records and \code{print()} repeats.  The
+replicate variance is an estimate (its degrees of freedom are in the
+warning and the record), and the variogram still says \eqn{c_0}: refit
+it with a nugget of at least \eqn{s_w^2}.
+
+In the cross-validation a location is held out whole, under the fold of
+its first row, and its error variance is part of its standardised error.
+A cell or held-out location \pkg{gstat} still cannot krige is reported
+\code{NA} with a warning, and \code{print()} says how many.
 }
 
 \examples{
@@ -281,12 +368,12 @@ Wiley. (Block kriging, chapter 3; cross-validation of the kriging
 variance, section 2.6.4.)
 }
 \seealso{
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()},
-\code{\link{resolution_profile}()},
-\code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

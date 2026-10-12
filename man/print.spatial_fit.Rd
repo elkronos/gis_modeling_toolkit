@@ -17,30 +17,38 @@
 \description{
 Shows the one-screen summary of a \code{gwr_fit}, a \code{bayesian_fit} or a
 custom subclass: backend, formula, number of observations, CRS, and the few
-backend-specific numbers worth seeing immediately (GWR bandwidth, GP basis
-size).  An \code{rf_fit} has its own method (see
+backend-specific numbers worth seeing immediately (GWR bandwidth; for a
+\code{bayesian_fit} the GP basis size, the smallest effective range that
+basis resolves in map units, the slope prior, and a flagged line when the
+sampler's diagnostics or the basis-adequacy check failed).  An
+\code{rf_fit} has its own method (see
 \code{\link{print.rf_fit}}), which shows the same header plus the forest
 settings.  It is what you get by typing the object's name, and the quickest
 way to confirm a fit used the data, predictors and CRS you meant.  For fit
 quality use \code{\link{model_metrics}()} or \code{\link{summary}()}
 instead.  Nothing printed here is an out-of-sample score.
 }
+\details{
+For a \code{gwr_fit} the bandwidth and AICc are followed by the effective
+number of parameters and, when any local window is of deficient rank, by
+the number of such windows.
+}
 \seealso{
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.gwr_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{model_metrics}()},
-\code{\link{predict.bayesian_fit}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.rf_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()},
-\code{\link{summary.spatial_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{methods on a fitted model}

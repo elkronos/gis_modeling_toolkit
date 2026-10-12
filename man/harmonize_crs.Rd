@@ -39,7 +39,7 @@ When one input carries no CRS, the same lon/lat heuristic
 identical data in the same place: coordinates that look like degrees are
 taken as EPSG:4326 and \strong{reprojected} to the other object's CRS (or
 \code{target_crs}); coordinates that do not are \emph{stamped} with
-\code{\link[sf:st_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
+\code{\link[sf:st_set_crs]{sf::st_set_crs()}}, which relabels without moving them.  Either way the
 assumption is announced with a warning.
 }
 \examples{
@@ -52,10 +52,10 @@ c(a = st_crs(h$a)$epsg, b = st_crs(h$b)$epsg)
 st_crs(h$a) == st_crs(h$b)
 }
 \seealso{
-Other spatial data preparation: 
-\code{\link{clip_target_for}()},
-\code{\link{coerce_to_points}()},
-\code{\link{ensure_projected}()},
-\code{\link{prep_model_data}()}
+Other spatial data preparation:
+\code{\link[=clip_target_for]{clip_target_for()}},
+\code{\link[=coerce_to_points]{coerce_to_points()}},
+\code{\link[=ensure_projected]{ensure_projected()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{spatial data preparation}

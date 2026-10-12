@@ -64,7 +64,7 @@ cat(
 "|---|---|\n",
 "| `gstat` | variogram fitting: `estimate_sac_range()`, design effects, kriging checks |\n",
 "| `ranger` | `fit_rf_model()` and `cv_rf()` |\n",
-"| `sp`, `GWmodel` | `fit_gwr_model()` and `cv_gwr()` |\n",
+"| `sp` | `fit_gwr_model()` and `cv_gwr()` |\n",
 "| `brms` (plus a Stan toolchain) | `fit_bayesian_spatial_model()` and `cv_bayes()` |\n",
 "| `geometry` | Delaunay triangle tessellations |\n",
 "| `ggplot2` | every `plot_*()` function and every `plot()` method |\n",
@@ -185,14 +185,16 @@ as above, only means the choice is made once and can be seen.
 Four more things about the data, each handled without stopping you:
 
 - A row whose response or predictor is `NA`, `NaN` or infinite is dropped
-  before a fit, and the count is logged; `prep_model_data()` is the function
-  that does it and `attr(x, "dropped")` says which rows.
+  before a fit, with a warning that gives the counts (class
+  `spatialkit_rows_dropped`); `prep_model_data()` is the function that does
+  it and `attr(x, "dropped")` says which rows.
 - Two observations at the same coordinates are fine for models and folds;
   a Voronoi tessellation keeps one seed per location, and every point at
   that location is indexed to its cell.
 - A point outside the boundary you tessellate gets no cell: `tess$index`
-  is `NA` for it and `assign_features_to_polygons()` leaves it out unless
-  you ask for it back with `keep_unassigned = TRUE`.
+  is `NA` for it and `assign_features_to_polygons()` leaves it out, with a
+  warning that gives the count, unless you ask for it back with
+  `keep_unassigned = TRUE`.
 - A variogram, which is what sizes blocks from the data, needs about thirty
   points; below that `estimate_sac_range()` returns `NA` and says so.
 
@@ -259,7 +261,8 @@ Eight cells, four of them slivers at the state's edge with no county inside,
 is coarse. A hundred county centroids spread fairly evenly have no elbow to
 find, and the call warns that `max_levels` chose this count rather than the
 data. `vignette("resolution")` is where to argue with it:
-`resolution_profile()` scores every cell count on four criteria at once.
+`resolution_profile()` scores every cell count on three count criteria and
+a diagnostic at once.
 
 ```{r map, eval=has_ggplot, fig.height=4.5, fig.alt="North Carolina covered by four large hexagonal cells shaded by their mean SIDS rate, plus four unshaded slivers at the edges that hold no county. The western cell has the lowest mean, about 1.5 per thousand, and the small southern cell the highest, about 2.8."}
 plot_tessellation_map(cells, boundary = boundary, fill_col = "resp_mean_rate",
@@ -287,9 +290,10 @@ blocks that define them (`make_folds(blocks = tess$cells)`).
 # 5. Build folds that hold out whole regions.  block_size is a distance in
 #    the CRS's units, here metres.  Blocks have to be at least as wide as the
 #    autocorrelation range for the folds to be honest; on these data no range
-#    could be identified, so 100 km is set by hand.  vignette("spatial-cross-
-#    validation") is about that choice, and make_folds(auto_range = TRUE)
-#    makes it from the data when gstat is installed.
+#    could be identified for what the predictor leaves unexplained, so 100 km
+#    is set by hand.  vignette("spatial-cross-validation") is about that
+#    choice, and make_folds(auto_range = TRUE) makes it from the data when
+#    gstat is installed.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -415,6 +419,6 @@ source(file.path(dir, "03-folds.R"))
 | **block** | a square of the study area used to build a fold; a fold holds out whole blocks |
 | **design effect (`deff`)** | how many times larger a cell mean's variance, as an estimate of the population mean, is than the independent-sample formula says, because the points in a cell are correlated; `n / deff` is the effective sample size for that estimate. The cell's own mean needs no such correction when its points are spread through the cell |
 | **flat region** | the cell counts a resolution criterion cannot distinguish from its optimum; a set, not an interval |
-| **support ceiling, range floor** | the most cells the point count allows (`n / min_cell_n`) and the fewest the autocorrelation range allows (`area / range^2`); a criterion whose optimum sits on either is being chosen for by that bound |
+| **support ceiling, range floor** | the most cells the point count allows (`n / min_cell_n`, counting the rows with a response) and the fewest the autocorrelation range allows (`area / range^2`); a criterion whose optimum sits on either is being chosen for by that bound |
 | **dissimilarity index (DI)** | how far a prediction location's predictors sit from the training data, on the scale of the training data's own spread; the area of applicability is where DI stays below what cross-validation saw |
 | **row ID** | `..row_id`, a column the package stamps on a layer so that folds and dropped rows can be traced back to the rows you passed in |

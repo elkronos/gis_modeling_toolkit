@@ -26,13 +26,18 @@ test_that("one missing response or predictor value does not switch the profile t
   d$z <- 3 * d$p + rnorm(n)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   sac <- rr_sac(pts)
-  clean <- resolution_profile(pts, "z", "p", levels = c(10, 20, 40), sac = sac)
+  # A range of 1500 on this extent needs 43 cells and 300 points support 33:
+  # that finding is an R warning with a class now, where it was a log line.
+  expect_warning(
+    clean <- resolution_profile(pts, "z", "p", levels = c(10, 20, 40), sac = sac),
+    class = "spatialkit_not_supported")
   expect_identical(attr(clean, "variable"), "residuals")
   for (col in c("z", "p")) {
     holed <- pts
     holed[[col]][17] <- NA
-    lines <- capture_spatialkit_log(
-      prof <- resolution_profile(holed, "z", "p", levels = c(10, 20, 40), sac = sac))
+    lines <- capture_spatialkit_log(expect_warning(
+      prof <- resolution_profile(holed, "z", "p", levels = c(10, 20, 40), sac = sac),
+      class = "spatialkit_not_supported"))
     expect_identical(attr(prof, "variable"), "residuals", info = col)
     expect_true(log_has(lines, "1 of 300 row"), info = col)
     expect_false(log_has(lines, "OLS fit on `predictor_vars` failed"), info = col)
@@ -56,9 +61,11 @@ test_that("a layer larger than sample_n is bounded, judged and scored on all its
   d <- data.frame(x = runif(N, 0, 10000), y = runif(N, 0, 10000), z = rnorm(N))
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   sac <- rr_sac(pts, range = 1200, nugget = 0.5, psill = 1)
+  # range_floor = TRUE: the ladder starts at the floor only when asked, since
+  # the default became FALSE.
   lines <- capture_spatialkit_log(
     prof <- resolution_profile(pts, "z", sac = sac, n_levels = 4, nstart = 3,
-                               sample_n = 300))
+                               sample_n = 300, range_floor = TRUE))
   b <- attr(prof, "bounds")
   expect_identical(b$n, 1200L)
   expect_identical(b$n_sample, 300L)

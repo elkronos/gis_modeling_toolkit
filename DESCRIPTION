@@ -12,8 +12,9 @@ Description: Constructs analysis regions from the distribution of the data
     observations, assigns features to cells, and aggregates to cell level
     with optional design-effect corrections so that standard errors account
     for within-cell autocorrelation. Also manages coordinate reference
-    systems. Fits geographically weighted regression
-    (via 'GWmodel'; Lu et al. (2014) <doi:10.1080/10095020.2014.917453>),
+    systems. Fits geographically weighted regression (with the kernels,
+    diagnostics and forward selection of 'GWmodel'; Lu et al. (2014)
+    <doi:10.1080/10095020.2014.917453>),
     Bayesian spatial Gaussian process regression (via 'brms', using the
     Hilbert space approximation of Riutort-Mayol et al. (2023)
     <doi:10.1007/s11222-022-10167-2>) and random forests (via 'ranger', with

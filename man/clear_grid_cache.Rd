@@ -26,9 +26,9 @@ clear_grid_cache()   # returns the number of entries removed, invisibly
 print(clear_grid_cache())                                   # 0: already empty
 }
 \seealso{
-Other package options and caches: 
-\code{\link{clear_fitted_cache}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{spatialkit_quiet}()}
+Other package options and caches:
+\code{\link[=clear_fitted_cache]{clear_fitted_cache()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
 \concept{package options and caches}

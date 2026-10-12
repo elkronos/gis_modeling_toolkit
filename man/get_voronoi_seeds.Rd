@@ -38,14 +38,21 @@ the integer vector of ranked candidates from \code{\link[=determine_optimal_leve
 (its first element is used), a \code{\link[=select_resolution]{select_resolution()}} result (its
 \verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}} (read with \code{select_resolution()} at
 its default criterion). The result then carries \code{attr(, "n_from")}
-saying which.
+saying which. A count read off a selection or a profile comes with what
+the selection found: a warning of class \code{"spatialkit_bound_chosen"} when
+the optimum sits on a bound of the ladder, so the bound chose the count,
+and one of class \code{"spatialkit_no_structure"} when one cell for the whole
+layer scores as well. A profile with no \code{cp} to read is an error (class
+\code{"spatialkit_no_default_criterion"} when another criterion is finite);
+see \code{\link[=resolution_profile]{resolution_profile()}}.
 
 With \code{method = "kmeans"}, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those
 are returned instead of a new k-means: a k-means partition is the
 Voronoi partition of its centres, so their cells are the cells the
 criteria judged. \code{sample_points}, when given, is then only assigned to
-them (for \code{attr(, "kmeans")}), and \code{boundary} only sets the CRS;
+them (for \code{attr(, "kmeans")}) and gives the cover, and \code{boundary} only
+sets the CRS and the cover (see "Details");
 \code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
@@ -79,12 +86,32 @@ with unusable coordinates are dropped first), \code{size} (points per seed),
 \code{iter} and \code{nstart}. For the scored centres of a selection or profile
 (see \code{n}) it describes \code{sample_points} assigned to them, each point to
 its nearest seed, with \code{iter} \code{NA} and \code{nstart} the profile's restarts,
-and is absent when no \code{sample_points} were given.
+and is absent when no \code{sample_points} were given. Every method also
+attaches \code{attr(, "cover")} when the call says what ground the seeds stand
+for (see "Details"): an sfc holding the boundary's polygons or the hull
+of the clustered points, in its own CRS.
 }
 \description{
 Creates an sf POINT layer of "seed" locations. Multiple strategies are
 supported: user-provided points, uniform random sampling within a boundary,
 or k-means clustering of a sampling cloud.
+}
+\details{
+Seeds lie inside the ground they stand for, so Voronoi cells clipped to the
+seeds' own hull would leave its edge uncovered. The result therefore
+carries that ground as \code{attr(, "cover")}: the \code{boundary} when one was
+given, otherwise the convex hull of \code{sample_points}, otherwise (for the
+scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a \code{\link[=select_resolution]{select_resolution()}}
+result passed as \code{n}) the hull of the points the profile was computed on.
+\code{\link[=build_tessellation]{build_tessellation()}} and
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} derive their default boundary from it, so
+\code{build_tessellation(seeds, method = "voronoi")} holds every observation
+without a \code{boundary}. Seeds with no cover are tessellated over their own
+hull unless a \code{boundary} or \code{cover} is passed then: \code{method = "provided"}
+seeds given with neither \code{boundary} nor \code{sample_points} have none, and no
+warning is raised for them, since they may be the observation sites
+themselves. The attribute survives
+\code{sf::st_transform()} and row subsetting; \code{rbind()} drops it.
 }
 \examples{
 library(sf)
@@ -94,14 +121,14 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

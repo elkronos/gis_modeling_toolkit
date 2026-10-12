@@ -7,33 +7,65 @@
 select_resolution(
   profile,
   criterion = c("cp", "reliability", "elbow", "moran_z"),
-  tol = 0.02
+  tol = 0.02,
+  range_floor = TRUE,
+  diagnostic = FALSE
 )
 }
 \arguments{
 \item{profile}{A \code{resolution_profile}.}
 
 \item{criterion}{Which column decides: \code{"cp"} (minimised),
-\code{"reliability"} (maximised), \code{"elbow"} (maximised) or
+\code{"reliability"} (maximised at or above the range floor),
+\code{"elbow"} (maximised) or, with \code{diagnostic = TRUE},
 \code{"moran_z"} (\eqn{|z|} minimised).}
 
 \item{tol}{Width of the flat region.  For \code{cp} and \code{reliability}
 it is relative to the optimum's value (\code{0.02} keeps levels within 2
 percent of it); for \code{elbow} and \code{moran_z}, whose optimum can
 be zero, it is relative to the criterion's range over the ladder.}
+
+\item{range_floor}{For \code{criterion = "reliability"} only.
+\code{TRUE} (default) reads the criterion at the levels at or above
+the range floor in \code{attr(profile, "bounds")}, which is where
+\code{resolution_profile()} started the ladder by default up to version
+2.0.0.  It applies when the layer supports the floor, some scored level
+reaches it, and the profile built its own ladder (a ladder set with
+\code{levels} is read as given).  \code{FALSE} reads every level.}
+
+\item{diagnostic}{\code{criterion = "moran_z"} is refused, with an error
+of class \code{spatialkit_diagnostic_criterion} that says what the
+column measures, unless this is \code{TRUE}: \code{moran_z} is a
+diagnostic of the cell means, not a count rule.  Default \code{FALSE}.}
 }
 \value{
 A list of class \code{resolution_selection} with \code{best} (the
 level), \code{flat} (the levels in the flat region, ascending; a set,
 which can skip a rung), \code{criterion}, \code{value} (the optimum),
 \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
-or first of the levels this criterion was scored at, which for
-\code{moran_z} starts above nine cells), \code{edge} (which bound that
+or first of the levels this criterion was read at, which for
+\code{moran_z} starts above nine cells and for \code{reliability} at
+the range floor), \code{edge} (which bound that
 is, in words: the support ceiling, the subsample's ceiling, the range
 floor, the ladder's own end,
 or the first or last level the criterion is computable at; \code{NA} for
 an interior optimum), \code{n_levels}, \code{values} (the criterion
-at every level, \code{NA} where it could not be computed) and
+at every level, \code{NA} where it could not be computed),
+\code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
+cell is within \code{tol} of the optimum, when the cell means at the
+optimum differ from one mean by no more than chance allows, or when
+the variogram found no spatial structure; \code{TRUE} when the optimum
+beats one cell on both counts; see "What each criterion returns".
+\code{TRUE} for an \code{elbow}; \code{NA} for the other criteria and
+for a profile that carries no one-cell value),
+\code{one_cell} (\code{cp} at one cell, or \code{NA}),
+\code{structure_p} (the p-value of the F test of the cells at
+\code{best} against one mean, multiplied by the number of levels
+searched and capped at 1; \code{NA} where \code{structured} is not
+read off \code{cp}),
+\code{range_floor} (the floor \code{reliability} was held to, or
+\code{NA}), \code{note} (what the flags mean, in words; \code{NULL} when
+there is nothing to say) and
 \code{seeds} (an sf POINT layer, with \code{seed_id}, of the centres of
 the partition the profile scored at \code{best}, in the CRS it was
 computed in; \code{NULL} for a profile that does not carry them).  Their
@@ -51,16 +83,81 @@ ceiling.  The region is the answer, and the argmin only a point in it.
 When the optimum sits at an end of the levels the criterion was scored at,
 the result says so and names the bound, because a bound is then doing the
 choosing rather than the criterion (see
-\code{\link{resolution_profile}} for what each criterion measures and how
-it behaved on simulated fields).
+\code{\link{resolution_profile}} for what each criterion measures and
+what it returns in practice).  The functions that take the result as a
+cell count raise that as a warning of class
+\code{spatialkit_bound_chosen}.
 }
+\section{What each criterion returns}{
+
+\describe{
+\item{\code{cp}}{The level that minimises Mallows' \eqn{C_p}: the count
+at which predicting an observation by its cell's mean has the least
+estimated error.  On a smooth response with little noise that is the
+support ceiling.  The result also says whether the optimum beats one
+cell for the whole layer (\code{attr(profile, "one_cell")}), in
+\code{structured}.  It is \code{TRUE} when two things hold:
+\eqn{C_p} at one cell is above the optimum by more than \code{tol},
+and the cell means at the optimum differ from one mean by more than
+chance allows.  The second is the F test of the cells against one
+mean, \eqn{(TSS - RSS) / (L - 1)} over \eqn{RSS / (m - L)}, at 5
+percent after a Bonferroni adjustment for the levels the optimum was
+searched over (\code{structure_p} is the adjusted p-value).  The
+cells are fitted to the coordinates alone, so the test holds its
+level on a response with no spatial structure whatever \eqn{C_p}'s
+noise variance is, and it is what decides when that variance is 0:
+\eqn{C_p} is then \eqn{RSS / n}, which falls with every finer level
+by chance alone, and the first comparison says nothing.
+When either fails, \code{structured} is \code{FALSE}: one mean for
+the whole layer predicts as well as any level scored, so the
+response shows no spatial structure the cells can use and the count
+is not identified.  \code{structured} is also \code{FALSE} when the
+profile's variogram was refused for showing no spatial structure.
+\code{best} is still the argmin.
+\strong{Measured on white noise} (uniform points, the default
+ladder), \code{structured} was \code{TRUE} on 3 of 200 layers of 60
+points, 7 of 200 of 120, 5 of 150 of 300 and none of 80 of 600 or of
+40 of 1,500 with the noise variance taken from the finest level; and
+with the package's own variogram, whose nugget was 0 on 27 of the
+180 layers, on none of 120 layers of 120 points and 3 of 60 of 300.
+The first comparison alone gave 27, 20, 8, 0 and 0, and then 38 and
+11.  The F distribution is exact for a Gaussian response, and the
+test held its level on others: with no structure in a lognormal
+response, a 0/1 response with mean 0.1 and a \eqn{t_3} response,
+\code{structured} was \code{TRUE} on 2 to 10 of 200 layers at each
+of 60, 120 and 300 points.  A \code{FALSE} on a small layer is weak
+evidence that there is
+no structure: on exponential fields (range parameter 100 on a
+1000-unit extent, nugget 0.3 on a unit sill) \code{structured} was
+\code{TRUE} on 12 of 40 layers of 60 points, 36 of 40 of 120 and 40
+of 40 of 300.}
+\item{\code{reliability}}{The coarsest count the range allows.  The
+reliability curve peaks below the range floor, so it is read at the
+levels at or above the floor the profile reports (when the layer
+supports the floor and the profile built its own ladder).  The floor
+is a level of every such ladder, so the result is the floor, with
+\code{edge} naming it (on a profile whose k-means failed at that
+level, the first level above it).  \code{range_floor = FALSE} reads
+every level and returns the curve's own maximum, which is usually a
+count below the floor.}
+\item{\code{elbow}}{The number of clusters of the points, when they
+cluster; an error otherwise, because the column is \code{NA} at every
+level unless the WSS curve bends.}
+\item{\code{moran_z}}{Refused unless \code{diagnostic = TRUE}.  It is
+the level at which neighbouring cell means (or, with predictors,
+their regression residuals) are least autocorrelated.  \eqn{|z|} is
+near 0 at 10 to 20 cells whatever the data and grows as cells get
+finer than the range, so its minimum is usually the first level it
+can be computed at, or one near it, and it says nothing about how
+well the cells represent the response.}
+}
+}
+
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
   # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
-  # noise for Mallows' Cp to have an interior optimum rather than descend
-  # to the ceiling.
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
   set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
@@ -72,22 +169,24 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   sel <- select_resolution(prof, criterion = "cp")
   print(sel)               # the level, and the flat region around it
   print(sel$flat)          # every level within `tol` of the optimum
-  print(sel$edge)          # NA here: the optimum is interior
+  print(sel$edge)          # the bound the optimum sits on; NA when interior
+  sel$structured           # FALSE when one cell for the layer does as well
 
-  # Reliability prefers coarse cells and here runs into the floor the
-  # autocorrelation range sets, which the result says in words.
+  # Reliability prefers coarse cells: it is read at or above the floor the
+  # autocorrelation range sets, and the result says in words that the
+  # floor is choosing.
   rel <- select_resolution(prof, criterion = "reliability")
   print(rel)
   c(at_floor = rel$at_floor, edge = rel$edge)
 }
 }
 \seealso{
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{resolution_profile}()},
-\code{\link{summarize_by_cell}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

@@ -40,7 +40,8 @@ high-cardinality predictors (Strobl et al. 2007), which is why permutation
 is the default despite costing more.}
 
 \item{include_coords}{Add the coordinates as predictors. Default
-\code{FALSE}; see above.}
+\code{FALSE}, which leaves the forest with no spatial information; see
+\emph{Coordinates as predictors}.}
 
 \item{replace}{Logical; grow each tree on a bootstrap sample drawn
 \emph{with} replacement (\code{TRUE}, ranger's default and this one) or
@@ -80,13 +81,20 @@ the arguments this function already sets (\code{num.trees},
 \code{importance}, \code{seed}, \code{replace},
 \code{sample.fraction}, \code{x}, \code{y}) are rejected with a
 message naming the wrapper argument to use instead.  Passing them here
-would reach \code{ranger()} twice and fail the call.}
+would reach \code{ranger()} twice and fail the call.
+\code{respect.unordered.factors} passed here overrides the
+\code{"order"} this function sets when a predictor is categorical; see
+\emph{Categorical predictors}.}
 }
 \value{
 An \code{rf_fit} object (inherits from \code{spatial_fit}).
 \code{$info} carries \code{num_trees}, \code{mtry}, \code{min_node_size},
 \code{importance_type}, \code{importance} (a named numeric, or
 \code{NULL} when \code{importance = "none"}), \code{include_coords},
+\code{categorical_predictors} (the unordered factor and character
+predictors, possibly none) and \code{respect_unordered_factors} (how
+ranger was told to split them: \code{"order"} unless overridden through
+\code{...}, and \code{NA} when there is none and nothing was passed),
 \code{replace} and \code{sample_fraction} (the sampling each tree was
 grown on, with \code{sample_fraction} resolved to the number ranger
 used), \code{oob_rmse} and \code{oob_r_squared} (each \code{NA_real_} when
@@ -104,19 +112,68 @@ Fits a regression random forest on an \code{sf} dataset and returns it as a
 \code{\link{predict_surface}}, \code{\link{area_of_applicability}} and the
 \code{plot()} method like any other backend.
 }
-\section{Coordinates are not predictors by default}{
+\section{Coordinates as predictors}{
 
-Handing a random forest the x and y coordinates lets it reproduce the
-training surface almost exactly by memorising location, and then fail badly
-anywhere it has not seen. Random cross-validation will not catch this:
-nearby points leak between folds, so the memorised surface scores well.
-That is how the practice became common. Meyer et al. (2019) show the
-collapse directly. \code{include_coords} therefore defaults to
-\code{FALSE}, and setting it to \code{TRUE} logs a caution, once per
-session (it is a deliberate choice, so it is not raised as an R warning,
-and it is not repeated for every fold of a cross-validation). If you do use it,
-score the model with \code{\link{cv_spatial}} and blocked folds, never with
-the out-of-bag error.
+\code{include_coords = TRUE} adds the x and y coordinates to the
+predictors. They are the only spatial information a forest can be given:
+without them it sees the covariates alone, and \code{print()} says "no
+spatial information used". The default is \code{FALSE}.
+
+What the coordinates buy depends on where the predictions are wanted. A
+forest splits on location as on any column, so it follows the training
+surface closely between sampled points, and has nothing but the nearest
+edge of the data to go on beyond them. Between sampled points the
+coordinates can lower the error, most where the covariates carry little
+of the spatial structure themselves, and the gain fades with distance
+from the training data.
+Beyond the autocorrelation range, or in a region the data never visited,
+it can reverse: in a simulated hold-out of an unvisited strip the forest
+with coordinates was 5.2\\% worse on average and 31\\% worse in the worst
+run. Meyer et al. (2019) report larger failures of the same kind. With
+covariates that carry the spatial structure themselves, expect less from
+the coordinates.
+
+What does not change is how such a forest has to be scored. It fits
+location closely, nearby points leak between random folds, and the
+out-of-bag error is a random hold-out too, so both overstate its
+accuracy. Score it with \code{\link{cv_rf}} and
+blocked folds (\code{make_folds(method = "block_kfold")}) or folds
+matched to the prediction distance (\code{method = "nndm"}), at the
+distances the map will be used at, never with the out-of-bag error, and
+compare the two forests on the same folds. That comparison is two calls:
+build the folds once and hand them to \code{cv_rf()} with and without
+the coordinates.
+\preformatted{
+folds   <- make_folds(dat, k = 5, method = "block_kfold")
+plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)
+with_xy <- cv_rf(dat, "z", c("a", "b"), folds = folds,
+                 include_coords = TRUE)
+c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+}
+\code{\link{cv_rf}} runs the same comparison in its example and reads it
+fold by fold. Setting
+\code{include_coords = TRUE} logs that advice, once per session (it is a
+deliberate choice, so it is not raised as an R warning, and it is not
+repeated for every fold of a cross-validation).
+}
+
+\section{Categorical predictors}{
+
+A predictor that is an unordered factor or a character column is split
+with \code{respect.unordered.factors = "order"}: ranger orders its levels
+by mean response once, before growing, and splits on that order. That is
+the handling ranger's own help recommends. ranger's default for a
+regression forest, \code{"ignore"}, splits on the order the levels happen
+to be stored in (alphabetical, for most data), which for a nominal
+variable is arbitrary: with a 40-level factor carrying random level
+effects, the test RMSE was 1.05 by level order against 0.57 by response
+order, lower in 10 draws of 10. Pass \code{respect.unordered.factors}
+through \code{...} to choose otherwise (\code{"ignore"}, or
+\code{"partition"} for every two-way split of the levels, which is slow
+beyond a few levels). Ordered factors are left alone and split on their
+own order, and with \code{splitrule = "extratrees"} ranger's own default
+for that rule, \code{"partition"}, is kept. The setting is recorded in
+\code{$info$respect_unordered_factors} and printed with the fit.
 }
 
 \section{The out-of-bag error is a random hold-out}{
@@ -181,16 +238,18 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 }
 \seealso{
 \code{\link{cv_rf}} for a spatially blocked performance estimate,
-\code{\link{area_of_applicability}}, which can take
-\code{weights = pmax(fit$info$importance, 0)} when that importance is
-finite (it is \code{NaN} when no row is out of bag; see "What
-fitted() returns").
+\code{\link{area_of_applicability}}, which weights the predictors by
+\code{pmax(fit$info$importance, 0)} by default when that importance is
+finite and the forest has out-of-bag skill (it is \code{NaN} when no row
+is out of bag; see "What fitted() returns"), and which needs
+\code{categorical = "indicator"} or \code{"drop"} for a forest with a
+factor predictor.
 
-Other model fitting: 
-\code{\link{fit_bayesian_spatial_model}()},
-\code{\link{fit_gwr_model}()},
-\code{\link{gp_lengthscale_bounds}()},
-\code{\link{new_spatial_fit}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=gp_lengthscale_bounds]{gp_lengthscale_bounds()}},
+\code{\link[=new_spatial_fit]{new_spatial_fit()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

@@ -11,7 +11,8 @@ assign_features_to_polygons(
   keep_unassigned = FALSE,
   predicate = sf::st_intersects,
   largest = TRUE,
-  tie_break = c("smallest_area", "first")
+  tie_break = c("smallest_area", "first"),
+  quiet = FALSE
 )
 }
 \arguments{
@@ -19,11 +20,26 @@ assign_features_to_polygons(
 
 \item{polygons_sf}{An sf or sfc polygonal layer.}
 
-\item{polygon_id_col}{Name of the polygon identifier column. Default "poly_id".}
+\item{polygon_id_col}{Name of the polygon identifier column: the column of
+\code{polygons_sf} the IDs are read from, and the name they are returned
+under. Default "poly_id". When \code{polygons_sf} has no column of that name,
+the IDs are read from the first of \code{"poly_id"}, \code{"polygon_id"}, \code{"id"},
+\code{"cell_id"} and \code{"grid_id"} it carries, and a message names the column
+that was used; when it has none of them, the polygons are numbered
+\verb{1, 2, ...} in row order, and a message says so. The column the IDs are
+read from must hold one distinct, non-missing value per polygon: a
+duplicated or missing ID is an error, because features in different
+polygons would come back under one ID. That includes a unit stored as
+several rows that share its ID (a region split into \code{POLYGON} parts):
+merge the parts into one row per ID first, for example with
+\verb{dplyr::summarise(dplyr::group_by(polygons_sf, <ID column>))}, which
+keeps the unit one cell. Numbering the rows would make each part a cell
+of its own.}
 
 \item{keep_unassigned}{Logical; retain features that fall inside no
 polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
-them.}
+them with a warning of class \code{"spatialkit_unassigned"} that gives
+their number.}
 
 \item{predicate}{Binary spatial predicate function. Default sf::st_intersects.
 Not used when \code{largest} applies: sf then assigns polygon features by
@@ -54,6 +70,10 @@ edge of two grid cells), the one whose bounding-box centre is lowest,
 then leftmost, so the choice does not depend on the order of the rows;
 \code{"first"} keeps the first match (original order-dependent
 behavior).}
+
+\item{quiet}{Logical; suppress this function's \code{message()}s (the one
+naming a fallback ID column). It does not silence R warnings. Default
+\code{FALSE}.}
 }
 \value{
 An sf object with \code{polygon_id_col} attached, one row per input
@@ -67,7 +87,21 @@ the polygons' own ID column when that is read from a fallback such as
 falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
-places (a CRS that could only be stamped, not reprojected). The
+places (a CRS that could only be stamped, not reprojected).
+
+Features that fall inside no polygon are counted on the attribute
+\code{"unassigned"}: a list with \code{n}, \code{which} (their row positions in
+\code{features_sf}) and \code{n_rows}. With \code{keep_unassigned = FALSE} they are not
+in the result, and a warning of class \code{"spatialkit_unassigned"} gives
+their number (\code{tryCatch(spatialkit_unassigned = )} catches it without
+matching the message; the condition carries \code{n} and \code{total}). The usual
+causes are a polygon layer that stops short of the data (a coastline
+drawn at another scale, a tessellation of seeds built without a
+\code{boundary} or \code{cover}; see \code{\link[=build_tessellation]{build_tessellation()}}) and points outside
+the study area. With \code{keep_unassigned = TRUE} they are kept with an
+\code{NA} ID and no warning is raised, unless every feature is unassigned.
+
+The
 attribute \code{"ties"} records how many features matched more than one
 polygon (with \code{largest}, overlapped several by exactly the same area)
 and had the \code{tie_break} rule decide for them: a list with \code{n},
@@ -80,7 +114,8 @@ returned and does not survive subsetting: \code{joined[i, ]}, like
 with no \code{"ties"} attribute, so nothing reports the parent's count
 for a different set of rows. \code{sf::st_drop_geometry()} keeps the record,
 since the rows are the same; see \code{\link{[.spatialkit_rows}} for
-what binding such data frames does.
+what binding such data frames does. The \code{"unassigned"} record is
+stamped and removed the same way.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
@@ -121,12 +156,12 @@ table(assigned$poly_id)
 \code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
-Other aggregation: 
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{resolution_profile}()},
-\code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

@@ -82,10 +82,17 @@ test_that("a misspelt column is an error in determine_optimal_levels(), and a mi
                "column 'Z' not found")
   expect_error(determine_optimal_levels(pts, response_var = "z", predictor_vars = c("w", "Elev")),
                "Elev.*not found")
-  out <- r2_warnings(determine_optimal_levels(pts, max_levels = 6, response_var = "z",
+  # A model-aware criterion with no response to read falls back, and says
+  # so.  (It used to say the same of a response without predictors, which
+  # the statistic does not need: the cell means are then regressed on an
+  # intercept alone.)
+  out <- r2_warnings(determine_optimal_levels(pts, max_levels = 6, predictor_vars = "w",
                                               criterion = "morans_i"))
-  expect_true(any(grepl("predictor_vars were not given", out$warnings)))
+  expect_true(any(grepl("needs a response_var, and none was given", out$warnings)))
   expect_null(attr(out$value, "diagnostics"))
+  resp_only <- r2_warnings(determine_optimal_levels(pts, max_levels = 6, response_var = "z",
+                                                    criterion = "morans_i"))
+  expect_false(any(grepl("falling back to geometric", resp_only$warnings)))
 })
 
 
@@ -97,7 +104,11 @@ test_that("repeat visits let the ladder reach one cell per location", {
   set.seed(3)
   d$z <- rnorm(150) + rep(1:5, each = 30)
   pp <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
-  prof <- resolution_profile(pp, "z", levels = 2:5, nstart = 3, sac = r2_sac(300))
+  # (A range of 300 needs 12 cells and five stations allow 5: an R warning
+  # with a class now, where it was a log line.)
+  expect_warning(
+    prof <- resolution_profile(pp, "z", levels = 2:5, nstart = 3, sac = r2_sac(300)),
+    class = "spatialkit_not_supported")
   expect_identical(prof$levels, 2:5)
   expect_identical(prof$wss[4], 0)
   expect_true(is.finite(prof$cp[4]))
@@ -243,8 +254,11 @@ test_that("k-means++ seeding draws in proportion to the squared distance", {
 test_that("range_floor = FALSE starts the ladder at 2 and still reports the floor", {
   pts <- r2_pts(300)
   sac <- r2_sac(250)
-  on  <- resolution_profile(pts, "z", sac = sac, n_levels = 5, nstart = 2)
+  # FALSE is the default now; TRUE starts the ladder at the floor.
+  on  <- resolution_profile(pts, "z", sac = sac, n_levels = 5, nstart = 2, range_floor = TRUE)
   off <- resolution_profile(pts, "z", sac = sac, n_levels = 5, nstart = 2, range_floor = FALSE)
+  expect_identical(resolution_profile(pts, "z", sac = sac, n_levels = 5, nstart = 2)$levels,
+                   off$levels)
   expect_gt(attr(on, "bounds")$floor, 2L)
   expect_identical(min(on$levels), attr(on, "bounds")$floor)
   expect_identical(min(off$levels), 2L)

@@ -97,8 +97,11 @@ test_that("the residual variogram plot builds", {
     ".resid"))
   expect_true(is.na(sac_flat))
   expect_s3_class(attr(sac_flat, "variogram"), "data.frame")
-  expect_match(attr(sac_flat, "rejected_reason"),
-               "no variogram model|did not converge")
+  # White noise is refused for want of spatial structure, by a test made
+  # before any model is looked at.  It used to end as "no variogram model" or
+  # "did not converge", whichever way gstat's fit happened to fail.
+  expect_identical(attr(sac_flat, "rejected_reason"),
+                   "no spatial structure detected at the nearest-neighbour scale")
   # response = FALSE: the layer assertions below are about the RESIDUAL
   # curve alone; the response overlay has its own test file
   # (test-plotting-diagnostics.R).
@@ -111,24 +114,21 @@ test_that("the residual variogram plot builds", {
   expect_equal("GeomLine" %in% layers2, !is.null(attr(sac_flat, "variogram_model")))
   expect_match(p2$labels$subtitle, "^No effective range")
 
-  # The all-singular outcome, made deterministic: every fit.variogram() call
-  # reports a singular model.  The NA carries the empirical variogram and no
-  # model, and the plot says why there is no range.
-  local_mocked_bindings(
-    fit.variogram = function(object, model, ...) {
-      model$psill <- c(0, 0); model$range <- c(0, 1)
-      attr(model, "singular") <- TRUE
-      model
-    },
-    .package = "gstat")
+  # The no-model outcome, made deterministic: the fit reports that no model
+  # could be fitted.  The NA carries the empirical variogram and no model,
+  # and the plot says why there is no range.  The stub replaces
+  # .sac_fit_model(), the fit estimate_sac_range() makes (it used to replace
+  # gstat::fit.variogram(), which is no longer called), and the layer is the
+  # structured one, because white noise is refused before any fit is read.
+  local_mocked_bindings(.sac_fit_model = function(...) NULL)
   sac_sing <- suppressWarnings(estimate_sac_range(
-    sf::st_sf(.resid = residuals(fit_flat), geometry = sf::st_geometry(flat)),
+    sf::st_sf(.resid = residuals(fit), geometry = sf::st_geometry(pts)),
     ".resid"))
   expect_true(is.na(sac_sing))
   expect_s3_class(attr(sac_sing, "variogram"), "data.frame")
   expect_null(attr(sac_sing, "variogram_model"))
   expect_match(attr(sac_sing, "rejected_reason"), "^no variogram model could be fitted")
-  p3 <- plot(fit_flat, type = "variogram", response = FALSE)
+  p3 <- plot(fit, type = "variogram", response = FALSE)
   expect_no_error(ggplot2::ggplot_build(p3))
   layers3 <- vapply(p3$layers, function(l) class(l$geom)[1L], character(1))
   expect_true("GeomPoint" %in% layers3)
