@@ -41,7 +41,10 @@ after the expression passed: a name gives that name (\code{median}, or
 \code{f} for a variable \code{f} holding a function),
 \code{stats::median} gives \code{median}, and any other expression gives
 \code{agg1}; pass a named list to choose the name. Anything else falls
-back to the default mean with a warning.}
+back to the default mean with a warning. The functions receive each
+column with its infinite values already set to \code{NA} (see
+"Details"), so they need \code{na.rm = TRUE} as they do for missing
+values.}
 
 \item{cells_sf}{Optional polygon sf layer to join cell geometries onto
 the output. When supplied, the return value is an sf object with
@@ -75,40 +78,46 @@ the fit via \code{sac}, or it is estimated when \code{response_var} is given and
 supported, with a nugget and with several structured components
 (each weighted by its partial sill) and with gstat's 2-D geometric
 anisotropy (\code{vgm(..., anis = c(angle, ratio))}), applied as gstat
-applies it. A model of any other family falls back to \code{deff = 1}
-with a warning naming it, and so does a request with no usable
-model (none supplied and none could be estimated, or a rejected
-fit that could not be replaced by an estimate); see "Value" for how
-to detect a fallback. A model with no structured component (a pure
+applies it. A request that cannot be met falls back to \code{"kish"},
+with a warning of class \code{"spatialkit_deff_fallback"} that gives the
+reason and the ICCs: a model of any other family (named in the
+warning), or no usable model (none supplied and none could be
+estimated, or a rejected fit that could not be replaced by an
+estimate). The standard errors, intervals and \code{cell_weight} are then
+Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+\code{deff_method} column says which on every row (see "Value"). The
+variogram route needs an identified range, which a layer does not
+always have, so read \code{deff_method} for the fallback. A model with
+no structured component (a pure
 nugget) implies that distinct observations are uncorrelated, so it
 is applied as a design effect of 1 in every cell, not treated as a
-fallback. Points with empty
+fallback. That includes the model \code{\link[=estimate_sac_range]{estimate_sac_range()}} returns
+when it finds no spatial structure (an \code{NA} range whose
+\code{rejected_reason} says so): the answer is then a design effect of
+1, \code{deff_method} reads \code{"variogram"}, and no fallback warning is
+raised. Points with empty
 geometry count towards their cells' values but not towards the
 correlation, with a warning.}
-\item{\code{"kish"}}{Estimate per-variable-type intra-class correlations
-(ICCs) from the grouped data using a one-way random-effects ANOVA
-decomposition (one ICC for the response variable and a separate
-ICC for the predictor variables), then apply Kish's formula per
+\item{\code{"kish"}}{Estimate an intra-class correlation (ICC) for each
+summarised column from the grouped data using a one-way
+random-effects ANOVA decomposition (one ICC for the response and one
+for each predictor), then apply Kish's formula per
 cell: \code{deff_i = 1 + (n_i - 1) * rho}. The ICC is the ANOVA
 (method-of-moments) estimator with Donner's \code{n0} for unequal cell
 sizes, not the REML estimate a mixed model returns: on a single
 unbalanced draw the two can differ by 0.1--0.2 (one check with cell
 sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
 while balanced designs agree to about 0.01. Neither is wrong, so do
-not read the difference as a defect. When multiple columns are
-pooled for a single ICC estimate (e.g. several predictor variables),
-each column is z-scored before pooling so that variables with
-different scales contribute equally to the variance decomposition.
-The response-specific ICC
-is used for response SEs and the predictor-specific ICC for
-predictor SEs. The response's ICC is never applied to predictor
-columns or vice versa, and it is the response's ICC (not the
-predictors') that sets \code{cell_weight} whenever a response was given.
+not read the difference as a defect. Each column's ICC is used
+for that column's SEs and for no other: the response's ICC is never
+applied to a predictor, nor one predictor's to another. It is the
+response's ICC that sets \code{cell_weight} whenever a response was
+given, and the first predictor's own ICC otherwise.
 Requires at least 2 cells with 2+ observations and at least 2 residual
 degrees of freedom (\code{N - k >= 2}); the ICC is taken as 0 (no
-correction for that variable type) otherwise, and likewise when the
+correction for that column) otherwise, and likewise when the
 estimate itself comes out at or below 0. The \code{"deff_applied"}
-attribute is attached when either ICC is positive, so when both are
+attribute is attached when any ICC is positive, so when all are
 0 there is none.}
 \item{A positive number}{Applied as a uniform design effect to every
 cell, as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the
@@ -127,8 +136,10 @@ whose fit was \emph{rejected} (its value is \code{NA} and it carries a
 it is set aside rather than correcting by a shape that was not trusted
 enough to report a range: the variogram is then estimated as if no \code{sac}
 had been given, with a plain warning saying so, or, where that is not
-possible, \code{deff} falls back to 1 with the fallback warning, which names
-the rejection. A \code{sac} with no \code{variogram_model} attribute -- a plain
+possible, \code{deff} falls back to \code{"kish"} with the fallback warning, which
+names the rejection. The exception is a \code{sac} refused because no spatial
+structure was found, whose model is a pure nugget: it is used, and gives
+a design effect of 1. A \code{sac} with no \code{variogram_model} attribute -- a plain
 number or a \code{units} object, say -- is a range without a correlation
 function, and is set aside the same way. A \code{sac} fitted to residuals
 (\code{attr(sac, "detrended")} \code{TRUE}) is used as given, with a warning when
@@ -177,30 +188,41 @@ summaries: the ID column, \code{n} (rows in the cell), one column per
 \code{agg_funs} entry per variable, \verb{..sd_*} / \verb{..se_*} for every numeric
 response and predictor, \verb{..neff_*} / \verb{..df_*} / \verb{..ci_lo_*} /
 \verb{..ci_hi_*} for the same columns when \code{conf_level} is given,
-\code{cell_weight}, \code{deff_applied} when a design effect was requested (any
-\code{deff} other than 1), and \code{cell_area} / \code{n_per_area} when
-\code{area = TRUE}. An input column also called \code{n} is not allowed to shadow
-the count.
+\code{cell_weight}, \code{deff_applied} and \code{deff_method} when a design effect
+was requested (any \code{deff} other than 1), and \code{cell_area} / \code{n_per_area}
+when \code{area = TRUE}. An input column also called \code{n} is not allowed to
+shadow the count.
 
-\code{deff_applied} is \code{TRUE} on every row when the requested correction was
-applied (exactly when the \code{"deff_applied"} attribute below is attached;
-under \code{"kish"}, when any standard-error column was corrected)
-and \code{FALSE} when it fell back to the uncorrected standard errors: a
-refused \code{deff}, a \code{"variogram"} request with no usable model, or
-\code{"kish"} ICCs of 0 for every variable type (and \code{NA} on a \code{cells_sf}
-row no point fell in).
-Unlike the attribute it survives \code{rbind()} and
+\code{deff_applied} is \code{TRUE} on every row when a design-effect correction
+was applied (exactly when the \code{"deff_applied"} attribute below is
+attached; under \code{"kish"}, when any standard-error column was corrected)
+and \code{FALSE} when the standard errors are the uncorrected ones: a
+refused \code{deff}, or \code{"kish"} ICCs of 0 for every column (and \code{NA} on a
+\code{cells_sf} row no point fell in). \code{deff_method} names the correction
+the standard errors carry, since their column names do not change with
+it: \code{"variogram"}, \code{"kish"} or \code{"fixed"} when the one requested was
+applied, \code{"none"} when none was, and \code{"kish (variogram fallback)"} or
+\code{"none (variogram fallback)"} when a \code{"variogram"} request could not be
+met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+So \code{deff_applied} is \code{TRUE} on a Kish fallback row: test
+\code{deff_method == "variogram"} to keep only rows the variogram corrected.
+Unlike the attribute, both columns survive \code{rbind()} and
 \code{dplyr::bind_rows()} of many results. A fallback is also signalled by a
-warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 is
-reported on \code{attr(, "icc")} instead), which
+warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 under a
+\code{"kish"} request is reported on \code{attr(, "icc")} instead), which
 \code{tryCatch(spatialkit_deff_fallback = )} catches without matching the
-message; it is raised only when the standard errors really are the
-uncorrected ones.
+message. It is raised when the correction requested was not the one
+applied: a refused number (the standard errors are then the uncorrected
+ones) or a \code{"variogram"} request that fell back to Kish; the condition
+of the second carries \code{requested} and \code{used}.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} and \code{deff}
-for \code{"kish"} (\code{deff} is the primary variable's per-cell design effect,
-all 1 when only the predictor ICC was positive),
+for \code{"kish"} (\code{icc_pred} is a vector named by predictor column, one ICC
+each; \code{deff} is the primary variable's per-cell design effect,
+all 1 when only a predictor's ICC was positive; \code{requested} and
+\code{fallback_reason} are added when a \code{"variogram"} request fell back to
+it),
 \code{deff}/\code{deff_rows}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"} (\code{deff} is
 the design effect at the primary variable's non-missing count per cell,
 \code{deff_rows} at the cell's row count, which is the vector the log line
@@ -209,12 +231,14 @@ When \code{cells_sf} is supplied, \emph{every} per-cell vector in that attribute
 (\code{deff}, \code{deff_rows} and \code{rbar} alike) is realigned to the joined row
 order, so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
 observations carry \code{NA}. No attribute is attached when no correction was
-applied: \code{deff = 1}, a \code{deff = "kish"} request whose ICCs are all 0, or
-a \code{"variogram"} request that could not be fitted. A \code{deff = "kish"} request always
-records the ICCs it estimated on an attribute \code{"icc"} (\code{resp} and
-\code{pred}, \code{NA} for a variable type with no numeric column), whether or not
+applied: \code{deff = 1}, or a \code{deff = "kish"} request (or Kish fallback)
+whose ICCs are all 0. A \code{deff = "kish"} request, and a \code{"variogram"}
+request that fell back to it, always
+records the ICCs it estimated on an attribute \code{"icc"} (\code{resp}, and
+\code{pred}, a vector named by predictor column; \code{NA} for a variable type
+with no numeric column), whether or not
 they were positive enough to apply, so a result with no \code{"deff_applied"}
-still says what the ICC came out as.
+still says what the ICCs came out as.
 
 The ID column keeps its input type when \code{cells_sf}'s ID column and the
 summarised IDs already have the same class. When the classes differ, both
@@ -253,6 +277,18 @@ finite responses carries 3 observations' worth of information about the
 response, not 10), and it is divided by that cell's design effect when
 \code{deff} applied one. With \code{deff = 1} and no missing values it equals \code{n}.
 Pass it as the \code{weights} argument of a downstream regression.
+
+An infinite value (\code{Inf}, \code{-Inf}) in a response or predictor column is
+treated as missing, as \code{NA} and \code{NaN} are, in every statistic of that
+column: the \code{agg_funs} results, \verb{..sd_*}, \verb{..se_*}, the interval columns,
+\verb{..neff_*}, \code{cell_weight} and the design effect. \code{n} still counts the row.
+A warning of class \code{"spatialkit_nonfinite"} names the columns and gives the
+number of rows and cells affected (the condition carries \code{n} and
+\code{columns}). \code{\link[=kriging_adequacy]{kriging_adequacy()}}, \code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} and \code{\link[=prep_model_data]{prep_model_data()}} leave such rows out too, so
+the steps of one pipeline agree on a cell's mean. A function in \code{agg_funs}
+therefore never sees an infinite value: \code{max} returns the largest finite
+value, and infinities cannot be counted through \code{agg_funs}.
 }
 \section{Spatial autocorrelation and standard-error bias}{
 
@@ -271,13 +307,13 @@ one when the cell's points are spread through it, and the corrected SE is too
 wide; see "What the standard error estimates" before setting \code{deff}.
 
 Setting \code{deff = "kish"} applies an approximate correction using Kish's
-design effect. Separate intra-class correlations (ICCs) are estimated for
-response and predictor variables via a one-way random-effects decomposition
-across all cells. Each variable type's ICC is used for its own SE
-adjustment, and each cell's effective sample size is reduced to
-\code{n_i / (1 + (n_i - 1) * rho)}. This is a first-order correction that
-does not require a full spatial covariance model but does require enough
-cells and observations for a stable ICC estimate.
+design effect. An intra-class correlation (ICC) is estimated for every
+summarised column on its own, the response and each predictor, via a
+one-way random-effects decomposition across all cells. Each column's ICC
+is used for that column's SE adjustment, and each cell's effective sample
+size is reduced to \code{n_i / (1 + (n_i - 1) * rho)}. This is a first-order
+correction that does not require a full spatial covariance model but does
+require enough cells and observations for a stable ICC estimate.
 
 A design effect estimated from the data (\code{"kish"} or \code{"variogram"}) comes
 with a second, small-sample correction. The within-cell correlation that
@@ -337,8 +373,13 @@ is reasonably uniform.
 
 \section{Design effects and variable types}{
 
-\code{deff = "kish"} estimates a separate ICC for response and predictor
-variables and applies each to its own columns. \code{deff = "variogram"} fits or
+\code{deff = "kish"} estimates a separate ICC for each summarised column, the
+response and every predictor, and applies each to that column alone:
+listing or removing a predictor leaves every other column's standard error,
+effective n and interval as they were. (One ICC used to be pooled over all
+the predictors, which was right for a column only when they all shared it:
+beside a predictor with an ICC of 0.87, one with an ICC of 0 had its
+standard error multiplied by 3.1.) \code{deff = "variogram"} fits or
 accepts \strong{one} correlation function and applies it to every numeric column,
 because a variogram is a property of the field being modelled rather than of
 a variable type; a predictor whose spatial structure differs markedly from
@@ -451,12 +492,12 @@ variance components. \emph{Biometrics Bulletin}, 2(6), 110--114.
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, which produces the input layer;
 \code{\link[=build_tessellation]{build_tessellation()}} for the cells themselves.
 
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{resolution_profile}()},
-\code{\link{select_resolution}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

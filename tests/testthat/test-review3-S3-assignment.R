@@ -103,7 +103,10 @@ test_that("a rejected sac that cannot be replaced gives one fallback warning nam
   expect_true(.r3_is_fallback(res))
   expect_match(res$warnings, "supplied `sac` reports no usable range \\(fitted range exceeds")
   expect_match(res$warnings, "estimated from `response_var` reports no usable range \\(variogram model did not converge")
-  expect_false(any(res$value$deff_applied))
+  # The one fallback is to Kish (this used to assert deff_applied FALSE, the
+  # uncorrected SE); the rows carry the label.
+  expect_true(all(res$value$deff_applied))
+  expect_identical(unique(res$value$deff_method), "kish (variogram fallback)")
 
   # No response to estimate from: the rejection is still named.
   res2 <- .r3_conditions(summarize_by_cell(pts, predictor_vars = "z",
@@ -294,7 +297,8 @@ test_that("dplyr's row verbs drop a row record as `[` does", {
   dat <- sf::st_as_sf(data.frame(x = 1:5, y = 5:1, resp = c(1, 2, NA, 4, 5),
                                  pred = c(1, 2, 3, 4, Inf)),
                       coords = c("x", "y"), crs = 32632)
-  clean <- prep_model_data(dat, "resp", "pred")
+  expect_warning(clean <- prep_model_data(dat, "resp", "pred"),
+                 class = "spatialkit_rows_dropped")
   expect_null(attr(dplyr::filter(clean, resp > 1), "dropped"))
   # And for a geometry-free frame carrying a record (what st_drop_geometry()
   # of such a layer is).

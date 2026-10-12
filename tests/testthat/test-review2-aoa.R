@@ -54,14 +54,43 @@ test_that("a zero threshold from duplicated training rows is explained", {
   tr$site <- rep(seq_len(30), each = 4)
   nd <- r2_aoa_pts(200, a = stats::rnorm(200), b = stats::rnorm(200))
 
+  # Without folds a twin is the same point of predictor space, not a
+  # neighbour: each row is measured against the nearest row with different
+  # values, so the threshold is the one the 30 distinct sites give.  (This
+  # block asserted threshold 0 and nothing inside, with a log line; that was
+  # the behaviour being reported, not the intended one.)
   lines <- capture_spatialkit_log(
     res <- area_of_applicability(nd, train_sf = tr, predictor_vars = c("a", "b")))
-  expect_identical(res$threshold, 0)
-  expect_identical(res$n_inside, 0L)
-  expect_true(log_has(lines, "DI threshold is 0 because 120 of 120 training rows have an exact duplicate"))
-  expect_true(log_has(lines, "leave_location_out"))
+  expect_gt(res$threshold, 0)
+  expect_true(all(res$train_DI > 0))
+  expect_identical(res$n_duplicates, 90L)
+  expect_gt(res$n_inside, 150L)
+  expect_false(log_has(lines, "DI threshold is 0"))
+  expect_true(log_has(lines, "90 of 120 training rows repeat another row's predictor values exactly \\(30 distinct points\\)"))
   out <- utils::capture.output(print(res))
-  expect_true(any(grepl("120 of 120 training DI are 0: exact duplicates", out,
+  expect_true(any(grepl("90 of 120 rows repeat another's values", out,
+                        fixed = TRUE)))
+  dedup <- area_of_applicability(nd, train_sf = tr[!duplicated(tr$site), ],
+                                 predictor_vars = c("a", "b"))
+  expect_identical(res$aoa$AOA, dedup$aoa$AOA)
+
+  # Folds that split a site's visits put a twin on the training side of
+  # nearly every hold-out.  The threshold is then 0 by definition, and that
+  # is a warning with a class, not a log line.
+  set.seed(11)
+  split_labs <- sample(rep(1:4, length.out = nrow(tr)))
+  lines0 <- capture_spatialkit_log(
+    expect_warning(
+      res0 <- area_of_applicability(nd, train_sf = tr,
+                                    predictor_vars = c("a", "b"),
+                                    folds = split_labs),
+      class = "spatialkit_aoa_zero_threshold"))
+  expect_identical(res0$threshold, 0)
+  expect_identical(res0$n_inside, 0L)
+  expect_true(log_has(lines0, "DI threshold is 0 because [0-9]+ of 120 training rows have an exact duplicate"))
+  expect_true(log_has(lines0, "leave_location_out"))
+  out0 <- utils::capture.output(print(res0))
+  expect_true(any(grepl("of 120 training DI are 0: exact duplicates", out0,
                         fixed = TRUE)))
 
   # Folds that keep a site's visits together give the threshold its meaning

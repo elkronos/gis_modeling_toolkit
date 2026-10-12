@@ -28,12 +28,27 @@ same rows), and the warning says which.  \code{convergence_ok} is
 \code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
 checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
 otherwise; a fit that did not converge is ranked like the others, so it
-also raises a warning.  Alongside the metrics it
+also raises a warning.  \code{gp_adequacy} is what the posterior of a
+Bayesian fit said about its Gaussian-process basis (\code{"ok"},
+\code{"below_resolution"}, \code{"unresolved_short_range"},
+\code{"no_signal_above_floor"} or \code{"not_checked"}; see "What the
+basis resolves" in \code{\link{fit_bayesian_spatial_model}}) and
+\code{NA} for the other backends.  A basis found too coarse scores like
+one that was adequate, so read the column beside the metrics.  Alongside
+the metrics it
 carries
-\code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
-\code{resid_morans_null}, the last of which names the null
+\code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p},
+\code{resid_morans_null} and \code{resid_morans_basis}.
+\code{resid_morans_null} names the null
 \code{\link{residual_morans_i}} scored each model against, since that
-choice is per-fit and governs how much the p-value is worth.  A
+choice is per-fit and governs how much the p-value is worth.
+\code{resid_morans_basis} says which residuals the statistic was
+computed on.  They are always the residuals of the rows the model was
+fitted to, also when \code{newdata} is given, so the column reads
+\code{"in-sample"}, or \code{"out-of-bag"} for a forest, and never
+\code{"newdata"}: beside \code{metric_basis = "newdata"} the Moran
+columns describe the training residuals, not the prediction errors on
+\code{newdata}, and the two can differ in sign.  A
 significant p-value is noted in the log (not raised as an R warning):
 positive autocorrelation as structure the model may have missed,
 negative (\code{resid_morans_z < 0}) as the alternating residuals of a
@@ -121,10 +136,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()},
-\code{\link{model_metrics}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
 \concept{model evaluation}

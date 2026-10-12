@@ -239,11 +239,14 @@ test_that("plot.resolution_profile draws one panel per criterion with the select
   drawn <- c("cp", "reliability", "elbow", "moran_z")
   drawn <- drawn[vapply(drawn, function(cn) any(is.finite(prof[[cn]])), logical(1))]
   expect_equal(n_panels, length(drawn))
-  # The chosen points agree with select_resolution().
+  # The chosen points agree with select_resolution().  moran_z has a panel
+  # and no chosen point: it is a diagnostic, which select_resolution() reads
+  # only when asked.
+  picked <- setdiff(drawn, "moran_z")
   geoms <- layer_geoms(p)
   chosen <- b$data[[which(geoms == "GeomPoint")[length(which(geoms == "GeomPoint"))]]]
-  expect_equal(nrow(chosen), length(drawn))
-  best <- vapply(drawn, function(cn) select_resolution(prof, criterion = cn)$best, integer(1))
+  expect_equal(nrow(chosen), length(picked))
+  best <- vapply(picked, function(cn) select_resolution(prof, criterion = cn)$best, integer(1))
   # The x axis may be log10-scaled (it is when the ladder spans a factor of
   # 8 or more), in which case the built data carry log10(levels).
   expect_true(setequal(round(chosen$x, 6), round(best, 6)) ||

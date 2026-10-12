@@ -14,14 +14,20 @@ test_that("drop_empty_blocks = FALSE lowers k to the blocks that hold points", {
   xy <- rbind(cbind(rnorm(30, 100, 20), rnorm(30, 100, 20)),
               cbind(rnorm(30, 900, 20), rnorm(30, 900, 20)))
   p <- r2_pts(xy[, 1], xy[, 2])
+  # The reduction was a log line only ("only 2 blocks hold points"), which
+  # this test pinned.  It is now a warning of class spatialkit_k_reduced,
+  # logged as well.
   lines <- capture_spatialkit_log(
-    f <- make_folds(p, k = 5, method = "block_kfold", block_nx = 4, block_ny = 4,
-                    drop_empty_blocks = FALSE, seed = 1))
+    expect_warning(
+      f <- make_folds(p, k = 5, method = "block_kfold", block_nx = 4, block_ny = 4,
+                      drop_empty_blocks = FALSE, seed = 1),
+      "returning 2 folds, not the k = 5 asked for: the requested 4 x 4 grid has 2 blocks that hold points",
+      class = "spatialkit_k_reduced"))
   expect_equal(f$k, 2L)
   expect_length(f$folds, 2L)
   expect_true(all(lengths(lapply(f$folds, `[[`, "test")) > 0L))
   expect_true(is.finite(f$params$balance_ratio))
-  expect_true(log_has(lines, "only 2 blocks hold points"))
+  expect_true(log_has(lines, "the requested 4 x 4 grid has 2 blocks that hold points"))
   # The empty blocks are still kept and packed.
   expect_equal(f$params$blocks_used, 16L)
   expect_identical(sort(unlist(f$params$fold_blocks)), 1:16)

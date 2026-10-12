@@ -27,10 +27,10 @@ whether the variogram is of the response or of its residuals on
 \code{predictor_vars} (\code{detrended}, \code{detrend_method}).
 }
 \seealso{
-Other print methods: 
-\code{\link{print.aoa}()},
-\code{\link{print.gwr_model_selection}()},
-\code{\link{print.morans_i}()},
-\code{\link{print.resolution_profile}()}
+Other print methods:
+\code{\link[=print.aoa]{print.aoa()}},
+\code{\link[=print.gwr_model_selection]{print.gwr_model_selection()}},
+\code{\link[=print.morans_i]{print.morans_i()}},
+\code{\link[=print.resolution_profile]{print.resolution_profile()}}
 }
 \concept{print methods}

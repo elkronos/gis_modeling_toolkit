@@ -26,8 +26,7 @@ tie-break.  The criterion is in-sample and the caption carries the label
 was read positionally.
 }
 \examples{
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE) &&
+if (requireNamespace("sp", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
   set.seed(1)
@@ -43,15 +42,15 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

@@ -1,50 +1,371 @@
 # spatialkit (development version)
 
+## Breaking changes
+
+Defaults and results that differ from 2.0.0.  Each entry says how to get the
+old behaviour where there is a way.
+
+* `estimate_sac_range()` fits its variogram model without iteration, so the
+  same layer gives the same verdict, range and nugget whatever the unit of
+  the response or of the coordinates and whatever the order of its rows.
+  The criterion is gstat's (squared error weighted by N/h^2); for each trial
+  range the nugget and partial sill are solved exactly, and the range is
+  searched on a grid and refined.  Every range and nugget moves a little.
+  Only the exponential family is fitted: the spherical fallback is gone.
+  `rejected_reason` no longer takes `"variogram model did not converge"`;
+  `attr(attr(x, "variogram_model"), "converged")` is `FALSE` when the
+  criterion has no minimum inside the ranges searched.  Nothing is printed
+  to the console.
+
+* `estimate_sac_range()` tests for spatial structure before it returns a
+  range: Moran's I of the modelled variable on its 2, 4, 8 and 16 nearest
+  neighbours, with the smallest one-sided p-value multiplied by four.  When
+  that is not below the new argument `structure_alpha` (default 0.05) the
+  result is `NA` with `rejected_reason` `"no spatial structure detected at
+  the nearest-neighbour scale"` and a pure-nugget model.  On white noise
+  (300 points) a finite range came back for 24 of 60 layers and now comes
+  back for 1.  The test has little power where few neighbours lie inside the
+  range.  `structure_alpha = 1` switches the refusal off.  A variogram that
+  no model with a range fits better than a constant is refused as `"the
+  empirical variogram is flat: no spatial structure at the lags resolved"`.
+
+* `estimate_sac_range()` gains `lags = c("adaptive", "equal")` and `n_lags`,
+  and `"adaptive"` is the default: the first bin ends where the closest
+  `max(50, n / 4)` pairs lie, and the rest widen geometrically to the
+  cutoff.  Fifteen equal bins hid structure shorter than the first bin: on a
+  clustered layer with a true range of 30 the median estimate was 77 and is
+  now 29.  A longer second structure seen at equal lags is kept in the model
+  and sets the range (`structures`, `short_range`), and a range the adaptive
+  lags leave past the largest lag falls back to the equal-lag result
+  (`lag_fallback`).  Ranges, nuggets and the block sizes of
+  `make_folds(auto_range = TRUE)` change.  `lags = "equal"` keeps the old
+  bins.
+
+* `estimate_sac_range()` never returns the largest directional range in
+  place of an all-pairs fit that identifies no range: the result is then
+  `NA`.  The directional ranges are still attached, and `anisotropy_used`
+  is always `FALSE`.
+
+* `resolution_profile(range_floor = FALSE)` is the default.  The ladder
+  starts at 2 cells; the floor the autocorrelation range implies is reported
+  in the bounds and the print, and is a level of the ladder when the layer
+  supports it.  A range is an estimate and can be spurious, and a ladder
+  that started at it could not show the counts below.
+  `select_resolution(criterion = "reliability")` reads the levels at or
+  above the floor, so it returns the floor, as it did when the ladder
+  started there; its new argument
+  `range_floor = FALSE` reads every level.  `resolution_profile(range_floor
+  = TRUE)` starts the ladder at the floor.
+
+* `resolution_profile()` takes its support ceiling from the rows that carry
+  a response (and every predictor, when predictors are given), not from
+  every point.  A layer with a response on a quarter of its rows gets a
+  quarter of the ceiling, `ceiling_from` reads `"min_cell_n (rows with a
+  response)"`, and a warning of class `spatialkit_response_ceiling` gives
+  both counts.  New columns `cells_resp` and `cell_resp_mean` count the
+  cells that hold a scored row and the scored rows per such cell.
+
+* `moran_z` is a diagnostic of the cell means and is no longer read as a
+  count rule.  It grows as cells get finer than the range and is near zero
+  at the coarsest counts it is computed at, whatever the data.
+  `select_resolution(criterion = "moran_z")` is an error of class
+  `spatialkit_diagnostic_criterion` unless `diagnostic = TRUE`; `summary()`
+  leaves it out unless it is named in `criteria`; `plot()` draws its curve
+  with no selected level.  `determine_optimal_levels()` still ranks by it
+  under `criterion = "morans_i"` and `"combined"`, and raises a warning of
+  class `spatialkit_diagnostic_ranking` when it does.
+
+* `get_voronoi_seeds()`, `voronoi_seeds_kmeans()` and `build_tessellation()`
+  read a `resolution_profile()` by `cp` or not at all.  A profile whose `cp`
+  is `NA` was read by the next finite criterion with a log line; it is now
+  an error (class `spatialkit_no_default_criterion` when another criterion
+  is finite).  A geometry-only profile whose only finite criterion is
+  `elbow` is still read by it.  Pass `select_resolution(profile, criterion =
+  )` to choose another criterion.
+
+* `select_features_forward()` accepts a candidate by a new default rule,
+  `rule = "se"`: its pooled gain has to exceed `tol` and the mean of its
+  per-fold gains has to exceed `se_mult` (default 1) standard errors of that
+  mean.  With `tol = 0` any gain was accepted.  `rule = "tol"` is the old
+  test.  Every learner now has a baseline, so the selection can be empty
+  (see Bug fixes).
+
+* `area_of_applicability()` weights the predictors by the model's variable
+  importance by default (`weights = "auto"`): `pmax(importance, 0)` when the
+  model carries a finite importance for every predictor and has out-of-bag
+  skill, equal weights otherwise, with the reason logged.
+  `params$weights_source` says which.  `weights = NULL` gives equal weights
+  as before.
+
+* `area_of_applicability()` measures location for a `gwr_fit` and a
+  `bayesian_fit`, which predict as a function of location.  Location has an
+  index of its own (`DI_location`, element `location`): the distance to the
+  nearest training point over the mean distance between training points,
+  with the same folds and threshold rule.  A point is inside only when it is
+  inside on both indices; `n_outside_predictors` counts the predictor index
+  alone.  `coords = "no"` gives the old result; `coords = "yes"` measures
+  location for any model.
+
+* `fit_rf_model()` splits an unordered factor or character predictor with
+  `respect.unordered.factors = "order"`, which ranger's help recommends;
+  ranger's default, `"ignore"`, splits on the order the levels are stored
+  in.  Forests with such a predictor change.  Pass
+  `respect.unordered.factors` through `...` to set it yourself.
+  `$info$categorical_predictors` and `$info$respect_unordered_factors` record
+  what was done, and `print()` shows it.  `print()` also reads "no spatial
+  information used" for a forest fitted without the coordinates.
+
+* The local regressions of a GWR are solved by the package, by pivoted QR on
+  predictors centred in each window, and GWmodel is no longer needed to fit,
+  predict, cross-validate or select (`sp` still is).  A window of deficient
+  rank neither stops the fit nor returns coefficients made of rounding
+  error: a coefficient it cannot estimate is `NA`, and a warning of class
+  `spatialkit_gwr_rank_deficient` counts them.  On windows of full rank the
+  results equal `GWmodel::gwr.basic()`'s to rounding error.  `fit$engine` is
+  a list in GWmodel's layout (`SDF`, `GW.diagnostic`, `GW.arguments`, `lm`)
+  and no longer an object of class `gwrm`.  `print()` heads the fit `<GWR>`,
+  not `<GWR (GWmodel)>`.
+
+* With `bandwidth = NULL`, `fit_gwr_model()`, `gwr_model_selection()` and
+  `cv_gwr()` select the bandwidth by a search of their own: 16 log-spaced
+  bandwidths are scored and the best is refined.  `GWmodel::bw.gwr()`'s
+  golden-section search assumes one minimum and returned a near-global
+  bandwidth when AICc had two.  The scored curve is kept in
+  `info$bandwidth_search`.  Selected bandwidths can differ from 2.0.0's;
+  supply `bandwidth` to fix one.  Below 20 observations the bandwidth is
+  searched like any other.
+
+* `fit_gwr_model()`, `gwr_model_selection()` and `cv_gwr()` select the
+  default bandwidth by the leave-one-location-out sum of squares, not AICc,
+  when rows share a location (repeat visits, replicate samples).  AICc
+  counts such rows as independent and is lowest where the windows reproduce
+  each location's mean.  A warning of class
+  `spatialkit_gwr_repeated_locations` gives the counts;
+  `info$n_locations` and `info$bandwidth_search$approach` record it.  A
+  layer with no repeated location is searched by AICc.
+
+* `fit_bayesian_spatial_model(standardize_predictors = TRUE)` scales its
+  automatic slope prior to the response: `normal(0, 2.5 * sd(y))` under an
+  identity link and `normal(0, 2.5 * sd(log(y)))` for the lognormal
+  families.  The fixed `normal(0, 5)` shrank a slope of about 14,000 per SD
+  on a response in dollars to 0.06.  Other links keep `normal(0, 5)`.  The
+  prior used is stored as `$info$b_prior`; pass `prior` to set your own.
+
+* `$info$convergence_ok` of a Bayesian fit follows Stan's own diagnostics
+  more closely.  It is `FALSE` on any divergent transition, an R-hat above
+  1.05, an R-hat above 1.01 with an effective sample size under 100 per
+  chain, a bulk or tail effective sample size under 100 per chain, or an
+  E-BFMI under 0.3 in a chain.  Short runs that passed can now fail.  A
+  failed verdict raises one warning of class `spatialkit_convergence` that
+  names each failed check and its remedy.
+
+* `summarize_by_cell(deff = "variogram")` falls back to `"kish"`, not to
+  the uncorrected standard error, when no usable variogram exists.  The
+  warning of class `spatialkit_deff_fallback` gives the reason.  A new
+  column `deff_method`, present whenever a design effect is requested, names
+  the correction each row carries.  A variogram refused because the
+  response shows no spatial structure is not a fallback: its pure-nugget
+  model gives a design effect of 1.
+
+* `summarize_by_cell(deff = "kish")` estimates the ICC of each predictor on
+  its own.  One ICC was pooled over every predictor listed, so listing a
+  second predictor changed the first one's standard error.
+  `attr(, "icc")$pred` and `attr(, "deff_applied")$icc_pred` are vectors
+  named by predictor column.
+
+* Voronoi cells built on seeds reach the edge of the data the seeds stand
+  for.  `build_tessellation(seeds, method = "voronoi")` without a boundary
+  clipped the cells to the seeds' own hull, and the observations outside it
+  were dropped by the assignment: a quarter of 3,000 uniform points at 25
+  k-means seeds.  The seeding functions now attach the boundary they drew
+  in, or the hull of the points they clustered, as `attr(, "cover")`, and
+  the cells are built over it.  Pass `boundary` to set the extent yourself.
+
+* `assign_features_to_polygons()` stops on a duplicated or missing value in
+  the polygon ID column.  Nine polygons with a zone attribute called `id`
+  came back as three.  When the rows that share an ID are parts of one unit,
+  merge them first with `dplyr::summarise(dplyr::group_by(polygons_sf, <ID
+  column>))`.
+
+* Conditions that were log lines are R warnings with a class, so
+  `tryCatch()`, `withCallingHandlers()` and `options(warn = 2)` see them:
+  rows dropped before a fit (`spatialkit_rows_dropped`), a constant
+  predictor (`spatialkit_constant_predictor`), features in no polygon
+  (`spatialkit_unassigned`), fewer folds than asked for
+  (`spatialkit_k_reduced`), a cell count chosen by a bound of the ladder
+  (`spatialkit_bound_chosen`) and a profile the layer does not support
+  (`spatialkit_not_supported`).  `?resolution_profile` lists the classes of
+  the resolution functions.
+
 ## New features
+
+* `make_folds()` gains `method = "knndm"`, the k-fold version of
+  nearest-neighbour distance matching (Linnenbrink et al. 2024).  It builds
+  `k` folds whose held-out distances are as close as a set of candidates
+  allows to the distances from `prediction_points` to the data, and has no
+  row limit, where `"nndm"` takes at most 5,000 rows and one fit per point.
+  The candidates are the random partition and, for up to 50 cluster counts,
+  the samples clustered on their coordinates and packed into `k` folds; the
+  one with the smallest Wasserstein distance to the target is returned, and
+  `params$candidates` lists them all.  The match is coarser than NNDM's.
+  Two cases raise a classed warning: prediction points nearer to the data
+  than any fold can hold a point out (`spatialkit_nndm_out_of_reach`), and
+  folds still closer to their training data than the prediction points are
+  to the samples (`spatialkit_knndm_short_of_target`).  The rule that packs
+  clusters into folds is this package's and was not checked against
+  `CAST::knndm()`.
+
+* `make_folds()` gains `max_test` for `"buffered_loo"` and `"nndm"`: folds
+  are built for a seeded random subset of that many held-out points, with
+  every row still available for training.  `"buffered_loo"` then runs on
+  layers its storage limit refuses.  It does not lift the 5,000-row limit of
+  `"nndm"`; `"knndm"` is the design above it.
+
+* `fold_separation()` gains `prediction_points`: the locations to be
+  predicted.  The held-out distances are then set beside the distances from
+  those points to the training data, and the result's `target` attribute
+  carries a `reading`: `"closer"` (the cross-validated error tends to read
+  low for that target), `"farther"` (it tends to read high), `"matched"` or
+  `"mixed"`.  NNDM and kNNDM folds are read against the prediction distances
+  they carry.  The table gains `target_median_dist` and `dist_gap`.
+
+* Every classed `estimate_sac_range()` result says how far its nugget can be
+  trusted.  `nugget_at_bound` is `TRUE` when the fit put the nugget at zero,
+  which is the bound of the search and not an estimate; `first_lag` is the
+  shortest lag resolved; `short_lag_semivariance` is the semivariance of
+  nearest-neighbour pairs with no model, an upper bound on the nugget.
+  `?sac_nugget` describes them.  The result also records `n_used`,
+  `n_missing`, `n_subsampled`, `structure_p`, `morans_i`, `lags` and
+  `lag_boundaries`.
+
+* `estimate_sac_range()` reads rows that share a location as one place.  The
+  test for spatial structure is made on the location means, pairs at zero
+  separation are in no lag bin, and their semivariance, the variance between
+  visits, is returned as `zero_lag_semivariance`.  When the rows outnumber
+  the locations by 30 or more, the nugget fitted to the variogram is not let
+  under it (`nugget_floor`).  With `detrend = "reml"` the fit takes one row
+  a location, drawn under `seed`, and takes no such floor.
+
+* `select_resolution(criterion = "cp")` says when the count is not
+  identified.  `structured` is `FALSE` when one cell for the whole layer
+  scores within `tol` of the optimum, or when the cell means at the optimum
+  differ from one mean by no more than chance (an F test at 5 percent,
+  adjusted for the levels searched; `structure_p`).  The pick is unchanged.
+  On white noise of 300 points it was `FALSE` on 145 of 150 layers.  The
+  functions that take the count raise a warning of class
+  `spatialkit_no_structure`.  `resolution_profile()` keeps what one cell
+  scores in `attr(, "one_cell")`.
+
+* `determine_optimal_levels()` gains `on_no_elbow = c("warn", "na",
+  "error")`.  The no-elbow warning has class `spatialkit_no_elbow` and
+  carries the count and `structured = FALSE`; `"na"` returns `NA_integer_`
+  in place of the chord rule's answer and `"error"` stops.
+  `criterion = "morans_i"` and `"combined"` run with a response and no
+  predictors, where they fell back to the geometric ranking.  A layer of one
+  or two points, or with every point on one location, returns 1 under the
+  same rule; it returned 1 with nothing said.
+
+* A GWR fit gives its standard errors.  `coef(fit, se = TRUE)` returns the
+  local estimates with their standard errors and t values, and
+  `predict(fit, newdata, se.fit = TRUE)` the standard error of the fitted
+  value (`se.fit`) and of a new observation (`se.pred`).  They follow
+  GWmodel's definitions, treat the bandwidth as known, and are not adjusted
+  for the number of local tests.  `print(summary(fit))` shows the effective
+  number of parameters and the AICc and RMSE of a global least-squares fit
+  on the same rows (`info$global_ols`): a GWR whose AICc is no lower has not
+  shown that its coefficients vary.
+
+* `fit_gwr_model(predictor_vars = character(0))` fits the model with a local
+  intercept alone, the kernel-weighted mean of the response.  It is the
+  baseline a GWR with predictors has to beat, and
+  `select_features_forward()` fits it as the null model of a GWR sweep.
+
+* `predict()` on a GWR says when a location is beyond the reach of the fit.
+  When a new location's nearest training point is farther than the widest
+  kernel at any training location reaches, the prediction is returned and a
+  warning of class `spatialkit_gwr_extrapolation` gives the count.  The
+  warning that counts `NA` predictions has class
+  `spatialkit_gwr_not_estimable`.  Both carry their counts as fields.
+  `predict_surface()`, `cv_gwr()`, `cv_spatial()`, `cv_block_size_sweep()`
+  and `select_features_forward()` raise each once per call, with totals.
+
+* `gwr_model_selection()` scores the model without predictors as `<none>`,
+  and `best` is `character(0)` when it wins.  The table gains `delta`, each
+  model's criterion minus the best one's, and `print()` lists the models
+  within 2 of the best and names the smallest (`within_2`,
+  `smallest_within_2`).  The sweep runs on the package's own solve, so a
+  candidate that is constant inside some windows no longer stops it.
+  `dmat_max_n` is accepted and ignored.
+
+* `area_of_applicability()` gains `categorical = c("refuse", "indicator",
+  "drop")` for factor and character predictors.  `"refuse"` is the default,
+  as before.  `"indicator"` codes each level as a 0/1 column with one shared
+  scale per predictor, and a row on a level no training row has gets
+  `DI = Inf`.  `"drop"` computes the index on the numeric predictors.
+
+* `select_features_forward()` gains `null_fn`, a function that fits the
+  no-predictor model for a learner that cannot.  `history` always starts
+  with the step-0 row and gains `gain`, `fold_gain` and `fold_gain_se`; the
+  result gains `baseline` (its type, score and the path reached) and
+  `fold_scores`.
+
+* `fit_bayesian_spatial_model()` reports what its GP basis resolves.  The
+  reduced-rank basis cannot represent structure below a floor, 14 to 33
+  percent of the extent along each axis at the defaults, stored in map units
+  as `$info$gp_resolution` and shown by `print()`.  The new argument
+  `gp_resolution` asks for a resolution in map units and derives `gp_k` and
+  the length-scale prior from it, up to 50 functions per dimension.  Before
+  compiling, a variogram range below the floor can raise a warning of class
+  `spatialkit_gp_resolution`.  After sampling, `$info$gp_adequacy$status`
+  is `"ok"`, `"below_resolution"`, `"unresolved_short_range"`,
+  `"no_signal_above_floor"` or `"not_checked"`, from the length-scale
+  posterior, the process's share of the variance and a short-lag Moran's I
+  of the residuals; the two that say the basis is too coarse raise
+  `spatialkit_gp_adequacy`.  `convergence_ok` stays about the sampler.
+
+* `cv_bayes()`'s `fold_metrics` and `compare_models()` gain a `gp_adequacy`
+  column beside `convergence_ok`.  `cv_bayes()` and `cv_spatial()` collect
+  the classed warnings a Bayesian fit raises in each fold and raise each
+  class once, naming the folds (fields `folds`, `fold_messages`).
+
+* `build_tessellation()` and `create_voronoi_polygons()` gain `cover`: the
+  observations, or a polygon, that the cells have to hold when the
+  generators are seeds made elsewhere.  Seeds with neither a boundary nor a
+  cover raise a warning of class `spatialkit_no_cover`.  `params` gains
+  `boundary_source`, `n_outside` and `cover_outside`.
+
+* `assign_features_to_polygons()` records the features no polygon holds as
+  `attr(, "unassigned")` (`n`, `which`), beside `"ties"`, and names the
+  column the polygon IDs were read from when `polygon_id_col` is absent.
+  The new argument `quiet` silences that message.
 
 * `fold_separation()` measures what blocked cross-validation is for: the
   distance from every held-out point to its nearest training point,
   summarised per fold.  Until now the only evidence a fold scheme worked was
   a proxy --- the block size compared against the estimated autocorrelation
   range, which `make_folds()` warns about.  That is a statement about the
-  design; this is the result, and the two can disagree in the direction that
-  matters.  Measured on 300 points over a 1000-unit square with a fitted
-  range of 292.5: blocks of 343 units are wider than the range, so
-  `make_folds()` raises no warning at all, and yet 76 percent of the
-  held-out points still sit closer to a training point than the range, the
-  nearest of them 23.3 units away.  Blocks wider than the range leak wherever
-  a test point sits near a block edge with training data just across it,
-  which in a fine grid is most of them.  The returned table carries
-  `n_train`, `n_test`, `n_blocks`, `min_dist`, `median_dist` and
-  `within_range` (the share inside the range), and its `print()` method
-  closes with what that share means for the score.  Nothing is estimated:
+  design; this is the result.  The returned table carries `n_train`,
+  `n_test`, `n_blocks`, `min_dist`, `median_dist` and `within_range`, the
+  correlation-weighted share: the mean of `exp(-3 d / range)` over the
+  held-out points, so a point at a twentieth of the range weighs more than
+  one at nine tenths of it.  Nothing is estimated:
   the distances come from the geometry and the range is the one the folds
   already carry or the one you pass.  A range that records its CRS (the
   folds' own `params$sac_range` and `params$crs`, or an
   `estimate_sac_range()` result) is compared with distances measured in that
-  CRS, so a copy of the layer in other units gives the same answer (a
-  US-foot copy used to report 19 percent of the hold-out inside a metre
-  range where the metre layer reported 89); `sac` and the distances are in
-  the units of the CRS the `crs` attribute names, metres for lon/lat input.
+  CRS, so a copy of the layer in other units gives the same answer; `sac`
+  and the distances are in the units of the CRS the `crs` attribute names,
+  metres for lon/lat input.
   `fold` is the `fold_id` a `cv_*()` result's `$folds` carries, so a join on
-  it pairs each fold's error with its own distances (it was the list
-  position, which after a dropped fold paired one fold's error with
-  another's distances).  A `units` object for `sac` is refused.  As in
-  `cv_*()`, a `make_folds()` result whose recorded rows sit at other
-  locations in `data_sf` is refused.  Folds built on `prep_model_data()`'s
-  200 points and measured on the 195 that `assign_features_to_polygons()`
-  kept used to be matched by position, and reported 100 percent of the
-  hold-out inside the range against 23--48 percent on the right layer.  The
-  location check is skipped when one layer is POINT and the other is not,
-  so folds built on polygons still measure their pointized copy.  The
-  `print()` verdict now depends on the fold scheme: "widen the blocks" is
-  said only of blocked folds, buffered leave-one-out is told to widen the
-  buffer, and random, leave-location-out and hand-made splits are told to
-  use blocked or buffered folds.  NNDM folds are no longer called
-  optimistic: they are built to reproduce the prediction-to-data distances,
-  so the share describes the prediction task.  The range line gives the
-  CRS's unit ("in metres"), where it used to print the CRS code as if it
-  were a unit ("in EPSG:32617 units").
+  it pairs each fold's error with its own distances.  A `units` object for
+  `sac` is refused.  As in `cv_*()`, a `make_folds()` result whose recorded
+  rows sit at other locations in `data_sf` is refused; the location check is
+  skipped when one layer is POINT and the other is not, so folds built on
+  polygons still measure their pointized copy.  `print()` reports the
+  distances and says which way the score tends to err only when it is given
+  the prediction locations (`prediction_points`, below); it shows the first
+  ten folds of a design with more than twenty.  The range line gives the
+  CRS's unit ("in metres").
 
 * `summary()` on a `resolution_profile()` puts every criterion's pick in one
   table: the level each prefers, the flat region around it, whether a ladder
@@ -72,8 +393,8 @@
   now names the reason in the returned object.  Beside it, `orphan_rows`
   holds the row IDs no fold names (they enter no training set and are never
   scored --- non-empty only when the folds were built on a different or
-  subsetted layer), `n_unknown_ids` counts fold entries naming rows the data
-  does not have, and `n_dropped` the rows `prep_model_data()` removed before
+  subsetted layer), `n_unknown_ids` counts the distinct rows the folds name
+  that the data does not have, and `n_dropped` the rows `prep_model_data()` removed before
   any fold was fitted.  The four together account for every row and every
   fold, so `n_folds_attempted - n_folds_succeeded` never has to be explained
   from the log.  A parallel worker that was killed outright (for lack of
@@ -161,8 +482,9 @@
   `deff_rows`, the per-cell design effect at the cell's row count that the
   log line reduced to a median and a max.  A `summarize_by_cell()` call that
   requests a design effect (any `deff` other than 1) also returns a logical
-  `deff_applied` column, `TRUE` on every row when the correction was applied
-  and `FALSE` when it fell back to the uncorrected standard errors; unlike
+  `deff_applied` column, `TRUE` on every row when a correction was applied
+  (a Kish fallback included; `deff_method` names the correction) and `FALSE`
+  when the standard errors are the uncorrected ones; unlike
   the `"deff_applied"` attribute it survives `rbind()` and
   `dplyr::bind_rows()` of many results.  The default frame is unchanged.
   `assign_features_to_polygons()` reports the features that matched more
@@ -364,10 +686,11 @@
 
 * `resolution_profile()` and `select_resolution()`: the number of cells,
   scored on every criterion at once.  `resolution_profile()` runs a
-  log-spaced ladder of level counts from a floor the autocorrelation range
-  implies (`ceiling(area / range^2)`) to a ceiling the support implies
-  (`floor(n / min_cell_n)`, where `n` is every point in the layer, not the
-  `sample_n` subsample the k-means runs on), fits each level as the best of
+  log-spaced ladder of level counts from 2 to a ceiling the support implies
+  (`floor(n / min_cell_n)`, where `n` is the rows of the layer that carry a
+  response, not the `sample_n` subsample the k-means runs on), reports the
+  floor the autocorrelation range implies (`ceiling(area / range^2)`),
+  fits each level as the best of
   25 k-means++ restarts, and returns a data.frame with the WSS elbow
   statistic (read on log-log axes, and `NA` when the points have no cluster
   structure to bend the curve), Mallows'
@@ -376,7 +699,8 @@
   response and predictors, with the nugget from the fitted variogram as the
   noise variance and the penalty set for the whole layer), the
   standardised residual Moran's
-  z of the cell means, and an analytic reliability of the cell means
+  z of the cell means (a diagnostic, not a count rule), and an analytic
+  reliability of the cell means
   --- the share of their spread that is between-cell signal rather than
   sampling noise, from the variogram alone via Krige's additivity relation
   (Cressie 1996), the shrinkage factor of Fay and Herriot (1979) --- plus
@@ -448,12 +772,12 @@
   is one short of the points rather than crediting the distinct locations.
   Points with empty or non-finite coordinates are dropped with an R warning,
   as in `determine_optimal_levels()`; it was a log line alone.
-  `range_floor = FALSE` starts the ladder at 2 whatever
+  `range_floor = FALSE`, the default, starts the ladder at 2 whatever
   the range and only reports the floor, so profiles whose range estimates
   differ (cross-validation folds) have comparable ladders; with the floor
   applying on one fold and not the next, reliability and the elbow moved by
-  a factor of 10--15 between folds.  The default, `range_floor = TRUE`,
-  keeps the floor, and the help page describes that regime switch.  Under
+  a factor of 10--15 between folds.  `range_floor = TRUE` starts the ladder
+  at the floor.  Under
   `select_on = "split"` a supplied `sac` is flagged in the log, since it
   must be fitted on the selection half, and the help page shows the
   two-call workflow.
@@ -610,8 +934,8 @@
   accept what the level-selection step returned: the integer vector of
   ranked candidates from `determine_optimal_levels()` (its first element is
   used), a `select_resolution()` result (its `$best`), or a
-  `resolution_profile()` (read with `select_resolution()` at its default
-  criterion).  Both were hard errors before, so nothing that worked
+  `resolution_profile()` (read by `cp`; a profile with no `cp` is an
+  error).  Both were hard errors before, so nothing that worked
   changes; the count used and where it came from are recorded as
   `params$approx_n_cells` / `params$approx_n_cells_from` and as
   `attr(seeds, "n_from")`.  The two functions the pipeline documents as a
@@ -718,7 +1042,8 @@
   them and the largest size that gives `k` blocks; they were dropped with
   only a log line.  A `units` object for `block_sizes` is refused by name.
   On clustered data `make_folds()` can still lower `k` at the top sizes,
-  which the `k` column shows.  The default ladder also skips sizes whose
+  which the `k` column shows; the sweep warns once, naming those sizes.  The
+  default ladder also skips sizes whose
   grid would exceed the 1,000,000 blocks `make_folds()` builds (a 6 km x 2 m
   transect used to abort with an error about `block_size`), runs along the
   line for points on one axis-parallel line (they were refused as having "no
@@ -752,12 +1077,12 @@
   `info$n_local_collinear`, `info$n_local_singular` and the global
   `info$condition_index` (on the centred predictors) beside `AICc`.
   `n_local_collinear` and the warning count the windows whose slopes are
-  collinear (`cn_slopes` above 30, or `cn` above 1e6), so a predictor's
+  collinear (`cn_slopes` above 30, or singular), so a predictor's
   origin (degrees C or kelvin) does not change the verdict.  The warning is
   now the exact fraction of locations rather than a sampled one, and its
-  thresholds (a quarter of the locations, or any) are unchanged; above a
-  quarter it now says that an exactly singular window stops the fit, instead
-  of promising non-finite coefficients.  The weighted survey sees what the
+  thresholds (a quarter of the locations, or any) are unchanged; it says
+  that a coefficient an exactly singular window cannot estimate is `NA`.
+  The weighted survey sees what the
   unweighted spot-check could not: a bisquare window's edge points
   contribute almost nothing to the fit, so they contribute almost nothing to
   its conditioning.  The survey also runs with a single numeric predictor,
@@ -788,21 +1113,24 @@
   of the variance the cell's mean would have with no data at all
   (`kr_ratio`, the coverage score --- near 1 the data tell the cell nothing;
   a share of the point sill never came near 1 for cells larger than the
-  range), whether it exceeds the design-based `s^2/n` of the
-  plain mean (`kr_exceeds_design`), and the kriged-minus-plain shift in
-  standard errors (`kr_shift`); plus the variance of the standardised
+  range), the error variance of the cell's plain mean under the same
+  variogram (`plain_var`), the share of it kriging removes (`kr_gain`), and
+  the kriged-minus-plain shift over the standard deviation the variogram
+  gives that difference (`kr_shift`); plus the variance of the standardised
   errors from blocked cross-validation (`attr(, "cv")$zscore_var`), which
   is about 1 when the kriging variance is right.  Measured on simulated
   exponential fields: 0.93--1.07 with the true variogram, 0.85--1.01 with
   the estimated one; under blocked folds it checks the sill and range
   rather than the nugget (0.95--1.24 with the nugget understated tenfold),
   and random folds are the instrument for the nugget.  The comparison the
-  function exists for: under uniform sampling kriged and plain means
-  differed by more than one standard error in 11--24 percent of cells; under
-  clustered sampling in 34--63 percent, with 3--27 of 16--64 cells empty
-  and kriged anyway.  Repeat visits to one location are kriged from their
-  mean, with the part of the nugget that varies between visits divided by
-  their count; kriging them as separate rows made every kriging system
+  function exists for, against known cell averages on those fields: kriging
+  cut the plain mean's squared error by 54--56 percent under uniform and
+  clustered sampling alike, where `kr_var` over `plain_var` predicted
+  55--58.  A naive `s^2/n` below `plain_var` says the naive standard error
+  is too small under the variogram; `kr_var` is not compared with `s^2/n`,
+  which moves with the fitted sill.  Repeat visits to one location are
+  kriged from their mean, with their pooled within-location variance
+  divided by their count; kriging them as separate rows made every kriging system
   singular and returned `NA` everywhere.  Any cell or held-out location
   gstat still cannot solve is counted in a warning.  This is the first
   kriging path in the package (`gstat::krige()`); its model families are
@@ -867,9 +1195,10 @@
   `spatialkit_quiet()` hides) said that its posterior was not to be
   trusted.  `cv_bayes()`'s `fold_metrics` gains `convergence_ok`: `TRUE` or
   `FALSE` as `fit_bayesian_spatial_model()` judged that fold's sampler
-  (R-hat, effective sample size, divergences), and `NA` when `fit_args`
-  sets `check_convergence = FALSE`.  A run with any `FALSE` raises one
-  warning naming those folds.  `compare_models()` gains the same column and
+  (divergent transitions, R-hat, effective sample size, E-BFMI), and `NA`
+  when `fit_args` sets `check_convergence = FALSE`.  A run with any `FALSE`
+  raises one warning of class `spatialkit_convergence` naming those folds
+  and the checks each failed.  `compare_models()` gains the same column and
   warns once for each model that did not converge.  Code that pins the
   exact column set of either table needs the new name added.
 
@@ -894,6 +1223,193 @@
   points at the selection rather than the bare count.
 
 ## Bug fixes
+
+* **`estimate_sac_range()` drew its `n_max` subsample over rows with nothing
+  to model.**  300 valued rows among 20,300 were estimated from the 74 that
+  fell in the draw, and 100 among 20,100 came back `NA`.  Rows with a missing
+  or infinite response or predictor are now dropped first, and the subsample
+  no longer depends on the order of the rows.
+
+* **`estimate_sac_range(detrend = "reml")` kept the first fit to converge,
+  not the best.**  When the true range is short against the extent the
+  starts of `nlme::gls()` lay in a valley of the likelihood: a layer with a
+  10 km range came back at 502 km and was refused.  The start is now the
+  best point of the profile likelihood on a grid, and the fit with the
+  largest log-likelihood is kept (`attr(, "reml")` gains `logLik`,
+  `logLik_gain` and `n_fits`).
+
+* **`estimate_sac_range()` returned `NA` or an R error for a bad argument
+  without naming it.**  `cutoff`, `range_frac`, `n_max`, `seed`,
+  `keep_directional_fits`, `n_lags` and `structure_alpha` are checked, and a
+  bad value is an error that names the argument.  `cutoff` above 1 and
+  `n_max` below 30 are errors; `n_max = Inf` means no subsample.
+
+* **`estimate_sac_range()` called a response constant by an absolute
+  floor.**  A response whose standard deviation was under 1.5e-8 in its own
+  unit was refused, and so was one of standard deviation 1 on a mean of
+  1e8.  The test is now relative: under 1e-12 of the largest absolute value.
+
+* **The projection chosen for lon/lat input depended on the order of the
+  rows.**  `ensure_projected()` scores candidate projections on a sample of
+  the points, taken at even spacing along the rows: 400 points over the
+  conterminous United States got an Albers CRS in some row orders and a
+  Lambert azimuthal one in others.  The sample is now taken along the points
+  sorted by coordinate.
+
+* **`resolution_profile()` reported a layer too small for a ladder as
+  supported.**  With fewer than two cells at `min_cell_n` it raised the
+  ceiling to 2 with `supported = TRUE`.  It still scores two cells, with
+  `supported = FALSE`, `ceiling_from = "fewer than two supported cells"` and
+  a warning of class `spatialkit_not_supported` that says what would work.
+
+* **A constant response got a finite `cp`.**  A response of 1e6 plus
+  rounding noise was scored on its rounding error and `select_resolution()`
+  returned 2 cells for it.  `cp`, `moran_i` and `moran_z` are now `NA` at
+  every level, with a warning of class `spatialkit_constant_response`.
+
+* **`determine_optimal_levels()` returned 1 for a layer with no rows.**  It
+  is now an error.
+
+* **The leakage warning of `make_folds(method = "block_kfold")` recommended
+  settings that stopped with an error or returned fewer folds.**  It ended
+  "Pass block_size = <range> or auto_range = TRUE" whatever the layout.  The
+  warning now builds the grid the advice asks for and says what comes back:
+  the setting when that gives `k` folds, and otherwise the largest block
+  size that does and `method = "nndm"` (`"knndm"` above 5,000 rows) as the
+  design that needs no block size.  The single-block error names that size too.
+
+* **`make_folds()` returned fewer folds than asked with only a log line.**
+  `"random_kfold"` with more folds than rows, `"block_kfold"` with fewer
+  than `k` occupied cells and `"leave_location_out"` with more folds than
+  groups now raise a warning of class `spatialkit_k_reduced`, which carries
+  `k_requested` and `k` and gives a setting that works.
+  `params$k_requested` records the `k` asked for, and `params$block_width`
+  and `params$block_height` the cells built.  `cv_block_size_sweep()` gathers
+  the reductions of its sizes into one warning, and its table gains the
+  columns `block_width` and `block_height`.
+
+* **`fold_separation()` printed "this score is optimistic" from a share that
+  cannot give a direction.**  Which way a score errs depends on how the
+  held-out distances compare with the distances from the prediction
+  locations to the data.  Without `prediction_points` the function now
+  reports the distances and draws no conclusion.  `n_unknown_ids` counts
+  each row once; it counted fold entries, so five missing rows read as 25
+  at `k = 5`.
+
+* **`make_folds(method = "nndm")` returned plain leave-one-out without a
+  warning when the prediction points were nearer to the data than
+  leave-one-out can reach.**  Excluding neighbours only lengthens a held-out
+  distance.  A warning of class `spatialkit_nndm_out_of_reach` now says that
+  the cross-validated error is an upper bound for those locations, and
+  `params` gains `max_ecdf_deficit`, `loo_ecdf_deficit`,
+  `target_out_of_reach` and the Wasserstein distances.
+
+* **`cv_spatial()`, `cv_rf()`, `cv_gwr()`, `cv_bayes()` and
+  `compare_models_cv()` dropped `block_size` and `auto_range = TRUE` without
+  a word when `folds` was supplied.**  They raise a warning of class
+  `spatialkit_fold_args_ignored`.
+
+* **`compare_models(fits, newdata = )` labelled training-residual Moran's I
+  as a `newdata` metric.**  A new column `resid_morans_basis` says
+  `"in-sample"`, or `"out-of-bag"` for a forest.
+
+* **`compare_models_cv()`, `cv_block_size_sweep()` and
+  `select_features_forward()` repeated the same data warning for every
+  model, size or candidate set.**  The warnings `prep_model_data()` raises
+  about a layer are raised once per call.  With `parallel` above one core, a
+  fold's classed warning keeps its class and fields.
+
+* **`model_metrics(fit, newdata, draws = TRUE)` stopped with "missing value
+  where TRUE/FALSE needed".**  `draws = TRUE` and `se.fit = TRUE` are
+  refused by name: the metrics take one predicted value per row.
+
+* **A predictor far from zero made `fit_gwr_model()` report every window as
+  collinear.**  Windows whose condition index with the intercept (`cn`) was
+  above 1e6 were counted, a rule for a solve of the uncentred normal
+  equations.  A window's slopes now count as collinear on the slope index
+  alone (`cn_slopes` above 30, or singular).
+
+* **The GWR bandwidth search could select a bandwidth at which a term is
+  estimable at no location.**  Such a bandwidth is not selected; when every
+  bandwidth is like that the widest is used, with a warning and
+  `info$bandwidth_is_fallback = TRUE`.
+
+* **`area_of_applicability()` returned a threshold of 0 for repeat visits.**
+  With `folds = NULL` a training row that repeats another's predictor values
+  was its own nearest neighbour at distance 0: 60 sites visited 4 times put
+  30 of 200 new points inside.  Each row's reference is now its nearest row
+  with different values, and the same layout puts 188 inside
+  (`n_duplicates` counts the repeats).  With `folds`, a threshold of 0 is a
+  warning of class `spatialkit_aoa_zero_threshold`.
+
+* **Without FNN, `area_of_applicability()` gave exact copies of training
+  rows a small non-zero distance.**  About one copy in ten came out near
+  1e-8 and could fall outside a threshold of 0.  The distance returned is
+  now recomputed exactly.
+
+* **`select_features_forward()` always selected at least one variable with a
+  forest or a GWR.**  A learner that could not fit an empty predictor set
+  had no baseline, so the first variable was accepted whatever it scored.
+  The baseline is now the learner's own null model (a GWR fits one),
+  `null_fn`, or the mean of each training fold.  Under a fold-mean baseline
+  the first variable is tested at the end and can be dropped
+  (`baseline$first`); `plot()` draws the path as walked.  A forest sweep can
+  still add noise variables after the real ones, because an extra variable
+  regularises the forest; `?select_features_forward` says how to read that.
+  `tol` takes any single number, `Inf` included.
+
+* **`plot()` on an area of applicability with a location index counted the
+  wrong rows beside the predictor threshold.**  It printed the rows outside
+  on either index.  The subtitle now counts the predictor index, location
+  and the total separately.
+
+* **One row of `newdata` with a factor level the model was not fitted with
+  made `predict()` on a `bayesian_fit` return `NA` for every row.**  Rows
+  with such a value are `NA`, the rest are predicted, and a warning of class
+  `spatialkit_new_levels` names the predictor and the levels.  Any other
+  failed posterior draw is a warning of class `spatialkit_predict_failed`,
+  where it was a log line.
+
+* **`prep_model_data()` dropped incomplete rows with a log line only.**
+  When preparing data for a fit it raises a warning of class
+  `spatialkit_rows_dropped` with the number and share of rows, the count by
+  reason and by column, and how far the response of the dropped rows sits
+  from that of the kept rows.  A predictor with one value in every kept row
+  raises `spatialkit_constant_predictor`.  Preparing `newdata` for
+  `predict()` raises neither.  `attr(, "dropped")` gains `by_column`,
+  `response_std_diff`, `constant_predictors` and `n_duplicate_locations`.
+
+* `fit_bayesian_spatial_model()` stops before compiling when the response
+  takes a single value, and raises a warning of class
+  `spatialkit_gp_basis_size` when there are fewer rows than a tenth of the
+  basis functions.
+
+* **`summarize_by_cell()` let one infinite value through.**  An `Inf` in a
+  response or predictor column made its cell's mean `Inf` and, under
+  `deff = "kish"`, set the ICC to 0 for every cell.  Infinite values are now
+  left out of every statistic of their column, as `NA` is, with a warning of
+  class `spatialkit_nonfinite`.
+
+* **`kriging_adequacy()` kriged a factor on its level codes.**  A response
+  that is not numeric or logical is an error that names the column and its
+  class.  A logical response is kriged as 0/1.
+
+* **`kriging_adequacy()` capped the replicates' variance at the nugget.**
+  Under a model with too small a nugget the means of repeat observations
+  were kriged as more exact than their replicates show.  Their pooled
+  within-location variance `sw2` is now used as it is: a mean of `m`
+  replicates has error variance `max(c0 - sw2, 0) + sw2 / m` for a nugget
+  `c0`.  A warning of class `spatialkit_replicate_var_above_nugget` gives
+  both numbers, and `attr(, "replicates")` records them.
+
+* **A subset of an assigned layer kept its parent's `"unassigned"` record.**
+  `[` and the dplyr row verbs drop it, as they drop `"dropped"` and
+  `"ties"`.
+
+* `plot.resolution_profile()` says "fewer than two cells meet `min_cell_n`"
+  of a profile that is unsupported for that reason; it said the floor
+  exceeds the ceiling.  `plot_folds()` and `print()` on a
+  `kriging_adequacy()` result label kNNDM folds.
 
 * **`ensure_stable_poly_id()` stopped on a cell that is valid in its own CRS
   and crosses itself in lon/lat, and took `build_tessellation(method =
@@ -969,10 +1485,10 @@
   `cp` is `NA` at every level for such a sac, where it was finite; the
   warning's last clause says so, and the notice is not raised.  A fit that
   converged to a range past the lags, or on a falling variogram, still gives
-  `cp` its nugget.  `estimate_sac_range()` returns what it did;
-  `?estimate_sac_range` now says that the count of `"variogram model did not
-  converge"` reasons understates how many fits did not converge, and where
-  to read it.
+  `cp` its nugget.  (`estimate_sac_range()` no longer fits with gstat's
+  iterative fit: the flag is now `FALSE` when the criterion has no minimum
+  inside the ranges searched, and the reason `"variogram model did not
+  converge"` is carried only by results stored by earlier versions.)
 
 * **A clipped cell that also touched the boundary from outside was dropped,
   and its points left with no cell.**  `st_intersection()` returns such a
@@ -1110,7 +1626,7 @@
   scrambling the prediction locations with no warning;
   `gwr_model_selection()` ranked models on 3-D distances; and
   `fit_gwr_model()` and `cv_gwr()` failed.  Z and M are now dropped in
-  `prep_model_data()` and again where the data are handed to GWmodel.
+  `prep_model_data()` and again where a GWR takes its coordinates.
 
 * **`predict.gwr_fit()` lost every prediction to one bad location.**  It
   went through `GWmodel::gwr.predict()`, which returns nothing for any row if
@@ -1119,10 +1635,9 @@
   training and new rows together exceed 10,000 (a 100 by 100 prediction grid
   came back all `NA`), and it built the full training hat matrix for a
   variance it then discarded, which is cubic in the training size.
-  Predictions now come from `gwr.basic(regression.points = )` in chunks, a
-  failing chunk is redone location by location, and only a truly singular
-  location is `NA`, with a warning counting them.  Where the old path
-  worked, the values are identical.
+  Predictions now come from the package's own local regressions, one per
+  new location, and only a location with no estimable prediction is `NA`,
+  with a warning counting them.
 
 * **On brms 2.17 to 2.22, one far-off row moved every Bayesian prediction in
   the call.**  brms rebuilt the Hilbert-space GP's boundary from the rows
@@ -1623,7 +2138,8 @@
   structured component) implies that distinct observations are uncorrelated,
   so it is applied as a design effect of 1 in every cell, with
   `deff_applied = TRUE`; it was reported as "the supplied model could not be
-  read", with the fallback warning.
+  read", with the fallback warning.  (The fallback is now to `"kish"`; see
+  Breaking changes.)
 
 * **An empty point switched off `summarize_by_cell(deff = "variogram")` for
   its cell.**  Its missing coordinates made the cell's mean correlation
@@ -1725,9 +2241,9 @@
   sill are the shorter ones, so their maximum is a lower bound, not an
   estimate.  A converged all-pairs fit past the fitted lags is now refused
   whatever the directions found (`rejected_reason = "fitted range exceeds
-  the largest lag fitted"`, the directional ranges still attached); the
-  directional maximum stands in only for an all-pairs fit that is singular
-  or did not converge.  On stationary fields whose range is close to the
+  the largest lag fitted"`, the directional ranges still attached), and
+  the directional maximum does not stand in for any other all-pairs fit
+  either (see Breaking changes).  On stationary fields whose range is close to the
   cutoff this also turns a few draws from a directional maximum into `NA`
   (3 of 30 at an effective range of 570 on a 1000 m square).
 
@@ -2007,18 +2523,15 @@
   221 around a true 3 with no warning, while adding a noise predictor to the
   same data warned at every location.  One numeric predictor is now enough.
 
-* **GWR said a singular window came back as `NaN` coefficients; it stops
+* **GWR said a singular window came back as `NaN` coefficients; it stopped
   the fit.**  GWmodel's matrix inverse throws on an exactly singular window,
   so a 0/1 indicator constant within clusters failed the whole fit with a
   bare "inv(): matrix is singular", while the help page and the collinearity
-  warning promised masked `NaN` coefficients.  The non-finite coefficients
-  GWmodel does return come from co-located points, where an adaptive
-  bandwidth no larger than the number of observations at a site gives the
-  kernel zero width (160 of 160 at 40 sites of 4 observations, 4
-  neighbours), and the warning blamed singular windows for those.  The fit
-  error now says a window is singular and how many the collinearity check
-  found, and the non-finite warning names co-located points when they are
-  the cause.
+  warning promised masked `NaN` coefficients.  The package now solves the
+  local regressions itself: a coefficient a window cannot estimate is `NA`
+  and the fit goes on (see Breaking changes).  A zero-width adaptive kernel
+  at co-located points still leaves a window with no weighted row, and the
+  warning names the co-located points when they are the cause.
 
 * **An adaptive GWR bandwidth above the number of points was capped in
   silence.**  `bandwidth = 1500`, meant as metres with `adaptive` left at
@@ -2030,11 +2543,10 @@
 
 * **Below 20 points, `bandwidth = NULL` did not fit at the bandwidth
   `bw.gwr()` chose.**  GWmodel searches adaptive bandwidths from 20
-  neighbours up to n, so with fewer points its choice exceeds n (18 for 12
-  points) and was capped at n, a different kernel with a worse AICc (18.3
-  against 9.7), without a word.  The cap stays and now raises a warning in
-  `fit_gwr_model()` and `gwr_model_selection()`; supply `bandwidth` for data
-  this small.
+  neighbours up to n, so with fewer points its choice exceeded n and was
+  capped at n, a different kernel with a worse AICc, without a word.  The
+  package's own search starts at the smallest bandwidth the model allows,
+  so a layer this small is searched like any other.
 
 * **A GWR predictor named twice raised false collinearity warnings.**
   `fit_gwr_model(predictor_vars = c("a", "b", "a"))` fitted correctly, but
@@ -2174,9 +2686,11 @@
   sampling --- have a training DI of 0; past about three quarters of the rows
   the threshold is 0 and only exact copies count as inside (30 sites visited
   four times: 0 of 200 new points inside, against 197 after deduplication).
-  The rule is unchanged; the result is now logged with the remedy
-  (leave-location-out folds, or deduplication) and `print()` shows the count
-  of zero training DI.
+  Without folds a row's reference is now its nearest row with different
+  predictor values, so repeats no longer set the threshold; with folds a
+  threshold of 0 is a classed warning that gives the remedy
+  (leave-location-out folds, or deduplication).  See the entry on repeat
+  visits above.
 
 * **`area_of_applicability()` refused all-zero weights, which the advice
   `pmax(importance, 0)` produces whenever the model found no useful
@@ -2471,8 +2985,9 @@
   threw the corrected result away.  When the estimate was rejected too, the
   one fallback raised two R warnings.  A `sac` that an estimate replaces now
   gets a plain warning saying what replaced it, and the fallback warning is
-  raised once per call, only when the standard errors really are the
-  uncorrected ones, naming every reason, the rejected `sac` included.
+  raised once per call, only when the correction applied is not the one
+  asked for (Kish, or none), naming every reason, the rejected `sac`
+  included.
 
 * **`summarize_by_cell(deff = "variogram")` ignored a `sac` that carried no
   variogram model without saying so.**  A plain number, or
@@ -2482,7 +2997,7 @@
   `sac` is now set aside with a warning, as a rejected `sac` is: a plain
   warning when a variogram is estimated instead, and the classed
   `spatialkit_deff_fallback` warning, naming it, when `deff` falls back
-  to 1.
+  to `"kish"`.
 
 * **`summarize_by_cell(deff = "kish")` recorded no correction when only the
   predictor standard errors were corrected.**  The `"deff_applied"`
@@ -2650,8 +3165,7 @@
   `info$local_collinearity$cn` and adds `cn_slopes`: the predictors centred
   at their weighted mean in the window, each divided by its standard
   deviation over the study area.  A window's slopes count as collinear when
-  `cn_slopes` is above 30 or singular, or when `cn` is above 1e6, where
-  GWmodel's uncentred solve starts losing precision in the slopes.
+  `cn_slopes` is above 30 or singular.
   `n_local_collinear` and the warning count those windows.  The kelvin and
   degrees C fits now get the same verdict (0 of 200 locations), and a
   regional covariate nearly constant within clusters is still flagged
@@ -2737,6 +3251,39 @@
 
 ## Documentation
 
+* The README, the vignettes and the tour scripts describe the behaviour of
+  this version: GWR needs `sp` alone, `moran_z` is a diagnostic, the ladder
+  starts at 2 with the range floor reported, `kriging_adequacy()` returns
+  `plain_var` and `kr_gain`, `make_folds()` has six methods, and
+  `estimate_sac_range()` has seven refusals and no directional stand-in.
+
+* `?fit_rf_model` and the caution logged for `include_coords = TRUE` no
+  longer say that a forest given the coordinates fails wherever it has not
+  been.  The gain from coordinates is largest between sampled points, fades
+  with distance and can reverse in a region the data never visited.  The
+  advice that stays is to score such a forest with blocked or
+  distance-matched folds, never out of bag, and to compare it with the
+  forest without coordinates on the same folds; `?cv_rf` runs that
+  comparison in its example.
+
+* `?make_folds` and `?cv_block_size_sweep` no longer say that blocks built
+  from `block_size` are one to two times that size on each axis.  That holds
+  on an axis at least as long as `block_size`; a shorter axis is spanned by
+  a single row or column of blocks as long as the extent there.
+  `?make_folds` says that the NNDM guarantee concerns nearest-neighbour
+  distances, so a learner that draws on several neighbours can still score
+  low on clustered samples.
+
+* `?area_of_applicability` has a Weights section with the cost of
+  importance weighting (a weak but real predictor is down-weighted by the
+  square of its relative importance), and says that the location index marks
+  a gap only when it is wider than the distance its threshold allows.
+
+* `?resolution_profile`, `?select_resolution` and
+  `?determine_optimal_levels` say what each criterion returns in practice,
+  and `?resolution_profile` lists which conditions are classed warnings,
+  classed errors, plain warnings and log lines.
+
 * Every figure in the vignettes carries alt text, which is what a screen
   reader announces and the only thing a reader gets when an image fails to
   load.  Each one states what the picture shows and what it is there to
@@ -2770,12 +3317,12 @@
   machine that ran it.  `SPATIALKIT_TOUR_OUTPUT` writes the figures to a folder
   instead of the device; `SPATIALKIT_TOUR_PAUSE = "no"` skips the per-figure
   pause.  A script skips the part that needs an absent package with a message
-  naming it, and scripts 02, 09 and 10 skip themselves when gstat, GWmodel or
+  naming it, and scripts 02, 09 and 10 skip themselves when gstat, sp or
   brms is absent.
 * Four vignettes join `spatialkit_nc_demo`: `getting-started` (installing, what
   the coordinates are in, the pipeline from points to a scored model and a map,
   and a glossary of the terms that recur), `resolution` (the ladder, the
-  four criteria and why they disagree), `spatial-cross-validation` (the five
+  criteria and why they disagree), `spatial-cross-validation` (the six
   fold schemes, block sizing, and reading a CV result down to the last row) and
   `diagnostics` (residual autocorrelation, aggregation standard errors, kriging
   adequacy, area of applicability, and two ways to leak).  Each is executed at
@@ -2884,26 +3431,18 @@
   a single observation; the resolution vignette says the blocked split
   reduces the leak between halves rather than removing it.
 
-* `?estimate_sac_range` now says that the exponential model is kept
-  whenever it converges and so overestimates the range on smoother fields
-  (about 1.8--2.1 times a Gaussian practical range, 1.3--1.4 times a
-  spherical one), and why the family is not chosen by fit (that biases
-  exponential fields low, to 0.82); that 15 lag bins make a range spanning
-  one or two of them come out long (60 m returned 89--102 m); that nothing
-  tests for spatial structure (white noise gave a finite range in 8 of 30
-  draws); that the "decreases with distance" refusal also fires on small
-  samples of ordinary fields (7--9 of 60 at n = 30, 0--1 at n = 100), which
-  its warning now says below 100 points; that the anisotropy note goes to
-  the log file at INFO, not the console, and that the longest directional
-  range is read from `directional_fitted` after checking
-  `directional_status`, not `max(attr(, "directional"))`, which is `NA`
-  exactly when the major axis ran past the fitted lags (the note itself, the
-  nc_demo vignette and the help now say so); that an accepted range can
-  still exceed half the width of the layer, leaving
-  `make_folds(auto_range = TRUE)` room for one block (`range_frac`); and a
-  flat variogram's refusal message no longer claims the data "never reached
-  a sill" without mentioning that a structureless variogram ends there too.
-  The README counts six refusals, not five.
+* `?estimate_sac_range` now says that only the exponential family is fitted
+  and so overestimates the range on smoother fields, and why the family is
+  not chosen by fit; that the "decreases with distance" refusal also fires
+  on small samples of ordinary fields, which its warning says below 100
+  points; that the longest directional range is read from
+  `directional_fitted` after checking `directional_status`, not
+  `max(attr(, "directional"))`, which is `NA` exactly when the major axis
+  ran past the fitted lags; and that an accepted range can still exceed half
+  the width of the layer, leaving `make_folds(auto_range = TRUE)` room for
+  one block (`range_frac`).  It has sections on the test for spatial
+  structure, the lags and structure at two scales, and lists the seven
+  `rejected_reason` values; the README counts seven refusals.
 
 * `?make_folds`: the NNDM details now say how the procedure differs from
   `CAST::nndm()` (a strict removal rule, one point more conservative per
@@ -2928,12 +3467,12 @@
   with the intercept and one for the slopes alone).  `?fit_gwr_model` and
   `?gwr_model_selection` now state the adaptive bandwidth's floor and cap.
 
-* `?fit_bayesian_spatial_model`: `check_convergence` says the checks write
-  WARN log lines and set `$info$convergence_ok` rather than "issue warnings",
-  and that under cmdstanr nothing is raised as an R warning; the basis
-  adequacy check is described as logged, and as changing neither
-  `convergence_ok` nor `print()` (the argument's text listed it among the
-  checks that set `convergence_ok` to `FALSE`); the `family` argument and
+* `?fit_bayesian_spatial_model`: `check_convergence` lists the checks that
+  set `$info$convergence_ok` and the warning a failed verdict raises; a
+  section "What the basis resolves" describes the floor of the basis, the
+  check before compiling and the adequacy status after sampling, which
+  changes neither `convergence_ok`; a Warnings section lists the condition
+  classes; the `family` argument and
   the non-Gaussian section no longer promise that any response type brms can
   fit works here; the spatial confounding section warns that coefficients
   under `standardize_predictors = TRUE` are per standard deviation before
@@ -2971,10 +3510,10 @@
   the coordinates themselves, and the graticule on the maps, differ.
 
 * The examples of `resolution_profile()`, `select_resolution()`, `summary()`
-  and `plot()` on a profile use `set.seed(4)`, on which their comments hold
-  (C_p interior at 28 cells, reliability on the range floor); with
-  `set.seed(2)` C_p had moved to the support ceiling.  The `plot()` example
-  no longer promises four panels on points that have no elbow.
+  and `plot()` on a profile use `set.seed(4)`, and their comments describe
+  either outcome for C_p (an interior level or the support ceiling) and
+  reliability on the range floor.  The `plot()` example no longer promises
+  four panels on points that have no elbow.
 
 * Tour script 02 runs to the end again: step 02.6 drew the elbow's pick,
   which its evenly spread points no longer have, and now draws the C_p pick.
@@ -3006,13 +3545,10 @@
   effect, which the package page said were there; the package page lists it
   among the defaults that were chosen, not cited.
 
-* `?estimate_sac_range` now says when the directional maximum is logged
-  (only when it stands in for a singular or non-converged all-pairs fit, at
-  WARN only above a ratio of 1.5, naming the directional ranges), and that a
-  range shorter than the first lag bin can come back several times too long
-  (a true 24 m returned 93--479 m at n = 1500, 19--32 m at `cutoff = 0.1`),
-  so a variogram at its sill in the first one or two bins calls for a
-  smaller `cutoff` whatever range was fitted.
+* `?estimate_sac_range` now says that the largest directional range never
+  stands in for the all-pairs fit, and how the adaptive lags resolve a range
+  shorter than one equal lag bin, which equal bins returned several times
+  too long.
 
 * `?make_folds` no longer says `auto_range` "fits directional variograms to
   account for anisotropy".  It sizes blocks from the omnidirectional range,
@@ -3023,8 +3559,8 @@
   lowered `k` just before that error is gone.  The page no longer says NNDM
   never pushes a point's nearest-neighbour distance past `phi`: the last
   exclusion can take it past by one neighbour step, as in `CAST::nndm()`.
-  The description lists all five methods.  The page now says that `k = 1` is
-  raised to 2 by the three k-fold methods, and that only `block_kfold`
+  The description lists all six methods.  The page now says that `k = 1` is
+  raised to 2 by the k-fold methods, and that only `block_kfold`
   returns `params$blocks_supplied` and `params$boundary_supplied`.
 
 * The README's entry for "response 'y' is not numeric" notes that

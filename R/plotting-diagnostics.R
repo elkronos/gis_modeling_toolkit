@@ -222,10 +222,18 @@ plot_cv_metrics <- function(cv, metric = "RMSE", ...) {
 #' fence, so the curve reaches it exactly when no training value was fenced
 #' off and runs past it, by the tail the fence removed, when some were.
 #' A prediction location outside on a predictor dropped for having no
-#' training variance has \code{DI = Inf}: it counts in the prediction curve,
+#' training variance, or under \code{categorical = "indicator"} on a level no
+#' training row has, has \code{DI = Inf}: it counts in the prediction curve,
 #' which then tops out below 1, and the caption says how many are off the
 #' axis.  A location with a missing predictor (\code{DI = NA}) is neither
 #' inside nor outside; it is left out of the curve and the caption counts it.
+#'
+#' When location has an index of its own (a \code{gwr_fit}, a
+#' \code{bayesian_fit}, or \code{coords = "yes"}; see
+#' \code{\link{area_of_applicability}()}), the curves and the dashed line are
+#' the predictor index alone.  The subtitle then counts three things: the
+#' locations beyond the predictor threshold, those beyond the location
+#' threshold, and those outside the area of applicability, which is either.
 #'
 #' @param x An \code{aoa} object from \code{\link{area_of_applicability}()}.
 #' @param type \code{"ecdf"} (default), the two empirical distribution
@@ -275,14 +283,21 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   di_new <- di_all[is.finite(di_all)]
   di_tr  <- di_tr[is.finite(di_tr)]
   n_all  <- x$n_new %||% length(di_all)
+  # What DI = Inf means for this result: a dropped predictor, and under
+  # categorical = "indicator" also a level no training row has, which is how
+  # print.aoa() words it.  A row on an unseen level was captioned "outside
+  # on a dropped predictor".
+  unseen_level <- length(x$categorical_vars) > 0L &&
+    identical(x$params$categorical, "indicator")
   if (!length(di_new)) {
     if (n_inf == 0L)
       stop("plot.aoa(): no finite dissimilarity index at any prediction location ",
            "(every row had a missing or non-finite predictor).", call. = FALSE)
     stop(sprintf(paste0("plot.aoa(): no finite dissimilarity index to plot: %d of ",
-                        "%d prediction locations are outside on a predictor dropped ",
+                        "%d prediction locations are outside on %sa predictor dropped ",
                         "for having no training variance (DI = Inf)%s."),
                  n_inf, n_all,
+                 if (unseen_level) "a level no training row has, or on " else "",
                  if (n_na) sprintf(" and %d %s a missing predictor (DI = NA)", n_na,
                                    if (n_na == 1L) "has" else "have")
                  else ""), call. = FALSE)
@@ -305,9 +320,31 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   q_in <- if (any(di_new <= thr)) stats::quantile(di_new[di_new <= thr], 0.9) / thr else NA_real_
   # Both of these ran past the right edge of the figure at the width a help
   # page and a vignette draw it, so each is broken where it reads naturally.
-  subtitle <- sprintf(
+  #
+  # The count beside "(DI > threshold)" is of the predictor index.  With a
+  # location index `n_outside` is the rows outside on EITHER index, so it is
+  # not that count: a GWR result with 10 of 100 rows beyond the predictor
+  # threshold and all 100 beyond the location threshold read "100 of 100
+  # prediction locations outside (DI > 0.017)", then "90% of those inside".
+  # `n_outside_predictors` is the count the threshold belongs to; an object
+  # from before it existed has no location index, and its `n_outside` is it.
+  loc     <- x$location
+  has_loc <- is.list(loc)
+  n_out_pred <- x$n_outside_predictors %||% x$n_outside %||%
+    (sum(di_new > thr) + n_inf)
+  subtitle <- if (has_loc)
+    sprintf(paste0("%d of %d prediction locations outside on the predictors ",
+                   "(DI > %.3g)\n%d outside on location; %d outside the AOA ",
+                   "(either)%s"),
+            n_out_pred, n_all, thr, loc$n_outside %||% NA_integer_,
+            x$n_outside %||% NA_integer_,
+            if (is.finite(q_in))
+              sprintf(paste0("\n90%% of those inside on the predictors sit ",
+                             "below %.0f%% of that threshold"), 100 * q_in)
+            else "")
+  else sprintf(
     "%d of %d prediction locations outside (DI > %.3g)%s",
-    x$n_outside %||% sum(di_new > thr), n_all, thr,
+    n_out_pred, n_all, thr,
     if (is.finite(q_in))
       sprintf("\n90%% of those inside sit below %.0f%% of the threshold", 100 * q_in)
     else "")
@@ -333,10 +370,16 @@ plot.aoa <- function(x, type = c("ecdf", "histogram"), ...) {
   caption <- sprintf("Threshold %s\n%s",
                      if (isTRUE(x$params$threshold_supplied)) "supplied" else "from the training DI",
                      cv_line)
+  if (has_loc)
+    caption <- paste0(caption, sprintf(paste0(
+      "\nThe curves are the predictor index; location is a second index ",
+      "(DI_location, threshold %.3g)"), as.numeric(loc$threshold)))
   if (n_inf)
     caption <- paste0(caption, sprintf(paste0(
-      "\n%d prediction location%s outside on a dropped predictor (DI = Inf) ",
+      "\n%d prediction location%s outside on %sa dropped predictor (DI = Inf) ",
       "%s off the axis"), n_inf, if (n_inf == 1L) "" else "s",
+      # Broken after the first clause: the line is too long for the figure.
+      if (unseen_level) "a level no training row has,\nor on " else "",
       if (n_inf == 1L) "is" else "are"))
   if (n_na)
     caption <- paste0(caption, sprintf(
@@ -626,9 +669,12 @@ plot_calibration <- function(cv, ...) {
 #' @param x A \code{resolution_profile}.
 #' @param criteria Character vector of criteria to draw, any of
 #'   \code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"moran_z"},
-#'   \code{"wss"}.  Default: every one of the four selectable criteria that
-#'   is finite at some level.  \code{"wss"} is the raw curve behind
-#'   \code{"elbow"} and has no selected point.
+#'   \code{"wss"}.  Default: the first four, each where it is finite at some
+#'   level.  \code{"cp"}, \code{"reliability"} and \code{"elbow"} are count
+#'   criteria and get a selected level and a shaded band.  \code{"moran_z"}
+#'   is a diagnostic of the cell means and not a count rule (see
+#'   \code{\link{select_resolution}()}), and \code{"wss"} is the raw curve
+#'   behind \code{"elbow"}: both are drawn as curves with no selected point.
 #' @param tol Passed to \code{\link{select_resolution}()} for the flat region.
 #' @param ... Ignored.
 #' @return A \code{ggplot} object.
@@ -662,10 +708,14 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
     stop("plot.resolution_profile(): `x` has no levels to draw; it is an ",
          if (nrow(x) == 0L) "empty" else "incomplete",
          " subset of a resolution profile.", call. = FALSE)
-  selectable <- c("cp", "reliability", "elbow", "moran_z")
-  allowed <- c(selectable, "wss")
+  # The count criteria get a selected level and a band.  moran_z is drawn by
+  # default as well, as a curve only: select_resolution() refuses to read a
+  # count from it unless asked with diagnostic = TRUE.
+  selectable <- c("cp", "reliability", "elbow")
+  by_default <- c(selectable, "moran_z")
+  allowed <- c(by_default, "wss")
   if (is.null(criteria)) {
-    criteria <- selectable[vapply(selectable, function(cn)
+    criteria <- by_default[vapply(by_default, function(cn)
       any(is.finite(suppressWarnings(as.numeric(x[[cn]])))), logical(1))]
     if (!length(criteria)) criteria <- "wss"
   }
@@ -685,7 +735,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   labels <- c(cp = "Mallows' Cp (lower is better)",
               reliability = "Reliability of cell means (higher is better)",
               elbow = "WSS elbow statistic (higher is better)",
-              moran_z = "|Moran's z| of cell means (lower is better)",
+              moran_z = "|Moran's z| of cell means (a diagnostic, not a count rule)",
               wss = "Within-cluster sum of squares")
   rows <- list(); chosen <- list(); flat <- list(); notes <- character(0)
   skipped <- character(0)
@@ -732,7 +782,13 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
             nrow(x), min(lv), max(lv),
             if (is.finite(bounds$floor %||% NA)) format(bounds$floor) else "none",
             if (is.finite(bounds$ceiling %||% NA)) format(bounds$ceiling) else "none",
-            if (isTRUE(bounds$supported)) "" else "; the floor exceeds the ceiling")
+            # Why a profile is not supported, as its bounds record it: "the
+            # floor exceeds the ceiling" was also said of a layer with fewer
+            # than two cells at min_cell_n, under "floor 2, ceiling 2".
+            if (isTRUE(bounds$supported)) ""
+            else if (identical(bounds$ceiling_from, "fewer than two supported cells"))
+              sprintf("; fewer than two cells meet min_cell_n = %s", format(bounds$min_cell_n))
+            else "; the floor exceeds the ceiling")
   else NULL
   caption <- paste(c("Red: the level each criterion selects; shaded: within tolerance of its optimum",
                      notes), collapse = "\n")
@@ -758,6 +814,12 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
 #' selection (see the help page's section on that); when a hold-out score
 #' was computed (\code{select_on = "split"}) it is drawn as a separate mark
 #' at the final step and named in the caption.
+#'
+#' With a learner that cannot fit an empty predictor set the first variable
+#' is added without a test and can be dropped at the end
+#' (\code{baseline$first$dropped}).  The path drawn is then the one the sweep
+#' walked, with that variable hollow and labelled "dropped at the end", and
+#' the red mark is the selected set, scored without it.
 #'
 #' @param x The list returned by \code{\link{select_features_forward}()}.
 #' @param ... Ignored.
@@ -795,8 +857,16 @@ plot.feature_selection <- function(x, ...) {
   minimise <- !(metric %in% c("R2", "Adj_R2"))
   selected <- x$selected
   n_sel    <- length(selected)
+  # The path the sweep walked.  It is the selection, unless the first
+  # variable was added without a test (a fold-mean baseline) and dropped at
+  # the end: `selected` is then the path without it, and matching
+  # selected[s] to step s would draw sets that were never on the path.
+  first_dropped <- isTRUE(x$baseline$first$dropped) &&
+    length(x$baseline$path) == n_sel + 1L
+  walked <- if (first_dropped) x$baseline$path else selected
+  n_walk <- length(walked)
 
-  # The accepted variable at step s is selected[s]; the path runs through
+  # The accepted variable at step s is walked[s]; the path runs through
   # its score.  Steps past n_sel were scored and rejected (nothing cleared
   # tol), and their best candidate is drawn as part of the path too, so the
   # stop is visible as a flattening rather than as a cut -- but hollow and
@@ -808,18 +878,27 @@ plot.feature_selection <- function(x, ...) {
   for (s in sort(unique(h$step))) {
     idx <- which(h$step == s)
     if (s == 0L) { pick <- idx[1L] }
-    else if (s <= n_sel) { pick <- idx[match(selected[s], h$variable[idx])] }
+    else if (s <= n_walk) { pick <- idx[match(walked[s], h$variable[idx])] }
     else { pick <- idx[if (minimise) which.min(h$score[idx]) else which.max(h$score[idx])] }
     if (length(pick) == 1L && !is.na(pick)) path_rows <- c(path_rows, pick)
   }
-  rejected <- path_rows[h$step[path_rows] > n_sel]
+  rejected <- path_rows[h$step[path_rows] > n_walk]
   h$role[path_rows]  <- "path"
   h$role[rejected]   <- "rejected"
   h$label[path_rows] <- h$variable[path_rows]
   h$label[rejected]  <- paste(h$variable[rejected], "(not added)")
+  if (first_dropped) {
+    undone <- path_rows[h$step[path_rows] == 1L]
+    h$role[undone]  <- "rejected"
+    h$label[undone] <- paste(h$variable[undone], "(dropped at the end)")
+  }
   df <- data.frame(panel = metric, x = h$step, y = as.numeric(h$score),
                    role = h$role, label = h$label, stringsAsFactors = FALSE)
-  chosen <- if (n_sel > 0L && n_sel %in% h$step) {
+  sel_score <- suppressWarnings(as.numeric(x$score %||% NA_real_))
+  chosen <- if (first_dropped && length(sel_score) == 1L && is.finite(sel_score)) {
+    # The selected set is not a step of the walk; its own score marks it.
+    data.frame(panel = metric, x = n_sel, y = sel_score)
+  } else if (n_sel > 0L && n_sel %in% h$step) {
     i <- path_rows[h$step[path_rows] == n_sel]
     data.frame(panel = metric, x = n_sel, y = as.numeric(h$score[i[1L]]))
   } else data.frame(panel = character(0), x = numeric(0), y = numeric(0))
@@ -833,6 +912,9 @@ plot.feature_selection <- function(x, ...) {
     else "The intercept-only model could not be scored, so the path starts at the first variable",
     if (n_sel == 0L) "Nothing was selected"
     else sprintf("Selected: %s", paste(selected, collapse = ", ")),
+    if (first_dropped)
+      sprintf(paste0("%s was added first without a test and dropped at the end;\n",
+                     "red marks the selected set, scored without it"), walked[1L]),
     if (is.finite(holdout))
       sprintf("Blue: hold-out score of the selected set on the estimation half (%.3g)", holdout)
   ), collapse = "\n")
@@ -869,8 +951,7 @@ plot.feature_selection <- function(x, ...) {
 #' @return A \code{ggplot} object.
 #' @family plotting
 #' @examples
-#' if (requireNamespace("GWmodel", quietly = TRUE) &&
-#'     requireNamespace("sp", quietly = TRUE) &&
+#' if (requireNamespace("sp", quietly = TRUE) &&
 #'     requireNamespace("ggplot2", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)

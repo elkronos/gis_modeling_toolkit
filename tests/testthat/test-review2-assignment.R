@@ -83,7 +83,7 @@ test_that("deff_applied marks each row, and survives binding results together", 
                    rep(c(FALSE, TRUE), each = 4))
 })
 
-test_that("a rejected sac falls back with the classed warning and FALSE rows", {
+test_that("a rejected sac falls back to Kish with the classed warning, and the rows say so", {
   pts <- .r2_field()
   rejected <- structure(NA_real_, class = c("sac_range", "numeric"),
                         rejected_reason = "fitted range exceeds the largest lag fitted",
@@ -93,7 +93,13 @@ test_that("a rejected sac falls back with the classed warning and FALSE rows", {
     out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram",
                              sac = rejected),
     "fitted range exceeds", class = "spatialkit_deff_fallback")
-  expect_identical(out$deff_applied, rep(FALSE, 6))
+  # The fallback is Kish now (this used to assert deff_applied FALSE on every
+  # row, the uncorrected SE): a correction was applied, and `deff_method`
+  # says it was not the one asked for.
+  expect_identical(out$deff_applied, rep(TRUE, 6))
+  expect_identical(out$deff_method, rep("kish (variogram fallback)", 6))
+  kish <- summarize_by_cell(pts, predictor_vars = "z", deff = "kish")
+  expect_equal(out[["..se_pred_z"]], kish[["..se_pred_z"]], tolerance = 1e-12)
   # Caught by class, without matching the message.
   caught <- tryCatch(
     summarize_by_cell(pts, predictor_vars = "z", deff = "variogram",

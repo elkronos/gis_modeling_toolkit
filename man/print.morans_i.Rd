@@ -22,10 +22,10 @@ description in place of the matrix: it is \eqn{n \times n}, and
 autoprinting it buried the statistic under a thousand lines of matrix.
 }
 \seealso{
-Other print methods: 
-\code{\link{print.aoa}()},
-\code{\link{print.gwr_model_selection}()},
-\code{\link{print.resolution_profile}()},
-\code{\link{print.sac_range}()}
+Other print methods:
+\code{\link[=print.aoa]{print.aoa()}},
+\code{\link[=print.gwr_model_selection]{print.gwr_model_selection()}},
+\code{\link[=print.resolution_profile]{print.resolution_profile()}},
+\code{\link[=print.sac_range]{print.sac_range()}}
 }
 \concept{print methods}

@@ -129,18 +129,21 @@ test_that("a single row of blocks is compared with the range along the row only"
   z <- as.numeric(t(chol(exp(-as.matrix(stats::dist(x)) / 50) + diag(1e-6, n))) %*% rnorm(n))
   p <- r2_pts(5e5 + x, rep(5e6, n), z = z)
   r <- suppressWarnings(as.numeric(estimate_sac_range(p, "z")))
-  skip_if_not(is.finite(r) && r > 260 && r < 650, "range outside the fixture's window")
+  # The field's effective range is 150.  The window was 260 to 650, around
+  # the 499 the equal-lag fit returned for it; the default lags now resolve
+  # the short lags and the estimate is 144.
+  skip_if_not(is.finite(r) && r > 100 && r < 250, "range outside the fixture's window")
   # Automatic grid: 15 x 1, blocks 667 m long, longer than the range.
   res <- r3_collect_warnings(r2_quiet(
     make_folds(p, k = 5, method = "block_kfold", response_var = "z", seed = 1)))
   expect_equal(c(res$value$params$grid_nx, res$value$params$grid_ny), c(15, 1))
   expect_length(res$warnings, 0L)
-  # block_nx: 1000 m blocks are silent, 250 m blocks warn.
+  # block_nx: 1000 m blocks are silent, 100 m blocks warn.
   res <- r3_collect_warnings(r2_quiet(
     make_folds(p, k = 5, method = "block_kfold", response_var = "z", block_nx = 10, seed = 1)))
   expect_length(res$warnings, 0L)
   res <- r3_collect_warnings(r2_quiet(
-    make_folds(p, k = 5, method = "block_kfold", response_var = "z", block_nx = 40, seed = 1)))
+    make_folds(p, k = 5, method = "block_kfold", response_var = "z", block_nx = 100, seed = 1)))
   expect_length(res$warnings, 1L)
   expect_match(res$warnings, "block_nx/block_ny yield blocks smaller than autocorrelation range")
 
@@ -167,11 +170,18 @@ test_that("a block size that leaves one block stops without announcing a lowered
                  "the block size \\(600\\) produces a single block"),
     level = logger::INFO)
   expect_false(log_has(lines, "Reducing k to match"))
-  # Two blocks or more still lower k, and say so.
+  expect_false(log_has(lines, "returning [0-9]+ folds, not the k"))
+  # Two blocks or more still lower k, and say so.  That was a log line only
+  # ("block_size produces only 4 blocks (< k = 5). Reducing k to match."),
+  # which this test pinned; it is now a warning of class
+  # spatialkit_k_reduced, logged as well.
   lines <- capture_spatialkit_log(
-    f <- make_folds(p, k = 5, method = "block_kfold", block_size = 400, seed = 1),
+    expect_warning(
+      f <- make_folds(p, k = 5, method = "block_kfold", block_size = 400, seed = 1),
+      "returning 4 folds, not the k = 5 asked for: block_size = 400 builds a 2 x 2 grid",
+      class = "spatialkit_k_reduced"),
     level = logger::INFO)
-  expect_true(log_has(lines, "block_size produces only 4 blocks \\(< k = 5\\). Reducing k"))
+  expect_true(log_has(lines, "returning 4 folds, not the k = 5 asked for"))
   expect_equal(f$k, 4L)
 })
 

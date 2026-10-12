@@ -27,7 +27,10 @@
 #' @param predictor_vars Predictor column names.  May be \code{character(0)}
 #'   for an intercept-only model (\code{fit_bayesian_spatial_model()} supports
 #'   one; the GWR and random-forest backends do not and reject it themselves).
-#' @param boundary Optional sf/sfc for CRS alignment.
+#' @param boundary Optional sf/sfc whose CRS the data are projected to.  It
+#'   is not a clip: rows that fall outside it are kept.  Subset
+#'   \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
+#'   restrict the rows.
 #' @param pointize Strategy for non-point geometry coercion, passed to
 #'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 #'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
@@ -46,8 +49,19 @@
 #'   layer carries that column, else \code{NULL}) and \code{reason} (one per
 #'   dropped row: \code{"geometry"}, \code{"missing"} or
 #'   \code{"non_finite"}, in that order of precedence when several apply),
+#'   \code{by_column} (for each modelling column, and for
+#'   \code{"(geometry)"}, how many of the dropped rows it is missing or
+#'   non-finite in; a row can count under several),
+#'   \code{response_std_diff} (the mean response of the dropped rows minus
+#'   that of the kept rows, in standard deviations of the response over both;
+#'   \code{NA} when the response is not numeric, or is itself missing in
+#'   every dropped row),
 #'   plus \code{n_rows}, the number of rows returned, which the record was
-#'   made for.
+#'   made for.  The same record carries two marks on the rows that were
+#'   kept: \code{constant_predictors}, the names of the predictors that take
+#'   one value in every returned row (\code{character(0)} when none does),
+#'   and \code{n_duplicate_locations}, the number of returned rows whose
+#'   coordinates repeat those of an earlier row.
 #'   Every fit stores \code{n} as \code{$info$n_dropped}.  The record
 #'   describes the rows this call returned and does not survive subsetting:
 #'   \code{clean[i, ]}, like \code{dplyr::filter()}, \code{slice()} or
@@ -65,6 +79,37 @@
 #'   envelope is included in that, deliberately; only coordinates the heuristic
 #'   declines are passed through as-is.  Set the CRS on \code{data_sf} if the
 #'   data are planar.
+#' @section Warnings:
+#' When preparing data for a fit (\code{require_response = TRUE}) two
+#' conditions are raised as R warnings, each with a class so it can be caught
+#' by name with \code{tryCatch()} or \code{withCallingHandlers()}:
+#' \describe{
+#'   \item{\code{spatialkit_rows_dropped}}{Rows were dropped.  The message
+#'     gives the number and share of rows, the count by reason and by
+#'     column, and, for a numeric response, how far the mean response of
+#'     the dropped rows sits from that of the kept rows.  A fit on the rows
+#'     that remain describes those rows only; when the difference is large
+#'     the rows are not missing at random and the fit is biased towards the
+#'     complete ones.}
+#'   \item{\code{spatialkit_constant_predictor}}{A predictor takes a single
+#'     value in every row that remains.  Its coefficient cannot be told from
+#'     the intercept: a GWR window is rank-deficient, a Bayesian slope is
+#'     its prior, and a forest ignores it.  The predictor is kept; drop it
+#'     from \code{predictor_vars}.}
+#' }
+#' Every fitter and every \code{cv_*()} function prepares its data here and
+#' passes these on.  \code{\link{compare_models_cv}()},
+#' \code{\link{cv_block_size_sweep}()} and
+#' \code{\link{select_features_forward}()} run several cross-validations
+#' of one layer, each of which prepares it, and raise a warning of either
+#' class once per distinct text for the run.
+#'
+#' With \code{require_response = FALSE} (how every \code{predict()} method
+#' prepares \code{newdata}) neither is raised: the dropped rows are written
+#' to the log and to the record, and the prediction for each comes back
+#' \code{NA}, so nothing is lost without a trace.  Repeated locations are
+#' legitimate (repeat visits to one site) and are counted in the record and
+#' the log, never warned about.
 #' @family model fitting
 #' @family spatial data preparation
 #' @examples
@@ -75,7 +120,8 @@
 #'              pred = c(1, 2, 3, 4, Inf)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' clean <- prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+#' # Drops rows 3 (NA) and 5 (Inf), and warns that it did, with the counts.
+#' clean <- suppressWarnings(prep_model_data(dat, "resp", "pred"))
 #' attr(clean, "dropped")
 #' @export
 prep_model_data <- function(data_sf, response_var, predictor_vars,
@@ -210,12 +256,133 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   keep <- ok_cc & ok_fin & ok_geom
   dropped     <- sum(!keep)
   dropped_geo <- sum(!ok_geom)
-  if (dropped > 0)
-    .log_warn(paste0("prep_model_data(): dropping %d row(s) with non-finite or ",
-                     "missing values (%d of them with an empty or non-finite ",
-                     "geometry)."), dropped, dropped_geo)
+  drop_idx    <- unname(which(!keep))
+  drop_reason <- as.character(ifelse(!ok_geom[drop_idx], "geometry",
+                              ifelse(!ok_cc[drop_idx], "missing", "non_finite")))
+
+  # How many of the dropped rows each column is responsible for.  A row can
+  # count under several columns, so these do not sum to `dropped`.
+  col_bad <- lapply(df, function(v) {
+    b <- is.na(v)
+    if (is.numeric(v)) b <- b | !is.finite(v)
+    b
+  })
+  by_column <- vapply(col_bad, function(b) sum(b & !keep), integer(1))
+  if (dropped_geo > 0L) by_column <- c(by_column, `(geometry)` = dropped_geo)
+
+  # Where the dropped rows sit on the response.  Rows that go missing on a
+  # predictor for reasons tied to the outcome leave a fit that describes the
+  # complete rows only: in the case that prompted this, 41% of the rows were
+  # dropped and the mean response moved from 0.03 to -0.62 with nothing said.
+  # Measured in SDs of the response over the rows where it is finite, so the
+  # number does not depend on its units.
+  response_std_diff <- NA_real_
+  shift_se   <- NA_real_
+  resp_means <- c(dropped = NA_real_, kept = NA_real_)
+  if (require_response && dropped > 0L && sum(keep) > 0L) {
+    y_all <- sf::st_drop_geometry(data_sf)[[response_var]]
+    if (is.logical(y_all)) y_all <- as.numeric(y_all)
+    if (is.numeric(y_all)) {
+      y_drop <- y_all[!keep]; y_drop <- y_drop[is.finite(y_drop)]
+      y_keep <- y_all[keep]
+      s_all  <- stats::sd(c(y_drop, y_keep))
+      if (length(y_drop) > 0L && is.finite(s_all) && s_all > 0) {
+        resp_means <- c(dropped = mean(y_drop), kept = mean(y_keep))
+        response_std_diff <- unname((resp_means[["dropped"]] -
+                                       resp_means[["kept"]]) / s_all)
+        # Two standard errors of a difference of means in SD units: below
+        # that, a handful of dropped rows says nothing about why they are
+        # missing, and the message states the difference without reading it.
+        shift_se <- sqrt(1 / length(y_drop) + 1 / length(y_keep))
+      }
+    }
+  }
+
+  if (dropped > 0L) {
+    n_miss <- sum(drop_reason == "missing")
+    n_nonf <- sum(drop_reason == "non_finite")
+    cols_txt <- paste(sprintf("%s %d", names(by_column), by_column)[by_column > 0L],
+                      collapse = ", ")
+    if (require_response) {
+      shift_txt <- if (is.finite(response_std_diff))
+        sprintf(paste0(" The response '%s' averages %s in the dropped rows ",
+                       "that have one and %s in the kept rows, a difference ",
+                       "of %.2f SD%s."),
+                response_var, format(signif(resp_means[["dropped"]], 4)),
+                format(signif(resp_means[["kept"]], 4)), response_std_diff,
+                if (abs(response_std_diff) >= 0.2 &&
+                    abs(response_std_diff) > 2 * shift_se)
+                  ", more than two standard errors, so the rows are not missing at random and the fit describes the kept rows, not the layer"
+                else "")
+      else ""
+      .warn_classed(
+        "spatialkit_rows_dropped",
+        paste0("prep_model_data(): dropped %d of %d row(s) (%.1f%%): %d with ",
+               "a missing value, %d with a non-finite value, %d with an empty ",
+               "or non-finite geometry. Rows affected by column: %s.%s The ",
+               "fit uses the %d row(s) that remain; attr(, \"dropped\") lists ",
+               "the rows removed."),
+        dropped, nrow(data_sf), 100 * dropped / nrow(data_sf),
+        n_miss, n_nonf, dropped_geo, cols_txt, shift_txt, sum(keep))
+    } else {
+      # Prediction mode.  Every predict() method returns NA at exactly these
+      # rows, so the result itself says which they are; an R warning per call
+      # would fire on every chunk of a predict_surface() grid with covariate
+      # gaps.  The log line and the record stay.
+      .log_warn(paste0("prep_model_data(): dropping %d row(s) with non-finite or ",
+                       "missing values (%d of them with an empty or non-finite ",
+                       "geometry). Rows affected by column: %s."),
+                dropped, dropped_geo, cols_txt)
+    }
+  }
 
   out <- data_sf[keep, , drop = FALSE]
+
+  # Two marks on the rows that remain.  A predictor that takes one value in
+  # every row cannot be told from the intercept (it is one source of the
+  # rank-deficient GWR windows), and repeated locations change what a
+  # neighbour count and a distance quantile mean.  Both passed through
+  # unmarked.
+  out_df <- sf::st_drop_geometry(out)
+  constant_predictors <- character(0)
+  if (nrow(out) >= 2L && length(predictor_vars) > 0L) {
+    is_const <- vapply(intersect(predictor_vars, names(out_df)), function(cn) {
+      v <- out_df[[cn]]
+      if (is.numeric(v)) isTRUE(max(v) == min(v)) else length(unique(v)) <= 1L
+    }, logical(1))
+    constant_predictors <- names(is_const)[is_const]
+  }
+  xy_out <- xy_mat
+  n_duplicate_locations <- NA_integer_
+  if (nrow(xy_out) == length(keep) && ncol(xy_out) >= 2L) {
+    xy_out <- xy_out[keep, , drop = FALSE]
+    # complex(): one hashable value per location, far faster than
+    # duplicated() on a two-column matrix, which pastes each row.
+    n_duplicate_locations <- sum(duplicated(complex(real = xy_out[, 1L],
+                                                    imaginary = xy_out[, 2L])))
+  } else if (nrow(out) > 0L) {
+    xy_k <- sf::st_coordinates(sf::st_geometry(out))
+    if (nrow(xy_k) == nrow(out) && ncol(xy_k) >= 2L)
+      n_duplicate_locations <- sum(duplicated(complex(real = xy_k[, 1L],
+                                                      imaginary = xy_k[, 2L])))
+  }
+  if (require_response) {
+    if (length(constant_predictors) > 0L)
+      .warn_classed(
+        "spatialkit_constant_predictor",
+        paste0("prep_model_data(): predictor(s) %s take a single value in all ",
+               "%d row(s) kept, so their coefficients cannot be told from the ",
+               "intercept (a GWR window is rank-deficient, a Bayesian slope is ",
+               "its prior). They are kept in the data; remove them from ",
+               "`predictor_vars`."),
+        paste(sQuote(constant_predictors), collapse = ", "), nrow(out))
+    if (isTRUE(n_duplicate_locations > 0L))
+      .log_info(paste0("prep_model_data(): %d of %d row(s) kept share their ",
+                       "coordinates with an earlier row (repeated locations); ",
+                       "attr(, \"dropped\")$n_duplicate_locations records the ",
+                       "count."),
+                n_duplicate_locations, nrow(out))
+  }
   # What was dropped, with the rows' identities.  The three masks above used
   # to be collapsed into the counts of that log line and nothing else, so a
   # fit's $n was the post-cleaning row count with no trace of how many rows
@@ -224,17 +391,22 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # as passed (point coercion and projection keep the row order); the row IDs
   # are given as well when the layer carries `..row_id`, which is what the
   # cross-validation functions name rows by.
-  drop_idx <- unname(which(!keep))
   # Stamped and classed, so that the record cannot outlive the rows it
-  # describes: `out[i, ]` returns a plain layer without it.
+  # describes: `out[i, ]` returns a plain layer without it.  The two marks on
+  # the kept rows ride in the same record for that reason: as plain
+  # attributes they would survive `[` and describe rows the subset no longer
+  # has.
   out <- .set_row_record(out, "dropped", list(
     n          = as.integer(dropped),
     n_geometry = as.integer(dropped_geo),
     which      = drop_idx,
     row_id     = if ("..row_id" %in% names(data_sf))
       data_sf[["..row_id"]][drop_idx] else NULL,
-    reason     = as.character(ifelse(!ok_geom[drop_idx], "geometry",
-                              ifelse(!ok_cc[drop_idx], "missing", "non_finite")))
+    reason     = drop_reason,
+    by_column  = by_column,
+    response_std_diff     = response_std_diff,
+    constant_predictors   = constant_predictors,
+    n_duplicate_locations = as.integer(n_duplicate_locations)
   ))
   out
 }
@@ -275,11 +447,23 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
 #' These are the bounds a length-scale \emph{prior} is calibrated over, not
 #' the scales a fitted model can resolve: that depends on the basis size
 #' (\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
-#' it as \code{$info$gp_ell_min}).  Both bounds are fixed fractions of the
+#' it as \code{$info$gp_ell_min}, and in map units as
+#' \code{$info$gp_resolution}).  Both bounds are fixed fractions of the
 #' spread of pairwise distances, so they do not shrink as points are added to
-#' the same area.  A surface whose range sits below what the basis resolves
-#' needs a larger \code{gp_k}: more points help the data identify a short
-#' range, but they make neither these bounds nor the derived basis finer.
+#' the same area: more points help the data identify a short range, but they
+#' make neither these bounds nor the derived basis finer.
+#'
+#' The lower bound is the 25th percentile of the pairwise distances, as an
+#' effective range.  On real layouts that is 14 to 33 percent of the extent
+#' along each axis (about 32 km on a uniform 100 km square), and the prior
+#' built on it puts 1 percent of its mass below it.  A surface whose range
+#' is shorter needs two things, not one: a basis fine enough to represent it
+#' and a prior that allows it.  A larger \code{gp_k} under the prior
+#' calibrated here changes almost nothing, because the prior still holds the
+#' length-scale above this bound.  \code{fit_bayesian_spatial_model()}
+#' therefore moves the prior's lower tail down to the length-scale the basis
+#' resolves whenever \code{gp_resolution} or an explicit \code{gp_k} asks
+#' for a finer basis than the one derived from these bounds.
 #'
 #' @param coords_xy Numeric matrix or data.frame of coordinates with at least
 #'   two columns; the first two are used, and replicated rows are collapsed
@@ -344,6 +528,17 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
   upper <- max(upper, lower * 1.2)               # ensure separation
   c(lower = as.numeric(lower), upper = as.numeric(upper))
 }
+
+
+# The cap on the TOTAL number of basis functions, gp_k^2.  One constant, read
+# by .gp_basis_spec() for the derived k and by fit_bayesian_spatial_model()
+# for a requested gp_resolution, so the two cannot disagree.
+.gp_max_basis <- 2500L
+
+# sqrt(2 log 20): the distance, in length-scales, at which a
+# squared-exponential correlation has fallen to 5 percent.  An "effective
+# range" is this many length-scales.
+.gp_se_range_factor <- sqrt(2 * log(20))
 
 
 #' Choose GP basis count and boundary factor from the length-scale/domain ratio
@@ -420,7 +615,7 @@ gp_lengthscale_bounds <- function(coords_xy, q_small = 0.25, max_n = 1000L) {
 #' @keywords internal
 #' @noRd
 .gp_basis_spec <- function(coords_xy, ls_bounds,
-                           k_min = 10L, max_basis = 2500L, c = NULL) {
+                           k_min = 10L, max_basis = .gp_max_basis, c = NULL) {
   # Reproduce brms::choose_L()'s domain measure exactly: centre each column,
   # then take the range over the POOLED matrix.  na.rm mirrors brms.
   xy <- as.matrix(coords_xy)[, 1:2, drop = FALSE]

@@ -37,8 +37,10 @@ step("02.2", "Candidate cell counts, cheapest first")
 lv <- determine_optimal_levels(pts, max_levels = 40)
 cat("  geometric candidates:", paste(lv, collapse = ", "), "\n")
 
-# With a response and predictors it can also score levels on residual spatial
-# autocorrelation. `criterion = "combined"` REQUIRES both.
+# With a response it can also rank the counts around the elbow by Moran's z of
+# the cell means (of their residuals on the predictors when those are given).
+# That statistic is a diagnostic and not a count rule, and the call says so in
+# a warning of class "spatialkit_diagnostic_ranking".
 lv2 <- determine_optimal_levels(pts, max_levels = 40, criterion = "combined",
                                 response_var = "z", predictor_vars = "elev")
 cat("  combined candidates:", paste(lv2, collapse = ", "), "\n")
@@ -50,22 +52,24 @@ step("02.3", "The full ladder")
 prof <- resolution_profile(pts, response_var = "z", n_levels = 16)
 print(prof)
 
-step("02.4", "Four criteria, four answers")
+step("02.4", "Three criteria, three answers")
 # Each criterion also reports the band of levels it cannot tell apart from its
 # own pick. The spread BETWEEN criteria is usually wider than any one of those
 # bands, and it is the more honest measure of how much the data pins this down.
-for (cr in c("cp", "reliability", "elbow", "moran_z")) {
+# The profile's fourth column, moran_z, is a diagnostic of the cell means and
+# not a count rule: select_resolution() refuses it unless asked with
+# diagnostic = TRUE, so it is not read here.
+for (cr in c("cp", "reliability", "elbow")) {
   s <- try(select_resolution(prof, criterion = cr), silent = TRUE)
   if (inherits(s, "try-error")) {
     cat(sprintf("  %-12s not available on this profile\n", cr))
     next
   }
-  # `edge` names the bound an optimum sits on: the range floor, the support
-  # ceiling, or the first level the criterion can be computed at (above nine
-  # cells for moran_z). There the bound chose and the criterion did not.
+  # `edge` names the bound an optimum sits on: the range floor or the support
+  # ceiling. There the bound chose and the criterion did not.
   # n_levels only sets how many rungs fall between the ends, so it cannot move
-  # them: lower min_cell_n to move the ceiling, or set range_floor = FALSE (or
-  # pass `levels`) to move the floor, and run it again.
+  # them: lower min_cell_n to move the ceiling, or pass range_floor = FALSE to
+  # select_resolution() to read reliability below the floor, and run it again.
   edge <- if (!is.na(s$edge)) paste0("  <- at ", s$edge) else ""
   # The flat region is a SET: it can skip a rung, so printing its first two
   # members as "a to b" both truncated it and implied the levels between were
@@ -83,7 +87,8 @@ if (!skip_without("ggplot2", "the profile plot")) {
   look_for("where the curves stop moving. A criterion whose optimum sits at ",
            "the first or last level it was scored at did not choose: the bound ",
            "did, and the caption says which. Lower min_cell_n to move the ",
-           "ceiling, or set range_floor = FALSE to move the floor, and run it again.")
+           "ceiling, or pass range_floor = FALSE to select_resolution() to read ",
+           "reliability below the floor, and run it again.")
   show_plot(plot(prof), "02-profile.png", height = 7)
 }
 

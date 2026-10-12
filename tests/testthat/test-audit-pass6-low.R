@@ -59,7 +59,6 @@ test_that("cv_bayes() fills yhat_sd from the posterior predictive draws", {
 # --------------------------------------------------------------------------
 
 test_that("fit_gwr_model() refuses n <= p + 1 observations with a single error", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   d <- .p6l_pts(n = 3, seed = 3)
   d$z <- c(1, 2, 4)

@@ -241,10 +241,10 @@ Cliff, A. D. and Ord, J. K. (1981) \emph{Spatial Processes:
 Models and Applications}. Pion, London. Section 8.3.
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()},
-\code{\link{model_metrics}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=model_metrics]{model_metrics()}}
 }
 \concept{model evaluation}

@@ -73,10 +73,8 @@
 #'       The distance axis is labelled in the units of the CRS the variogram
 #'       was actually fitted in, which is not necessarily the fit's own CRS
 #'       (lon/lat data are projected first). Each curve is the variogram
-#'       \code{estimate_sac_range()} returns for its variable: all point pairs,
-#'       or, when the all-pairs fit was unusable, the widest of four directions,
-#'       which is named with its azimuth (in the title for the residuals, in the
-#'       caption for the response). A fit that identified no range says why in
+#'       \code{estimate_sac_range()} returns for its variable, which is over
+#'       all point pairs. A fit that identified no range says why in
 #'       the subtitle, since the overlaid model line is then not a fit to believe.
 #'       Requires 'gstat'.}
 #'     \item{\code{"coefficients"}}{For a GWR fit only: the local coefficient
@@ -85,8 +83,10 @@
 #'       collinear for that term are drawn hollow and grey
 #'       (\code{mask = TRUE}): for a slope, where the kernel-weighted
 #'       window's slope condition index (\code{cn_slopes}, predictors
-#'       centred in the window) is above 30 or the window is singular, or
-#'       where the index with the intercept (\code{cn}) is above 1e6; for
+#'       centred in the window) is above 30 or the window is singular; a
+#'       predictor far from zero is not masked, because the local solve
+#'       centres each window and the index with the intercept (\code{cn})
+#'       does not enter; for
 #'       the Intercept, where \code{cn} is above 30 (a predictor far from 0
 #'       against its local spread makes the local intercept an
 #'       extrapolation).  They are masked because the smooth surface a naive map draws
@@ -283,7 +283,10 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
   # map of a temperature in kelvin, identical to the one in degrees C that
   # was drawn.  A fit made before `cn_slopes` existed falls back to `cn`.
   is_intercept <- identical(term, "Intercept") && !("Intercept" %in% x$predictor_vars)
-  cn_bad <- if (is.data.frame(lc) && nrow(lc) == nrow(dat)) {
+  # A fit with no predictors has a local intercept and nothing it could be
+  # collinear with: the map is of local means, and nothing is masked.
+  cn_bad <- if (!length(x$predictor_vars)) rep(FALSE, nrow(dat))
+  else if (is.data.frame(lc) && nrow(lc) == nrow(dat)) {
     if (is_intercept) (!is.finite(lc$cn) | lc$cn > 30)
     else .gwr_slopes_collinear(lc)
   } else rep(FALSE, nrow(dat))
@@ -362,8 +365,11 @@ plot.spatial_fit <- function(x, type = c("residuals", "observed_predicted",
 #' rather than refused.
 #'
 #' Nothing is recomputed: the plot reads the \code{variogram},
-#' \code{variogram_model}, \code{crs}, \code{directional} and
-#' \code{anisotropy_used} attributes the estimate already carries.  The
+#' \code{variogram_model}, \code{crs} and \code{rejected_reason}
+#' attributes the estimate already carries.  The variogram is the one over
+#' all point pairs; a result stored by an earlier version, whose range could
+#' be that of the widest of four directions (\code{anisotropy_used}
+#' \code{TRUE}), is titled with its azimuth.  The
 #' distance axis is in the units of the CRS the variogram was actually fitted
 #' in, which \code{estimate_sac_range()} may have chosen itself for lon/lat
 #' input.
@@ -453,11 +459,13 @@ plot.sac_range <- function(x, ...) {
     if (is.null(u) || is.na(u) || !nzchar(u)) "CRS units" else u
   }, error = function(e) "CRS units")
 
-  # Which variogram is this?  When anisotropy was established,
-  # estimate_sac_range() returns the single azimuth with the widest range --
-  # about a quarter of the point pairs -- and calling that plainly by `what`
-  # overstates the structure for the plot whose whole purpose is to show how
-  # much there is.  NA: all pairs; "": one direction, azimuth unknown.
+  # Which variogram is this?  estimate_sac_range() returns the all-pairs
+  # variogram and sets anisotropy_used to FALSE.  An object stored by an
+  # earlier version can carry TRUE: its range was that of the single azimuth
+  # with the widest range -- about a quarter of the point pairs -- and
+  # calling that plainly by `what` overstates the structure for the plot
+  # whose whole purpose is to show how much there is.  NA: all pairs; "":
+  # one direction, azimuth unknown.
   azimuth_of <- function(s) {
     if (!isTRUE(attr(s, "anisotropy_used"))) return(NA_character_)
     dir_r <- attr(s, "directional")
@@ -506,9 +514,8 @@ plot.sac_range <- function(x, ...) {
                                     linewidth = 0.8)
     }
     # Each curve is whichever variogram estimate_sac_range() returned for its
-    # variable: all pairs, or the widest single direction when the all-pairs
-    # fit was unusable -- which a response carrying a trend often is while
-    # its residuals are not.  The overlay was labelled plainly as the
+    # variable: all pairs, or, on an object stored by an earlier version, the
+    # widest single direction.  The overlay was labelled plainly as the
     # response whichever it was, and its sill and range set against an
     # all-pairs residual curve over four times as many pairs.
     ov_az <- azimuth_of(overlay)
@@ -525,8 +532,8 @@ plot.sac_range <- function(x, ...) {
     s_res <- sill_of(vm); s_resp <- sill_of(ovm)
     both_ok <- same_pairs && is.finite(sac) && is.finite(overlay) &&
       is.finite(s_res) && is.finite(s_resp) && s_resp > 0
-    # A range can be missing for several reasons (no sill within the lags, a
-    # fit that did not converge, a falling or flat variogram), so the clause
+    # A range can be missing for several reasons (no sill within the lags, no
+    # spatial structure, a falling or flat variogram), so the clause
     # says only that none was identified.  "Reached no identified sill"
     # described every case as a still-rising curve.  The residual reason is
     # in the subtitle; the response's appears nowhere else, so it is named.
@@ -567,23 +574,25 @@ plot.sac_range <- function(x, ...) {
   } else if (!is.null(attr(sac, "rejected_range"))) {
     # A variogram that never reaches a sill is the single most useful thing to
     # SEE, so draw it and label why no range is marked, rather than refusing.
-    # estimate_sac_range() records WHICH of two reasons applied; hard-coding
-    # the sill wording for both captioned a non-converged fit with a sentence
-    # its own two numbers refute (range 11 "exceeds" a cutoff of 682).
+    # estimate_sac_range() records WHICH reason applied; hard-coding the sill
+    # wording for all of them captioned a refusal with a sentence its own two
+    # numbers refute (range 11 "exceeds" a cutoff of 682).
     reason <- attr(sac, "rejected_reason")
     p <- p + ggplot2::labs(
       subtitle = .wrap_label(
         if (identical(reason, "variogram model did not converge"))
+          # Not produced any more: a result stored by a version that fitted
+          # the model with gstat's iterative fit can carry it.
           sprintf(paste0("No effective range: the fit stopped at gstat's ",
                          "iteration limit, so the range it reports (%.0f) is ",
                          "where the optimiser halted, not a fitted parameter."),
                   attr(sac, "rejected_range"))
         else if (isTRUE(grepl("^no variogram model", reason)))
-          # Both model fits singular: the picture of residuals with no spatial
-          # structure at the lags resolved.  There is no model line to draw.
+          # Fewer than three lag bins hold point pairs, so nothing was
+          # fitted and there is no model line to draw.  (A flat variogram
+          # has a reason of its own and is captioned with it, below.)
           paste0("No effective range: no variogram model could be fitted ",
-                 "(a flat, nugget-only variogram -- no spatial structure at ",
-                 "these lags).")
+                 "(fewer than three lag bins hold point pairs).")
         else if (identical(reason, "empirical variogram decreases with distance"))
           # The shape of a periodic structure or of a variance that differs
           # between a dense cluster and the rest -- not of a trend, which rises
@@ -653,7 +662,8 @@ plot.sac_range <- function(x, ...) {
 #' the parameter that decides whether the scheme leaks, read from
 #' \code{folds$params}: the block size (and the estimated range when
 #' \code{auto_range} found one), the buffer, the number of location groups,
-#' or the median NNDM exclusion.
+#' the median NNDM exclusion, or, for kNNDM folds, that they are matched to
+#' the prediction distances.
 #'
 #' @param folds A list returned by \code{make_folds()}.
 #' @param points_sf The \code{sf} layer the folds were built from.
@@ -802,5 +812,6 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
       sprintf("Distance-matched exclusion, median %s%s", num(prm$median_buffer),
               units)
     else "Distance-matched exclusion (NNDM)",
+    knndm = "k folds matched to the distances from the prediction points (kNNDM)",
     NULL)
 }

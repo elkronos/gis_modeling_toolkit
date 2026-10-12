@@ -2,7 +2,6 @@
 # GWR regressions from the second adversarial review.
 # ===========================================================================
 
-skip_if_not_installed("GWmodel")
 skip_if_not_installed("sp")
 
 # Every warning raised while evaluating `expr`, muffled, beside its value (or
@@ -65,6 +64,7 @@ test_that("a one-predictor GWR is surveyed for local collinearity", {
 # ---------------------------------------------------------------------------
 
 test_that("the survey's kernel weights equal GWmodel::gw.weight()", {
+  skip_if_not_installed("GWmodel")
   d <- c(0, 0, 50, 100, 100, 150)
   for (k in c("bisquare", "gaussian", "tricube", "boxcar", "exponential")) {
     # Fixed, with points exactly at the kernel's edge.
@@ -84,6 +84,7 @@ test_that("the survey's kernel weights equal GWmodel::gw.weight()", {
 })
 
 test_that("a fixed boxcar bandwidth equal to the grid spacing is not called singular", {
+  skip_if_not_installed("GWmodel")
   set.seed(3)
   g <- expand.grid(x = seq(0, 1500, by = 100), y = seq(0, 1500, by = 100))
   g$a <- rnorm(nrow(g)); g$b <- rnorm(nrow(g))
@@ -100,17 +101,37 @@ test_that("a fixed boxcar bandwidth equal to the grid spacing is not called sing
                as.integer(colSums(W > 0)))
 })
 
-test_that("an exactly singular window stops the fit with the cause named", {
+test_that("an exactly singular window returns NA for what it cannot estimate, with the cause named", {
+  # `soil` is a 0/1 indicator, constant inside every 20-neighbour window.  The
+  # fit used to stop here ("inv(): matrix is singular").  The local solve
+  # returns the fit: the slope of `soil` is NA in every window, the intercept
+  # is NA where soil is 1 (it would absorb the slope there) and an estimate
+  # where soil is 0, and the slope of `a` and every fitted value are
+  # estimates.
   d <- .r2_clusters(exact = TRUE)
   r <- .r2_catch(fit_gwr_model(d, "z", c("a", "soil"), adaptive = TRUE,
                                bandwidth = 20))
-  expect_type(r$value, "character")
-  expect_match(r$value, "^fit_gwr_model\\(\\): GWR fit failed: inv\\(\\)")
-  expect_match(r$value, "local window's design is singular")
-  expect_match(r$value, "survey found [0-9]+ singular window")
-  # The collinearity warning before it does not promise NaN coefficients.
-  expect_true(any(grepl("an exactly singular window makes GWmodel stop the fit",
+  fit <- r$value
+  expect_s3_class(fit, "gwr_fit")
+  co <- coef(fit)
+  expect_true(all(is.na(co$soil)))
+  expect_identical(is.na(co$Intercept), d$soil == 1)
+  expect_false(anyNA(co$a))
+  expect_lt(max(abs(co$a - 2)), 0.5)
+  expect_false(anyNA(fitted(fit)))
+  expect_lt(sqrt(mean((fitted(fit) - (2 * d$a + 3 * d$soil))^2)), 0.15)
+  expect_identical(fit$info$n_local_singular, 200L)
+  expect_identical(fit$info$n_rank_deficient, 200L)
+  expect_true(all(fit$info$local_collinearity$rank == 2L))
+  w <- grep("local regressions are rank deficient", r$warnings, value = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "^fit_gwr_model\\(\\): 200 of 200 local regressions are rank deficient")
+  expect_match(w, "Intercept at 100, a at 0, soil at 200")
+  expect_match(w, "a predictor that is constant inside a window")
+  # The collinearity warning before it says what such a window returns.
+  expect_true(any(grepl("a coefficient that an exactly singular window cannot estimate is NA",
                         r$warnings)))
+  expect_false(any(grepl("GWmodel stop", r$warnings)))
 })
 
 test_that("non-finite coefficients at co-located points are blamed on the zero-width kernel", {
@@ -207,12 +228,21 @@ test_that("gwr_model_selection() ranks a model with an undefined AICc last", {
   sel <- r$value
   expect_s3_class(sel, "gwr_model_selection")
   expect_lt(min(sel$raw[[2]][, 3]), 0)
-  expect_identical(sel$best, "a")
-  expect_true(any(grepl("AICc is undefined for 1 of 6 model\\(s\\) at bandwidth 6",
+  # Of the models with a predictor, `a` alone is best, as it was.  The model
+  # without predictors is scored too and ranks above it: at 6 neighbours each
+  # window fits two parameters on five points, which costs more in AICc than
+  # `a` explains.
+  expect_identical(sel$table$variables[sel$table$n_vars > 0L][1L], "a")
+  expect_identical(sel$table$variables[1L], "<none>")
+  expect_identical(sel$best, character(0))
+  # Seven models: the six of the sweep and the one without predictors, which
+  # the table carries as `<none>`.
+  expect_true(any(grepl("AICc is undefined for 1 of 7 model\\(s\\) at bandwidth 6",
                         r$warnings)))
-  expect_true(is.na(sel$table$criterion[6]))
-  expect_identical(sel$table$n_vars[6], 3L)
-  expect_true(all(is.finite(sel$table$criterion[1:5])))
+  expect_identical(nrow(sel$table), 7L)
+  expect_true(is.na(sel$table$criterion[7]))
+  expect_identical(sel$table$n_vars[7], 3L)
+  expect_true(all(is.finite(sel$table$criterion[1:6])))
 })
 
 test_that("gwr_model_selection() warns when it raises a too-small adaptive bandwidth", {
@@ -231,8 +261,9 @@ test_that("gwr_model_selection() warns when it raises a too-small adaptive bandw
 
 # ---------------------------------------------------------------------------
 # An adaptive bandwidth above n was capped at n in silence: a distance passed
-# with adaptive left at TRUE, and bw.gwr()'s choice below 20 points, whose
-# search range [20, n] is then reversed.
+# with adaptive left at TRUE.  GWmodel::bw.gwr()'s choice below 20 points,
+# whose search range [20, n] is reversed, was capped the same way; the
+# package's own search covers the range the model allows, from its floor to n.
 # ---------------------------------------------------------------------------
 
 test_that("an adaptive bandwidth above n is capped with a warning that suggests adaptive = FALSE", {
@@ -257,7 +288,13 @@ test_that("an adaptive bandwidth above n is capped with a warning that suggests 
                         rs$warnings)))
 })
 
-test_that("below 20 points, capping bw.gwr()'s choice at n is said", {
+test_that("below 20 points the bandwidth is searched from the model's floor to n", {
+  # GWmodel::bw.gwr() searches adaptive counts from 20 up, a range that is
+  # empty for 12 observations: it returned 18, which was capped at 12 with a
+  # warning that said neither was an optimised bandwidth.  The package's
+  # search runs from the floor for two parameters (4 neighbours with the
+  # bisquare kernel) to 12, so the bandwidth is a selected one and there is
+  # nothing to cap.
   set.seed(1)
   n <- 12
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000); a <- rnorm(n)
@@ -265,18 +302,25 @@ test_that("below 20 points, capping bw.gwr()'s choice at n is said", {
                                z = 1 + (x / 1000) * a + rnorm(n, 0, 0.3)),
                     coords = c("x", "y"), crs = 32617)
   r <- .r2_catch(fit_gwr_model(d, "z", "a"))
-  expect_equal(r$value$info$bandwidth, 12)
+  bs <- r$value$info$bandwidth_search
+  expect_identical(bs$range, c(4, 12))
+  expect_gte(r$value$info$bandwidth, 4)
+  expect_lte(r$value$info$bandwidth, 12)
   expect_false(r$value$info$bandwidth_is_fallback)
-  expect_true(any(grepl(paste0("bw\\.gwr\\(\\) searches adaptive bandwidths ",
-                               "from 20 neighbours up to n, a range that is ",
-                               "empty for 12 observations, and returned [0-9]+; ",
-                               "using 12"), r$warnings)))
+  expect_false(any(grepl("bw\\.gwr|range that is empty|exceeds the 12 observations",
+                         r$warnings)))
+  # Every count in the range was a candidate, and the one used has the lowest
+  # AICc of those scored.
+  expect_identical(bs$curve$bandwidth[which.min(bs$curve$criterion)],
+                   r$value$info$bandwidth)
+  expect_equal(min(bs$curve$criterion), r$value$info$AICc, tolerance = 1e-8)
 
   s <- .r2_pts(14, 1, c("a", "b"))
   s$z <- 1 + s$a + rnorm(14, 0, 0.3)
   rs <- .r2_catch(gwr_model_selection(s, "z", c("a", "b")))
-  expect_identical(rs$value$bandwidth, 14L)
-  expect_true(any(grepl("empty for 14 observations", rs$warnings)))
+  expect_gte(rs$value$bandwidth, 5L)
+  expect_lte(rs$value$bandwidth, 14L)
+  expect_false(any(grepl("empty for 14 observations", rs$warnings)))
 })
 
 

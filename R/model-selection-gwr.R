@@ -1,52 +1,54 @@
 # =============================================================================
-# GWR-specific model selection (wrapper for GWmodel::gwr.model.selection)
+# GWR-specific model selection (the forward sweep of
+# GWmodel::gwr.model.selection, scored by the package's local solve)
 # =============================================================================
 #
 # Design note
 # -----------
-# Every call into GWmodel is confined to .gwr_ms_engine().  Everything after
-# it -- criterion extraction, model-list normalisation, ranking -- is pure and
-# is tested directly, and the engine itself is injectable so the assembly path
-# can be exercised without GWmodel installed.  This matters because GWmodel is
-# in Suggests: without the split, the entire function would be untested on any
-# machine that does not have it, which is every CRAN check machine.
+# Every model is scored inside .gwr_ms_engine().  Everything after it --
+# criterion extraction, model-list normalisation, ranking -- is pure and is
+# tested directly, and the engine itself is injectable so the assembly path
+# can be exercised on its own.  The engine returns its sweep in the layout
+# GWmodel's function returns, which is what the helpers below read.
 # =============================================================================
 
 
-#' Extract the ranking criterion from GWmodel's model-selection diagnostics
+#' Extract the ranking criterion from a model-selection diagnostic table
 #'
-#' \code{GWmodel::gwr.model.selection()} documents its diagnostic table
-#' (\code{GWR.df}) as "a data frame consited of four columns: bandwidth, AIC,
-#' AICc, RSS".  So \strong{AICc is column 3}, and column 2 is the uncorrected
-#' AIC.  GWmodel builds the table with \code{rbind()} over unnamed vectors
+#' The table has the layout of \code{GWmodel::gwr.model.selection()}'s
+#' \code{GWR.df}, which GWmodel documents as "a data frame consited of four
+#' columns: bandwidth, AIC, AICc, RSS".  So \strong{AICc is column 3}, and
+#' column 2 is the uncorrected AIC.  The package's own engine names the four
+#' columns and the criterion is found by name.  GWmodel builds its table with
+#' \code{rbind()} over unnamed vectors
 #' (\code{c(bw, aic.rss[2], aic.rss[3], aic.rss[1])} in \code{Model.selection.r}),
-#' so it never carries column names: the by-name branch below cannot fire on a
-#' real GWmodel return, and the positional fallback is the path every real call
-#' takes.  Getting it wrong is not a fallback-only risk, it is the normal case.
+#' so a table that comes from it, or from an injected engine that copies it,
+#' carries no column names and is read by position.
 #' Reading column 2 ranks on AIC while labelling the result AICc, which selects
 #' larger models than AICc would and can carry a pure-noise predictor.
-#'
-#' The by-name branch is kept for a future GWmodel that labels the table, and
-#' for injected test engines.
 #'
 #' @param gwr_df The second element of the \code{gwr.model.selection()} return.
 #' @param criterion Column name to look for, matched case-insensitively.
 #' @return A list with \code{values} (numeric, non-finite coerced to
-#'   \code{NA}), \code{column}, \code{column_name}, \code{by_name},
+#'   \code{NA}), \code{raw} (the same before that coercion, so that an
+#'   infinite criterion can be told from a missing one), \code{column},
+#'   \code{column_name}, \code{by_name},
 #'   \code{shape_ok} (\code{TRUE} when the table has the documented four
 #'   columns, or when the column was located by name) and \code{label}.
 #' @keywords internal
 #' @noRd
 .gwr_ms_criterion <- function(gwr_df, criterion = "AICc") {
   if (is.null(gwr_df))
-    stop(".gwr_ms_criterion(): GWmodel returned no diagnostic table.",
+    stop(".gwr_ms_criterion(): the engine returned no diagnostic table.",
          call. = FALSE)
 
   # A bare numeric vector (no dim) is unambiguous: it IS the criterion.
   if (is.atomic(gwr_df) && is.null(dim(gwr_df))) {
     vals <- suppressWarnings(as.numeric(gwr_df))
+    raw_vals <- vals
     vals[!is.finite(vals)] <- NA_real_
-    return(list(values = vals, column = 1L, column_name = NA_character_,
+    return(list(values = vals, raw = raw_vals, column = 1L,
+                column_name = NA_character_,
                 by_name = FALSE, shape_ok = FALSE,
                 label = sprintf("%s (assumed: unlabelled vector)", criterion)))
   }
@@ -82,6 +84,7 @@
 
   raw  <- if (is_df) gwr_df[[col]] else gwr_df[, col]
   vals <- suppressWarnings(as.numeric(raw))
+  raw_vals <- vals
   vals[!is.finite(vals)] <- NA_real_
 
   col_name <- if (!is.null(cn) && nzchar(cn[[col]])) cn[[col]] else NA_character_
@@ -93,7 +96,7 @@
       sprintf("%s (assumed: column %d, labelled '%s')", criterion, col, col_name)
     else sprintf("%s (assumed: column %d, unlabelled)", criterion, col)
 
-  list(values = vals, column = col, column_name = col_name,
+  list(values = vals, raw = raw_vals, column = col, column_name = col_name,
        by_name = by_name, shape_ok = shape_ok, label = label)
 }
 
@@ -144,7 +147,7 @@
 #' @noRd
 .gwr_ms_varsets <- function(model_list, response_var) {
   if (!is.list(model_list) || length(model_list) == 0L)
-    stop(".gwr_ms_varsets(): GWmodel returned an empty model list.",
+    stop(".gwr_ms_varsets(): the engine returned an empty model list.",
          call. = FALSE)
 
   lapply(model_list, function(m) {
@@ -176,13 +179,15 @@
 #' @param minimise Logical; \code{TRUE} for AICc/CV, \code{FALSE} for a
 #'   criterion where larger is better.
 #' @return A data.frame with \code{rank}, \code{n_vars}, \code{variables},
-#'   \code{criterion}.
+#'   \code{criterion} and \code{delta}, the criterion's distance from the
+#'   best model's (0 in the first row, \code{NA} where the criterion is).  A
+#'   model without predictors is labelled \code{<none>}.
 #' @keywords internal
 #' @noRd
 .gwr_ms_table <- function(varsets, values, minimise = TRUE) {
   n <- length(varsets)
   if (length(values) != n)
-    stop(sprintf(paste0(".gwr_ms_table(): GWmodel returned %d model(s) but ",
+    stop(sprintf(paste0(".gwr_ms_table(): the engine returned %d model(s) but ",
                         "%d criterion value(s); the two cannot be aligned."),
                  n, length(values)), call. = FALSE)
 
@@ -202,18 +207,23 @@
                df$n_vars, na.last = TRUE)
   df  <- df[ord, , drop = FALSE]
   df$rank <- seq_len(nrow(df))
+  # How far each model is from the best: the gap a reader would otherwise
+  # subtract by hand before calling one model selected.
+  df$delta <- if (all(is.na(df$criterion))) NA_real_
+    else if (minimise) df$criterion - min(df$criterion, na.rm = TRUE)
+    else max(df$criterion, na.rm = TRUE) - df$criterion
   rownames(df) <- NULL
   attr(df, "varsets") <- varsets[ord]
   df
 }
 
 
-#' Run an expression, optionally swallowing GWmodel's progress output
+#' Run an expression, optionally swallowing output written with cat()
 #'
-#' GWmodel reports progress with bare \code{cat()}, so neither
-#' \code{suppressMessages()} nor \code{suppressWarnings()} touches it. A sweep
-#' prints one "Now calibrating the model" block per candidate (190 of them at
-#' 19 candidates), plus the full golden-section bandwidth trace.
+#' GWmodel's functions report progress with bare \code{cat()}, which neither
+#' \code{suppressMessages()} nor \code{suppressWarnings()} touches; a call
+#' to one of them (in a test that compares against GWmodel, say) is wrapped
+#' in this to keep the console clean.
 #'
 #' @param expr Expression to evaluate (forced exactly once).
 #' @param quiet Logical; discard output written to stdout.
@@ -230,79 +240,76 @@
 }
 
 
-#' Run GWmodel's model-selection sweep
+#' Run the forward model-selection sweep
 #'
-#' All GWmodel interaction lives here so the rest of the function is testable
-#' without it.
+#' The sweep \code{GWmodel::gwr.model.selection()} defines, scored by the
+#' package's own local solve.  Starting from no predictor, each step fits the
+#' current model plus each remaining candidate in turn, keeps the candidate
+#' with the lowest AICc, and goes on until every candidate is in:
+#' \code{p (p + 1) / 2} models for \code{p} candidates, each at the one
+#' bandwidth.  A model whose AICc is outside its domain is passed over when a
+#' step is chosen.  The model without predictors (a local mean) is scored at
+#' the same bandwidth.
+#'
+#' Everything that scores a model lives here, so the rest of
+#' \code{gwr_model_selection()} is testable with an injected engine.
 #'
 #' @return A list with \code{model_list}, \code{gwr_df}, \code{bandwidth},
-#'   \code{bandwidth_source}, \code{used_dmat} and \code{raw} (GWmodel's
-#'   unmodified return, which the caller passes straight through to the public
-#'   result).  \code{.engine} is a documented injection point, so this list is
-#'   the contract an injected engine has to satisfy, \code{raw} included.
+#'   \code{bandwidth_source}, \code{used_dmat} and \code{raw} (the sweep's
+#'   model list and diagnostic table in the layout
+#'   \code{GWmodel::gwr.model.selection()} returns, which the caller passes
+#'   straight through to the public result).  \code{.engine} is a documented
+#'   injection point, so this list is the contract an injected engine has to
+#'   satisfy, \code{raw} included.  Two further elements are optional:
+#'   \code{null_model} (a numeric vector named \code{bandwidth}, \code{AIC},
+#'   \code{AICc} and \code{RSS} for the model without predictors; without it
+#'   the table has no \code{<none>} row), \code{bandwidth_search} (what
+#'   \code{.gwr_bw_search()} returned), and \code{undefined} with
+#'   \code{null_undefined} (for each model of the sweep, and for the one
+#'   without predictors, the reason \code{.gwr_criterion()} gives why its
+#'   criterion is not usable, \code{""} when it is).
 #' @keywords internal
 #' @noRd
 .gwr_ms_engine <- function(dat, response_var, candidate_vars, bandwidth,
                            adaptive, kernel, bw_approach, dmat_max_n,
                            quiet = TRUE) {
-  if (!requireNamespace("GWmodel", quietly = TRUE))
-    stop("gwr_model_selection(): package 'GWmodel' is required. ",
-         "Install with install.packages('GWmodel').", call. = FALSE)
+  # GWmodel is not needed: the sweep runs on the package's own local solve.
   if (!requireNamespace("sp", quietly = TRUE))
-    stop("gwr_model_selection(): package 'sp' is required (GWmodel interop).",
-         call. = FALSE)
+    stop("gwr_model_selection(): package 'sp' is required (the sweep hands ",
+         "the data to the local solve as a Spatial object). Install with ",
+         "install.packages('sp').", call. = FALSE)
 
   n_obs   <- nrow(dat)
   n_cand  <- length(candidate_vars)
   sp_dat  <- .to_sp(dat, unique(c(response_var, candidate_vars)))
-
-  # One distance matrix reused across every candidate fit and the bandwidth
-  # search.  GWmodel recomputes distances per call otherwise, and the sweep
-  # makes n_cand*(n_cand+1)/2 + bandwidth-search calls.  n^2 doubles: 2000
-  # points is 32 MB, which is why this is capped rather than unconditional.
-  dMat <- NULL
-  # `Inf` means no cap -- always precompute.  It was gated on is.finite(), so
-  # Inf meant NEVER precompute: with adaptive = FALSE the sweep then died on
-  # n = 100 (a fixed bandwidth needs the matrix) and blamed the caller.
-  if (!is.na(dmat_max_n) && n_obs <= dmat_max_n) {
-    dMat <- tryCatch(
-      GWmodel::gw.dist(dp.locat = sp::coordinates(sp_dat)),
-      error = function(e) {
-        .log_warn("gwr_model_selection(): gw.dist() failed (%s); GWmodel will recompute distances per model.",
-                  conditionMessage(e))
-        NULL
-      }
-    )
-  }
+  df      <- sp_dat@data
+  coords  <- sp::coordinates(sp_dat)
+  y       <- as.numeric(df[[response_var]])
+  # The design of one model: the intercept and its predictors' columns.  The
+  # candidates are numeric (gwr_model_selection() refuses anything else), so
+  # this is the model matrix.
+  design <- function(vars)
+    cbind(Intercept = 1, as.matrix(df[, vars, drop = FALSE]))
 
   # --- Bandwidth ------------------------------------------------------------
   # One bandwidth is used for every candidate model: that is what makes the
   # criterion comparable across them, and it is also the method's main
   # limitation (see the function's documentation).
   bandwidth_source <- "supplied"
+  bw_search <- NULL
   if (is.null(bandwidth)) {
-    full_fml <- stats::reformulate(termlabels = candidate_vars,
-                                   response = response_var)
-    # bw.gwr() distinguishes a supplied distance matrix with missing(dMat),
-    # NOT is.null(dMat).  Passing dMat = NULL explicitly therefore takes the
-    # *supplied* branch, where dim(NULL)[1] != n evaluates to logical(0) and
-    # the if() dies with "missing value where TRUE/FALSE needed".  dMat is NULL
-    # on three ordinary paths -- dmat_max_n = 0, n_obs above dmat_max_n
-    # (default 2000), and a failed gw.dist() -- so every dataset over 2000
-    # points used to land in the fallback-bandwidth branch below with the
-    # message blaming GWmodel.  Build the call instead and simply omit the
-    # argument, which is what makes missing(dMat) true.
-    bw_args <- list(formula = full_fml, data = sp_dat, approach = bw_approach,
-                    kernel = kernel, adaptive = adaptive)
-    if (!is.null(dMat)) bw_args$dMat <- dMat
-    bw <- tryCatch(
-      .gwr_quietly(suppressWarnings(do.call(GWmodel::bw.gwr, bw_args)), quiet),
+    # The grid-then-refine search fit_gwr_model() uses, on the model with
+    # every candidate; see .gwr_bw_search().
+    bw_search <- tryCatch(
+      .gwr_bw_search(design(candidate_vars), y, coords, kernel, adaptive,
+                     approach = bw_approach),
       error = function(e) {
-        .log_warn("gwr_model_selection(): bw.gwr() failed: %s",
+        .log_warn("gwr_model_selection(): the bandwidth search failed: %s",
                   conditionMessage(e))
-        NA_real_
+        NULL
       }
     )
+    bw <- if (is.null(bw_search)) NA_real_ else bw_search$bandwidth
     if (!isTRUE(is.finite(bw)) || bw <= 0) {
       bw <- .fallback_bandwidth(sp_dat, adaptive)
       bandwidth_source <- "fallback"
@@ -311,8 +318,39 @@
                              "bandwidth = %.4f. Supply `bandwidth` explicitly ",
                              "for a defensible comparison."), bw),
               call. = FALSE)
+    } else if (isTRUE(bw_search$none_defined)) {
+      bandwidth_source <- "widest (no bandwidth has a defined criterion)"
+      .warn_and_log(paste0("gwr_model_selection(): no bandwidth from %s to ",
+                           "%s%s has a defined %s for the model with every ",
+                           "candidate, so none could be selected: at each of ",
+                           "the %d tried %s. The widest, %s, is used. ",
+                           "Supply `bandwidth`, or use fewer candidates or ",
+                           "more observations."),
+                    format(signif(bw_search$range[1L], 6)),
+                    format(signif(bw_search$range[2L], 6)),
+                    if (isTRUE(adaptive)) " neighbours" else "",
+                    .gwr_bw_criterion_name(bw_search, score = TRUE),
+                    bw_search$n_evaluations,
+                    .gwr_bw_undefined_text(bw_search, n_obs),
+                    format(signif(bw, 6)))
     } else {
-      bandwidth_source <- sprintf("bw.gwr(%s) on the full model", bw_approach)
+      # Where locations repeat the search leaves out whole locations, for
+      # either criterion asked for; see .gwr_bw_search().
+      bandwidth_source <- sprintf(
+        "%s search on the full model",
+        if (isTRUE(bw_search$by_location)) "leave-one-location-out CV"
+        else bw_approach)
+      note <- .gwr_bw_search_note(bw_search, adaptive)
+      if (nzchar(note))
+        .log_warn(paste0("gwr_model_selection(): bandwidth %s%s selected by ",
+                         "%s from %d scored between %s and %s: %s See ",
+                         "$bandwidth_search."),
+                  format(signif(bw, 6)),
+                  if (isTRUE(adaptive)) " neighbours" else "",
+                  .gwr_bw_criterion_name(bw_search),
+                  bw_search$n_evaluations,
+                  format(signif(bw_search$range[1L], 6)),
+                  format(signif(bw_search$range[2L], 6)), note)
     }
   } else {
     bw <- as.numeric(bandwidth)
@@ -320,7 +358,7 @@
 
   # Clamp against the LARGEST model in the sweep (all candidates + intercept),
   # not the smallest.  A bandwidth that supports a one-variable fit can leave
-  # the full model underdetermined, and GWmodel would fail partway through.
+  # the full model underdetermined.
   if (isTRUE(adaptive)) {
     bw      <- as.integer(round(bw))
     if (n_cand + 2L > n_obs)
@@ -348,8 +386,7 @@
       bw <- min_bw
     }
     # Capped at n, and said: a supplied count above n is most often a
-    # distance meant for adaptive = FALSE, and bw.gwr() searches from 20 up
-    # to n, so below 20 points its choice exceeds n.  See fit_gwr_model().
+    # distance meant for adaptive = FALSE.  See fit_gwr_model().
     if (bw > n_obs) {
       if (identical(bandwidth_source, "supplied"))
         .warn_and_log(paste0("gwr_model_selection(): an adaptive bandwidth of ",
@@ -358,79 +395,86 @@
                              "of neighbours; for a distance in CRS units, set ",
                              "adaptive = FALSE."),
                       bw, n_obs, n_obs)
-      else if (!identical(bandwidth_source, "fallback"))
-        .warn_and_log(paste0("gwr_model_selection(): GWmodel::bw.gwr() ",
-                             "searches adaptive bandwidths from 20 neighbours ",
-                             "up to n, a range that is empty for %d ",
-                             "observations, and returned %d; using %d. Neither ",
-                             "is an optimised bandwidth: with this few ",
-                             "observations, supply `bandwidth`."),
-                      n_obs, bw, n_obs)
       bw <- as.integer(n_obs)
     }
   }
 
   # A supplied fixed bandwidth in the wrong units (degrees read as metres)
-  # empties every window, and the sweep then died on GWmodel's bare "inv():
-  # matrix is singular"; fit_gwr_model() says what is wrong, and so does this.
+  # leaves every window its own observation alone; fit_gwr_model() says what
+  # is wrong, and so does this.
   if (!isTRUE(adaptive) && identical(bandwidth_source, "supplied"))
     .gwr_warn_tiny_fixed_bw(dat, bw, "gwr_model_selection")
 
-  # A FIXED bandwidth needs the distance matrix.  Without one,
-  # gwr.model.selection() sets dMat <- matrix(0, 0, 0) and then asserts
-  # stopifnot(bw > min(dMat)); min() of an empty matrix is Inf, so the
-  # assertion can never hold and the sweep dies with the bare
-  # "(bw > min(dMat)) is not TRUE".  Say so here, where the remedies are
-  # nameable, rather than letting a fixed-bandwidth sweep on n > dmat_max_n
-  # stop unexplained.
-  if (!isTRUE(adaptive) && is.null(dMat))
-    stop(sprintf(paste0("gwr_model_selection(): a fixed bandwidth ",
-                        "(adaptive = FALSE) requires the precomputed n x n ",
-                        "distance matrix, and none was built for these %d ",
-                        "observations%s. GWmodel asserts `bw > min(dMat)`, and ",
-                        "min() of the empty matrix it substitutes is Inf, so ",
-                        "the sweep cannot start. Either allow the matrix -- ",
-                        "`dmat_max_n = %d` or more, costing about %.3g MB -- ",
-                        "or use `adaptive = TRUE`, which needs no distance ",
-                        "matrix."),
-                 n_obs,
-                 if (is.finite(dmat_max_n) && n_obs > dmat_max_n)
-                   sprintf(" (dmat_max_n = %s)", format(dmat_max_n)) else "",
-                 n_obs, (as.numeric(n_obs)^2 * 8) / 1024^2),
-         call. = FALSE)
-
-  # `approach` is deliberately NOT forwarded.  It only steers gwr.model.selection's
-  # own bandwidth search, and bw is always explicit here; GWmodel's documented
-  # example leaves it at its "CV" default and still reports AICc in the
-  # diagnostic table, so passing it could only introduce a version-dependent
-  # difference for no gain.
-  #
-  # `dMat` is omitted rather than passed as NULL for the same reason as in
-  # bw.gwr() above: gwr.model.selection() branches on missing(dMat).
-  ms_args <- list(DeVar = response_var, InDeVars = candidate_vars,
-                  data = sp_dat, bw = bw, adaptive = adaptive, kernel = kernel)
-  if (!is.null(dMat)) ms_args$dMat <- dMat
-  res <- tryCatch(
-    .gwr_quietly(do.call(GWmodel::gwr.model.selection, ms_args), quiet),
-    error = function(e) {
-      msg <- conditionMessage(e)
-      stop(sprintf("gwr_model_selection(): gwr.model.selection() failed: %s%s",
-                   msg, if (grepl("singular", msg, fixed = TRUE))
-                     .gwr_singular_hint() else ""), call. = FALSE)
+  # --- The sweep --------------------------------------------------------------
+  # c(bandwidth, AIC, AICc, RSS) for one model, the row GWmodel's table has,
+  # and the value a forward step is chosen on: AICc, or Inf outside its domain.
+  # `why` is the reason a model that the formula gives a number for is still
+  # not comparable (.gwr_criterion()): its fit reproduces the mean of the
+  # observations at each location, or a term of it is estimable nowhere.
+  loc <- .gwr_locations(coords)
+  score <- function(vars) {
+    cr <- .gwr_criterion(design(vars), y, coords, bw, kernel, adaptive,
+                         approach = "AICc", loc = loc)
+    list(row = c(bw, cr$AIC, cr$AICc, cr$RSS), value = cr$value,
+         n_deficient = cr$n_deficient, why = cr$why)
+  }
+  n_sweep    <- n_cand * (n_cand + 1L) / 2L
+  model_list <- vector("list", n_sweep)
+  # GWmodel's table has these four columns and no names; they are named here,
+  # so the criterion is found by name and not by position.
+  gwr_df     <- matrix(NA_real_, n_sweep, 4L,
+                       dimnames = list(NULL, c("bandwidth", "AIC", "AICc",
+                                               "RSS")))
+  n_def      <- integer(n_sweep)
+  why        <- character(n_sweep)
+  level      <- character(0)
+  remaining  <- candidate_vars
+  tag <- 0L
+  for (i in seq_len(n_cand)) {
+    step <- numeric(length(remaining))
+    for (j in seq_along(remaining)) {
+      vars <- c(level, remaining[j])
+      tag  <- tag + 1L
+      fml  <- paste0(response_var, "~", paste(vars, collapse = "+"))
+      # Progress, for a long sweep watched with quiet = FALSE.
+      if (!isTRUE(quiet))
+        cat(sprintf("Now calibrating model %d of %d: %s\n", tag, n_sweep, fml))
+      sc <- score(vars)
+      model_list[[tag]] <- list(fml, vars)
+      gwr_df[tag, ]     <- sc$row
+      n_def[tag]        <- sc$n_deficient
+      why[tag]          <- sc$why
+      step[j]           <- sc$value
     }
-  )
+    idx <- if (any(is.finite(step))) which.min(step) else 1L
+    level     <- c(level, remaining[idx])
+    remaining <- remaining[-idx]
+  }
+  if (!isTRUE(quiet))
+    cat(sprintf("Now calibrating the model without predictors: %s~1\n",
+                response_var))
+  null <- score(character(0))
 
-  if (!is.list(res) || length(res) < 2L)
-    stop("gwr_model_selection(): gwr.model.selection() returned an unexpected ",
-         "shape (expected a list of a model list and a diagnostic table).",
-         call. = FALSE)
+  # A model with windows of deficient rank is scored on its estimable fitted
+  # values, which is sound, but its coefficients are NA there: say how many
+  # models that concerns before one of them is selected and fitted.
+  if (any(n_def > 0L, na.rm = TRUE))
+    .log_warn(paste0("gwr_model_selection(): %d of %d model(s) have local ",
+                     "windows of deficient rank at bandwidth %s (up to %d of ",
+                     "%d windows). They are scored on their fitted values, ",
+                     "which those windows do estimate; fit_gwr_model() on such ",
+                     "a model returns NA for the coefficients they cannot."),
+              sum(n_def > 0L, na.rm = TRUE), n_sweep, format(bw),
+              max(n_def, na.rm = TRUE), n_obs)
 
-  model_list <- if (!is.null(res$model.list)) res$model.list else res[[1L]]
-  gwr_df     <- if (!is.null(res$GWR.df))     res$GWR.df     else res[[2L]]
-
+  raw <- list(model_list, gwr_df)
   list(model_list = model_list, gwr_df = gwr_df,
        bandwidth = bw, bandwidth_source = bandwidth_source,
-       used_dmat = !is.null(dMat), raw = res)
+       used_dmat = FALSE, raw = raw,
+       null_model = c(bandwidth = as.numeric(bw), AIC = null$row[2L],
+                      AICc = null$row[3L], RSS = null$row[4L]),
+       bandwidth_search = bw_search,
+       undefined = why, null_undefined = null$why)
 }
 
 
@@ -440,10 +484,15 @@
 
 #' Forward model selection for geographically weighted regression
 #'
-#' Wraps \code{GWmodel::gwr.model.selection()}, which grows a GWR model one
-#' predictor at a time and scores every intermediate model with a corrected
-#' Akaike information criterion.  GWmodel returns two loosely-coupled lists;
-#' this function returns a ranked table.
+#' Grows a GWR model one predictor at a time and scores every intermediate
+#' model with a corrected Akaike information criterion, the sweep
+#' \code{GWmodel::gwr.model.selection()} defines, and returns a ranked table
+#' with each model's distance from the best.  The model without predictors is
+#' scored too.  Every model is fitted by the package's own local solve (see
+#' \code{\link{fit_gwr_model}}, \strong{The local solve}), so a candidate
+#' that is constant inside some windows, a regional indicator say, is scored
+#' on what those windows do estimate and neither stops the sweep nor scores
+#' as rounding error.
 #'
 #' @section What this optimises, and what it does not:
 #' The criterion is \strong{in-sample}. AICc penalises the effective number of
@@ -457,7 +506,7 @@
 #' disagreement is itself informative. It usually means a candidate is
 #' predictive only locally.
 #'
-#' Two further limitations follow from the method itself:
+#' One further limitation follows from the method itself:
 #'
 #' \itemize{
 #'   \item \strong{One bandwidth for every model.} Comparing criteria across
@@ -467,27 +516,57 @@
 #'     (Lu et al. 2014); it is not an implementation shortcut. Refit the
 #'     selected model with \code{bandwidth = NULL} to re-optimise once the
 #'     variable set is settled.
-#'   \item \strong{The null model is never evaluated.} The sweep starts from
-#'     one predictor, so the result always names at least one. It cannot tell
-#'     you that none of the candidates help.
 #' }
+#'
+#' @section The model without predictors, and the gaps:
+#' The forward sweep starts from one predictor, so by itself it always names
+#' at least one, whether or not any candidate helps.  The model without
+#' predictors, a local mean at the sweep's bandwidth, is therefore scored as
+#' well and ranked with the others as \code{<none>}.  When it ranks first,
+#' \code{best} is \code{character(0)}: no candidate improves on it.
+#'
+#' The \code{delta} column of \code{table} is each model's criterion minus
+#' the best one's.  Differences of AICc below about 2 do not separate two
+#' models (Burnham and Anderson 2002), so \code{within_2} lists the models
+#' that close to the best and \code{smallest_within_2} names the one among
+#' them with the fewest predictors, which is the one to prefer when several
+#' are that close.  \code{best} is still the model with the lowest criterion.
+#'
+#' @section Observations that share a location:
+#' When rows of \code{data_sf} have the same coordinates, the bandwidth
+#' search leaves out whole locations, for either \code{bw_approach} (see
+#' \code{\link{fit_gwr_model}}, \strong{Observations that share a
+#' location}); \code{bandwidth_source} then reads
+#' \code{"leave-one-location-out CV search on the full model"}.  The models
+#' are still ranked by AICc, which counts the rows at one location as
+#' independent, so the gaps overstate what a predictor adds when a location
+#' has an effect of its own; a warning of class
+#' \code{"spatialkit_gwr_repeated_locations"} says so with the counts.  A
+#' model whose fit reproduces the mean of the observations at each location
+#' (every such model scores the same, whatever its predictors) has criterion
+#' \code{NA} and is listed last, as is one with a term that no local window
+#' can estimate; a warning names them.
 #'
 #' @section Cost:
 #' The sweep fits \code{p * (p + 1) / 2} GWR models for \code{p} candidates
-#' (55 at p = 10, 210 at p = 20), each over all \code{n} locations.
+#' (55 at p = 10, 210 at p = 20), and the one without predictors, each over
+#' all \code{n} locations.
 #' \code{max_models} stops the call before it runs for hours.
 #'
 #' @param data_sf An \code{sf} object with response, predictors and geometry.
 #' @param response_var Response column name.
 #' @param candidate_vars Character vector naming at least two \strong{numeric}
 #'   predictors to choose among.  Factor, character and logical candidates are
-#'   refused: GWmodel fits a factor as several model-matrix columns while this
+#'   refused: a factor is several model-matrix columns while this
 #'   sweep counts it as one variable, so the criteria would not be comparable,
 #'   and \code{\link{fit_gwr_model}()}, the documented next step, takes only
 #'   numerics.  Encode them as numeric indicators first.
 #' @param bandwidth Bandwidth held fixed across all candidate models. If
-#'   \code{NULL} (default) it is selected with \code{GWmodel::bw.gwr()} on the
-#'   model containing every candidate. Integer neighbour count when
+#'   \code{NULL} (default) it is searched for on the model containing every
+#'   candidate, by the grid-then-refine search of
+#'   \code{\link{fit_gwr_model}()} (see its \strong{Bandwidth selection});
+#'   what the search scored is returned in \code{bandwidth_search}. Integer
+#'   neighbour count when
 #'   \code{adaptive = TRUE}; otherwise a distance in the units of the
 #'   **projected** CRS the sweep runs in, which \code{prep_model_data()} may
 #'   have chosen for you.  Geographic input is projected before the bandwidth
@@ -501,36 +580,44 @@
 #'   (a regular grid), which leaves a window fewer weighted points; then use
 #'   a larger bandwidth.  An adaptive count below 1 or above R's largest
 #'   integer is refused, as in \code{\link{fit_gwr_model}()}.
-#'   One above the number of observations is capped at it, with a warning;
-#'   below 20 observations that includes \code{bw.gwr()}'s choice, since its
-#'   adaptive search starts at 20 neighbours.
+#'   One above the number of observations is capped at it, with a warning.
 #' @param adaptive Logical; adaptive (nearest-neighbour) bandwidth. Default
 #'   \code{TRUE}.
 #' @param kernel Weighting kernel. One of \code{"bisquare"} (default),
 #'   \code{"gaussian"}, \code{"tricube"}, \code{"boxcar"},
 #'   \code{"exponential"}.
 #' @param bw_approach Criterion for the bandwidth search: \code{"AICc"}
-#'   (default) or \code{"CV"}. Matches \code{\link{fit_gwr_model}}'s default.
+#'   (default) or \code{"CV"}, the leave-one-out sum of squared prediction
+#'   errors. Matches \code{\link{fit_gwr_model}}'s default.  When
+#'   observations share a location the search leaves out whole locations
+#'   whichever is asked for; see \strong{Observations that share a
+#'   location}.
 #' @param max_models Refuse the call if the sweep would exceed this many model
 #'   fits. Default 200, which admits up to 19 candidates.
-#' @param dmat_max_n Precompute and reuse an \code{n} x \code{n} distance
-#'   matrix when \code{n} is at most this. Default 2000 (about 32 MB). Set to 0
-#'   to disable.
-#' @param quiet Discard GWmodel's progress output. Default \code{TRUE}, because
-#'   GWmodel writes it with bare \code{cat()} that no \code{suppressMessages()}
-#'   can silence, and emits one block per candidate model, so it scales with the
-#'   square of the candidate count. Set \code{FALSE} to watch a long sweep
-#'   progress.
+#' @param dmat_max_n Not used.  The sweep takes its distances window by
+#'   window and builds no \code{n} x \code{n} distance matrix, so a fixed
+#'   bandwidth works at any \code{n}.  The argument is accepted so that calls
+#'   written with it run.
+#' @param quiet Print no progress. Default \code{TRUE}. With \code{FALSE} one
+#'   line is written (with \code{cat()}) as each model is fitted, to watch a
+#'   long sweep progress.
 #' @param .engine Internal; injectable backend used for testing.
 #'
 #' @return An object of class \code{gwr_model_selection}, a list with:
-#'   \code{best} (character vector of the selected predictors);
+#'   \code{best} (character vector of the selected predictors, the model with
+#'   the lowest criterion; \code{character(0)} when that is the model without
+#'   predictors);
 #'   \code{table} (ranked data.frame of every model evaluated, with columns
-#'   \code{rank}, \code{n_vars}, \code{variables} and \code{criterion};
-#'   \code{criterion} is \code{NA}, and the model ranked last, where GWmodel
-#'   could not evaluate it or where AICc is undefined because the model's
+#'   \code{rank}, \code{n_vars}, \code{variables}, \code{criterion} and
+#'   \code{delta}, the criterion minus the best model's; the model without
+#'   predictors is the row \code{<none>};
+#'   \code{criterion} is \code{NA}, and the model ranked last, where it
+#'   could not be evaluated or where AICc is undefined because the model's
 #'   effective number of parameters \eqn{tr(S)} is not below \eqn{n - 2},
 #'   which raises a warning);
+#'   \code{within_2} (the rows of \code{table} whose \code{delta} is at most
+#'   2) and \code{smallest_within_2} (the predictors of the smallest model
+#'   among them);
 #'   \code{criterion} (label for the criterion actually read, noting when it
 #'   had to be located positionally);
 #'   \code{criterion_by_name} (logical: whether that column was found by
@@ -544,25 +631,37 @@
 #'   candidate set the sweep ran over, both echoed by \code{print()});
 #'   \code{bandwidth}, \code{bandwidth_source}, \code{adaptive} and
 #'   \code{kernel} (the smoothing held fixed across the sweep, and where it
-#'   came from);
-#'   \code{n_obs}, \code{n_models}, \code{used_dmat}; and \code{raw}
-#'   (GWmodel's unmodified return: the two-element list of its model list and
-#'   its diagnostic table).
+#'   came from: \code{"supplied"}, or the criterion's name followed by
+#'   \code{"search on the full model"}, the criterion being
+#'   \code{"leave-one-location-out CV"} when observations share a location);
+#'   \code{bandwidth_search} (what the search scored, as
+#'   \code{\link{fit_gwr_model}} keeps it; \code{NULL} when the bandwidth was
+#'   supplied);
+#'   \code{n_obs}, \code{n_models} (the rows of \code{table}),
+#'   \code{used_dmat} (always \code{FALSE}); and \code{raw}
+#'   (the forward sweep in the layout \code{GWmodel::gwr.model.selection()}
+#'   returns: the two-element list of its model list and its diagnostic
+#'   table, without the model that has no predictors).
 #'
 #' @section Using $raw with GWmodel directly:
-#' \code{raw} is GWmodel's own \code{list(model.list, GWR.df)}, so its two
-#' elements have to be unpacked before GWmodel's own helpers will take them:
-#' \code{GWmodel::gwr.model.view()} takes \code{(DeVar, InDeVars, model.list)},
-#' so the call is
+#' \code{raw} has the layout of GWmodel's own \code{list(model.list, GWR.df)},
+#' so its two elements have to be unpacked before GWmodel's helpers will take
+#' them: \code{GWmodel::gwr.model.view()} takes
+#' \code{(DeVar, InDeVars, model.list)}, so the call is
 #' \preformatted{
 #'   GWmodel::gwr.model.view(sel$response_var, sel$candidate_vars, sel$raw[[1]])
 #' }
 #' Pass \code{sel$raw[[1]]}, not \code{sel$raw}.  The diagnostic table is
-#' \code{sel$raw[[2]]}, an unlabelled numeric matrix whose columns are
-#' \code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order; the
-#' \code{criterion} column of \code{$table} is its third column.
+#' \code{sel$raw[[2]]}, a numeric matrix whose columns are
+#' \code{bandwidth}, \code{AIC}, \code{AICc}, \code{RSS} in that order (and
+#' are named so); the \code{criterion} column of \code{$table} is its third
+#' column.
 #'
 #' @references
+#' Burnham, K. P. and Anderson, D. R. (2002). \emph{Model Selection and
+#' Multimodel Inference: A Practical Information-Theoretic Approach}, 2nd
+#' edition. Springer.
+#'
 #' Lu, B., Harris, P., Charlton, M. and Brunsdon, C. (2014). The GWmodel R
 #' package: further topics for exploring spatial heterogeneity using
 #' geographically weighted models. \emph{Geo-spatial Information Science}
@@ -573,8 +672,7 @@
 #'   selected model.
 #' @family cross-validation
 #' @examples
-#' if (requireNamespace("GWmodel", quietly = TRUE) &&
-#'     requireNamespace("sp", quietly = TRUE)) {
+#' if (requireNamespace("sp", quietly = TRUE)) {
 #'   library(sf)
 #'   set.seed(1)
 #'   n <- 80
@@ -585,7 +683,7 @@
 #'   )
 #'   dat$z <- 2 * dat$a - dat$b + rnorm(n, 0, 0.5)
 #'   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 30)
-#'   print(sel)              # every model tried, by AICc
+#'   print(sel)              # every model tried, by AICc, with the gaps
 #'   print(sel$best)         # the winning predictor set: a and b, not noise
 #'   fit <- fit_gwr_model(dat, "z", sel$best)
 #'   fit
@@ -612,12 +710,12 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
   bw_approach <- match.arg(bw_approach)
 
   # Validate `bandwidth` here, not inside .gwr_ms_engine(): the engine is an
-  # injectable test seam and requires GWmodel, so a check placed there would
-  # be skipped for injected engines and unreachable without GWmodel.
+  # injectable test seam, so a check placed there would be skipped for
+  # injected engines.
   # Unvalidated, NA reaches the engine's clamp as "missing value where
   # TRUE/FALSE needed", a length-2 vector as "the condition has length > 1",
   # and with adaptive = FALSE (no clamp at all) a zero or negative distance
-  # goes straight into GWmodel.
+  # goes straight into the kernel.
   if (!is.null(bandwidth) &&
       (!is.numeric(bandwidth) || length(bandwidth) != 1L ||
        !is.finite(bandwidth) || bandwidth <= 0))
@@ -679,7 +777,7 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                        is.numeric, logical(1))
   if (any(!cand_types))
     stop(sprintf(paste0("gwr_model_selection(): candidate(s) %s are not numeric. ",
-                        "GWmodel fits a factor as several model-matrix columns ",
+                        "A factor is several model-matrix columns ",
                         "while this sweep counts it as one variable, so the ",
                         "criteria would not be comparable -- and fit_gwr_model(), ",
                         "the documented next step, rejects it outright. Encode ",
@@ -697,15 +795,31 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 
   varsets <- .gwr_ms_varsets(eng$model_list, response_var)
   crit    <- .gwr_ms_criterion(eng$gwr_df, criterion = "AICc")
-  # A model whose AICc is outside its domain (tr S >= n - 2: its local fits
-  # interpolate the data) gets a large negative AICc from GWmodel, and the
-  # sweep ranked it first: at n = 60 a model of `a` plus three noise
-  # variables won with -66689.  Set those to NA so they rank last, and say so.
-  # GWmodel picked its own forward steps on the same numbers, which the
-  # warning says too.  Unguarded when the AIC column cannot be located.
   aic <- .gwr_ms_aic_column(eng$gwr_df, crit)
-  if (!is.null(aic) && length(aic) == length(crit$values)) {
-    undef <- !is.na(crit$values) & .gwr_aicc_undefined(aic, crit$values)
+  # The model without predictors, when the engine scored it: a local mean at
+  # the sweep's bandwidth, ranked with the others as `<none>`.  Without it the
+  # sweep starts from one predictor and can only ever name at least one,
+  # whether or not any candidate helps.
+  null <- eng$null_model
+  has_null <- is.numeric(null) && !is.null(names(null)) &&
+    all(c("AIC", "AICc") %in% names(null))
+  if (has_null) {
+    varsets     <- c(list(character(0)), varsets)
+    crit$values <- c(if (is.finite(null[["AICc"]])) null[["AICc"]] else NA_real_,
+                     crit$values)
+    crit$raw    <- c(null[["AICc"]], crit$raw)
+    if (!is.null(aic)) aic <- c(null[["AIC"]], aic)
+  }
+  # A model whose AICc is outside its domain (tr S >= n - 2: its local fits
+  # interpolate the data) gets a large negative AICc from the formula, minus
+  # infinity when the residual sum of squares is exactly 0, and the sweep
+  # ranked it first: at n = 60 a model of `a` plus three noise variables won
+  # with -66689.  Set those to NA so they rank last, and say so.  Judged on
+  # the criterion as the engine returned it, so that an infinite one counts.
+  # Unguarded when the AIC column cannot be located.
+  if (!is.null(aic) && length(aic) == length(crit$values) &&
+      length(crit$raw) == length(crit$values)) {
+    undef <- !is.na(crit$raw) & .gwr_aicc_undefined(aic, crit$raw)
     if (any(undef)) {
       crit$values[undef] <- NA_real_
       # No larger adaptive bandwidth exists once it is every observation.
@@ -715,9 +829,8 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                            "of %d model(s) at bandwidth %s and they are ranked ",
                            "last: their effective number of parameters tr(S) ",
                            "is not below n - 2 = %d, so their local fits ",
-                           "(nearly) interpolate the data. GWmodel chose its ",
-                           "forward steps on the same values, so the sweep ",
-                           "past them may not follow the best path. %s"),
+                           "(nearly) interpolate the data. A forward step is ",
+                           "chosen among the models whose AICc is defined. %s"),
                     sum(undef), length(undef), format(eng$bandwidth),
                     nrow(dat) - 2L,
                     if (at_n)
@@ -730,29 +843,85 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
                     else "Use a larger bandwidth.")
     }
   }
+  # Two more kinds of model have a number from the formula and still cannot
+  # be ranked, and the engine says which (`undefined`).  One reproduces the
+  # mean of the observations at each location: on a layer whose locations
+  # repeat, every such model scores the same, whatever its predictors.  The
+  # other has a term that no window estimates, so it has no coefficient for
+  # it anywhere.  Both rank last.
+  why <- eng$undefined
+  if (is.character(why) && length(why) == length(eng$model_list)) {
+    if (has_null) why <- c(as.character(eng$null_undefined %||% "")[1L], why)
+    labels <- vapply(varsets, function(v)
+      if (length(v)) paste(v, collapse = " + ") else "<none>", character(1))
+    sat  <- why == "df_distinct" & !is.na(crit$values)
+    term <- why == "term" & !is.na(crit$values)
+    if (any(sat) || any(term)) {
+      crit$values[sat | term] <- NA_real_
+      .warn_and_log(paste0("gwr_model_selection(): %d of %d model(s) are not ",
+                           "ranked at bandwidth %s; their criterion is NA and ",
+                           "they are listed last.%s%s Use a larger bandwidth."),
+                    sum(sat | term), length(why), format(eng$bandwidth),
+                    if (any(sat))
+                      sprintf(paste0(" %d (%s) reproduce the mean of the ",
+                                     "observations at each location, or ",
+                                     "nearly: their effective number of ",
+                                     "parameters tr(S) is not below the ",
+                                     "number of distinct rows of location ",
+                                     "and predictors minus 2, so AICc ",
+                                     "measures only the spread among ",
+                                     "observations that share a location."),
+                              sum(sat), paste(labels[sat], collapse = "; "))
+                    else "",
+                    if (any(term))
+                      sprintf(paste0(" %d (%s) have a term that no local ",
+                                     "window can estimate, so no ",
+                                     "coefficient for it exists anywhere."),
+                              sum(term), paste(labels[term], collapse = "; "))
+                    else "")
+    }
+  }
+  # Several observations at one location: said once, with the counts.
+  loc <- .gwr_locations(sf::st_coordinates(dat)[, 1:2, drop = FALSE])
+  if (loc$n < nrow(dat))
+    .gwr_warn(
+      "spatialkit_gwr_repeated_locations",
+      paste0("gwr_model_selection(): the %d observations are at %d distinct ",
+             "location(s) (%d hold more than one observation, the most %d). ",
+             "AICc counts the ",
+             "observations at one location as independent. They are not ",
+             "when a location has an effect of its own, and the gaps in the ",
+             "table then overstate what a predictor adds.%s Confirm the ",
+             "selection with select_features_forward(), or fit the means of ",
+             "replicate observations, one row per location."),
+      nrow(dat), loc$n, sum(loc$size > 1L), max(loc$size),
+      if (isTRUE(eng$bandwidth_search$by_location) &&
+          isFALSE(eng$bandwidth_search$none_defined))
+        sprintf(paste0(" No bandwidth was supplied: it was selected by %s ",
+                       "(each location predicted from the others)."),
+                .gwr_bw_criterion_name(eng$bandwidth_search))
+      else "")
   tab     <- .gwr_ms_table(varsets, crit$values, minimise = TRUE)
 
-  # GWmodel builds GWR.df with rbind() over unnamed vectors, so it never
-  # carries column names and this branch is the normal path, not an edge case.
-  # The documented column order is c(bandwidth, AIC, AICc, RSS): AICc is
-  # column 3.  Reading column 2 would rank on the uncorrected AIC while
-  # labelling the answer AICc.
-  if (!crit$by_name)
-    .log_info(paste0("gwr_model_selection(): GWmodel's diagnostic table carries ",
-                     "no column names (it is built by rbind() over unnamed ",
-                     "vectors), so AICc is read positionally from column %d of ",
-                     "the documented c(bandwidth, AIC, AICc, RSS) layout. Check ",
-                     "$raw if the ranking looks wrong."), crit$column)
-  # A shape other than those four columns means the assumption above no longer
-  # holds and the ranking may be built on a different criterion entirely.
+  # The diagnostic table is in GWmodel's layout, a matrix of
+  # c(bandwidth, AIC, AICc, RSS): AICc is column 3, and reading column 2 would
+  # rank on the uncorrected AIC while labelling the answer AICc.  An unnamed
+  # table of any other shape (an injected engine's) is read at the same
+  # position and the ranking is flagged as unverified.
   if (!isTRUE(crit$shape_ok) && !isTRUE(crit$by_name))
-    .log_warn(paste0("gwr_model_selection(): GWmodel's diagnostic table does ",
+    .log_warn(paste0("gwr_model_selection(): the diagnostic table does ",
                      "not have the documented four columns (bandwidth, AIC, ",
                      "AICc, RSS); AICc was read from column %d of a table with ",
                      "a shape this version does not recognise. Treat the ",
                      "ranking as unverified and check $raw."), crit$column)
 
   best_set <- attr(tab, "varsets")[[1L]]
+  # The models a difference of 2 does not separate from the best, and the
+  # smallest of them: the usual reading of AICc differences (Burnham and
+  # Anderson 2002) is that such models have about the same support, and then
+  # the one with fewest predictors is the one to prefer.
+  close_i <- which(!is.na(tab$delta) & tab$delta <= 2)
+  small_i <- close_i[order(tab$n_vars[close_i], tab$criterion[close_i])][1L]
   n_failed <- sum(is.na(tab$criterion))
   if (n_failed > 0L)
     .log_warn("gwr_model_selection(): %d of %d models produced a non-finite criterion and were ranked last.",
@@ -765,6 +934,10 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
     list(
       best             = best_set,
       table            = tab,
+      # The rows of `table` within 2 of the best, and the predictors of the
+      # smallest model among them (character(0) for the model without any).
+      within_2          = tab[close_i, , drop = FALSE],
+      smallest_within_2 = attr(tab, "varsets")[[small_i]],
       criterion        = crit$label,
       # How the criterion column was found: by name, or by its documented
       # position (`criterion_column`), and whether the table had the four
@@ -782,6 +955,7 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
       n_obs            = nrow(dat),
       n_models         = nrow(tab),
       used_dmat        = isTRUE(eng$used_dmat),
+      bandwidth_search = eng$bandwidth_search,
       raw              = eng$raw
     ),
     class = "gwr_model_selection"
@@ -792,16 +966,23 @@ gwr_model_selection <- function(data_sf, response_var, candidate_vars,
 #' Print a GWR model selection result
 #'
 #' Shows the forward-selection trail: the response, the candidate predictors,
-#' and the top-ranked models with their criterion values, so you can see both
-#' which model won and by how much.  A shallow gap between the first few rows
-#' means the ranking is not well identified and the choice of predictors should
-#' not be treated as settled.  Check the gap before reporting one model as the
-#' selected one.
+#' and the top-ranked models with their criterion values and, in the
+#' \code{delta} column, how far each is from the best.  Below the table it
+#' lists the models within 2 of the best, which a difference in AICc does not
+#' separate (Burnham and Anderson 2002), and names the smallest of them.  When
+#' several models are that close the ranking is not well identified and the
+#' choice of predictors should not be treated as settled; when the model
+#' without predictors (\code{<none>}) is among them, no candidate has been
+#' shown to help.
 #'
 #' @param x A \code{gwr_model_selection} object.
 #' @param n Number of top-ranked models to show. Default 10.
 #' @param ... Ignored.
 #' @return \code{x}, invisibly.
+#' @references
+#' Burnham, K. P. and Anderson, D. R. (2002). \emph{Model Selection and
+#' Multimodel Inference: A Practical Information-Theoretic Approach}, 2nd
+#' edition. Springer.
 #' @family print methods
 #' @export
 print.gwr_model_selection <- function(x, n = 10L, ...) {
@@ -822,8 +1003,33 @@ print.gwr_model_selection <- function(x, n = 10L, ...) {
   if (n_show < nrow(x$table))
     cat(sprintf("  ... %d more (see $table)\n", nrow(x$table) - n_show))
 
-  cat(sprintf("\nSelected: %s ~ %s\n", x$response_var,
-              paste(x$best, collapse = " + ")))
+  rhs <- function(v) if (length(v)) paste(v, collapse = " + ") else "1"
+  cat(sprintf("\nSelected: %s ~ %s\n", x$response_var, rhs(x$best)))
+  if (!length(x$best))
+    cat("  The model without predictors has the lowest criterion: no candidate\n",
+        "  improves on a local mean at this bandwidth.\n", sep = "")
+
+  # The gaps, worked out: which models a difference of 2 does not separate
+  # from the best, and the smallest of them.  A table without `delta` (an
+  # object from an earlier version) prints as it did.
+  tab <- x$table
+  if (is.data.frame(tab) && "delta" %in% names(tab)) {
+    close <- which(!is.na(tab$delta) & tab$delta <= 2)
+    if (length(close) > 1L) {
+      cat(sprintf("\nWithin 2 of the best (a difference this small does not separate models):\n"))
+      for (i in close)
+        cat(sprintf("  %s ~ %s  (+%.2f)\n", x$response_var,
+                    if (identical(tab$variables[i], "<none>")) "1"
+                    else tab$variables[i], tab$delta[i]))
+      small <- close[order(tab$n_vars[close], tab$criterion[close])][1L]
+      cat(sprintf("Smallest of them: %s ~ %s\n", x$response_var,
+                  if (identical(tab$variables[small], "<none>")) "1"
+                  else tab$variables[small]))
+    } else if (nrow(tab) > 1L && is.finite(tab$delta[2L])) {
+      cat(sprintf("\nNo other model is within 2 of the best; the runner-up is %.2f away.\n",
+                  tab$delta[2L]))
+    }
+  }
   cat("\nThe criterion is in-sample and every model shares one bandwidth.\n")
   cat("Confirm with select_features_forward() before relying on this.\n")
   invisible(x)

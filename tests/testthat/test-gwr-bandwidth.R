@@ -122,7 +122,6 @@ test_that("fit_gwr_model fits a two-valued NON-INTEGER response with a warning",
   # family = "binomial" was nonsense for such values.  The same guard runs once
   # per fold inside cv_gwr(), where a small training fold can legitimately hold
   # only two distinct values, so a hard stop there aborted whole CV runs.
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
 
   censored <- .gwr2v_points(c(0.0031, 12.7401))
@@ -147,17 +146,45 @@ test_that("fit_gwr_model fits a two-valued NON-INTEGER response with a warning",
                "family = 'binomial'")
 })
 
-test_that("the two-valued response guard sits behind the GWmodel requirement", {
-  # Dependency-free companion to the skipped test above, and the reason it has
-  # to skip: fit_gwr_model() checks for its backend BEFORE it looks at the
-  # response, so nothing about the response can be observed without GWmodel.
-  # Both response shapes therefore produce the same missing-backend error, and
-  # neither the warning nor the binary stop is reachable on this install.
-  skip_if(requireNamespace("GWmodel", quietly = TRUE),
-          "GWmodel is installed, so the backend check passes")
-
-  for (z in list(c(0.0031, 12.7401), c(0, 1), c(1.5, 2.5, 3.5))) {
-    expect_error(fit_gwr_model(.gwr2v_points(z), "z", "a", bandwidth = 60),
-                 "package 'GWmodel' is required")
+test_that("no function of the package requires or calls GWmodel", {
+  # fit_gwr_model(), predict(), cv_gwr() and gwr_model_selection() used to
+  # stop with "package 'GWmodel' is required" before looking at anything
+  # else, and this test asserted that the two-valued response guard above
+  # could not be reached without it.  The local regressions, the bandwidth
+  # search and the sweep are the package's own now, so the requirement
+  # guarded nothing and is gone: GWmodel is in Suggests for the tests that
+  # compare against it.  Checked on the code itself, so that it holds on a
+  # machine where GWmodel is installed: no function body holds a
+  # `GWmodel::` call or asks for the namespace.  (Messages that name a
+  # GWmodel function as advice are strings, not calls.)
+  ns <- asNamespace("spatialkit")
+  uses_gwmodel <- function(e) {
+    if (is.call(e) && is.symbol(e[[1L]])) {
+      fn <- as.character(e[[1L]])
+      if (fn %in% c("::", ":::") && identical(as.character(e[[2L]]), "GWmodel"))
+        return(TRUE)
+      if (fn %in% c("requireNamespace", "loadNamespace", "library", "require",
+                    "asNamespace", "getNamespace", "getExportedValue") &&
+          length(e) >= 2L && identical(e[[2L]], "GWmodel"))
+        return(TRUE)
+    }
+    if (is.call(e) || is.pairlist(e) || is.list(e) || is.expression(e))
+      for (i in seq_along(e))
+        # An empty argument (x[, 1]) is the empty symbol; there is nothing in it.
+        if (!identical(e[[i]], quote(expr = )) && uses_gwmodel(e[[i]])) return(TRUE)
+    FALSE
   }
+  nms <- ls(ns, all.names = TRUE)
+  hits <- nms[vapply(nms, function(nm) {
+    f <- get(nm, envir = ns)
+    is.function(f) && !is.primitive(f) &&
+      (uses_gwmodel(body(f)) || uses_gwmodel(as.list(formals(f))))
+  }, logical(1))]
+  expect_identical(hits, character(0))
+  # The check finds what it looks for.
+  expect_true(uses_gwmodel(quote(GWmodel::bw.gwr(f, data = d))))
+  expect_true(uses_gwmodel(quote(if (!requireNamespace("GWmodel", quietly = TRUE)) stop("x"))))
+  expect_false(uses_gwmodel(quote(stop("use GWmodel::ggwr.basic()"))))
+  # And GWR is offered wherever sp is.
+  expect_identical(.model_available("GWR"), requireNamespace("sp", quietly = TRUE))
 })

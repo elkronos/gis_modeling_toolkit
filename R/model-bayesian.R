@@ -250,16 +250,786 @@
 }
 
 
+# ---------------------------------------------------------------------------
+# The automatic slope prior
+# ---------------------------------------------------------------------------
+
+# brms families whose location parameter is on the scale of log(response)
+# although they report an identity link.
+.brms_log_location_families <- c("lognormal", "shifted_lognormal",
+                                 "hurdle_lognormal")
+
+#' The automatic slope prior for standardised predictors
+#'
+#' A slope per standard deviation of a predictor is on the scale of the linear
+#' predictor.  Under an identity link that is the scale of the response, so a
+#' fixed \code{normal(0, 5)} is a different prior for every choice of units:
+#' it left 98.6 percent of a slope alone with income in thousands of dollars
+#' and 0.007 percent of the same slope with income in dollars.  The prior is
+#' therefore \code{normal(0, 2.5 * s)}, where \code{s} is the standard
+#' deviation of whatever the linear predictor is a model of:
+#' \itemize{
+#'   \item \code{sd(y)} for an identity link (gaussian, student, skew_normal
+#'     and the like, and mixtures of them);
+#'   \item \code{sd(log(y))} for the lognormal families, which report an
+#'     identity link while their location is on the log scale;
+#'   \item nothing for any other link (log, logit, ...), where the linear
+#'     predictor has a scale of its own and the fixed \code{normal(0, 5)}
+#'     stays.
+#' }
+#' A predictor standardised to unit SD cannot move the response by much more
+#' than one SD of the response per SD of its own, so 2.5 of them is weak
+#' without being flat.  This is the default scaling of \pkg{rstanarm}
+#' (Gabry and Goodrich, "Prior Distributions for rstanarm Models").
+#'
+#' @param y The response on the training rows.
+#' @param family As handed to \code{brms::brm()}.
+#' @return A list with \code{spec} (the Stan distribution string),
+#'   \code{scale} (\code{s}; 1 on the unit scale), \code{basis}
+#'   (\code{"sd"}, \code{"sd_log"} or \code{"unit"}) and \code{label} (how to
+#'   say it).
+#' @keywords internal
+#' @noRd
+.b_prior_auto <- function(y, family) {
+  unit <- list(spec = "normal(0, 5)", scale = 1, basis = "unit",
+               label = "fixed, on the scale of the link")
+  fam <- tryCatch({
+    f <- family
+    if (is.function(f)) f <- f()
+    if (is.character(f)) f <- brms::brmsfamily(f[[1L]])
+    f
+  }, error = function(e) NULL)
+  if (!is.list(fam)) return(unit)
+  parts <- if (is.list(fam$mix) && length(fam$mix) > 0L) fam$mix else list(fam)
+  one <- function(p, nm) {
+    v <- tryCatch(as.character(p[[nm]])[1L], error = function(e) NA_character_)
+    if (length(v) != 1L) NA_character_ else v
+  }
+  links <- vapply(parts, one, character(1), nm = "link")
+  fams  <- vapply(parts, one, character(1), nm = "family")
+  if (anyNA(links) || !all(links == "identity")) return(unit)
+  if (!(is.numeric(y) || is.logical(y))) return(unit)
+  y <- as.numeric(y)
+  on_log <- fams %in% .brms_log_location_families
+  if (all(on_log)) {
+    v <- y[is.finite(y) & y > 0]
+    s <- if (length(v) > 1L) stats::sd(log(v)) else NA_real_
+    basis <- "sd_log"; label <- "2.5 x SD of the log response"
+  } else if (!any(on_log)) {
+    v <- y[is.finite(y)]
+    s <- if (length(v) > 1L) stats::sd(v) else NA_real_
+    basis <- "sd"; label <- "2.5 x SD of the response"
+  } else {
+    return(unit)
+  }
+  # A constant response has no scale to give.  normal(0, 0) passes
+  # brms::validate_prior() and Stan cannot use it, so fall back to one unit.
+  if (!is.finite(s) || s <= 0) {
+    s <- 1; basis <- "unit"; label <- "2.5; the response has no spread"
+  }
+  # %.10g, as for the length-scale prior: fixed-point formatting rounds a
+  # small scale to the literal 0.
+  list(spec = sprintf("normal(0, %.10g)", 2.5 * s), scale = s, basis = basis,
+       label = label)
+}
+
+
+#' The slope prior brms will use, read back from validate_prior()
+#'
+#' @param vp The table \code{brms::validate_prior()} returned, or \code{NULL}.
+#' @param requested The automatic prior's spec, or \code{NULL} when none was
+#'   set.
+#' @return One string: the class-level \code{b} priors (\code{"(flat)"} for
+#'   brms's default), then any coefficient-level ones as \code{name: prior}.
+#'   The requested spec, or \code{"(flat)"}, when \code{vp} cannot be read.
+#' @keywords internal
+#' @noRd
+.b_prior_used <- function(vp, requested = NULL) {
+  fallback <- if (is.null(requested)) "(flat)" else requested
+  if (is.null(vp) || !is.data.frame(vp) ||
+      !all(c("class", "coef", "prior") %in% names(vp)))
+    return(fallback)
+  is_b <- vp$class == "b"
+  if (!any(is_b)) return(fallback)
+  cls <- unique(vp$prior[is_b & !nzchar(vp$coef)])
+  cls[!nzchar(cls)] <- "(flat)"
+  if (!length(cls)) cls <- "(flat)"
+  own <- is_b & nzchar(vp$coef) & nzchar(vp$prior)
+  paste(c(unique(cls),
+          if (any(own)) unique(sprintf("%s: %s", vp$coef[own], vp$prior[own]))),
+        collapse = "; ")
+}
+
+
+# ---------------------------------------------------------------------------
+# What the basis resolves, in map units
+# ---------------------------------------------------------------------------
+
+#' The linear unit of a layer's CRS, for a message
+#' @keywords internal
+#' @noRd
+.gp_unit_label <- function(x) {
+  u <- tryCatch(sf::st_crs(x)$units_gdal, error = function(e) NULL)
+  if (length(u) != 1L || is.na(u) || !nzchar(u)) "CRS units" else u
+}
+
+#' A distance in map units, for a message
+#' @keywords internal
+#' @noRd
+.gp_fmt_dist <- function(v) {
+  ifelse(is.finite(v),
+         format(signif(v, 3), big.mark = ",", scientific = FALSE, trim = TRUE),
+         "NA")
+}
+
+#' Basis functions per dimension needed to resolve an effective range
+#'
+#' The inversion of \code{m >= 1.75 * c * S / ell}, with the effective range
+#' turned into a length-scale on the axis where it is shortest in scaled
+#' units (the one with the larger coordinate SD).
+#'
+#' @param range Effective range in map units.
+#' @param gp_c,S Boundary factor and pooled centred range.
+#' @param xy_scale The two coordinate SDs the axes were divided by.
+#' @return An integer-valued numeric (not capped).
+#' @keywords internal
+#' @noRd
+.gp_k_needed <- function(range, gp_c, S, xy_scale) {
+  ell <- (range / .gp_se_range_factor) / max(xy_scale)
+  ceiling(1.75 * gp_c * S / ell)
+}
+
+
+#' Parse the length-scale prior this package sets
+#'
+#' @param spec A prior string: \code{"inv_gamma(a, b)"} or
+#'   \code{"normal(0, s)"} (a half-normal, since \code{lscale} has a lower
+#'   bound of 0).  Anything else, or several different entries, is not parsed.
+#' @return A list with \code{cdf} (a function) and \code{var}, or \code{NULL}.
+#' @keywords internal
+#' @noRd
+.lscale_prior_parse <- function(spec) {
+  if (!is.character(spec) || length(spec) != 1L || is.na(spec)) return(NULL)
+  num <- "\\s*([-+0-9.eE]+)\\s*"
+  m <- regmatches(spec, regexec(paste0("^inv_gamma\\(", num, ",", num, "\\)$"),
+                                spec))[[1L]]
+  if (length(m) == 3L) {
+    a <- suppressWarnings(as.numeric(m[2L])); b <- suppressWarnings(as.numeric(m[3L]))
+    if (!is.finite(a) || !is.finite(b) || a <= 0 || b <= 0) return(NULL)
+    return(list(
+      cdf = function(x) 1 - stats::pgamma(1 / x, shape = a, rate = b),
+      var = if (a > 2) b^2 / ((a - 1)^2 * (a - 2)) else NA_real_))
+  }
+  m <- regmatches(spec, regexec(paste0("^normal\\(\\s*0\\s*,", num, "\\)$"),
+                                spec))[[1L]]
+  if (length(m) == 2L) {
+    s <- suppressWarnings(as.numeric(m[2L]))
+    if (!is.finite(s) || s <= 0) return(NULL)
+    return(list(cdf = function(x) 2 * stats::pnorm(x / s) - 1,
+                var = s^2 * (1 - 2 / pi)))
+  }
+  NULL
+}
+
+
+#' Moran's I of a variable's OLS residuals over a weight matrix
+#'
+#' One-sided (greater), with the Cliff and Ord regression-residual moments.
+#'
+#' @param y Numeric response.
+#' @param X Design matrix with its intercept column.
+#' @param W Weight matrix, base or \pkg{Matrix}.
+#' @return A list with \code{I}, \code{z} and \code{p}, or \code{NULL} when
+#'   it cannot be computed.
+#' @keywords internal
+#' @noRd
+.gp_resid_moran <- function(y, X, W) {
+  n  <- length(y)
+  e  <- stats::lm.fit(X, y)$residuals
+  e  <- e - mean(e)
+  S0 <- sum(W)
+  if (!is.finite(S0) || S0 <= 0 || sum(e^2) <= 0) return(NULL)
+  I   <- as.numeric((n / S0) * sum(e * (W %*% e)) / sum(e^2))
+  mom <- .morans_residual_moments(W = W, X = X, S0 = S0,
+                                  is_sparse = inherits(W, "Matrix"))
+  if (is.null(mom) || !is.finite(mom$VI) || mom$VI <= 0) return(NULL)
+  z <- (I - mom$EI) / sqrt(mom$VI)
+  list(I = I, z = z, p = stats::pnorm(z, lower.tail = FALSE))
+}
+
+#' Short-lag Moran's I of a variable's OLS residuals
+#'
+#' Over the \code{k} nearest neighbours.  Used before fitting to ask whether
+#' the response has any spatial structure at short range before a variogram
+#' range below the basis floor is taken at its word.
+#' \code{estimate_sac_range()} tests for structure itself and refuses most
+#' white-noise layers, and still returned a finite range below the floor in
+#' 3 of 60 draws.
+#'
+#' @param xy Coordinate matrix.
+#' @param y Numeric response.
+#' @param X Design matrix without the intercept, or \code{NULL}.
+#' @param k Neighbours.  4: the short lag is where structure the basis cannot
+#'   resolve shows.
+#' @return A list with \code{I}, \code{z} and \code{p} (one-sided, greater),
+#'   or \code{NULL} when it cannot be computed.
+#' @keywords internal
+#' @noRd
+.gp_short_lag_moran <- function(xy, y, X = NULL, k = 4L) {
+  tryCatch({
+    y  <- as.numeric(y)
+    xy <- as.matrix(xy)[, 1:2, drop = FALSE]
+    n  <- length(y)
+    if (n < 10L || nrow(xy) != n || !all(is.finite(y)) || !all(is.finite(xy)))
+      return(NULL)
+    X <- if (is.null(X) || !length(X)) matrix(1, n, 1L) else cbind(1, as.matrix(X))
+    .gp_resid_moran(y, X, .build_knn_weights(xy, k = k))
+  }, error = function(e) NULL)
+}
+
+# The correlation that defines an effective range: the distance at which it
+# has fallen to this (.gp_se_range_factor is the same 0.05 for the kernel).
+.gp_range_correlation <- 0.05
+
+#' Moran's I of a variable's OLS residuals at the basis floor's distance
+#'
+#' Over the pairs of points between 0.75 and 1.25 floors apart.  An effective
+#' range is the distance at which the correlation has fallen to 0.05, so a
+#' response whose range is below the floor is uncorrelated at the floor's
+#' distance, and one that is still correlated there has structure the floor
+#' does not bound.  A variogram can return a short range for such a response:
+#' on squared-exponential fields with ranges of 60 and 90 km it returned 5 to
+#' 7 km in 1 to 9 of 60 draws, each with significant short-lag
+#' autocorrelation.  Asking that this statistic not be both above 0.05 and
+#' significant took the warnings on those fields from 15 of 180 draws to 2,
+#' on a sine with a 96 km wavelength from 8 of 60 to 0, and on fields with
+#' ranges of 8 to 15 km from 178 of 180 to 176.
+#'
+#' The band needs every pairwise distance, so more than \code{max_n} rows are
+#' thinned to \code{max_n} at even steps through the rows (no random draw:
+#' the fit must leave the caller's random-number stream where it was).
+#'
+#' @param xy Coordinate matrix.
+#' @param y Numeric response.
+#' @param X Design matrix without the intercept, or \code{NULL}.
+#' @param floor The floor, in map units.
+#' @param max_n Most rows used.
+#' @return A list with \code{I}, \code{z}, \code{p} (one-sided, greater),
+#'   \code{band} (the two distances) and \code{n_pairs}, or \code{NULL} when
+#'   it cannot be computed (no pair in the band, among other reasons).
+#' @keywords internal
+#' @noRd
+.gp_floor_moran <- function(xy, y, X = NULL, floor, max_n = 1500L) {
+  tryCatch({
+    y  <- as.numeric(y)
+    xy <- as.matrix(xy)[, 1:2, drop = FALSE]
+    n  <- length(y)
+    if (n < 10L || nrow(xy) != n || !all(is.finite(y)) || !all(is.finite(xy)) ||
+        !is.finite(floor) || floor <= 0)
+      return(NULL)
+    X <- if (is.null(X) || !length(X)) matrix(1, n, 1L) else cbind(1, as.matrix(X))
+    if (n > max_n) {
+      keep <- unique(round(seq(1, n, length.out = max_n)))
+      xy <- xy[keep, , drop = FALSE]; y <- y[keep]; X <- X[keep, , drop = FALSE]
+    }
+    band <- c(0.75, 1.25) * floor
+    D <- as.matrix(stats::dist(xy))
+    W <- (D >= band[1L] & D < band[2L]) * 1
+    diag(W) <- 0
+    out <- .gp_resid_moran(y, X, W)
+    if (is.null(out)) return(NULL)
+    out$band    <- band
+    out$n_pairs <- sum(W) / 2
+    out
+  }, error = function(e) NULL)
+}
+
+
+#' Compare the response's estimated range with what the basis resolves
+#'
+#' Run before anything is compiled.  The floor of the basis is known from the
+#' coordinates alone, and a range below it means minutes of sampling for a
+#' surface that cannot hold the structure.
+#'
+#' A variogram range below the floor is taken as the reach of the structure
+#' only when two things agree with it: the variable is autocorrelated at
+#' short range, and it is no longer autocorrelated at the floor's distance.
+#' Without the first the range is noise (a variogram fitted to white noise
+#' can still return a short range: 3 of 60 draws).  Without the second the
+#' range is contradicted: structure reaches at least to the floor, and the
+#' variogram either fitted a smooth surface badly or found a short range
+#' beside a longer one.
+#'
+#' @param dat_sf The prepared training layer.
+#' @param response_var,predictor_vars Column names.
+#' @param resolution Named \code{c(x, y)}: the smallest effective range the
+#'   basis resolves along each axis, in map units.
+#' @param gp_c,S,xy_scale As in \code{.gp_k_needed()}.
+#' @return A list with \code{status} (\code{"ok"}, \code{"below_floor"},
+#'   \code{"below_floor_no_autocorrelation"},
+#'   \code{"below_floor_long_range"}, \code{"not_estimated"} or
+#'   \code{"not_run"}), \code{range} (map units, or \code{NA}), \code{floor}
+#'   (the coarser axis's), \code{k_needed}, \code{moran},
+#'   \code{moran_floor} and \code{reason}.
+#' @keywords internal
+#' @noRd
+.gp_prefit_range_check <- function(dat_sf, response_var, predictor_vars,
+                                   resolution, gp_c, S, xy_scale) {
+  out <- list(status = "not_run", range = NA_real_,
+              floor = max(resolution), k_needed = NA_real_, moran = NULL,
+              moran_floor = NULL, reason = NA_character_)
+  df <- sf::st_drop_geometry(dat_sf)
+  y  <- df[[response_var]]
+  if (!(is.numeric(y) || is.logical(y))) {
+    out$reason <- "the response is not numeric"
+    return(out)
+  }
+  # The range of what the GP is asked to model: the response net of the
+  # predictors when there are any.  A predictor estimate_sac_range() cannot
+  # detrend on (it stops) falls back to the raw response.
+  est <- function(pv) tryCatch(
+    suppressWarnings(suppressMessages(
+      estimate_sac_range(dat_sf, response_var,
+                         predictor_vars = if (length(pv)) pv else NULL))),
+    error = function(e) structure(NA_real_, rejected_reason = conditionMessage(e),
+                                  failed = TRUE))
+  r <- est(predictor_vars)
+  if (isTRUE(attr(r, "failed")) && length(predictor_vars) > 0L)
+    r <- est(character(0))
+  rng <- suppressWarnings(as.numeric(r))[1L]
+
+  design <- function() {
+    X <- NULL
+    if (length(predictor_vars) > 0L)
+      X <- tryCatch(
+        stats::model.matrix(stats::reformulate(predictor_vars), data = df)[, -1L, drop = FALSE],
+        error = function(e) NULL)
+    xy <- sf::st_coordinates(dat_sf)[, 1:2, drop = FALSE]
+    if (!is.null(X) && nrow(X) != nrow(xy)) X <- NULL
+    list(xy = xy, X = X)
+  }
+  moran <- function() {
+    d <- design()
+    .gp_short_lag_moran(d$xy, as.numeric(y), d$X)
+  }
+
+  if (!is.finite(rng) || rng <= 0) {
+    out$status <- "not_estimated"
+    out$reason <- attr(r, "rejected_reason") %||% "no range was returned"
+    out$moran  <- moran()
+    # Both tests, so the log can say which way an unestimated range leans.
+    if (!is.null(out$moran) && isTRUE(out$moran$p < 0.05)) {
+      d <- design()
+      out$moran_floor <- .gp_floor_moran(d$xy, as.numeric(y), d$X,
+                                         floor = out$floor)
+    }
+    return(out)
+  }
+  out$range    <- rng
+  out$k_needed <- .gp_k_needed(rng, gp_c, S, xy_scale)
+  if (rng >= out$floor) {
+    out$status <- "ok"
+    return(out)
+  }
+  # Below the floor.  A variogram fitted to a response with no spatial
+  # structure can still return a short range (estimate_sac_range() refuses
+  # most such layers itself; 3 of 60 white-noise draws got one), so the
+  # range is taken at its word only when the short-lag autocorrelation is
+  # there (or cannot be tested).
+  out$moran <- moran()
+  if (!(is.null(out$moran) || isTRUE(out$moran$p < 0.05))) {
+    out$status <- "below_floor_no_autocorrelation"
+    return(out)
+  }
+  # And only when the autocorrelation is gone by the floor's distance.  Any
+  # real structure makes the short-lag test significant, long-range structure
+  # included, so that test alone let a spuriously short range through.
+  d <- design()
+  out$moran_floor <- .gp_floor_moran(d$xy, as.numeric(y), d$X, floor = out$floor)
+  mf <- out$moran_floor
+  out$status <- if (!is.null(mf) && isTRUE(mf$I > .gp_range_correlation) &&
+                    isTRUE(mf$p < 0.05))
+    "below_floor_long_range" else "below_floor"
+  out
+}
+
+
+# ---------------------------------------------------------------------------
+# Sampler diagnostics
+# ---------------------------------------------------------------------------
+
+# The thresholds convergence_ok is judged by; see @param check_convergence
+# for where each comes from.  R-hat has two: above .bayes_rhat_max fails
+# whatever else holds, above .bayes_rhat_caution fails only beside too few
+# effective draws (.bayes_rhat_tiers()).
+.bayes_rhat_max      <- 1.05
+.bayes_rhat_caution  <- 1.01
+.bayes_ess_per_chain <- 100
+.bayes_ebfmi_min     <- 0.3
+
+#' Sort R-hat values into the ones that fail and the ones to caution on
+#'
+#' One cut at 1.01 over every parameter fails fits that have converged.  This
+#' model has several hundred basis weights, and the largest of several hundred
+#' R-hat values is near 1.01 by chance at the default run length.  Four
+#' default fits (four chains of 1,000 post-warmup draws, about 540
+#' parameters) had maxima of 1.005 to 1.011 with every effective sample size
+#' at least 1,086 against 400 required, and one of the four was failed on a
+#' single basis weight at 1.011.  Chains that have converged by construction
+#' (540 independent AR(1) parameters, four chains of 1,000 draws, eight
+#' replicates each) give the same picture: at an effective sample size near
+#' 1,300 the largest R-hat was 1.008 to 1.011 and one replicate in eight had
+#' a parameter above 1.01; near 450 it was 1.027 to 1.032, with 130 to 160
+#' parameters above 1.01 and none above 1.05.
+#'
+#' The same simulation ties the two recommendations of Vehtari et al. (2021)
+#' together: parameters with an effective sample size of 350 to 450 had a
+#' mean R-hat of 1.009.  So a value above 1.01 is a failure when the
+#' parameter's effective sample size is also short, a caution when it is not,
+#' and a failure above 1.05 either way.
+#'
+#' @param rhat_vals Named R-hat values (\code{NaN} for a constant parameter).
+#' @param neff_vals Named ratios from \code{brms::neff_ratio()}, or
+#'   \code{NULL}.
+#' @param n_draws,n_chains Post-warmup draws over all chains, and chains.
+#' @return A list with \code{failed} and \code{caution}, the parameter names
+#'   in each.  A parameter above 1.01 whose effective sample size cannot be
+#'   read fails.
+#' @keywords internal
+#' @noRd
+.bayes_rhat_tiers <- function(rhat_vals, neff_vals = NULL, n_draws = NA_real_,
+                              n_chains = NA_real_) {
+  nm    <- names(rhat_vals)
+  above <- which(rhat_vals > .bayes_rhat_caution)
+  if (!length(above)) return(list(failed = character(0), caution = character(0)))
+  ess <- rep(NA_real_, length(rhat_vals))
+  counts_known <- is.numeric(n_draws) && length(n_draws) == 1L &&
+    is.finite(n_draws) && n_draws > 0 && is.numeric(n_chains) &&
+    length(n_chains) == 1L && is.finite(n_chains) && n_chains > 0
+  if (counts_known && is.numeric(neff_vals) && !is.null(names(neff_vals)) &&
+      !is.null(nm))
+    ess <- unname(neff_vals[nm]) * n_draws
+  enough <- is.finite(ess) & ess >= .bayes_ess_per_chain * n_chains
+  fails  <- above[rhat_vals[above] > .bayes_rhat_max | !enough[above]]
+  list(failed  = nm[fails], caution = nm[setdiff(above, fails)])
+}
+
+#' Parameters whose bulk or tail effective sample size is too small
+#'
+#' \code{brms::neff_ratio()} is \code{min(bulk ESS, tail ESS) / draws}, so the
+#' smaller of the two effective sample sizes is the ratio times the number of
+#' post-warmup draws.  The rule is absolute, 100 per chain, as Stan's own
+#' warning is: a share of the draws asks for 100 in all at
+#' \code{chains = 2, iter = 1000} and for 2,000 at four chains of 10,000.
+#'
+#' @param neff_vals Named ratios from \code{brms::neff_ratio()}.
+#' @param n_draws Post-warmup draws over all chains.
+#' @param n_chains Number of chains.
+#' @return The names of the parameters below
+#'   \code{.bayes_ess_per_chain * n_chains}; \code{character(0)} when the
+#'   draw or chain count is unknown.
+#' @keywords internal
+#' @noRd
+.bayes_low_ess <- function(neff_vals, n_draws, n_chains) {
+  if (!is.numeric(n_draws) || length(n_draws) != 1L || !is.finite(n_draws) ||
+      !is.numeric(n_chains) || length(n_chains) != 1L || !is.finite(n_chains) ||
+      n_draws <= 0 || n_chains <= 0)
+    return(character(0))
+  names(neff_vals)[which(neff_vals * n_draws < .bayes_ess_per_chain * n_chains)]
+}
+
+#' E-BFMI per chain from brms::nuts_params()
+#'
+#' The energy Bayesian fraction of missing information of Betancourt (2016):
+#' the mean squared change in energy between successive transitions over the
+#' variance of the energy.
+#'
+#' @param np The data.frame \code{brms::nuts_params()} returns.
+#' @return A named numeric, one per chain; length 0 when the energies are
+#'   absent.
+#' @keywords internal
+#' @noRd
+.bayes_ebfmi <- function(np) {
+  if (!is.data.frame(np) || !all(c("Parameter", "Value", "Chain") %in% names(np)))
+    return(numeric(0))
+  en <- np[np$Parameter == "energy__", , drop = FALSE]
+  if (!nrow(en)) return(numeric(0))
+  if ("Iteration" %in% names(en)) en <- en[order(en$Chain, en$Iteration), ]
+  vapply(split(en$Value, en$Chain), function(e) {
+    if (length(e) < 3L || !is.finite(stats::var(e)) || stats::var(e) <= 0)
+      return(NA_real_)
+    (sum(diff(e)^2) / length(e)) / stats::var(e)
+  }, numeric(1))
+}
+
+#' What to do about each sampler check that failed
+#'
+#' The remedy differs by check.  More iterations bring R-hat down and the
+#' effective sample size up.  They do not remove divergent transitions, which
+#' need a smaller step size (a higher \code{adapt_delta}), and a low E-BFMI
+#' comes from the shape of the posterior.  A fit whose only failure was two
+#' divergent transitions used to be told to run more iterations.
+#'
+#' @param failed Character: any of \code{"divergent"}, \code{"rhat"},
+#'   \code{"ess"} and \code{"ebfmi"}.
+#' @param iter,chains,adapt_delta The settings the fit ran with.
+#' @return One string, a sentence per remedy, in the order above.
+#' @keywords internal
+#' @noRd
+.bayes_convergence_advice <- function(failed, iter, chains, adapt_delta = NULL) {
+  out <- character(0)
+  if ("divergent" %in% failed) {
+    ad <- suppressWarnings(as.numeric(adapt_delta %||% NA_real_))[1L]
+    out <- c(out, sprintf(
+      paste0("For the divergent transitions, raise adapt_delta in `control`",
+             "%s; more iterations do not remove them."),
+      if (is.finite(ad)) sprintf(" (now %.2f)", ad) else ""))
+  }
+  what <- c(if ("rhat" %in% failed) "bring R-hat down",
+            if ("ess" %in% failed) "raise the effective sample size")
+  if (length(what) > 0L)
+    out <- c(out, sprintf(
+      "Run more iterations (iter = %s, chains = %s now) to %s.",
+      format(iter), format(chains), paste(what, collapse = " and ")))
+  if ("ebfmi" %in% failed)
+    out <- c(out, paste0(
+      "A low E-BFMI comes from the shape of the posterior, not the run ",
+      "length: a longer warmup can help, and otherwise the model or its ",
+      "priors need changing."))
+  paste(out, collapse = " ")
+}
+
+
+# ---------------------------------------------------------------------------
+# GP adequacy
+# ---------------------------------------------------------------------------
+
+#' Largest gap between a prior's distribution function and a sample's
+#'
+#' The Kolmogorov-Smirnov distance between the draws of a parameter and its
+#' prior: 0 when the posterior is the prior, 1 when they share no mass.  It
+#' sees a posterior that moved as well as one that narrowed, which the ratio
+#' of variances does not: a length-scale posterior pushed to the long side of
+#' its prior is wider than the prior and has moved almost all of its mass.
+#'
+#' @param x Numeric draws.
+#' @param cdf The prior's distribution function.
+#' @return A number in 0 to 1, or \code{NA} with fewer than two finite draws.
+#' @keywords internal
+#' @noRd
+.gp_prior_gap <- function(x, cdf) {
+  x <- sort(x[is.finite(x)])
+  n <- length(x)
+  if (n < 2L) return(NA_real_)
+  Fx <- cdf(x)
+  if (!all(is.finite(Fx))) return(NA_real_)
+  max(seq_len(n) / n - Fx, Fx - (seq_len(n) - 1) / n)
+}
+
+# The thresholds of "not identified"; see .gp_adequacy().
+.gp_share_floor       <- 0.01
+.gp_contraction_floor <- 0.25
+.gp_prior_gap_floor   <- 0.30
+
+#' What the posterior says about the Gaussian process, against its basis
+#'
+#' Two questions the single "share of draws below the floor" could not
+#' separate.  Did the data give the Gaussian process anything to carry?  If
+#' so, does the posterior want a shorter length-scale than the basis
+#' resolves?  The share below the floor cannot answer the first: with a
+#' derived basis the prior puts under 1 percent of its mass below the floor,
+#' so a posterior equal to the prior gives 1 percent against a 10 percent
+#' trigger, and with a small user \code{gp_k} the share restates the prior
+#' (0.984 prior, 0.986 posterior).
+#'
+#' "Not identified" is decided on one of two things, and \code{identified_by}
+#' records which.
+#' \itemize{
+#'   \item With a residual standard deviation on the scale of the Gaussian
+#'     process (a gaussian or lognormal family), on the share of the variance
+#'     the process carries, \code{sdgp^2 / (sdgp^2 + sigma^2)}: not identified
+#'     when its 2.5 percent quantile is under 0.01.  On nine fits that
+#'     quantile was 0.000 to 0.003 for the three with nothing to find (white
+#'     noise, a 30 km field under a 97 km floor, \code{gp_k = 6}) and 0.17 to
+#'     0.94 for the six with a surface.
+#'   \item Without one, on the length-scales: not identified when on every
+#'     axis the posterior neither narrowed (it kept more than three quarters
+#'     of its prior's variance) nor moved (the largest gap between its
+#'     distribution function and the prior's is under 0.30).  On the
+#'     length-scale draws of the same nine fits the gap was 0.07 to 0.15 for
+#'     the three with nothing to find and 0.60 to 0.95 for the five whose
+#'     posterior moved; the sixth sat at its prior's median and is identified
+#'     by narrowing (0.63 and 0.81 of the variance gone, gaps 0.15 and 0.25).
+#'     Draws from the prior itself give a gap under 0.20 in 999 of 1,000
+#'     samples of 100.  This rule agrees with the share on eight of the nine
+#'     and calls the \code{gp_k = 6} fit identified (one axis lost 0.32 of
+#'     its prior's variance), as the rule it replaces did; it has been run
+#'     on no fit of a family without a residual standard deviation.
+#' }
+#' The variance ratio alone is not a test of identification, and was used as
+#' one: a surface smoother than the prior expects (a plane, a range longer
+#' than the extent) moves the length-scale to the long side of its prior,
+#' where the posterior is wider than the prior and the ratio's "contraction"
+#' is negative.  Three fits whose Gaussian process carried 0.57 to 0.94 of
+#' the variance at the 2.5 percent quantile had contractions of -0.34 to
+#' -2.27 and were reported as having found no spatial structure.
+#'
+#' @param ls_draws Matrix of length-scale draws, one column per length-scale.
+#' @param sdgp_draws,sigma_draws Numeric draws, or \code{NULL}.
+#' @param gp_ell_min The smallest length-scale the basis resolves.
+#' @param prior_spec The length-scale prior string, for the contraction and
+#'   the gap.
+#' @param xy_scale Coordinate SDs, to report ranges in map units.
+#' @return A list; see \code{$info$gp_adequacy} in
+#'   \code{?fit_bayesian_spatial_model}.  \code{status} is \code{"ok"},
+#'   \code{"below_resolution"} or \code{"not_identified"}.  It is what the
+#'   posterior says and no more: the caller reads the residuals next
+#'   (\code{.gp_fit_resid_moran()}) and splits both \code{"not_identified"}
+#'   and \code{"ok"} on what is left in them.
+#' @keywords internal
+#' @noRd
+.gp_adequacy <- function(ls_draws, sdgp_draws = NULL, sigma_draws = NULL,
+                         gp_ell_min, prior_spec = NULL, xy_scale = c(1, 1)) {
+  qs <- c(0.025, 0.5, 0.975)
+  ls_draws   <- as.matrix(ls_draws)
+  frac_below <- mean(as.numeric(ls_draws) < gp_ell_min, na.rm = TRUE)
+
+  pr <- .lscale_prior_parse(prior_spec)
+  contraction <- prior_gap <- rep(NA_real_, ncol(ls_draws))
+  names(contraction) <- names(prior_gap) <- colnames(ls_draws)
+  if (!is.null(pr)) {
+    if (is.finite(pr$var) && pr$var > 0)
+      contraction[] <- 1 - apply(ls_draws, 2L, stats::var) / pr$var
+    prior_gap[] <- apply(ls_draws, 2L, .gp_prior_gap, cdf = pr$cdf)
+  }
+
+  share <- NULL
+  if (is.numeric(sdgp_draws) && is.numeric(sigma_draws) &&
+      length(sdgp_draws) == length(sigma_draws) && length(sdgp_draws) > 0L) {
+    sh <- sdgp_draws^2 / (sdgp_draws^2 + sigma_draws^2)
+    share <- stats::quantile(sh, qs, names = FALSE, na.rm = TRUE)
+    names(share) <- c("q2.5", "q50", "q97.5")
+  }
+  sdgp <- NULL
+  if (is.numeric(sdgp_draws) && length(sdgp_draws) > 0L) {
+    sdgp <- stats::quantile(sdgp_draws, qs, names = FALSE, na.rm = TRUE)
+    names(sdgp) <- c("q2.5", "q50", "q97.5")
+  }
+
+  # The share decides wherever there is one.  The length-scales decide only
+  # where there is not, and there a posterior that moved counts as much as
+  # one that narrowed.
+  identified <- NA; identified_by <- NA_character_
+  if (!is.null(share) && is.finite(share[["q2.5"]])) {
+    identified    <- share[["q2.5"]] >= .gp_share_floor
+    identified_by <- "spatial_share"
+  } else if (all(is.finite(prior_gap))) {
+    narrowed <- is.finite(contraction) & contraction >= .gp_contraction_floor
+    moved    <- prior_gap >= .gp_prior_gap_floor
+    identified    <- any(narrowed | moved)
+    identified_by <- "length_scale"
+  }
+
+  # The posterior effective range per length-scale, in map units.  One
+  # length-scale per axis under gp_iso = FALSE; a shared one is reported on
+  # both axes, each with its own scaling.
+  # A family with several distributional parameters has one GP each, and so
+  # more columns than axes; no single range describes that fit.
+  eff <- NULL
+  if (ncol(ls_draws) %in% c(1L, 2L)) {
+    axes <- if (ncol(ls_draws) == 2L) list(x = 1L, y = 2L) else list(x = 1L, y = 1L)
+    eff <- t(vapply(seq_along(axes), function(i)
+      .gp_se_range_factor * xy_scale[[i]] *
+        stats::quantile(ls_draws[, axes[[i]]], qs, names = FALSE, na.rm = TRUE),
+      numeric(3)))
+    dimnames(eff) <- list(names(axes), c("q2.5", "q50", "q97.5"))
+  }
+
+  status <- if (identical(identified, FALSE)) "not_identified"
+            else if (is.finite(frac_below) && frac_below > 0.10) "below_resolution"
+            else "ok"
+  list(status = status, frac_below = frac_below, identified = identified,
+       identified_by = identified_by, contraction = contraction,
+       prior_gap = prior_gap, spatial_share = share, sdgp = sdgp,
+       effective_range = eff)
+}
+
+# The test on the residuals that the status is split on: neighbours and level.
+.gp_resid_k     <- 4L
+.gp_resid_level <- 0.05
+
+#' Short-lag Moran's I of a fitted model's residuals
+#'
+#' What the posterior of the Gaussian process cannot say: whether the surface
+#' it fitted left structure behind.  A process that carries a share of the
+#' variance at a range clear of the floor is all \code{.gp_adequacy()} sees
+#' in a response with a regional trend plus structure finer than the basis,
+#' and in one with the trend alone.  The residuals tell them apart, over the
+#' few nearest neighbours and one-sided: ten fits of 400 points on a 100 km
+#' square (floor 32 to 33 km) with a component at 8 or 12 km gave p of
+#' 5.3e-10 to 0.014, five of them under a posterior that read "ok".  See
+#' "What the basis resolves" in \code{?fit_bayesian_spatial_model} for the
+#' fits with no such component.
+#'
+#' The fitted values come from \code{fitted()}, which caches them, so the
+#' pass over the posterior is not repeated by \code{summary()} or
+#' \code{residuals()}.
+#'
+#' @param obj A \code{bayesian_fit}.
+#' @param fam_name The family's name, or \code{NA}.
+#' @param k Neighbours.
+#' @return A list with \code{test} (a list with \code{I}, \code{z}, the
+#'   one-sided \code{p} and \code{k}, or \code{NULL}) and \code{reason} (why
+#'   there is no test, or \code{NA}).
+#' @keywords internal
+#' @noRd
+.gp_fit_resid_moran <- function(obj, fam_name = NA_character_, k = .gp_resid_k) {
+  none <- function(why) list(test = NULL, reason = why)
+  if (isTRUE(fam_name %in% .brms_category_families))
+    return(none("an ordinal or categorical family has no residual per row"))
+  res <- tryCatch(suppressWarnings(suppressMessages(stats::residuals(obj))),
+                  error = function(e) e)
+  if (inherits(res, "error"))
+    return(none(sprintf("residuals() failed: %s", conditionMessage(res))))
+  if (!is.numeric(res) || length(res) != obj$n || sum(is.finite(res)) < 10L)
+    return(none("residuals() did not return a finite number for at least 10 rows"))
+  mor <- tryCatch(suppressWarnings(suppressMessages(
+    residual_morans_i(obj, alternative = "greater", k = k))),
+    error = function(e) NULL)
+  p <- suppressWarnings(as.numeric(mor$p_value %||% NA_real_))[1L]
+  if (is.null(mor) || !is.finite(p))
+    return(none("Moran's I could not be computed on the residuals"))
+  list(test = list(I = mor$observed, z = mor$z, p = p, k = as.integer(k)),
+       reason = NA_character_)
+}
+
+
 #' Fit a Bayesian spatial regression with a 2D Gaussian Process (via brms)
 #'
 #' Fits a regression whose residual spatial structure is modelled explicitly, as
 #' a Gaussian process over the coordinates, and so kept out of the errors.  Two
 #' things follow, and they are the reasons to reach for this backend.  First,
-#' every quantity comes with a posterior, so predictions carry calibrated
-#' intervals instead of point estimates.  Score them with
+#' every quantity comes with a posterior, so predictions carry intervals
+#' instead of point estimates.  Whether those intervals are calibrated is
+#' something to measure, not assume: score them with
 #' \code{\link{cv_bayes}()}, which reports held-out interval coverage and CRPS.
-#' Second, the fitted length-scale is itself an estimate of how far the spatial
-#' dependence reaches, a number you can read and report.
+#' Second, the spatial term is a smooth regional surface at a stated
+#' resolution.  The Gaussian process is fitted through a reduced-rank basis,
+#' and that basis has a floor: an effective range below which it cannot
+#' represent structure, reported in map units as \code{$info$gp_resolution}
+#' and by \code{print()}.  With the defaults the floor is 14 to 33 percent of
+#' the extent along each axis (about 32 km on a uniform 100 km square, 155 km
+#' east-west and 63 km north-south on the census tracts of North Carolina).
+#' Structure shorter than the floor is counted as noise: the fitted range comes
+#' out too long, the residual standard deviation too large, and the intervals
+#' too narrow where the structure is.  See "What the basis resolves" below.
+#'
+#' The fitted length-scale is an estimate of how far the spatial dependence
+#' reaches only when its posterior sits clear of both that floor and its
+#' prior.  \code{$info$gp_adequacy} says whether it does, and when it does
+#' \code{$info$gp_adequacy$effective_range} holds the posterior effective range
+#' per axis in map units (the raw \code{lscale} draws are in per-axis
+#' standardised units and are not a distance).
 #'
 #' Choose it over \code{\link{fit_gwr_model}()} when you want one global
 #' relationship plus an explicit spatial random field, and uncertainty you can
@@ -293,7 +1063,25 @@
 #' @param gp_k Positive integer giving the number of GP basis functions
 #'   \emph{per dimension}, or NULL (default) to derive it from the
 #'   length-scale/domain ratio.  The fitted model carries
-#'   \code{gp_k^2} basis functions, not \code{gp_k} (see Details).
+#'   \code{gp_k^2} basis functions, not \code{gp_k} (see Details).  A value
+#'   above the derived one makes the basis finer, and the length-scale
+#'   prior's lower tail moves down to the length-scale that basis resolves,
+#'   because a finer basis under the default prior gains almost nothing.  A
+#'   value below the derived one leaves the prior where it was, mostly below
+#'   what the basis resolves; that share is stored as
+#'   \code{$info$gp_adequacy$prior_mass_below}, logged when it passes 10
+#'   percent and flagged by \code{print()}.  To ask for a resolution in map
+#'   units, use \code{gp_resolution} and leave this \code{NULL}.
+#' @param gp_resolution The shortest effective range the basis should resolve,
+#'   as a single positive number in the units of the data's CRS (metres for a
+#'   UTM layer), or NULL (default) for the percentile rule described under
+#'   Details.  \code{gp_k} is derived from it, and the length-scale prior's
+#'   lower tail moves with the basis.  It can only refine: a value the default
+#'   basis already resolves leaves the default basis in place.  It is an error
+#'   when the basis it needs exceeds the cap of 50 functions per dimension
+#'   (2,500 in all); the message gives the basis size needed and the shortest
+#'   range the cap reaches on this layout.  Cost grows with
+#'   \code{gp_k^2}.  Give \code{gp_resolution} or \code{gp_k}, not both.
 #' @param gp_iso Logical; passed to \code{brms::gp(iso = )}.  \code{FALSE}
 #'   (the default) fits a separate length-scale per coordinate axis, letting the
 #'   model learn any directional structure from the data.  \code{TRUE} fits a
@@ -310,8 +1098,19 @@
 #'   length-scale, so raising \code{gp_c} raises the derived \code{gp_k} with
 #'   it, up to the cap of 50 per dimension (a capped value is logged).
 #' @param prior Optional brms prior specification. When NULL and
-#'   \code{standardize_predictors = TRUE}, weakly informative
-#'   \code{normal(0, 5)} priors are set on regression coefficients.
+#'   \code{standardize_predictors = TRUE}, a weakly informative prior is set on
+#'   the regression coefficients, on the scale of the linear predictor:
+#'   \code{normal(0, 2.5 * sd(y))} under an identity link (gaussian, student,
+#'   skew-normal and mixtures of them), \code{normal(0, 2.5 * sd(log(y)))} for
+#'   the lognormal families, whose location is on the log scale, and the fixed
+#'   \code{normal(0, 5)} under any other link (log, logit and so on), where the
+#'   linear predictor has a scale of its own.  \code{sd()} is taken over the
+#'   training rows.  The result therefore does not depend on the units of the
+#'   response: a fixed \code{normal(0, 5)} under an identity link, which is
+#'   what earlier versions set, left a slope alone when income was in
+#'   thousands of dollars and shrank the same slope to nothing when it was in
+#'   dollars.  The prior brms used is stored as \code{$info$b_prior} and shown
+#'   by \code{print()}.  When \code{prior} is given, no slope prior is added.
 #'   A data-informed GP length-scale prior is always appended
 #'   automatically unless \code{prior} already contains an entry with
 #'   \code{class = "lscale"}.
@@ -346,29 +1145,70 @@
 #'   predictors, so \code{coef()} reports a slope per standard deviation of
 #'   each predictor and an intercept at the predictor means, not the raw-unit
 #'   values \code{stats::lm()} would give; see \code{\link{coef.bayesian_fit}}.
-#' @param check_convergence Logical; after fitting, check for divergent
-#'   transitions, R-hat above 1.05 and an effective-sample-size ratio below
-#'   0.1.  Each problem found is written to the log as a WARN line (shown on
-#'   the console unless \code{\link{spatialkit_quiet}()} is on), sets
-#'   \code{$info$convergence_ok} to \code{FALSE}, and is detailed in
-#'   \code{$info$convergence_diagnostics}; \code{print()} on the fit flags it.
-#'   The GP basis is also checked against the posterior length-scale (see
-#'   Details): a basis too coarse for it is logged as a WARN line, and the
-#'   share of draws it cannot resolve is recorded as
-#'   \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, but it
-#'   does not change \code{convergence_ok} and \code{print()} does not flag
-#'   it.  None of these are raised as R warnings by the fit itself; the
-#'   functions that score fits do raise one: \code{\link{cv_bayes}()} names
-#'   the folds whose sampler did not converge (and marks them in
-#'   \code{fold_metrics$convergence_ok}), and
-#'   \code{\link{compare_models}()} names such a model (column
-#'   \code{convergence_ok}).  Under \pkg{rstan} the sampler raises its own
-#'   R-hat and ESS warnings; under \pkg{cmdstanr} nothing does, so read
-#'   \code{$info$convergence_ok}.  \code{FALSE} skips
-#'   the checks and leaves \code{convergence_ok} \code{NA} (not checked).
+#' @param check_convergence Logical; after fitting, read the sampler's
+#'   diagnostics and set \code{$info$convergence_ok}.  The verdict follows
+#'   Stan's own diagnostics, with these thresholds:
+#'   \itemize{
+#'     \item any divergent transition after warmup;
+#'     \item bulk or tail effective sample size below 100 per chain for any
+#'       parameter (Vehtari et al. 2021; the rule \pkg{rstan} warns on).  It
+#'       is an absolute count: a share of the draws, which earlier versions
+#'       used, asks for 100 in all at \code{chains = 2, iter = 1000};
+#'     \item rank-normalised split R-hat, in two tiers.  Above 1.05, the
+#'       value \pkg{rstan}'s own sampler warning uses, for any parameter.
+#'       Above 1.01, the value Vehtari et al. (2021) recommend, for a
+#'       parameter whose effective sample size is also below the count in
+#'       the previous item, or cannot be read;
+#'     \item E-BFMI below 0.3 in any chain (Betancourt 2016).
+#'   }
+#'   An R-hat between 1.01 and 1.05 on a parameter with enough effective
+#'   draws is a caution, not a failure: it is stored by name in
+#'   \code{$info$convergence_diagnostics$rhat_caution}, logged, and counted
+#'   by \code{print()}.  The reason is the number of parameters.  This model
+#'   has one weight per basis function, about 540 parameters at the usual
+#'   basis, and the largest of that many R-hat values sits near 1.01 in a
+#'   fit that has converged: four fits at the default four chains of 2,000
+#'   iterations had largest values of 1.005, 1.009, 1.009 and 1.011, with
+#'   every effective sample size at least 1,086 against the 400 required.
+#'   Chains that have converged by construction (540 independent
+#'   parameters, four chains of 1,000 draws) had a largest value of 1.008 to
+#'   1.011 at an effective sample size near 1,300, and 130 to 160 values
+#'   above 1.01, none above 1.05, at an effective sample size near 450.
+#'   Vehtari et al. give 1.01 beside an effective sample size above 400, and
+#'   an R-hat of 1.01 is about what an effective sample size of 400 gives
+#'   (1.009 on average in the same chains), so the two are read together
+#'   here.
+#'
+#'   Transitions that stop at \code{max_treedepth} are counted and logged but
+#'   do not change the verdict: Stan treats them as a cost, not as invalid
+#'   draws.  A failed verdict sets \code{convergence_ok} to \code{FALSE},
+#'   raises one R warning of class \code{spatialkit_convergence} naming each
+#'   failed check with its count and its first five parameters, and
+#'   \code{print()} flags it; \code{$info$convergence_diagnostics} holds every
+#'   value.  The warning closes with the remedy for the checks that failed: a
+#'   higher \code{adapt_delta} for divergent transitions, which more
+#'   iterations do not remove, and more iterations for R-hat and effective
+#'   sample size.  \code{\link{cv_bayes}()} marks such folds in
+#'   \code{fold_metrics$convergence_ok} and \code{\link{compare_models}()}
+#'   names such a model.  A short run usually fails, on effective sample
+#'   size: two fits of two chains and 300 post-warmup draws each had two or
+#'   three parameters below 100 effective draws per chain, and 66 and 76 of
+#'   their 537 parameters above R-hat 1.01.
+#'
+#'   The same step checks the GP basis against the posterior and the
+#'   residuals (see "What the basis resolves") and stores the result as
+#'   \code{$info$gp_adequacy}.  The residuals need the fitted values, one
+#'   pass over the posterior that \code{fitted()} caches for later calls.
+#'   That check is about the approximation, not the sampler, so it does not
+#'   change \code{convergence_ok}; \code{print()} and \code{summary()} show
+#'   its status, and two of its states raise a warning of class
+#'   \code{spatialkit_gp_adequacy}.  \code{FALSE} skips
+#'   all of these and leaves \code{convergence_ok} \code{NA} (not checked)
+#'   and the adequacy status \code{"not_checked"}.
 #'   Default TRUE.
 #' @param pointize Strategy for non-point geometry coercion.
-#' @param boundary Optional polygonal sf/sfc for CRS harmonization.
+#' @param boundary Optional polygonal sf/sfc whose CRS the data are projected
+#'   to.  It is not a clip: rows outside it are kept.
 #' @param .already_prepped Logical (internal). If \code{TRUE}, skip the
 #'   \code{prep_model_data()} call because the caller has already projected,
 #'   coerced, and filtered the data.  The data must then have plain POINT
@@ -384,8 +1224,9 @@
 #' estimated length-scale to the domain extent, following
 #' Riutort-Mayol et al. (2023): \code{gp_c} is set large enough to contain the
 #' upper length-scale bound, and \code{gp_k} large enough to resolve the lower
-#' one.  The derived value is typically 21-25 per dimension and is largely
-#' independent of \code{n}.
+#' one.  The derived value depends on the layout, not on \code{n}: 23 on a
+#' uniform square, 27 to 38 on the census tracts of Iowa, North Carolina and
+#' Texas, and the cap of 50 on California's, whose tracts are clustered.
 #'
 #' The domain extent used is the one \code{brms::gp(c = )} itself multiplies:
 #' the full pooled range of the column-centred coordinates
@@ -408,14 +1249,158 @@
 #' adequacy check below are all expressed in those standardised units, a second
 #' normalisation would leave every length-scale quantity in the wrong units.
 #'
-#' After fitting, the posterior length-scale is compared against the smallest
-#' scale the chosen basis can resolve
-#' (\code{1.75 * gp_c * S / gp_k}, stored as \code{$info$gp_ell_min}); when
-#' more than 10% of the posterior mass falls below it a WARN line is logged
-#' and the share is recorded as
-#' \code{$info$convergence_diagnostics$gp_lscale_below_resolution}, which is
-#' the signal that \code{gp_k} should be raised.  This runs with the other
-#' checks, so only under \code{check_convergence = TRUE}.
+#' \strong{What the basis resolves.}
+#' The smallest length-scale the chosen basis can resolve is
+#' \code{1.75 * gp_c * S / gp_k}, stored in standardised units as
+#' \code{$info$gp_ell_min}.  As an effective range (the distance at which the
+#' squared-exponential correlation has fallen to 5 percent, 2.45 length-scales)
+#' and in map units it is \code{$info$gp_resolution}, one value per axis
+#' because each coordinate is divided by its own standard deviation.  The
+#' floor is soft: the basis keeps 99 percent of a process's variance at the
+#' floor, 69 percent at half of it and 41 percent at a third.  The default
+#' length-scale prior is what makes it bind, with 1 percent of its mass below
+#' the floor and about one part in a hundred million below half of it.
+#'
+#' Three checks hold the basis against the data.
+#' \enumerate{
+#'   \item Before anything is compiled, the autocorrelation range of the
+#'     response (of its OLS residuals when there are predictors) is estimated
+#'     with \code{\link{estimate_sac_range}()} and compared with the coarser
+#'     axis's floor.  That range is a variogram estimate and can be wrong in
+#'     both directions, so a range below the floor raises a warning only when
+#'     two other things agree with it.  The same variable is autocorrelated
+#'     at short range (Moran's I over 4 nearest neighbours, one-sided, at 5
+#'     percent): a variogram fitted to a response with no spatial structure
+#'     can still return a short range (in 3 of 60 white-noise draws;
+#'     \code{estimate_sac_range()} refuses most such layers itself).  And it is
+#'     no longer autocorrelated at the floor's distance (Moran's I over the
+#'     pairs 0.75 to 1.25 floors apart is not both above 0.05, the
+#'     correlation that defines an effective range, and significant at 5
+#'     percent): a variogram can also return a short range for a surface
+#'     that is smooth over long distances.  The warning has class
+#'     \code{spatialkit_gp_resolution}, gives both numbers and the basis size
+#'     that would resolve the range, says that it is an estimate which the
+#'     check after sampling tests against the residuals of the fitted model,
+#'     and says when the basis size is past the
+#'     cap or past the number of rows, where kriging is the better tool if
+#'     the range is right.  A short range the floor-distance test contradicts
+#'     is logged and shown by \code{print()} without a warning: it can still
+#'     mean short-range structure beside a longer one, which the basis counts
+#'     as noise.  Nothing before sampling separates the two; the residuals
+#'     after it do (the third check).  A range that cannot be
+#'     estimated is logged with the reason and shown by \code{print()}; the
+#'     result is in \code{$info$gp_prefit}.  In 60 simulated draws each
+#'     (400 points on a 100 km square, floor 33 km) the warning was raised
+#'     for 59 fields with a range of 8 to 15 km; for 0 or 1 fields
+#'     that were squared-exponential with a range of 60 or 90 km, a sine or
+#'     a plane; for 2 of white noise; and for 5 exponential fields with a
+#'     60 km range.  An exponential field has structure at every scale, and
+#'     a fit of one with a 50 km range had 62 percent of its length-scale
+#'     draws below the floor, so those 5 are not plainly wrong.
+#'   \item Also before sampling, the share of the length-scale prior below
+#'     the floor is computed (\code{$info$gp_adequacy$prior_mass_below}).  A
+#'     derived basis keeps it near 0.01; a small \code{gp_k} does not (0.98
+#'     at \code{gp_k = 6} where the derived value is 23), and a share above
+#'     0.10 is logged and flagged by \code{print()}.
+#'   \item After sampling, under \code{check_convergence = TRUE}, the
+#'     posterior and the residuals are read.  The posterior says whether the
+#'     Gaussian process carries a share of the variance and where its
+#'     length-scale sits against the floor.  It cannot say what the surface
+#'     left behind, so the residuals are tested for autocorrelation at short
+#'     range in every fit (Moran's I over 4 nearest neighbours, one-sided,
+#'     at 5 percent; \code{$info$gp_adequacy$residual_moran}).
+#'     \code{$info$gp_adequacy$status} is one of:
+#'     \describe{
+#'       \item{\code{"ok"}}{The Gaussian process carries a share of the
+#'         variance, its length-scale is clear of the floor, and the
+#'         residuals show no autocorrelation at short range.  A surface
+#'         smoother than the prior expects (a plane, a range longer than the
+#'         extent) is \code{"ok"}: its length-scale posterior sits on the
+#'         long side of the prior and is wider than it.}
+#'       \item{\code{"below_resolution"}}{The Gaussian process carries a
+#'         share of the variance and more than 10 percent of the
+#'         length-scale draws fall below the floor.  The 10 percent trigger
+#'         is this package's operationalisation of the check Riutort-Mayol
+#'         et al. recommend, not a figure from the paper.}
+#'       \item{\code{"unresolved_short_range"}}{The residuals are
+#'         autocorrelated at short range: the signature of structure finer
+#'         than the basis, counted as noise.  It is reached two ways, and
+#'         \code{$info$gp_adequacy$identified} says which.  The Gaussian
+#'         process carries no variance that can be told from zero
+#'         (\code{FALSE}): all of the structure is below the floor.  Or it
+#'         carries a share and its length-scale is clear of the floor
+#'         (\code{TRUE}): it fitted a surface, and finer structure sits
+#'         beside it, as with a regional trend plus short-range structure.}
+#'       \item{\code{"no_signal_above_floor"}}{The Gaussian process carries
+#'         no variance that can be told from zero, and the residuals show
+#'         nothing left over.  A response with no spatial structure gives
+#'         this, so it is not a failure by itself.}
+#'       \item{\code{"not_checked"}}{\code{check_convergence = FALSE}.}
+#'     }
+#'     The second and third raise a warning of class
+#'     \code{spatialkit_gp_adequacy}; the fourth is logged.  When the
+#'     residuals cannot be tested (an ordinal or categorical family has no
+#'     residual per row; a posterior that cannot be drawn), the status rests
+#'     on the posterior alone, a line is logged, the reason is in
+#'     \code{$info$gp_adequacy$residual_untested}, and \code{print()} keeps
+#'     its flag on a variogram range that was below the floor.
+#'
+#'     The residual test rests on fits of points on a 100 km square whose
+#'     floor is 32 to 33 km.  Sampled fits: ten of a response with a
+#'     component below the floor (a field with an 8 or 12 km range, alone or
+#'     beside a plane or a field with a 90 km range) had p of 5.3e-10 to
+#'     0.014, and five of the ten had a posterior that reads \code{"ok"};
+#'     twelve of a response with none (planes, bowls, a sine, fields with
+#'     ranges of 45 to 200 km) had p of 0.66 to 0.97.  At the posterior mode
+#'     of the same model, computed without sampling, the test was
+#'     significant in 0 of 160 fits of fields with ranges of 45 to 200 km
+#'     and in 3 of 120 fits of a plane, a bowl and a sine (one noise draw of
+#'     the 40, shared by the three, whose own Moran's I has p = 0.003);
+#'     and in 16 to 18 of 20 fits of each of four responses with an 8 km
+#'     field in them, where the length-scale at the mode was below the floor
+#'     in 0 or 1 of the 20.  On a fit with nothing left over the test is
+#'     conservative, because the surface takes up part of the noise and
+#'     leaves the residuals slightly negatively autocorrelated (median I of
+#'     -0.03 to -0.07).  It is not sharp just below the floor: a field with
+#'     a 20 km range was significant in 8 of 20 fits, and there it is the
+#'     length-scale draws that report it (\code{"below_resolution"}).  An
+#'     exponential field has structure at every scale and can be reported
+#'     with a range above the floor (8 of 20 fits at 60 km).  The 5 percent
+#'     level is the usual one and is not tuned; with many rows a small
+#'     leftover autocorrelation is significant, so read the size of I
+#'     beside its p.
+#'
+#'     "No variance
+#'     that can be told from zero" is decided on the Gaussian process's share
+#'     of the variance, \code{sdgp^2 / (sdgp^2 + sigma^2)}: its 2.5 percent
+#'     quantile is under 0.01.  On nine fits that quantile was 0.000 to 0.003
+#'     for the three with nothing for the process to find and 0.17 to 0.94
+#'     for the six with a surface; the threshold rests on those nine.  It
+#'     does not mark off a response whose structure is all below the floor:
+#'     on five fits of a field with an 8 km range under a 33 km floor the
+#'     quantile was 0.000, 0.000, 0.001, 0.015 and 0.019, so two of the five
+#'     count as carrying a share, and it is the residual test that reports
+#'     them.  The
+#'     share exists for a gaussian or lognormal family.  For any other
+#'     family the length-scales decide instead: the process is not identified
+#'     when on every axis the posterior kept more than three quarters of its
+#'     prior's variance and the largest gap between its distribution function
+#'     and the prior's is under 0.30.  That second rule has been checked on
+#'     the length-scale draws of the same nine gaussian fits, where it agrees
+#'     with the share on eight, and on no fit of another family.
+#'     \code{$info$gp_adequacy$identified_by} says which rule was used.  The width of the length-scale posterior does not
+#'     decide by itself, because a posterior that moved to longer
+#'     length-scales is wider than its prior; and the share of draws below
+#'     the floor cannot detect an unidentified process, because a posterior
+#'     the data did not move puts 1 percent below the floor, the same as the
+#'     prior.
+#' }
+#' A response whose range is below the floor needs a finer basis and a prior
+#' that allows the shorter length-scale, both of which \code{gp_resolution}
+#' sets, up to the cap.  Past the cap this model is the wrong tool: resolving
+#' a 30 km range on the North Carolina tracts would take 156 functions per
+#' dimension, 24,336 in all for 2,672 points.  Kriging has no such floor; see
+#' \code{\link{kriging_adequacy}()} for cell means.
 #'
 #' \strong{Coordinate scaling and anisotropy.}
 #' Before fitting the GP, X and Y coordinates are each centred and divided by
@@ -446,6 +1431,40 @@
 #'   Model-specific metadata lives in \code{$info} (coords: the names of the
 #'   scaled coordinate columns handed to \code{brms::gp()}; coord_scaling,
 #'   predictor_scaling, gp_k, gp_c, gp_iso, gp_n_basis, gp_ell_min,
+#'   gp_resolution: the smallest effective range the basis resolves, as
+#'   \code{c(x, y)} in map units; gp_resolution_requested: the
+#'   \code{gp_resolution} argument, or \code{NULL};
+#'   gp_prefit: the check made before sampling, a list with \code{status}
+#'   (\code{"ok"}; \code{"below_floor"}, the one that warns;
+#'   \code{"below_floor_no_autocorrelation"} and
+#'   \code{"below_floor_long_range"}, a range below the floor that the
+#'   short-lag or the floor-distance test did not bear out;
+#'   \code{"not_estimated"} or \code{"not_run"}), \code{range} (the
+#'   estimated range in map units), \code{floor}, \code{k_needed},
+#'   \code{moran} and \code{moran_floor} (the two Moran's I tests, each with
+#'   \code{I}, \code{z} and a one-sided \code{p}), \code{reason} and
+#'   \code{unit};
+#'   gp_adequacy: a list with \code{status} (see Details), \code{frac_below}
+#'   (the share of length-scale draws below \code{gp_ell_min}),
+#'   \code{identified} and \code{identified_by} (\code{"spatial_share"} or
+#'   \code{"length_scale"}, the rule that decided it; see Details),
+#'   \code{contraction} (one minus the ratio of posterior to prior variance,
+#'   per length-scale, negative when the posterior is the wider of the two)
+#'   and \code{prior_gap} (the largest gap between the posterior's and the
+#'   prior's distribution functions, per length-scale; both \code{NA} for a
+#'   length-scale prior this function did not set), \code{spatial_share} and
+#'   \code{sdgp} (2.5,
+#'   50 and 97.5 percent quantiles; the share only for a gaussian or lognormal
+#'   family), \code{effective_range} (the posterior effective range per axis
+#'   in map units, same quantiles), \code{residual_moran} (the test on the
+#'   residuals the status rests on: \code{I}, \code{z}, a one-sided \code{p}
+#'   and \code{k}, the number of neighbours; absent when it could not be
+#'   run, and \code{residual_untested} then says why), \code{resolution},
+#'   \code{unit} and \code{prior_mass_below};
+#'   b_prior: the slope prior brms used (\code{"(flat)"} for its default,
+#'   \code{NA} for a model with no slopes), and b_prior_source: where it came
+#'   from; predictor_levels: the levels each factor or character predictor
+#'   has in the training rows, which \code{predict()} holds new data to;
 #'   gp_S: the pooled centred range \code{brms::gp(c = )} multiplies;
 #'   gp_cmeans: the column means brms centred the scaled coordinates on;
 #'   gp_xy_range: the training extrema of the scaled coordinates, which
@@ -458,15 +1477,48 @@
 #'   semicolon-separated, if brms resolved the axes differently); loo, looic,
 #'   convergence_ok (\code{TRUE} or \code{FALSE}, and \code{NA} when nothing
 #'   was checked, as under \code{check_convergence = FALSE}),
-#'   convergence_diagnostics: \code{n_divergent},
-#'   \code{max_rhat}, \code{min_neff_ratio}, and \code{rhat_failed} /
-#'   \code{neff_failed}, the parameters that failed each check by name with
-#'   their values (empty when none failed), which is what makes a failed
-#'   check actionable; and n_dropped: the rows
+#'   convergence_diagnostics: \code{n_divergent}, \code{n_max_treedepth},
+#'   \code{ebfmi} (per chain), \code{max_rhat}, \code{min_neff_ratio},
+#'   \code{min_ess} (the smallest bulk or tail effective sample size) and
+#'   \code{ess_required} (100 per chain), and \code{rhat_failed} /
+#'   \code{neff_failed} / \code{ess_failed}, the parameters that failed each
+#'   check by name with their values (R-hat, ESS ratio and ESS; empty when
+#'   none failed), which is what makes a failed check actionable,
+#'   \code{rhat_caution}, the parameters whose R-hat is between 1.01 and 1.05
+#'   with enough effective draws, which do not fail the verdict, plus
+#'   \code{gp_lscale_below_resolution} and \code{gp_adequacy}, the share and
+#'   status described under Details; and n_dropped: the rows
 #'   \code{prep_model_data()} removed for missing or non-finite values or a
 #'   bad geometry, so \code{$n} can be read against \code{nrow(data_sf)}).
 #'   The raw brmsfit is in \code{$engine}.
 #' @family model fitting
+#' @section Warnings:
+#' Every warning this function raises carries a condition class, so a caller
+#' can catch or muffle exactly one of them by name:
+#' \describe{
+#'   \item{\code{spatialkit_rows_dropped},
+#'     \code{spatialkit_constant_predictor}}{From
+#'     \code{\link{prep_model_data}()}: incomplete rows were dropped, with the
+#'     counts; a predictor takes one value in every row kept.}
+#'   \item{\code{spatialkit_gp_basis_size}}{Fewer than one row per ten basis
+#'     functions.}
+#'   \item{\code{spatialkit_gp_resolution}}{A variogram fitted before
+#'     compiling puts the response's range below what the basis resolves, and
+#'     the autocorrelation of the response agrees.  An estimate; the check
+#'     after sampling tests it against the residuals of the fitted model.}
+#'   \item{\code{spatialkit_convergence}}{The sampler's diagnostics fail.}
+#'   \item{\code{spatialkit_gp_adequacy}}{The basis is too coarse for the
+#'     data: the posterior asks for a shorter length-scale than it resolves
+#'     (\code{"below_resolution"}), or the residuals are autocorrelated at
+#'     short range (\code{"unresolved_short_range"}).}
+#' }
+#' A response that takes a single value is an error, raised before anything
+#' is compiled.  The convergence warning carries the checks that failed as
+#' \code{failed} (\code{"divergent"}, \code{"ebfmi"}, \code{"rhat"},
+#' \code{"ess"}).  \code{\link{cv_bayes}()} fits once per fold; it collects
+#' the last four classes from its folds and raises each once for the run,
+#' naming the folds, and \code{\link{cv_spatial}()} does the same for a
+#' \code{fit_fn} that calls this function.
 #' @section Non-Gaussian responses:
 #' Nothing in this function is Gaussian-specific except its default.  A
 #' numeric count, binary (0/1 or logical) or bounded response passes straight
@@ -580,6 +1632,14 @@
 #' }
 #' }
 #' @references
+#' Betancourt, M. (2016). Diagnosing suboptimal cotangent disintegrations in
+#' Hamiltonian Monte Carlo. arXiv:1604.00695.
+#'
+#' Vehtari, A., Gelman, A., Simpson, D., Carpenter, B. and Burkner, P.-C.
+#' (2021). Rank-normalization, folding, and localization: an improved R-hat
+#' for assessing convergence of MCMC (with discussion). \emph{Bayesian
+#' Analysis} \strong{16}, 667--718. \doi{10.1214/20-BA1221}
+#'
 #' Riutort-Mayol, G., Burkner, P.-C., Andersen, M. R., Solin, A. and
 #' Vehtari, A. (2023). Practical Hilbert space approximate Bayesian
 #' Gaussian processes for probabilistic programming.
@@ -636,6 +1696,7 @@ fit_bayesian_spatial_model <- function(
     check_convergence = TRUE,
     pointize    = "auto",
     boundary    = NULL,
+    gp_resolution = NULL,
     .already_prepped = FALSE
 ) {
   if (!inherits(data_sf, "sf"))
@@ -742,6 +1803,19 @@ fit_bayesian_spatial_model <- function(
                  response_var),
          call. = FALSE)
 
+  # A response with one value leaves nothing for the regression or the GP to
+  # explain.  It used to reach the compiler: a minute of C++ and then a
+  # sampler with sigma running into zero, for a model that could have been
+  # refused from the column alone.
+  if (length(unique(y_resp)) <= 1L)
+    stop(sprintf(paste0("fit_bayesian_spatial_model(): response '%s' takes a ",
+                        "single value (%s) in all %d row(s), so there is no ",
+                        "variation for the regression or the Gaussian process ",
+                        "to explain. Check the column and the filter that ",
+                        "produced these rows."),
+                 response_var, format(y_resp[[1L]]), nrow(dat_sf)),
+         call. = FALSE)
+
   # NOTE: prep_model_data() coerces geometry to points and drops incomplete
   # rows, and projects the CRS *whenever one can be established* --
   # ensure_projected() passes a CRS-less dataset through unchanged when its
@@ -827,7 +1901,52 @@ fit_bayesian_spatial_model <- function(
   gp_spec   <- .gp_basis_spec(cbind(dat_df[["..x"]], dat_df[["..y"]]), ls_bounds,
                               c = gp_c)
   gp_k_auto <- is.null(gp_k)
-  if (gp_k_auto)      gp_k <- gp_spec$k
+  k_cap     <- as.integer(floor(sqrt(.gp_max_basis)))
+  xy_scale  <- c(x = x_scale, y = y_scale)
+  unit_lbl  <- .gp_unit_label(dat_sf)
+
+  # ---- A requested resolution, in map units ----
+  # The percentile rule sizes the basis from the layout alone; this sizes it
+  # from the shortest effective range the caller wants represented.  It can
+  # only refine: a request the derived basis already meets keeps the derived
+  # basis.  Past the cap it is an error, not a silent cap, because the caller
+  # asked for a range the model then cannot hold.
+  gp_resolution_requested <- NULL
+  if (!is.null(gp_resolution)) {
+    if (!is.numeric(gp_resolution) || length(gp_resolution) != 1L ||
+        !is.finite(gp_resolution) || gp_resolution <= 0)
+      stop(sprintf(paste0("fit_bayesian_spatial_model(): `gp_resolution` must ",
+                          "be a single positive number: the shortest effective ",
+                          "range the basis should resolve, in the units of the ",
+                          "data's CRS (%s)."), unit_lbl), call. = FALSE)
+    if (!gp_k_auto)
+      stop(paste0("fit_bayesian_spatial_model(): pass `gp_resolution` or ",
+                  "`gp_k`, not both. `gp_resolution` derives `gp_k`."),
+           call. = FALSE)
+    c_use <- if (is.null(gp_c)) gp_spec$c else gp_c
+    k_req <- .gp_k_needed(gp_resolution, c_use, gp_spec$S, xy_scale)
+    if (!is.finite(k_req) || k_req > k_cap) {
+      finest <- .gp_se_range_factor * (1.75 * c_use * gp_spec$S / k_cap) * xy_scale
+      stop(sprintf(paste0("fit_bayesian_spatial_model(): `gp_resolution` = %s ",
+                          "%s needs gp_k = %s per dimension (%s basis ",
+                          "functions), above the cap of %d (%d). At the cap ",
+                          "this layout resolves effective ranges from %s %s ",
+                          "along x and %s %s along y. A shorter range is ",
+                          "outside what the reduced-rank GP can represent ",
+                          "here: use kriging, or model cell means (see ",
+                          "kriging_adequacy())."),
+                   .gp_fmt_dist(gp_resolution), unit_lbl,
+                   format(k_req, big.mark = ",", scientific = FALSE),
+                   format(k_req^2, big.mark = ",", scientific = FALSE),
+                   k_cap, k_cap^2,
+                   .gp_fmt_dist(finest[["x"]]), unit_lbl,
+                   .gp_fmt_dist(finest[["y"]]), unit_lbl),
+           call. = FALSE)
+    }
+    gp_resolution_requested <- as.numeric(gp_resolution)
+    gp_k <- max(as.integer(k_req), gp_spec$k)
+  }
+  if (is.null(gp_k))  gp_k <- gp_spec$k
   if (is.null(gp_c))  gp_c <- gp_spec$c
 
   # Validate before the arithmetic below divides by gp_k.  Previously an
@@ -853,20 +1972,71 @@ fit_bayesian_spatial_model <- function(
   # resolution of the basis brms will actually build, not of a notional one.
   # Reported here and re-checked against the posterior after fitting.
   gp_ell_min <- 1.75 * gp_c * gp_spec$S / gp_k
+  # The same floor as an effective range in map units, per axis: what a user
+  # can hold against the distances in their data.  The axes differ because
+  # each coordinate was divided by its own SD.
+  gp_resolution_xy <- .gp_se_range_factor * gp_ell_min * xy_scale
   .log_info(
     paste0("fit_bayesian_spatial_model(): GP basis k = %d per dimension, ",
            "c = %.2f; TOTAL basis functions = %d (n = %d). ",
-           "Smallest resolvable length-scale = %.4f on scaled coords."),
-    gp_k, gp_c, gp_k^2, nrow(dat_sf), gp_ell_min
+           "Smallest resolvable length-scale = %.4f on scaled coords: ",
+           "effective ranges from %s %s along x and %s %s along y."),
+    gp_k, gp_c, gp_k^2, nrow(dat_sf), gp_ell_min,
+    .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+    .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl
   )
-  if (isTRUE(gp_spec$capped) && isTRUE(gp_k_auto))
+  if (isTRUE(gp_spec$capped) && isTRUE(gp_k_auto) &&
+      is.null(gp_resolution_requested))
     .log_warn(
-      paste0("fit_bayesian_spatial_model(): derived GP basis count was capped ",
-             "at %d. The approximation may under-resolve short-range structure; ",
-             "pass a larger gp_k explicitly if short-range spatial variation ",
-             "matters."),
-      gp_k^2
+      paste0("fit_bayesian_spatial_model(): the derived GP basis was capped ",
+             "at %d per dimension (%d basis functions), the most this function ",
+             "fits. It resolves effective ranges from %s %s along x and %s %s ",
+             "along y; shorter structure is counted as noise."),
+      gp_k, gp_k^2,
+      .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+      .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl
     )
+
+  # ---- The length-scale prior follows a basis the caller made finer ----
+  # The prior's lower 1% tail sits at the percentile bound, and the derived
+  # basis is sized to that bound.  A finer basis under the same prior gains
+  # almost nothing, because the prior, not the basis, then holds the
+  # length-scale up: on fields with a 15 km range, k = 50 with the percentile
+  # prior fitted a 34 km range, the same as an exact GP under that prior, and
+  # 17.6 km once the tail was moved to what k = 50 resolves.  So the tail
+  # moves down with the basis.  It never moves up: a basis coarser than the
+  # bound would pin the prior into a sliver (1.76 to 1.89 at gp_k = 6), and
+  # that case is reported below as prior mass under the floor instead.  Only
+  # a basis finer than the derived one (an explicit gp_k above it, or a
+  # gp_resolution that needed more) moves the tail, so a default fit, and a
+  # request the derived basis already meets, have the prior they always had.
+  if (gp_k > gp_spec$k && gp_ell_min < ls_bounds[["lower"]]) {
+    .log_info(
+      paste0("fit_bayesian_spatial_model(): gp_k = %d resolves a shorter ",
+             "length-scale (%.4f) than the prior's lower bound (%.4f); the ",
+             "prior's lower 1%% tail moves to %.4f so the finer basis can be ",
+             "used."),
+      gp_k, gp_ell_min, ls_bounds[["lower"]], gp_ell_min
+    )
+    ls_bounds[["lower"]] <- gp_ell_min
+  }
+
+  # Fewer than one row per ten basis functions.  The approximation is still a
+  # valid GP prior, but most weights are then set by that prior alone and the
+  # sampler pays for all of them.
+  if (nrow(dat_sf) < gp_k^2 / 10)
+    .warn_classed(
+      "spatialkit_gp_basis_size",
+      paste0("fit_bayesian_spatial_model(): %d row(s) against %d basis ",
+             "functions (gp_k = %d per dimension), fewer than one row per ten ",
+             "basis functions. Most basis weights are then set by their prior, ",
+             "not the data, and sampling is slow. A smaller `gp_k` is cheaper ",
+             "but resolves less (now effective ranges from %s %s along x and ",
+             "%s %s along y); with this few rows kriging fits the same kind ",
+             "of model exactly."),
+      nrow(dat_sf), gp_k^2, gp_k,
+      .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+      .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl)
 
   # Optional predictor standardization — store transform params so
   # predictions can be computed correctly on new data.
@@ -927,15 +2097,25 @@ fit_bayesian_spatial_model <- function(
   # 2. GP length-scale prior (always, unless the user's prior already
   #    includes an "lscale" class entry).
 
+  prior_from_user <- !is.null(prior)
+  b_prior_auto    <- NULL
   if (is.null(prior)) {
     prior_parts <- list()
     if (isTRUE(standardize_predictors) && length(predictor_vars) > 0L) {
+      # The scale follows the response wherever the linear predictor is on
+      # the response's scale (.b_prior_auto()).  A fixed normal(0, 5) is a
+      # different prior for every choice of units: with income in dollars it
+      # shrank a slope of 10,236 per SD to 0.3, with the same income in
+      # thousands it left 98.8% of it, and convergence_ok was TRUE both times.
+      b_prior_auto <- .b_prior_auto(y_resp, family)
       # One row per distributional parameter's slopes (.b_prior_rows()): a
       # dpar-less row matches no slope of a categorical or mixture model.
       prior_parts <- c(prior_parts, list(
-        .b_prior_rows("normal(0, 5)", fml, dat_df, family)
+        .b_prior_rows(b_prior_auto$spec, fml, dat_df, family)
       ))
-      .log_info("fit_bayesian_spatial_model(): using weakly informative normal(0,5) priors on standardized coefficients.")
+      .log_info(paste0("fit_bayesian_spatial_model(): slope prior %s on the ",
+                       "standardised coefficients (%s)."),
+                b_prior_auto$spec, b_prior_auto$label)
     }
     prior <- if (length(prior_parts) > 0L) Reduce(`+`, prior_parts) else NULL
   }
@@ -1110,6 +2290,161 @@ fit_bayesian_spatial_model <- function(
     }
   }
 
+  # The slope prior, read from the same table: what brms will use, not what
+  # was asked for.  NA when the model has no slopes.
+  b_prior_used <- if (length(predictor_vars) > 0L)
+    .b_prior_used(if (is.data.frame(vp)) vp else NULL, b_prior_auto$spec)
+    else NA_character_
+  b_prior_source <- if (length(predictor_vars) == 0L) NA_character_
+    else if (!is.null(b_prior_auto)) sprintf("automatic: %s", b_prior_auto$label)
+    else if (prior_from_user) "from `prior`"
+    else "brms default"
+
+  # ---- Prior mass below the basis floor ----
+  # Known before sampling, and it bounds what the post-fit share can say: a
+  # posterior that the data did not move leaves this much below the floor.
+  # A derived basis keeps it near 0.01.  A small user gp_k does not: 0.984 at
+  # gp_k = 6 on a layout whose derived value is 23, where the post-fit share
+  # (0.986) only restated it.
+  ls_prior_parsed  <- .lscale_prior_parse(gp_lscale_prior_used)
+  prior_mass_below <- if (is.null(ls_prior_parsed)) NA_real_
+                      else as.numeric(ls_prior_parsed$cdf(gp_ell_min))
+  if (is.finite(prior_mass_below) && prior_mass_below > 0.10)
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): %.0f%% of the length-scale prior ",
+             "(%s) lies below the smallest length-scale gp_k = %d resolves ",
+             "(%.4f on scaled coords; effective ranges from %s %s along x and ",
+             "%s %s along y). The basis is too coarse for the prior, so the ",
+             "share of posterior draws below that floor will be high whatever ",
+             "the data say.%s"),
+      100 * prior_mass_below, gp_lscale_prior_used, gp_k, gp_ell_min,
+      .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+      .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl,
+      if (!gp_k_auto && gp_k < gp_spec$k)
+        sprintf(" Leave `gp_k` NULL (the derived value is %d) or raise it.",
+                gp_spec$k)
+      else "")
+
+  # ---- The response's own range against the floor ----
+  gp_prefit <- .gp_prefit_range_check(
+    dat_sf, response_var, predictor_vars, resolution = gp_resolution_xy,
+    gp_c = gp_c, S = gp_spec$S, xy_scale = xy_scale)
+  gp_prefit$unit <- unit_lbl
+  range_of <- if (length(predictor_vars) > 0L)
+    "the response net of the predictors" else "the response"
+  if (identical(gp_prefit$status, "below_floor")) {
+    # A variogram estimate, made before anything is fitted.  It is said as
+    # one: the range can be wrong, and the check after sampling reads the
+    # fitted model and its residuals.  The message used to state the range
+    # as fact and tell the caller the model could not represent it.  It does
+    # not say the later check "supersedes" it either: that check answers on
+    # the residuals, and a status of "ok" over residuals nobody had read left
+    # a warning that was right withdrawn by a check that had not looked.
+    k_need <- gp_prefit$k_needed
+    k_txt  <- format(k_need, big.mark = ",", scientific = FALSE)
+    k2_txt <- format(k_need^2, big.mark = ",", scientific = FALSE)
+    advice <- if (k_need > k_cap)
+      sprintf(paste0("Resolving it would take gp_k = %s per dimension (%s ",
+                     "basis functions), above the cap of %d; if the fitted ",
+                     "model bears the range out, use kriging, or model cell ",
+                     "means (see kriging_adequacy())."), k_txt, k2_txt, k_cap)
+    else
+      sprintf(paste0("Resolving it would take gp_k = %s per dimension (%s ",
+                     "basis functions): gp_resolution = %s fits that basis.%s"),
+              k_txt, k2_txt, format(signif(gp_prefit$range, 3),
+                                    scientific = FALSE, trim = TRUE),
+              if (k_need^2 > nrow(dat_sf))
+                sprintf(paste0(" That is more basis functions than the %d ",
+                               "row(s); if the range is right, kriging (see ",
+                               "kriging_adequacy() for cell means) is usually ",
+                               "the better tool."),
+                        nrow(dat_sf))
+              else "")
+    mf <- gp_prefit$moran_floor
+    .warn_classed(
+      "spatialkit_gp_resolution",
+      paste0("fit_bayesian_spatial_model(): a variogram fitted before ",
+             "sampling puts the autocorrelation range of %s at %s %s, shorter ",
+             "than the %s %s this basis resolves (gp_k = %d: effective ranges ",
+             "from %s %s along x and %s %s along y). This is an estimate and ",
+             "can be wrong%s; the check after sampling ($info$gp_adequacy, ",
+             "shown by print()) reads the fitted model and tests its ",
+             "residuals for what the surface left behind. If ",
+             "the range is right, structure at that range is counted as ",
+             "noise: the surface is smoothed over it and the intervals are ",
+             "too narrow. %s"),
+      range_of, .gp_fmt_dist(gp_prefit$range), unit_lbl,
+      .gp_fmt_dist(gp_prefit$floor), unit_lbl, gp_k,
+      .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+      .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl,
+      if (!is.null(mf))
+        sprintf(paste0(", though the autocorrelation at the floor's distance ",
+                       "agrees with it (Moran's I = %.3f over pairs %s to %s ",
+                       "%s apart)"), mf$I, .gp_fmt_dist(mf$band[1L]),
+                .gp_fmt_dist(mf$band[2L]), unit_lbl)
+      else "",
+      advice)
+  } else if (identical(gp_prefit$status, "below_floor_long_range")) {
+    mf <- gp_prefit$moran_floor
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): a variogram fitted before ",
+             "sampling puts the autocorrelation range of %s at %s %s, below ",
+             "the %s %s this basis resolves, but %s is still autocorrelated ",
+             "at that distance (Moran's I = %.3f over pairs %s to %s %s ",
+             "apart, one-sided p = %.2g; an effective range ends where the ",
+             "correlation falls to 0.05). The variogram's range is therefore ",
+             "not the reach of the structure, and no warning is raised on ",
+             "it. Either the variogram fitted a smooth surface badly, or ",
+             "there is short-range structure beside a longer one, which this ",
+             "basis counts as noise; the check after sampling ",
+             "($info$gp_adequacy) tells the two apart on the residuals of ",
+             "the fitted model."),
+      range_of, .gp_fmt_dist(gp_prefit$range), unit_lbl,
+      .gp_fmt_dist(gp_prefit$floor), unit_lbl, range_of, mf$I,
+      .gp_fmt_dist(mf$band[1L]), .gp_fmt_dist(mf$band[2L]), unit_lbl, mf$p)
+  } else if (identical(gp_prefit$status, "not_estimated")) {
+    mor <- gp_prefit$moran
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): the autocorrelation range of %s ",
+             "could not be estimated before fitting (%s), so the basis ",
+             "(effective ranges from %s %s along x and %s %s along y) was not ",
+             "checked against it.%s"),
+      range_of, gp_prefit$reason,
+      .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+      .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl,
+      if (!is.null(mor) && isTRUE(mor$p < 0.05)) {
+        # Any real structure is autocorrelated at short range, long-range
+        # structure included, so that alone does not point below the floor.
+        mf <- gp_prefit$moran_floor
+        if (!is.null(mf) && isTRUE(mf$I > .gp_range_correlation) &&
+            isTRUE(mf$p < 0.05))
+          sprintf(paste0(" It is still autocorrelated at the floor's ",
+                         "distance (Moran's I = %.3f over pairs %s to %s %s ",
+                         "apart, one-sided p = %.2g), so its structure ",
+                         "reaches at least as far as the basis resolves."),
+                  mf$I, .gp_fmt_dist(mf$band[1L]), .gp_fmt_dist(mf$band[2L]),
+                  unit_lbl, mf$p)
+        else
+          sprintf(paste0(" It is autocorrelated at short range (Moran's I = ",
+                         "%.3f over 4 nearest neighbours, one-sided p = %.2g)",
+                         "%s, so a range below that floor is not ruled out."),
+                  mor$I, mor$p,
+                  if (!is.null(mf))
+                    sprintf(" and not at the floor's distance (Moran's I = %.3f)",
+                            mf$I)
+                  else "")
+      } else "")
+  } else if (identical(gp_prefit$status, "below_floor_no_autocorrelation")) {
+    .log_info(
+      paste0("fit_bayesian_spatial_model(): a variogram fitted to %s gave a ",
+             "range of %s %s, below the basis floor, but it shows no ",
+             "short-range autocorrelation (Moran's I = %.3f over 4 nearest ",
+             "neighbours, one-sided p = %.2g), so that range is not read as ",
+             "structure."),
+      range_of, .gp_fmt_dist(gp_prefit$range), unit_lbl,
+      gp_prefit$moran$I, gp_prefit$moran$p)
+  }
+
   brm_args <- list(
     formula = fml, data = dat_df, family = family, prior = prior,
     chains = chains, iter = iter, warmup = warmup, cores = cores,
@@ -1126,62 +2461,143 @@ fit_bayesian_spatial_model <- function(
   # check_convergence = FALSE returned convergence_ok = TRUE over an empty
   # diagnostics list -- a verdict on checks that never happened, for a fit
   # whose max R-hat was 1.28 -- and print() had nothing to caveat.
+  #
+  # The verdict follows Stan's own diagnostics (see @param check_convergence
+  # for the source of each threshold).  It used to cut R-hat at 1.05 and to
+  # judge effective sample size as a share of the draws, which equals 100
+  # per chain only at the default 4 x 2000: a fit of 2 x 600 with bulk and
+  # tail ESS of 130 and 137 passed while rstan raised both of its ESS
+  # warnings on it.
   convergence_ok <- NA
   convergence_diagnostics <- list()
+  conv_problems <- character(0)
+  # Which checks failed, so the advice that closes the warning fits them.
+  conv_failed   <- character(0)
+  gp_adequacy <- list(status = "not_checked")
   if (isTRUE(check_convergence) && inherits(fit, "brmsfit")) {
     convergence_ok <- TRUE
-    # Divergent transitions
+    # Chains and post-warmup draws, read from the fit; the call's own
+    # arguments when the fit cannot say.
+    n_chains <- tryCatch(as.numeric(brms::nchains(fit)), error = function(e) NA_real_)
+    if (length(n_chains) != 1L || !is.finite(n_chains) || n_chains < 1)
+      n_chains <- suppressWarnings(as.numeric(chains))[1L]
+    n_draws <- tryCatch(as.numeric(brms::ndraws(fit)), error = function(e) NA_real_)
+    if (length(n_draws) != 1L || !is.finite(n_draws) || n_draws < 1)
+      n_draws <- suppressWarnings(as.numeric(chains) *
+                                    (as.numeric(iter) - as.numeric(warmup)))[1L]
+
+    # Divergent transitions, tree-depth saturation and E-BFMI
     np <- tryCatch(brms::nuts_params(fit), error = function(e) NULL)
     if (!is.null(np)) {
       n_divergent <- sum(np$Value[np$Parameter == "divergent__"], na.rm = TRUE)
       convergence_diagnostics$n_divergent <- n_divergent
       if (n_divergent > 0L) {
         convergence_ok <- FALSE
-        .log_warn(
-          "fit_bayesian_spatial_model(): %d divergent transition(s) detected. Consider increasing adapt_delta (currently %.2f) or reparameterizing the model.",
-          n_divergent, control$adapt_delta %||% 0.8
-        )
+        conv_failed   <- c(conv_failed, "divergent")
+        conv_problems <- c(conv_problems, sprintf(
+          "%d divergent transition(s) after warmup", n_divergent))
+      }
+      # Transitions that stopped at the tree-depth limit.  Stan calls this an
+      # efficiency concern, not a validity one, so it is recorded and logged
+      # and does not change the verdict.
+      td <- np$Value[np$Parameter == "treedepth__"]
+      if (length(td) > 0L) {
+        max_td <- suppressWarnings(as.numeric(control$max_treedepth %||% 10))[1L]
+        n_max_td <- sum(td >= max_td, na.rm = TRUE)
+        convergence_diagnostics$n_max_treedepth <- n_max_td
+        if (n_max_td > 0L)
+          .log_warn(
+            paste0("fit_bayesian_spatial_model(): %d transition(s) stopped at ",
+                   "max_treedepth = %s. That slows sampling and does not by ",
+                   "itself invalidate the draws; raise max_treedepth in ",
+                   "`control` if the effective sample size is low."),
+            n_max_td, format(max_td))
+      }
+      ebfmi <- .bayes_ebfmi(np)
+      if (length(ebfmi) > 0L) {
+        convergence_diagnostics$ebfmi <- ebfmi
+        low_e <- which(ebfmi < .bayes_ebfmi_min)
+        if (length(low_e) > 0L) {
+          convergence_ok <- FALSE
+          conv_failed   <- c(conv_failed, "ebfmi")
+          conv_problems <- c(conv_problems, sprintf(
+            "E-BFMI below %s in chain(s) %s (%s)", format(.bayes_ebfmi_min),
+            paste(names(ebfmi)[low_e], collapse = ", "),
+            paste(sprintf("%.2f", ebfmi[low_e]), collapse = ", ")))
+        }
       }
     }
     
-    # R-hat.  Both accessors run under .muffle_ess_cap(): posterior's
-    # "The ESS has been capped" arrives once per well-mixed basis weight.
+    # R-hat and effective sample size.  Both accessors run under
+    # .muffle_ess_cap(): posterior's "The ESS has been capped" arrives once
+    # per well-mixed basis weight.  Both are read before either is judged,
+    # because an R-hat between 1.01 and 1.05 is judged beside the effective
+    # sample size of the same parameter.
     rhat_vals <- tryCatch({
       rh <- .muffle_ess_cap(brms::rhat(fit))
       if (is.numeric(rh)) rh else NULL
     }, error = function(e) NULL)
-    
-    if (!is.null(rhat_vals)) {
-      # brms::rhat() returns NaN for a parameter that is constant across
-      # draws, which `lprior` frequently is.  Two consequences had to be
-      # guarded.  `names(rhat_vals)[rhat_vals > 1.05]` keeps one NA element per
-      # NaN entry -- so convergence_ok was set FALSE and the warning named
-      # "NA" -- while which() drops them.  And max(..., na.rm = TRUE) over an
-      # all-NA vector is -Inf with a warning, not a diagnostic.
-      max_rhat <- if (any(is.finite(rhat_vals)))
-        max(rhat_vals[is.finite(rhat_vals)]) else NA_real_
-      convergence_diagnostics$max_rhat <- max_rhat
-      bad_rhat <- names(rhat_vals)[which(rhat_vals > 1.05)]
-      # Every failing parameter by name, with its value -- the log line
-      # names five, and "max R-hat 1.09" is not actionable where
-      # "sdgp_gp..x..y has R-hat 1.09" is.  An empty named numeric when none.
-      convergence_diagnostics$rhat_failed <- rhat_vals[bad_rhat]
-      if (length(bad_rhat) > 0L) {
-        convergence_ok <- FALSE
-        .log_warn(
-          "fit_bayesian_spatial_model(): %d parameter(s) have R-hat > 1.05 (max = %.3f): %s. The model may not have converged.",
-          length(bad_rhat), max_rhat,
-          paste(utils::head(bad_rhat, 5), collapse = ", ")
-        )
-      }
-    }
-    
-    # Effective sample size ratio
     neff_vals <- tryCatch({
       ne <- .muffle_ess_cap(brms::neff_ratio(fit))
       if (is.numeric(ne)) ne else NULL
     }, error = function(e) NULL)
-    
+
+    if (!is.null(rhat_vals)) {
+      if (is.null(names(rhat_vals)))
+        names(rhat_vals) <- sprintf("parameter %d", seq_along(rhat_vals))
+      # brms::rhat() returns NaN for a parameter that is constant across
+      # draws, which `lprior` frequently is.  Two consequences had to be
+      # guarded.  A logical subscript keeps one NA element per NaN entry --
+      # so convergence_ok was set FALSE and the warning named "NA" -- while
+      # which() drops them.  And max(..., na.rm = TRUE) over an all-NA
+      # vector is -Inf with a warning, not a diagnostic.
+      max_rhat <- if (any(is.finite(rhat_vals)))
+        max(rhat_vals[is.finite(rhat_vals)]) else NA_real_
+      convergence_diagnostics$max_rhat <- max_rhat
+      # Two tiers (.bayes_rhat_tiers()): above 1.05 fails; above 1.01 fails
+      # when that parameter's effective sample size is short as well, and is
+      # a caution when it is not.  One cut at 1.01 over about 540 parameters
+      # failed a default fit whose largest R-hat was 1.011 and whose smallest
+      # effective sample size was 1,278 against 400 required.
+      tiers    <- .bayes_rhat_tiers(rhat_vals, neff_vals, n_draws, n_chains)
+      bad_rhat <- tiers$failed
+      # Every failing parameter by name, with its value -- the message
+      # names five, and "max R-hat 1.09" is not actionable where
+      # "sdgp_gp..x..y has R-hat 1.09" is.  An empty named numeric when none.
+      convergence_diagnostics$rhat_failed  <- rhat_vals[bad_rhat]
+      convergence_diagnostics$rhat_caution <- rhat_vals[tiers$caution]
+      n_caution <- length(tiers$caution)
+      if (length(bad_rhat) > 0L) {
+        convergence_ok <- FALSE
+        conv_failed <- c(conv_failed, "rhat")
+        n_hi <- sum(rhat_vals[bad_rhat] > .bayes_rhat_max)
+        conv_problems <- c(conv_problems, sprintf(
+          paste0("%d parameter(s) fail on R-hat (max %.3f): %d above %s, %d ",
+                 "above %s with %s%s: %s"),
+          length(bad_rhat), max_rhat, n_hi, format(.bayes_rhat_max),
+          length(bad_rhat) - n_hi, format(.bayes_rhat_caution),
+          if (is.null(neff_vals))
+            "an effective sample size that could not be read"
+          else "too few effective draws",
+          if (n_caution > 0L)
+            sprintf(" (%d more above %s have enough and are not counted)",
+                    n_caution, format(.bayes_rhat_caution)) else "",
+          paste(utils::head(bad_rhat, 5), collapse = ", ")))
+      } else if (n_caution > 0L) {
+        .log_warn(
+          paste0("fit_bayesian_spatial_model(): %d of %d parameter(s) have ",
+                 "R-hat between %s and %s (max %.3f), each with at least the ",
+                 "%s effective draws required. Among this many parameters ",
+                 "that happens by chance in a converged fit, so ",
+                 "$info$convergence_ok does not fail on it; ",
+                 "$info$convergence_diagnostics$rhat_caution names them."),
+          n_caution, sum(is.finite(rhat_vals)), format(.bayes_rhat_caution),
+          format(.bayes_rhat_max), max_rhat,
+          format(.bayes_ess_per_chain * n_chains))
+      }
+    }
+
+    # Effective sample size
     if (!is.null(neff_vals)) {
       # Same NaN hazard as R-hat above: a constant parameter has no effective
       # sample size.  which() drops the NAs a logical subscript would keep as
@@ -1190,15 +2606,22 @@ fit_bayesian_spatial_model <- function(
       min_neff <- if (any(is.finite(neff_vals)))
         min(neff_vals[is.finite(neff_vals)]) else NA_real_
       convergence_diagnostics$min_neff_ratio <- min_neff
-      low_neff <- names(neff_vals)[which(neff_vals < 0.1)]
+      # neff_ratio is min(bulk, tail) ESS over the draws, so the smaller of
+      # the two effective sample sizes is the ratio times the draws.
+      convergence_diagnostics$min_ess     <- min_neff * n_draws
+      convergence_diagnostics$ess_required <- .bayes_ess_per_chain * n_chains
+      low_neff <- .bayes_low_ess(neff_vals, n_draws, n_chains)
       convergence_diagnostics$neff_failed <- neff_vals[low_neff]
+      convergence_diagnostics$ess_failed  <- neff_vals[low_neff] * n_draws
       if (length(low_neff) > 0L) {
         convergence_ok <- FALSE
-        .log_warn(
-          "fit_bayesian_spatial_model(): %d parameter(s) have effective sample size ratio < 0.1 (min = %.3f): %s. Consider running longer chains.",
-          length(low_neff), min_neff,
-          paste(utils::head(low_neff, 5), collapse = ", ")
-        )
+        conv_failed   <- c(conv_failed, "ess")
+        conv_problems <- c(conv_problems, sprintf(
+          paste0("%d parameter(s) with bulk or tail effective sample size ",
+                 "under %s (%s per chain x %s chain(s); min %.0f): %s"),
+          length(low_neff), format(.bayes_ess_per_chain * n_chains),
+          format(.bayes_ess_per_chain), format(n_chains), min_neff * n_draws,
+          paste(utils::head(low_neff, 5), collapse = ", ")))
       }
     }
 
@@ -1208,9 +2631,15 @@ fit_bayesian_spatial_model <- function(
     # resolve, the Hilbert-space approximation is inadequate and nothing else
     # here would say so.  Riutort-Mayol et al. (2023) recommend checking that
     # the posterior length-scale lies inside the region the basis resolves and
-    # raising m when it does not; the 10% posterior-mass trigger below is this
+    # raising m when it does not; the 10% posterior-mass trigger is this
     # package's operationalisation of that check, not a figure from the paper.
-    # It is what makes a smaller default gp_k safe rather than merely cheaper.
+    #
+    # That share alone is blind when the data do not inform the length-scale:
+    # the posterior then equals the prior, which puts about 1% below the floor
+    # by construction.  .gp_adequacy() therefore asks first whether the GP is
+    # identified at all; the residual check that splits "no structure" from
+    # "structure the basis cannot hold" needs the fitted values and runs once
+    # the fit object exists, below.
     #
     # brms names GP parameters lscale(gp...) / sdgp(gp...), embedding the
     # covariate names, so match on the prefix rather than a literal term name.
@@ -1220,20 +2649,28 @@ fit_bayesian_spatial_model <- function(
       error = function(e) NULL
     )
     if (!is.null(ls_draws) && length(ls_draws) > 0L) {
-      frac_below <- mean(as.numeric(ls_draws) < gp_ell_min, na.rm = TRUE)
-      convergence_diagnostics$gp_lscale_below_resolution <- frac_below
-      if (is.finite(frac_below) && frac_below > 0.10)
-        .log_warn(
-          paste0("fit_bayesian_spatial_model(): %.0f%% of posterior ",
-                 "length-scale draws fall below the smallest scale this basis ",
-                 "can resolve (%.4f). Consider raising gp_k (currently %d, ",
-                 "%d total basis functions)."),
-          100 * frac_below, gp_ell_min, gp_k, gp_k^2
-        )
+      one_col <- function(pattern, regex) {
+        m <- tryCatch(as.matrix(fit, variable = pattern, regex = regex),
+                      error = function(e) NULL)
+        if (is.matrix(m) && ncol(m) == 1L) as.numeric(m[, 1L]) else NULL
+      }
+      sdgp_draws  <- one_col("^sdgp", TRUE)
+      # The share of variance the GP carries needs a residual SD on the same
+      # scale as the GP: a Gaussian response, or one Gaussian on the log scale.
+      sigma_draws <- if (fam_name %in% c("gaussian", "lognormal"))
+        one_col("sigma", FALSE) else NULL
+      gp_adequacy <- .gp_adequacy(ls_draws, sdgp_draws, sigma_draws,
+                                  gp_ell_min = gp_ell_min,
+                                  prior_spec = gp_lscale_prior_used,
+                                  xy_scale   = xy_scale)
+      convergence_diagnostics$gp_lscale_below_resolution <- gp_adequacy$frac_below
     }
     # Every accessor failed, so nothing was checked after all.
     if (!length(convergence_diagnostics)) convergence_ok <- NA
   }
+  gp_adequacy$resolution       <- gp_resolution_xy
+  gp_adequacy$unit             <- unit_lbl
+  gp_adequacy$prior_mass_below <- prior_mass_below
 
   loo_obj <- NULL; looic <- NA_real_
   if (isTRUE(compute_loo)) {
@@ -1257,7 +2694,7 @@ fit_bayesian_spatial_model <- function(
     }
   }
 
-  new_spatial_fit(
+  obj <- new_spatial_fit(
     subclass       = "bayesian_fit",
     engine         = fit,
     formula        = fml,
@@ -1275,6 +2712,19 @@ fit_bayesian_spatial_model <- function(
       gp_lscale_prior          = gp_lscale_prior_used,
       gp_n_basis               = gp_k^2,
       gp_ell_min               = gp_ell_min,
+      # The same floor as an effective range in map units, per axis, and the
+      # request that set it when there was one.
+      gp_resolution            = gp_resolution_xy,
+      gp_resolution_requested  = gp_resolution_requested,
+      gp_prefit                = gp_prefit,
+      gp_adequacy              = gp_adequacy,
+      # The slope prior brms used and where it came from.
+      b_prior                  = b_prior_used,
+      b_prior_source           = b_prior_source,
+      # The levels each categorical predictor has in the training rows, which
+      # are the levels brms kept; predict() and fitted() hand brms these and
+      # no others.
+      predictor_levels         = .bayes_predictor_levels(dat_cols, predictor_vars),
       # The scaled-coordinate extrema of the training data, the column means
       # brms centred them on, and the pooled centred range it derived the
       # boundary L = c * S from.  predict() needs them: brms 2.17 to 2.22
@@ -1299,6 +2749,224 @@ fit_bayesian_spatial_model <- function(
       predictor_scaling        = predictor_scaling
     )
   )
+
+  # ---- What the surface left behind ----
+  # The posterior of the GP cannot say whether structure was left in the
+  # residuals, and that is the question for both of its verdicts.
+  #
+  # A GP the data did not identify looks the same in its hyperparameters
+  # whether the response is white noise or has structure finer than the
+  # basis: sdgp near zero and a length-scale posterior equal to its prior.
+  # What separates them is what is left in the residuals at short range, over
+  # the few nearest neighbours and one-sided: on a field with a 30 km range
+  # under a 97 to 251 km floor the residual Moran's I had p = 0.003 at 4
+  # neighbours and 0.065 at the default 8 two-sided, and white noise on the
+  # same layout 0.36.
+  #
+  # A GP the data did identify looks the same whether the surface it fitted
+  # is all there is or sits beside structure finer than the basis.  A weak
+  # plane plus a field with an 8 km range under a 33 km floor gave a share of
+  # the variance of 0.09 to 0.54 at ranges of 55 and 72 km, 2 percent of the
+  # length-scale draws below the floor, and so "ok", over residuals with a
+  # Moran's I of 0.143 (p = 5.6e-06) and a fitted surface that explained 19
+  # percent of the response.  The residuals were read only for an
+  # unidentified GP, so nothing was said.  They are read for every fit whose
+  # posterior was, and "ok" is not returned over autocorrelated ones.
+  if (!identical(gp_adequacy$status, "not_checked")) {
+    rm_res <- .gp_fit_resid_moran(obj, fam_name)
+    gp_adequacy$residual_moran <- rm_res$test
+    if (is.null(rm_res$test)) gp_adequacy$residual_untested <- rm_res$reason
+    left_over <- !is.null(rm_res$test) && rm_res$test$p < .gp_resid_level
+    gp_adequacy$status <- switch(
+      gp_adequacy$status,
+      not_identified = if (left_over) "unresolved_short_range"
+                       else "no_signal_above_floor",
+      ok             = if (left_over) "unresolved_short_range" else "ok",
+      gp_adequacy$status)
+    obj$info$gp_adequacy <- gp_adequacy
+  }
+  # The adequacy status rides with the other diagnostics when any were read;
+  # an unchecked fit keeps its empty list.
+  if (length(obj$info$convergence_diagnostics) > 0L)
+    obj$info$convergence_diagnostics$gp_adequacy <- gp_adequacy$status
+
+  # ---- Say what was found ----
+  # One classed R warning for a failed sampler verdict.  The checks used to
+  # be log lines only, which spatialkit_quiet(), knitr and tryCatch() hide,
+  # and under cmdstanr nothing else warns.
+  if (identical(convergence_ok, FALSE) && length(conv_problems) > 0L)
+    .warn_classed(
+      "spatialkit_convergence",
+      paste0("fit_bayesian_spatial_model(): the sampler's diagnostics fail, ",
+             "so $info$convergence_ok is FALSE: %s. %s ",
+             "$info$convergence_diagnostics has every value."),
+      paste(conv_problems, collapse = "; "),
+      .bayes_convergence_advice(conv_failed, iter = iter, chains = chains,
+                                adapt_delta = control$adapt_delta),
+      # Which checks failed ("divergent", "ebfmi", "rhat", "ess"), for a
+      # caller that fits fold by fold and reports them by fold.
+      data = list(failed = conv_failed))
+
+  floor_txt <- sprintf("%s %s along x and %s %s along y",
+                       .gp_fmt_dist(gp_resolution_xy[["x"]]), unit_lbl,
+                       .gp_fmt_dist(gp_resolution_xy[["y"]]), unit_lbl)
+  # What "not identified" rested on, as the clause that opens both messages:
+  # the share of the variance where there is one, the length-scales where
+  # there is not.
+  id_txt <- function() {
+    sh <- gp_adequacy$spatial_share
+    if (identical(gp_adequacy$identified_by, "spatial_share") && !is.null(sh))
+      return(sprintf(
+        paste0("the Gaussian process carries no variance that can be told ",
+               "from zero (its share of the variance has a 95%% interval of ",
+               "%.3f to %.3f)"), sh[["q2.5"]], sh[["q97.5"]]))
+    ct <- gp_adequacy$contraction
+    pg <- gp_adequacy$prior_gap
+    sprintf(
+      paste0("the data did not move the Gaussian process's length-scale from ",
+             "its prior (largest gap between the two distribution functions ",
+             "%s%s)"),
+      paste(sprintf("%.2f", pg), collapse = " and "),
+      if (length(ct) && all(is.finite(ct)))
+        sprintf("; %s of the prior's variance kept",
+                paste(sprintf("%.0f%%", 100 * (1 - ct)), collapse = " and "))
+      else "")
+  }
+  # What can still be done about a basis found short: a finer one if the cap
+  # allows, and otherwise a different model.
+  finest_cap <- .gp_se_range_factor * (1.75 * gp_c * gp_spec$S / k_cap) * xy_scale
+  finer_txt <- if (!gp_k_auto && gp_k < gp_spec$k)
+    sprintf(paste0("`gp_k` = %d is below the value derived for this layout ",
+                   "(%d): leave `gp_k` NULL, or raise it."), gp_k, gp_spec$k)
+  else if (gp_k >= k_cap)
+    sprintf(paste0("The basis is at the cap of %d per dimension, so this ",
+                   "model cannot hold a shorter range: use kriging, or model ",
+                   "cell means (see kriging_adequacy())."), k_cap)
+  else sprintf(
+    paste0("A `gp_resolution` below %s %s gives a finer basis; the cap of %d ",
+           "per dimension reaches %s %s along x and %s %s along y.%s"),
+    .gp_fmt_dist(max(gp_resolution_xy)), unit_lbl, k_cap,
+    .gp_fmt_dist(finest_cap[["x"]]), unit_lbl,
+    .gp_fmt_dist(finest_cap[["y"]]), unit_lbl,
+    # The variogram's short range, whichever way the check before fitting
+    # read it: this text is used only where the fitted model agrees with it.
+    if (gp_prefit$status %in% c("below_floor", "below_floor_long_range") &&
+        is.finite(gp_prefit$range) && gp_prefit$range < max(finest_cap))
+      sprintf(paste0(" The range a variogram gave before fitting (%s %s) is ",
+                     "below that; if it is right, kriging, or a model of cell ",
+                     "means (see kriging_adequacy()), suits these data better."),
+              .gp_fmt_dist(gp_prefit$range), unit_lbl)
+    else "")
+  rm_test <- gp_adequacy$residual_moran
+  # What an identified GP found, as the clause that opens its message: the
+  # share of the variance where there is one, and the range it sits at.
+  found_txt <- function() {
+    sh  <- gp_adequacy$spatial_share
+    eff <- gp_adequacy$effective_range
+    at  <- if (is.matrix(eff) && all(is.finite(eff[, "q50"])))
+      sprintf(" at an effective range of %s %s along x and %s %s along y",
+              .gp_fmt_dist(eff[["x", "q50"]]), unit_lbl,
+              .gp_fmt_dist(eff[["y", "q50"]]), unit_lbl)
+      else ""
+    if (!is.null(sh) && all(is.finite(sh)))
+      sprintf(paste0("the Gaussian process carries %.2f to %.2f of the ",
+                     "variance (95%% interval)%s"), sh[["q2.5"]], sh[["q97.5"]], at)
+    else sprintf("the Gaussian process fitted a surface%s", at)
+  }
+  if (identical(gp_adequacy$status, "below_resolution")) {
+    .warn_classed(
+      "spatialkit_gp_adequacy",
+      paste0("fit_bayesian_spatial_model(): %.0f%% of the posterior ",
+             "length-scale draws fall below the smallest length-scale this ",
+             "basis resolves (gp_k = %d, %d basis functions: effective ranges ",
+             "from %s). The data ask for a shorter range than the basis can ",
+             "hold, so the fitted range is too long and part of the structure ",
+             "is counted as noise.%s %s"),
+      100 * gp_adequacy$frac_below, gp_k, gp_k^2, floor_txt,
+      if (!is.null(rm_test) && rm_test$p < .gp_resid_level)
+        sprintf(paste0(" The residuals are autocorrelated at short range ",
+                       "(Moran's I = %.3f over %d nearest neighbours, ",
+                       "one-sided p = %.2g)."), rm_test$I, rm_test$k, rm_test$p)
+      else "",
+      finer_txt)
+  } else if (identical(gp_adequacy$status, "unresolved_short_range") &&
+             identical(gp_adequacy$identified, FALSE)) {
+    .warn_classed(
+      "spatialkit_gp_adequacy",
+      paste0("fit_bayesian_spatial_model(): %s, but the residuals are ",
+             "autocorrelated at short range (Moran's I = %.3f over %d nearest ",
+             "neighbours, one-sided p = %.2g). Structure with an effective ",
+             "range under %s cannot be held by this basis (gp_k = %d) and is ",
+             "counted as noise, so the surface misses it and the intervals do ",
+             "not cover it. %s"),
+      id_txt(), rm_test$I, rm_test$k, rm_test$p, floor_txt, gp_k, finer_txt)
+  } else if (identical(gp_adequacy$status, "unresolved_short_range")) {
+    # An identified GP over residuals that are still autocorrelated: a
+    # surface was found, and structure finer than the basis sits beside it.
+    .warn_classed(
+      "spatialkit_gp_adequacy",
+      paste0("fit_bayesian_spatial_model(): %s, and the residuals are still ",
+             "autocorrelated at short range (Moran's I = %.3f over %d nearest ",
+             "neighbours, one-sided p = %.2g). The surface left structure ",
+             "behind. Structure with an effective range under %s cannot be ",
+             "held by this basis (gp_k = %d) and is counted as noise, so the ",
+             "surface misses it and the intervals do not cover it. %s"),
+      found_txt(), rm_test$I, rm_test$k, rm_test$p, floor_txt, gp_k, finer_txt)
+  } else if (identical(gp_adequacy$status, "ok") && is.null(rm_test)) {
+    # "ok" on the posterior alone.  Said, because the residuals are what a
+    # surface beside finer structure is caught by.
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): the residuals could not be tested ",
+             "for autocorrelation at short range (%s), so the adequacy status ",
+             "\"ok\" rests on the posterior alone: %s, with %.0f%% of the ",
+             "length-scale draws below what the basis resolves. Structure ",
+             "finer than the basis beside that surface would not show there."),
+      gp_adequacy$residual_untested %||% "no reason recorded", found_txt(),
+      100 * gp_adequacy$frac_below)
+  } else if (identical(gp_adequacy$status, "no_signal_above_floor")) {
+    # Not a failure by itself: a response with no spatial structure gives the
+    # same picture, and the residuals show nothing left over.
+    .log_warn(
+      paste0("fit_bayesian_spatial_model(): %s, and the residuals %s. A ",
+             "response with no spatial structure gives this. Structure with ",
+             "an effective range under %s could not be held by this basis in ",
+             "any case and would be counted as noise."),
+      id_txt(),
+      if (!is.null(rm_test))
+        sprintf(paste0("show no autocorrelation at short range (Moran's I = ",
+                       "%.3f over %d nearest neighbours, one-sided p = %.2g)"),
+                rm_test$I, rm_test$k, rm_test$p)
+      else sprintf("could not be tested for autocorrelation (%s)",
+                   gp_adequacy$residual_untested %||% "no reason recorded"),
+      floor_txt)
+  }
+
+  obj
+}
+
+
+#' The levels each categorical predictor takes in the training rows
+#'
+#' brms drops unused levels when it builds the model frame, and at predict
+#' time refuses any \code{newdata} factor whose \emph{level set} is not a
+#' subset of the ones it kept, whatever values the rows carry.  These are
+#' those levels: the values that occur, in the factor's own order.
+#'
+#' @param df The training data, without geometry.
+#' @param predictor_vars Predictor names.
+#' @return A named list, one element per factor or character predictor, each
+#'   a list with \code{levels} and \code{ordered}; empty when there is none.
+#' @keywords internal
+#' @noRd
+.bayes_predictor_levels <- function(df, predictor_vars) {
+  out <- list()
+  for (cn in intersect(predictor_vars, names(df))) {
+    v <- df[[cn]]
+    if (!(is.factor(v) || is.character(v))) next
+    f <- droplevels(as.factor(v))
+    out[[cn]] <- list(levels = levels(f), ordered = is.ordered(v))
+  }
+  out
 }
 
 

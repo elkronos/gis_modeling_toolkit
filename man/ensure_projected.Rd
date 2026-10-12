@@ -71,7 +71,7 @@ extent of the data. It is \strong{not} always UTM:
 (EPSG:326xx north of the equator, EPSG:327xx south). Distances and areas
 are close to true over a few degrees of longitude, which is the case
 this package is usually in. The centre is the centroid on the sphere,
-computed with s2 whatever \code{\link[sf:s2]{sf::sf_use_s2()}} is set to, so data near a
+computed with s2 whatever \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} is set to, so data near a
 zone edge get the same zone in every session.}
 \item{Wide extents}{Once the data reach well beyond the roughly 3 degrees
 a UTM zone is designed for, a single zone can distort distances by
@@ -148,10 +148,10 @@ st_crs(ensure_projected(pts_ll, target_crs = 3035))$epsg  # 3035
 st_crs(ensure_projected(pts_ll, purpose = "area"))$proj4string
 }
 \seealso{
-Other spatial data preparation: 
-\code{\link{clip_target_for}()},
-\code{\link{coerce_to_points}()},
-\code{\link{harmonize_crs}()},
-\code{\link{prep_model_data}()}
+Other spatial data preparation:
+\code{\link[=clip_target_for]{clip_target_for()}},
+\code{\link[=coerce_to_points]{coerce_to_points()}},
+\code{\link[=harmonize_crs]{harmonize_crs()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{spatial data preparation}

@@ -135,7 +135,9 @@ test_that("select_features_forward() does not echo the fold failures of its null
   expect_false(log_has(lines, "fit failed; skipping"))
   expect_false(log_has(lines, "all 3 folds failed"))
   # The probe's fallback is still announced (as a message, not a log line)
-  # when quiet = FALSE.
+  # when quiet = FALSE.  The fallback is now a baseline (the training-fold
+  # mean) where it used to be "the first variable is accepted
+  # unconditionally", so the message this asserted has changed with it.
   msgs <- character(0)
   withCallingHandlers(
     suppressWarnings(select_features_forward(d, "z", c("w", "a"),
@@ -144,7 +146,8 @@ test_that("select_features_forward() does not echo the fold failures of its null
     message = function(m) {
       msgs <<- c(msgs, conditionMessage(m)); invokeRestart("muffleMessage")
     })
-  expect_true(any(grepl("null \\(intercept-only\\) model could not be scored", msgs)))
+  expect_true(any(grepl("cannot fit a model with no predictors, so the baseline is the training-fold mean", msgs)))
+  expect_false(any(grepl("accepted unconditionally", msgs)))
 })
 
 
@@ -739,7 +742,12 @@ test_that("summarize_by_cell(deff = 'variogram') corrects the response SE with t
   # ... which is what passing the response variogram explicitly gives, and
   # NOT what the residual variogram gives.
   sac_resp  <- suppressWarnings(estimate_sac_range(pts, "z"))
-  sac_resid <- suppressWarnings(estimate_sac_range(pts, "z", predictor_vars = "p"))
+  # structure_alpha = 1: the residual field's range (45) is hardly longer than
+  # the spacing of these points (about 32), which the test for spatial
+  # structure does not detect, so at the default the residuals get no range.
+  # A residual variogram is needed here to show that using one is warned of.
+  sac_resid <- suppressWarnings(estimate_sac_range(pts, "z", predictor_vars = "p",
+                                                   structure_alpha = 1))
   skip_if(is.na(sac_resp) || is.na(sac_resid), "the variograms did not fit on this draw")
   explicit <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
                                 sac = sac_resp)

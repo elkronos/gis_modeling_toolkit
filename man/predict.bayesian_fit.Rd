@@ -32,19 +32,24 @@ point summary.  Default FALSE.}
 }
 \value{
 Numeric vector of length \code{nrow(newdata)}, or a
-\code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  If the
+\code{n_draws x nrow(newdata)} matrix when \code{draws = TRUE}.  Rows
+with a missing or non-finite predictor or coordinate, and rows carrying
+a level of a categorical predictor the model was not fitted with, are
+\code{NA} (an \code{NA} column with \code{draws = TRUE}); the other
+rows are unaffected.  If the
 posterior draw fails the result is all \code{NA} (a 1-row matrix for
-\code{draws = TRUE}) and the cause is logged.  An ordinal or categorical
+\code{draws = TRUE}) with a warning of class
+\code{spatialkit_predict_failed} that gives the cause.  An ordinal or categorical
 family is not a failed draw and is an error under
 \code{type = "epred"}: its expected value is a probability per response
 category, not one number per row.  Use \code{type = "predict",
-draws = TRUE} for posterior draws of the predicted category, as category
+  draws = TRUE} for posterior draws of the predicted category, as category
 indices; the share of draws in each category estimates its probability.
 Without \code{draws = TRUE}, \code{type = "predict"} returns the mean (or
 median) category index, an expected rank for an ordinal family and an
 error for \code{brms::categorical()}, whose categories have no order.
-With \code{newdata = NULL} the cached \code{fitted()} values are returned only
-for the default \code{summary = "mean"}, \code{type = "epred"},
+With \code{newdata = NULL} the cached \code{fitted()} values are returned
+only for the default \code{summary = "mean"}, \code{type = "epred"},
 \code{draws = FALSE} combination; any other combination is recomputed
 against the training data, because the cache holds epred column means and
 nothing else.
@@ -84,22 +89,38 @@ factor puts that edge well outside the training data, so only
 \code{newdata} reaching far past it is affected.
 }
 
+\section{Levels of a categorical predictor}{
+
+A factor or character predictor is handed to brms with the levels the model
+was fitted with: the values that occur in the training rows
+(\code{object$info$predictor_levels}).  brms compares the level \emph{set}
+of a \code{newdata} factor with those, so without this a factor that only
+listed an extra level, or a model fitted on a subset whose factor kept an
+unused level, was refused outright.  A row whose value is not among the
+fitted levels has no prediction: it is returned as \code{NA}, the other
+rows are predicted, and one warning of class \code{spatialkit_new_levels}
+names the predictor, the levels and the number of rows.  A prediction
+therefore does not depend on which other rows share the call, and
+\code{\link{predict_surface}()} returns the same surface at any
+\code{chunk_size}.
+}
+
 \seealso{
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.gwr_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{model_metrics}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.rf_fit}()},
-\code{\link{print.spatial_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()},
-\code{\link{summary.spatial_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{methods on a fitted model}

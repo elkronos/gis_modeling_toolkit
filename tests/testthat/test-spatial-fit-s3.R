@@ -79,7 +79,9 @@ test_that("print.spatial_fit labels and details a gwr_fit", {
                 AICc = 412.25, bandwidth_is_fallback = FALSE))
 
   txt <- .s3_printed(gwr)
-  expect_match(txt, "<GWR (GWmodel)> spatial model fit", fixed = TRUE)
+  # No GWmodel code computes the fit any more, so the header does not name it.
+  expect_match(txt, "<GWR> spatial model fit", fixed = TRUE)
+  expect_false(grepl("GWmodel", txt, fixed = TRUE))
   expect_match(txt, "Bandwidth: 37.5 neighbours (adaptive, gaussian kernel)", fixed = TRUE)
   expect_match(txt, "AICc    : 412.25", fixed = TRUE)
 
@@ -304,7 +306,7 @@ test_that("coef() on a spatial_fit errors rather than returning NULL", {
   gwr <- new_spatial_fit("gwr_fit", engine = list(), formula = z ~ w,
                          response_var = "z", predictor_vars = "w",
                          data_sf = pts, info = list())
-  expect_error(coef(gwr), "no GWmodel `SDF` component")
+  expect_error(coef(gwr), "no `SDF` component")
 
   bay <- new_spatial_fit("bayesian_fit", engine = list(), formula = z ~ w,
                          response_var = "z", predictor_vars = "w",

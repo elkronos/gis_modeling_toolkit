@@ -10,7 +10,6 @@
 
 test_that("predict.gwr_fit aligns newdata CRS to the training CRS", {
   skip_if_not_installed("sp")
-  skip_if_not_installed("GWmodel")
 
   set.seed(31)
   n <- 40

@@ -17,26 +17,31 @@
 \description{
 Shows the forest's shape (formula, n, number of trees, \code{mtry}, node
 size) along with the out-of-bag error and, prominently, whether the
-coordinates were used as predictors.  That last line is the one to check:
-a forest fitted with \code{include_coords = TRUE} can memorise location and
-score well out-of-bag while failing everywhere it has not been.
+coordinates were used as predictors.  That line is the one to check.  A
+forest fitted without them prints "no spatial information used": it sees
+the covariates alone.  One fitted with \code{include_coords = TRUE} fits
+location closely, so its out-of-bag error overstates its accuracy and it
+has to be scored with blocked or distance-matched folds; see
+\emph{Coordinates as predictors} in \code{\link{fit_rf_model}}.  When a
+predictor is an unordered factor or a character column, a line says how
+ranger was told to split it.
 }
 \seealso{
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.gwr_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{model_metrics}()},
-\code{\link{predict.bayesian_fit}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.spatial_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()},
-\code{\link{summary.spatial_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{methods on a fitted model}

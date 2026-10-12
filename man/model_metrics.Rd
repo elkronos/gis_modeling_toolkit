@@ -12,7 +12,10 @@ model_metrics(object, ...)
 \arguments{
 \item{object}{A \code{spatial_fit} object.}
 
-\item{...}{Additional arguments passed to predict().}
+\item{...}{Additional arguments passed to predict().  The metrics are
+computed from one predicted value per row, so \code{draws = TRUE} (a
+Bayesian fit) and \code{se.fit = TRUE} (a GWR), with which
+\code{predict()} returns a matrix or a list, are refused.}
 
 \item{newdata}{Optional sf object for out-of-sample evaluation. If NULL,
 fitted values are used (in-sample, or out-of-bag for an \code{rf_fit};
@@ -141,28 +144,28 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{compare_models_cv}()},
-\code{\link{evaluate_insample}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=compare_models_cv]{compare_models_cv()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.gwr_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{predict.bayesian_fit}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.rf_fit}()},
-\code{\link{print.spatial_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()},
-\code{\link{summary.spatial_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.gwr_fit]{coef.gwr_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{methods on a fitted model}
 \concept{model evaluation}

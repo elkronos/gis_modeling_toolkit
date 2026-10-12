@@ -30,8 +30,11 @@ test_that("the diagnostics are computed per cell and the CV statistic is near 1 
   expect_s3_class(ka, "sf")
   expect_equal(nrow(ka), nrow(cells))
   df <- sf::st_drop_geometry(ka)
-  expect_true(all(c("poly_id", "n", "mean", "se", "kr_pred", "kr_var", "kr_ratio",
-                    "kr_exceeds_design", "kr_shift") %in% names(df)))
+  expect_true(all(c("poly_id", "n", "mean", "se", "plain_var", "kr_pred", "kr_var",
+                    "kr_ratio", "kr_gain", "kr_shift") %in% names(df)))
+  # The comparison of kr_var with s^2/n is no longer returned: it was read as
+  # marking cells where kriging does not pay, and moved with the sill.
+  expect_false("kr_exceeds_design" %in% names(df))
   expect_equal(sum(df$n), nrow(pts))
   expect_true(all(is.finite(df$kr_pred)))
   expect_true(all(df$kr_var >= 0))
@@ -42,8 +45,13 @@ test_that("the diagnostics are computed per cell and the CV statistic is near 1 
   sm <- summarize_by_cell(asg, response_var = "z")
   expect_equal(df$mean[match(sm$poly_id, df$poly_id)], sm$resp_mean_z)
   expect_equal(df$se[match(sm$poly_id, df$poly_id)], sm$..se_resp_z)
-  expect_equal(df$kr_exceeds_design, df$kr_var > df$se^2)
-  expect_equal(df$kr_shift, (df$kr_pred - df$mean) / df$se)
+  # Kriging is set against the plain mean on the same variogram: the kriging
+  # variance never exceeds the plain mean's, and the shift is standardised by
+  # the standard deviation the model gives the difference (it was divided by
+  # the naive s / sqrt(n)).
+  expect_true(all(df$kr_var <= df$plain_var))
+  expect_equal(df$kr_gain, 1 - df$kr_var / df$plain_var)
+  expect_equal(df$kr_shift, (df$kr_pred - df$mean) / sqrt(df$plain_var - df$kr_var))
   # The kriged estimate is the block-kriging prediction gstat returns.
   bk <- gstat::krige(z ~ 1, locations = pts, newdata = cells,
                      model = attr(ka_true_sac(), "variogram_model"), nmax = 50,
@@ -60,7 +68,7 @@ test_that("the diagnostics are computed per cell and the CV statistic is near 1 
   expect_output(print(ka), "var of standardised error")
 })
 
-test_that("empty and one-point cells get a kriged estimate and NA design comparisons", {
+test_that("empty cells get a kriged estimate and no comparison with a plain mean; one-point cells get both", {
   skip_if_not_installed("gstat")
   pts <- ka_field(n = 60, seed = 2)
   cells <- create_grid_polygons(ka_bnd, target_cells = 64, type = "square")
@@ -69,8 +77,15 @@ test_that("empty and one-point cells get a kriged estimate and NA design compari
   df <- sf::st_drop_geometry(ka)
   expect_gt(sum(df$n == 0L), 0L)
   expect_true(all(is.finite(df$kr_pred[df$n == 0L])))
-  expect_true(all(is.na(df$kr_exceeds_design[df$n < 2L])))
-  expect_true(all(is.na(df$kr_shift[df$n < 2L])))
+  # s^2 needs two points; the plain mean's variance under the variogram needs
+  # one, so a one-point cell has a gain and a shift (both were NA below two
+  # points when the shift was in units of s / sqrt(n)).
+  expect_true(all(is.na(df$se[df$n < 2L])))
+  expect_true(all(is.na(df$plain_var[df$n == 0L]) & is.na(df$kr_gain[df$n == 0L]) &
+                    is.na(df$kr_shift[df$n == 0L])))
+  expect_gt(sum(df$n == 1L), 0L)
+  expect_true(all(is.finite(df$kr_gain[df$n == 1L]) & is.finite(df$kr_shift[df$n == 1L])))
+  expect_true(all(df$kr_var[df$n >= 1L] <= df$plain_var[df$n >= 1L]))
   expect_true(all(is.na(df$mean[df$n == 0L])))
   # Empty cells are worse determined than full ones.
   expect_gt(mean(df$kr_ratio[df$n == 0L]), mean(df$kr_ratio[df$n >= 3L]))
@@ -248,10 +263,17 @@ test_that("repeat visits to a station are kriged from their means instead of com
   expect_equal(attr(ka, "n_locations"), 80L)
   expect_equal(attr(ka, "cv")$n_pred, 80L)
   expect_true(is.finite(attr(ka, "cv")$zscore_var))
-  # With the whole nugget differing between visits, kriging the 80 means is
-  # kriging all 240 visits with the nugget as their measurement error.
+  # The visits differ by more than the nugget has room for, so the replicate
+  # variance is the measurement error (it was capped at the nugget, 0.2, and
+  # this test pinned the cap): kriging the 80 means is kriging all 240 visits
+  # with their pooled within-station variance as the error of each.
+  d <- sf::st_drop_geometry(asg); xy <- sf::st_coordinates(asg)
+  st_id <- match(paste(xy[, 1], xy[, 2]), unique(paste(xy[, 1], xy[, 2])))
+  sw2 <- sum((d$z - as.numeric(tapply(d$z, st_id, mean))[st_id])^2) / (240 - 80)
+  expect_gt(sw2, 0.3)
+  expect_equal(attr(ka, "replicates")$nugget_used, sw2)
   bk <- gstat::krige(z ~ 1, rv, cells, model = vm[vm$model != "Nug", ],
-                     weights = rep(1 / 0.2, nrow(rv)), debug.level = 0)
+                     weights = rep(1 / sw2, nrow(rv)), debug.level = 0)
   expect_equal(df$kr_pred, as.numeric(bk$var1.pred), tolerance = 1e-8)
   expect_equal(df$kr_var, as.numeric(bk$var1.var), tolerance = 1e-8)
   expect_output(print(ka), "240 points at 80 distinct locations")

@@ -67,10 +67,16 @@ test_that("every observation appears in exactly one test fold", {
 
 test_that("k above the group count degenerates to leave-one-group-out", {
   pts <- site_points(n_sites = 5, per_site = 4)
-  f <- make_folds(pts, k = 99, method = "leave_location_out",
-                  group_var = "site", seed = 1)
+  # Fewer folds than asked used to be a log line only; it is now a warning
+  # of class spatialkit_k_reduced.
+  expect_warning(
+    f <- make_folds(pts, k = 99, method = "leave_location_out",
+                    group_var = "site", seed = 1),
+    "returning 5 folds, not the k = 99 asked for: `site` has 5 distinct groups",
+    class = "spatialkit_k_reduced")
   expect_equal(f$k, 5L)
   expect_length(f$folds, 5L)
+  expect_identical(f$params$k_requested, 99L)
 })
 
 test_that("leave_location_out validates its group column", {
@@ -234,19 +240,31 @@ test_that("nndm folds do not depend on the row order of the input", {
                      crs = 3857)
   gp$..row_id <- seq_len(nrow(gp))
   fixtures$grid <- list(pts = gp, grid = nndm_setup()$grid)
+  # The regular-grid fixture predicts at the sample points themselves, so its
+  # target distances are 0 and no fold can match them.  make_folds() used to
+  # return plain leave-one-out for it without a word; it now raises a warning
+  # of class spatialkit_nndm_out_of_reach, which is muffled here because this
+  # test is about row order (test-fix-folds-nndm-reach.R tests the warning).
+  reach <- 0L
+  quiet_reach <- function(expr) withCallingHandlers(
+    expr, spatialkit_nndm_out_of_reach = function(w) {
+      reach <<- reach + 1L; invokeRestart("muffleWarning")
+    })
   for (fx in fixtures) {
-    f0 <- make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 1)
+    f0 <- quiet_reach(make_folds(fx$pts, method = "nndm", prediction_points = fx$grid, seed = 1))
     for (s in 1:3) {
       set.seed(100 + s)
       perm <- sample(nrow(fx$pts))
-      f1 <- make_folds(fx$pts[perm, ], method = "nndm",
-                       prediction_points = fx$grid, seed = 1)
+      f1 <- quiet_reach(make_folds(fx$pts[perm, ], method = "nndm",
+                                   prediction_points = fx$grid, seed = 1))
       expect_equal(as_sets(f1), as_sets(f0))
       expect_equal(f1$params$n_removed_total, f0$params$n_removed_total)
       expect_equal(sort(f1$params$realised_distances),
                    sort(f0$params$realised_distances), tolerance = 1e-10)
     }
   }
+  # Raised for the grid fixture's four calls and for neither two-cluster one.
+  expect_identical(reach, 4L)
 })
 
 test_that("the realised distance distribution is never more optimistic than the target", {

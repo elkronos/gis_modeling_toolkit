@@ -42,7 +42,8 @@ error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).}
 
-\item{k}{Number of folds. Default 5.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
+read when \code{folds} is supplied.  Default 5.}
 
 \item{seed}{RNG seed. Default 123.}
 
@@ -53,8 +54,10 @@ the folds came from other data when they were not).}
 \code{adaptive = FALSE} a distance in the units of the \strong{projected}
 CRS the folds are fitted in (geographic input is projected first, so a
 value in degrees is read as metres). \code{NULL} (default) selects a
-bandwidth per fold with \code{GWmodel::bw.gwr()}, which is reported in
-\code{fold_metrics$bandwidth}. See \code{\link{fit_gwr_model}}.}
+bandwidth per fold from that fold's training rows, by the search
+\code{\link{fit_gwr_model}()} runs (its section Bandwidth selection:
+AICc, or the leave-one-location-out sum of squares when observations
+share a location), and reports it in \code{fold_metrics$bandwidth}.}
 
 \item{kernel}{Kernel function type.}
 
@@ -62,20 +65,23 @@ bandwidth per fold with \code{GWmodel::bw.gwr()}, which is reported in
 
 \item{pointize}{Geometry coercion strategy.}
 
-\item{block_size}{Optional minimum block edge length for spatial CV blocks
-(projected CRS units).  Blocks are then at least as large as the
-spatial autocorrelation range.}
+\item{block_size}{Optional minimum block edge length (projected CRS
+units) for the blocks built when \code{folds} is \code{NULL}; see
+\code{\link{make_folds}()}.  It is a size you choose and is not
+compared with the autocorrelation range unless one can be estimated, in
+which case a smaller size is warned about.  Beside supplied
+\code{folds} it has nothing to size and raises a warning (class
+\code{spatialkit_fold_args_ignored}).}
 
 \item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.}
+Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
+the same warning as \code{block_size}.}
 
 \item{parallel}{Accepted so that every \code{cv_*()} function takes the
 same arguments, but the GWR folds always run one after another in this
-R process.  GWmodel is built with OpenMP, and OpenMP (GNU libgomp)
-deadlocks \code{parallel::mclapply()}'s forked workers once a GWR has
-been fitted in the session, for example by \code{fit_gwr_model()}, so
-forking would hang the call.  A value asking for more than one core
+R process, where the warnings \code{predict()} raises for each fold are
+collected into one.  A value asking for more than one core
 raises a warning saying so.  Default \code{FALSE}.}
 
 \item{metrics}{Optional scoring function of your own, a
@@ -98,7 +104,13 @@ missing fold is missing.  See \code{\link{cv_spatial}} for the five
 statuses and for \code{orphan_rows}.  \code{Adj_R2} is \code{NA}
 in both \code{overall} and \code{fold_metrics}: the pooled predictions
 have no single parameter count, and a GWR's effective parameter count is
-not its predictor count (see \code{\link{cv_spatial}}).
+not its predictor count (see \code{\link{cv_spatial}}).  A held-out
+location whose local regression cannot be estimated has \code{yhat}
+\code{NA}, and one beyond the reach of its fold's fit is predicted and
+scored; each case raises one warning for the whole run (classes
+\code{"spatialkit_gwr_not_estimable"} and
+\code{"spatialkit_gwr_extrapolation"}), with the totals over the folds
+that had any.  See \code{\link{predict.gwr_fit}}.
 }
 \description{
 Refits a geographically weighted regression from scratch on each training
@@ -151,8 +163,7 @@ coverage, which are proper scoring rules and have no such failure mode.
 }
 
 \examples{
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE)) {
+if (requireNamespace("sp", quietly = TRUE)) {
   library(sf)
   set.seed(1)
   n <- 60
@@ -169,17 +180,17 @@ if (requireNamespace("GWmodel", quietly = TRUE) &&
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

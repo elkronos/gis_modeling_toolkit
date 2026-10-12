@@ -4,16 +4,21 @@
 \alias{coef.gwr_fit}
 \title{Extract GWR local coefficients}
 \usage{
-\method{coef}{gwr_fit}(object, ...)
+\method{coef}{gwr_fit}(object, se = FALSE, ...)
 }
 \arguments{
 \item{object}{A \code{gwr_fit} object.}
 
+\item{se}{Logical; also return the standard errors and t values.  Default
+\code{FALSE}.}
+
 \item{...}{Ignored.}
 }
 \value{
-A data.frame of local coefficient estimates: one row per
-observation, one column per model term.
+With \code{se = FALSE}, a data.frame of local coefficient
+estimates: one row per observation, one column per model term.  With
+\code{se = TRUE}, a list of three such data.frames: \code{estimate},
+\code{se} and \code{t}.
 Never \code{NULL}: when the engine carries no \code{SDF} component this
 errors, following the \code{coef()} contract described in
 \code{\link{new_spatial_fit}}.
@@ -30,37 +35,64 @@ it back to \code{object$data_sf} to map it.  Use
 \section{What is and is not returned}{
 
 Only the model terms: the intercept and one column per predictor.
-GWmodel's \code{SDF} data slot carries a good deal more alongside them
+The engine's \code{SDF} data slot carries a good deal more alongside them
 (standard errors, t-values, the observed response, the fitted values, the
 residuals, \code{Local_R2}): 15 columns for a two-predictor fit, of which 3
 are coefficients.  Returning the whole slot would have made
 \code{coef(fit)$Local_R2} and \code{coef(fit)$a_SE} read like coefficients
-and \code{ncol(coef(fit))} a meaningless number.  Reach for
-\code{object$engine$SDF} when you want the rest; it is the unmodified
-GWmodel object.
+and \code{ncol(coef(fit))} a meaningless number.  Ask for the standard
+errors and t values with \code{se = TRUE}; reach for
+\code{object$engine$SDF} when you want the rest.
 
-If the model terms cannot be located in the \code{SDF} (a GWmodel that
+A coefficient is \code{NA} at a location whose local window cannot
+estimate it: a predictor that does not vary among the observations that
+carry weight there has no slope, and the intercept is then not identified
+either unless the predictor is 0 there.  \code{object$info$nonfinite_coef}
+is the mask, and \code{\link{fit_gwr_model}} raises a warning that counts
+them.
+
+If the model terms cannot be located in the \code{SDF} (an engine that
 names its coefficient columns differently), the whole slot is returned with
 a warning saying so.  The call neither errors nor returns a silently short
 table.
 }
 
+\section{Standard errors}{
+
+With \code{se = TRUE} the local standard errors and t values come with the
+estimates.  A standard error is
+\eqn{\hat\sigma\sqrt{(C C^\top)_{jj}}}{sigma * sqrt(diag(C C'))}, with
+\eqn{C = (X^\top W X)^{-1} X^\top W} the weights the local regression puts
+on the responses and \eqn{\hat\sigma^2} the residual sum of squares over
+the fit's effective degrees of freedom: the definition
+\code{GWmodel::gwr.basic()} uses, computed from the QR decomposition that
+gave the estimate.  They treat the bandwidth as known.  The t values are
+one test per term and location, tens to thousands of them and strongly
+dependent, so a map of \eqn{|t| > 2} overstates what is significant; no
+p-value, adjusted or not, is returned.  What an adjustment for the number
+of tests needs is on the fit: the t values here, the effective number of
+parameters \code{object$info$enp} and the residual degrees of freedom
+\code{object$info$edf}.  When observations share a location the standard
+errors are too small as well (see \code{\link{fit_gwr_model}},
+\strong{Observations that share a location}).
+}
+
 \seealso{
-Other methods on a fitted model: 
-\code{\link{coef.bayesian_fit}()},
-\code{\link{coef.rf_fit}()},
-\code{\link{fitted.bayesian_fit}()},
-\code{\link{fitted.gwr_fit}()},
-\code{\link{fitted.rf_fit}()},
-\code{\link{model_metrics}()},
-\code{\link{predict.bayesian_fit}()},
-\code{\link{predict.gwr_fit}()},
-\code{\link{predict.rf_fit}()},
-\code{\link{print.rf_fit}()},
-\code{\link{print.spatial_fit}()},
-\code{\link{residuals.bayesian_fit}()},
-\code{\link{residuals.gwr_fit}()},
-\code{\link{residuals.rf_fit}()},
-\code{\link{summary.spatial_fit}()}
+Other methods on a fitted model:
+\code{\link[=coef.bayesian_fit]{coef.bayesian_fit()}},
+\code{\link[=coef.rf_fit]{coef.rf_fit()}},
+\code{\link[=fitted.bayesian_fit]{fitted.bayesian_fit()}},
+\code{\link[=fitted.gwr_fit]{fitted.gwr_fit()}},
+\code{\link[=fitted.rf_fit]{fitted.rf_fit()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=predict.bayesian_fit]{predict.bayesian_fit()}},
+\code{\link[=predict.gwr_fit]{predict.gwr_fit()}},
+\code{\link[=predict.rf_fit]{predict.rf_fit()}},
+\code{\link[=print.rf_fit]{print.rf_fit()}},
+\code{\link[=print.spatial_fit]{print.spatial_fit()}},
+\code{\link[=residuals.bayesian_fit]{residuals.bayesian_fit()}},
+\code{\link[=residuals.gwr_fit]{residuals.gwr_fit()}},
+\code{\link[=residuals.rf_fit]{residuals.rf_fit()}},
+\code{\link[=summary.spatial_fit]{summary.spatial_fit()}}
 }
 \concept{methods on a fitted model}

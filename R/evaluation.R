@@ -69,8 +69,8 @@
 #' @noRd
 .model_available <- function(model_name) {
   switch(model_name,
-    "GWR" = requireNamespace("GWmodel", quietly = TRUE) &&
-      requireNamespace("sp", quietly = TRUE),
+    # The GWR is solved by this package; sp holds the fit's Spatial table.
+    "GWR" = requireNamespace("sp", quietly = TRUE),
     "Bayesian" = requireNamespace("brms", quietly = TRUE),
     "RF" = requireNamespace("ranger", quietly = TRUE),
     FALSE
@@ -1124,8 +1124,13 @@ print.morans_i <- function(x, ...) {
 #'
 #' @param fits Named list of \code{spatial_fit} objects.
 #' @return A data.frame with columns \code{model}, \code{resid_morans_I},
-#'   \code{resid_morans_z}, \code{resid_morans_p} and \code{resid_morans_null}
-#'   (which null the p-value was computed against, per model).
+#'   \code{resid_morans_z}, \code{resid_morans_p}, \code{resid_morans_null}
+#'   (which null the p-value was computed against, per model) and
+#'   \code{resid_morans_basis} (which residuals the statistic was computed
+#'   on: \code{"out-of-bag"} for a fit whose \code{residuals()} are
+#'   out-of-bag, \code{"in-sample"} otherwise, \code{NA} when no statistic
+#'   was computed).  The residuals are always the fit's own, so the basis is
+#'   never \code{"newdata"}.
 #' @keywords internal
 #' @noRd
 .residual_morans_table <- function(fits) {
@@ -1140,11 +1145,19 @@ print.morans_i <- function(x, ...) {
       data.frame(model = nms[i], resid_morans_I = NA_real_,
                  resid_morans_z = NA_real_, resid_morans_p = NA_real_,
                  resid_morans_null = NA_character_,
+                 resid_morans_basis = NA_character_,
                  stringsAsFactors = FALSE)
     } else {
+      # residual_morans_i() reads residuals(fit): the rows the model was
+      # fitted to, whatever `newdata` compare_models() was given.  The same
+      # rule as evaluate_insample()'s metric_basis without newdata: a
+      # forest's are out-of-bag, every other backend's in-sample.
       data.frame(model = nms[i], resid_morans_I = mi$observed,
                  resid_morans_z = mi$z, resid_morans_p = mi$p_value,
                  resid_morans_null = mi$null,
+                 resid_morans_basis =
+                   if (isTRUE(fits[[i]]$info$fitted_are_oob)) "out-of-bag"
+                   else "in-sample",
                  stringsAsFactors = FALSE)
     }
   })
@@ -1309,12 +1322,27 @@ evaluate_insample <- function(fits, newdata = NULL, ...) {
 #'   \code{TRUE} or \code{FALSE} for a Bayesian fit whose convergence was
 #'   checked (see \code{\link{fit_bayesian_spatial_model}}) and \code{NA}
 #'   otherwise; a fit that did not converge is ranked like the others, so it
-#'   also raises a warning.  Alongside the metrics it
+#'   also raises a warning.  \code{gp_adequacy} is what the posterior of a
+#'   Bayesian fit said about its Gaussian-process basis (\code{"ok"},
+#'   \code{"below_resolution"}, \code{"unresolved_short_range"},
+#'   \code{"no_signal_above_floor"} or \code{"not_checked"}; see "What the
+#'   basis resolves" in \code{\link{fit_bayesian_spatial_model}}) and
+#'   \code{NA} for the other backends.  A basis found too coarse scores like
+#'   one that was adequate, so read the column beside the metrics.  Alongside
+#'   the metrics it
 #'   carries
-#'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p} and
-#'   \code{resid_morans_null}, the last of which names the null
+#'   \code{resid_morans_I}, \code{resid_morans_z}, \code{resid_morans_p},
+#'   \code{resid_morans_null} and \code{resid_morans_basis}.
+#'   \code{resid_morans_null} names the null
 #'   \code{\link{residual_morans_i}} scored each model against, since that
-#'   choice is per-fit and governs how much the p-value is worth.  A
+#'   choice is per-fit and governs how much the p-value is worth.
+#'   \code{resid_morans_basis} says which residuals the statistic was
+#'   computed on.  They are always the residuals of the rows the model was
+#'   fitted to, also when \code{newdata} is given, so the column reads
+#'   \code{"in-sample"}, or \code{"out-of-bag"} for a forest, and never
+#'   \code{"newdata"}: beside \code{metric_basis = "newdata"} the Moran
+#'   columns describe the training residuals, not the prediction errors on
+#'   \code{newdata}, and the two can differ in sign.  A
 #'   significant p-value is noted in the log (not raised as an R warning):
 #'   positive autocorrelation as structure the model may have missed,
 #'   negative (\code{resid_morans_z < 0}) as the alternating residuals of a
@@ -1369,6 +1397,11 @@ compare_models <- function(fits, newdata = NULL, ...) {
   # TRUE / FALSE as fit_bayesian_spatial_model() judged the sampler, NA for
   # other backends and for a Bayesian fit whose checks were not run.
   met_df$convergence_ok <- NA
+  # What the posterior said about the GP basis ($info$gp_adequacy$status),
+  # NA for other backends and for a fit saved before the status existed.  A
+  # basis found too coarse scores like one that was adequate, so the table
+  # has to say which rows those are.
+  met_df$gp_adequacy <- NA_character_
   for (i in seq_len(nrow(met_df))) {
     nm <- met_df$model[i]
     # By index, not fits[[nm]]: name lookup returns the FIRST match, so with two
@@ -1395,9 +1428,13 @@ compare_models <- function(fits, newdata = NULL, ...) {
       met_df$LOOIC[i] <- obj$info$looic %||% NA_real_
       ok <- obj$info$convergence_ok
       met_df$convergence_ok[i] <- if (is.logical(ok) && length(ok) == 1L) ok else NA
-      # The fit logged its R-hat, ESS and divergences, but a log line is
-      # invisible under knitr, spatialkit_quiet() and tryCatch(), and the
-      # row is ranked like the others.
+      st <- obj$info$gp_adequacy$status
+      met_df$gp_adequacy[i] <- if (is.character(st) && length(st) == 1L) st
+                               else NA_character_
+      # The fit raised its own warning (class spatialkit_convergence) when
+      # it was made, naming the checks that failed: divergent transitions,
+      # R-hat, effective sample size, E-BFMI.  That was another call, and
+      # the row is ranked here like the others, so it is said again.
       if (isFALSE(ok))
         .warn_and_log(paste0("compare_models(): the sampler of Bayesian model ",
                              "'%s' did not converge (see print() on the fit, ",
@@ -1462,6 +1499,11 @@ compare_models <- function(fits, newdata = NULL, ...) {
                     collapse = ", "))
 
   # --- Post-fit residual spatial autocorrelation check ---
+  # Computed on each fit's own residuals, whatever `newdata` is.  With
+  # newdata the row's metric_basis reads "newdata", and the Moran columns
+  # beside it used to carry no basis of their own: a GWR row showed newdata
+  # RMSE beside I = -0.097 from its training residuals, where the newdata
+  # errors had I = +0.111.  resid_morans_basis says which they are.
   moran_df <- .residual_morans_table(fits)
   met_df   <- merge(met_df, moran_df, by = "model", all.x = TRUE, sort = FALSE)
 
@@ -1476,22 +1518,26 @@ compare_models <- function(fits, newdata = NULL, ...) {
     p_val <- met_df$resid_morans_p[i]
     I_val <- met_df$resid_morans_I[i]
     z_val <- met_df$resid_morans_z[i]
+    # Which residuals, said in the line: with `newdata` the reader would
+    # otherwise take them for the prediction errors on it.
+    basis <- met_df$resid_morans_basis[i]
+    basis <- if (is.character(basis) && !is.na(basis)) basis else "in-sample"
     if (is.finite(p_val) && p_val < 0.05) {
       if (is.finite(z_val) && z_val < 0)
         .log_warn(
-          paste0("compare_models(): residuals of '%s' show significant ",
+          paste0("compare_models(): the %s residuals of '%s' show significant ",
                  "negative spatial autocorrelation (Moran's I = %.4f, ",
                  "p = %.4g): neighbouring residuals alternate in sign, as ",
                  "in-sample residuals of a model that tracks the data closely ",
                  "(a GP, a small-bandwidth GWR) do. That points to ",
                  "over-fitting, not to missed spatial structure."),
-          met_df$model[i], I_val, p_val)
+          basis, met_df$model[i], I_val, p_val)
       else
         .log_warn(
-          paste0("compare_models(): residuals of '%s' show significant ",
+          paste0("compare_models(): the %s residuals of '%s' show significant ",
                  "spatial autocorrelation (Moran's I = %.4f, p = %.4g). ",
                  "The model may not fully capture the spatial structure."),
-          met_df$model[i], I_val, p_val
+          basis, met_df$model[i], I_val, p_val
         )
     }
   }
@@ -1583,7 +1629,8 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   \emph{none} of the requested backends is installed, nothing is left to
 #'   compare and the call errors with \code{"no viable models."}.  Guard with
 #'   \code{requireNamespace()} when the model set is not known in advance.
-#' @param k Number of folds. Default 5.
+#' @param k Number of folds to build when \code{folds} is \code{NULL}; not
+#'   read when \code{folds} is supplied.  Default 5.
 #' @param seed RNG seed. Default 123.
 #' @param folds Optional fold definitions: a \code{\link{make_folds}()} return
 #'   value, or a bare list of \code{list(train =, test =)} pairs of
@@ -1615,7 +1662,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
 #' @param block_size Optional minimum block edge length for the shared spatial
 #'   CV blocks (projected CRS units), passed to \code{\link{make_folds}()}
-#'   when \code{folds} is \code{NULL}.  Default \code{NULL}.
+#'   when \code{folds} is \code{NULL}.  Default \code{NULL}.  Beside
+#'   supplied \code{folds} it has nothing to size and raises a warning
+#'   (class \code{spatialkit_fold_args_ignored}); so does
+#'   \code{auto_range = TRUE}.
 #' @param auto_range Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 #'   the autocorrelation range of the response (detrended on
 #'   \code{predictor_vars}) is estimated and used as the minimum block size of
@@ -1667,6 +1717,11 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
 #'   a table of the same shape.  \code{by_fold} and the Bayesian coverage and
 #'   CRPS columns are per fold and are not recomputed.
+#'   Every model is cross-validated on the layer as passed, so the warnings
+#'   \code{\link{prep_model_data}()} raises about that layer (class
+#'   \code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
+#'   and \code{spatialkit_constant_predictor}) are raised once for the
+#'   comparison, not once per model.
 #'   Only the models that actually ran appear, so check which names are
 #'   present; there is not always one entry per requested model, because a
 #'   backend whose package is missing is dropped with a message.  When \strong{no} requested backend
@@ -1692,11 +1747,10 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   )
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
-#'   # The random forest, and GWR beside it when GWmodel is installed, on the
+#'   # The random forest, and GWR beside it when sp is installed, on the
 #'   # same folds.  "Bayesian" is left out here because a Stan fit per fold
 #'   # takes minutes; add it to `models` for a run to report.
-#'   models <- c("RF", if (requireNamespace("GWmodel", quietly = TRUE) &&
-#'                        requireNamespace("sp", quietly = TRUE)) "GWR")
+#'   models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
 #'   cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
 #'                            rf_args = list(num_trees = 100),
 #'                            gwr_args = list(bandwidth = 30))
@@ -1748,6 +1802,12 @@ compare_models_cv <- function(
   cleanup <- .with_seed(seed)
   on.exit(cleanup(), add = TRUE)
 
+  # Every backend's cv_*() prepares the layer for itself and finds the same
+  # incomplete rows and the same constant predictors, so the warnings that
+  # report them are raised by the first model and not repeated by the others.
+  end_run <- .once_per_run(.prep_warning_classes)
+  on.exit(end_run(), add = TRUE)
+
   # Build the folds ONCE.  Leaving folds = NULL let each backend call
   # make_folds() for itself, and any difference in the arguments that reach it
   # -- or simply seed = NULL -- produced a different split per model: measured,
@@ -1774,6 +1834,7 @@ compare_models_cv <- function(
   # them at (119 of 150 L-shaped parcels changed fold against a standalone
   # cv_gwr(pointize = "centroid")).  The provenance probe stays on the geometry
   # as supplied, which is what each cv_*() checks it against.
+  .warn_fold_args_ignored(folds, block_size, auto_range, "compare_models_cv")
   if (is.null(folds)) {
     pointized <- !all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
     fold_src  <- if (pointized) coerce_to_points(data_sf, pointize) else data_sf

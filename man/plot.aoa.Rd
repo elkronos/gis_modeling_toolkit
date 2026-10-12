@@ -33,10 +33,19 @@ derived from: the threshold is the largest training DI inside an outlier
 fence, so the curve reaches it exactly when no training value was fenced
 off and runs past it, by the tail the fence removed, when some were.
 A prediction location outside on a predictor dropped for having no
-training variance has \code{DI = Inf}: it counts in the prediction curve,
+training variance, or under \code{categorical = "indicator"} on a level no
+training row has, has \code{DI = Inf}: it counts in the prediction curve,
 which then tops out below 1, and the caption says how many are off the
 axis.  A location with a missing predictor (\code{DI = NA}) is neither
 inside nor outside; it is left out of the curve and the caption counts it.
+}
+\details{
+When location has an index of its own (a \code{gwr_fit}, a
+\code{bayesian_fit}, or \code{coords = "yes"}; see
+\code{\link{area_of_applicability}()}), the curves and the dashed line are
+the predictor index alone.  The subtitle then counts three things: the
+locations beyond the predictor threshold, those beyond the location
+threshold, and those outside the area of applicability, which is either.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {
@@ -60,15 +69,15 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

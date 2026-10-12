@@ -506,16 +506,48 @@ test_that("a rejected sac cannot size a design effect", {
                                  nugget = 0),
     crs = sf::st_crs(32632))
 
-  # The supplied `sac` is refused, and the internal re-estimate on this small
-  # fixture is refused too: one fallback, so one warning, naming both.
+  # With a trend across the cells the internal re-estimate is refused too
+  # (its variogram has no sill inside the lags): one fallback, so one
+  # warning, naming both.
+  trended <- pts
+  trended$resp <- trended$resp + 0.05 * sf::st_coordinates(trended)[, 1]
   expect_warning(
-    out <- summarize_by_cell(pts, response_var = "resp",
+    out <- summarize_by_cell(trended, response_var = "resp",
                              deff = "variogram", sac = fake),
     "supplied `sac` reports no usable range.*estimated from `response_var` reports no usable range",
     class = "spatialkit_deff_fallback")
-  expect_null(attr(out, "deff_applied"))
+  # The fallback is Kish, not the uncorrected SE (this used to assert no
+  # `deff_applied` attribute and SEs equal to deff = 1): the refused model
+  # sizes nothing, and the result is the deff = "kish" one, labelled.
+  kish <- summarize_by_cell(trended, response_var = "resp", deff = "kish")
+  expect_identical(attr(out, "deff_applied")$method, "kish")
+  expect_identical(attr(out, "deff_applied")$requested, "variogram")
+  expect_equal(out[["..se_resp_resp"]], kish[["..se_resp_resp"]], tolerance = 1e-10)
+  expect_equal(out$cell_weight, kish$cell_weight, tolerance = 1e-10)
+  expect_identical(unique(out$deff_method), "kish (variogram fallback)")
+  # Not the refused model's design effect, which equalled n in every cell.
+  expect_true(all(out$cell_weight > 1))
+
+  # The fixture's own response is white noise.  The supplied `sac` is still
+  # set aside, with a plain warning, and the re-estimate answers: it finds no
+  # spatial structure, whose model is a pure nugget, so the design effect is
+  # 1 by the variogram route.  That is not a fallback (this branch asserted
+  # the Kish fallback while every refusal was set aside; on four cells of
+  # white noise Kish's ICC came out positive by chance and widened the
+  # standard errors by 38 percent).
+  w <- list()
+  out0 <- withCallingHandlers(
+    summarize_by_cell(pts, response_var = "resp", deff = "variogram", sac = fake),
+    warning = function(c) { w[[length(w) + 1L]] <<- c; invokeRestart("muffleWarning") })
+  expect_length(w, 1L)
+  expect_false(inherits(w[[1L]], "spatialkit_deff_fallback"))
+  expect_match(conditionMessage(w[[1L]]),
+               "supplied `sac` reports no usable range.*It was set aside, and the design effect uses the variogram estimated from `response_var`")
+  expect_identical(attr(out0, "deff_applied")$method, "variogram")
+  expect_identical(unique(out0$deff_method), "variogram")
   iid <- summarize_by_cell(pts, response_var = "resp", deff = 1)
-  expect_equal(out[["..se_resp_resp"]], iid[["..se_resp_resp"]], tolerance = 1e-10)
+  expect_equal(out0[["..se_resp_resp"]], iid[["..se_resp_resp"]], tolerance = 1e-10)
+  expect_equal(out0$cell_weight, rep(25, 4))
 })
 
 
@@ -599,10 +631,16 @@ test_that("a point outside every cell gets NA, not the nearest cell", {
   all_pts <- rbind(inner, outer)
   bnd <- sf::st_as_sfc(sf::st_bbox(inner))
 
-  tess <- suppressMessages(build_tessellation(all_pts, boundary = bnd,
-                                              method = "square",
-                                              approx_n_cells = 4, clip = TRUE))
+  # The NAs are counted and warned about, with a class (they were one INFO
+  # line in the log).
+  expect_warning(
+    tess <- suppressMessages(build_tessellation(all_pts, boundary = bnd,
+                                                method = "square",
+                                                approx_n_cells = 4, clip = TRUE)),
+    "30 of 40 point\\(s\\) \\(75.0%\\) fall in no cell",
+    class = "spatialkit_unassigned")
   expect_equal(sum(is.na(tess$index)), 30L)
+  expect_identical(tess$params$n_outside, 30L)
   assigned <- suppressWarnings(assign_features_to_polygons(
     all_pts, tess$cells, polygon_id_col = "cell_id", keep_unassigned = TRUE))
   expect_equal(sum(is.na(assigned$cell_id)), sum(is.na(tess$index)))
@@ -689,7 +727,7 @@ test_that("assign_features_to_polygons says so when nothing is assigned", {
 # --------------------------------------------------------------------------
 
 test_that("the local collinearity check sees the intercept and singular windows", {
-  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
   # local_xmat omitted the intercept column, so an indicator constant INSIDE a
   # window was not detected as collinear with it; and is.finite(cn) && cn > 1e6
   # discarded kappa = Inf, the worst case there is.  The check also ran before
@@ -784,7 +822,7 @@ test_that("the collinearity diagnostic is the scaled condition index, thresholde
 
 
 test_that("fitted.gwr_fit is not fooled by a predictor named yhat", {
-  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
   # has_coef_suffix inferred which GWmodel call produced the SDF from the
   # column names, so a PREDICTOR ending in "_coef" made a gwr.basic() SDF look
   # like a gwr.predict() one and switched off the model-term exclusion --
@@ -804,7 +842,7 @@ test_that("fitted.gwr_fit is not fooled by a predictor named yhat", {
 
 
 test_that("an implausible fixed bandwidth is called out", {
-  skip_if_not_installed("GWmodel")
+  skip_if_not_installed("sp")
   # prep_model_data() projects geographic input before the bandwidth is used,
   # so 0.2 "degrees" became 0.2 metres: every local window empty, all
   # coefficients NaN, summary() reporting n = 0, and nothing raised.
@@ -845,7 +883,6 @@ test_that("an implausible fixed bandwidth is called out", {
 
 
 test_that("non-finite local coefficients are counted and reported", {
-  skip_if_not_installed("GWmodel")
   # The post-fit half of the same story, asserted without depending on how a
   # given GWmodel version fails: build the count from an SDF directly.  Nothing
   # used to report this at all -- fitted(), residuals(), summary() and
@@ -916,7 +953,6 @@ test_that("cv_rf's seed reaches the forest", {
 
 
 test_that("gwr_model_selection refuses candidates fit_gwr_model would reject", {
-  skip_if_not_installed("GWmodel")
   set.seed(59); n <- 60
   d <- sf::st_as_sf(data.frame(x = runif(n, 0, 1000), y = runif(n, 0, 1000),
                                a = rnorm(n),
@@ -979,7 +1015,6 @@ test_that("weights with a non-zero diagonal are corrected, not accepted", {
 
 test_that("compare_models_cv scores every model on identical folds", {
   skip_if_not_installed("ranger")
-  skip_if_not_installed("GWmodel")
   # With folds = NULL each cv_*() built its own from k/seed/block_size/..., so
   # a per-model block_size (or seed = NULL) silently gave the models different
   # splits and the table ranked models scored on different data.

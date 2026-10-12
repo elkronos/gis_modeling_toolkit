@@ -27,7 +27,7 @@
 #        install.packages("ranger")                   # random forest backend
 #        install.packages("gstat")                    # autocorrelation range
 #        install.packages("geometry")                 # Delaunay triangulation
-#        install.packages(c("sp", "GWmodel"))         # GWR backend (optional)
+#        install.packages("sp")                       # GWR backend (optional)
 #      Anything missing is skipped with a message rather than failing.
 #
 #   3. Run it:
@@ -52,8 +52,7 @@ has_ggplot  <- requireNamespace("ggplot2",  quietly = TRUE)
 has_ranger  <- requireNamespace("ranger",   quietly = TRUE)
 has_gstat   <- requireNamespace("gstat",    quietly = TRUE)
 has_geom    <- requireNamespace("geometry", quietly = TRUE)
-has_gwmodel <- requireNamespace("GWmodel",  quietly = TRUE) &&
-               requireNamespace("sp",       quietly = TRUE)
+has_gwr     <- requireNamespace("sp",       quietly = TRUE)
 
 if (!has_ggplot)
   stop("This demo draws maps and needs ggplot2. install.packages(\"ggplot2\")",
@@ -312,9 +311,9 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 }
 
 if (has_ranger) {
-  # include_coords = TRUE hands the forest the coordinates, so it can memorise
-  # the training surface.  That is the failure mode the default (FALSE) exists
-  # to prevent, and the one random folds cannot see.
+  # include_coords = TRUE hands the forest the coordinates, so it can fit the
+  # training surface by location.  A random hold-out then overstates its
+  # accuracy, which random folds cannot show.
   rf_args <- list(include_coords = TRUE, num_trees = 300, seed = 1)
   cv_random  <- do.call(cv_rf, c(list(points_sf, response_var, predictor_vars,
                                       folds = folds_random),  rf_args))
@@ -354,7 +353,7 @@ if (has_ranger) {
 }
 
 gwr_fit <- NULL
-if (has_gwmodel) {
+if (has_gwr) {
   gwr_fit <- tryCatch(
     fit_gwr_model(data_sf = points_sf, response_var = response_var,
                   predictor_vars = predictor_vars,
@@ -369,7 +368,7 @@ if (has_gwmodel) {
                 gwr_fit$info$bandwidth, met$R2, met$RMSE))
   }
 } else {
-  cat("  Skipping GWR: install.packages(c(\"sp\", \"GWmodel\"))\n")
+  cat("  Skipping GWR: install.packages(\"sp\")\n")
 }
 
 # Aggregate absolute model error onto each tessellation.

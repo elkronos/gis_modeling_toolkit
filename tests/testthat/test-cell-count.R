@@ -49,7 +49,11 @@ test_that("a select_resolution() result and a profile are read at their best lev
   expect_match(r1$from, "select_resolution\\(criterion = \"elbow\"\\)")
   # The profile itself goes through select_resolution()'s default criterion
   # (cp needs a response -- present here -- and a usable variogram).
-  r2 <- tryCatch(resolve(prof, "n", "get_voronoi_seeds"), error = function(e) e)
+  # (The response here is white noise, so the count comes with a warning
+  # that one cell does as well, or that a bound chose it: not what is under
+  # test.)
+  r2 <- tryCatch(suppressWarnings(resolve(prof, "n", "get_voronoi_seeds")),
+                 error = function(e) e)
   if (!inherits(r2, "error")) {
     expect_equal(r2$n, as.numeric(select_resolution(prof)$best))
     expect_match(r2$from, "resolution_profile\\(\\) read with select_resolution")

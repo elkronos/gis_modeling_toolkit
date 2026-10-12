@@ -388,7 +388,6 @@ test_that("print.gwr_model_selection shows the ranking and states the caveats", 
 # --- GWmodel-gated integration ----------------------------------------------
 
 test_that("gwr_model_selection reads GWmodel's criterion with the right orientation", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
 
   set.seed(42)
@@ -403,8 +402,11 @@ test_that("gwr_model_selection reads GWmodel's criterion with the right orientat
   sel <- gwr_model_selection(dat, "z", c("a", "b", "noise"), bandwidth = 40)
 
   expect_s3_class(sel, "gwr_model_selection")
-  expect_identical(nrow(sel$table), 6L)          # 3 + 2 + 1
-  expect_identical(sel$table$rank, 1:6)
+  # 3 + 2 + 1 models of the forward sweep, and the model without predictors.
+  expect_identical(nrow(sel$table), 7L)
+  expect_identical(sel$table$rank, 1:7)
+  expect_identical(sum(sel$table$variables == "<none>"), 1L)
+  expect_identical(nrow(sel$raw[[2]]), 6L)
   expect_false(is.unsorted(sel$table$criterion, na.rm = TRUE))
   expect_identical(sel$bandwidth, 40L)
   expect_true(all(sel$best %in% c("a", "b", "noise")))
@@ -423,7 +425,6 @@ test_that("gwr_model_selection reads GWmodel's criterion with the right orientat
 })
 
 test_that("gwr_model_selection selects a bandwidth when none is supplied", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
 
   set.seed(7)
@@ -436,8 +437,10 @@ test_that("gwr_model_selection selects a bandwidth when none is supplied", {
   dat$z <- 3 * dat$a + rnorm(n, 0, 0.3)
 
   sel <- gwr_model_selection(dat, "z", c("a", "b"))
-  expect_identical(nrow(sel$table), 3L)          # 2 + 1
-  expect_match(sel$bandwidth_source, "bw\\.gwr")
+  expect_identical(nrow(sel$table), 4L)          # 2 + 1, and <none>
+  # The package's own search, on the model with every candidate.
+  expect_identical(sel$bandwidth_source, "AICc search on the full model")
+  expect_s3_class(sel$bandwidth_search$curve, "data.frame")
   expect_true(is.finite(sel$bandwidth))
   expect_gte(sel$bandwidth, 5L)                  # bisquare floor, n_cand + 3
   expect_lte(sel$bandwidth, 60L)
@@ -445,7 +448,6 @@ test_that("gwr_model_selection selects a bandwidth when none is supplied", {
 })
 
 test_that("gwr_model_selection silences GWmodel's cat() progress unless asked", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
 
   set.seed(9)

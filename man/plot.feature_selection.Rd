@@ -30,6 +30,13 @@ selection (see the help page's section on that); when a hold-out score
 was computed (\code{select_on = "split"}) it is drawn as a separate mark
 at the final step and named in the caption.
 }
+\details{
+With a learner that cannot fit an empty predictor set the first variable
+is added without a test and can be dropped at the end
+(\code{baseline$first$dropped}).  The path drawn is then the one the sweep
+walked, with that variable hollow and labelled "dropped at the end", and
+the red mark is the selected set, scored without it.
+}
 \examples{
 if (requireNamespace("ranger", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
@@ -49,15 +56,15 @@ if (requireNamespace("ranger", quietly = TRUE) &&
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

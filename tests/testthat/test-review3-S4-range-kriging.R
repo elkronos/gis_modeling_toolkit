@@ -21,7 +21,11 @@
 }
 
 # The white-noise REML refusal of test-sac-range.R (seed 7, 0.27 m), fitted
-# once for the tests that read it.
+# once for the tests that read it.  structure_alpha = 1: white noise is now
+# refused for want of spatial structure before any range is looked at, and
+# these tests are about the REML floor, which that refusal would hide.
+# lags = "equal": the floor is compared with the first of gstat's equal bins
+# (about 30 m here), which is the binning these tests were written against.
 .r3s4_wn <- local({
   val <- NULL
   function() {
@@ -32,7 +36,8 @@
                       z = rnorm(n), w = rnorm(n))
       pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
       lines <- capture_spatialkit_log(
-        r <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml")))
+        r <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml",
+                                                 lags = "equal", structure_alpha = 1)))
       val <<- list(r = r, lines = lines, xy = as.matrix(d[, c("x", "y")]))
     }
     val
@@ -65,8 +70,13 @@ test_that("a REML range the point pairs support is returned, and the same at any
   skip_if_not_installed("gstat")
   skip_if_not_installed("nlme")
   pts <- .r3s4_field(9, n = 300, rp = 10)
-  r5 <- estimate_sac_range(pts, "z", "cov", detrend = "reml")
-  r1 <- estimate_sac_range(pts, "z", "cov", detrend = "reml", cutoff = 0.1)
+  # Equal lags, whose first bin is the 30 m one this test is about, and the
+  # structure test off: a 30 m range on points about 29 m apart is below
+  # what that test detects (it is refused at the default, asserted below).
+  r5 <- estimate_sac_range(pts, "z", "cov", detrend = "reml", lags = "equal",
+                           structure_alpha = 1)
+  r1 <- estimate_sac_range(pts, "z", "cov", detrend = "reml", cutoff = 0.1,
+                           lags = "equal", structure_alpha = 1)
   expect_true(is.finite(r5))
   expect_equal(as.numeric(r1), as.numeric(r5))
   # Shorter than the first bin, which alone used to refuse it ...
@@ -75,6 +85,13 @@ test_that("a REML range the point pairs support is returned, and the same at any
   d30 <- sort(as.numeric(stats::dist(sf::st_coordinates(pts))))[30]
   expect_gt(as.numeric(r5), d30)
   expect_null(attr(r5, "range_floor"))
+  # The structure test is attached either way, and at the default it decides.
+  expect_gte(attr(r5, "structure_p"), 0.05)
+  r0 <- suppressWarnings(estimate_sac_range(pts, "z", "cov", detrend = "reml"))
+  expect_true(is.na(r0))
+  expect_identical(attr(r0, "rejected_reason"),
+                   "no spatial structure detected at the nearest-neighbour scale")
+  expect_identical(attr(r0, "structure_p"), attr(r5, "structure_p"))
 })
 
 test_that("a REML range below 30 pairs is refused, says so, and keeps the REML numbers", {
@@ -103,27 +120,38 @@ test_that("a REML range below 30 pairs is refused, says so, and keeps the REML n
   expect_true(all(c("nugget_prop", "sigma2") %in% names(rm)))
 })
 
-test_that("the gstat-path floor refusal points at a smaller cutoff", {
-  # Not reachable on ordinary data (the binned fit did not go below the first
-  # lag on white noise or on 60 m fields), so the fit is stubbed to return a
-  # 6 m effective range on a field whose variogram rises normally.
+test_that("the variogram-path floor refusal points at a smaller cutoff", {
+  # Hard to reach on ordinary data, so the fit is stubbed to return a 6 m
+  # effective range on a field whose variogram rises normally.  The stub
+  # replaces .sac_fit_model(), the fit estimate_sac_range() makes; it used to
+  # replace gstat::fit.variogram(), which is no longer called.
   skip_if_not_installed("gstat")
   pts <- .r3s4_field(2, n = 150, rp = 100)
   local_mocked_bindings(
-    fit.variogram = function(object, model, ...) {
+    .sac_fit_model = function(vg, cutoff_dist, family = "Exp", upper = 4, ...) {
       m <- gstat::vgm(psill = 1, model = "Exp", range = 2, nugget = 0.2)
       attr(m, "singular") <- FALSE
       attr(m, "SSErr") <- 1
+      attr(m, "converged") <- TRUE
       m
-    },
-    .package = "gstat")
-  lines <- capture_spatialkit_log(r <- estimate_sac_range(pts, "z"))
+    })
+  # Equal lags: a smaller cutoff narrows the bins, so that is the advice.
+  lines <- capture_spatialkit_log(r <- estimate_sac_range(pts, "z", lags = "equal"))
   expect_true(is.na(r))
   expect_identical(attr(r, "rejected_reason"), "fitted range is below the shortest lag fitted")
   expect_equal(attr(r, "range_floor"), .r3s4_first_lag(r))
+  expect_equal(attr(r, "first_lag"), .r3s4_first_lag(r))
   expect_null(attr(r, "reml"))
   expect_true(log_has(lines, "shorter than the shortest lag the variogram resolves"))
   expect_true(log_has(lines, "re-run with a smaller `cutoff`"))
+  # Adaptive lags start at the closest pairs already, so a smaller cutoff is
+  # not offered: the points are too far apart for a range that short.
+  lines <- capture_spatialkit_log(r <- estimate_sac_range(pts, "z"))
+  expect_identical(attr(r, "rejected_reason"), "fitted range is below the shortest lag fitted")
+  expect_equal(attr(r, "range_floor"), .r3s4_first_lag(r))
+  expect_true(log_has(lines, "shorter than the shortest lag the variogram resolves"))
+  expect_false(log_has(lines, "re-run with a smaller `cutoff`"))
+  expect_true(log_has(lines, "too far apart to measure a range that short"))
 })
 
 

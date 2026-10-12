@@ -347,7 +347,6 @@ test_that("folds on lon/lat polygons are accepted after sf_use_s2() is toggled",
 # ---------------------------------------------------------------------------
 
 test_that("cv_gwr() validates its kernel with match.arg() alone", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
   src <- paste(deparse(body(cv_gwr)), collapse = " ")
   expect_false(grepl(".validate_kernel", src, fixed = TRUE))

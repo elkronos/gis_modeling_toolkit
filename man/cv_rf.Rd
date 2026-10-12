@@ -53,7 +53,11 @@ Under forked workers each fold's forest runs single-threaded unless
 four threads in total, where it would otherwise mean four times the
 session's \code{mc.cores}.}
 
-\item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.}
+\item{block_size, auto_range, boundary}{Passed to \code{\link{cv_spatial}}.
+\code{block_size} and \code{auto_range = TRUE} size the blocks built
+when \code{folds} is \code{NULL}; beside supplied \code{folds} they
+have nothing to size and raise a warning of class
+\code{spatialkit_fold_args_ignored}.}
 
 \item{pointize}{How non-POINT geometry is reduced to a point before
 fitting; passed to \code{\link{cv_spatial}}. Default \code{"auto"}.}
@@ -79,6 +83,24 @@ forest on each training fold. Unlike the out-of-bag error, this holds out
 whole spatial blocks, so neighbours of a held-out point are not sitting in
 the training set.
 }
+\section{Comparing the forest with and without coordinates}{
+
+Whether \code{include_coords = TRUE} lowers the error depends on how far
+from the training data the predictions are (see \emph{Coordinates as
+predictors} in \code{\link{fit_rf_model}}), so it is a comparison to make
+on your own data, at the block size the map will be used at. Score the
+two forests on the same folds: build the folds once with
+\code{\link{make_folds}} and pass the result as \code{folds} to two
+calls, one with \code{include_coords = TRUE} and one without. Each fold
+then holds out the same rows in both, so the two \code{overall} rows
+compare like with like and the two \code{fold_metrics} tables pair up
+fold by fold. A difference in \code{overall} that is small beside the
+spread of the per-fold differences is not evidence for either forest.
+The example below runs the comparison. \code{\link{compare_models_cv}}
+takes one set of forest arguments (\code{rf_args}) per call, so it scores
+one of the two forests, not both.
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -121,20 +143,32 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
   cv_rf(dat, "z", "a", k = 4)$overall
+
+  # The forest with and without the coordinates, on the same blocked
+  # folds.  (The second call logs the include_coords caution, once per
+  # session; this comparison is what it asks for.)  This response has no
+  # spatial structure, so here the coordinates can only cost accuracy.
+  folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+  plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+  with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+                   include_coords = TRUE)
+  c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+  # Fold by fold: positive where the coordinates lowered the error.
+  plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

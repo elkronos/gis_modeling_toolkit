@@ -16,7 +16,10 @@ produce neither more centres than there are distinct points nor as many
 centres as there are rows. Check \code{nrow()} on the result. A
 \code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
 accepted: its scored centres are returned when it carries them, and
-otherwise its count is used.}
+otherwise its count is used. Such a count raises the warnings and the
+error described under \code{n} in \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} (classes
+\code{"spatialkit_bound_chosen"}, \code{"spatialkit_no_structure"} and
+\code{"spatialkit_no_default_criterion"}).}
 
 \item{set_seed}{Optional integer RNG seed. Default 456, so a call gives the
 same seeds every time whatever the session's random-number state; an
@@ -30,7 +33,8 @@ kept. Default 10.}
 \value{
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
 \code{k} exceeds the number of distinct positions), with \code{seed_id} and
-\code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}.
+\code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and
+\code{attr(, "cover")}, the convex hull of \code{points_sf} (an sfc in its CRS).
 }
 \description{
 Places \code{k} seed points at k-means cluster centres of the observed
@@ -62,6 +66,12 @@ scored on. Raising \code{nstart} narrows the gap but does not close it. Pass
 the \code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to close
 it: the centres of the scored partition are then returned (in the CRS of
 \code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
+
+The centres lie inside the points, so their own hull is smaller than the
+data's. The result carries the convex hull of \code{points_sf} as
+\code{attr(, "cover")}, and \code{\link[=build_tessellation]{build_tessellation()}} clips the cells to that hull
+(grown by 2 percent of its diagonal) when no \code{boundary} is passed, so every
+point of \code{points_sf} falls in a cell.
 }
 \examples{
 library(sf)
@@ -75,14 +85,14 @@ nrow(seeds)   # at most 8: one seed per non-empty cluster
 seeds         # the cluster centres, as an sf POINT layer in the points' CRS
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

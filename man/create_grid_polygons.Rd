@@ -115,14 +115,14 @@ nrow(grid_sq)
 nrow(grid_hex)
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

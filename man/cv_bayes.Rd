@@ -43,7 +43,8 @@ error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
 the folds came from other data when they were not).}
 
-\item{k}{Number of folds. Default 5.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
+read when \code{folds} is supplied.  Default 5.}
 
 \item{seed}{RNG seed. Default 123.  It seeds fold construction \strong{and},
 through a per-fold draw, each fold's Stan sampler, so two seeds give
@@ -74,12 +75,16 @@ score, as proportions strictly between 0 and 1 (\code{0.95}, not
 column \code{coverage_<percent>} of \code{fold_metrics}, named at full
 precision (\code{0.975} gives \code{coverage_97.5}).}
 
-\item{block_size}{Optional minimum block edge length for spatial CV blocks
-(projected CRS units).}
+\item{block_size}{Optional minimum block edge length (projected CRS
+units) for the blocks built when \code{folds} is \code{NULL}; see
+\code{\link{make_folds}()}.  Beside supplied \code{folds} it has
+nothing to size and raises a warning (class
+\code{spatialkit_fold_args_ignored}).}
 
 \item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 estimate the autocorrelation range and use it as the minimum block size.
-Default \code{FALSE}.}
+Default \code{FALSE}.  \code{TRUE} beside supplied \code{folds} raises
+the same warning as \code{block_size}.}
 
 \item{parallel}{Logical or positive integer.  If \code{TRUE},
 auto-detect the number of cores and fit folds in parallel via
@@ -124,12 +129,22 @@ that give the coverage below (\code{NA} when
 see \code{\link{cv_spatial}}.
 \code{fold_metrics} carries, beyond the columns its siblings share,
 \code{gp_k}, \code{gp_n_basis}, \code{n_draws}, \code{CRPS}, the
-\code{coverage_*} columns and \code{convergence_ok}: \code{TRUE} or
+\code{coverage_*} columns, \code{convergence_ok} and
+\code{gp_adequacy}.  \code{convergence_ok} is \code{TRUE} or
 \code{FALSE} as \code{\link{fit_bayesian_spatial_model}()} judged that
-fold's sampler (R-hat, effective sample size, divergences), \code{NA}
+fold's sampler (divergent transitions, R-hat, effective sample size and
+E-BFMI; see its \code{check_convergence}), \code{NA}
 when \code{fit_args} sets \code{check_convergence = FALSE}.  A fold that
 did not converge is scored like the others, so a run with any
-\code{FALSE} raises one warning naming those folds.
+\code{FALSE} raises one warning of class \code{spatialkit_convergence}
+naming those folds and the checks each failed.
+\code{gp_adequacy} is what that fold's posterior said about its
+Gaussian-process basis (\code{"ok"}, \code{"below_resolution"},
+\code{"unresolved_short_range"}, \code{"no_signal_above_floor"} or
+\code{"not_checked"}; see "What the basis resolves" in
+\code{\link{fit_bayesian_spatial_model}}).  A fold whose basis was
+found too coarse is scored like the others too.  See \strong{Warnings
+from the folds}.
 The \code{predictive_coverage} entries (one per
 \code{coverage_levels} value, plus \code{mean_CRPS}) are averages across
 folds \strong{weighted by each fold's \code{n_pred}}, because the per-fold
@@ -155,6 +170,24 @@ the cores.  For a cheap first pass on the same question, cross-validate a
 forest with \code{\link{cv_rf}()} and come back here once the predictor set
 has settled.
 }
+\section{Warnings from the folds}{
+
+\code{\link{fit_bayesian_spatial_model}()} warns about a fit under four
+condition classes: \code{spatialkit_gp_basis_size},
+\code{spatialkit_gp_resolution}, \code{spatialkit_convergence} and
+\code{spatialkit_gp_adequacy} (see its \strong{Warnings}).  Each fold is
+a fit, and none of those warnings says which fold it came from, so they
+are collected as the folds run and each class is raised once after the
+last fold, under this function's name and with the same class.  Each
+warning names the folds and carries \code{folds} (their labels) and
+\code{fold_messages} (every fold's own text, named by fold) as fields of
+the condition.  The convergence warning covers the folds that were
+scored and gives the checks each failed, also as the field
+\code{failed}; the other three quote the first fold's own text.  Each
+fold's own line is in the log.  Warnings that Stan or \pkg{brms} raise
+themselves are not collected and are passed on.
+}
+
 \section{Percentage errors on responses with zeros}{
 
 \code{MAPE} divides by the observed value and \code{SMAPE} by
@@ -235,17 +268,17 @@ if (requireNamespace("brms", quietly = TRUE)) {
 }
 }
 \seealso{
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{fold_separation}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=fold_separation]{fold_separation()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

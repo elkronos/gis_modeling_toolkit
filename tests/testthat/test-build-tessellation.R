@@ -290,14 +290,22 @@ test_that("clip = FALSE leaves cells extending past the boundary", {
   # A boundary covering only the lower-left quadrant, so clipping visibly bites.
   small <- sf::st_sf(geometry = sf::st_sfc(.bt_sq(0, 0, 50, 50), crs = 32632))
 
-  clipped <- suppressMessages(build_tessellation(pts, boundary = small,
+  # The boundary holds a quarter of the ground, so most points fall in no
+  # cell either way: counted, and warned about with a class.
+  expect_warning(
+    clipped <- suppressMessages(build_tessellation(pts, boundary = small,
+                                                   method = "square",
+                                                   approx_n_cells = 16,
+                                                   quiet = TRUE)),
+    "point\\(s\\) \\([0-9.]+%\\) fall in no cell", class = "spatialkit_unassigned")
+  expect_warning(
+    whole <- suppressMessages(build_tessellation(pts, boundary = small,
                                                  method = "square",
-                                                 approx_n_cells = 16,
-                                                 quiet = TRUE))
-  whole <- suppressMessages(build_tessellation(pts, boundary = small,
-                                               method = "square",
-                                               approx_n_cells = 16, clip = FALSE,
-                                               quiet = TRUE))
+                                                 approx_n_cells = 16, clip = FALSE,
+                                                 quiet = TRUE)),
+    "point\\(s\\) \\([0-9.]+%\\) fall in no cell", class = "spatialkit_unassigned")
+  expect_identical(clipped$params$n_outside, sum(is.na(clipped$index)))
+  expect_gt(clipped$params$n_outside, 0L)
 
   expect_equal(sum(as.numeric(sf::st_area(clipped$cells))),
                as.numeric(sf::st_area(small)), tolerance = 1e-6)

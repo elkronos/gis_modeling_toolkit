@@ -73,7 +73,7 @@ test_that("a regional covariate is still flagged, including a cluster at the glo
   expect_gte(flagged[[2L]], 55)
 })
 
-test_that("a far-from-zero origin flags the slopes only where GWmodel's solve degrades", {
+test_that("a far-from-zero origin flags the slopes only for a fit GWmodel's solve made", {
   set.seed(1); n <- 200
   x <- runif(n, 0, 10000); y <- runif(n, 0, 10000)
   el <- 500 + 150 * sin(x / 3000) + 100 * cos(y / 2500) + rnorm(n, 0, 5)
@@ -81,18 +81,29 @@ test_that("a far-from-zero origin flags the slopes only where GWmodel's solve de
   s <- .gwr_local_collinearity(cbind(x, y), cbind(el), TRUE, 30, "bisquare")
   expect_gt(sum(!is.finite(s$cn) | s$cn > 30), 100)
   expect_equal(sum(.gwr_slopes_collinear(s)), 0L)
-  # Shifted until the uncentred index passes 1e6: flagged, on `cn` alone.
+  # Shifted until the uncentred index passes 1e6.  That is where a solve of
+  # the uncentred normal equations, GWmodel's, loses the slopes, so a survey
+  # that belongs to such a fit (no `rank` column) is flagged on `cn` alone.
   s7 <- .gwr_local_collinearity(cbind(x, y), cbind(el + 1e7), TRUE, 30, "bisquare")
   expect_equal(s7$cn_slopes, s$cn_slopes, tolerance = 1e-6)
   expect_gt(sum(.gwr_slopes_collinear(s7)), 0L)
   expect_true(all(s7$cn[.gwr_slopes_collinear(s7)] > 1e6))
+  # The package's solve centres each window and gives the same slopes at any
+  # origin: the survey of a fit it made carries the solve's rank, and is not
+  # flagged however large `cn` is.  (Asserted the opposite before.)
+  expect_identical(sum(s7$cn > 1e6), sum(.gwr_slopes_collinear(s7)))
+  expect_identical(sum(.gwr_slopes_collinear(s7, own_solve = TRUE)), 0L)
+  expect_identical(sum(.gwr_slopes_collinear(cbind(s7, rank = 2L))), 0L)
+  # A `cn` that is singular to machine precision still counts.
+  s_inf <- cbind(s7, rank = 2L); s_inf$cn[1:3] <- Inf
+  expect_identical(which(.gwr_slopes_collinear(s_inf)), 1:3)
   # A survey made before cn_slopes existed falls back to cn > 30.
   old <- s[, c("row", "x", "y", "n_window", "cn")]
   expect_identical(.gwr_slopes_collinear(old), !is.finite(old$cn) | old$cn > 30)
 })
 
 test_that("the same field in degrees C and in kelvin gets the same verdict and a drawable map", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   d <- .r3_temperature()
   rC <- .r3_catch(fit_gwr_model(d, "yield", "tC", bandwidth = 30))
   rK <- .r3_catch(fit_gwr_model(d, "yield", "tK", bandwidth = 30))
@@ -130,7 +141,7 @@ test_that("the same field in degrees C and in kelvin gets the same verdict and a
 
 test_that("a far-from-zero predictor beside a second one no longer draws the global warning", {
   # v2.0.0 already warned on this for two or more predictors.
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   d <- .r3_temperature()
   rK <- .r3_catch(fit_gwr_model(d, "yield", c("tK", "nz"), bandwidth = 30))
   rC <- .r3_catch(fit_gwr_model(d, "yield", c("tC", "nz"), bandwidth = 30))
@@ -148,69 +159,82 @@ test_that("a far-from-zero predictor beside a second one no longer draws the glo
 
 # ---------------------------------------------------------------------------
 # S7-GWR-CLASSES-3: the adaptive floor is not enough when neighbours tie at
-# the kernel's edge (a regular grid); the warning and the fit error say so.
+# the kernel's edge (a regular grid); the floor warning and the warning about
+# the rank-deficient windows say so.
 # ---------------------------------------------------------------------------
 
 # A 10 x 10 grid of spacing 100 with predictor `a`.  Away from the four
 # corners a point has three or four neighbours at 100 and none nearer, so at
 # the bisquare floor of 4 neighbours, the point itself counted, the kernel's
 # edge is at 100: they all get weight 0, and 96 local regressions hold their
-# own point alone.  X'WX is then [1, a; a, a^2], of rank 1 for two parameters.
+# own point alone.  One point for two parameters: rank 1.
 .r3_tied_grid <- function(a) {
   g <- expand.grid(x = 5e5 + (0:9) * 100, y = 5e6 + (0:9) * 100)
   g$a <- a; g$z <- 1 + 2 * g$a + rnorm(100)
   sf::st_as_sf(g, coords = c("x", "y"), crs = 32632)
 }
 
-test_that("the floor warning and the singular-fit error name ties at the kernel's edge", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
-  # Whether GWmodel calls a one-point window singular is a matter of rounding.
-  # Eliminating [1, a; a, a^2] leaves a^2 - a * a as the last pivot: 0 where
-  # the product is rounded before the subtraction, and the rounding error of
-  # a * a where the two are fused into one operation (as on arm64), unless
-  # a * a is exact.  The predictor takes multiples of 1/8 in [-1, 1]: their
-  # squares are exact and none outranks the 1 as first pivot, so every step is
-  # exact, the pivot is 0 and the fit stops on any platform.
+# What the fit on the tied grid has to be, whatever the predictor's values:
+# returned, with 96 windows of rank 1 whose fitted value is their own
+# observation, their slope NA, an undefined AICc, and warnings that say all
+# of it.
+.r3_expect_tied_fit <- function(r, d) {
+  expect_true(any(grepl("using 4\\. That is enough unless several neighbours tie at the kernel's edge",
+                        r$warnings)))
+  expect_true(any(grepl("local collinearity: 96% of 100 locations have a collinear local design",
+                        r$warnings)))
+  fit <- r$value
+  expect_s3_class(fit, "gwr_fit")
+  lc <- fit$info$local_collinearity
+  expect_identical(sum(lc$n_window == 1L & is.infinite(lc$cn)), 96L)
+  expect_identical(fit$info$n_local_collinear, 96L)
+  # The solve: 96 windows of rank 1, each saturated (leverage 1, the fitted
+  # value is the observation), and four corner windows of full rank.
+  expect_identical(as.integer(table(lc$rank)[c("1", "2")]), c(96L, 4L))
+  expect_identical(fit$info$n_rank_deficient, 96L)
+  expect_identical(fit$info$n_saturated, 96L)
+  one <- lc$rank == 1L
+  expect_equal(lc$leverage[one], rep(1, 96L))
+  expect_equal(fitted(fit)[one], d$z[one])
+  expect_true(all(is.na(coef(fit)$a[one])))
+  expect_false(anyNA(coef(fit)$a[!one]))
+  expect_identical(fit$info$n_local_singular, 96L)
+  # Not a silently interpolating fit: tr(S) is 99.4 of 100, so AICc is
+  # undefined and reported as NA, and both facts are warned about.
+  expect_gt(fit$info$tr_S, 99)
+  expect_true(is.na(fit$info$AICc))
+  expect_length(grep("AICc is undefined", r$warnings), 1L)
+  w <- grep("local regressions are rank deficient", r$warnings, value = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "^fit_gwr_model\\(\\): 96 of 100 local regressions are rank deficient")
+  expect_match(w, "96 of those windows hold as many weighted observations as they have estimable coefficients")
+  expect_match(w, "neighbours tied at the kernel's edge \\(a regular grid\\)")
+}
+
+test_that("the floor warning and the rank-deficiency warning name ties at the kernel's edge", {
+  skip_if_not_installed("sp")
+  # A one-point window gave GWmodel's solver [1, a; a, a^2] to invert, whose
+  # last pivot a^2 - a * a is 0 where the product is rounded before the
+  # subtraction and the rounding error of a * a where the two are fused (as
+  # on arm64), unless a * a is exact.  With the predictor in eighths every
+  # step is exact, and the fit stopped on any platform; with normal draws it
+  # stopped or returned slopes of -45 to 77 around a true 2 according to the
+  # platform.  The local solve returns the same fit for both.
   set.seed(2)
   d <- .r3_tied_grid(sample(seq(-1, 1, by = 0.125), 100, replace = TRUE))
   r <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2))
-  expect_true(any(grepl("using 4\\. That is enough unless several neighbours tie at the kernel's edge",
-                        r$warnings)))
-  expect_type(r$value, "character")
-  expect_match(r$value, "survey found 96 singular window")
-  expect_match(r$value, "neighbours tied at the kernel's edge \\(a regular grid\\)")
+  .r3_expect_tied_fit(r, d)
   # Kernels that keep the edge point are not told about ties.
   rg <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2, kernel = "gaussian"))
   expect_false(any(grepl("tie at the kernel's edge", rg$warnings)))
 })
 
-test_that("a continuous predictor on the tied grid is flagged whether or not GWmodel stops", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
-  # The squares of normal draws are rounded, so GWmodel stops on the 96
-  # one-point windows or returns coefficients for them according to the
-  # platform's arithmetic.  The survey does not depend on that: it counts the
-  # points that carry weight, and warns before the fit.
+test_that("a continuous predictor on the tied grid gives the same fit as one in eighths", {
+  skip_if_not_installed("sp")
   set.seed(2)
   d <- .r3_tied_grid(rnorm(100))
   r <- .r3_catch(fit_gwr_model(d, "z", "a", bandwidth = 2))
-  expect_true(any(grepl("using 4\\. That is enough unless several neighbours tie at the kernel's edge",
-                        r$warnings)))
-  expect_true(any(grepl("local collinearity: 96% of 100 locations have a collinear local design",
-                        r$warnings)))
-  if (is.character(r$value)) {
-    expect_match(r$value, "survey found 96 singular window")
-    expect_match(r$value, "neighbours tied at the kernel's edge \\(a regular grid\\)")
-  } else {
-    # The fit that comes back carries the survey: the 96 windows are there to
-    # be read, each with one point and an infinite condition index.
-    expect_s3_class(r$value, "gwr_fit")
-    lc <- r$value$info$local_collinearity
-    expect_identical(sum(lc$n_window == 1L & is.infinite(lc$cn)), 96L)
-    expect_identical(r$value$info$n_local_collinear, 96L)
-    skip(paste0("GWmodel returned coefficients for the 96 one-point windows ",
-                "instead of stopping, so the singular-fit error is not reached ",
-                "with a continuous predictor on this platform"))
-  }
+  .r3_expect_tied_fit(r, d)
 })
 
 
@@ -237,7 +261,7 @@ test_that("gwr_model_selection() refuses an adaptive count below 1 or above R's 
 })
 
 test_that("cv_gwr() refuses an adaptive count below 1 up front, not in every fold", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   set.seed(1); n <- 60
   dat <- sf::st_as_sf(data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                                  a = rnorm(n)),
@@ -256,7 +280,7 @@ test_that("cv_gwr() refuses an adaptive count below 1 up front, not in every fol
 # ---------------------------------------------------------------------------
 
 test_that("the undefined-AICc warning gives advice that can be followed", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   set.seed(4); n <- 4
   dat <- sf::st_as_sf(data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                                  a = rnorm(n), b = rnorm(n)),
@@ -290,11 +314,16 @@ test_that("the undefined-AICc warning gives advice that can be followed", {
 # about a fixed bandwidth in the wrong units, and about a singular window.
 # ---------------------------------------------------------------------------
 
-test_that("gwr_model_selection() warns about a tiny fixed bandwidth and explains a singular window", {
-  expect_match(.gwr_singular_hint(), "^ -- at least one local window's design is singular")
-  expect_no_match(.gwr_singular_hint(), "survey found")
-  expect_match(.gwr_singular_hint(3L), "The collinearity survey found 3 singular window")
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+test_that("gwr_model_selection() warns about a tiny fixed bandwidth, and the rank hint names the causes", {
+  # No window stops a fit or a sweep any more, so there is no solver error to
+  # explain; the causes are named in the warning fit_gwr_model() raises about
+  # windows of deficient rank, and a selected bandwidth is called selected.
+  expect_match(.gwr_rank_hint(), "^ Typical causes are a predictor that is constant inside a window")
+  expect_match(.gwr_rank_hint(), "a mixed GWR, GWmodel::gwr.mixed\\(\\)\\)\\.$")
+  expect_no_match(.gwr_rank_hint(), "No bandwidth was supplied")
+  expect_match(.gwr_rank_hint("150"),
+               "No bandwidth was supplied: the search selected this one \\(150\\)")
+  skip_if_not_installed("sp")
   set.seed(1); n <- 60
   dat <- sf::st_as_sf(data.frame(x = -80 + runif(n, 0, 0.5), y = 35 + runif(n, 0, 0.5),
                                  a = rnorm(n), b = rnorm(n)),
@@ -304,10 +333,13 @@ test_that("gwr_model_selection() warns about a tiny fixed bandwidth and explains
                                      adaptive = FALSE))
   expect_true(any(grepl("^gwr_model_selection\\(\\): a fixed bandwidth of 0.2 is less than a ten-thousandth",
                         r$warnings)))
-  # What GWmodel then does with empty windows is a backend property; when it
-  # is the singular-matrix error, the error explains it.
-  if (is.character(r$value) && grepl("singular", r$value))
-    expect_match(r$value, "local window's design is singular")
+  # At 0.2 m every window holds its own observation alone, every model
+  # interpolates, and no AICc is defined: the sweep says so and selects
+  # nothing.
+  expect_true(any(grepl("AICc is undefined for 4 of 4 model\\(s\\) at bandwidth 0.2",
+                        r$warnings)))
+  expect_type(r$value, "character")
+  expect_match(r$value, "no model produced a finite criterion")
   # A bandwidth in the units the sweep runs in draws no such warning.
   ok <- .r3_catch(gwr_model_selection(dat, "z", c("a", "b"), bandwidth = 20000,
                                       adaptive = FALSE))
@@ -342,7 +374,7 @@ test_that("print() shows a fixed bandwidth with its unit and an adaptive one as 
 # ---------------------------------------------------------------------------
 
 test_that("fit_gwr_model() refuses a non-numeric response up front", {
-  skip_if_not_installed("GWmodel"); skip_if_not_installed("sp")
+  skip_if_not_installed("sp")
   s <- surf_test_points(60)
   s$zc <- as.character(round(s$z, 3))
   r <- .r3_catch(fit_gwr_model(s, "zc", "w"))

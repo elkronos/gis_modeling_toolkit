@@ -23,7 +23,8 @@ test_that("prep_model_data drops NA and non-finite rows", {
   pts$row <- seq_len(5L)
 
   # Row 1: ok, Row 2: NA in y, Row 3: ok, Row 4: NA in x1, Row 5: Inf in y
-  clean <- prep_model_data(pts, "y", "x1", require_response = TRUE)
+  expect_warning(clean <- prep_model_data(pts, "y", "x1", require_response = TRUE),
+                 class = "spatialkit_rows_dropped")
   expect_equal(nrow(clean), 2L)
   expect_equal(clean$row, c(1L, 3L))
 
@@ -182,7 +183,9 @@ test_that("prep_model_data ignores response NAs when require_response = FALSE (r
   expect_equal(nrow(result), 3L)
 
   # In training mode, only row 3 (no NA in y) should survive.
-  result_train <- prep_model_data(pts, "y", "x1", require_response = TRUE)
+  expect_warning(
+    result_train <- prep_model_data(pts, "y", "x1", require_response = TRUE),
+    class = "spatialkit_rows_dropped")
   expect_equal(nrow(result_train), 1L)
 })
 

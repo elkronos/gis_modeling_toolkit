@@ -112,11 +112,13 @@
 #' @param boundary The argument (may be \code{NULL}).
 #' @param caller Function name for the message.
 #' @param label Argument name for the message.
+#' @param what The kind of layer, for the message.
 #' @keywords internal
 #' @noRd
-.check_boundary_arg <- function(boundary, caller, label = "boundary") {
+.check_boundary_arg <- function(boundary, caller, label = "boundary",
+                                what = "polygon") {
   if (is.null(boundary) || inherits(boundary, c("sf", "sfc"))) return(invisible())
-  stop(sprintf("%s(): `%s` must be an sf or sfc polygon layer%s.", caller, label,
+  stop(sprintf("%s(): `%s` must be an sf or sfc %s layer%s.", caller, label, what,
                .tess_hint(boundary, "$boundary")),
        call. = FALSE)
 }
@@ -205,6 +207,251 @@
 }
 
 
+# -----------------------------------------------------------------------------
+# Cover: the ground the cells of a seeded tessellation have to hold
+# -----------------------------------------------------------------------------
+#
+# Voronoi cells built with no boundary are clipped to the convex hull of their
+# generators, grown by 2% of its diagonal.  That is right when the generators
+# are the observations.  When they are seeds (k-means centres, random points in
+# a boundary, the centres a resolution profile scored) the seeds lie inside
+# the data, so the cells stopped short of it: 3,000 uniform points lost 72% of
+# their rows to assign_features_to_polygons() at 4 seeds, 25% at 25 and 4% at
+# 100, and the route build_tessellation()'s own warnings prescribe (profile,
+# selection, seeds, cells) lost 15% at 41 cells, with no condition raised.
+# The rows lost are the edge of the study area, so the cell means moved too.
+#
+# The seeders therefore attach the ground the seeds stand for as
+# attr(seeds, "cover"): the boundary they were drawn in, or the convex hull of
+# the points they were clustered from.  create_voronoi_polygons() derives its
+# default boundary from that (or from a `cover` argument) instead of from the
+# seeds' own hull.
+
+#' The cover of a layer, as geometry in the layer's own CRS
+#'
+#' For a polygon layer, its polygons as they are; for anything else (points),
+#' the planar convex hull of the coordinates as given, which is a POINT or a
+#' LINESTRING when they have no area.  The hull is taken on the bare numbers,
+#' CRS set aside: the question is which coordinates it has to hold, and sf
+#' would otherwise build a spherical hull for lon/lat.
+#'
+#' @param x An sf or sfc layer, or \code{NULL}.
+#' @return An sfc in the CRS of \code{x}, or \code{NULL} when \code{x} is not
+#'   a layer or holds no usable geometry.
+#' @keywords internal
+#' @noRd
+.cover_of <- function(x) {
+  if (is.null(x) || !inherits(x, c("sf", "sfc"))) return(NULL)
+  g <- sf::st_geometry(x)
+  g <- g[!sf::st_is_empty(g)]
+  if (!length(g)) return(NULL)
+  types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  if (all(types %in% c("POLYGON", "MULTIPOLYGON"))) return(g)
+  xy <- sf::st_coordinates(g)
+  if (ncol(xy) < 2L) return(NULL)
+  xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), 1:2, drop = FALSE]
+  if (!nrow(xy)) return(NULL)
+  sf::st_convex_hull(sf::st_sfc(sf::st_multipoint(unname(xy)), crs = sf::st_crs(g)))
+}
+
+
+#' Put a cover in the CRS its generators are now in
+#'
+#' The cover came with the generators (as an attribute of the seeds, or as
+#' the `cover` argument), and the builders then project, stamp or transform
+#' the generators.  This moves the cover the same way.
+#' \itemize{
+#'   \item A cover with no CRS is read in the coordinates of the generators
+#'     as they arrived: a cover the seeders attached was built there, and a
+#'     `cover` argument is documented so.  When the generators had no CRS
+#'     either and have one now, they were either stamped as they were or
+#'     taken as lon/lat and projected; which, is read off whether their
+#'     coordinates moved, and the cover is given the same reading.
+#'   \item When the generators are still in an unnamed planar space, so is
+#'     the cover, whatever CRS it carried.
+#'   \item When both have a CRS and they differ, the cover is transformed.  A
+#'     polygon or hull gets vertices along its edges first (in its own
+#'     coordinates, a two-hundredth of its extent apart), because a straight
+#'     edge in one CRS is not straight in another: across the conterminous
+#'     United States the middle of a lon/lat hull's northern edge would
+#'     otherwise sit hundreds of kilometres inside the points it was drawn
+#'     round, once projected.
+#' }
+#'
+#' @param cover sfc geometry of the cover.
+#' @param pts_in The generators as the calling function received them.
+#' @param pts_now The generators in the working CRS.
+#' @return The cover as an sfc in the CRS of \code{pts_now}.
+#' @keywords internal
+#' @noRd
+.cover_follow <- function(cover, pts_in, pts_now) {
+  g <- sf::st_geometry(cover)
+  crs_in <- sf::st_crs(pts_in); crs_now <- sf::st_crs(pts_now)
+  if (is.na(sf::st_crs(g))) {
+    if (!is.na(crs_in)) {
+      g <- sf::st_set_crs(g, crs_in)
+    } else if (!is.na(crs_now)) {
+      b0 <- unname(as.numeric(sf::st_bbox(pts_in)))
+      b1 <- unname(as.numeric(sf::st_bbox(pts_now)))
+      moved <- !isTRUE(all.equal(b0, b1))
+      g <- sf::st_set_crs(g, if (moved) sf::st_crs(4326) else crs_now)
+    }
+  }
+  if (is.na(crs_now)) return(sf::st_set_crs(g, NA))
+  if (sf::st_crs(g) == crs_now) return(g)
+  types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  if (!all(types %in% c("POINT", "MULTIPOINT"))) {
+    bb  <- sf::st_bbox(g)
+    ext <- max(as.numeric(bb[["xmax"]] - bb[["xmin"]]),
+               as.numeric(bb[["ymax"]] - bb[["ymin"]]))
+    if (is.finite(ext) && ext > 0) {
+      crs_g <- sf::st_crs(g)
+      g <- sf::st_set_crs(sf::st_segmentize(sf::st_set_crs(g, NA),
+                                            dfMaxLength = ext / 200), crs_g)
+    }
+  }
+  sf::st_transform(g, crs_now)
+}
+
+
+#' The boundary a cover gives, in the working CRS
+#'
+#' The cover's convex hull (points) or its polygons, grown by 2 percent of
+#' its diagonal, the margin a hull of the generators themselves gets.  The
+#' margin is what keeps every observation inside after the cover has been
+#' through a CRS change: an unbuffered hull of 2,628 North Carolina tracts,
+#' built in their CRS and used in the seeds', left 5 of them outside at 10
+#' seeds.  Generators the cover does not hold keep their ground: their hull
+#' is added, so the cells are never smaller than the ones the generators'
+#' own hull gave.
+#'
+#' @param cover The cover as an sfc in the CRS of \code{pts}.
+#' @param pts The generators in the working CRS.
+#' @return A one-row sf polygon layer, or \code{NULL} when the cover gives no
+#'   usable polygon; \code{attr(, "none_inside")} is \code{TRUE} when the
+#'   cover held none of the generators and was set aside for that.
+#' @keywords internal
+#' @noRd
+.cover_boundary <- function(cover, pts) {
+  build <- function() {
+    g <- cover[!sf::st_is_empty(cover)]
+    if (!length(g)) return(NULL)
+    types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+    u <- if (all(types %in% c("POLYGON", "MULTIPOLYGON")))
+      sf::st_union(.safe_make_valid(g))
+    else sf::st_convex_hull(sf::st_combine(g))
+    grow_of <- function(x) {
+      bb <- sf::st_bbox(x)
+      0.02 * max(sqrt(as.numeric(bb[["xmax"]] - bb[["xmin"]])^2 +
+                      as.numeric(bb[["ymax"]] - bb[["ymin"]])^2), 1)
+    }
+    grow <- grow_of(u)
+    if (!is.finite(grow)) return(NULL)
+    gp <- sf::st_geometry(pts)
+    gp <- gp[!sf::st_is_empty(gp)]
+    # Judged against the grown cover, so a generator on its edge is inside.
+    inside <- lengths(sf::st_intersects(
+      gp, suppressWarnings(sf::st_buffer(u, dist = grow)))) > 0L
+    if (length(gp) && !any(inside)) return(structure(list(), none_inside = TRUE))
+    if (!all(inside)) {
+      u    <- sf::st_union(c(u, sf::st_convex_hull(sf::st_combine(gp))))
+      grow <- grow_of(u)
+    }
+    b <- .safe_make_valid(suppressWarnings(sf::st_buffer(u, dist = grow)))
+    b <- sf::st_sf(geometry = sf::st_sfc(sf::st_union(b)[[1L]], crs = sf::st_crs(pts)))
+    ok <- nrow(b) == 1L && !sf::st_is_empty(b) &&
+      as.character(sf::st_geometry_type(b)) %in% c("POLYGON", "MULTIPOLYGON") &&
+      isTRUE(suppressWarnings(as.numeric(sf::st_area(sf::st_set_crs(b, NA)))) > 0)
+    if (ok) b else NULL
+  }
+  tryCatch(build(), error = function(e) NULL)
+}
+
+
+#' Does this layer look like seeds placed inside some other data?
+#'
+#' \code{get_voronoi_seeds()}, \code{voronoi_seeds_kmeans()} and
+#' \code{voronoi_seeds_random()} return \code{seed_id} and \code{method}
+#' columns, and the k-means route adds \code{attr(, "kmeans")} or
+#' \code{attr(, "n_from")}.  Only k-means and random seeds count: they are
+#' placed inside a cloud or a boundary by construction.  Seeds a caller
+#' provided (\code{method = "provided"}) may be the observation sites
+#' themselves, whose own hull is the right boundary.
+#' @keywords internal
+#' @noRd
+.looks_like_seeds <- function(x) {
+  if (!is.null(attr(x, "kmeans", exact = TRUE)) ||
+      !is.null(attr(x, "n_from", exact = TRUE))) return(TRUE)
+  if (!inherits(x, "sf") || !all(c("seed_id", "method") %in% names(x))) return(FALSE)
+  m <- x[["method"]]
+  is.character(m) && length(m) > 0L && all(m %in% c("kmeans", "random"))
+}
+
+
+#' Count the points of a `cover` argument that the cells do not hold
+#'
+#' Wherever `cover` does not size the cells it is only checked against them:
+#' Voronoi cells built in a `boundary`, a grid (laid over the boundary) and
+#' Delaunay triangles (which span the hull of the generators).  Polygon covers
+#' are not checked.  The warning says what set the cells for the method that
+#' ran, and what to change: the advice to leave `boundary` out so the cells
+#' are built to hold `cover` is true of Voronoi cells only, and was given for
+#' a grid, and for triangles built with no boundary at all.
+#'
+#' @param cover The `cover` argument (or \code{NULL}).
+#' @param cells The cells, in the working CRS.
+#' @param pts_in,pts_now The generators as received and in the working CRS.
+#' @param caller Function name for the warning.
+#' @param method The tessellation method the cells were built with.
+#' @param clipped For \code{method = "triangles"}: were the triangles clipped
+#'   to a boundary?
+#' @return \code{NULL} when there is nothing to check, else the count.
+#' @keywords internal
+#' @noRd
+.cover_points_outside <- function(cover, cells, pts_in, pts_now, caller,
+                                  method = "voronoi", clipped = FALSE) {
+  if (is.null(cover) || !inherits(cover, c("sf", "sfc"))) return(NULL)
+  g <- sf::st_geometry(cover)
+  types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  if (!length(g) || !all(types %in% c("POINT", "MULTIPOINT"))) return(NULL)
+  g <- tryCatch(.cover_follow(g, pts_in, pts_now), error = function(e) NULL)
+  if (is.null(g)) return(NULL)
+  cells_cmp <- cells
+  if (is.na(sf::st_crs(g)) != is.na(sf::st_crs(cells_cmp)))
+    cells_cmp <- sf::st_set_crs(cells_cmp, sf::st_crs(g))
+  idx <- .build_point_cell_index(sf::st_sf(geometry = g), cells_cmp, warn = FALSE)
+  n_out <- sum(is.na(idx) & !sf::st_is_empty(g))
+  if (n_out > 0L) {
+    # What set the cells, and what would make them hold the cover, by method.
+    why <- switch(
+      method,
+      voronoi   = "`boundary` sets the cells, and it does not hold them",
+      triangles = if (isTRUE(clipped))
+        paste0("the triangles span the convex hull of `points_sf`, clipped to ",
+               "`boundary`, and that does not hold them")
+      else "the triangles span the convex hull of `points_sf`, and it does not hold them",
+      "the grid is laid over `boundary`, and it does not hold them")
+    fix <- switch(
+      method,
+      voronoi   = paste0("Pass a boundary that holds the observations, or leave ",
+                         "`boundary` out so the cells are built to hold `cover`"),
+      triangles = paste0("`cover` sizes nothing for method = \"triangles\": use ",
+                         "method = \"voronoi\" with no `boundary`, whose cells are ",
+                         "built to hold `cover`, or triangulate points whose hull ",
+                         "holds the observations"),
+      paste0("`cover` sizes nothing for a grid: pass a boundary that holds the ",
+             "observations"))
+    .warn_classed("spatialkit_unassigned", paste0(
+      "%s(): %d of the %d `cover` point(s) (%.1f%%) fall outside every cell: ",
+      "%s. They will be left out by assign_features_to_polygons(). %s; ",
+      "`params$cover_outside` records the count."),
+      caller, n_out, length(g), 100 * n_out / length(g), why, fix,
+      data = list(n = n_out, total = length(g)))
+  }
+  n_out
+}
+
+
 #' Project a lon/lat boundary for a grid of equal-area cells
 #'
 #' The CRS ensure_projected() picks for distances, unless that CRS distorts
@@ -278,7 +525,8 @@
 #'
 #' It is not the target [build_tessellation()] derives on its own:
 #' `method = "voronoi"` without a boundary clips to the convex hull of the
-#' points buffered by 2 percent of its diagonal, and there `expand` is always
+#' points (or of their `cover`, for seeds) buffered by 2 percent of its
+#' diagonal, and there `expand` is always
 #' a distance. A bounding box over a non-rectangular point cloud includes
 #' corners with no data, so a hex or square grid laid over it has cells that
 #' hold no points; pass the study-area polygon when there is one.
@@ -419,13 +667,15 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'
 #' @param pts An sf POINT object.
 #' @param cells_sf An sf polygon object with a `cell_id` column.
+#' @param warn Raise the classed warning when points fall outside every cell.
+#'   \code{FALSE} for a caller that reports the count in its own words.
 #' @return Integer vector of cell_id values, one per row of `pts`, with
 #'   \code{NA} for points that fall outside every cell, carrying the
 #'   nearest-cell repairs as \code{attr(, "snapped")} (\code{n}, \code{which},
 #'   \code{distance}); the callers move that record into \code{params}.
 #' @keywords internal
 #' @noRd
-.build_point_cell_index <- function(pts, cells_sf) {
+.build_point_cell_index <- function(pts, cells_sf, warn = TRUE) {
   n <- nrow(pts)
   if (n == 0L || nrow(cells_sf) == 0L)
     return(structure(rep(NA_integer_, n),
@@ -484,11 +734,28 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
                   snapped$n, max(snapped$distance))
     }
   }
+  # A point in no cell is a point every summary built from `index` leaves
+  # out, so it is a warning the caller can catch, with the count; it was an
+  # INFO line in the temp log, and nothing on the result held the number.
   n_out <- sum(is.na(index))
-  if (n_out > 0L)
-    .log_info(paste0("build_tessellation(): %d of %d point(s) fall outside every ",
-                     "cell and are recorded as NA in `index`."),
-              n_out, length(index))
+  if (n_out > 0L && isTRUE(warn)) {
+    # A point with empty geometry is in no cell either, but for want of a
+    # location, not for lying outside the study area.
+    n_empty <- sum(is.na(index) & sf::st_is_empty(sf::st_geometry(pts)))
+    .warn_classed("spatialkit_unassigned", paste0(
+      "build_tessellation(): %d of %d point(s) (%.1f%%) fall in no cell and ",
+      "are NA in `index`; `params$n_outside` holds the count. %s"),
+      n_out, length(index), 100 * n_out / length(index),
+      if (n_empty == n_out)
+        "They have empty geometry, so there is no location to index."
+      else paste0(
+        if (n_empty > 0L) sprintf("%d of them have empty geometry; the rest lie ", n_empty)
+        else "They lie ",
+        "outside the ground the cells cover (the boundary, grown by `expand`). ",
+        "Pass a boundary that holds them, or a larger `expand`, if they belong ",
+        "to the study area."),
+      data = list(n = n_out, total = length(index)))
+  }
 
   attr(index, "snapped") <- snapped
   index
@@ -523,6 +790,20 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' centroid instead, so cast to POINT, or take centroids, first if one cell
 #' per feature is what you want.
 #'
+#' With no `boundary` the cells are clipped to a boundary derived from the
+#' data. For observations that is their own convex hull grown by 2 percent of
+#' its diagonal, so every observation has a cell. Seeds are different: k-means
+#' centres, random points in a study area and the centres a resolution
+#' profile scored all lie inside the ground they stand for, and cells clipped
+#' to the hull of the seeds leave the edge of that ground uncovered (on 3,000
+#' uniform points, 72 percent of them at 4 seeds, 25 percent at 25 and 4
+#' percent at 100). The boundary is therefore derived from the `cover` when
+#' there is one: the argument, or the cover the seeding functions attach to
+#' their result. A layer that looks like seeds and has neither a boundary nor
+#' a cover (seeds bound with `rbind()`, which drops the attribute, or built
+#' by hand) gets the seeds' own hull and a warning of class
+#' `"spatialkit_no_cover"`.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries. Points with
 #'   no CRS whose coordinates look like lon/lat (the heuristic
 #'   [ensure_projected()] applies, with its warning) are taken as EPSG:4326
@@ -537,6 +818,23 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   with CRS-less points taken as lon/lat) is read as lon/lat when its
 #'   coordinates fit the lon/lat envelope, and refused with an error
 #'   otherwise.
+#' @param cover Optional sf or sfc layer the cells have to hold, read when
+#'   there is no `boundary`: the observations (points), or a polygon. The
+#'   boundary is then derived from it instead of from `points_sf`: the convex
+#'   hull of the cover's points, or its polygons, grown by 2 percent of the
+#'   diagonal. This is what seeds need, because seeds lie inside the data they
+#'   stand for and their own hull stops short of it (see "Details").
+#'   When `NULL`, the cover the seeding functions attach is used
+#'   (`attr(points_sf, "cover")`, set by [get_voronoi_seeds()],
+#'   [voronoi_seeds_kmeans()] and [voronoi_seeds_random()]). A cover with no
+#'   CRS is read in the coordinates of `points_sf`, and one in another CRS is
+#'   transformed. A generator outside the cover keeps its ground (the hull of
+#'   the generators is added); a cover that holds none of the generators is
+#'   set aside with a warning. With a `boundary`, the boundary sets the cells
+#'   and `cover` is only checked against them: the number of its points that
+#'   fall outside every cell is returned as `params$cover_outside`, with a
+#'   warning of class `"spatialkit_unassigned"` when it is not 0 (a polygon
+#'   cover is not checked).
 #' @param expand Numeric; absolute distance, in the working CRS's units, by
 #'   which the boundary (or the hull derived from the points) is grown before
 #'   the diagram is built. With `clip = TRUE` the cells are clipped to the
@@ -561,9 +859,17 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
 #'   every cell, which means outside the study area (grown by \code{expand}
 #'   when it is positive), so a summary built from it counts only the points
-#'   the tessellation actually covers.  \code{boundary} is the boundary the
-#'   cells were built in: the one supplied or derived, grown by
-#'   \code{expand}.
+#'   the tessellation actually covers.  Such points are counted in
+#'   \code{params$n_outside}, and a warning of class
+#'   \code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+#'   the boundary the cells were built in: the one supplied or derived, grown
+#'   by \code{expand}.  \code{params$boundary_source} says where it came
+#'   from: \code{"boundary"} (the argument), \code{"cover"} (the
+#'   \code{cover} argument), \code{"seeds' cover"} (the cover attached to
+#'   \code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
+#'   itself).  \code{params$cover_outside} is the number of \code{cover}
+#'   points outside every cell when a point \code{cover} was given with a
+#'   \code{boundary}, and \code{NULL} otherwise.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -578,12 +884,28 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' @export
 create_voronoi_polygons <- function(
     points_sf, boundary = NULL, expand = 0, clip = TRUE,
-    keep_duplicates = FALSE, crs = NULL, quiet = FALSE
+    keep_duplicates = FALSE, crs = NULL, quiet = FALSE, cover = NULL
 ) {
   .assert_sf(points_sf, c("POINT", "MULTIPOINT"), "points_sf")
   .check_boundary_arg(boundary, "create_voronoi_polygons")
+  .check_boundary_arg(cover, "create_voronoi_polygons", label = "cover",
+                      what = "point or polygon")
   if (nrow(points_sf) < 1) stop("create_voronoi_polygons(): `points_sf` has no rows.")
   .msg <- function(...) if (!quiet) message(...)
+  # The ground the cells have to hold, when there is no boundary: the `cover`
+  # argument, else the cover a seeding function attached.  Read before the
+  # points are moved; it is put in the working CRS where it is used.
+  pts_in <- points_sf
+  cover_geom <- NULL
+  cover_from <- NULL
+  if (!is.null(cover)) {
+    cover_geom <- sf::st_geometry(cover)
+    cover_from <- "cover"
+  } else if (inherits(attr(points_sf, "cover", exact = TRUE), c("sf", "sfc"))) {
+    cover_geom <- sf::st_geometry(attr(points_sf, "cover", exact = TRUE))
+    cover_from <- "seeds' cover"
+  }
+  seed_like <- .looks_like_seeds(points_sf)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -633,6 +955,33 @@ create_voronoi_polygons <- function(
     }
   }
 
+  boundary_source <- "boundary"
+  if (is.null(boundary) && !is.null(cover_geom)) {
+    # From the cover: its hull or polygons, in the working CRS, grown by 2% of
+    # the diagonal (see .cover_boundary()).
+    from_cover <- .cover_boundary(
+      tryCatch(.cover_follow(cover_geom, pts_in, pts),
+               error = function(e) sf::st_sfc(crs = sf::st_crs(pts))),
+      pts)
+    if (inherits(from_cover, "sf")) {
+      .msg(sprintf(paste0("create_voronoi_polygons(): deriving boundary from %s ",
+                          "(its hull or polygons, grown by 2%% of the diagonal)."),
+                   if (identical(cover_from, "cover")) "`cover`"
+                   else "the cover the seeds carry"))
+      boundary <- from_cover
+      boundary_source <- cover_from
+    } else {
+      .warn_classed("spatialkit_no_cover", paste0(
+        "create_voronoi_polygons(): %s %s, so it is set aside and the boundary ",
+        "is derived from `points_sf` itself. Pass the observations, or the ",
+        "study area, as `cover` or `boundary`."),
+        if (identical(cover_from, "cover")) "`cover`" else "the cover the seeds carry",
+        if (isTRUE(attr(from_cover, "none_inside")))
+          "holds none of the points in `points_sf` (the two are in different places)"
+        else "gives no polygon in the working CRS")
+      seed_like <- FALSE     # said already; not twice
+    }
+  }
   if (is.null(boundary)) {
     .msg("create_voronoi_polygons(): deriving boundary via convex hull of points.")
     hull <- sf::st_convex_hull(sf::st_union(sf::st_geometry(pts)))
@@ -640,9 +989,27 @@ create_voronoi_polygons <- function(
     # degenerate slivers along the convex hull boundary.
     bb   <- sf::st_bbox(hull)
     diag <- sqrt((bb$xmax - bb$xmin)^2 + (bb$ymax - bb$ymin)^2)
+    # Seeds with nothing to say what ground they stand for: the cells stop
+    # at the seeds' own hull, which is inside the data.  This is the case the
+    # cover exists to prevent, so it is said when it still happens.
+    if (seed_like) {
+      flat <- !isTRUE(suppressWarnings(
+        as.numeric(sf::st_area(sf::st_set_crs(hull, NA)))) > 0)
+      .warn_classed("spatialkit_no_cover", paste0(
+        "create_voronoi_polygons(): `points_sf` is a layer of seeds (%d) with ",
+        "no `boundary` and no cover, so the cells are clipped to the seeds' own ",
+        "convex hull grown by 2%% of its diagonal%s. Seeds lie inside the data ",
+        "they stand for, so observations near its edge will fall in no cell. ",
+        "Pass the study area as `boundary`, or the observations as `cover`."),
+        nrow(pts),
+        if (flat) paste0(", and that hull has no area (one seed, two, or seeds ",
+                         "on a line): the cells are a sliver")
+        else "")
+    }
     hull <- suppressWarnings(sf::st_buffer(hull, dist = 0.02 * max(diag, 1)))
     hull_sfc <- sf::st_sfc(hull, crs = sf::st_crs(pts))
     boundary <- sf::st_sf(geometry = hull_sfc)
+    boundary_source <- "points"
   } else {
     if (!any(sf::st_geometry_type(boundary) %in% c("POLYGON", "MULTIPOLYGON")))
       stop("create_voronoi_polygons(): `boundary` must be polygonal.")
@@ -697,6 +1064,11 @@ create_voronoi_polygons <- function(
   index   <- .build_point_cell_index(pts, cells)
   snapped <- attr(index, "snapped")
   attr(index, "snapped") <- NULL
+  # With a boundary given, a point `cover` is checked against the cells.
+  cover_outside <- if (identical(boundary_source, "boundary"))
+    .cover_points_outside(cover, cells, pts_in, pts, "create_voronoi_polygons",
+                          method = "voronoi")
+  else NULL
 
   list(
     cells    = .to_output_crs(cells, crs_out),
@@ -708,7 +1080,13 @@ create_voronoi_polygons <- function(
     boundary = .to_output_crs(boundary_expanded, crs_out),
     method   = "voronoi",
     params   = list(clip = clip, expand = expand, keep_duplicates = keep_duplicates,
-                    snapped = snapped)
+                    snapped = snapped,
+                    # Points of `points_sf` in no cell, where the boundary came
+                    # from, and (with a boundary and a point cover) the cover
+                    # points in no cell.
+                    n_outside = sum(is.na(index)),
+                    boundary_source = boundary_source,
+                    cover_outside = cover_outside)
   )
 }
 
@@ -1092,8 +1470,12 @@ create_grid_polygons <- function(
 #'   own to lay a grid over and error without it; supply the study-area polygon,
 #'   or build one from the points with [clip_target_for()]. **Optional** for
 #'   `method = "voronoi"` and `method = "triangles"`, which derive their extent
-#'   from the points themselves and use `boundary` only to clip the result when
-#'   `clip = TRUE`. When exactly one of `points_sf` and `boundary` has a CRS,
+#'   from the points themselves (for `"voronoi"`, from `cover` when there is
+#'   one) and use `boundary` only to clip the result when
+#'   `clip = TRUE`. When `points_sf` holds seeds and not the observations,
+#'   pass the study area here or the observations as `cover`: seeds lie
+#'   inside the data, and cells clipped to the seeds' own hull leave its edge
+#'   uncovered. When exactly one of `points_sf` and `boundary` has a CRS,
 #'   the other is interpreted in it, with a warning. CRS-less points, and a
 #'   CRS-less boundary given with projected points, are read as
 #'   [harmonize_crs()] does; CRS-less points that do not look like lon/lat
@@ -1111,7 +1493,10 @@ create_grid_polygons <- function(
 #'   one cell per input point and \code{"triangles"} one triangle per
 #'   neighbouring triple, so neither has a count to set, and both warn that the
 #'   argument was ignored.  For a Voronoi cell count, place the seeds with
-#'   \code{\link{get_voronoi_seeds}()} and tessellate those.  For hex
+#'   \code{\link{get_voronoi_seeds}()} and tessellate those, passing the
+#'   study area as \code{boundary} or the observations as \code{cover}
+#'   (seeds made from a boundary or from \code{sample_points} carry their
+#'   cover with them).  For hex
 #'   grids the target is adjusted for packing density; the actual count after
 #'   clipping to an irregular boundary may differ noticeably.  Besides a
 #'   number, this accepts what the level-selection step returned: the integer
@@ -1121,6 +1506,12 @@ create_grid_polygons <- function(
 #'   \code{select_resolution()} at its default criterion).  The count used
 #'   is returned as \code{params$approx_n_cells} and where it came from as
 #'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
+#'   A count read off a selection or a profile raises a warning of class
+#'   \code{"spatialkit_bound_chosen"} when its optimum sits on a bound of the
+#'   ladder and one of class \code{"spatialkit_no_structure"} when one cell
+#'   for the whole layer scores as well; a profile with no \code{cp} to read
+#'   is an error (class \code{"spatialkit_no_default_criterion"} when another
+#'   criterion is finite).  See \code{\link{resolution_profile}()}.
 #'   A count read off a profile or selection is a number of k-means cells:
 #'   every one occupied, and small where the points are dense.  A lattice
 #'   lays that many equal cells over the whole boundary, so on clustered
@@ -1133,13 +1524,34 @@ create_grid_polygons <- function(
 #'   \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 #'   given the \code{select_resolution()} result or the profile itself, it
 #'   returns the centres of the partition the profile scored, whose Voronoi
-#'   cells are the cells the criteria judged.
+#'   cells are the cells the criteria judged.  Seeds made that way carry the
+#'   hull of \code{sample_points} as their cover, so the cells built on them
+#'   hold every point; made with neither \code{sample_points} nor a boundary,
+#'   they carry the hull of the points the profile was computed on.
 #' @param cellsize Numeric cell size, in the units of the working CRS.  Read by
 #'   \code{method = "hex"} and \code{"square"} only; the other two methods warn
 #'   that it was ignored.  When both \code{cellsize} and \code{approx_n_cells}
 #'   are given, \code{cellsize} wins and \code{approx_n_cells} is ignored with
 #'   a logged warning; supply one or the other.  With a geographic \code{crs}
 #'   it is in that CRS's degrees, and the grid is laid in degrees.
+#' @param cover Optional sf or sfc layer the cells have to hold: the
+#'   observations (points), or a polygon. Read by `method = "voronoi"` when
+#'   there is no `boundary`: the boundary is then derived from the cover (the
+#'   convex hull of its points, or its polygons, grown by 2 percent of the
+#'   diagonal) instead of from the hull of `points_sf`. Pass it when
+#'   `points_sf` holds seeds. When `NULL`, the cover the seeding functions
+#'   attach to their result is used (`attr(points_sf, "cover")`: the boundary
+#'   the seeds were drawn in, or the hull of the points they were clustered
+#'   from), so `build_tessellation(voronoi_seeds_kmeans(obs, k))` holds every
+#'   observation without it; `rbind()` of seed layers drops that attribute.
+#'   Seeds with neither a boundary nor a cover are tessellated over their own
+#'   hull, with a warning of class `"spatialkit_no_cover"`. A cover with no
+#'   CRS is read in the coordinates of `points_sf`; one in another CRS is
+#'   transformed. With a `boundary` (and for the other methods) the cover
+#'   sizes nothing: when it is a point layer, the number of its points that
+#'   fall outside every cell is returned as `params$cover_outside`, with a
+#'   warning of class `"spatialkit_unassigned"` when it is not 0. See
+#'   [create_voronoi_polygons()].
 #' @param expand Buffer distance, in the working CRS's units, by which the
 #'   Voronoi boundary is grown before the diagram is built. Applied by
 #'   `method = "voronoi"` only; the `"hex"`, `"square"` and `"triangles"`
@@ -1182,14 +1594,23 @@ create_grid_polygons <- function(
 #'       median cell width of a cell is snapped to it. That covers points
 #'       sitting exactly on a shared edge, and leaves points outside the study
 #'       area as `NA`. A summary built from `index` therefore counts only the
-#'       points the tessellation actually covers.}
+#'       points the tessellation actually covers. When any point is `NA`, a
+#'       warning of class `"spatialkit_unassigned"` gives the number
+#'       (`tryCatch(spatialkit_unassigned = )` catches it; the condition
+#'       carries `n` and `total`).}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units). For `"hex"` and
+#'       outside every cell each sat, in CRS units); `n_outside`, the number
+#'       of points of `points_sf` that fall in no cell (the `NA`s of
+#'       `index`); and `cover_outside`, the number of `cover` points in no
+#'       cell when a point `cover` was checked against the cells (`NULL`
+#'       otherwise). For `"voronoi"` also `boundary_source`, where the
+#'       boundary came from: `"boundary"`, `"cover"`, `"seeds' cover"` or
+#'       `"points"`. For `"hex"` and
 #'       `"square"` also `cells_occupied` and `cells_empty`, the number of
 #'       cells that hold at least one point and that hold none.}
 #'   }
@@ -1208,7 +1629,8 @@ build_tessellation <- function(
     points_sf, boundary = NULL,
     method = c("voronoi", "triangles", "hex", "square"),
     approx_n_cells = NULL, cellsize = NULL, expand = 0,
-    clip = TRUE, keep_duplicates = FALSE, crs = NULL, quiet = FALSE
+    clip = TRUE, keep_duplicates = FALSE, crs = NULL, quiet = FALSE,
+    cover = NULL
 ) {
   .msg <- function(...) if (!quiet) message(...)
   method <- match.arg(method)
@@ -1229,9 +1651,20 @@ build_tessellation <- function(
              stop(paste0(conditionMessage(e), hint), call. = FALSE)
            })
   .check_boundary_arg(boundary, "build_tessellation")
+  .check_boundary_arg(cover, "build_tessellation", label = "cover",
+                      what = "point or polygon")
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
+  # The points as they arrived, and the cover that came with them: the
+  # `cover` argument, else the one a seeding function attached.  Both are
+  # read before the points are moved, and the cover is moved the same way
+  # where it is used (see .cover_follow()).
+  points_in  <- points_sf
+  cover_attr <- attr(points_sf, "cover", exact = TRUE)
+  cover_geom <- if (!is.null(cover)) sf::st_geometry(cover)
+                else if (inherits(cover_attr, c("sf", "sfc"))) sf::st_geometry(cover_attr)
+                else NULL
 
   # The level-selection step's own answer is accepted here, so the count
   # need not be carried between the two calls by hand.
@@ -1266,7 +1699,9 @@ build_tessellation <- function(
                 "one cell per input point: to control the cell count, place",
                 "seeds with get_voronoi_seeds() and tessellate those (given a",
                 "select_resolution() result or a profile as `n`, it returns the",
-                "centres of the partition that was scored), or use",
+                "centres of the partition that was scored), passing the study",
+                "area as `boundary` or the observations as `cover` so the cells",
+                "hold every observation, or use",
                 "method = \"hex\" or \"square\".")
         else
           paste("Delaunay produces one triangle per neighbouring triple, so",
@@ -1395,11 +1830,35 @@ build_tessellation <- function(
 
   # ---- Voronoi ----
   if (identical(method, "voronoi")) {
-    return(finish(create_voronoi_polygons(
-      points_sf = points_sf, boundary = boundary, expand = expand,
+    # The cover goes down already in the working CRS: read there against the
+    # projected points, a CRS-less cover would be stamped with the working
+    # CRS, degrees and all.  A point `cover` goes as points, so its hull is
+    # taken in the working CRS and holds them exactly.
+    cover_now <- if (is.null(cover_geom)) NULL else
+      tryCatch(.cover_follow(cover_geom, points_in, points_sf),
+               error = function(e) NULL)
+    if (!is.null(cover_geom) && is.null(cover_now) && is.null(boundary))
+      .warn_classed("spatialkit_no_cover", paste0(
+        "build_tessellation(): %s could not be put in the working CRS (%s), so ",
+        "it is set aside and the boundary is derived from `points_sf` itself. ",
+        "Pass the study area as `boundary`."),
+        if (!is.null(cover)) "`cover`" else "the cover the seeds carry",
+        .fold_crs_label(points_sf))
+    # The cover goes down the way it came: a `cover` the caller passed as the
+    # argument, a cover the seeds carry as their attribute (now in the working
+    # CRS).  Both used to go as the argument, so create_voronoi_polygons()
+    # named a `cover` nobody had passed, in its message ("deriving boundary
+    # from `cover`") and in its warning that the cover holds none of the
+    # points.
+    pts_v <- points_sf
+    attr(pts_v, "cover") <- if (is.null(cover)) cover_now else NULL
+    res <- create_voronoi_polygons(
+      points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
-      crs = crs_arg, quiet = quiet
-    )))
+      crs = crs_arg, quiet = quiet,
+      cover = if (is.null(cover)) NULL else cover_now
+    )
+    return(finish(res))
   }
 
   # ---- Hex / Square ----
@@ -1454,7 +1913,9 @@ build_tessellation <- function(
         "points, place seeds with get_voronoi_seeds(method = \"kmeans\", n = ",
         "<what you passed as approx_n_cells>, sample_points = <the points>) and ",
         "use method = \"voronoi\": from a profile or selection those seeds are ",
-        "the centres of the partition it scored."),
+        "the centres of the partition it scored. Seeds made with `sample_points` ",
+        "carry the points' hull as their cover; otherwise pass the study area ",
+        "as `boundary`, or the observations as `cover`."),
         method, occupied, nrow(grid), format(approx_n_cells), approx_n_cells_from)
 
     return(finish(list(
@@ -1465,7 +1926,11 @@ build_tessellation <- function(
                     clip = clip, keep_duplicates = keep_duplicates,
                     expand = expand, snapped = snapped,
                     cells_occupied = occupied,
-                    cells_empty = nrow(grid) - occupied)
+                    cells_empty = nrow(grid) - occupied,
+                    n_outside = sum(is.na(index)),
+                    cover_outside = .cover_points_outside(
+                      cover, grid, points_in, points_sf, "build_tessellation",
+                      method = method))
     )))
   }
 
@@ -1576,7 +2041,12 @@ build_tessellation <- function(
     res <- finish(list(
       cells = tri_sf, index = index, boundary = boundary, method = "triangles",
       params = list(clip = clip, keep_duplicates = keep_duplicates,
-                    expand = expand, snapped = snapped)
+                    expand = expand, snapped = snapped,
+                    n_outside = sum(is.na(index)),
+                    cover_outside = .cover_points_outside(
+                      cover, tri_sf, points_in, points_sf, "build_tessellation",
+                      method = "triangles",
+                      clipped = !is.null(boundary) && isTRUE(clip)))
     ))
     # The corners of a triangle are the points themselves.  After the round
     # trip through the working projection they sit ~1e-14 degrees off the
