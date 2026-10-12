@@ -345,8 +345,8 @@ old behaviour where there is a way.
   a proxy --- the block size compared against the estimated autocorrelation
   range, which `make_folds()` warns about.  That is a statement about the
   design; this is the result.  The returned table carries `n_train`,
-  `n_test`, `n_blocks`, `min_dist`, `median_dist` and `within_range`, the
-  correlation-weighted share: the mean of `exp(-3 d / range)` over the
+  `n_test`, `n_blocks`, `min_dist`, `median_dist` and `mean_cor`, the
+  mean correlation: the mean of `exp(-3 d / range)` over the
   held-out points, so a point at a twentieth of the range weighs more than
   one at nine tenths of it.  Nothing is estimated:
   the distances come from the geometry and the range is the one the folds
@@ -1292,9 +1292,12 @@ old behaviour where there is a way.
   cannot give a direction.**  Which way a score errs depends on how the
   held-out distances compare with the distances from the prediction
   locations to the data.  Without `prediction_points` the function now
-  reports the distances and draws no conclusion.  `n_unknown_ids` counts
-  each row once; it counted fold entries, so five missing rows read as 25
-  at `k = 5`.
+  reports the distances and draws no conclusion.  The column `within_range`
+  (the share of held-out points closer than the range) is replaced by
+  `mean_cor`, the mean correlation between a held-out point and its nearest
+  training point; code that reads the old column has to be changed.
+  `n_unknown_ids` counts each row once; it counted fold entries, so five
+  missing rows read as 25 at `k = 5`.
 
 * **`make_folds(method = "nndm")` returned plain leave-one-out without a
   warning when the prediction points were nearer to the data than

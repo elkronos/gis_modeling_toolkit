@@ -26,12 +26,12 @@ test_that("fold_separation measures a recorded range in the CRS it was recorded 
   f$params$sac_range <- structure(600, class = "sac_range", crs = sf::st_crs(32617))
   a <- fold_separation(f, d)
   b <- fold_separation(f, sf::st_transform(d, 2264))   # the same layer in US feet
-  expect_equal(b$within_range, a$within_range, tolerance = 1e-6)
+  expect_equal(b$mean_cor, a$mean_cor, tolerance = 1e-6)
   expect_equal(attr(b, "crs"), "EPSG:32617")
   # The folds' own CRS is used when the range carries none.
   f$params$sac_range <- 600
   b2 <- fold_separation(f, sf::st_transform(d, 2264))
-  expect_equal(b2$within_range, a$within_range, tolerance = 1e-6)
+  expect_equal(b2$mean_cor, a$mean_cor, tolerance = 1e-6)
   # A bare number stays in data_sf's own units, as documented.
   b3 <- fold_separation(f$folds, sf::st_transform(d, 2264), sac = 600)
   expect_equal(attr(b3, "crs"), "EPSG:2264")
