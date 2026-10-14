@@ -10,10 +10,14 @@
 \item{x}{A \code{resolution_profile}.}
 
 \item{criteria}{Character vector of criteria to draw, any of
-\code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"moran_z"},
-\code{"wss"}.  Default: the first four, each where it is finite at some
-level.  \code{"cp"}, \code{"reliability"} and \code{"elbow"} are count
-criteria and get a selected level and a shaded band.  \code{"moran_z"}
+\code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"loo"},
+\code{"moran_z"}, \code{"wss"}.  Default: the first five, each where it
+is finite at some level.  \code{"cp"}, \code{"reliability"},
+\code{"elbow"} and \code{"loo"} (the leave-one-out error of the
+estimate the profile was built for; a profile built without
+\code{estimate} has no such column, and a column of that name added
+to one is drawn only when named here) are count criteria and get a
+selected level and a shaded band.  \code{"moran_z"}
 is a diagnostic of the cell means and not a count rule (see
 \code{\link{select_resolution}()}), and \code{"wss"} is the raw curve
 behind \code{"elbow"}: both are drawn as curves with no selected point.}
@@ -36,6 +40,12 @@ is (the support ceiling, the range floor, the ladder's own end, or the
 first level the criterion is computable at), because there the bound is
 choosing, not the criterion.  A criterion that is \code{NA} at every
 level is left out with a log line rather than drawn empty.
+}
+\details{
+A profile whose ladder is one size (\code{obs_per_cell} set to one
+number) has one level, set by the size.  Each criterion that is finite
+there is drawn as one point in its panel, with no selected level and no
+band, and the caption says that the size set the count.
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE) &&

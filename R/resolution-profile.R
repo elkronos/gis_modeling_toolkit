@@ -2948,17 +2948,106 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'     finer than the range, so its minimum is usually the first level it
 #'     can be computed at, or one near it, and it says nothing about how
 #'     well the cells represent the response.}
+#'   \item{\code{loo}}{The level with the lowest leave-one-out error of the
+#'     estimate the profile was built for
+#'     (\code{\link{resolution_profile}(estimate = )}); of levels with the
+#'     same error, the one with the fewest cells.  The flat region is every
+#'     level whose error is within \code{tol} of the lowest.  The column
+#'     needs no variogram.  \code{structured} is read as for \code{cp}, with
+#'     the leave-one-out error in place of \eqn{C_p}: it is \code{TRUE} when
+#'     the error of one mean for all scored rows is above the optimum by
+#'     more than \code{tol} and the F test of the cells at the optimum
+#'     against one mean, adjusted for the levels searched, has
+#'     \eqn{p < 0.05}; \code{one_cell} then holds the error of one mean.
+#'     Under this criterion the count depends on the values of the response.
+#'     When the profile's estimate is the pooled value and the lowest error
+#'     is at the finest level scored, a note says that the end of the ladder
+#'     chose the count.  On a ladder \code{obs_per_cell} set, an optimum at
+#'     an end has the \code{edge} \code{"the finest size offered
+#'     (obs_per_cell)"} or \code{"the coarsest size offered
+#'     (obs_per_cell)"}; a finest level the profile held to the most cells
+#'     k-means can place keeps the label of the support ceiling.}
+#'   \item{\code{size}}{The count a size gives,
+#'     \code{max(2, round(n / obs_per_cell))}, with \code{n} the rows the
+#'     size divides: the rows with a response, or every point for a profile
+#'     without one.  No optimum is searched for.  The level returned is the
+#'     first of three that applies: the level the profile built for that
+#'     size; the count itself, when the profile has a partition at it;
+#'     otherwise the built level nearest to the count on the log scale (of
+#'     two as near, the one with fewer cells), with a warning of class
+#'     \code{spatialkit_size_not_reached}, which says so when the count is
+#'     more than k-means can place on the layer.  It reads any profile, one
+#'     built without a response or without an estimate included, but not a
+#'     column subset, which has lost the row count.  \code{flat} is the level,
+#'     \code{value} the rows per cell it leaves (\code{n / best}), and
+#'     \code{at_ceiling}, \code{at_floor} and \code{edge} are \code{NA}: no
+#'     bound chose anything, so the functions that take the selection as a
+#'     count raise no \code{spatialkit_bound_chosen}.  Under this rule
+#'     neither the cells, which are fitted to the coordinates, nor their
+#'     number, which is a count of rows, depend on the values of the
+#'     response.
+#'     A size does not ask whether the response has structure the cells can
+#'     use, so \code{structured} asks it separately, on a profile built with
+#'     an \code{estimate}.  It is \code{FALSE} when the leave-one-out error
+#'     of one mean for all scored rows is within \code{tol} of the error at
+#'     the level, or below it, or when the F test of the cells at the level
+#'     against one mean has \eqn{p \ge 0.05}.  The count stands either way,
+#'     since the caller set it: \code{structured = FALSE} says that the cell
+#'     values will say little that one mean for the layer does not.  The
+#'     functions that take the selection as a count then raise
+#'     \code{spatialkit_no_structure}.  On a profile without an estimate
+#'     \code{structured} is \code{NA}.}
+#'   \item{\code{auto}}{The rule that goes with the profile's estimate:
+#'     \code{"size"} for a profile built with \code{estimate = "pooled"},
+#'     \code{"loo"} for \code{estimate = "mean"}, and \code{"cp"} for a
+#'     profile without an estimate.  A column subset of a profile has lost
+#'     the record of its estimate and is read by \code{"cp"}.
+#'     \code{criterion} in the result is the criterion applied, never
+#'     \code{"auto"}.}
 #' }
 #'
+#' @section A profile built with an estimate:
+#' This function's default criterion is \code{"cp"}, whatever the profile.
+#' A profile built with \code{estimate} that is passed straight to
+#' \code{\link{get_voronoi_seeds}()}, \code{\link{voronoi_seeds_kmeans}()} or
+#' \code{\link{build_tessellation}()} as the count is read by
+#' \code{criterion = "auto"}.  So \code{select_resolution(profile)} and the
+#' profile itself can give two counts: name \code{criterion = "auto"},
+#' \code{"size"} or \code{"loo"} here for the rule that goes with the
+#' estimate.  \code{cp} is computed on such a profile as on any other and
+#' scores plain means; when the profile's estimate is the pooled value the
+#' result's note says so.
+#'
+#' \code{"cp"} and \code{"reliability"} cannot be read off a profile whose
+#' ladder \code{obs_per_cell} set under \code{sac = "auto"}.  Such a profile
+#' fits no variogram, both columns are \code{NA} at every level, and the
+#' call is an error that names the ways to get them: build the profile with
+#' \code{sac = NULL}, with a \code{sac} of your own, or with
+#' \code{obs_per_cell = NULL}.  On a ladder of one size that has a variogram
+#' either criterion returns the one level, with \code{edge} \code{"the only
+#' level scored"}.
+#'
+#' For a ladder of one size, \code{summary()} of the profile lists each
+#' criterion that is finite at the level and says that the size set the
+#' count, and \code{plot()} draws each as one point, with no selected level
+#' and no band.
+#'
 #' @param profile A \code{resolution_profile}.
-#' @param criterion Which column decides: \code{"cp"} (minimised),
+#' @param criterion Which rule sets the count: \code{"cp"} (minimised),
 #'   \code{"reliability"} (maximised at or above the range floor),
-#'   \code{"elbow"} (maximised) or, with \code{diagnostic = TRUE},
-#'   \code{"moran_z"} (\eqn{|z|} minimised).
-#' @param tol Width of the flat region.  For \code{cp} and \code{reliability}
-#'   it is relative to the optimum's value (\code{0.02} keeps levels within 2
-#'   percent of it); for \code{elbow} and \code{moran_z}, whose optimum can
-#'   be zero, it is relative to the criterion's range over the ladder.
+#'   \code{"elbow"} (maximised), \code{"loo"} (the leave-one-out error of
+#'   the profile's estimate, minimised), \code{"size"} (the count
+#'   \code{obs_per_cell} gives), \code{"auto"} (\code{"size"} for a profile
+#'   of pooled values, \code{"loo"} for one of plain means, \code{"cp"} for
+#'   a profile without an estimate) or, with \code{diagnostic = TRUE},
+#'   \code{"moran_z"} (\eqn{|z|} minimised).  Default \code{"cp"}.
+#' @param tol Width of the flat region.  For \code{cp}, \code{reliability}
+#'   and \code{loo} it is relative to the optimum's value (\code{0.02} keeps
+#'   levels within 2 percent of it); for \code{elbow} and \code{moran_z},
+#'   whose optimum can be zero, it is relative to the criterion's range over
+#'   the ladder.  Under \code{"size"} there is no flat region, and
+#'   \code{tol} is the margin by which the cells have to beat one mean for
+#'   \code{structured} and nothing else.
 #' @param range_floor For \code{criterion = "reliability"} only.
 #'   \code{TRUE} (default) reads the criterion at the levels at or above
 #'   the range floor in \code{attr(profile, "bounds")}, which is where
@@ -2970,33 +3059,64 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   of class \code{spatialkit_diagnostic_criterion} that says what the
 #'   column measures, unless this is \code{TRUE}: \code{moran_z} is a
 #'   diagnostic of the cell means, not a count rule.  Default \code{FALSE}.
+#' @param obs_per_cell For \code{criterion = "size"}: the mean number of
+#'   rows per cell wanted, a single number of at least 1 (fractions are
+#'   allowed).  \code{NULL} (default) is the profile's own size when it was
+#'   built at exactly one (\code{\link{resolution_profile}(obs_per_cell =
+#'   )}), and 4.5 otherwise.  Given with a criterion that is not
+#'   \code{"size"} it is an error.
 #' @return A list of class \code{resolution_selection} with \code{best} (the
 #'   level), \code{flat} (the levels in the flat region, ascending; a set,
 #'   which can skip a rung), \code{criterion}, \code{value} (the optimum),
 #'   \code{at_ceiling} and \code{at_floor} (logical: the optimum is the last
 #'   or first of the levels this criterion was read at, which for
 #'   \code{moran_z} starts above nine cells and for \code{reliability} at
-#'   the range floor), \code{edge} (which bound that
+#'   the range floor; both \code{NA} under \code{"size"}, which searches for
+#'   no optimum), \code{edge} (which bound that
 #'   is, in words: the support ceiling, the subsample's ceiling, the range
-#'   floor, the ladder's own end,
+#'   floor, the ladder's own end, the finest or the coarsest size offered
+#'   on a ladder \code{obs_per_cell} set, the only level scored,
 #'   or the first or last level the criterion is computable at; \code{NA} for
-#'   an interior optimum), \code{n_levels}, \code{values} (the criterion
+#'   an interior optimum and under \code{"size"}), \code{n_levels},
+#'   \code{values} (the criterion
 #'   at every level, \code{NA} where it could not be computed),
 #'   \code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
 #'   cell is within \code{tol} of the optimum, when the cell means at the
 #'   optimum differ from one mean by no more than chance allows, or when
 #'   the variogram found no spatial structure; \code{TRUE} when the optimum
 #'   beats one cell on both counts; see "What each criterion returns".
-#'   \code{TRUE} for an \code{elbow}; \code{NA} for the other criteria and
-#'   for a profile that carries no one-cell value),
-#'   \code{one_cell} (\code{cp} at one cell, or \code{NA}),
+#'   For \code{loo} and \code{size} on a profile built with
+#'   \code{estimate}: \code{FALSE} when the leave-one-out error of one mean
+#'   for all scored rows is within \code{tol} of the error at \code{best},
+#'   or below it, or when the cell means at \code{best} differ from one
+#'   mean by no more than chance allows; \code{TRUE} when the cells beat
+#'   one mean on both counts.
+#'   \code{TRUE} for an \code{elbow}; \code{NA} for \code{reliability}
+#'   and \code{moran_z}, and for a profile that carries no one-cell value),
+#'   \code{one_cell} (\code{cp} at one cell under \code{cp}; the
+#'   leave-one-out error of one mean for all scored rows under \code{loo}
+#'   and \code{size}; \code{NA} otherwise),
 #'   \code{structure_p} (the p-value of the F test of the cells at
 #'   \code{best} against one mean, multiplied by the number of levels
-#'   searched and capped at 1; \code{NA} where \code{structured} is not
-#'   read off \code{cp}),
+#'   searched and capped at 1; a size searches one level; \code{NA} where
+#'   \code{structured} is not read off \code{cp} or the leave-one-out
+#'   error),
 #'   \code{range_floor} (the floor \code{reliability} was held to, or
-#'   \code{NA}), \code{note} (what the flags mean, in words; \code{NULL} when
-#'   there is nothing to say) and
+#'   \code{NA}), \code{note} (what the flags mean, in words: a character
+#'   vector, one note an element; \code{NULL} when there is nothing to
+#'   say.  The notes written under \code{"loo"} and \code{"size"}, and for
+#'   a profile built with \code{estimate} or with one size, carry names:
+#'   \code{size} (the size that set the count), \code{held} (a size the
+#'   profile held to the most cells k-means can place), \code{structure}
+#'   (why the count is not identified), \code{finest} (the lowest error of
+#'   pooled values is at the finest level scored), \code{estimate}
+#'   (\code{cp} scores plain means, on a profile of pooled values) and
+#'   \code{ladder} (the ladder is one size).  A note of \code{cp} or
+#'   \code{moran_z} about the criterion itself has no name.  The warning
+#'   of class \code{spatialkit_no_structure} that the functions taking the
+#'   selection as a count raise carries every note but those named
+#'   \code{size}, \code{held}, \code{finest}, \code{estimate} and
+#'   \code{ladder}) and
 #'   \code{seeds} (an sf POINT layer, with \code{seed_id}, of the centres of
 #'   the partition the profile scored at \code{best}, in the CRS it was
 #'   computed in; \code{NULL} for a profile that does not carry them).  Their
@@ -3008,6 +3128,45 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{init}, \code{density_power}, \code{density_k}), and the seeds
 #'   carry it as \code{attr(, "partition")}; the regions are those the
 #'   profile built, whatever kind built them.
+#'
+#'   For \code{"loo"} and \code{"size"}, and for any criterion on a profile
+#'   built with \code{estimate}, the list has these elements after
+#'   \code{seeds} (\code{partition}, when there is one, stays last):
+#'   \code{estimate} (the profile's, \code{"mean"} or \code{"pooled"};
+#'   \code{NA} for a profile without one);
+#'   \code{obs_per_cell} (rows per cell at \code{best}: the rows a size
+#'   divides over \code{best}; \code{NA} for an object that keeps no row
+#'   count);
+#'   \code{obs_per_cell_asked} (the size asked for; \code{NA} unless the
+#'   criterion is \code{"size"});
+#'   \code{scored_per_cell} (the profile's column at \code{best}: the rows
+#'   the leave-one-out error read over the cells that hold one.  It is not
+#'   \code{obs_per_cell}: it leaves out rows the error did not read and
+#'   cells that hold none of them, as under \code{select_on = "split"});
+#'   \code{loo} and \code{loo_one_cell} (the leave-one-out error at
+#'   \code{best} and that of one mean for all scored rows);
+#'   \code{share_alone} and \code{own_weight} (the profile's columns at
+#'   \code{best}); and \code{count_rule}, a list of class
+#'   \code{spatialkit_count_rule} that records how the count was set:
+#'   \code{rule} (the criterion applied), \code{estimate} (the estimate the
+#'   rule was computed for: the profile's for \code{"size"} and
+#'   \code{"loo"}, \code{"mean"} for \code{"cp"}, \code{NA} otherwise),
+#'   \code{cells}, \code{obs_per_cell}, \code{obs_per_cell_asked},
+#'   \code{response}, \code{n} (the rows the size divides), \code{n_points},
+#'   \code{n_fit} (the rows the centres were fitted to; fewer than
+#'   \code{n_points} for a subsample), \code{seed}, \code{features},
+#'   \code{scored} (what the profile scored at \code{best} for its
+#'   estimate: \code{estimate}, \code{n}, \code{cells}, \code{loo},
+#'   \code{loo_se}, \code{loo_one_cell}, \code{share_alone},
+#'   \code{own_weight}, \code{structured} and \code{rows}; \code{NULL}
+#'   without an estimate), \code{partition}, \code{crs} and
+#'   \code{scored_cells} (\code{NA}: the record stands for a count).
+#'   \code{seeds} carries the same record as \code{attr(, "count_rule")}
+#'   with \code{scored_cells = TRUE}, since they are the centres that were
+#'   scored.  Under \code{"loo"} and \code{"size"} \code{one_cell} holds
+#'   the leave-one-out error of one mean and \code{range_floor} is
+#'   \code{NA}.  \code{criterion} is the criterion applied, never
+#'   \code{"auto"}.
 #' @family aggregation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
@@ -3037,8 +3196,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #' }
 #' @export
 select_resolution <- function(profile,
-                              criterion = c("cp", "reliability", "elbow", "moran_z"),
-                              tol = 0.02, range_floor = TRUE, diagnostic = FALSE) {
+                              criterion = c("cp", "reliability", "elbow", "moran_z",
+                                            "loo", "size", "auto"),
+                              tol = 0.02, range_floor = TRUE, diagnostic = FALSE,
+                              obs_per_cell = NULL) {
   if (!inherits(profile, "resolution_profile"))
     stop("select_resolution(): `profile` must come from resolution_profile().",
          call. = FALSE)
@@ -3049,6 +3210,31 @@ select_resolution <- function(profile,
     stop("select_resolution(): `range_floor` must be TRUE or FALSE.", call. = FALSE)
   if (!is.logical(diagnostic) || length(diagnostic) != 1L || is.na(diagnostic))
     stop("select_resolution(): `diagnostic` must be TRUE or FALSE.", call. = FALSE)
+  if (!is.null(obs_per_cell) &&
+      !(is.numeric(obs_per_cell) && !is.object(obs_per_cell) && length(obs_per_cell) == 1L &&
+        is.finite(obs_per_cell) && obs_per_cell >= 1))
+    stop(sprintf(paste0("select_resolution(): `obs_per_cell` must be NULL or a single ",
+                        "number of at least 1; got %s."), .got_text(obs_per_cell)),
+         call. = FALSE)
+  # The estimate the profile scores, when it names one.  "auto" is the rule
+  # that goes with it: a size for pooled values, the leave-one-out minimum
+  # for plain means, and Cp for a profile that names none (one built without
+  # `estimate`, and a column subset, which has lost its attributes).
+  est <- attr(profile, "estimate", exact = TRUE)
+  est_value <- .profile_estimate(profile)
+  asked <- criterion
+  if (criterion == "auto")
+    criterion <- if (identical(est_value, "pooled")) "size"
+                 else if (identical(est_value, "mean")) "loo"
+                 else "cp"
+  if (!is.null(obs_per_cell) && criterion != "size")
+    stop(sprintf(paste0("select_resolution(): `obs_per_cell` is read by criterion = \"size\" ",
+                        "only, and criterion = \"%s\" was asked for%s."),
+                 asked,
+                 if (asked == "auto")
+                   sprintf(", which reads this profile by \"%s\"", criterion)
+                 else ""),
+         call. = FALSE)
   # `[` keeps the class, so a subset arrives here looking like a profile.  An
   # empty one or a column subset missing the criterion used to fall through to
   # the "NA at every level" error below, which sends the user off to add a
@@ -3056,6 +3242,12 @@ select_resolution <- function(profile,
   if (nrow(profile) == 0L)
     stop("select_resolution(): `profile` has no levels; it is an empty subset ",
          "of a resolution profile.", call. = FALSE)
+  if (criterion == "size")
+    return(.select_size(profile, obs_per_cell, tol, est_value))
+  if (criterion == "loo" && !"loo" %in% names(profile))
+    stop(paste0("select_resolution(): `profile` has no `loo` column; build it with ",
+                "resolution_profile(estimate = \"mean\") or estimate = \"pooled\"."),
+         call. = FALSE)
   if (!criterion %in% names(profile) || !"levels" %in% names(profile))
     stop(sprintf(paste0("select_resolution(): `profile` has no `%s` column%s; ",
                         "it is a column subset of a resolution profile. Pass ",
@@ -3068,6 +3260,9 @@ select_resolution <- function(profile,
   if (criterion == "moran_z") v <- abs(v)
   ok <- is.finite(v)
   one <- attr(profile, "one_cell", exact = TRUE)
+  # The sizes of a ladder `obs_per_cell` set, when the profile is on one.
+  ladder_sizes <- if (is.list(attr(profile, "bounds", exact = TRUE)))
+    attr(profile, "bounds", exact = TRUE)$obs_per_cell else NULL
   # A constant response is its own case: Cp is NA because no level fits a
   # constant better than another, and the message used to ask for "a level
   # whose cells hold two scored rows", which every level of that profile had.
@@ -3078,6 +3273,28 @@ select_resolution <- function(profile,
                  criterion,
                  if (identical(attr(profile, "variable"), "residuals"))
                    "OLS residual of the response on the predictors" else "response"),
+         call. = FALSE)
+  # The same for the leave-one-out error, whose reference is the estimate's:
+  # the rows it read do not vary.
+  if (!any(ok) && criterion == "loo" && is.list(est) && isTRUE(est$constant))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the %s is ",
+                        "constant: its total sum of squares is rounding error at most, ",
+                        "so no cell count fits it better than another."),
+                 criterion, "response"),
+         call. = FALSE)
+  # A ladder of sizes that was given no `sac` fitted no variogram, so Cp has
+  # no noise variance and the reliability no range.  Said here, with the
+  # ways to get the column, and not as a profile that lacks a response.
+  if (!any(ok) && criterion %in% c("cp", "reliability") &&
+      identical(attr(profile, "cp_noise", exact = TRUE)$source, "none"))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level: this profile is on ",
+                        "a size ladder (obs_per_cell = %s), which fits no variogram unless ",
+                        "`sac` is given, and `%s` takes its %s from one. Build the profile ",
+                        "with `sac = NULL` to have the variogram estimated, with a `sac` of ",
+                        "your own, or with obs_per_cell = NULL for the automatic ladder; ",
+                        "criterion = \"size\" reads this profile."),
+                 criterion, .got_text(ladder_sizes), criterion,
+                 if (criterion == "cp") "noise variance" else "range"),
          call. = FALSE)
   if (!any(ok))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level%s."),
@@ -3092,6 +3309,8 @@ select_resolution <- function(profile,
                                        "falls in a straight line, as it does for points ",
                                        "with no cluster structure, so the geometry names ",
                                        "no cell count)"),
+                        loo = paste0(" (it needs a level at which some cell holds two ",
+                                     "rows with a response)"),
                         "")), call. = FALSE)
   maximise <- criterion %in% c("reliability", "elbow")
   lv <- profile$levels
@@ -3132,7 +3351,10 @@ select_resolution <- function(profile,
   }
   opt <- if (maximise) max(v[ok]) else min(v[ok])
   best <- lv[ok][if (maximise) which.max(v[ok]) else which.min(v[ok])]
-  flat <- if (criterion %in% c("cp", "reliability")) {
+  # Of levels with the same leave-one-out error, the one with the fewest
+  # cells, whatever order the rows of the profile are in.
+  if (criterion == "loo") best <- min(lv[ok][v[ok] == opt])
+  flat <- if (criterion %in% c("cp", "reliability", "loo")) {
     if (maximise) lv[ok][v[ok] >= opt * (1 - tol)] else lv[ok][v[ok] <= opt * (1 + tol)]
   } else {
     band <- tol * diff(range(v[ok]))
@@ -3242,7 +3464,63 @@ select_resolution <- function(profile,
                            "at which %s are least autocorrelated across neighbouring ",
                            "cells, not the level that represents the response best."),
                     what_z)
+  } else if (criterion == "loo") {
+    # The same two questions as for Cp, asked of the leave-one-out error of
+    # the profile's estimate: is it below that of one mean for every scored
+    # row by more than `tol`, and do the cell means at the optimum differ
+    # from one mean by more than chance, after the adjustment for the levels
+    # searched.  Read only while the `loo` column is the one the references
+    # were recorded with.
+    n_searched <- sum(ok)
+    st <- .estimate_structure(profile, best, tol, n_searched = n_searched)
+    structured  <- st$structured
+    one_cp      <- st$one_cell
+    structure_p <- st$structure_p
+    p_text <- if (is.finite(structure_p))
+      sprintf("p = %s after adjusting for the %d level%s searched",
+              format(signif(structure_p, 2)), n_searched, if (n_searched == 1L) "" else "s")
+    else ""
+    if (isFALSE(st$beats))
+      note <- c(structure = sprintf(
+        paste0("the leave-one-out error at one cell (%s) is within %s%% of the optimum ",
+               "(%s): one mean for the whole layer predicts as well as any level scored, ",
+               "so the response shows no spatial structure the cells can use and the ",
+               "count is not identified."),
+        format(signif(one_cp, 3)), format(100 * tol), format(signif(opt, 3))))
+    else if (isFALSE(structured))
+      note <- c(structure = sprintf(
+        paste0("the cell means at %d cells differ from one mean for the whole layer by ",
+               "no more than chance allows (F test of the cells against one mean, %s), so ",
+               "the response shows no spatial structure the cells can use and the count ",
+               "is not identified. The leave-one-out error at one cell is %s against %s ",
+               "at the optimum, a gap that chance produces on a layer of this size."),
+        as.integer(best), p_text, format(signif(one_cp, 3)), format(signif(opt, 3))))
+    else if (isTRUE(st$beats) && is.na(structured))
+      note <- c(structure = paste0(
+        "the leave-one-out error at one cell is above the optimum by more than `tol`, ",
+        "but the profile carries no F test of the cells against one mean at this level, ",
+        "so whether that is more than chance is not known."))
+    # For pooled values the error can keep falling to the end of the ladder.
+    # When it did, the ladder's end set the count.
+    if (identical(est_value, "pooled") && best == max(lv[ok]))
+      note <- c(note, finest = paste0(
+        "the lowest leave-one-out error of the pooled value is at the finest level ",
+        "scored, so the end of the ladder chose the count. criterion = \"size\" sets ",
+        "it by a size."))
   }
+  # Cp scores plain means whatever the profile's estimate is.
+  if (criterion == "cp" && identical(est_value, "pooled"))
+    note <- c(note, estimate = paste0(
+      "cp scores plain means, and this profile's estimate is the pooled value; ",
+      "criterion = \"size\" is the rule for it."))
+  # A ladder of one size is one level, so the criterion had nothing to choose
+  # among.
+  if (criterion %in% c("cp", "reliability") && length(ladder_sizes) == 1L)
+    note <- c(note, ladder = sprintf(
+      paste0("the ladder is one size (obs_per_cell = %s), so %s had one level to choose ",
+             "from. Build the profile with obs_per_cell = NULL, or with several sizes, ",
+             "for a ladder %s can choose on."),
+      .got_text(ladder_sizes), criterion, criterion))
   sel <- structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
                  criterion = criterion, value = opt,
                  at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,
@@ -3257,6 +3535,110 @@ select_resolution <- function(profile,
                  # kept.
                  seeds = .profile_seeds(profile, best)),
             class = "resolution_selection")
+  .selection_close(sel, profile, est_value, tol)
+}
+
+
+#' The estimate a profile names, by value
+#'
+#' @param profile A \code{resolution_profile}, or a subset of one.
+#' @return \code{"mean"} or \code{"pooled"}; \code{NA} for a profile built
+#'   without an estimate, for a column subset, which has lost the attribute,
+#'   and for an attribute that names neither.
+#' @keywords internal
+#' @noRd
+.profile_estimate <- function(profile) {
+  est <- attr(profile, "estimate", exact = TRUE)
+  if (is.list(est) && is.character(est$value) && length(est$value) == 1L &&
+      est$value %in% c("mean", "pooled"))
+    as.character(unclass(est$value)) else NA_character_
+}
+
+
+#' Whether `loo` is read where no criterion is named
+#'
+#' \code{summary()} and \code{plot()} of a profile take \code{loo} into
+#' their default set where it is the leave-one-out error
+#' \code{resolution_profile()} wrote: the profile names an estimate, or the
+#' object is a column subset that kept \code{loo} and none of \code{cp},
+#' \code{reliability} and \code{elbow}.  A column called \code{loo} that a
+#' caller added to a profile built without an estimate is read only when
+#' \code{criteria} names it, so the table and the plot of such a profile are
+#' the ones they were before the column had a meaning here.
+#'
+#' @param profile A \code{resolution_profile}, or a subset of one.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.loo_by_default <- function(profile)
+  "loo" %in% names(profile) &&
+    (is.list(attr(profile, "estimate", exact = TRUE)) ||
+       !any(c("cp", "reliability", "elbow") %in% names(profile)))
+
+
+# The names select_resolution() gives the notes it writes about something
+# other than whether the count is identified: the size that set the count, a
+# size the profile held, an optimum at the finest level of a pooled profile,
+# the estimate `cp` scores, and a ladder of one size.  The note that says why
+# a count is not identified is named `structure` under "size" and "loo" and
+# has no name under the criteria that wrote one before.  The warning raised
+# when the count becomes cells pastes every note but these five.
+.NOTES_NOT_STRUCTURE <- c("size", "held", "finest", "estimate", "ladder")
+
+
+#' What a selection carries beyond the criterion's own answer
+#'
+#' On the path that names an estimate (the profile carries one, or the
+#' criterion is \code{"loo"} or \code{"size"}) the selection gains what the
+#' profile scored at the chosen level and the record of how the count was
+#' set, and its seeds carry that record.  The kind that built the profile's
+#' cells, when the profile records one, is the last element either way.  A
+#' selection from a profile without an estimate by \code{"cp"},
+#' \code{"reliability"}, \code{"elbow"} or \code{"moran_z"} gains nothing
+#' but that kind, as before.
+#'
+#' @param sel The selection, with the elements every criterion returns.
+#' @param profile The \code{resolution_profile} it was read off.
+#' @param est_value The profile's estimate, \code{"mean"} or
+#'   \code{"pooled"}; \code{NA} for a profile that names none.
+#' @param tol The tolerance of the call.
+#' @param asked The size asked for; \code{NA} unless the criterion is
+#'   \code{"size"}.
+#' @return The selection.
+#' @keywords internal
+#' @noRd
+.selection_close <- function(sel, profile, est_value, tol, asked = NA_real_) {
+  if (!is.na(est_value) || sel$criterion %in% c("loo", "size")) {
+    best <- sel$best
+    n    <- .count_rule_rows(attr(profile, "bounds", exact = TRUE))
+    est  <- attr(profile, "estimate", exact = TRUE)
+    sel$estimate           <- est_value
+    # Rows per cell at the count chosen: the rows a size divides over the
+    # centres asked for.  `scored_per_cell` is another number: the rows the
+    # leave-one-out error read, over the cells that hold one.
+    sel$obs_per_cell       <- if (is.na(n)) NA_real_ else n / best
+    sel$obs_per_cell_asked <- as.numeric(asked)
+    sel$scored_per_cell    <- .profile_at(profile, best, "scored_per_cell")
+    sel$loo                <- .profile_at(profile, best, "loo")
+    sel$loo_one_cell       <- if (!is.na(est_value) && "loo" %in% names(profile))
+      as.numeric(est$loo_one_cell %||% NA_real_)[1L] else NA_real_
+    sel$share_alone        <- .profile_at(profile, best, "share_alone")
+    sel$own_weight         <- .profile_at(profile, best, "own_weight")
+    # Whether the cells at this count beat one mean for the profile's
+    # estimate.  "size" and "loo" asked that themselves; under another
+    # criterion it is asked here of the one level chosen.
+    scored_structured <- if (sel$criterion %in% c("loo", "size")) sel$structured
+                         else .estimate_structure(profile, best, tol, n_searched = 1L)$structured
+    rec <- .count_rule_new(profile, rule = sel$criterion, cells = best,
+                           obs_per_cell_asked = asked, structured = scored_structured,
+                           scored_cells = NA)
+    sel$count_rule <- rec
+    # The seeds are the centres the profile scored at this count.
+    if (inherits(sel$seeds, "sf")) {
+      rec$scored_cells <- TRUE
+      attr(sel$seeds, "count_rule") <- rec
+    }
+  }
   # The kind that built the profile's cells, when it is not the present one
   # (see resolution_profile()): the selection names it, and its seeds carry
   # it on.
@@ -3264,6 +3646,138 @@ select_resolution <- function(profile,
   if (is.list(part) && !is.null(part$kind))
     sel$partition <- part[.partition_fields()]
   sel
+}
+
+
+#' The count a size gives, read off a profile
+#'
+#' \code{select_resolution(criterion = "size")}.  The count is
+#' \code{.count_at(n, obs_per_cell)}, with \code{n} the rows the size
+#' divides, and the level returned is the first of three that applies: the
+#' level the profile built for that size; the count itself, when the profile
+#' has a partition at it; the built level nearest to the count on the log
+#' scale, with a warning.  No optimum is searched for, so no bound can
+#' choose the count and the edge flags are \code{NA}.
+#'
+#' A size does not ask whether the response has structure the cells can
+#' use, so that is asked separately, of the profile's estimate at the level
+#' returned: \code{.estimate_structure()} with one level searched.
+#'
+#' @param profile A \code{resolution_profile}.
+#' @param obs_per_cell The size asked for, or \code{NULL} for the profile's
+#'   own size when it was built at exactly one, and
+#'   \code{.OBS_PER_CELL_DEFAULT} otherwise.
+#' @param tol The margin of the structure test.
+#' @param est_value The profile's estimate, or \code{NA}.
+#' @return A \code{resolution_selection}.
+#' @keywords internal
+#' @noRd
+.select_size <- function(profile, obs_per_cell, tol, est_value) {
+  bounds <- attr(profile, "bounds", exact = TRUE)
+  n <- .count_rule_rows(bounds)
+  if (is.na(n))
+    stop(paste0("select_resolution(): criterion = \"size\" needs the number of rows the ",
+                "size divides, which a profile keeps in attr(, \"bounds\"); this object ",
+                "has none (it is a column subset of a resolution profile). Pass the ",
+                "profile resolution_profile() returned."), call. = FALSE)
+  if (!"levels" %in% names(profile))
+    stop(paste0("select_resolution(): `profile` has no `levels` column; it is a column ",
+                "subset of a resolution profile. Pass the profile resolution_profile() ",
+                "returned."), call. = FALSE)
+  sizes <- bounds$obs_per_cell
+  size  <- if (!is.null(obs_per_cell)) as.numeric(obs_per_cell)
+           else if (length(sizes) == 1L) as.numeric(sizes)
+           else .OBS_PER_CELL_DEFAULT
+  k_star <- .count_at(n, size)
+  lv <- profile$levels
+  # The levels at which a partition was built.
+  built <- if ("wss" %in% names(profile)) is.finite(suppressWarnings(as.numeric(profile$wss)))
+           else rep(TRUE, length(lv))
+  if (!any(built))
+    stop(paste0("select_resolution(): no level of `profile` has a partition (`wss` is NA ",
+                "at every level), so no level can stand for a size."), call. = FALSE)
+  # (i) The level the profile built for this size.  It is the count the size
+  # gives unless the profile held the size to the most cells k-means can
+  # place; the profile said so when it was built, so nothing is raised here.
+  at <- match(size, as.numeric(sizes))
+  own <- if (!is.na(at) && length(bounds$size_levels) == length(sizes))
+    as.integer(bounds$size_levels[[at]]) else NA_integer_
+  held <- FALSE
+  if (!is.na(own) && own %in% lv[built]) {
+    best <- own
+    held <- best != k_star
+  } else if (k_star %in% lv[built]) {
+    # (ii) The count itself is a level.
+    best <- k_star
+  } else {
+    # (iii) The built level nearest to the count on the log scale; of two as
+    # near, the one with fewer cells.  Ratios, not differences of logarithms:
+    # 2 and 8 are as near to 4 as each other, and their logarithms differ
+    # from log(4) by amounts that need not round alike.
+    cand <- sort(unique(lv[built]))
+    best <- cand[which.min(pmax(cand, k_star) / pmin(cand, k_star))]
+    # The most cells k-means can place on the layer: its distinct locations
+    # where some repeat, one short of the points where none does.  A profile
+    # fitted to every point counted the locations; one fitted to a subsample
+    # counted the subsample's, and one short of the points is then still a
+    # bound.  A count above it is one no profile scores, and the advice to
+    # build one at that size is left out.
+    one <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
+    repeats <- one(bounds$n) && one(bounds$n_distinct) && one(bounds$n_sample) &&
+      bounds$n_sample >= bounds$n && bounds$n_distinct < bounds$n
+    cap <- if (!one(bounds$n)) NA_integer_
+           else if (repeats) as.integer(bounds$n_distinct)
+           else as.integer(bounds$n) - 1L
+    .warn_classed("spatialkit_size_not_reached",
+                  paste0("select_resolution(): obs_per_cell = %s asks for %d cells, which ",
+                         "is not a level of this profile; the nearest level, %d cells (%s), ",
+                         "is used. %s"),
+                  format(size), k_star, as.integer(best), .per_cell_text(n / best),
+                  if (!is.na(cap) && k_star > cap)
+                    sprintf(paste0("That count is more than k-means can place on %s (%d ",
+                                   "cells), so no profile scores it."),
+                            if (repeats)
+                              sprintf("the layer's %d distinct locations",
+                                      as.integer(bounds$n_distinct))
+                            else sprintf("%d points", as.integer(bounds$n)), cap)
+                  else sprintf("Build the profile with obs_per_cell = %s to score that count.",
+                               format(size)),
+                  data = list(obs_per_cell = size, wanted = k_star, used = as.integer(best),
+                              reason = "not a level"))
+  }
+  best <- as.integer(best)
+  note <- c(size = sprintf(paste0("the count is set by obs_per_cell = %s, the caller's ",
+                                  "choice; no criterion chose it."), format(size)))
+  if (held)
+    note <- c(note, held = sprintf(
+      paste0("the profile holds this size to %d cells, the most k-means can place on ",
+             "this layer; obs_per_cell = %s asks for %d."), best, format(size), k_star))
+  # Whether cells of this size beat one mean for the whole layer.  The count
+  # stands either way: the caller set it.
+  st <- .estimate_structure(profile, best, tol, n_searched = 1L)
+  if (isFALSE(st$structured))
+    note <- c(note, structure = paste0(
+      if (isFALSE(st$beats))
+        sprintf(paste0("at %d cells the leave-one-out error of the %s (%s) is not below ",
+                       "that of one mean for the whole layer (%s) by more than %s%%"),
+                best, if (identical(est_value, "pooled")) "pooled value" else "plain mean",
+                format(signif(st$loo, 3)), format(signif(st$one_cell, 3)), format(100 * tol))
+      else
+        sprintf(paste0("the cell means at %d cells differ from one mean for the whole ",
+                       "layer by no more than chance allows (F test, p = %s)"),
+                best, format(signif(st$structure_p, 2))),
+      ": the response shows no spatial structure that cells of this size can use."))
+  sel <- structure(list(best = best, flat = best,
+                 criterion = "size", value = n / best,
+                 at_ceiling = NA, at_floor = NA, edge = NA_character_,
+                 n_levels = length(lv),
+                 values = stats::setNames(n / lv, lv),
+                 structured = st$structured, one_cell = st$one_cell,
+                 structure_p = st$structure_p,
+                 range_floor = NA_integer_, note = note,
+                 seeds = .profile_seeds(profile, best)),
+            class = "resolution_selection")
+  .selection_close(sel, profile, est_value, tol, asked = size)
 }
 
 
@@ -3310,9 +3824,17 @@ select_resolution <- function(profile,
   if (is.finite(held_floor) && best == min(scored))
     return(if (best == held_floor) "the range floor (area / range^2)"
            else "the first level at or above the range floor (area / range^2)")
+  # A ladder `obs_per_cell` set ends where the sizes asked for end: no
+  # ceiling of support and no range floor bounds it.  One case apart: a
+  # finest size the profile held to the most cells k-means can place.  That
+  # level is the layer's bound and not the caller's, and it keeps the label
+  # of the support ceiling.
+  size_ladder <- is.list(bounds) && !is.null(bounds$obs_per_cell)
+  size_held <- size_ladder && identical(bounds$ceiling_from, "distinct locations")
   if (best == max(scored)) {
     if (max(scored) < max(ladder))
       return("the last level the criterion is computable at")
+    if (size_ladder && !size_held) return("the finest size offered (obs_per_cell)")
     if (is.list(bounds) && identical(as.integer(max(ladder)), as.integer(bounds$ceiling)))
       return(if (identical(bounds$ceiling_from, "distinct locations") &&
                  isTRUE(bounds$ceiling < (bounds$n_distinct %||% NA_integer_)))
@@ -3334,6 +3856,7 @@ select_resolution <- function(profile,
   if (best == min(scored)) {
     if (min(scored) > min(ladder))
       return("the first level the criterion is computable at")
+    if (size_ladder) return("the coarsest size offered (obs_per_cell)")
     if (is.list(bounds) && isTRUE(bounds$supported) && is.finite(bounds$range %||% NA) &&
         !isFALSE(bounds$range_floor) &&
         identical(as.integer(min(ladder)), as.integer(bounds$floor)))
@@ -3356,6 +3879,8 @@ select_resolution <- function(profile,
     " Fewer cells would be wider than the range and average over more than one patch of the field."
   else if (grepl("only level", edge, fixed = TRUE))
     " One level leaves nothing to compare it with."
+  else if (grepl("(obs_per_cell)", edge, fixed = TRUE))
+    " `obs_per_cell` sets the sizes offered; how small a cell may be is the caller's choice."
   else ""
 }
 
@@ -3363,19 +3888,73 @@ select_resolution <- function(profile,
 #' @export
 print.resolution_selection <- function(x, ...) {
   cat(sprintf("Resolution by %s: %d cells\n", x$criterion, x$best))
-  cat(sprintf("  flat region : %s (%d of %d levels)\n",
-              .band_label(x$flat, .scored_levels(x$values)),
-              length(x$flat), x$n_levels))
+  by_size <- identical(x$criterion, "size")
+  rec <- if (inherits(x$count_rule, "spatialkit_count_rule")) x$count_rule else NULL
+  # A size has no flat region: its line gives the size asked for and the
+  # rows per cell the count leaves.
+  if (by_size) {
+    asked <- x$obs_per_cell_asked %||% NA_real_
+    n_div <- if (is.null(rec)) NA_integer_ else rec$n
+    cat(sprintf("  size        : %s asked (obs_per_cell); %s rows / %d cells = %.2f\n",
+                paste(format(asked), if (isTRUE(asked == 1)) "row per cell" else "rows per cell"),
+                format(n_div), x$best, x$value))
+  } else {
+    cat(sprintf("  flat region : %s (%d of %d levels)\n",
+                .band_label(x$flat, .scored_levels(x$values)),
+                length(x$flat), x$n_levels))
+  }
   # The kind that built the cells, when the profile recorded one; a selection
   # from a k-means profile prints as it always did.
   if (is.list(x$partition) && !is.null(x$partition$kind))
     cat(sprintf("  cells       : %s\n", .partition_label(x$partition)))
   # strwrap() collapses runs of spaces, so the aligned label is put back
   # after wrapping rather than wrapped with the sentence.
-  say <- function(text) {
-    body <- strwrap(text, width = 62)
-    cat(paste0(c("  note        : ", rep("                ", length(body) - 1L)), body),
+  say <- function(text, label = "note", width = 62) {
+    body <- strwrap(text, width = width)
+    cat(paste0(c(sprintf("  %-12s: ", label), rep("                ", length(body) - 1L)), body),
         sep = "\n")
+  }
+  # What the profile scored at this count for its estimate, under the two
+  # criteria that read it.
+  est <- x$estimate %||% NA_character_
+  if (x$criterion %in% c("size", "loo") && length(est) == 1L && !is.na(est)) {
+    cat(sprintf("  estimate    : %s\n",
+                if (identical(est, "pooled"))
+                  sprintf("pooled toward the %d nearest cells", .POOL_NEIGHBOURS)
+                else "plain means"))
+    alone <- x$share_alone %||% NA_real_
+    # The rows the leave-one-out error read and the cells that hold one.  The
+    # line says so where they are not every row and every cell: under the
+    # split the error read one half of the rows, and a centre with no scored
+    # row near it (rows without a response) is a cell the share says nothing
+    # of.
+    scored <- if (!is.null(rec) && is.list(rec$scored)) rec$scored else NULL
+    half <- identical(scored$rows, "selection half")
+    occupied <- scored$cells %||% NA_integer_
+    fewer <- length(occupied) == 1L && is.finite(occupied) && occupied < x$best
+    per <- x$scored_per_cell %||% NA_real_
+    if (is.finite(alone)) {
+      w <- x$own_weight %||% NA_real_
+      say(paste0(if (half)
+                   sprintf("in the selection half (%s rows%s, %.2f per cell): ",
+                           format(scored$n),
+                           if (fewer) sprintf(" in %d of the %d cells", occupied, x$best) else "",
+                           per)
+                 else if (fewer)
+                   sprintf("in the %d of the %d cells that hold a scored row (%.2f per cell): ",
+                           occupied, x$best, per)
+                 else "",
+                 sprintf("%.1f%% of the rows are alone in their cell", 100 * alone),
+                 if (is.finite(w)) sprintf("; median own weight %.2f", w) else ""),
+          label = "at this size", width = 76)
+    }
+    # Left out when the profile has neither number: a constant response.
+    loo <- x$loo %||% NA_real_
+    one <- x$loo_one_cell %||% NA_real_
+    if (isTRUE(is.finite(loo)) || isTRUE(is.finite(one)))
+      cat(sprintf("  loo         : %s (one cell for %s: %s)\n",
+                  format(signif(loo, 3)), if (half) "that half" else "the layer",
+                  format(signif(one, 3))))
   }
   edge <- x$edge %||% NA_character_
   if (!is.na(edge))
@@ -3423,12 +4002,23 @@ print.resolution_selection <- function(x, ...) {
 #' \code{\link{plot.resolution_profile}()} draws the curves the bands were
 #' read from.
 #'
+#' A profile whose ladder is one size (\code{obs_per_cell} set to one
+#' number) has one level, and the size set it.  The table then has one row
+#' per criterion that is finite at that level, and the line under it says
+#' that the count is set by the size and that no criterion chooses among
+#' levels.  The result carries the size as \code{attr(, "obs_per_cell")}.
+#'
 #' @param object A \code{\link{resolution_profile}()}.
 #' @param criteria Character vector, any of \code{"cp"},
-#'   \code{"reliability"}, \code{"elbow"}, \code{"moran_z"}.  Default: every
-#'   one of \code{"cp"}, \code{"reliability"} and \code{"elbow"} that is
-#'   finite at some level.  \code{"moran_z"}, a diagnostic, is read only
-#'   when named here.
+#'   \code{"reliability"}, \code{"elbow"}, \code{"moran_z"}, \code{"loo"}.
+#'   Default: every one of \code{"cp"}, \code{"reliability"},
+#'   \code{"elbow"} and \code{"loo"} that is finite at some level
+#'   (\code{loo} is a column of a profile built with \code{estimate}; a
+#'   column of that name on a profile built without one is read only when
+#'   named here).
+#'   \code{"moran_z"}, a diagnostic, is read only when named here.
+#'   \code{"size"} and \code{"auto"} are not criteria of the table: a size
+#'   sets the count and has no flat region to compare.
 #' @param tol Passed to \code{\link{select_resolution}()} for the flat
 #'   region.  Default 0.02.
 #' @param ... Ignored.
@@ -3492,12 +4082,21 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
   if (!is.numeric(tol) || length(tol) != 1L || !is.finite(tol) || tol < 0)
     stop("summary.resolution_profile(): `tol` must be a single non-negative number.",
          call. = FALSE)
-  selectable <- c("cp", "reliability", "elbow", "moran_z")
+  # `loo` is the leave-one-out error of the estimate a profile was built for.
+  # A profile without one has no such column, and a column of that name a
+  # caller added to it is read only when named (.loo_by_default()), so its
+  # table is unchanged.
+  selectable <- c("cp", "reliability", "elbow", "moran_z", "loo")
   # moran_z is a diagnostic of the cell means, not a count rule: its smallest
   # |z| usually sits below Cp's flat region, which left the default table's
   # "in every flat region" line empty.  It is read when named, and then kept
   # out of the closing comparison.
   count_rules <- setdiff(selectable, "moran_z")
+  # A ladder of one size is one level: the size set the count, and no
+  # criterion has levels to choose among.
+  bounds <- attr(object, "bounds", exact = TRUE)
+  one_size <- if (is.list(bounds) && length(bounds$obs_per_cell) == 1L)
+    as.numeric(bounds$obs_per_cell) else NULL
   # A criterion the caller named is reported on by select_resolution() itself,
   # whose message says which input it is missing.  Only the defaulted set is
   # filtered here, and then a failure is unexpected rather than informative.
@@ -3518,20 +4117,39 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
            ". A criterion counted twice agrees with itself, which would make the ",
            "closing comparison meaningless.", call. = FALSE)
   } else {
-    criteria <- count_rules[vapply(count_rules, function(cn)
+    read <- if (.loo_by_default(object)) count_rules else setdiff(count_rules, "loo")
+    criteria <- read[vapply(read, function(cn)
       cn %in% names(object) &&
         any(is.finite(suppressWarnings(as.numeric(object[[cn]])))), logical(1))]
   }
   bad <- setdiff(criteria, selectable)
+  # What select_resolution(criterion = "auto") reads this profile by.
+  est_value <- .profile_estimate(object)
+  auto_is <- if (identical(est_value, "pooled")) "size"
+             else if (identical(est_value, "mean")) "loo"
+             else "cp"
   if (length(bad))
     stop("summary.resolution_profile(): unknown criteria: ", paste(bad, collapse = ", "),
-         ". Choose from ", paste(selectable, collapse = ", "), ".", call. = FALSE)
+         ". Choose from ", paste(selectable, collapse = ", "), ".",
+         # "auto" names the rule that goes with the profile's estimate; said
+         # with what it is on this profile.
+         if ("auto" %in% bad)
+           sprintf(paste0(" \"auto\" names no criterion of the table; on this profile ",
+                          "select_resolution() takes it as \"%s\"."), auto_is)
+         else "",
+         # A size sets the count; it has no optimum and no flat region to put
+         # beside the others'.
+         if ("size" %in% bad || ("auto" %in% bad && auto_is == "size"))
+           paste0(" A size sets the count and has no flat region to compare; ",
+                  "select_resolution(criterion = \"size\") reads it.")
+         else "",
+         call. = FALSE)
   if (!length(criteria)) {
     # Two different faults reach here, and the wrong message sends the caller
     # off to fix the data when the object is what is wrong.
-    if (!any(selectable %in% names(object)))
+    if (!any(setdiff(selectable, "loo") %in% names(object)))
       stop("summary.resolution_profile(): `object` carries none of the ",
-           "criterion columns (", paste(selectable, collapse = ", "),
+           "criterion columns (", paste(setdiff(selectable, "loo"), collapse = ", "),
            "); it is a column subset of a resolution profile. Pass the ",
            "profile resolution_profile() returned.", call. = FALSE)
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
@@ -3541,6 +4159,21 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
          if ("moran_z" %in% names(object) &&
              any(is.finite(suppressWarnings(as.numeric(object[["moran_z"]])))))
            " moran_z is finite, and is a diagnostic: name it in `criteria` to see it."
+         else "",
+         if (!is.null(one_size))
+           sprintf(paste0(" The ladder is one size (obs_per_cell = %s); the count is set ",
+                          "by the size, and select_resolution(criterion = \"size\") reads it."),
+                   format(one_size))
+         else if (is.list(bounds) && length(bounds$obs_per_cell))
+           # Several sizes: the three criteria can all be NA for a reason the
+           # sentences above do not give.
+           sprintf(paste0(" The profile is on a ladder of sizes (obs_per_cell = %s)%s; ",
+                          "select_resolution(criterion = \"size\") reads it."),
+                   .got_text(bounds$obs_per_cell),
+                   if (identical(attr(object, "cp_noise", exact = TRUE)$source, "none"))
+                     paste0(", which fits no variogram unless `sac` is given, so it has no ",
+                            "cp and no reliability")
+                   else "")
          else "",
          call. = FALSE)
   }
@@ -3595,6 +4228,9 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
   part <- attr(object, "partition", exact = TRUE)
   if (is.list(part) && !is.null(part$kind))
     attr(out, "partition") <- part[.partition_fields()]
+  # The one size of the ladder, for the print method's line; absent on every
+  # other ladder.
+  if (!is.null(one_size)) attr(out, "obs_per_cell") <- one_size
   out
 }
 
@@ -3653,7 +4289,16 @@ print.resolution_summary <- function(x, ...) {
   # One blank line between the table and the first note, whichever it is.
   gap <- FALSE
   open_notes <- function() if (!gap) { cat("\n"); gap <<- TRUE }
-  if (any(on_edge)) {
+  # A ladder of one size has one level, and it is the size that set it: said
+  # in place of "the optimum is the only level scored".
+  one_size <- attr(x, "obs_per_cell", exact = TRUE)
+  if (is.numeric(one_size) && length(one_size) == 1L) {
+    open_notes()
+    cat(strwrap(sprintf(paste0("the ladder is one size (obs_per_cell = %s); the count is ",
+                               "set by the size, and no criterion chooses among levels."),
+                        format(one_size)),
+                width = 78, prefix = "  ", exdent = 2), sep = "\n")
+  } else if (any(on_edge)) {
     # Wrapped, because with four criteria named one line reached 87
     # columns, which is the wrapping this block was moved here to avoid.
     open_notes()
@@ -3717,11 +4362,22 @@ print.resolution_summary <- function(x, ...) {
 #' besides a number, the object the level-selection step produced:
 #' \code{determine_optimal_levels()}'s integer vector of ranked candidates
 #' (the first is used), a \code{resolution_selection} (its \code{$best}), or a
-#' \code{resolution_profile} (read with \code{select_resolution()} at its
-#' default criterion, \code{cp}).  The count and where it came from are
+#' \code{resolution_profile} (read with \code{select_resolution()}: by
+#' \code{cp} when it names no estimate, by \code{criterion = "auto"} when it
+#' names one).  The count and where it came from are
 #' returned so the caller can record both on its output.
 #'
-#' A profile is read by \code{cp} or not at all, with one exception: a
+#' Whether the profile carries an \code{"estimate"} attribute is tested
+#' first, and a profile that has one goes straight to
+#' \code{select_resolution(x, criterion = "auto")}: a size for pooled
+#' values, the leave-one-out minimum for plain means.  The test that some
+#' criterion is finite, below, is not applied to it: a profile of one size
+#' that fitted no variogram has no \code{cp}, \code{reliability} or
+#' \code{elbow} and still has a count.  An error \code{select_resolution()}
+#' raises on the way is passed on as it is.
+#'
+#' A profile without an estimate is read by \code{cp} or not at all, with
+#' one exception: a
 #' geometry-only profile whose one finite criterion is \code{elbow} is read
 #' by that, since it is the only thing such a profile can mean.  A profile
 #' whose \code{cp} is \code{NA} at every level while \code{reliability} (or
@@ -3747,7 +4403,9 @@ print.resolution_summary <- function(x, ...) {
 #'   \code{.profile_seeds()}, or \code{NULL} when \code{x} carries none) and,
 #'   for a selection or a profile, \code{criterion}, \code{edge},
 #'   \code{at_floor}, \code{at_ceiling} and \code{structured} as
-#'   \code{select_resolution()} reports them (\code{NULL} otherwise).
+#'   \code{select_resolution()} reports them (\code{NULL} otherwise), and
+#'   \code{count_rule}, the selection's record of how the count was set
+#'   (\code{NULL} for a number, and for a selection that carries none).
 #' @keywords internal
 #' @noRd
 .resolve_cell_count <- function(x, arg, caller) {
@@ -3759,11 +4417,43 @@ print.resolution_summary <- function(x, ...) {
     e <- sel$edge %||% NA_character_
     if (is.na(e)) "" else sprintf(", an optimum at %s", e)
   }
+  # Whether a selection's count was set by a size.  The size is then part of
+  # the rule, and the provenance note names it with the criterion.
+  by_size <- function(sel) {
+    asked <- sel$obs_per_cell_asked %||% NA_real_
+    identical(sel$criterion, "size") && is.numeric(asked) && length(asked) == 1L &&
+      is.finite(asked)
+  }
+  # The call that made a selection, as the provenance note writes it.
+  call_text <- function(sel) {
+    if (by_size(sel))
+      sprintf("select_resolution(criterion = \"size\", obs_per_cell = %s)",
+              format(sel$obs_per_cell_asked))
+    else sprintf("select_resolution(criterion = \"%s\")", sel$criterion)
+  }
   if (inherits(x, "resolution_selection")) {
     n <- x$best
     sel <- x
-    from <- sprintf("select_resolution(criterion = \"%s\")%s", x$criterion, edge_note(x))
+    # For every criterion but a size this is the line it always was, whatever
+    # the selection holds as its `criterion`.
+    from <- if (by_size(x)) paste0(call_text(x), edge_note(x))
+            else sprintf("select_resolution(criterion = \"%s\")%s", x$criterion, edge_note(x))
     seeds <- x$seeds
+  } else if (inherits(x, "resolution_profile") &&
+             !is.null(attr(x, "estimate", exact = TRUE))) {
+    # A profile that names an estimate is read by the rule that goes with
+    # it: a size for pooled values, the leave-one-out minimum for plain
+    # means (criterion = "auto").  Tested first, before any criterion is
+    # asked to be finite: a profile of one size that fitted no variogram has
+    # no `cp`, `reliability` or `elbow` and still has a count, and so does a
+    # pooled profile of a constant response.  An error select_resolution()
+    # raises on the way is passed on as it is.
+    sel <- select_resolution(x, criterion = "auto")
+    n <- sel$best
+    seeds <- sel$seeds
+    from <- sprintf("resolution_profile() read with %s%s", call_text(sel), edge_note(sel))
+    .log_info("%s(): `%s` is a resolution profile; read with %s: %d cells.",
+              caller, arg, call_text(sel), n)
   } else if (inherits(x, "resolution_profile")) {
     # A profile is read by select_resolution()'s default criterion, cp.  It
     # used to fall through cp, reliability, elbow, moran_z to the first that
@@ -3776,6 +4466,12 @@ print.resolution_summary <- function(x, ...) {
       any(is.finite(suppressWarnings(as.numeric(x[[cn]]))))
     usable <- Filter(finite_in, c("cp", "reliability", "elbow"))
     geometry_only <- is.na(attr(x, "variable") %||% NA_character_)
+    # The sizes of a ladder `obs_per_cell` set.  Such a profile has a count,
+    # the one a size gives, though none of the three criteria may be finite
+    # on it: a ladder of sizes fits no variogram unless `sac` is given, and
+    # one size is one level, which has no WSS curve.
+    ladder_sizes <- if (is.list(attr(x, "bounds", exact = TRUE)))
+      attr(x, "bounds", exact = TRUE)$obs_per_cell else NULL
     # A geometry-only profile of a layer with no cluster structure lands here
     # too: its elbow is NA rather than the sqrt(first x last level) the
     # linear chord rule used to hand on as if the data had chosen it.
@@ -3783,7 +4479,21 @@ print.resolution_summary <- function(x, ...) {
       stop(sprintf(paste0("%s(): `%s` is a resolution profile with no criterion finite at ",
                           "any level, so no cell count can be read off it.%s%s"),
                    caller, arg,
-                   if (geometry_only)
+                   if (length(ladder_sizes))
+                     sprintf(paste0(" It is on a ladder of sizes (obs_per_cell = %s) and was ",
+                                    "built without an `estimate`, so it is read by `cp`, or by ",
+                                    "`elbow` when it has no `response_var`, and neither is ",
+                                    "finite on it%s. A size reads it: pass ",
+                                    "select_resolution(<profile>, criterion = \"size\") as ",
+                                    "`%s`, or pass a number."),
+                             .got_text(ladder_sizes),
+                             if (!geometry_only &&
+                                 identical(attr(x, "cp_noise", exact = TRUE)$source, "none"))
+                               paste0(" (a ladder of sizes fits no variogram unless `sac` is ",
+                                      "given, and `cp` takes its noise variance from one)")
+                             else "",
+                             arg)
+                   else if (geometry_only)
                      paste0(" It is geometry-only, and its WSS curve has no elbow: the ",
                             "points have no cluster structure to choose a count. Pass a ",
                             "number, or profile with a `response_var`.")
@@ -3803,10 +4513,16 @@ print.resolution_summary <- function(x, ...) {
                        "profile is read by, is NA at every level%s, so no cell count is ",
                        "read off it. Finite on it: %s. To use one, pass ",
                        "select_resolution(<profile>, criterion = \"%s\") as `%s`; or ",
-                       "pass a number."),
+                       "pass a number.%s"),
                 caller, arg,
                 if (geometry_only) " (the profile has no `response_var`)" else "",
-                paste(usable, collapse = ", "), usable[[1L]], arg),
+                paste(usable, collapse = ", "), usable[[1L]], arg,
+                # A ladder of sizes has one more reader.
+                if (length(ladder_sizes))
+                  sprintf(paste0(" The profile is on a ladder of sizes (obs_per_cell = %s): ",
+                                 "criterion = \"size\" reads it by a size."),
+                          .got_text(ladder_sizes))
+                else ""),
         class = "spatialkit_no_default_criterion", call = NULL))
     sel <- select_resolution(x, criterion = crit)
     n <- sel$best
@@ -3864,13 +4580,41 @@ print.resolution_summary <- function(x, ...) {
                     caller, arg, as.integer(n), sel$criterion %||% "the criterion", e,
                     .edge_hint(e), arg,
                     data = list(edge = e, criterion = sel$criterion, n = as.integer(n)))
-    if (isFALSE(sel$structured))
+    # The notes that say why the count is not identified: every note of the
+    # selection, as before, but the ones select_resolution() writes about
+    # something else (which rule set the count, a size the profile held, the
+    # end of the ladder, which estimate the criterion scores, a ladder of one
+    # size).  Those carry one of five names and are left out here.  A note
+    # without a name, or with any other, is pasted as it always was, so a
+    # selection whose notes the caller wrote is told in the caller's words.
+    why <- sel$note
+    other <- names(why) %in% .NOTES_NOT_STRUCTURE
+    if (any(other)) {
+      why <- why[!other]
+      if (!length(why)) why <- NULL
+    }
+    if (isFALSE(sel$structured) && by_size(sel))
+      # A size set this count and no criterion, so the count stands; what
+      # the caller is told is that the cells will say little.  A selection
+      # that names "size" and no size asked for is not one this function
+      # wrote, and is told in the present words.
+      .warn_classed("spatialkit_no_structure",
+                    paste0("%s(): `%s` is %d cells, set by obs_per_cell = %s, and %s The ",
+                           "count stands, since a size set it and no criterion; the cell ",
+                           "values will say little that one mean for the layer does not."),
+                    caller, arg, as.integer(n), format(sel$obs_per_cell_asked %||% NA_real_),
+                    paste(why %||% paste0("one mean for the whole layer predicts a left-out ",
+                                          "observation as well as cells of this size do."),
+                          collapse = " "),
+                    data = list(criterion = sel$criterion, n = as.integer(n),
+                                one_cell = sel$one_cell))
+    else if (isFALSE(sel$structured))
       .warn_classed("spatialkit_no_structure",
                     paste0("%s(): `%s` is %d cells, the optimum of `%s`, but %s Pass a ",
                            "number as `%s` if a count is wanted on other grounds."),
                     caller, arg, as.integer(n), sel$criterion %||% "the criterion",
-                    paste(sel$note %||% paste0("one cell for the whole layer does as well, ",
-                                               "so the count is not identified."),
+                    paste(why %||% paste0("one cell for the whole layer does as well, ",
+                                          "so the count is not identified."),
                           collapse = " "),
                     arg,
                     data = list(criterion = sel$criterion, n = as.integer(n),
@@ -3878,5 +4622,9 @@ print.resolution_summary <- function(x, ...) {
   }
   list(n = as.numeric(n), from = from, seeds = seeds,
        criterion = sel$criterion, edge = sel$edge, at_floor = sel$at_floor,
-       at_ceiling = sel$at_ceiling, structured = sel$structured)
+       at_ceiling = sel$at_ceiling, structured = sel$structured,
+       # How the count was set, for the functions that turn it into cells:
+       # NULL for a number, and for a count a present criterion read off a
+       # profile without an estimate.
+       count_rule = sel$count_rule)
 }

@@ -666,12 +666,21 @@ plot_calibration <- function(cv, ...) {
 #' choosing, not the criterion.  A criterion that is \code{NA} at every
 #' level is left out with a log line rather than drawn empty.
 #'
+#' A profile whose ladder is one size (\code{obs_per_cell} set to one
+#' number) has one level, set by the size.  Each criterion that is finite
+#' there is drawn as one point in its panel, with no selected level and no
+#' band, and the caption says that the size set the count.
+#'
 #' @param x A \code{resolution_profile}.
 #' @param criteria Character vector of criteria to draw, any of
-#'   \code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"moran_z"},
-#'   \code{"wss"}.  Default: the first four, each where it is finite at some
-#'   level.  \code{"cp"}, \code{"reliability"} and \code{"elbow"} are count
-#'   criteria and get a selected level and a shaded band.  \code{"moran_z"}
+#'   \code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"loo"},
+#'   \code{"moran_z"}, \code{"wss"}.  Default: the first five, each where it
+#'   is finite at some level.  \code{"cp"}, \code{"reliability"},
+#'   \code{"elbow"} and \code{"loo"} (the leave-one-out error of the
+#'   estimate the profile was built for; a profile built without
+#'   \code{estimate} has no such column, and a column of that name added
+#'   to one is drawn only when named here) are count criteria and get a
+#'   selected level and a shaded band.  \code{"moran_z"}
 #'   is a diagnostic of the cell means and not a count rule (see
 #'   \code{\link{select_resolution}()}), and \code{"wss"} is the raw curve
 #'   behind \code{"elbow"}: both are drawn as curves with no selected point.
@@ -711,11 +720,20 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   # The count criteria get a selected level and a band.  moran_z is drawn by
   # default as well, as a curve only: select_resolution() refuses to read a
   # count from it unless asked with diagnostic = TRUE.
-  selectable <- c("cp", "reliability", "elbow")
+  # `loo` is drawn like the other count criteria where it is the column
+  # resolution_profile() wrote.  A profile built without an estimate has
+  # none, and a column of that name a caller added to it is drawn only when
+  # named (.loo_by_default()), so its plot is the one it always was.
+  selectable <- c("cp", "reliability", "elbow", "loo")
   by_default <- c(selectable, "moran_z")
   allowed <- c(by_default, "wss")
+  # A ladder of one size is one level, set by the size: nothing was chosen
+  # among levels, so no level is marked and no band is drawn.
+  bounds <- attr(x, "bounds")
+  one_size <- is.list(bounds) && length(bounds$obs_per_cell) == 1L
   if (is.null(criteria)) {
-    criteria <- by_default[vapply(by_default, function(cn)
+    read <- if (.loo_by_default(x)) by_default else setdiff(by_default, "loo")
+    criteria <- read[vapply(read, function(cn)
       any(is.finite(suppressWarnings(as.numeric(x[[cn]])))), logical(1))]
     if (!length(criteria)) criteria <- "wss"
   }
@@ -735,6 +753,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
   labels <- c(cp = "Mallows' Cp (lower is better)",
               reliability = "Reliability of cell means (higher is better)",
               elbow = "WSS elbow statistic (higher is better)",
+              loo = "Leave-one-out error (lower is better)",
               moran_z = "|Moran's z| of cell means (a diagnostic, not a count rule)",
               wss = "Within-cluster sum of squares")
   rows <- list(); chosen <- list(); flat <- list(); notes <- character(0)
@@ -750,7 +769,7 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
     if (!any(ok)) { skipped <- c(skipped, cn); next }
     rows[[cn]] <- data.frame(panel = labels[[cn]], x = lv[ok], y = v[ok],
                              stringsAsFactors = FALSE)
-    if (cn %in% selectable) {
+    if (cn %in% selectable && !one_size) {
       sel <- try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE)
       if (!inherits(sel, "try-error")) {
         chosen[[cn]] <- data.frame(panel = labels[[cn]], x = sel$best,
@@ -776,7 +795,6 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
     .log_info("plot.resolution_profile(): %s NA at every level; not drawn.",
               paste(skipped, collapse = ", "))
   df <- do.call(rbind, rows)
-  bounds <- attr(x, "bounds")
   subtitle <- if (is.list(bounds))
     sprintf("%d levels from %d to %d cells (floor %s, ceiling %s)%s",
             nrow(x), min(lv), max(lv),
@@ -788,13 +806,23 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
             if (isTRUE(bounds$supported)) ""
             else if (identical(bounds$ceiling_from, "fewer than two supported cells"))
               sprintf("; fewer than two cells meet min_cell_n = %s", format(bounds$min_cell_n))
+            else if (identical(bounds$ceiling_from, "fewer than two cells of the size"))
+              "; fewer than two cells of the size asked for"
             else "; the floor exceeds the ceiling")
   else NULL
-  caption <- paste(c("Red: the level each criterion selects; shaded: within tolerance of its optimum",
-                     notes), collapse = "\n")
+  caption <- if (one_size)
+    sprintf(paste0("the ladder is one size (obs_per_cell = %s); the count is set by the ",
+                   "size,\nand no criterion chooses among levels."),
+            format(as.numeric(bounds$obs_per_cell)))
+  else paste(c("Red: the level each criterion selects; shaded: within tolerance of its optimum",
+               notes), collapse = "\n")
+  # One point has no line through it: ggplot2 draws nothing for one and says
+  # so, once a panel, each time the plot is printed.  Every other profile, a
+  # one-level profile on another ladder included, keeps its line layer.
   .plot_sweep(df, chosen = do.call(rbind, chosen), flat = do.call(rbind, flat),
               title = "Resolution profile", subtitle = subtitle, caption = caption,
-              x_lab = "Number of cells", y_lab = NULL, log_x = log_x)
+              x_lab = "Number of cells", y_lab = NULL, log_x = log_x,
+              connect = !one_size)
 }
 
 

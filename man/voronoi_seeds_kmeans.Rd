@@ -26,7 +26,11 @@ produce neither more centres than there are distinct points nor as many
 centres as there are rows. Check \code{nrow()} on the result. A
 \code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
 accepted: its scored centres are returned when it carries them, and
-otherwise its count is used. Such a count raises the warnings and the
+otherwise its count is used. A profile is read as \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}
+reads one passed as \code{n}: by \code{cp} when it was built without an
+\code{estimate}, and by \code{select_resolution(criterion = "auto")} when it was
+built with one (a size for pooled values, the lowest leave-one-out
+error for plain means). Such a count raises the warnings and the
 error described under \code{n} in \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} (classes
 \code{"spatialkit_bound_chosen"}, \code{"spatialkit_no_structure"} and
 \code{"spatialkit_no_default_criterion"}).}
