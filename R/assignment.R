@@ -64,7 +64,9 @@
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
 #'   then leftmost, so the choice does not depend on the order of the rows;
 #'   \code{"first"} keeps the first match (original order-dependent
-#'   behavior).
+#'   behavior). On cells built from the centres a profile scored, a point on
+#'   the edge between two of them is placed by the profile's rule whichever
+#'   is given (see Value).
 #' @param quiet Logical; suppress this function's \code{message()}s (the one
 #'   naming a fallback ID column). It does not silence R warnings. Default
 #'   \code{FALSE}.
@@ -96,7 +98,9 @@
 #'   The
 #'   attribute `"ties"` records how many features matched more than one
 #'   polygon (with `largest`, overlapped several by exactly the same area)
-#'   and had the `tie_break` rule decide for them: a list with `n`,
+#'   and had the `tie_break` rule decide for them (on cells built from the
+#'   centres a profile scored, the profile's rule then places the points
+#'   among them, as the last paragraph says): a list with `n`,
 #'   `which` (their row positions in `features_sf`), `rule` and `n_rows`
 #'   (the number of rows returned, which the record was made for). A large
 #'   `n` means the polygon layer overlaps, and per-cell counts built from the
@@ -125,6 +129,37 @@
 #'   summary does not compare the two for such a layer. To assign the
 #'   features as they were scored, assign their points:
 #'   `assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
+#'
+#'   When that record says the cells are the ones the profile scored
+#'   (`scored_cells` is `TRUE`: the cells [build_tessellation()] builds on a
+#'   selection's seeds, or on the seeds a seeding function returns for one)
+#'   and holds the centres it scored (`count_rule$scored$centres`), a point
+#'   on the edge between two or more of those cells is given the cell
+#'   [resolution_profile()] scored it in: that of its nearest centre,
+#'   measured in the CRS the record names, and of centres the same distance
+#'   away the lower-numbered one. Such points occur on gridded locations
+#'   (raster cell centres, a regular sampling grid), where a row can lie the
+#'   same distance from two centres and the polygons hold it in either cell
+#'   or in both. The rows each cell holds are then the rows its count was
+#'   scored on, and [summarize_by_cell()]'s check of them reads `"match"`.
+#'   A point counts as on the edge when it lies within a margin of both
+#'   cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
+#'   at a UTM northing of 4,400 km. [build_tessellation()] draws such cells
+#'   in the CRS the record names, around the centres as the record holds
+#'   them, whatever CRS the seeds came back in (unless its `crs` names
+#'   another projected CRS), so their corners carry only the rounding of
+#'   that computation, far less than the margin. A point
+#'   farther from its nearest centre's cell keeps the polygon that holds it,
+#'   and so do features that are not points, points without a CRS beside a
+#'   record with one, and a join in longitude and latitude. A centre's cell
+#'   is the one cell that holds it and no other centre; a centre outside a
+#'   boundary that clipped its cell away from it has the cell, among those
+#'   that hold no centre, whose inside is nearest it. Cells built from other
+#'   seeds leave most centres without a cell, and their points to the
+#'   polygons. Polygons without the record, such as polygons
+#'   the caller brings, and cells whose record says `scored_cells` is
+#'   `FALSE` or `NA` (other cells built from the count, such as a lattice
+#'   sized by it) are placed by the polygons alone.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -452,6 +487,22 @@ assign_features_to_polygons <- function(
   } else {
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
   }
+  # On cells built from the centres a profile scored, a point on the edge
+  # between two of them goes to the cell the profile scored it in, whatever
+  # `tie_break` picked or which side of the edge rounding put it on: its
+  # nearest centre, a tie to the lower-numbered one.  Then the rows each cell
+  # holds are the rows its count was scored on.
+  if (!is.null(count_rule)) {
+    on_edge <- .scored_edge_cells(f, p, id_col, joined, polygon_id_col, count_rule,
+                                  features_sf)
+    if (length(on_edge$rows)) {
+      joined[[polygon_id_col]][on_edge$rows] <- on_edge$ids
+      .log_info(paste0("assign_features_to_polygons(): %d point(s) on the edge between two ",
+                       "cells resolution_profile() scored were given the cell it scored ",
+                       "them in, that of their nearest centre."),
+                length(on_edge$rows))
+    }
+  }
   # Which features matched no polygon, by their row in `features_sf`, read
   # before the row key goes.
   unassigned_rows <- sort(joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])])
@@ -557,6 +608,125 @@ assign_features_to_polygons <- function(
     out_ids  <- c(out_ids, p_sel[[join_id]][pick])
   }
   list(rows = out_rows, ids = out_ids)
+}
+
+
+#' Points on the edge between cells a profile scored, placed as it placed them
+#'
+#' On cells whose record of their count sits beside the centres the profile
+#' scored (\code{.scored_centres()}), \code{resolution_profile()} gave each
+#' row to its nearest centre in the record's CRS, a tie to the lower-numbered
+#' centre (\code{.nearest_centre()}), and the polygons hold a row that is the
+#' same distance from two centres in either cell, or in both.  A point the
+#' join placed in a cell, that lies within \code{.edge_tol()} of the edge of
+#' that cell and of the cell of the centre the profile's rule gives it, is
+#' given that cell.  A point farther from that cell than the margin keeps
+#' the cell it has: it is not on their shared edge, so the cells are not the
+#' ones scored there (built in another CRS, say), and the summary's check
+#' says so.
+#'
+#' The cell of a centre is the one cell that holds it, when it holds no
+#' other centre: a Voronoi cell holds its own centre and no other, so cells
+#' built from other seeds (a subset of the centres) leave most centres
+#' without one, and the points tied to those keep their cells.  A centre in
+#' no cell stands outside a boundary that clipped its cell away from it;
+#' its cell is then the one cell holding no centre whose point on the
+#' surface has it as its nearest centre, when no other such cell has.
+#'
+#' Edges are measured in the CRS of the join: a projected one, or none on
+#' either side when the record names none.  Polygons in longitude and
+#' latitude, features without a CRS beside a record with one, or the
+#' reverse, are left as the join placed them.
+#'
+#' @param f The join's copy of the features, in the join's CRS, one row per
+#'   row of \code{features}.
+#' @param p The polygons, in the join's CRS, with their IDs in \code{id_col}.
+#' @param id_col The ID column of \code{p}.
+#' @param joined The join, one row per feature: \code{..pre_join_row_id}
+#'   (the row of \code{f}) and the polygon's ID in \code{id}.
+#' @param id The name of the ID column of \code{joined}.
+#' @param rec The record of the count the polygons carry.
+#' @param features The features as the caller passed them.
+#' @return A list: \code{rows}, the rows of \code{joined} whose cell
+#'   changes, and \code{ids}, the ID each gets.
+#' @keywords internal
+#' @noRd
+.scored_edge_cells <- function(f, p, id_col, joined, id, rec, features) {
+  none <- list(rows = integer(0), ids = p[[id_col]][integer(0)])
+  cen <- .scored_centres(rec)
+  if (is.null(cen)) return(none)
+  crs_j <- sf::st_crs(p)
+  crs_r <- rec$crs
+  crs_f <- sf::st_crs(features)
+  if (!is.na(crs_j) && isTRUE(sf::st_is_longlat(crs_j))) return(none)
+  if (!is.na(crs_r) && isTRUE(sf::st_is_longlat(crs_r))) return(none)
+  if (is.na(crs_r) != is.na(crs_j) || is.na(crs_r) != is.na(crs_f)) return(none)
+
+  # The points the join placed in a cell.
+  ids_p <- p[[id_col]]
+  at    <- match(joined[[id]], ids_p)
+  src   <- joined[["..pre_join_row_id"]]
+  gf    <- sf::st_geometry(f)
+  point <- sf::st_geometry_type(gf, by_geometry = TRUE) == "POINT" & !sf::st_is_empty(gf)
+  rows  <- which(!is.na(at) & point[src])
+  if (!length(rows)) return(none)
+
+  # Those within the margin of their own cell's edge.  The others lie inside
+  # it, away from every other cell.
+  gp  <- sf::st_geometry(p)
+  tol <- .edge_tol(sf::st_bbox(gp))
+  edge <- suppressWarnings(sf::st_boundary(gp))
+  d    <- as.numeric(sf::st_distance(gf[src[rows]], edge[at[rows]], by_element = TRUE))
+  rows <- rows[which(d <= tol)]
+  if (!length(rows)) return(none)
+
+  # Their nearest centre, from their coordinates in the record's CRS, as the
+  # profile measured them.
+  pts <- features[src[rows], , drop = FALSE]
+  if (!is.na(crs_r) && !isTRUE(crs_f == crs_r)) pts <- sf::st_transform(pts, crs_r)
+  xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  rows <- rows[ok]
+  if (!length(rows)) return(none)
+  g <- .nearest_centre(xy[ok, 1L], xy[ok, 2L], cen[, 1L], cen[, 2L],
+                       use_fnn = .has_backend("FNN"))
+
+  # The cell of each centre: the one cell that holds it and no other centre.
+  where <- sf::st_as_sf(data.frame(x = cen[, 1L], y = cen[, 2L]), coords = c("x", "y"),
+                        crs = crs_r)
+  if (!is.na(crs_r) && !isTRUE(crs_r == crs_j)) where <- sf::st_transform(where, crs_j)
+  hit  <- sf::st_intersects(where, gp)
+  cell <- rep(NA_integer_, nrow(cen))
+  one  <- lengths(hit) == 1L
+  cell[one] <- vapply(hit[one], function(h) h[1L], integer(1))
+  cell[cell %in% cell[duplicated(cell) & !is.na(cell)]] <- NA_integer_
+  # A centre in no cell lies outside a boundary that clipped its cell away
+  # from it.  Its cell is the one, among the cells that hold no centre, whose
+  # inside is nearer it than any other centre: a point on that cell's surface
+  # has it as its nearest centre, and no other such cell has.
+  lost <- which(lengths(hit) == 0L)
+  if (length(lost)) {
+    empty <- setdiff(seq_along(gp), unlist(hit))
+    if (length(empty)) {
+      inside <- suppressWarnings(sf::st_point_on_surface(gp[empty]))
+      if (!is.na(crs_r) && !isTRUE(crs_r == crs_j)) inside <- sf::st_transform(inside, crs_r)
+      ixy <- unname(sf::st_coordinates(inside)[, 1:2, drop = FALSE])
+      fin <- is.finite(ixy[, 1L]) & is.finite(ixy[, 2L])
+      k <- rep(NA_integer_, length(empty))
+      k[fin] <- .nearest_centre(ixy[fin, 1L], ixy[fin, 2L], cen[, 1L], cen[, 2L],
+                                use_fnn = .has_backend("FNN"))
+      own <- !is.na(k) & k %in% lost & !(k %in% k[duplicated(k) & !is.na(k)])
+      cell[k[own]] <- empty[own]
+    }
+  }
+
+  # A point goes to its centre's cell when it lies on that cell's edge too.
+  to   <- cell[g]
+  move <- which(!is.na(to) & to != at[rows])
+  if (!length(move)) return(none)
+  d_to <- as.numeric(sf::st_distance(gf[src[rows[move]]], gp[to[move]], by_element = TRUE))
+  move <- move[which(d_to <= tol)]
+  list(rows = rows[move], ids = ids_p[to[move]])
 }
 
 
@@ -1677,7 +1847,8 @@ assign_features_to_polygons <- function(
 #'   record is the one [select_resolution()] wrote: `rule`, `estimate` (the
 #'   cell value the count was chosen for), `cells`, `obs_per_cell`,
 #'   `response`, `scored` (what the profile scored at the count: the rows,
-#'   the cells that hold one and the leave-one-out error among them),
+#'   the cells that hold one, the leave-one-out error among them, and the
+#'   centres the rows were given to),
 #'   `partition`, `crs` and `scored_cells`. It has class
 #'   `"spatialkit_count_rule"` and a print method. `check$estimate` is
 #'   `"match"` or `"mismatch"`: whether the summary reports the estimate the
@@ -1711,11 +1882,19 @@ assign_features_to_polygons <- function(
 #'   A row that is the same distance from two centres lies on the boundary
 #'   between their cells, which happens on gridded locations.
 #'   [resolution_profile()] scores such a row in the cell of the
-#'   lower-numbered centre. [assign_features_to_polygons()] places it by the
-#'   polygons: in the one that holds it, or, at its default `tie_break`, in
-#'   the smaller of two that share it. The two can therefore place it in
-#'   different cells, and the comparison then reports `"differ"` on cells and
-#'   rows nobody changed, with `what = "loo"` when it finds the same rows in
+#'   lower-numbered centre, and [assign_features_to_polygons()], on cells
+#'   built from the centres the profile scored, gives a point on that
+#'   boundary the same cell, measured in the CRS the record names, so the
+#'   comparison reads `"match"` on gridded locations too.
+#'   [build_tessellation()] draws those cells in the CRS the record names,
+#'   whatever CRS the seeds arrive in, unless its `crs` names another
+#'   projected CRS. Cells built in another projected CRS are the
+#'   nearest-centre cells of that CRS, so a row near a boundary, on it or
+#'   not, can sit in another cell than the profile put it in. So can a row
+#'   joined in longitude and latitude (rows and cells both in degrees), and
+#'   a row that reached the record's CRS by another transformation than the
+#'   profile's, which can settle a tie the other way. The comparison then
+#'   reports `"differ"`, with `what = "loo"` when it finds the same rows in
 #'   the same number of cells with another leave-one-out error. The
 #'   summary's own numbers describe the cells as assigned.
 #'

@@ -161,6 +161,43 @@
 }
 
 
+#' The centres the profile scored, when the seeds are those centres
+#'
+#' The seeds of a \code{select_resolution()} result, and the seeds
+#' \code{get_voronoi_seeds()} hands on from one, are the centres the profile
+#' scored, and come back in the CRS of the points they were placed for.  Put
+#' back in the CRS the profile measured in, they differ from the centres by
+#' the rounding of the two transformations, which can settle a tie between
+#' two seeds the other way, and a caller may hand them in another order
+#' (sorted by their cell, say), which settles a tie by that order.  The
+#' centres as the record holds them, in its order, settle it as the profile
+#' did.
+#'
+#' @param rule The summary's record of the count, or \code{NULL}.
+#' @param seed_xy The seeds' coordinates in the working CRS, one row per row
+#'   of \code{seeds}.
+#' @param crs The working CRS.
+#' @param use_fnn Whether \pkg{FNN} is used, as the call's other searches
+#'   are told.
+#' @return When the record sits beside the centres
+#'   (\code{.scored_centres()}), the working CRS is the record's (or both
+#'   have none), and the seeds are the centres (\code{.seeds_as_centres()}):
+#'   a list of \code{centres}, the record's, and \code{seed}, for each centre
+#'   the row of \code{seeds} that is it.  \code{NULL} otherwise, and the
+#'   seeds are searched as they are.
+#' @keywords internal
+#' @noRd
+.values_at_centres <- function(rule, seed_xy, crs, use_fnn = .has_backend("FNN")) {
+  cen <- .scored_centres(rule)
+  if (is.null(cen)) return(NULL)
+  if (!inherits(crs, "crs") || is.na(crs) != is.na(rule$crs)) return(NULL)
+  if (!is.na(crs) && !isTRUE(crs == rule$crs)) return(NULL)
+  of <- .seeds_as_centres(seed_xy, cen, use_fnn)
+  if (is.null(of)) return(NULL)
+  list(centres = cen, seed = of)
+}
+
+
 #' Cell IDs written in the class of a summary's ID column
 #'
 #' IDs are matched as text.  An ID that matches a row of the summary is that
@@ -228,7 +265,10 @@
 #'    ([build_tessellation()] gives `NA` in `index` to a seed whose cell the
 #'    clip removed). Without `seeds`, the polygon of `values` that holds the
 #'    location, by [assign_features_to_polygons()] with its default
-#'    `tie_break`; a location in no polygon has no cell. Polygons without a
+#'    `tie_break` and the summary's record of the count, so a location on
+#'    the edge between two cells the profile scored is placed as that
+#'    function places such a row (see "Ties"); a location in no polygon has
+#'    no cell. Polygons without a
 #'    CRS are read as that function read them for the rows of `points`: the
 #'    locations are handed to it in the CRS of `points`, whatever CRS
 #'    `newdata` arrived in.
@@ -265,7 +305,20 @@
 #' @section Ties:
 #' A location the same distance from two seeds takes the one that comes
 #' first in `seeds`. For the seeds of a [select_resolution()] result that is
-#' the lower-numbered centre, the rule [resolution_profile()] scores with. A
+#' the lower-numbered centre, the rule [resolution_profile()] scores with.
+#' When the summary's record of the count holds the centres the profile
+#' scored and `seeds` are those centres (the seeds a selection carries, or
+#' those a seeding function returns for it), in any order and any CRS, the
+#' distances are taken to the centres as the record holds them, a tie goes
+#' to the lower-numbered centre, and each centre gives the ID of the seed
+#' that stands at it. Seeds count as the centres when they are as many and
+#' each lies at a different centre, within a thousandth of its distance from
+#' the next nearest one, so a seed that came back from another CRS with its
+#' coordinates rounded, or seeds sorted by their cell, do not settle a tie
+#' another way. A location on the edge between two such cells then takes
+#' the cell [assign_features_to_polygons()] gives a row there, with `seeds`
+#' and without. Other seeds, among them a subset of the centres, are
+#' searched as given. A
 #' location the same distance from two locations of scored rows takes the
 #' one with the lower x coordinate, then the lower y; among scored rows at
 #' one location that lie in different cells, the cell that comes first in
@@ -616,8 +669,26 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
   cell <- rep(NA_character_, length(live))
   if (by_seeds) {
     if (length(live) && length(seed_at)) {
-      j <- .values_at_nearest(qx, qy, seed_xy[seed_at, 1L], seed_xy[seed_at, 2L], use_fnn)
-      cell <- seed_ids[seed_at][j]
+      # Seeds that are the centres the profile scored, in any order, are
+      # searched at the centres as the record holds them and in its order, so
+      # a location the same distance from two goes where the profile and the
+      # assignment put it, whatever rounding a change of CRS brought to the
+      # seeds.  Each centre takes the ID of the seed that is it.
+      as_cen <- .values_at_centres(rule, seed_xy, crs, use_fnn)
+      if (is.null(as_cen)) {
+        if (!is.null(.scored_centres(rule)))
+          .log_info(paste0("cell_values_at(): the %d seeds are not the %d centres the ",
+                           "summary's record holds, so they are searched as given, and a ",
+                           "location the same distance from two seeds takes the one that ",
+                           "comes first in `seeds`."),
+                    nrow(seed_xy), nrow(.scored_centres(rule)))
+        j <- .values_at_nearest(qx, qy, seed_xy[seed_at, 1L], seed_xy[seed_at, 2L], use_fnn)
+        cell <- seed_ids[seed_at][j]
+      } else {
+        cen <- as_cen$centres
+        j <- .values_at_nearest(qx, qy, cen[, 1L], cen[, 2L], use_fnn)
+        cell <- seed_ids[as_cen$seed[j]]
+      }
     }
   } else if (length(live) && !all(is.na(values[[id_col]]))) {
     # The assignment is given the points and no column of `newdata`, so none
@@ -629,6 +700,10 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     cells_at <- sf::st_sf(
       stats::setNames(data.frame(values[[id_col]][has_id], stringsAsFactors = FALSE), id_col),
       geometry = sf::st_geometry(values)[has_id])
+    # With the summary's record of the count, which the rows were assigned
+    # with: a location on the edge between two cells the profile scored goes
+    # where the profile put such a row.
+    cells_at <- .count_rule_put(cells_at, rule)
     # `frame` is the CRS the coordinates of `points` are read in, which is
     # where the rows were assigned from.  Points without a CRS are given it
     # beside polygons that carry one, and not left for the assignment to

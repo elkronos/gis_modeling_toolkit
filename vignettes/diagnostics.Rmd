@@ -397,11 +397,16 @@ rows with a response, `"cells"` for another number of cells that hold one,
 which means rows sit in other cells, and `"record"` when the assigned layer
 and `cells_sf` carry different records. The usual causes are rows filtered
 after the assignment, a boundary that leaves points in no cell, and a layer
-other than the one profiled. On gridded locations there is one more: a row
-the same distance from two centres lies on the boundary between their cells,
-the profile scores it in the cell of the lower-numbered centre, and the
-assignment can place it in the other, so the warning then speaks of rows
-nobody changed. The values returned describe the cells as given, and
+other than the one profiled. On gridded locations a row can lie the same
+distance from two centres, on the boundary between their cells. The profile
+scores it in the cell of the lower-numbered centre, and
+`assign_features_to_polygons()` gives a point there the same cell when the
+cells carry the record of the centres scored, so a lattice passes the check.
+`build_tessellation()` draws those cells in the profile's CRS whatever CRS
+the seeds come back in. Cells built in another projected CRS, named with its
+`crs`, are the nearest-centre cells of that CRS, so rows near a boundary, on
+it or not, can sit in another cell, and the warning then speaks of them. The
+values returned describe the cells as given, and
 `attr(, "count_rule")$check` keeps the outcome. Cells the caller brings carry
 no record and are not checked.
 

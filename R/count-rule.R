@@ -54,6 +54,163 @@
 }
 
 
+#' The centres a profile scored at one level
+#'
+#' The matrix \code{resolution_profile()} keeps in \code{attr(, "centres")}
+#' for the level, which its estimate gave each scored row to by
+#' \code{.nearest_centre()}, as it is: the coordinates in the profile's CRS
+#' and the centres in the order they were numbered in.
+#'
+#' @param profile A \code{resolution_profile}.
+#' @param level The level (cell count).
+#' @return A two-column numeric matrix without dimnames, one row per centre;
+#'   \code{NULL} when the profile holds no centres at that level (a column
+#'   subset, which has lost them).
+#' @keywords internal
+#' @noRd
+.profile_centres <- function(profile, level) {
+  cen <- attr(profile, "centres", exact = TRUE)
+  xy  <- if (is.list(cen)) cen[[as.character(level)]] else NULL
+  if (!is.matrix(xy) || !is.numeric(xy) || nrow(xy) < 1L || ncol(xy) < 2L) return(NULL)
+  xy <- unname(xy[, 1:2, drop = FALSE])
+  storage.mode(xy) <- "double"
+  xy
+}
+
+
+#' The centres a record sits beside
+#'
+#' @param rec A record of a count (\code{.count_rule_get()}), or \code{NULL}.
+#' @return \code{rec$scored$centres} when the record says it sits beside the
+#'   centres the profile scored (\code{scored_cells} is \code{TRUE}) and holds
+#'   one finite centre per cell of the count, two at least, with a CRS object
+#'   (which may be \code{NA}); \code{NULL} otherwise, and then no point is
+#'   placed by the profile's rule.
+#' @keywords internal
+#' @noRd
+.scored_centres <- function(rec) {
+  if (is.null(rec) || !isTRUE(rec$scored_cells) || !is.list(rec$scored) ||
+      !inherits(rec$crs, "crs"))
+    return(NULL)
+  cen <- rec$scored$centres
+  if (!is.matrix(cen) || !is.numeric(cen) || ncol(cen) != 2L || nrow(cen) < 2L ||
+      !identical(nrow(cen), as.integer(rec$cells)) || !all(is.finite(cen)))
+    return(NULL)
+  cen
+}
+
+
+#' The CRS the cells of a record's centres are drawn in
+#'
+#' @param rec A record of a count, or \code{NULL}.
+#' @return The record's CRS when it sits beside the centres the profile
+#'   scored (\code{.scored_centres()}) and that CRS is a projected one;
+#'   \code{NULL} otherwise.
+#' @keywords internal
+#' @noRd
+.scored_crs <- function(rec) {
+  if (is.null(.scored_centres(rec))) return(NULL)
+  crs <- rec$crs
+  if (is.na(crs) || isTRUE(sf::st_is_longlat(crs))) return(NULL)
+  crs
+}
+
+
+#' The nearest and the next nearest centre of every point
+#'
+#' @param x,y Coordinates of the points.
+#' @param cx,cy Coordinates of the centres, two at least.
+#' @param use_fnn Whether to use \pkg{FNN}.  Without it the search is
+#'   exact, over every centre.
+#' @return A list: \code{first}, the nearest centre of each point, and
+#'   \code{d1} and \code{d2}, the squared distances to it and to the next
+#'   nearest, both computed in R from the coordinates.
+#' @keywords internal
+#' @noRd
+.two_nearest <- function(x, y, cx, cy, use_fnn = .has_backend("FNN")) {
+  if (isTRUE(use_fnn) && length(cx) > 16L) {
+    nn <- matrix(FNN::get.knnx(cbind(cx, cy), cbind(x, y), k = 2L)$nn.index, length(x), 2L)
+    a <- nn[, 1L]; b <- nn[, 2L]
+    da <- (x - cx[a])^2 + (y - cy[a])^2
+    db <- (x - cx[b])^2 + (y - cy[b])^2
+    swap <- db < da
+    return(list(first = ifelse(swap, b, a), d1 = pmin(da, db), d2 = pmax(da, db)))
+  }
+  d1 <- (x - cx[1L])^2 + (y - cy[1L])^2
+  d2 <- rep(Inf, length(x))
+  first <- rep.int(1L, length(x))
+  for (j in seq_along(cx)[-1L]) {
+    d <- (x - cx[j])^2 + (y - cy[j])^2
+    nearer <- d < d1
+    d2 <- ifelse(nearer, d1, pmin(d2, d))
+    d1[nearer] <- d[nearer]
+    first[nearer] <- j
+  }
+  list(first = first, d1 = d1, d2 = d2)
+}
+
+
+#' Which centre each seed is
+#'
+#' Seeds are the centres a record holds when they are as many, and each lies
+#' at a different centre: within one part in a thousand of its distance from
+#' the next nearest centre, or within \code{.edge_tol()} of the centres'
+#' coordinates when that is more.  The seeds a selection carries, and those a
+#' seeding function returns for one, are the centres in the profile's order,
+#' in the CRS of the points they were placed for; put back in the record's
+#' CRS they have moved by the rounding of the two transformations, a few
+#' millimetres at most (Lambert azimuthal equal-area across a continent), and
+#' a thousandth of the distance between two centres is far more than that
+#' for centres more than a few metres apart.  Seeds in another order, sorted
+#' by their cell for example, are matched all the same.  Seeds placed by a
+#' fit of their own lie metres from the centres and are not.
+#'
+#' @param xy Two-column matrix of the seeds' coordinates, in the record's
+#'   CRS.
+#' @param cen The record's centres (\code{.scored_centres()}).
+#' @param use_fnn Whether to use \pkg{FNN}.
+#' @return Integer vector, for each centre the row of \code{xy} that is it;
+#'   \code{NULL} when the seeds are not the centres.
+#' @keywords internal
+#' @noRd
+.seeds_as_centres <- function(xy, cen, use_fnn = .has_backend("FNN")) {
+  if (is.null(cen) || !is.matrix(xy) || ncol(xy) < 2L) return(NULL)
+  K <- nrow(cen)
+  if (nrow(xy) != K || K < 2L || !all(is.finite(xy[, 1:2]))) return(NULL)
+  two <- .two_nearest(xy[, 1L], xy[, 2L], cen[, 1L], cen[, 2L], use_fnn)
+  if (anyDuplicated(two$first)) return(NULL)
+  tol <- .edge_tol(c(range(cen[, 1L]), range(cen[, 2L])))
+  if (!all(sqrt(two$d1) <= pmax(1e-3 * sqrt(two$d2), tol))) return(NULL)
+  of <- integer(K)
+  of[two$first] <- seq_len(K)
+  of
+}
+
+
+#' How far from an edge a point can lie and still be on it
+#'
+#' The corners of Voronoi cells are computed in floating point, so a point
+#' the same distance from two centres can lie a little inside either cell.
+#' Rounding grows with the size of the coordinates, so the margin is one
+#' part in 1e10 of the largest coordinate of the layer: 0.44 mm at a UTM
+#' northing of 4,400 km, far more than the rounding of the corners and far
+#' less than the spacing of gridded locations.  The cells
+#' \code{create_voronoi_polygons()} draws on seeds that are the centres are
+#' drawn around the centres as the record holds them
+#' (\code{.seeds_as_centres()}), so rounding the seeds took on through
+#' another CRS does not move their edges.
+#'
+#' @param bb A bounding box (\code{sf::st_bbox()}), in the CRS the distance
+#'   is taken in.
+#' @return One positive number, in the units of that CRS.
+#' @keywords internal
+#' @noRd
+.edge_tol <- function(bb) {
+  m <- suppressWarnings(max(abs(as.numeric(bb)), na.rm = TRUE))
+  1e-10 * max(1, if (is.finite(m)) m else 1)
+}
+
+
 #' Whether a level's cells beat one mean, for the profile's estimate
 #'
 #' The rule of \code{.no_structure()} on the numbers a profile with an
@@ -121,6 +278,12 @@
 #'   profile's for \code{"size"} and \code{"loo"}, \code{"mean"} for
 #'   \code{"cp"}, which scores plain means, and \code{NA} for the other
 #'   rules.  \code{scored} is \code{NULL} for a profile without an estimate.
+#'   Its last element, \code{centres}, is the matrix of the centres the
+#'   profile scored at the count, in \code{crs} and in the profile's order
+#'   (\code{NULL} when the profile no longer holds them): each scored row was
+#'   given to the nearest of them, a tie to the lower-numbered one, and
+#'   \code{assign_features_to_polygons()} and \code{cell_values_at()} read
+#'   them to place a point on the edge between two cells the same way.
 #' @keywords internal
 #' @noRd
 .count_rule_new <- function(profile, rule, cells, obs_per_cell_asked = NA_real_,
@@ -146,7 +309,8 @@
       share_alone  = .profile_at(profile, cells, "share_alone"),
       own_weight   = .profile_at(profile, cells, "own_weight"),
       structured   = as.logical(structured)[1L],
-      rows         = as.character(est$rows %||% NA_character_)[1L])
+      rows         = as.character(est$rows %||% NA_character_)[1L],
+      centres      = .profile_centres(profile, cells))
   }
   part   <- .partition_record(profile)
   nstart <- attr(profile, "nstart", exact = TRUE)

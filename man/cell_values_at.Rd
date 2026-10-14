@@ -120,7 +120,10 @@ location has one, unless its nearest seed has an \code{NA} ID
 (\code{\link[=build_tessellation]{build_tessellation()}} gives \code{NA} in \code{index} to a seed whose cell the
 clip removed). Without \code{seeds}, the polygon of \code{values} that holds the
 location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} with its default
-\code{tie_break}; a location in no polygon has no cell. Polygons without a
+\code{tie_break} and the summary's record of the count, so a location on
+the edge between two cells the profile scored is placed as that
+function places such a row (see "Ties"); a location in no polygon has
+no cell. Polygons without a
 CRS are read as that function read them for the rows of \code{points}: the
 locations are handed to it in the CRS of \code{points}, whatever CRS
 \code{newdata} arrived in.
@@ -159,7 +162,20 @@ that class can hold every ID (see Value).
 
 A location the same distance from two seeds takes the one that comes
 first in \code{seeds}. For the seeds of a \code{\link[=select_resolution]{select_resolution()}} result that is
-the lower-numbered centre, the rule \code{\link[=resolution_profile]{resolution_profile()}} scores with. A
+the lower-numbered centre, the rule \code{\link[=resolution_profile]{resolution_profile()}} scores with.
+When the summary's record of the count holds the centres the profile
+scored and \code{seeds} are those centres (the seeds a selection carries, or
+those a seeding function returns for it), in any order and any CRS, the
+distances are taken to the centres as the record holds them, a tie goes
+to the lower-numbered centre, and each centre gives the ID of the seed
+that stands at it. Seeds count as the centres when they are as many and
+each lies at a different centre, within a thousandth of its distance from
+the next nearest one, so a seed that came back from another CRS with its
+coordinates rounded, or seeds sorted by their cell, do not settle a tie
+another way. A location on the edge between two such cells then takes
+the cell \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a row there, with \code{seeds}
+and without. Other seeds, among them a subset of the centres, are
+searched as given. A
 location the same distance from two locations of scored rows takes the
 one with the lower x coordinate, then the lower y; among scored rows at
 one location that lie in different cells, the cell that comes first in

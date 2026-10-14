@@ -69,7 +69,9 @@ smallest area and, among polygons of equal area (a point on the shared
 edge of two grid cells), the one whose bounding-box centre is lowest,
 then leftmost, so the choice does not depend on the order of the rows;
 \code{"first"} keeps the first match (original order-dependent
-behavior).}
+behavior). On cells built from the centres a profile scored, a point on
+the edge between two of them is placed by the profile's rule whichever
+is given (see Value).}
 
 \item{quiet}{Logical; suppress this function's \code{message()}s (the one
 naming a fallback ID column). It does not silence R warnings. Default
@@ -104,7 +106,9 @@ the study area. With \code{keep_unassigned = TRUE} they are kept with an
 The
 attribute \code{"ties"} records how many features matched more than one
 polygon (with \code{largest}, overlapped several by exactly the same area)
-and had the \code{tie_break} rule decide for them: a list with \code{n},
+and had the \code{tie_break} rule decide for them (on cells built from the
+centres a profile scored, the profile's rule then places the points
+among them, as the last paragraph says): a list with \code{n},
 \code{which} (their row positions in \code{features_sf}), \code{rule} and \code{n_rows}
 (the number of rows returned, which the record was made for). A large
 \code{n} means the polygon layer overlaps, and per-cell counts built from the
@@ -133,6 +137,37 @@ be assigned to another cell than the one it was scored in, and the
 summary does not compare the two for such a layer. To assign the
 features as they were scored, assign their points:
 \code{assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)}.
+
+When that record says the cells are the ones the profile scored
+(\code{scored_cells} is \code{TRUE}: the cells \code{\link[=build_tessellation]{build_tessellation()}} builds on a
+selection's seeds, or on the seeds a seeding function returns for one)
+and holds the centres it scored (\code{count_rule$scored$centres}), a point
+on the edge between two or more of those cells is given the cell
+\code{\link[=resolution_profile]{resolution_profile()}} scored it in: that of its nearest centre,
+measured in the CRS the record names, and of centres the same distance
+away the lower-numbered one. Such points occur on gridded locations
+(raster cell centres, a regular sampling grid), where a row can lie the
+same distance from two centres and the polygons hold it in either cell
+or in both. The rows each cell holds are then the rows its count was
+scored on, and \code{\link[=summarize_by_cell]{summarize_by_cell()}}'s check of them reads \code{"match"}.
+A point counts as on the edge when it lies within a margin of both
+cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
+at a UTM northing of 4,400 km. \code{\link[=build_tessellation]{build_tessellation()}} draws such cells
+in the CRS the record names, around the centres as the record holds
+them, whatever CRS the seeds came back in (unless its \code{crs} names
+another projected CRS), so their corners carry only the rounding of
+that computation, far less than the margin. A point
+farther from its nearest centre's cell keeps the polygon that holds it,
+and so do features that are not points, points without a CRS beside a
+record with one, and a join in longitude and latitude. A centre's cell
+is the one cell that holds it and no other centre; a centre outside a
+boundary that clipped its cell away from it has the cell, among those
+that hold no centre, whose inside is nearest it. Cells built from other
+seeds leave most centres without a cell, and their points to the
+polygons. Polygons without the record, such as polygons
+the caller brings, and cells whose record says \code{scored_cells} is
+\code{FALSE} or \code{NA} (other cells built from the count, such as a lattice
+sized by it) are placed by the polygons alone.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.

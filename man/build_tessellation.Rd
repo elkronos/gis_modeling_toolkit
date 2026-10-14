@@ -132,11 +132,17 @@ indexed, in the equal-area CRS \code{ensure_projected(purpose = "area")} picks
 for the boundary, with a logged warning, as \code{\link[=create_grid_polygons]{create_grid_polygons()}}
 does, so the cells stay equal-area. Seeds that carry the record of how
 their count was set (\code{attr(, "count_rule")}) were scored in the CRS the
-profile worked in, each row in the cell of its nearest centre. Voronoi
-cells built in another projected CRS are the nearest-seed cells of that
-CRS, so a row near a boundary can fall in the neighbouring cell, and
-\code{\link[=summarize_by_cell]{summarize_by_cell()}} then reports that the cells are not the ones
-scored.}
+profile worked in, each row in the cell of its nearest centre. When the
+record says they are the centres it scored and holds them (the seeds of
+a \code{\link[=select_resolution]{select_resolution()}} result, or those a seeding function returns for
+one), \code{method = "voronoi"} builds their cells in that CRS, with no
+\code{crs} or a geographic one, whatever CRS the seeds arrive in, and
+returns them there or in the geographic \code{crs}; see
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}, section "Seeds a profile scored". Voronoi
+cells built in another projected CRS, named here, are the nearest-seed
+cells of that CRS, so a row near a boundary can fall in the
+neighbouring cell, and \code{\link[=summarize_by_cell]{summarize_by_cell()}} then reports that the
+cells are not the ones scored.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

@@ -166,6 +166,42 @@
 }
 
 
+#' Seeds moved onto the centres they stand for
+#'
+#' Seeds whose record sits beside the centres a profile scored
+#' (\code{.scored_centres()}), in the record's CRS (or both without one),
+#' and that are those centres (\code{.seeds_as_centres()}): each seed is
+#' given the coordinates of its centre as the record holds them.  Seeds that
+#' went through another CRS and back differ from them by the rounding of the
+#' two transformations, a few millimetres at most, and the cells drawn on
+#' them would put a point the same distance from two centres that far
+#' inside one cell.
+#'
+#' @param pts The seeds, in the working CRS.
+#' @param rec Their record of the count, or \code{NULL}.
+#' @return \code{pts}, its rows, columns and order unchanged, with the
+#'   centres' coordinates when the seeds are the centres; \code{pts} as it
+#'   is otherwise.
+#' @keywords internal
+#' @noRd
+.seeds_at_centres <- function(pts, rec) {
+  cen <- .scored_centres(rec)
+  if (is.null(cen) || nrow(pts) != nrow(cen)) return(pts)
+  crs <- sf::st_crs(pts)
+  if (is.na(crs) != is.na(rec$crs) || (!is.na(crs) && !isTRUE(crs == rec$crs))) return(pts)
+  if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT")) return(pts)
+  xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
+  of <- .seeds_as_centres(xy, cen)
+  if (is.null(of)) return(pts)
+  at <- integer(nrow(cen))
+  at[of] <- seq_len(nrow(cen))
+  if (identical(xy, cen[at, , drop = FALSE])) return(pts)
+  geom <- sf::st_geometry(sf::st_as_sf(data.frame(x = cen[at, 1L], y = cen[at, 2L]),
+                                       coords = c("x", "y"), crs = crs))
+  sf::st_set_geometry(pts, geom)
+}
+
+
 #' Keep the polygonal part of each clipped cell
 #'
 #' \code{st_intersection()} returns a GEOMETRYCOLLECTION for a cell whose
@@ -850,10 +886,27 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
 #'   in: the cells are built in the local projected CRS [ensure_projected()]
 #'   picks for the points, so they are nearest-point cells on the ground, and
-#'   are then transformed, with long edges densified.
+#'   are then transformed, with long edges densified. Seeds that are the
+#'   centres a profile scored are built in the CRS the profile worked in
+#'   instead (see "Seeds a profile scored").
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
+#' @section Seeds a profile scored:
+#' The seeds of a [select_resolution()] result, and the seeds
+#' [get_voronoi_seeds()] or [voronoi_seeds_kmeans()] return for one, are the
+#' centres [resolution_profile()] scored, and their record of the count
+#' (`attr(, "count_rule")`) says so (`scored_cells = TRUE`) and holds the
+#' centres in the CRS the profile worked in. Unless a projected `crs` is
+#' given, their cells are built in that CRS, whatever CRS the seeds arrive
+#' in (degrees, or the CRS of a boundary they were placed in), and returned
+#' in it, or in a geographic `crs` when one is given. When the seeds are
+#' those centres (as many, each at a different centre, within a thousandth
+#' of its distance from the next nearest), each is first put at its centre
+#' as the record holds it, so rounding the seeds took on in another CRS
+#' does not move an edge. The cells are then the cells each row was scored
+#' in, and [assign_features_to_polygons()] gives a point on an edge between
+#' two of them the cell the profile scored it in.
 #' @return A list with \code{cells}, \code{index}, \code{boundary},
 #'   \code{method} and \code{params}.  \code{index} holds one \code{cell_id}
 #'   per row of \code{points_sf}, and \code{NA} for a point that falls outside
@@ -932,6 +985,13 @@ create_voronoi_polygons <- function(
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
 
+  # Seeds that are the centres a profile scored are drawn in the CRS it
+  # scored them in (the record's), unless a projected `crs` names another:
+  # their cells are then the cells each row was scored in.  Drawn in a CRS
+  # ensure_projected() picked for the seeds' own extent, or in the CRS of a
+  # boundary in another projection, a row near an edge could sit in the
+  # neighbouring cell.
+  scored_crs <- .scored_crs(seed_rule)
   pts <- points_sf
   crs_out <- NULL
   if (!is.null(crs)) {
@@ -944,7 +1004,7 @@ create_voronoi_polygons <- function(
     # the degree-sized hull buffer below as metres.
     if (.is_geographic_crs(crs)) {
       crs_out <- sf::st_crs(pts)
-      pts <- ensure_projected(pts)
+      pts <- if (is.null(scored_crs)) ensure_projected(pts) else sf::st_transform(pts, scored_crs)
       if (!is.null(boundary)) boundary <- .align_crs(boundary, pts)
     }
   } else {
@@ -958,7 +1018,11 @@ create_voronoi_polygons <- function(
     # were tessellated as planar, silently (18% of locations at 55N in a
     # cell that was not their nearest point's), while build_tessellation()
     # projected the very same points.
-    if (.is_longlat(pts) || is.na(sf::st_crs(pts))) pts <- ensure_projected(pts)
+    if (!is.null(scored_crs) && !is.na(sf::st_crs(pts))) {
+      if (!isTRUE(sf::st_crs(pts) == scored_crs)) pts <- sf::st_transform(pts, scored_crs)
+    } else if (.is_longlat(pts) || is.na(sf::st_crs(pts))) {
+      pts <- ensure_projected(pts)
+    }
     if (!is.null(boundary)) {
       # A CRS-less boundary with points just taken as lon/lat gets the same
       # assumption, when its coordinates allow it, as in build_tessellation().
@@ -976,6 +1040,10 @@ create_voronoi_polygons <- function(
       boundary <- .align_crs(boundary, pts)
     }
   }
+  # In the record's CRS, seeds that are its centres stand where the record
+  # holds them, so the edges between their cells are where the profile drew
+  # them, whatever rounding a trip through another CRS left on the seeds.
+  pts <- .seeds_at_centres(pts, seed_rule)
 
   boundary_source <- "boundary"
   if (is.null(boundary) && !is.null(cover_geom)) {
@@ -1620,11 +1688,17 @@ create_grid_polygons <- function(
 #'   for the boundary, with a logged warning, as [create_grid_polygons()]
 #'   does, so the cells stay equal-area. Seeds that carry the record of how
 #'   their count was set (`attr(, "count_rule")`) were scored in the CRS the
-#'   profile worked in, each row in the cell of its nearest centre. Voronoi
-#'   cells built in another projected CRS are the nearest-seed cells of that
-#'   CRS, so a row near a boundary can fall in the neighbouring cell, and
-#'   [summarize_by_cell()] then reports that the cells are not the ones
-#'   scored.
+#'   profile worked in, each row in the cell of its nearest centre. When the
+#'   record says they are the centres it scored and holds them (the seeds of
+#'   a [select_resolution()] result, or those a seeding function returns for
+#'   one), `method = "voronoi"` builds their cells in that CRS, with no
+#'   `crs` or a geographic one, whatever CRS the seeds arrive in, and
+#'   returns them there or in the geographic `crs`; see
+#'   [create_voronoi_polygons()], section "Seeds a profile scored". Voronoi
+#'   cells built in another projected CRS, named here, are the nearest-seed
+#'   cells of that CRS, so a row near a boundary can fall in the
+#'   neighbouring cell, and [summarize_by_cell()] then reports that the
+#'   cells are not the ones scored.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1782,6 +1856,14 @@ build_tessellation <- function(
   boundary_ll <- NULL      # the boundary before alignment, for that check
   pts_out     <- NULL      # the points in `crs_out`, for the triangles
   projected_msg <- FALSE
+  # Seeds that are the centres a profile scored are tessellated in the CRS
+  # it scored them in (the record's), unless a projected `crs` names
+  # another, so their Voronoi cells are the cells each row was scored in.
+  # ensure_projected() picks a CRS for the seeds' own extent, which on a
+  # wide lon/lat layer is not the one it picked for the points profiled, and
+  # seeds placed in a boundary's CRS arrive in that one.
+  scored_crs <- if (identical(method, "voronoi")) .scored_crs(.count_rule_get(points_sf))
+                else NULL
   if (!is.null(crs)) {
     points_sf <- .transform_or_stamp(points_sf, crs, "points_sf", "build_tessellation")
     if (!is.null(boundary))
@@ -1801,7 +1883,8 @@ build_tessellation <- function(
       crs_out     <- sf::st_crs(points_sf)
       pts_out     <- points_sf
       boundary_ll <- boundary
-      points_sf   <- ensure_projected(points_sf)
+      points_sf   <- if (is.null(scored_crs)) ensure_projected(points_sf)
+                     else sf::st_transform(points_sf, scored_crs)
       lonlat_work <- TRUE
       if (!is.null(boundary)) boundary <- .align_crs(boundary, points_sf)
     }
@@ -1824,12 +1907,24 @@ build_tessellation <- function(
     if (!is.null(boundary) && lonlat_in && is.na(sf::st_crs(boundary)))
       boundary <- .crsless_boundary_as_lonlat(boundary, sf::st_crs(points_sf),
                                               "build_tessellation")
-    if (lonlat_in || is.na(sf::st_crs(points_sf)))
+    # Seeds that are the centres a profile scored, in a CRS: the record's.
+    to_scored <- !is.null(scored_crs) && !is.na(sf::st_crs(points_sf))
+    if (!to_scored && (lonlat_in || is.na(sf::st_crs(points_sf))))
       points_sf <- ensure_projected(points_sf)
     projected_msg <- lonlat_in
     assumed <- attr(points_sf, "crs_assumed")
     lonlat_work <- lonlat_in || identical(assumed, "EPSG:4326")
-    if (!is.null(boundary)) {
+    if (to_scored && !isTRUE(sf::st_crs(points_sf) == scored_crs)) {
+      # A boundary without a CRS is read in the CRS the seeds arrived in, and
+      # then moved to the record's with them.
+      seeds_in   <- points_sf
+      points_sf  <- sf::st_transform(points_sf, scored_crs)
+      projected_msg <- TRUE
+      if (!is.null(boundary)) {
+        boundary <- .resolve_crsless_pair(seeds_in, boundary, "build_tessellation")$boundary
+        boundary <- .align_crs(boundary, points_sf)
+      }
+    } else if (!is.null(boundary)) {
       # Only a POSITIVE assumption is a CRS.  ensure_projected() records
       # "none" for CRS-less points it left planar, and st_crs("none") is an
       # error ("invalid crs: none"), so every method failed on CRS-less

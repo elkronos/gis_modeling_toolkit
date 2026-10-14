@@ -867,7 +867,8 @@ test_that("the record has the fields of the design and no other", {
          scored = list(estimate = "pooled", n = 600L, cells = unname(est$cells[["133"]]),
                        loo = p$loo, loo_se = p$loo_se, loo_one_cell = est$loo_one_cell,
                        share_alone = p$share_alone, own_weight = p$own_weight,
-                       structured = s$structured, rows = "all"),
+                       structured = s$structured, rows = "all",
+                       centres = unname(attr(p, "centres")[["133"]])),
          partition = list(kind = "density", init = "kmeans++", density_power = 1,
                           density_k = 8L, nstart = attr(p, "nstart")),
          crs = sf::st_crs(pts), scored_cells = NA))
