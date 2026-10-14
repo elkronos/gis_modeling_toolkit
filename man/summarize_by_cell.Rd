@@ -16,7 +16,9 @@ summarize_by_cell(
   deff_max_n = 500L,
   quiet = TRUE,
   conf_level = NULL,
-  area = FALSE
+  area = FALSE,
+  estimate = c("mean", "pooled"),
+  obs_level = NULL
 )
 }
 \arguments{
@@ -181,6 +183,37 @@ with s2, sf's default), not a planar area in squared degrees, and the
 distortion check passes by construction; with s2 switched off, sf needs
 the lwgeom package for that area and the request is refused without
 it.  The measured spread is attached as \code{attr(, "area_error")}.}
+
+\item{estimate}{Which value of a cell the frame reports: \code{"mean"}
+(default) or \code{"pooled"}. With \code{"mean"} the frame is the one described
+above. With \code{"pooled"} every numeric response and predictor column also
+gets a pooled value, \code{w * m + (1 - w) * t}: the cell's own mean \code{m} and a
+target \code{t}, the mean of the rows of the 8 cells whose observations'
+centroids are nearest (all the other cells when there are fewer than 10;
+the polygons are not read). The own weight is
+\code{w = tau2 / (tau2 + sigma2 / n)}, where \code{n} is the cell's count,
+\code{sigma2} the spread of the observations about their cell's mean and
+\code{tau2} the mean squared distance between a cell's level and its target.
+Each column is pooled on its own rows: those with a value, a cell and a
+location. \code{agg_funs}, \code{deff}, \code{sac} and \code{conf_level} do not enter the
+pooled columns, and every other column is computed as with \code{"mean"}.
+Lon/lat coordinates, and coordinates without a CRS that look like
+degrees, are projected for the distances between centroids, as
+\code{\link[=resolution_profile]{resolution_profile()}} projects them. The projection is chosen from
+every row of the layer, those without a value or a cell included, so on
+such input the rows a column does not use can still decide the CRS its
+distances are measured in; a layer projected beforehand is used in its
+own CRS. See "Value" for the columns, the attributes and the warnings.}
+
+\item{obs_level}{Optional level in (0, 1), such as \code{0.90}, of an interval
+for one further observation in a cell, located like the data. It needs
+\code{estimate = "pooled"}: the interval is the pooled value plus the
+\code{(1 - obs_level) / 2} and \code{(1 + obs_level) / 2} quantiles of the
+leave-one-out residuals of the pooled values, so its two offsets are the
+same in every cell. It is a statement about observations on average,
+not about each cell. It is a separate argument from \code{conf_level}, whose
+interval is for a mean and is not a range for an observation. Default
+\code{NULL}: no such interval.}
 }
 \value{
 A tibble/data.frame (or sf if cells_sf given) with per-cell
@@ -246,6 +279,60 @@ are coerced to character in order to join (logged as a warning), and the
 returned ID column is therefore character. Whole numbers are written out
 in full for that (\code{"100000"}, never \code{"1e+05"}), so an integer and a
 double ID of the same cell still match.
+
+With \code{estimate = "pooled"}, each numeric column \code{v} with its prefix
+(\code{resp_} or \code{pred_}) gains \verb{..pooled_<prefix><v>} (the pooled value),
+\verb{..pooled_w_<prefix><v>} (the own weight, 0 to 1; it is not a regression
+weight) and \verb{..pooled_target_<prefix><v>} (the target), and with
+\code{obs_level} also \verb{..obs_lo_<prefix><v>} and \verb{..obs_hi_<prefix><v>}.
+They follow every column listed above and precede \code{cell_area} and
+\code{n_per_area}, the response's first, then each predictor's. A cell with
+no row that has a value, a cell and a location gets \code{NA}, never a value
+made from its neighbours. Two attributes are attached.
+\code{attr(, "pooled")}, of class \code{"spatialkit_pooled"}, records what was
+fitted: \code{toward}, \code{neighbours}, \code{crs} (the CRS the centroid distances
+were measured in), \code{obs_level}, \code{conf_level}, \code{intervals} and \code{columns},
+a list with one entry per pooled column holding \code{column}, \code{role}
+(\code{"response"} or \code{"predictor"}), \code{n} (rows used), \code{cells}, \code{df} (values
+beyond one per cell, which \code{sigma2} rests on), \code{neighbours} (the cells
+in each target), \code{sigma2}, \code{tau2}, \code{own_weight} (the median weight),
+\code{share_alone} (the share of rows that are the only one in their cell),
+\code{loo} and \code{loo_se} (the leave-one-out mean squared error of the pooled
+value, and its standard error over rows), \code{loo_one_cell} (the same error
+with one mean for all rows), \code{structured} and \code{structure_p} (whether the
+cells predict a left-out observation better than one mean, and the
+p-value of the F test of the cell means against one mean, which has to
+be below 0.05 as well), \code{offsets} (the two offsets of the interval),
+\code{repeated}, \code{skipped}, \code{constant} and \code{status}. \code{attr(, "intervals")} is
+the same data frame as \code{attr(, "pooled")$intervals}: one row per family
+of interval columns in the frame, saying what it covers, what it is
+centred on, its level and its method. Away from the observations no
+interval here is calibrated.
+
+Where the pooled columns of a column cannot be computed they are \code{NA},
+with a warning of class \code{"spatialkit_pool_unavailable"} and not an
+error: a layer without geometry, no row with a value, a cell and a
+location, no cell with two values, or more cells than the neighbour
+search may compare without the 'FNN' package
+(\code{options(spatialkit.exact_pairs_max = )}, 2e9 pairs by default). The
+other warnings of the pooled columns are of class
+\code{"spatialkit_pool_degenerate"} (one cell, no spread inside any cell, or
+every own weight 0), \code{"spatialkit_pool_few_cells"} (2 to 9 cells, where
+each target is the mean of all the other cells),
+\code{"spatialkit_pool_few_df"} (\code{sigma2} rests on fewer than 30 values
+beyond one per cell), \code{"spatialkit_no_structure"} (\code{structured} is
+\code{FALSE}: the pooled values predict a left-out observation no better
+than one mean for all rows, or the F test does not tell the cell means
+from one mean; the text says which, and \code{beats} in the condition is
+\code{TRUE} for the second), \code{"spatialkit_pool_rows_skipped"} (rows with a
+value and a cell and no location) and, with \code{obs_level},
+\code{"spatialkit_repeated_locations"} and \code{"spatialkit_few_residuals"}.
+Each is raised once per call and reason, for all the columns it applies
+to, and carries them in \code{columns}; the numbers of each column are in
+\code{attr(, "pooled")}. The two about few cells and few values are raised
+for columns whose weights were estimated, and the two of \code{obs_level} for
+columns whose interval is read from residuals, so a constant column
+raises \code{"spatialkit_pool_degenerate"} and no other.
 }
 \description{
 Aggregates an sf point dataset into one row per cell. By default computes

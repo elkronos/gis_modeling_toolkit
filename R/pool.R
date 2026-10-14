@@ -957,3 +957,52 @@
   as_before <- c(FALSE, x[-1L] == x[-n] & y[-1L] == y[-n])
   sum(as_before | c(as_before[-1L], FALSE))
 }
+
+
+# -----------------------------------------------------------------------------
+# The intervals a summary's frame holds
+# -----------------------------------------------------------------------------
+
+#' The intervals in a summary's frame, and what each covers
+#'
+#' One row per family of interval columns in the frame.  The interval for one
+#' observation is centred on the pooled value; the t interval is centred on
+#' the plain mean, and what it covers follows the design effect: the cell's
+#' own mean at a design effect of 1, the cell mean as an estimate of the
+#' population mean under any other.  Neither row is written when its level
+#' was not asked for.
+#'
+#' @param obs_level Level of the interval for one observation, or
+#'   \code{NULL}.
+#' @param conf_level Level of the plain mean's t interval, or \code{NULL}.
+#' @param deff_label The design effect the t interval was built with, as it
+#'   is written in a call: \code{1}, \code{"kish"} (with its quotes),
+#'   \code{"variogram"} or a number.  It reads \code{1} exactly when the
+#'   interval carries none, which is what \code{.deff_label()} writes.
+#' @return A data frame with the columns \code{columns} (the stems of the two
+#'   interval columns), \code{covers}, \code{centre}, \code{level} and
+#'   \code{method}; no row when both levels are \code{NULL}.
+#' @keywords internal
+#' @noRd
+.intervals_table <- function(obs_level, conf_level, deff_label) {
+  obs <- !is.null(obs_level)
+  ci  <- !is.null(conf_level)
+  own <- identical(as.character(deff_label), "1")
+  data.frame(
+    columns = c(character(0),
+                if (obs) "..obs_lo_, ..obs_hi_",
+                if (ci)  "..ci_lo_, ..ci_hi_"),
+    covers  = c(character(0),
+                if (obs) paste0("one further observation in the cell, located like the data; ",
+                                "on average over observations, not cell by cell"),
+                if (ci && own) paste0("the cell's own mean, when its observations are spread ",
+                                      "through the cell; not a range for one observation"),
+                if (ci && !own) paste0("the cell mean as an estimate of the population mean; ",
+                                       "not a range for one observation")),
+    centre  = c(character(0), if (obs) "pooled value", if (ci) "plain mean"),
+    level   = c(numeric(0), if (obs) as.numeric(obs_level), if (ci) as.numeric(conf_level)),
+    method  = c(character(0),
+                if (obs) "quantiles of leave-one-out residuals",
+                if (ci)  sprintf("t, deff = %s", deff_label)),
+    stringsAsFactors = FALSE)
+}
