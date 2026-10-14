@@ -50,7 +50,9 @@ an sf or sfc layer, whose CRS is used. A projected CRS is the working
 CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
 in: the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
 picks for the points, so they are nearest-point cells on the ground, and
-are then transformed, with long edges densified.}
+are then transformed, with long edges densified. Seeds that are the
+centres a profile scored are built in the CRS the profile worked in
+instead (see "Seeds a profile scored").}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
@@ -144,6 +146,24 @@ a cover (seeds bound with \code{rbind()}, which drops the attribute, or built
 by hand) gets the seeds' own hull and a warning of class
 \code{"spatialkit_no_cover"}.
 }
+\section{Seeds a profile scored}{
+
+The seeds of a \code{\link[=select_resolution]{select_resolution()}} result, and the seeds
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} return for one, are the
+centres \code{\link[=resolution_profile]{resolution_profile()}} scored, and their record of the count
+(\code{attr(, "count_rule")}) says so (\code{scored_cells = TRUE}) and holds the
+centres in the CRS the profile worked in. Unless a projected \code{crs} is
+given, their cells are built in that CRS, whatever CRS the seeds arrive
+in (degrees, or the CRS of a boundary they were placed in), and returned
+in it, or in a geographic \code{crs} when one is given. When the seeds are
+those centres (as many, each at a different centre, within a thousandth
+of its distance from the next nearest), each is first put at its centre
+as the record holds it, so rounding the seeds took on in another CRS
+does not move an edge. The cells are then the cells each row was scored
+in, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a point on an edge between
+two of them the cell the profile scored it in.
+}
+
 \examples{
 library(sf)
 set.seed(1)

@@ -321,6 +321,22 @@ old behaviour where there is a way.
   (`spatialkit_cells_differ`) when the cells or rows it is given are not the
   ones the count was scored on.
 
+* The record holds the centres the profile scored (`scored$centres`).
+  `build_tessellation(method = "voronoi")` and `create_voronoi_polygons()`
+  build the cells of those centres in the CRS the profile worked in, with no
+  `crs` or a geographic one, whatever CRS the seeds arrive in (degrees, or
+  the CRS of a boundary they were placed in), each seed put at its centre as
+  the record holds it.  On such cells `assign_features_to_polygons()` gives
+  a point on the edge between two cells the cell `resolution_profile()`
+  scored it in: its nearest centre in the record's CRS, and of two the same
+  distance away the lower-numbered one.  On gridded locations (raster cell
+  centres, a regular sampling grid) the rows each cell holds are then the
+  rows its count was scored on, and the summary's check reads `match`.
+  `cell_values_at()` places a location on such an edge in the same cell,
+  without `seeds` and with the seeds in any order.  Polygons without the
+  record, cells whose record says they are other cells built from the
+  count, and features that are not points are placed by the polygons alone.
+
 * New `cell_values_at()`: the value and interval of the cell at other
   locations, with each location's distance from the nearest observation.
 

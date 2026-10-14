@@ -3323,8 +3323,10 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{scored} (what the profile scored at \code{best} for its
 #'   estimate: \code{estimate}, \code{n}, \code{cells}, \code{loo},
 #'   \code{loo_se}, \code{loo_one_cell}, \code{share_alone},
-#'   \code{own_weight}, \code{structured} and \code{rows}; \code{NULL}
-#'   without an estimate), \code{partition}, \code{crs} and
+#'   \code{own_weight}, \code{structured}, \code{rows} and \code{centres},
+#'   the matrix of the centres the rows were scored in, in \code{crs} and
+#'   in the profile's order; \code{NULL} without an estimate),
+#'   \code{partition}, \code{crs} and
 #'   \code{scored_cells} (\code{NA}: the record stands for a count).
 #'   \code{seeds} carries the same record as \code{attr(, "count_rule")}
 #'   with \code{scored_cells = TRUE}, since they are the centres that were

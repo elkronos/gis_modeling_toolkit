@@ -330,7 +330,8 @@ record with one more element, \code{check}, whatever \code{estimate} is. The
 record is the one \code{\link[=select_resolution]{select_resolution()}} wrote: \code{rule}, \code{estimate} (the
 cell value the count was chosen for), \code{cells}, \code{obs_per_cell},
 \code{response}, \code{scored} (what the profile scored at the count: the rows,
-the cells that hold one and the leave-one-out error among them),
+the cells that hold one, the leave-one-out error among them, and the
+centres the rows were given to),
 \code{partition}, \code{crs} and \code{scored_cells}. It has class
 \code{"spatialkit_count_rule"} and a print method. \code{check$estimate} is
 \code{"match"} or \code{"mismatch"}: whether the summary reports the estimate the
@@ -362,11 +363,19 @@ neither warning.
 A row that is the same distance from two centres lies on the boundary
 between their cells, which happens on gridded locations.
 \code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the
-lower-numbered centre. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} places it by the
-polygons: in the one that holds it, or, at its default \code{tie_break}, in
-the smaller of two that share it. The two can therefore place it in
-different cells, and the comparison then reports \code{"differ"} on cells and
-rows nobody changed, with \code{what = "loo"} when it finds the same rows in
+lower-numbered centre, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
+built from the centres the profile scored, gives a point on that
+boundary the same cell, measured in the CRS the record names, so the
+comparison reads \code{"match"} on gridded locations too.
+\code{\link[=build_tessellation]{build_tessellation()}} draws those cells in the CRS the record names,
+whatever CRS the seeds arrive in, unless its \code{crs} names another
+projected CRS. Cells built in another projected CRS are the
+nearest-centre cells of that CRS, so a row near a boundary, on it or
+not, can sit in another cell than the profile put it in. So can a row
+joined in longitude and latitude (rows and cells both in degrees), and
+a row that reached the record's CRS by another transformation than the
+profile's, which can settle a tie the other way. The comparison then
+reports \code{"differ"}, with \code{what = "loo"} when it finds the same rows in
 the same number of cells with another leave-one-out error. The
 summary's own numbers describe the cells as assigned.
 
