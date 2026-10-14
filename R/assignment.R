@@ -108,6 +108,23 @@
 #'   since the rows are the same; see \code{\link{[.spatialkit_rows}} for
 #'   what binding such data frames does. The `"unassigned"` record is
 #'   stamped and removed the same way.
+#'
+#'   When `polygons_sf` carries `attr(, "count_rule")`, the record of how
+#'   its cell count was set (cells from [build_tessellation()] on seeds
+#'   placed from a [select_resolution()] result or from a profile built with
+#'   an `estimate`), the result carries the same record.
+#'   [summarize_by_cell()] reads it and checks that the rows and cells it is
+#'   given are the ones the count was scored on. It is a plain attribute: a
+#'   row subset keeps it and `dplyr::mutate()`, `dplyr::select()` and
+#'   `dplyr::arrange()` drop it, which is why the summary also looks for it
+#'   on its `cells_sf`. The profile scores a feature that is not a point at
+#'   one point of it (`coerce_to_points(, "auto")`), in the cell of the
+#'   nearest centre; this function gives a polygon feature to the cell it
+#'   overlaps most. A feature that straddles a cell boundary can therefore
+#'   be assigned to another cell than the one it was scored in, and the
+#'   summary does not compare the two for such a layer. To assign the
+#'   features as they were scored, assign their points:
+#'   `assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -144,6 +161,9 @@ assign_features_to_polygons <- function(
   if (nrow(polygons_sf) == 0L)
     stop("assign_features_to_polygons(): `polygons_sf` has zero rows.")
   tie_break <- match.arg(tie_break)
+  # The record of how the cells' count was set, when they carry one: copied
+  # onto the assigned rows, where summarize_by_cell() looks for it first.
+  count_rule <- .count_rule_get(polygons_sf)
 
   orig_crs <- sf::st_crs(features_sf)
   # The join runs in the polygons' CRS whenever that is projected: it is the
@@ -489,7 +509,7 @@ assign_features_to_polygons <- function(
   joined <- .set_row_record(joined, "unassigned",
                             list(n = n_unassigned,
                                  which = as.integer(unassigned_rows)))
-  joined
+  .count_rule_put(joined, count_rule)
 }
 
 
@@ -1277,7 +1297,10 @@ assign_features_to_polygons <- function(
 #'   every row of the layer, those without a value or a cell included, so on
 #'   such input the rows a column does not use can still decide the CRS its
 #'   distances are measured in; a layer projected beforehand is used in its
-#'   own CRS. See "Value" for the columns, the attributes and the warnings.
+#'   own CRS. When the input carries the record of its cells' count (see
+#'   "Value") and that record names a projected CRS, the one the profile
+#'   worked in, the distances are measured in it, whatever CRS the layer is
+#'   in. See "Value" for the columns, the attributes and the warnings.
 #' @param obs_level Optional level in (0, 1), such as `0.90`, of an interval
 #'   for one further observation in a cell, located like the data. It needs
 #'   `estimate = "pooled"`: the interval is the pooled value plus the
@@ -1404,6 +1427,64 @@ assign_features_to_polygons <- function(
 #'   for columns whose weights were estimated, and the two of `obs_level` for
 #'   columns whose interval is read from residuals, so a constant column
 #'   raises `"spatialkit_pool_degenerate"` and no other.
+#'
+#'   When `assigned_points_sf` carries `attr(, "count_rule")`, or `cells_sf`
+#'   does (the assigned layer's is read first), the result carries that
+#'   record with one more element, `check`, whatever `estimate` is. The
+#'   record is the one [select_resolution()] wrote: `rule`, `estimate` (the
+#'   cell value the count was chosen for), `cells`, `obs_per_cell`,
+#'   `response`, `scored` (what the profile scored at the count: the rows,
+#'   the cells that hold one and the leave-one-out error among them),
+#'   `partition`, `crs` and `scored_cells`. It has class
+#'   `"spatialkit_count_rule"` and a print method. `check$estimate` is
+#'   `"match"` or `"mismatch"`: whether the summary reports the estimate the
+#'   count was chosen for (`NA` for a count chosen for neither). A mismatch
+#'   is a warning of class `"spatialkit_estimate_mismatch"` (fields
+#'   `chosen_for`, `reported`, `rule`, `cells`), and the summary is returned
+#'   as asked. `check$cells` is `"match"`, `"differ"` or `"not checked:
+#'   <reason>"`: the response is fitted again on the rows and cells given,
+#'   with the estimate the profile scored, and its scored rows, its occupied
+#'   cells and its leave-one-out error are compared with the record's, the
+#'   error to a relative tolerance of 1e-8. The first that differs is a
+#'   warning of class `"spatialkit_cells_differ"` (fields `what`: `"n"`,
+#'   `"cells"` or `"loo"`; `scored`; `found`): rows were dropped or moved
+#'   between cells, or the layer is another one. The same class with `what =
+#'   "record"` (fields `field`, `scored`, `found`) is raised when the
+#'   assigned layer and `cells_sf` carry different records, so the rows were
+#'   assigned to other cells than the `cells_sf` given: the cells of another
+#'   selection, or the scored cells of a selection beside other cells built
+#'   from its count, such as a lattice sized by it. `check$cells` is then
+#'   `"differ"`, whatever the comparison of the rows finds. The comparison
+#'   is not made, and `check$cells` says why, when the response is another
+#'   column or was not summarised, the profile read the selection half
+#'   (`select_on = "split"`), the cells are not the ones the profile scored
+#'   (`scored_cells` is `FALSE` or `NA`), the profile scored no estimate, the
+#'   input has no coordinates, the features are not points (see
+#'   [assign_features_to_polygons()]), or the fit was stopped by the limit on
+#'   an exact search without the 'FNN' package. Cells and rows without a
+#'   record, such as polygons the caller brings, are not checked and raise
+#'   neither warning.
+#'
+#'   A row that is the same distance from two centres lies on the boundary
+#'   between their cells, which happens on gridded locations.
+#'   [resolution_profile()] scores such a row in the cell of the
+#'   lower-numbered centre. [assign_features_to_polygons()] places it by the
+#'   polygons: in the one that holds it, or, at its default `tie_break`, in
+#'   the smaller of two that share it. The two can therefore place it in
+#'   different cells, and the comparison then reports `"differ"` on cells and
+#'   rows nobody changed, with `what = "loo"` when it finds the same rows in
+#'   the same number of cells with another leave-one-out error. The
+#'   summary's own numbers describe the cells as assigned.
+#'
+#'   The comparison uses the fit of the pooled columns when that is a fit of
+#'   the estimate the profile scored, and fits the response once more
+#'   otherwise. Without the 'FNN' package that fit compares every pair of
+#'   cell centroids (pooled values) or, for each row alone in its cell,
+#'   every other location (plain means), and above
+#'   `options(spatialkit.exact_pairs_max = )` pairs it is not made
+#'   (`"not checked: work limit"`). A summary is not compared when neither
+#'   layer carries the record: `attr(x, "count_rule") <- NULL` on the
+#'   assigned layer and on `cells_sf` removes it.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -1538,6 +1619,17 @@ summarize_by_cell <- function(assigned_points_sf,
                           "lon/lat input -- and pass those."),
                    .fold_crs_label(cells_sf), 100 * area_err), call. = FALSE)
   }
+  # The record of how the cells' count was set, when the input carries one:
+  # on the assigned rows first, on the cells second.  It is read from the
+  # cells here, before that layer is cut down to its ID column.
+  rule_rows  <- .count_rule_get(assigned_points_sf)
+  rule_cells <- if (is.null(cells_sf)) NULL else .count_rule_get(cells_sf)
+  count_rule <- if (!is.null(rule_rows)) rule_rows else rule_cells
+  # The CRS the profile worked in, in which the pooled values' distances are
+  # then measured too.
+  count_crs <- if (!is.null(count_rule) && inherits(count_rule$crs, "crs") &&
+                   !is.na(count_rule$crs) && !isTRUE(sf::st_is_longlat(count_rule$crs)))
+    count_rule$crs else NULL
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
@@ -2380,6 +2472,7 @@ summarize_by_cell <- function(assigned_points_sf,
   # values and its position, and before the join below adds the geometry.
   # Nothing here reads `agg_funs` or `deff`: a column is pooled on its own
   # scored rows, from their values, their cells and their coordinates.
+  pooled <- NULL
   if (identical(estimate, "pooled") && (has_resp || has_pred)) {
     # The design effect the t interval carries is the one recorded above as
     # applied, not the one asked for: a refused number, and Kish ICCs of 0 for
@@ -2395,11 +2488,42 @@ summarize_by_cell <- function(assigned_points_sf,
         # column's standard error as it is.
         kish_zero = if (use_kish)
           unique(c(if (has_resp && resp_rho <= 0) resp_num,
-                   if (has_pred) pred_num[pred_rho <= 0]))))
+                   if (has_pred) pred_num[pred_rho <= 0]))),
+      crs = count_crs)
     for (nm in names(pooled$columns)) out[[nm]] <- pooled$columns[[nm]]
     attr(out, "pooled")    <- pooled$record
     attr(out, "intervals") <- pooled$record$intervals
     .pooled_warnings(pooled$events, obs_level)
+  }
+
+  # --- the record of how the cells' count was set ---
+  # Read and checked whatever `estimate` is, and attached with the result of
+  # its checks: whether the summary reports the estimate the count was
+  # chosen for, and whether the cells and rows it was given are the ones the
+  # profile scored.  Nothing above depends on it but the CRS of the pooled
+  # values' distances.
+  if (!is.null(count_rule)) {
+    # What the engine finds for the response on the rows summarised.  Under
+    # pooled values with a count scored for them it is the fit just made;
+    # otherwise one more fit of the response.
+    found <- function(est) {
+      if (identical(est, "pooled") && !is.null(pooled)) {
+        r <- pooled$record$columns[[paste0("resp_", response_var)]]
+        return(list(n = r$n, cells = r$cells, loo = r$loo, status = r$status))
+      }
+      loc <- if (!is.null(pooled)) pooled$loc else .pooled_xy(assigned_points_sf, count_crs)
+      res <- .pool_column(df[[response_var]], df[[id_col]], loc$xy, NULL, want = est,
+                          use_fnn = .has_backend("FNN"))
+      list(n = res$record$n, cells = res$record$cells,
+           loo = if (is.null(res$fit)) NA_real_
+                 else if (identical(est, "pooled")) res$fit$loo_pooled
+                 else res$fit$loo_mean,
+           status = res$record$status)
+    }
+    attr(out, "count_rule") <- .count_rule_check(
+      count_rule, other = if (!is.null(rule_rows)) rule_cells,
+      estimate = estimate, response_var = response_var, summarised = resp_num,
+      layer = assigned_points_sf, found = found)
   }
 
   if (!is.null(cells_sf)) {
@@ -2489,10 +2613,14 @@ summarize_by_cell <- function(assigned_points_sf,
         deff_attr   <- attr(out, "deff_applied")
         icc_attr    <- attr(out, "icc")
         pooled_attr <- attr(out, "pooled")
+        rule_attr   <- attr(out, "count_rule")
         pre_join_id <- as.character(out[[id_col]])
 
         out <- dplyr::left_join(cells_slim, out, by = id_col)
         if (!is.null(icc_attr)) attr(out, "icc") <- icc_attr
+        # The record of the count, with the result of its checks.  It is the
+        # one read above, not whatever the cells' own attribute holds.
+        attr(out, "count_rule") <- rule_attr
         # The record of the pooled columns and its table of intervals, which
         # the join drops as it drops "icc".
         if (!is.null(pooled_attr)) {
@@ -2581,12 +2709,15 @@ summarize_by_cell <- function(assigned_points_sf,
 #' polygon's, and it is projected before any distance is taken.
 #'
 #' @param layer The assigned layer.
+#' @param crs \code{NULL}, or the projected CRS to measure in: the one the
+#'   record of the cells' count names, in which the profile measured.  The
+#'   points are then put in that CRS, and no other is chosen.
 #' @return \code{NULL} when the layer has no geometry (a plain data frame);
 #'   otherwise a list with \code{xy}, a two-column matrix, and \code{crs},
 #'   the CRS its distances are measured in.
 #' @keywords internal
 #' @noRd
-.pooled_xy <- function(layer) {
+.pooled_xy <- function(layer, crs = NULL) {
   if (!inherits(layer, "sf")) return(NULL)
   if (nrow(layer) == 0L)
     return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
@@ -2597,7 +2728,8 @@ summarize_by_cell <- function(assigned_points_sf,
         if (grepl("st_point_on_surface may not give correct results",
                   conditionMessage(w), fixed = TRUE))
           invokeRestart("muffleWarning"))
-  layer <- ensure_projected(layer)
+  layer <- if (is.null(crs)) ensure_projected(layer)
+           else ensure_projected(layer, target_crs = crs)
   xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
   far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
   xy[which(far), ] <- NA_real_
@@ -2655,16 +2787,19 @@ summarize_by_cell <- function(assigned_points_sf,
 #' @param obs_level,conf_level The two levels of the call, or \code{NULL}.
 #' @param deff_label The design effect of the t interval, as
 #'   \code{.intervals_table()} takes it.
+#' @param crs \code{NULL}, or the CRS the distances are measured in, as
+#'   \code{.pooled_xy()} takes it.
 #' @return A list: \code{columns}, the new columns by name, in the order they
 #'   are appended; \code{record}, the list of class \code{spatialkit_pooled};
-#'   and \code{events}, what \code{.pooled_warnings()} reads.
+#'   \code{events}, what \code{.pooled_warnings()} reads; and \code{loc}, the
+#'   coordinates the columns were fitted on (\code{.pooled_xy()}'s list).
 #' @keywords internal
 #' @noRd
 .pooled_columns <- function(layer, df, id_col, out_ids, resp_num, pred_num,
-                            obs_level, conf_level, deff_label) {
+                            obs_level, conf_level, deff_label, crs = NULL) {
   use_fnn <- .has_backend("FNN")
   id   <- df[[id_col]]
-  loc  <- .pooled_xy(layer)
+  loc  <- .pooled_xy(layer, crs)
   xy   <- loc$xy
   cols <- unique(c(resp_num, pred_num))
   located <- if (is.null(xy)) NULL else is.finite(xy[, 1L]) & is.finite(xy[, 2L])
@@ -2734,7 +2869,7 @@ summarize_by_cell <- function(assigned_points_sf,
     limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
     skipped_rows  = sum(unlocated),
     skipped_cells = length(unique(id[unlocated])))
-  list(columns = columns, record = record, events = events)
+  list(columns = columns, record = record, events = events, loc = loc)
 }
 
 

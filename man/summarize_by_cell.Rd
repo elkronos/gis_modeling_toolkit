@@ -203,7 +203,10 @@ degrees, are projected for the distances between centroids, as
 every row of the layer, those without a value or a cell included, so on
 such input the rows a column does not use can still decide the CRS its
 distances are measured in; a layer projected beforehand is used in its
-own CRS. See "Value" for the columns, the attributes and the warnings.}
+own CRS. When the input carries the record of its cells' count (see
+"Value") and that record names a projected CRS, the one the profile
+worked in, the distances are measured in it, whatever CRS the layer is
+in. See "Value" for the columns, the attributes and the warnings.}
 
 \item{obs_level}{Optional level in (0, 1), such as \code{0.90}, of an interval
 for one further observation in a cell, located like the data. It needs
@@ -333,6 +336,62 @@ to, and carries them in \code{columns}; the numbers of each column are in
 for columns whose weights were estimated, and the two of \code{obs_level} for
 columns whose interval is read from residuals, so a constant column
 raises \code{"spatialkit_pool_degenerate"} and no other.
+
+When \code{assigned_points_sf} carries \code{attr(, "count_rule")}, or \code{cells_sf}
+does (the assigned layer's is read first), the result carries that
+record with one more element, \code{check}, whatever \code{estimate} is. The
+record is the one \code{\link[=select_resolution]{select_resolution()}} wrote: \code{rule}, \code{estimate} (the
+cell value the count was chosen for), \code{cells}, \code{obs_per_cell},
+\code{response}, \code{scored} (what the profile scored at the count: the rows,
+the cells that hold one and the leave-one-out error among them),
+\code{partition}, \code{crs} and \code{scored_cells}. It has class
+\code{"spatialkit_count_rule"} and a print method. \code{check$estimate} is
+\code{"match"} or \code{"mismatch"}: whether the summary reports the estimate the
+count was chosen for (\code{NA} for a count chosen for neither). A mismatch
+is a warning of class \code{"spatialkit_estimate_mismatch"} (fields
+\code{chosen_for}, \code{reported}, \code{rule}, \code{cells}), and the summary is returned
+as asked. \code{check$cells} is \code{"match"}, \code{"differ"} or \code{"not checked: <reason>"}: the response is fitted again on the rows and cells given,
+with the estimate the profile scored, and its scored rows, its occupied
+cells and its leave-one-out error are compared with the record's, the
+error to a relative tolerance of 1e-8. The first that differs is a
+warning of class \code{"spatialkit_cells_differ"} (fields \code{what}: \code{"n"},
+\code{"cells"} or \code{"loo"}; \code{scored}; \code{found}): rows were dropped or moved
+between cells, or the layer is another one. The same class with \code{what = "record"} (fields \code{field}, \code{scored}, \code{found}) is raised when the
+assigned layer and \code{cells_sf} carry different records, so the rows were
+assigned to other cells than the \code{cells_sf} given: the cells of another
+selection, or the scored cells of a selection beside other cells built
+from its count, such as a lattice sized by it. \code{check$cells} is then
+\code{"differ"}, whatever the comparison of the rows finds. The comparison
+is not made, and \code{check$cells} says why, when the response is another
+column or was not summarised, the profile read the selection half
+(\code{select_on = "split"}), the cells are not the ones the profile scored
+(\code{scored_cells} is \code{FALSE} or \code{NA}), the profile scored no estimate, the
+input has no coordinates, the features are not points (see
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}), or the fit was stopped by the limit on
+an exact search without the 'FNN' package. Cells and rows without a
+record, such as polygons the caller brings, are not checked and raise
+neither warning.
+
+A row that is the same distance from two centres lies on the boundary
+between their cells, which happens on gridded locations.
+\code{\link[=resolution_profile]{resolution_profile()}} scores such a row in the cell of the
+lower-numbered centre. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} places it by the
+polygons: in the one that holds it, or, at its default \code{tie_break}, in
+the smaller of two that share it. The two can therefore place it in
+different cells, and the comparison then reports \code{"differ"} on cells and
+rows nobody changed, with \code{what = "loo"} when it finds the same rows in
+the same number of cells with another leave-one-out error. The
+summary's own numbers describe the cells as assigned.
+
+The comparison uses the fit of the pooled columns when that is a fit of
+the estimate the profile scored, and fits the response once more
+otherwise. Without the 'FNN' package that fit compares every pair of
+cell centroids (pooled values) or, for each row alone in its cell,
+every other location (plain means), and above
+\code{options(spatialkit.exact_pairs_max = )} pairs it is not made
+(\code{"not checked: work limit"}). A summary is not compared when neither
+layer carries the record: \code{attr(x, "count_rule") <- NULL} on the
+assigned layer and on \code{cells_sf} removes it.
 }
 \description{
 Aggregates an sf point dataset into one row per cell. By default computes

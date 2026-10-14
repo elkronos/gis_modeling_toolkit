@@ -96,6 +96,14 @@ of partition that placed it (\code{attr(points_sf, "partition")}, see
 \code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
 built them.  Seeds of plain k-means record nothing, and \code{params}
 then has no such element; neither has it for points that are not seeds.
+\code{params$count_rule} is present when \code{points_sf} carries the
+record of how its count was set (\code{attr(points_sf, "count_rule")}:
+the seeds of a \code{\link{select_resolution}()} result, or seeds a
+seeding function placed from one): the same list, which the cells carry
+too as \code{attr(cells, "count_rule")}.
+\code{\link{assign_features_to_polygons}()} copies it to the rows it
+assigns, and \code{\link{summarize_by_cell}()} checks its result
+against it.
 }
 \description{
 Assigns every location in the study area to its nearest input point, giving

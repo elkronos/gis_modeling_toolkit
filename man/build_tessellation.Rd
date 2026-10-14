@@ -191,7 +191,21 @@ placed itself, \code{iter}, \code{iter_max} and \code{converged}. The cells are
 the Voronoi cells of the seeds whatever kind placed them. For
 \code{"hex"} and
 \code{"square"} also \code{cells_occupied} and \code{cells_empty}, the number of
-cells that hold at least one point and that hold none.}
+cells that hold at least one point and that hold none.
+\code{count_rule}, the record of how the count was set, is present on
+two paths, and the cells then carry it too as
+\code{attr(cells, "count_rule")}. For \code{"voronoi"}, when \code{points_sf}
+carries one (\code{attr(points_sf, "count_rule")}: the seeds of a
+\code{\link[=select_resolution]{select_resolution()}} result, or seeds \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} placed from one): the record as the seeds
+carry it, whose \code{scored_cells} says whether these are the cells the
+profile scored. For \code{"hex"} and \code{"square"}, when \code{approx_n_cells}
+is a selection that carries a record, or a profile built with an
+\code{estimate}, and no \code{cellsize} is given: that record with
+\code{scored_cells} \code{FALSE}, since a lattice at that count is not the
+partition the profile scored. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}
+copies the record to the rows it assigns, and \code{\link[=summarize_by_cell]{summarize_by_cell()}}
+checks its result against it.}
 }
 }
 \description{

@@ -240,7 +240,7 @@ test_that("get_voronoi_seeds() checks its two counts before a new kind reads the
                                  extra, list(...)))
     for (bad in list(0, NA, "a", 2.5, c(1, 2), Inf, -3)) {
       expect_error(f(kmeans_nstart = bad),
-                   "get_voronoi_seeds(): `kmeans_nstart` must be a single positive whole number of starts",
+                   "get_voronoi_seeds(): `kmeans_nstart` must be NULL or a single positive whole number of starts",
                    fixed = TRUE)
       expect_error(f(kmeans_iter = bad),
                    "get_voronoi_seeds(): `kmeans_iter` must be a single positive whole number of iterations",

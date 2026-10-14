@@ -875,6 +875,14 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
 #'   built them.  Seeds of plain k-means record nothing, and \code{params}
 #'   then has no such element; neither has it for points that are not seeds.
+#'   \code{params$count_rule} is present when \code{points_sf} carries the
+#'   record of how its count was set (\code{attr(points_sf, "count_rule")}:
+#'   the seeds of a \code{\link{select_resolution}()} result, or seeds a
+#'   seeding function placed from one): the same list, which the cells carry
+#'   too as \code{attr(cells, "count_rule")}.
+#'   \code{\link{assign_features_to_polygons}()} copies it to the rows it
+#'   assigns, and \code{\link{summarize_by_cell}()} checks its result
+#'   against it.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -915,6 +923,11 @@ create_voronoi_polygons <- function(
   # get_voronoi_seeds()): handed on in `params`, so the cells say what built
   # them.  Read before the points are moved, as the cover is.
   seed_partition <- attr(points_sf, "partition", exact = TRUE)
+  # The record of how the seeds' count was set, when they carry one (a
+  # selection's seeds, or seeds placed from a selection or a profile): handed
+  # on in `params` and on the cells, so the summary can check that it is
+  # given the cells and rows the count was scored on.
+  seed_rule <- .count_rule_get(points_sf)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1101,6 +1114,12 @@ create_voronoi_polygons <- function(
   # list it always was.
   if (is.list(seed_partition) && !is.null(seed_partition$kind))
     res$params$partition <- seed_partition
+  # The same for the record of the count, which the cells carry as well: set
+  # on them here, after they are in the CRS they are returned in.
+  if (!is.null(seed_rule)) {
+    res$params$count_rule <- seed_rule
+    res$cells <- .count_rule_put(res$cells, seed_rule)
+  }
   res
 }
 
@@ -1638,7 +1657,21 @@ create_grid_polygons <- function(
 #'       the Voronoi cells of the seeds whatever kind placed them. For
 #'       `"hex"` and
 #'       `"square"` also `cells_occupied` and `cells_empty`, the number of
-#'       cells that hold at least one point and that hold none.}
+#'       cells that hold at least one point and that hold none.
+#'       `count_rule`, the record of how the count was set, is present on
+#'       two paths, and the cells then carry it too as
+#'       `attr(cells, "count_rule")`. For `"voronoi"`, when `points_sf`
+#'       carries one (`attr(points_sf, "count_rule")`: the seeds of a
+#'       [select_resolution()] result, or seeds [get_voronoi_seeds()] or
+#'       [voronoi_seeds_kmeans()] placed from one): the record as the seeds
+#'       carry it, whose `scored_cells` says whether these are the cells the
+#'       profile scored. For `"hex"` and `"square"`, when `approx_n_cells`
+#'       is a selection that carries a record, or a profile built with an
+#'       `estimate`, and no `cellsize` is given: that record with
+#'       `scored_cells` `FALSE`, since a lattice at that count is not the
+#'       partition the profile scored. [assign_features_to_polygons()]
+#'       copies the record to the rows it assigns, and [summarize_by_cell()]
+#'       checks its result against it.}
 #'   }
 #' @family tessellation
 #' @examples
@@ -1813,9 +1846,13 @@ build_tessellation <- function(
     }
   }
   finish <- function(res) {
-    if (is.null(crs_out)) return(res)
-    res$cells    <- .to_output_crs(res$cells, crs_out)
-    res$boundary <- .to_output_crs(res$boundary, crs_out)
+    if (!is.null(crs_out)) {
+      res$cells    <- .to_output_crs(res$cells, crs_out)
+      res$boundary <- .to_output_crs(res$boundary, crs_out)
+    }
+    # The record of how the count was set, on the cells as they are returned.
+    if (!is.null(res$params$count_rule))
+      res$cells <- .count_rule_put(res$cells, res$params$count_rule)
     res
   }
   if (!is.null(boundary)) {
@@ -1879,7 +1916,10 @@ build_tessellation <- function(
     pts_v <- points_sf
     attr(pts_v, "cover") <- if (is.null(cover)) cover_now else NULL
     # The record of the kind that placed the seeds (attr(, "partition")) goes
-    # down on the points themselves: the projections above keep it.
+    # down on the points themselves: the projections above keep it.  So does
+    # the record of how their count was set; it is put back here as the
+    # points arrived with it, whatever a projection did with it.
+    pts_v <- .count_rule_put(pts_v, .count_rule_get(points_in))
     res <- create_voronoi_polygons(
       points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,
@@ -1946,7 +1986,7 @@ build_tessellation <- function(
         "as `boundary`, or the observations as `cover`."),
         method, occupied, nrow(grid), format(approx_n_cells), approx_n_cells_from)
 
-    return(finish(list(
+    res <- list(
       cells = grid, index = index, boundary = boundary, method = method,
       params = list(approx_n_cells = approx_n_cells,
                     approx_n_cells_from = approx_n_cells_from,
@@ -1959,7 +1999,17 @@ build_tessellation <- function(
                     cover_outside = .cover_points_outside(
                       cover, grid, points_in, points_sf, "build_tessellation",
                       method = method))
-    )))
+    )
+    # A lattice sized by a selection or a profile carries the record of how
+    # that count was set, marked as not the cells the profile scored: a grid
+    # at that count is another partition.  A `cellsize` sizes the lattice
+    # itself, and the count then sized nothing.
+    if (!is.null(n_cells$count_rule) && is.null(cellsize)) {
+      rule <- n_cells$count_rule
+      rule$scored_cells <- FALSE
+      res$params$count_rule <- rule
+    }
+    return(finish(res))
   }
 
   # ---- Delaunay triangles ----

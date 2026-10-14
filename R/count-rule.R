@@ -8,6 +8,13 @@
 # and what the profile scored at that count.  A selection from a profile
 # without an estimate by "cp", "reliability", "elbow" or "moran_z" carries
 # none, and neither does a count given as a number.
+#
+# The record travels as the attribute "count_rule": from the selection's
+# seeds to the seeds a seeding function returns, to the cells built on them
+# (and `params$count_rule` of the tessellation), to the layer assigned to the
+# cells, to the summary.  summarize_by_cell() reads it and checks two
+# things: that it reports the estimate the count was chosen for, and that
+# the cells and rows it is given are the ones the profile scored.
 
 
 #' The rows a size divides, read off a profile's bounds
@@ -170,4 +177,378 @@
     crs      = if (inherits(crs, "crs")) crs else sf::NA_crs_,
     scored_cells = as.logical(scored_cells)[1L]),
     class = "spatialkit_count_rule")
+}
+
+
+#' The record of a count a layer carries
+#'
+#' A record is read only when it is one this code can read: a list of class
+#' \code{spatialkit_count_rule} whose \code{version} is \code{1L} and
+#' which names one rule, one count and one estimate (which may be
+#' \code{NA}).  Anything else is treated as no record, so a record of
+#' another version, or one a caller cut down, is not checked against and not
+#' handed on.
+#'
+#' @param x Any object.
+#' @return \code{attr(x, "count_rule")} when it is such a record;
+#'   \code{NULL} otherwise.
+#' @keywords internal
+#' @noRd
+.count_rule_get <- function(x) {
+  rec <- attr(x, "count_rule", exact = TRUE)
+  if (!is.list(rec) || !inherits(rec, "spatialkit_count_rule")) return(NULL)
+  one <- function(v) length(v) == 1L
+  readable <- identical(rec$version, 1L) &&
+    is.character(rec$rule) && one(rec$rule) && !is.na(rec$rule) &&
+    is.numeric(rec$cells) && one(rec$cells) && !is.na(rec$cells) &&
+    one(rec$estimate) && (is.character(rec$estimate) || is.na(rec$estimate))
+  if (readable) rec else NULL
+}
+
+
+#' Put the record of a count on a layer
+#'
+#' @param x The layer: seeds, cells or assigned rows.
+#' @param rec The record, or \code{NULL} for none.
+#' @param scored_cells \code{NULL} to leave the record's \code{scored_cells}
+#'   as it is; otherwise its new value: \code{TRUE} beside the centres the
+#'   profile scored, \code{FALSE} beside other centres placed at that count.
+#' @return \code{x}, with \code{attr(, "count_rule")} set when \code{rec} is
+#'   a record and left as it was otherwise.
+#' @keywords internal
+#' @noRd
+.count_rule_put <- function(x, rec, scored_cells = NULL) {
+  if (is.null(rec)) return(x)
+  if (!is.null(scored_cells)) rec$scored_cells <- as.logical(scored_cells)[1L]
+  attr(x, "count_rule") <- rec
+  x
+}
+
+
+# The fields in which two records of one path agree, in the order they are
+# compared: the first that differs is the one a warning names.  The first
+# five say which selection the cells were built from; `scored_cells` says
+# whether they are that selection's scored cells or other cells built from
+# its count (a lattice, seeds a function placed itself), so rows assigned to
+# the one and summarised with the other differ in it and in nothing else.
+.count_rule_same_fields <- c("rule", "estimate", "cells", "crs", "scored$loo",
+                             "scored_cells")
+
+#' The first field in which two records differ
+#'
+#' A layer of assigned rows and the cells it is summarised with each carry
+#' the record of the selection their cells were built from.  When the two
+#' selections are not the same one, the records differ in the rule, the
+#' estimate, the count, the CRS or the leave-one-out error the profile
+#' scored.  When they are the same selection and the cells are not the same
+#' cells (its scored cells beside a lattice sized by it), the records differ
+#' in \code{scored_cells}.
+#'
+#' @param a,b Two records.
+#' @return \code{NULL} when the two agree in all six; otherwise a list with
+#'   \code{field}, the name of the first that differs, and \code{a} and
+#'   \code{b}, its two values as text.
+#' @keywords internal
+#' @noRd
+.count_rule_differs <- function(a, b) {
+  value <- function(rec, field) switch(field,
+    "crs"        = rec$crs,
+    "scored$loo" = if (is.list(rec$scored)) rec$scored$loo else NULL,
+    rec[[field]])
+  text <- function(v, field) {
+    if (is.null(v)) return("none")
+    if (identical(field, "crs"))
+      return(if (inherits(v, "crs") && !is.na(v)) as.character(v$input)[1L] else "NA")
+    if (is.numeric(v) && !is.integer(v)) return(format(v, digits = 8))
+    v <- as.character(v)[1L]
+    if (is.na(v)) "NA" else v
+  }
+  same <- function(x, y, field) {
+    if (is.null(x) || is.null(y)) return(is.null(x) && is.null(y))
+    if (identical(field, "crs")) {
+      if (!inherits(x, "crs") || !inherits(y, "crs")) return(identical(x, y))
+      if (is.na(x) || is.na(y)) return(is.na(x) && is.na(y))
+      return(isTRUE(x == y))
+    }
+    if (identical(field, "scored$loo")) return(.same_loo(x, y))
+    identical(x, y)
+  }
+  for (field in .count_rule_same_fields) {
+    x <- value(a, field); y <- value(b, field)
+    if (!same(x, y, field))
+      return(list(field = field, a = text(x, field), b = text(y, field)))
+  }
+  NULL
+}
+
+
+#' Whether two leave-one-out errors are one number
+#'
+#' @param a,b Two errors.
+#' @return \code{TRUE} when both are missing, or when they agree to a
+#'   relative tolerance of \code{.RECORD_TOL}; \code{FALSE} for a missing
+#'   error against a number.
+#' @keywords internal
+#' @noRd
+.same_loo <- function(a, b) {
+  a <- as.numeric(a)[1L]; b <- as.numeric(b)[1L]
+  if (is.na(a) || is.na(b)) return(is.na(a) && is.na(b))
+  abs(a - b) <= .RECORD_TOL * max(abs(a), abs(b))
+}
+
+
+#' Check a summary against the record of its cells' count
+#'
+#' Three things, in this order, each with a warning of its own where it
+#' fails.  The warnings are raised here; the summary is returned as asked.
+#' \enumerate{
+#'   \item Two records.  When the cells handed to the summary carry another
+#'     record than the assigned rows do, the rows were assigned to other
+#'     cells than those: class \code{spatialkit_cells_differ} with
+#'     \code{what = "record"}.  The checks below run against the record of
+#'     the assigned rows.
+#'   \item The estimate.  When the count was chosen for plain means or for
+#'     pooled values and the summary reports the other: class
+#'     \code{spatialkit_estimate_mismatch}.
+#'   \item The cells and the rows.  The engine is run on the response with
+#'     the estimate the profile scored, and its scored rows, its occupied
+#'     cells and its leave-one-out error are compared with the record's, the
+#'     last to a relative tolerance of \code{.RECORD_TOL}.  The first that
+#'     differs is named: class \code{spatialkit_cells_differ} with
+#'     \code{what} one of \code{"n"}, \code{"cells"} and \code{"loo"}.
+#' }
+#' The third is skipped, and the reason kept, where the record's numbers do
+#' not describe the cells in hand or cannot be computed again: the profile
+#' scored no estimate, or read the selection half; other cells were built
+#' from the count, or the record does not say whose centres these are; the
+#' response is another column, or was not summarised; the input has no
+#' coordinates; the features summarised are not points; the fit was stopped
+#' before an exact search above the limit (\code{.work_guard()}).
+#'
+#' Features that are not points are assigned by largest overlap, where the
+#' profile scored each at one point in the cell of the nearest centre, so a
+#' difference there says nothing about rows dropped.  It is the layer
+#' summarised that decides: the points of such features
+#' (\code{coerce_to_points()}), assigned as points, are the rows the profile
+#' scored, and are checked like any points, whatever the record's
+#' \code{features} says of the layer profiled.
+#'
+#' @param rec The record the summary reads: that of the assigned rows, or of
+#'   the cells when the rows carry none.
+#' @param other The record of the cells when the assigned rows carry one
+#'   too; \code{NULL} otherwise.
+#' @param estimate The estimate the summary reports.
+#' @param response_var The call's \code{response_var}, or \code{NULL}.
+#' @param summarised The response columns the call summarised.
+#' @param layer The layer summarised, as the caller passed it.
+#' @param found A function of one estimate, \code{"mean"} or
+#'   \code{"pooled"}, that returns what the engine finds for the response on
+#'   the rows summarised: a list with \code{n} (scored rows), \code{cells}
+#'   (the cells that hold one), \code{loo} (the leave-one-out error of that
+#'   estimate) and \code{status} (\code{"work limit"} when the fit was
+#'   stopped).  It is called only when the third check runs.
+#' @return \code{rec} with one more element, \code{check}: a list with
+#'   \code{estimate} (\code{"match"}, \code{"mismatch"}, or \code{NA} for a
+#'   count chosen for neither estimate) and \code{cells} (\code{"match"},
+#'   \code{"differ"}, or \code{"not checked: <reason>"}).  \code{cells} is
+#'   \code{"differ"} also when the two records differ.
+#' @keywords internal
+#' @noRd
+.count_rule_check <- function(rec, other = NULL, estimate, response_var, summarised,
+                              layer, found) {
+  value_name <- function(est) if (identical(est, "pooled")) "pooled value" else "plain mean"
+  check <- list(estimate = NA_character_, cells = NA_character_)
+
+  # ---- 1. Two records ---------------------------------------------------------
+  records_differ <- FALSE
+  if (!is.null(other)) {
+    d <- .count_rule_differs(rec, other)
+    if (!is.null(d)) {
+      records_differ <- TRUE
+      .warn_classed("spatialkit_cells_differ",
+                    paste0("summarize_by_cell(): `assigned_points_sf` and `cells_sf` carry ",
+                           "different count records (%s: %s against %s), so the rows were ",
+                           "assigned to other cells than the `cells_sf` given. The record of ",
+                           "the assigned layer is used."),
+                    d$field, d$a, d$b,
+                    data = list(what = "record", field = d$field, scored = d$a, found = d$b))
+    }
+  }
+
+  # ---- 2. The estimate --------------------------------------------------------
+  chosen <- rec$estimate
+  if (is.character(chosen) && length(chosen) == 1L && chosen %in% c("mean", "pooled")) {
+    check$estimate <- if (identical(chosen, estimate)) "match" else "mismatch"
+    if (identical(check$estimate, "mismatch"))
+      .warn_classed("spatialkit_estimate_mismatch",
+                    paste0("summarize_by_cell(): the number of cells (%d, set by %s) was ",
+                           "chosen for the %s, and this summary reports the %s. %s"),
+                    as.integer(rec$cells), rec$rule, value_name(chosen), value_name(estimate),
+                    if (identical(chosen, "pooled"))
+                      paste0("At this cell size plain means of small cells are noisy: pass ",
+                             "estimate = \"pooled\", or choose the count for plain means ",
+                             "(resolution_profile(estimate = \"mean\")).")
+                    else
+                      paste0("Pooled values are valid on these cells; the count that suits ",
+                             "them is set by a size (criterion = \"size\")."),
+                    data = list(chosen_for = chosen, reported = estimate, rule = rec$rule,
+                                cells = as.integer(rec$cells)))
+  }
+
+  # ---- 3. The cells and the rows ----------------------------------------------
+  sc <- rec$scored
+  why <- if (!is.list(sc) || !isTRUE(sc$estimate %in% c("mean", "pooled")))
+           "the profile scored no estimate"
+         else if (!identical(sc$rows, "all")) "the profile read the selection half"
+         else if (isFALSE(rec$scored_cells)) "other cells were built from this count"
+         else if (!isTRUE(rec$scored_cells)) "the record does not say whose centres these are"
+         else if (is.null(response_var)) "the response was not summarised"
+         else if (!identical(response_var, rec$response)) "the response is another column"
+         else if (!response_var %in% summarised) "the response was not summarised"
+         else if (!inherits(layer, "sf")) "the input has no coordinates"
+         else if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
+           "the features are not points"
+         else NULL
+  if (is.null(why)) {
+    got <- found(sc$estimate)
+    if (identical(got$status, "work limit")) why <- "work limit"
+  }
+  if (!is.null(why)) {
+    check$cells <- if (records_differ) "differ" else paste("not checked:", why)
+    rec$check <- check
+    return(rec)
+  }
+
+  int_of <- function(v) if (is.numeric(v) && length(v) == 1L) as.integer(v) else NA_integer_
+  num_of <- function(v) if (is.numeric(v) && length(v) == 1L) as.numeric(v) else NA_real_
+  a <- list(n = int_of(sc$n), cells = int_of(sc$cells), loo = num_of(sc$loo))
+  b <- list(n = int_of(got$n), cells = int_of(got$cells), loo = num_of(got$loo))
+  what <- if (!identical(a$n, b$n)) "n"
+          else if (!identical(a$cells, b$cells)) "cells"
+          else if (!.same_loo(a$loo, b$loo)) "loo"
+          else NULL
+  check$cells <- if (is.null(what) && !records_differ) "match" else "differ"
+  if (!is.null(what)) {
+    num <- function(v) if (is.na(v)) "NA" else format(v, digits = 6)
+    .warn_classed("spatialkit_cells_differ",
+                  paste0("summarize_by_cell(): these are not the cells and rows the count ",
+                         "was scored on (%s differs). The profile scored %d rows of '%s' in ",
+                         "%d cells with a leave-one-out error of %s; here %d rows in %d ",
+                         "cells give %s. %s"),
+                  c(n = "the number of rows", cells = "the number of cells",
+                    loo = "the leave-one-out error")[[what]],
+                  a$n, rec$response, a$cells, num(a$loo), b$n, b$cells, num(b$loo),
+                  if (identical(what, "loo"))
+                    paste0("The same number of rows and cells was found, so rows sit in ",
+                           "other cells than the profile put them in, or values changed: ",
+                           "rows exactly on a boundary between two cells (gridded ",
+                           "locations) can be assigned to the other cell, and coordinates ",
+                           "that reached this CRS by another transformation can settle a ",
+                           "tie between neighbouring cells the other way.")
+                  else
+                    paste0("Rows were dropped or moved between cells: points outside every ",
+                           "cell, a boundary that clips the cells, a subset of the rows, or ",
+                           "another layer."),
+                  data = list(what = what, scored = a, found = b))
+  }
+  rec$check <- check
+  rec
+}
+
+
+#' @export
+print.spatialkit_count_rule <- function(x, ...) {
+  label  <- function(name) sprintf("  %-12s: ", name)
+  indent <- strrep(" ", 16L)
+  one    <- function(v) length(v) == 1L && !is.na(v)
+  # An error is written as print.spatialkit_pooled() writes it, so the two
+  # records of one summary show one number one way.
+  num    <- function(v) if (is.numeric(v) && one(v)) sprintf("%.2e", v) else "NA"
+  count  <- function(k, what)
+    sprintf("%s %s%s", format(k), what, if (isTRUE(k == 1L)) "" else "s")
+
+  # ---- the count and what set it ----------------------------------------------
+  asked <- x$obs_per_cell_asked
+  how <- c(if (identical(x$rule, "size") && is.numeric(asked) && one(asked))
+             paste(.per_cell_text(asked), "asked"),
+           if (is.numeric(x$n) && one(x$n))
+             sprintf("%s / %s = %.2f", count(x$n, "row"), count(x$cells, "cell"),
+                     x$n / x$cells))
+  cat(sprintf("Count: %s, set by %s%s\n", count(x$cells, "cell"), x$rule,
+              if (length(how)) sprintf(" (%s)", paste(how, collapse = "; ")) else ""))
+
+  # ---- the estimate the rule was computed for ---------------------------------
+  cat(label("chosen for"),
+      if (identical(x$estimate, "pooled")) "the pooled value"
+      else if (identical(x$estimate, "mean")) "the plain mean"
+      # A size and the leave-one-out error score the profile's estimate, so
+      # without one the object the count was read off named none (a profile
+      # built without an estimate, or a column subset, which loses it).
+      else if (isTRUE(x$rule %in% c("size", "loo")))
+        "no cell value: the profile names no estimate"
+      else sprintf("no cell value: %s scores none", x$rule),
+      "\n", sep = "")
+
+  # ---- the cells --------------------------------------------------------------
+  part   <- x$partition
+  nstart <- part$nstart
+  starts <- .partition_label(part, if (is.numeric(nstart) && one(nstart)) nstart else NULL)
+  # The seed with every digit: 100000, not 1e+05.
+  seed <- if (is.numeric(x$seed) && one(x$seed)) format(x$seed, scientific = FALSE)
+  if (!is.null(seed))
+    starts <- if (endsWith(starts, ")"))
+      paste0(substr(starts, 1L, nchar(starts) - 1L), "; seed ", seed, ")")
+    else sprintf("%s (seed %s)", starts, seed)
+  fitted <- if (!one(x$n_fit) || !one(x$n_points)) NULL
+            else if (x$n_fit < x$n_points)
+              sprintf("fitted to a subsample of %d of the %d points",
+                      as.integer(x$n_fit), as.integer(x$n_points))
+            else "fitted to every row"
+  half  <- is.list(x$scored) && identical(x$scored$rows, "selection half")
+  whose <- if (isTRUE(x$scored_cells))
+             paste0("these are the cells the profile scored", if (half) ", on half the rows")
+           else if (isFALSE(x$scored_cells))
+             "other cells were built from this count: not the cells the profile scored"
+           else "the record stands for the count and sits beside no centres"
+  # What built the cells, wrapped where the density kind's settings make it
+  # long; whose cells they are starts a line of its own.
+  built <- strwrap(paste0(paste(c(if (identical(part$kind, "density")) "density"
+                                  else if (identical(part$kind, "kmeans")) "k-means",
+                                  starts, fitted), collapse = ", "), ";"),
+                   width = 64)
+  cat(label("cells"), paste(built, collapse = paste0("\n", indent)), "\n",
+      indent, whose, "\n", sep = "")
+
+  # ---- what the profile scored at the count -----------------------------------
+  sc <- x$scored
+  if (is.list(sc))
+    cat(label("scored"),
+        sprintf("loo %s on %s in %s (one cell: %s)%s\n", num(sc$loo),
+                if (half) sprintf("the %s of the selection half", count(sc$n, "row"))
+                else count(sc$n, "row"),
+                count(sc$cells, "cell"), num(sc$loo_one_cell),
+                if (is.numeric(sc$share_alone) && one(sc$share_alone))
+                  sprintf("; %.1f%% of rows alone", 100 * sc$share_alone)
+                else ""),
+        sep = "")
+
+  # ---- the summary's checks, on a summary only --------------------------------
+  ck <- x$check
+  if (is.list(ck)) {
+    skipped <- is.character(ck$cells) && startsWith(ck$cells, "not checked: ")
+    cat(label(if (skipped) "not checked" else "checked"),
+        if (identical(ck$cells, "match")) "the cells and rows summarised are the ones scored"
+        else if (identical(ck$cells, "differ"))
+          "the cells and rows summarised are not the ones scored"
+        else if (skipped) substring(ck$cells, nchar("not checked: ") + 1L)
+        else ck$cells,
+        "\n", sep = "")
+    if (identical(ck$estimate, "mismatch"))
+      cat(indent,
+          if (identical(x$estimate, "pooled"))
+            "the summary reports the plain mean, not the pooled value"
+          else "the summary reports the pooled value, not the plain mean",
+          "\n", sep = "")
+  }
+  invisible(x)
 }

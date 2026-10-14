@@ -116,6 +116,23 @@ for a different set of rows. \code{sf::st_drop_geometry()} keeps the record,
 since the rows are the same; see \code{\link{[.spatialkit_rows}} for
 what binding such data frames does. The \code{"unassigned"} record is
 stamped and removed the same way.
+
+When \code{polygons_sf} carries \code{attr(, "count_rule")}, the record of how
+its cell count was set (cells from \code{\link[=build_tessellation]{build_tessellation()}} on seeds
+placed from a \code{\link[=select_resolution]{select_resolution()}} result or from a profile built with
+an \code{estimate}), the result carries the same record.
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} reads it and checks that the rows and cells it is
+given are the ones the count was scored on. It is a plain attribute: a
+row subset keeps it and \code{dplyr::mutate()}, \code{dplyr::select()} and
+\code{dplyr::arrange()} drop it, which is why the summary also looks for it
+on its \code{cells_sf}. The profile scores a feature that is not a point at
+one point of it (\code{coerce_to_points(, "auto")}), in the cell of the
+nearest centre; this function gives a polygon feature to the cell it
+overlaps most. A feature that straddles a cell boundary can therefore
+be assigned to another cell than the one it was scored in, and the
+summary does not compare the two for such a layer. To assign the
+features as they were scored, assign their points:
+\code{assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)}.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
