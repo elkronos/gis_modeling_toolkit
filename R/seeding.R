@@ -38,15 +38,32 @@
 #'   Besides a number, `n` accepts what the level-selection step returned:
 #'   the integer vector of ranked candidates from [determine_optimal_levels()]
 #'   (its first element is used), a [select_resolution()] result (its
-#'   `$best`), or a [resolution_profile()] (read with `select_resolution()` at
-#'   its default criterion). The result then carries `attr(, "n_from")`
+#'   `$best`), or a [resolution_profile()]. A profile built without an
+#'   `estimate` is read with `select_resolution()` by `cp`. A profile built
+#'   with `estimate` is read by `criterion = "auto"`, the rule that goes
+#'   with its estimate: a size for pooled values and the lowest
+#'   leave-one-out error for plain means. The size is the profile's own when
+#'   it was built at one, and 4.5 rows per cell otherwise, and the count is
+#'   the profile's level for that size, or the built level nearest to
+#'   `max(2, round(n / obs_per_cell))` when the profile has none for it
+#'   (with a warning of class `"spatialkit_size_not_reached"`).
+#'   `select_resolution(profile)` with
+#'   no `criterion` still reads such a profile by `cp`, so pass the profile
+#'   itself, or a selection that names its criterion. A profile built with
+#'   `obs_per_cell` and without an `estimate` is read by `cp` like any
+#'   profile without one; pass `select_resolution(profile, criterion =
+#'   "size")` for the count its size gives. The result then
+#'   carries `attr(, "n_from")`
 #'   saying which. A count read off a selection or a profile comes with what
 #'   the selection found: a warning of class `"spatialkit_bound_chosen"` when
 #'   the optimum sits on a bound of the ladder, so the bound chose the count,
 #'   and one of class `"spatialkit_no_structure"` when one cell for the whole
-#'   layer scores as well. A profile with no `cp` to read is an error (class
-#'   `"spatialkit_no_default_criterion"` when another criterion is finite);
-#'   see [resolution_profile()].
+#'   layer scores as well. A count set by a size has no optimum, so no bound
+#'   can choose it; its `"spatialkit_no_structure"` warning says that the
+#'   count stands and that the cell values will say little that one mean
+#'   does not. A profile without an estimate and with no `cp` to read is an
+#'   error (class `"spatialkit_no_default_criterion"` when another criterion
+#'   is finite); see [resolution_profile()].
 #'
 #'   With `method = "kmeans"`, a selection or profile also carries the
 #'   centres of the partition the profile scored at that count, and those
@@ -559,7 +576,11 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   centres as there are rows. Check `nrow()` on the result. A
 #'   [select_resolution()] result or a [resolution_profile()] is also
 #'   accepted: its scored centres are returned when it carries them, and
-#'   otherwise its count is used. Such a count raises the warnings and the
+#'   otherwise its count is used. A profile is read as [get_voronoi_seeds()]
+#'   reads one passed as `n`: by `cp` when it was built without an
+#'   `estimate`, and by `select_resolution(criterion = "auto")` when it was
+#'   built with one (a size for pooled values, the lowest leave-one-out
+#'   error for plain means). Such a count raises the warnings and the
 #'   error described under `n` in [get_voronoi_seeds()] (classes
 #'   `"spatialkit_bound_chosen"`, `"spatialkit_no_structure"` and
 #'   `"spatialkit_no_default_criterion"`).

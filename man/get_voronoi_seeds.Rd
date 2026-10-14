@@ -40,15 +40,31 @@ assume \code{n}.
 Besides a number, \code{n} accepts what the level-selection step returned:
 the integer vector of ranked candidates from \code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
 (its first element is used), a \code{\link[=select_resolution]{select_resolution()}} result (its
-\verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}} (read with \code{select_resolution()} at
-its default criterion). The result then carries \code{attr(, "n_from")}
+\verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}}. A profile built without an
+\code{estimate} is read with \code{select_resolution()} by \code{cp}. A profile built
+with \code{estimate} is read by \code{criterion = "auto"}, the rule that goes
+with its estimate: a size for pooled values and the lowest
+leave-one-out error for plain means. The size is the profile's own when
+it was built at one, and 4.5 rows per cell otherwise, and the count is
+the profile's level for that size, or the built level nearest to
+\code{max(2, round(n / obs_per_cell))} when the profile has none for it
+(with a warning of class \code{"spatialkit_size_not_reached"}).
+\code{select_resolution(profile)} with
+no \code{criterion} still reads such a profile by \code{cp}, so pass the profile
+itself, or a selection that names its criterion. A profile built with
+\code{obs_per_cell} and without an \code{estimate} is read by \code{cp} like any
+profile without one; pass \code{select_resolution(profile, criterion = "size")} for the count its size gives. The result then
+carries \code{attr(, "n_from")}
 saying which. A count read off a selection or a profile comes with what
 the selection found: a warning of class \code{"spatialkit_bound_chosen"} when
 the optimum sits on a bound of the ladder, so the bound chose the count,
 and one of class \code{"spatialkit_no_structure"} when one cell for the whole
-layer scores as well. A profile with no \code{cp} to read is an error (class
-\code{"spatialkit_no_default_criterion"} when another criterion is finite);
-see \code{\link[=resolution_profile]{resolution_profile()}}.
+layer scores as well. A count set by a size has no optimum, so no bound
+can choose it; its \code{"spatialkit_no_structure"} warning says that the
+count stands and that the cell values will say little that one mean
+does not. A profile without an estimate and with no \code{cp} to read is an
+error (class \code{"spatialkit_no_default_criterion"} when another criterion
+is finite); see \code{\link[=resolution_profile]{resolution_profile()}}.
 
 With \code{method = "kmeans"}, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those

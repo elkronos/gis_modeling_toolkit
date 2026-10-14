@@ -10,10 +10,15 @@
 \item{object}{A \code{\link{resolution_profile}()}.}
 
 \item{criteria}{Character vector, any of \code{"cp"},
-\code{"reliability"}, \code{"elbow"}, \code{"moran_z"}.  Default: every
-one of \code{"cp"}, \code{"reliability"} and \code{"elbow"} that is
-finite at some level.  \code{"moran_z"}, a diagnostic, is read only
-when named here.}
+\code{"reliability"}, \code{"elbow"}, \code{"moran_z"}, \code{"loo"}.
+Default: every one of \code{"cp"}, \code{"reliability"},
+\code{"elbow"} and \code{"loo"} that is finite at some level
+(\code{loo} is a column of a profile built with \code{estimate}; a
+column of that name on a profile built without one is read only when
+named here).
+\code{"moran_z"}, a diagnostic, is read only when named here.
+\code{"size"} and \code{"auto"} are not criteria of the table: a size
+sets the count and has no flat region to compare.}
 
 \item{tol}{Passed to \code{\link{select_resolution}()} for the flat
 region.  Default 0.02.}
@@ -78,6 +83,12 @@ Nothing in the table is a decision procedure.  Each flat region is
 routinely wide, the choice within it belongs to the analyst, and
 \code{\link{plot.resolution_profile}()} draws the curves the bands were
 read from.
+
+A profile whose ladder is one size (\code{obs_per_cell} set to one
+number) has one level, and the size set it.  The table then has one row
+per criterion that is finite at that level, and the line under it says
+that the count is set by the size and that no criterion chooses among
+levels.  The result carries the size as \code{attr(, "obs_per_cell")}.
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {

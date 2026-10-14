@@ -1516,14 +1516,20 @@ create_grid_polygons <- function(
 #'   number, this accepts what the level-selection step returned: the integer
 #'   vector of ranked candidates from \code{\link{determine_optimal_levels}()}
 #'   (its first element is used), a \code{\link{select_resolution}()} result
-#'   (its \code{$best}), or a \code{\link{resolution_profile}()} (read with
-#'   \code{select_resolution()} at its default criterion).  The count used
+#'   (its \code{$best}), or a \code{\link{resolution_profile}()}.  A profile
+#'   built without an \code{estimate} is read with
+#'   \code{select_resolution()} by \code{cp}; one built with
+#'   \code{estimate} is read by \code{criterion = "auto"}, the rule that
+#'   goes with its estimate: a size for pooled values, the lowest
+#'   leave-one-out error for plain means.  The count used
 #'   is returned as \code{params$approx_n_cells} and where it came from as
 #'   \code{params$approx_n_cells_from} (\code{NULL} for a plain number).
 #'   A count read off a selection or a profile raises a warning of class
 #'   \code{"spatialkit_bound_chosen"} when its optimum sits on a bound of the
 #'   ladder and one of class \code{"spatialkit_no_structure"} when one cell
-#'   for the whole layer scores as well; a profile with no \code{cp} to read
+#'   for the whole layer scores as well (for a count set by a size: when
+#'   cells of that size predict no better than one mean; the count stands);
+#'   a profile without an estimate and with no \code{cp} to read
 #'   is an error (class \code{"spatialkit_no_default_criterion"} when another
 #'   criterion is finite).  See \code{\link{resolution_profile}()}.
 #'   A count read off a profile or selection is a number of k-means cells:
