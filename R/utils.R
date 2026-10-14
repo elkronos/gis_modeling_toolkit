@@ -946,6 +946,9 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' @noRd
 .warn_classed <- function(class, fmt, ..., data = list()) {
   msg <- sprintf(fmt, ...)
+  # Taken over by the caller for the length of this call (see
+  # .answer_for_classed()): neither logged nor raised.
+  if (any(class %in% .answered_state$classes)) return(invisible(msg))
   # Already said, in these words, by an earlier call of the same run (see
   # .once_per_run()): neither logged nor raised again.
   if (.said_in_run(class, msg)) return(invisible(msg))
@@ -955,6 +958,40 @@ setOldClass(c("spatialkit_rows", "sf"))
   warning(do.call(warningCondition,
                   c(list(message = msg, class = class, call = NULL), data)))
   invisible(msg)
+}
+
+
+# ---------------------------------------------------------------------------
+# A classed warning the caller answers for itself
+# ---------------------------------------------------------------------------
+# cell_values_at() places its locations with assign_features_to_polygons()
+# and reports a location in no polygon row by row, so that function's
+# warning that no feature falls in any polygon says nothing new there.  A
+# calling handler can muffle the warning, but not the line .warn_classed()
+# logs before it raises it, which reaches the console.  A function that
+# answers for a class itself opens a span here around the one call.  While
+# the span is open a warning of that class is neither logged nor raised;
+# every other warning is logged and raised as usual.
+
+# The classes taken over by the open spans.
+.answered_state <- new.env(parent = emptyenv())
+
+#' Open a span in which a classed warning is neither logged nor raised
+#'
+#' @param classes Condition classes the caller answers for itself.
+#' @return A function that closes the span; call it when the call the span
+#'   was opened for returns or stops (\code{tryCatch(, finally = )}).  A span
+#'   opened inside another adds its classes to the outer one's, and closing
+#'   it leaves the outer one's.
+#' @keywords internal
+#' @noRd
+.answer_for_classed <- function(classes) {
+  outer <- .answered_state$classes
+  .answered_state$classes <- union(outer, classes)
+  function() {
+    .answered_state$classes <- outer
+    invisible(NULL)
+  }
 }
 
 

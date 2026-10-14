@@ -174,6 +174,7 @@ table(assigned$poly_id)
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
 Other aggregation:
+\code{\link[=cell_values_at]{cell_values_at()}},
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
 \code{\link[=kriging_adequacy]{kriging_adequacy()}},
 \code{\link[=resolution_profile]{resolution_profile()}},

@@ -424,6 +424,7 @@ that follow.
 
 Other aggregation:
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=cell_values_at]{cell_values_at()}},
 \code{\link[=kriging_adequacy]{kriging_adequacy()}},
 \code{\link[=resolution_profile]{resolution_profile()}},
 \code{\link[=select_resolution]{select_resolution()}},
