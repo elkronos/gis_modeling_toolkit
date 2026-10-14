@@ -301,22 +301,40 @@
 #' it says how rough the objective is at this \code{k}, which a profile can
 #' report so that a flat region is shown at its real width.
 #'
+#' With \code{init = "random"} each restart starts from \code{k} distinct
+#' locations drawn at random (\code{.random_centers()}), the draws
+#' \code{stats::kmeans(centers = k, nstart = nstart)} makes, so the best of
+#' them is the fit that call returns, and their spread is kept as well.
+#'
 #' @param xy Numeric matrix of coordinates.
 #' @param k Number of clusters (\code{>= 2}).
 #' @param nstart Number of restarts.
 #' @param iter.max Passed to \code{stats::kmeans()}.
+#' @param init \code{"kmeans++"} (default) or \code{"random"}: how each
+#'   restart's starting centres are drawn.
 #' @return \code{NULL} when every restart failed; otherwise a list with
 #'   \code{km} (the best \code{kmeans} fit), \code{wss} (its
 #'   \code{tot.withinss}), \code{spread} (\code{(max - min) / min} of
 #'   \code{tot.withinss} across the restarts that ran) and \code{n_ok}.
 #' @keywords internal
 #' @noRd
-.kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L) {
+.kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L, init = "kmeans++") {
   best <- NULL; w <- rep(NA_real_, nstart)
+  random <- identical(init, "random")
+  # The distinct rows random starts are drawn from, found once.  Fewer of
+  # them than centres is what stats::kmeans() refuses as "more cluster
+  # centers than distinct data points".
+  cn <- if (random) unique(xy) else NULL
+  if (random && nrow(cn) < k) return(NULL)
   for (r in seq_len(nstart)) {
-    km <- try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
-                                             iter.max = iter.max, nstart = 1L)),
-              silent = TRUE)
+    km <- if (random)
+      try(suppressWarnings(stats::kmeans(xy, centers = .random_centers(xy, cn, k, nstart),
+                                         iter.max = iter.max, nstart = 1L)),
+          silent = TRUE)
+    else
+      try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
+                                         iter.max = iter.max, nstart = 1L)),
+          silent = TRUE)
     if (inherits(km, "try-error")) next
     w[r] <- km$tot.withinss
     if (is.null(best) || km$tot.withinss < best$tot.withinss) best <- km
@@ -574,6 +592,14 @@
 #' \code{k}.  Because the optimiser changed, a selection made by an earlier
 #' version on a curve that had such a bump can differ from the one made now;
 #' where the earlier curve was clean, the selection is the same.
+#'
+#' \strong{The sweep is plain k-means, whatever the regions are built with
+#' afterwards.}  This function has no \code{partition} argument: the elbow is
+#' a reading of the sum of squares that plain k-means minimises, and the
+#' cells behind Moran's z are that partition's.  A count returned here says
+#' nothing about density-weighted regions;
+#' \code{\link{resolution_profile}(partition = "density")} scores a ladder of
+#' those.
 #'
 #' \strong{The model-aware criteria rank on the standardised deviate, not on
 #' |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
@@ -1140,6 +1166,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # WSS curve is read for its shape, and optimisation noise on it is what
   # produced the concave bump the elbow rule once selected.  See
   # .kmeans_best() for the measured effect and the citations.
+  # The sweep is plain k-means, the kind "kmeans" of .partition_centres(),
+  # from k-means++ starts: the elbow is a reading of the sum of squares that
+  # kind minimises.  resolution_profile(partition = "density") is where a
+  # density-weighted partition is scored.
   nstart <- 25L
   wss <- numeric(k_max)
   wss_spread <- numeric(k_max)
@@ -1152,7 +1182,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     } else {
       # Assignments are discarded on purpose: only the WSS is kept from this
       # sweep, which bounds memory for large max_levels (see Details).
-      kb <- .kmeans_best(xy, k, nstart = nstart)
+      kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",
+                               nstart = nstart)
       if (is.null(kb)) {
         wss[k] <- wss[k - 1L]
         failed_k <- c(failed_k, k)
@@ -1272,7 +1303,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   moran_z    <- rep(NA_real_, k_max)   # standardised deviate, used for ranking
   wss_eval   <- wss
   for (k in eval_ks) {
-    kb <- .kmeans_best(xy, k, nstart = nstart)
+    kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",
+                             nstart = nstart)
     if (is.null(kb)) next
     km <- kb$km
     wss_eval[k]   <- km$tot.withinss

@@ -71,7 +71,12 @@ the partition the profile scored at \code{best}, in the CRS it was
 computed in; \code{NULL} for a profile that does not carry them).  Their
 Voronoi cells are the cells that were scored;
 \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
-\code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.
+\code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  For a
+profile built with \code{partition = "density"} or \code{init =
+  "random"} the list also has \code{partition} (\code{kind},
+\code{init}, \code{density_power}, \code{density_k}), and the seeds
+carry it as \code{attr(, "partition")}; the regions are those the
+profile built, whatever kind built them.
 }
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:

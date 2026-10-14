@@ -148,10 +148,112 @@
 #' candidates; he does not offer it as a rule that picks one.  This is that
 #' display, with the other criteria alongside.
 #'
+#' @section The partition:
+#' The regions at every level are the Voronoi cells of a set of centres: a
+#' point belongs to the centre nearest to it.  \code{partition} says what the
+#' centres minimise, and every level of the ladder is built with the same
+#' kind.
+#' \describe{
+#'   \item{\code{"kmeans"} (default)}{The sum, over the points, of the
+#'     squared distance to the nearest centre.  The centres follow the square
+#'     root of the point density.  The cells are compact, smaller where the
+#'     points are dense and larger where they are sparse, and a cell in a
+#'     dense place holds several times the points of a cell in a sparse
+#'     place.}
+#'   \item{\code{"density"}}{The same sum with each point weighted by its
+#'     local density to the power \code{density_power}.  The local density at
+#'     a point is the number of points in the disc that reaches its
+#'     \code{density_k}-th nearest neighbour, over the area of that disc.
+#'     With \code{density_power = 1} the centres follow the point density
+#'     itself.  The cells are compact: many small ones where the points are
+#'     dense, a few large ones where they are sparse.  They hold about the
+#'     same number of points each once there are more cells than dense
+#'     places (clusters of points).  With fewer cells than dense places a
+#'     cell takes in whole clusters, large and small, and the counts are
+#'     about as uneven as under \code{"kmeans"}.  \code{density_power = 0}
+#'     weights every point alike, which is the objective of
+#'     \code{"kmeans"}; a power above 1 goes past equal counts and gives the
+#'     cells of dense places fewer points than those of sparse places.}
+#' }
+#' Two simulations show both ends.  The measure is the coefficient of
+#' variation of the cell counts (their standard deviation over their mean,
+#' 0 when every cell holds the same number), as medians over 20 layers.  On
+#' 1,200 points, 900 of them in four clusters over a sparse background, cut
+#' into 60 cells, it was 1.2 under \code{"kmeans"}, where the fullest cell
+#' held 42 times the points of the smallest, and 0.29 under
+#' \code{"density"}, where it held 4 times.  On 2,000 points with 28 dense
+#' places (half of the points in 3 large clusters, 30 percent in 25 small
+#' ones, the rest spread out) it was 0.90 under \code{"kmeans"} and 0.97
+#' under \code{"density"} at 10 cells and 1.08 and 1.01 at 20 cells; at 60
+#' cells it was 0.95 and 0.31, and at 130 cells 1.05 and 0.43.  A ladder
+#' starts at 2 cells, so its low levels are usually below the number of
+#' dense places, and the counts in \code{cell_n_min} and
+#' \code{cell_n_median} show where the two kinds part.
+#'
+#' \code{init} says how each of the \code{nstart} starts is drawn before it
+#' is refined; the best start is kept.  \code{"kmeans++"} draws the centres
+#' one at a time, each a point taken in proportion to its squared distance
+#' from the centres already drawn (times its weight, under
+#' \code{"density"}), which spreads the start over the points.
+#' \code{"random"} draws \code{k} distinct locations at random, as
+#' \code{\link[stats]{kmeans}()} does.
+#'
+#' A start of the kind \code{"kmeans"} is refined by
+#' \code{\link[stats]{kmeans}()} (Hartigan and Wong), for at most 50
+#' iterations from a k-means++ start and 100 from a random one.  A start of
+#' the kind \code{"density"} is refined by Lloyd's iteration, for at most 100
+#' steps: each point goes to its nearest centre, each centre moves to the
+#' weighted mean of its points, and a centre left without a point stays
+#' where it is.  \code{iter_max} sets another limit.  The start with the
+#' lowest sum is kept, and a kept start that was cut off at the limit is
+#' reported (see "Conditions"): its centres are those of the last step.
+#' Large layers can need more than 100 steps: on a simulated layer of 30,000
+#' points no start of six at 100 and 300 cells took more than 68, and on one
+#' of 60,000 points three of six took 102 to 152.
+#'
+#' The density kind depends on the points alone.  It works on the distinct
+#' locations in coordinate order, so the order of the rows does not matter.
+#' Its two tolerances are fractions of the extent of the points (the diagonal
+#' of their bounding box), so the unit of the coordinates does not matter:
+#' the neighbour distance is not taken below a millionth of the extent, and
+#' the iteration stops when no centre moves by \eqn{10^{-12}} of it.  Points
+#' at one location count as that many points at it and share a cell; the
+#' neighbour distance is measured to the \code{density_k}-th nearest
+#' \emph{other} location, so it is not zero where locations repeat.  The
+#' neighbour searches use \pkg{FNN} when it is installed.  The result is the
+#' same without it; the search then takes time that grows with the square of
+#' the number of points, about thirty times as long for 10,000 points and
+#' 2,000 centres.
+#'
+#' The columns keep their meaning under \code{"density"}, because each is
+#' read off the cells and not off the way they were drawn.  \code{wss} is the
+#' within-cell sum of squares of the coordinates with every point counted
+#' once, taken about each cell's mean, so \code{wss} and \code{elbow}
+#' compare between kinds; the weighted sum the centres minimise is kept in
+#' \code{attr(, "partition")$objective}, and \code{wss_spread} is its spread
+#' over the starts.  \code{cp}, \code{moran_z} and the test against one cell
+#' need cells drawn without the response, which both kinds give.
+#' \code{reliability} is computed for square cells of the level's average
+#' area and count and never reads the cells, so it is the same number under
+#' either kind.  The \code{elbow} is found more readily under
+#' \code{"density"} where the points cluster: once each cluster has its
+#' centres, further centres go into the clusters, the sparse ground between
+#' them keeps its sum of squares, and the curve flattens.  On simulated
+#' layers of 800 points in 3 to 8 clusters over a sparse background an elbow
+#' was read on 24 of 30 under \code{"density"} and on 10 under
+#' \code{"kmeans"}; on 100 uniform layers, on none under either.
+#'
+#' A profile built with a \code{partition} or an \code{init} other than the
+#' default carries \code{attr(, "partition")}, and
+#' \code{\link{select_resolution}()}, the seeding functions and
+#' \code{\link{build_tessellation}()} hand that record on with the regions
+#' (see "Value").  A result with no such record was built by plain k-means.
+#'
 #' @section The ladder and its bounds:
 #' Cells are k-means clusters of the (projected) coordinates, fitted at each
 #' level as the best of \code{nstart} k-means++ restarts (see
-#' \code{\link{determine_optimal_levels}} for why).  Levels are spaced
+#' \code{\link{determine_optimal_levels}} for why), unless \code{partition}
+#' or \code{init} says otherwise (see "The partition").  Levels are spaced
 #' logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
 #' step wastes fits at large \eqn{L} and starves resolution at small.  The
 #' ladder runs from 2 to a ceiling the data impose.  The ceiling is
@@ -371,6 +473,38 @@
 #'     the scored variable is constant to within rounding (a response the
 #'     predictors fit exactly leaves such residuals), so \code{cp},
 #'     \code{moran_i} and \code{moran_z} are \code{NA} at every level.}
+#'   \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
+#'     \code{\link{get_voronoi_seeds}()} and
+#'     \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
+#'     "density"}: a centre holds no point, so there are fewer occupied cells
+#'     than the count.  A centre that loses its points stays where it is, and
+#'     the start that is kept is the one with the lowest sum, whether or not
+#'     all its centres hold points.  It happens at high counts, mostly from
+#'     \code{init = "random"}.  On simulated layers of 800 points (in 4
+#'     clusters, in 28, and uniform; 20 of each) no partition into 80 cells
+#'     or fewer had such a centre.  At 400 cells, from random starts with
+#'     the best of 10 kept, 2, 5 and 1 of the 20 layers had one; from
+#'     k-means++ starts none of 840 partitions at 40 to 600 cells had one,
+#'     though it can happen.  The condition carries \code{level}, the count,
+#'     and \code{empty}.}
+#'   \item{\code{spatialkit_not_converged}}{\code{resolution_profile()},
+#'     \code{\link{get_voronoi_seeds}()} and
+#'     \code{\link{voronoi_seeds_kmeans}()}, for every call except the
+#'     plain k-means each has always run: the start that was kept was cut
+#'     off at the iteration limit, so its centres are those of the last step
+#'     and a longer run can still move points between cells.  The condition
+#'     carries \code{level} (the count; for a profile every level it
+#'     happened at), \code{iter} and \code{iter_max}.  Raise
+#'     \code{iter_max} (\code{kmeans_iter} in
+#'     \code{get_voronoi_seeds()}).}
+#'   \item{\code{spatialkit_partition_unused}}{\code{\link{get_voronoi_seeds}()}
+#'     and \code{\link{voronoi_seeds_kmeans}()}, given a profile or a
+#'     \code{select_resolution()} result together with a \code{partition},
+#'     an \code{init} or density settings other than those the profile was
+#'     built with: the scored centres are returned, and what the call asked
+#'     for is not used.  The
+#'     condition carries \code{kind} and \code{init}, those of the centres
+#'     returned.}
 #'   \item{\code{spatialkit_bound_chosen}}{\code{\link{get_voronoi_seeds}()},
 #'     \code{\link{voronoi_seeds_kmeans}()} and
 #'     \code{\link{build_tessellation}()}, given a profile or a
@@ -438,7 +572,9 @@
 #'   describe the subsample; the bounds, \code{supported}, the variance term
 #'   of \code{cp} and \code{reliability} describe the whole layer, so the
 #'   answer does not change with \code{sample_n} except through the fits.
-#' @param nstart k-means++ restarts per level.  Default 25.
+#' @param nstart Starts per level; the best is kept.  Default 25.  They are
+#'   k-means++ starts unless \code{init} says otherwise, and the same number
+#'   is run under either \code{partition}.
 #' @param seed RNG seed for the subsample and the restarts; restored
 #'   afterwards.  Default 123.  The rows are put in coordinate order before
 #'   either, so the profile does not depend on the order they come in.
@@ -501,9 +637,48 @@
 #'   the data support it and the floor is below the ceiling, as the default
 #'   did up to version 2.0.0; an estimated range then sets the fewest cells
 #'   any criterion can choose (see "The ladder and its bounds").
+#' @param partition What the centres of the regions minimise, at every level
+#'   of the ladder.  \code{"kmeans"} (default): the sum of squared distances
+#'   from the points to their nearest centre; compact cells whose counts are
+#'   several times higher in dense places than in sparse ones.
+#'   \code{"density"}: the same sum with each point weighted by its local
+#'   density to the power \code{density_power}; compact cells that, at the
+#'   default power, hold about the same number of points each once there are
+#'   more cells than dense places, and counts about as uneven as
+#'   \code{"kmeans"} gives below that.  See "The partition".
+#' @param init How each start is drawn.  \code{"kmeans++"} (default): the
+#'   centres one at a time, each in proportion to its squared distance from
+#'   those already drawn, times its weight under \code{partition =
+#'   "density"}.  \code{"random"}: \code{k} distinct locations at random, as
+#'   \code{\link[stats]{kmeans}()} draws them.
+#' @param density_power For \code{partition = "density"}: the power the local
+#'   density is raised to for a point's weight, a number from 0 to 2.
+#'   Default 1, which evens out the cell counts once the cells outnumber the
+#'   dense places (see "The partition").  \code{0} weights every
+#'   point alike, the objective of \code{"kmeans"} (reached by Lloyd's
+#'   iteration, so the centres are close to that kind's and not equal to
+#'   them); values between give counts between the two; values above 1 give
+#'   the cells of dense places fewer points than those of sparse places.
+#'   Setting it under \code{partition = "kmeans"}, which does not read it,
+#'   is a warning.
+#' @param density_k For \code{partition = "density"}: the number of nearest
+#'   neighbours the local density is read from.  Default 8.  It is held to
+#'   one fewer than the distinct locations.  A small number follows the
+#'   density closely and noisily; a large one smooths it.  Setting it under
+#'   \code{partition = "kmeans"} is a warning.
+#' @param iter_max The most iterations a start runs for: a single positive
+#'   whole number, or \code{NULL} (default) for the kind's own limit, 50 for
+#'   \code{partition = "kmeans"} from k-means++ starts and 100 for random
+#'   starts and for \code{partition = "density"}.  A kept start that was cut
+#'   off at the limit is a warning of class
+#'   \code{"spatialkit_not_converged"}, except in the default call, which
+#'   reports nothing, as before.
 #' @return A data.frame of class \code{resolution_profile} with one row per
-#'   level and columns \code{levels}, \code{wss}, \code{wss_spread} (relative
-#'   spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
+#'   level and columns \code{levels}, \code{wss} (the within-cell sum of
+#'   squares of the coordinates, every point counted once, under either
+#'   \code{partition}), \code{wss_spread} (relative
+#'   spread of WSS across the restarts; under \code{partition = "density"},
+#'   of the weighted sum the starts minimise), \code{elbow}, \code{cell_n_min},
 #'   \code{cell_n_median}, \code{cell_diam_median} (twice the median RMS
 #'   radius of the cells, in coordinate units: about 0.8 of the side of a
 #'   square cell of the same area, and less for finer cells, so a size to
@@ -564,6 +739,19 @@
 #'   use them when given the selection or the profile.  The centres carry the
 #'   hull as their \code{"cover"} attribute, which those two functions hand on
 #'   so that Voronoi cells built on the seeds reach the edge of the points.
+#'   A profile built with \code{partition = "density"} or \code{init =
+#'   "random"} also carries \code{partition}: a list with \code{kind},
+#'   \code{init}, \code{density_power} and \code{density_k} (both \code{NA}
+#'   for \code{kind = "kmeans"}); for \code{kind = "density"},
+#'   \code{objective}, the weighted sum the centres minimise, named by
+#'   level; \code{iter_max}, the iteration limit; and \code{iter} and
+#'   \code{converged}, the iterations each level's kept start took and
+#'   whether it stopped before the limit, named by level.  The selection
+#'   carries the first four as \code{$partition}, its
+#'   seeds and the seeds the seeding functions return as
+#'   \code{attr(, "partition")}, and a Voronoi tessellation built on them as
+#'   \code{params$partition}.  A profile built with the defaults has no such
+#'   attribute, and neither has anything made from it.
 #' @references
 #' Cressie, N. (1996). Change of support and the modifiable areal unit
 #' problem. \emph{Geographical Systems}, 3(2--3), 159--180.
@@ -604,8 +792,17 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                                levels = NULL, n_levels = 20L, min_cell_n = 9L,
                                sample_n = 1500L, nstart = 25L, seed = 123L,
                                sac = NULL, select_on = c("all", "split"),
-                               range_floor = FALSE) {
+                               range_floor = FALSE,
+                               partition = c("kmeans", "density"),
+                               init = c("kmeans++", "random"),
+                               density_power = 1, density_k = 8L,
+                               iter_max = NULL) {
   select_on <- match.arg(select_on)
+  partition <- match.arg(partition)
+  # As match.arg() reads it, with a message that names this function when
+  # the value is not one of the two.
+  init <- if (identical(init, .partition_inits())) init[1L]
+          else .match_init(init, "resolution_profile")
   # Whether the caller set the ladder: select_resolution() holds `reliability`
   # to the range floor only on a ladder this function built.
   levels_given <- !is.null(levels)
@@ -619,6 +816,25 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   if (!is.numeric(nstart) || length(nstart) != 1L || !is.finite(nstart) || nstart < 1)
     stop("resolution_profile(): `nstart` must be a single number >= 1.", call. = FALSE)
   nstart <- as.integer(nstart)
+  # The kind of partition every level of the ladder is built with, and how its
+  # starts are drawn (R/partition.R).  `part` is the record the profile, its
+  # selections and the seeds made from them carry.
+  part <- .check_partition_args(partition, init, density_power, density_k,
+                                "resolution_profile")
+  # The present kind, the best of `nstart` k-means++ starts, leaves no record:
+  # a profile made with it is the object it always was.
+  part_default <- identical(part$kind, "kmeans") && identical(part$init, "kmeans++")
+  # Iterations per start, unless `iter_max` sets them.  50 for k-means from
+  # k-means++ starts, as always.  Random starts lie further from an optimum,
+  # and Lloyd's iteration of the density kind takes more steps than Hartigan
+  # and Wong's: 100 for both.  Over 192 density runs on 300 to 6,000 points
+  # (uniform and clustered, 2 to 667 cells) the longest took 66 steps to stop
+  # moving, and 5 percent took more than 40.  Larger layers take more: a
+  # start that is cut off is reported after the sweep.
+  if (!is.null(iter_max))
+    iter_max <- .check_whole_count(iter_max, "iter_max", "resolution_profile",
+                                   "iterations", null_ok = TRUE)
+  part_iter <- if (!is.null(iter_max)) iter_max else if (part_default) 50L else 100L
   # These three used to fail deep inside seq() or an if() with R's own message,
   # and a fractional min_cell_n printed a ceiling that did not match it.
   if (!is.numeric(n_levels) || length(n_levels) != 1L || !is.finite(n_levels) || n_levels < 2)
@@ -1276,30 +1492,107 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # Rows and occupied cells behind each level's RSS, for Cp's fallback noise
   # estimate below.
   m_ok_v <- rep(NA_real_, m); L_ok_v <- rep(NA_real_, m)
+  # What the columns mean under partition = "density".  The cells are then
+  # the Voronoi cells of centres that minimise a density-weighted sum, and
+  # each column is still read off those cells:
+  #   wss, elbow    The within-cell sum of squares of the coordinates, every
+  #                 point counted once, about each cell's own mean.  That is
+  #                 what the kind "kmeans" reports (its centres are the cell
+  #                 means), so the column and the elbow read from it compare
+  #                 between kinds, and the curve still starts from the total
+  #                 sum of squares at one cell.  The weighted sum the centres
+  #                 minimise is not a sum of squares of the layer: it weights
+  #                 a point by its density, and its one-cell value is not the
+  #                 total sum of squares.  It is kept in attr(, "partition").
+  #                 The elbow rule's threshold holds on points with no
+  #                 clusters: over 100 uniform layers of 400 to 1,500 points
+  #                 the largest sag was 0.006 under "kmeans" and 0.048 under
+  #                 "density", against the log(1.25) = 0.22 an elbow takes,
+  #                 and on 60 layers of 800 points whose density varies
+  #                 without clusters (a gradient, two plateaus, a radial
+  #                 fall) an elbow was read on 0 and on 2.  Read off the
+  #                 weighted sum it was read on 10 of those 60, which is the
+  #                 other reason to read the unweighted one.  Where the
+  #                 points do cluster the density kind's curve bends more
+  #                 sharply: past the number of clusters its centres go into
+  #                 the clusters, and the sparse ground keeps its sum of
+  #                 squares.  On 30 layers of 3 to 8 clusters over a sparse
+  #                 background an elbow was read on 24 against 10.
+  #   wss_spread    The spread, over the starts, of what the starts minimise
+  #                 and are ranked by: the weighted sum.
+  #   cell_n_*, cell_diam_median, cells_resp, cell_resp_mean
+  #                 Counts and sizes of the cells, whatever drew them.
+  #   rss, cp       The cells are drawn from the coordinates alone under
+  #                 either kind (the weights are a function of the
+  #                 coordinates), so the cell means are a linear fit with one
+  #                 parameter per occupied cell, which is all Mallows' Cp
+  #                 assumes.  Its variance term, tau^2 times the cells over
+  #                 the rows, is the sum over the cells of (rows in the cell
+  #                 / rows) x tau^2 / (rows in the cell), and holds however
+  #                 the rows are shared out.
+  #   moran_i, moran_z, the F test against one cell
+  #                 Statistics of the cell means under the hypothesis of no
+  #                 structure, valid for any cells drawn without the
+  #                 response.  Moran's z assumes cell means of equal
+  #                 variance, which cells of about equal counts come closer
+  #                 to.
+  #   reliability   Not read off the cells at all: it is computed for square
+  #                 cells of the level's average area that hold the level's
+  #                 average count, so it is the same number under either
+  #                 kind.  The cells of the density kind match its counts
+  #                 more closely and its areas less.
+  # Nothing here is undefined under the density kind, so no column is NA for
+  # the kind's sake.  A level at which no start gives a partition is NA under
+  # either kind.
+  objective_v <- rep(NA_real_, m)
+  # Iterations the kept start of each level took, and whether it stopped
+  # before the limit.
+  iter_v <- rep(NA_integer_, m); converged_v <- rep(NA, m)
+  # Occupied cells per level.  Every cell of the kind "kmeans" holds a point;
+  # a centre of the density kind that loses its points stays where it is,
+  # and its cell then adds no mean to Cp's variance term.
+  L_fit_v <- as.numeric(levels)
   for (i in seq_len(m)) {
     L  <- levels[i]
-    kb <- .kmeans_best(xy, L, nstart = nstart)
+    kb <- .partition_centres(xy, L, partition = part$kind, init = part$init,
+                             nstart = nstart, iter.max = part_iter,
+                             density_power = density_power, density_k = density_k)
     if (is.null(kb)) {
-      .log_warn("resolution_profile(): k-means failed at %d cells; that level is NA.", L)
+      .log_warn("resolution_profile(): %s failed at %d cells; that level is NA.",
+                if (identical(part$kind, "density")) "the density-weighted k-means"
+                else "k-means", L)
       next
     }
-    km <- kb$km
-    centres[[i]] <- unname(km$centers[, 1:2, drop = FALSE])
+    cl <- kb$cluster
+    centres[[i]] <- kb$centers
     out$wss[i]        <- kb$wss
     out$wss_spread[i] <- kb$spread
-    sizes <- tabulate(km$cluster, nbins = L)
+    objective_v[i]    <- kb$objective
+    iter_v[i]         <- as.integer(kb$iter)
+    converged_v[i]    <- isTRUE(kb$converged)
+    sizes <- tabulate(cl, nbins = L)
+    L_fit <- sum(sizes > 0L)
+    L_fit_v[i] <- L_fit
+    if (L_fit < L)
+      .warn_classed("spatialkit_empty_cells",
+                    paste0("resolution_profile(): at %d cells, %d of the centres hold no ",
+                           "point (a centre that loses its points stays where it is), so ",
+                           "the level has %d occupied cells: `cell_n_min` is 0 there, and ",
+                           "`cp` counts the occupied cells."),
+                    L, L - L_fit, L_fit,
+                    data = list(level = as.integer(L), empty = as.integer(L - L_fit)))
     out$cell_n_min[i]    <- as.integer(min(sizes))
     out$cell_n_median[i] <- stats::median(sizes)
-    rad <- sqrt(km$withinss / pmax(sizes, 1L))
+    rad <- sqrt(kb$withinss / pmax(sizes, 1L))
     out$cell_diam_median[i] <- 2 * stats::median(rad[sizes >= 2L])
     if (!is.null(y)) {
       okr <- is.finite(y)
       m_ok <- sum(okr)
-      L_ok <- length(unique(km$cluster[okr]))     # cells holding a scored row
+      L_ok <- length(unique(cl[okr]))             # cells holding a scored row
       out$cells_resp[i] <- L_ok
       if (L_ok > 0L) out$cell_resp_mean[i] <- m_ok / L_ok
       if (m_ok > L_ok) {
-        cm  <- stats::ave(y[okr], km$cluster[okr])
+        cm  <- stats::ave(y[okr], cl[okr])
         out$rss[i] <- sum((y[okr] - cm)^2)
         m_ok_v[i] <- m_ok; L_ok_v[i] <- L_ok
         # Cp for the cells of the whole layer, estimated from the subsample.
@@ -1309,13 +1602,13 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # built from the layer's N rows with a response.  With no subsample
         # (m = N, L_ok = L) it is Mallows' RSS / n + 2 tau^2 L / n.
         if (!is.null(vg) && !is_const)
-          out$cp[i] <- out$rss[i] / m_ok + vg$nugget * (L_ok / m_ok + L / n_resp)
+          out$cp[i] <- out$rss[i] / m_ok + vg$nugget * (L_ok / m_ok + L_fit / n_resp)
       }
       # Moran's I of cell means that differ by rounding error alone is
       # rounding error too.
       if (!is_const) {
         mi <- .morans_i_for_k(xy[okr, , drop = FALSE], y[okr],
-                              pred_for_moran[okr, , drop = FALSE], km$cluster[okr])
+                              pred_for_moran[okr, , drop = FALSE], cl[okr])
         out$moran_i[i] <- mi[["I"]]
         out$moran_z[i] <- mi[["z"]]
       }
@@ -1348,7 +1641,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (is.finite(s2) && s2 > 0) {
         fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
         out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
-          s2 * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + levels[fin_cp] / n_resp)
+          s2 * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + L_fit_v[fin_cp] / n_resp)
         cp_noise <- list(source = "finest-level residual mean square", value = s2,
                          level = as.integer(levels[j]))
         # A variogram that found no spatial structure does carry a model, the
@@ -1434,13 +1727,55 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                        "no cluster structure); `elbow` is NA."))
   }
   wss_bumps <- .wss_bumps(out$wss[fin])
-  if (wss_bumps > 0L)
+  if (wss_bumps > 0L && part_default)
     .log_warn(paste0("resolution_profile(): the WSS curve rises at %d step(s) of ",
                      "the ladder even with %d k-means++ restarts; the elbow and ",
                      "the neighbouring levels' spread are partly optimisation noise."),
               wss_bumps, nstart)
+  else if (wss_bumps > 0L && identical(part$kind, "kmeans"))
+    .log_warn(paste0("resolution_profile(): the WSS curve rises at %d step(s) of ",
+                     "the ladder even with %s per level; the elbow and the ",
+                     "neighbouring levels' spread are partly optimisation noise."),
+              wss_bumps, .partition_label(part, nstart))
+  else if (wss_bumps > 0L)
+    # The density kind minimises the weighted sum, so a rise of the
+    # unweighted one is not by itself a start that went wrong; a rise of the
+    # weighted sum is.
+    .log_warn(paste0("resolution_profile(): the WSS curve rises at %d step(s) of ",
+                     "the ladder. The centres of partition = \"density\" minimise the ",
+                     "density-weighted sum (attr(<profile>, \"partition\")$objective), ",
+                     "which rises at %d step(s) with %s per level; the elbow is read ",
+                     "off the unweighted curve and is that much less sure."),
+              wss_bumps, .wss_bumps(objective_v[is.finite(objective_v)]),
+              .partition_label(part, nstart))
 
-  structure(out,
+  # A level whose kept start was cut off at the iteration limit: its centres
+  # are those of the last step, and a longer run can still move points
+  # between cells.  Said for every call but the one this function has always
+  # made (k-means from k-means++ starts with its own limit), whose result and
+  # conditions are unchanged.
+  cut_off <- which(converged_v %in% FALSE)
+  if (length(cut_off) && (!part_default || !is.null(iter_max)))
+    .warn_not_converged("resolution_profile", levels[cut_off], iter_v[cut_off], part_iter,
+                        part$kind, "iter_max", of = m)
+
+  # The record of the kind that built the regions.  Absent for the present
+  # kind, so that a profile made with it is unchanged; .partition_record()
+  # reads either.  The weighted sum each level's centres minimise goes with
+  # it under the density kind, since `wss` there is the unweighted one, and
+  # so do the iterations each level's kept start took and whether it stopped
+  # before the limit.
+  part_attr <- NULL
+  if (!part_default) {
+    part_attr <- part[.partition_fields()]
+    if (identical(part$kind, "density"))
+      part_attr$objective <- stats::setNames(objective_v, levels)
+    part_attr$iter_max  <- as.integer(part_iter)
+    part_attr$iter      <- stats::setNames(iter_v, levels)
+    part_attr$converged <- stats::setNames(converged_v, levels)
+  }
+
+  out <- structure(out,
             class      = c("resolution_profile", "data.frame"),
             bounds     = bounds,
             variogram  = if (is.null(vg)) NULL
@@ -1459,6 +1794,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
             # nor a boundary, so their Voronoi cells reach the points' hull and
             # not only the centres'.
             hull       = hull)
+  if (!is.null(part_attr)) attr(out, "partition") <- part_attr
+  out
 }
 
 
@@ -1553,9 +1890,14 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
               else
                 sprintf("nugget %.3g, partial sill %.3g, range %s", vg$nugget, vg$psill,
                         if (is.finite(vg$range)) sprintf("%.0f", vg$range) else "unidentified")))
-  cat(sprintf("  scored on   : %s; %d k-means++ restarts per level; WSS rises at %d step(s)\n",
+  # The kind that built the cells: unrecorded for k-means from k-means++
+  # starts, whose line is the one it always was.
+  part <- attr(x, "partition", exact = TRUE)
+  cat(sprintf("  scored on   : %s; %s per level; WSS rises at %d step(s)\n",
               if (is.na(attr(x, "variable"))) "geometry only" else attr(x, "variable"),
-              attr(x, "nstart"), attr(x, "wss_bumps")))
+              if (is.list(part) && !is.null(part$kind)) .partition_label(part, attr(x, "nstart"))
+              else sprintf("%d k-means++ restarts", attr(x, "nstart")),
+              attr(x, "wss_bumps")))
   # What one cell for the whole layer scores: the ladder starts at 2, so the
   # level every other has to beat is not a row of the table.
   one <- attr(x, "one_cell", exact = TRUE)
@@ -1782,7 +2124,12 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   computed in; \code{NULL} for a profile that does not carry them).  Their
 #'   Voronoi cells are the cells that were scored;
 #'   \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
-#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.
+#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  For a
+#'   profile built with \code{partition = "density"} or \code{init =
+#'   "random"} the list also has \code{partition} (\code{kind},
+#'   \code{init}, \code{density_power}, \code{density_k}), and the seeds
+#'   carry it as \code{attr(, "partition")}; the regions are those the
+#'   profile built, whatever kind built them.
 #' @family aggregation
 #' @examples
 #' if (requireNamespace("gstat", quietly = TRUE)) {
@@ -2018,7 +2365,7 @@ select_resolution <- function(profile,
                            "cells, not the level that represents the response best."),
                     what_z)
   }
-  structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
+  sel <- structure(list(best = as.integer(best), flat = sort(as.integer(flat)),
                  criterion = criterion, value = opt,
                  at_ceiling = at_ceiling, at_floor = at_floor, edge = edge,
                  n_levels = length(lv),
@@ -2032,6 +2379,13 @@ select_resolution <- function(profile,
                  # kept.
                  seeds = .profile_seeds(profile, best)),
             class = "resolution_selection")
+  # The kind that built the profile's cells, when it is not the present one
+  # (see resolution_profile()): the selection names it, and its seeds carry
+  # it on.
+  part <- attr(profile, "partition", exact = TRUE)
+  if (is.list(part) && !is.null(part$kind))
+    sel$partition <- part[.partition_fields()]
+  sel
 }
 
 
@@ -2057,6 +2411,11 @@ select_resolution <- function(profile,
   # without it a selection given to get_voronoi_seeds() with neither points
   # nor a boundary had no cover to hand on.
   attr(s, "cover")  <- attr(profile, "hull", exact = TRUE)
+  # The kind that built the cells these centres seed, when the profile
+  # records one.
+  part <- attr(profile, "partition", exact = TRUE)
+  if (is.list(part) && !is.null(part$kind))
+    attr(s, "partition") <- part[.partition_fields()]
   s
 }
 
@@ -2129,6 +2488,10 @@ print.resolution_selection <- function(x, ...) {
   cat(sprintf("  flat region : %s (%d of %d levels)\n",
               .band_label(x$flat, .scored_levels(x$values)),
               length(x$flat), x$n_levels))
+  # The kind that built the cells, when the profile recorded one; a selection
+  # from a k-means profile prints as it always did.
+  if (is.list(x$partition) && !is.null(x$partition$kind))
+    cat(sprintf("  cells       : %s\n", .partition_label(x$partition)))
   # strwrap() collapses runs of spaces, so the aligned label is put back
   # after wrapping rather than wrapped with the sentence.
   say <- function(text) {
@@ -2345,10 +2708,16 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
   # The whole ladder, not its ends: the print method needs it to tell a band
   # with a hole in it from a solid run, and `[` on the result keeps it, so a
   # subset can still be read honestly.
-  structure(out, class = c("resolution_summary", "data.frame"),
+  out <- structure(out, class = c("resolution_summary", "data.frame"),
             common = sort(unique(as.integer(common))), bands = bands,
             scored = scored, ladder = lv,
             n_levels = nrow(object), tol = tol, variable = attr(object, "variable"))
+  # The kind that built the cells, when the profile recorded one; the summary
+  # of a k-means profile is the object it always was.
+  part <- attr(object, "partition", exact = TRUE)
+  if (is.list(part) && !is.null(part$kind))
+    attr(out, "partition") <- part[.partition_fields()]
+  out
 }
 
 
@@ -2382,6 +2751,10 @@ print.resolution_summary <- function(x, ...) {
               nrow(x), if (nrow(x) == 1L) "on" else "a",
               n_lv, if (n_lv == 1L) "" else "s",
               min(lad), max(lad)))
+  # The kind that built the cells, when the profile recorded one.
+  part <- attr(x, "partition", exact = TRUE)
+  if (is.list(part) && !is.null(part$kind))
+    cat(sprintf("  cells: %s\n\n", .partition_label(part)))
   tab <- data.frame(
     criterion = x$criterion,
     best = x$best,

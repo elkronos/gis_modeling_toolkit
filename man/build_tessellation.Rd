@@ -177,7 +177,13 @@ of points of \code{points_sf} that fall in no cell (the \code{NA}s of
 cell when a point \code{cover} was checked against the cells (\code{NULL}
 otherwise). For \code{"voronoi"} also \code{boundary_source}, where the
 boundary came from: \code{"boundary"}, \code{"cover"}, \code{"seeds' cover"} or
-\code{"points"}. For \code{"hex"} and
+\code{"points"}, and, when \code{points_sf} is a layer of seeds that records
+the kind of partition that placed it (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}),
+\code{partition}: that record, a list with \code{kind}, \code{init},
+\code{density_power} and \code{density_k} and, for seeds a seeding function
+placed itself, \code{iter}, \code{iter_max} and \code{converged}. The cells are
+the Voronoi cells of the seeds whatever kind placed them. For
+\code{"hex"} and
 \code{"square"} also \code{cells_occupied} and \code{cells_empty}, the number of
 cells that hold at least one point and that hold none.}
 }

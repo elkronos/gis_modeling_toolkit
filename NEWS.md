@@ -199,6 +199,62 @@ old behaviour where there is a way.
 
 ## New features
 
+* `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and
+  `voronoi_seeds_kmeans()` gain `partition = c("kmeans", "density")`.
+  `"kmeans"`, the default, is what each function did: centres that minimise
+  the sum of squared distances from the points.  `"density"` weights each
+  point by its local density (the points in the disc that reaches its
+  `density_k`-th nearest neighbour, default 8, over the disc's area) to the
+  power `density_power` (0 to 2, default 1).  The cells are compact, and at
+  power 1 they hold about the same number of points each once there are more
+  cells than dense places; with fewer cells the counts are about as uneven
+  as under `"kmeans"`.  On 2,000 simulated points with 28 dense places the
+  coefficient of variation of the cell counts was 0.90 under `"kmeans"` and
+  0.97 under `"density"` at 10 cells, and 0.95 and 0.31 at 60 cells.  The
+  result does not depend on the order of the rows, the unit of the
+  coordinates or whether FNN is installed, and points at one location share
+  a cell.
+
+* The same three functions gain `init`: `"kmeans++"` draws a start's centres
+  one at a time, each in proportion to its squared distance from those
+  already drawn, and `"random"` draws distinct locations at random, as
+  `stats::kmeans()` does.  `resolution_profile()` defaults to `"kmeans++"`,
+  as before.  The two seeding functions default to `NULL`: random starts for
+  `partition = "kmeans"`, the run they have always made, and k-means++ for
+  `partition = "density"`.
+
+* `resolution_profile()` and `voronoi_seeds_kmeans()` gain `iter_max`, the
+  most iterations a start runs for.  `NULL`, the default, is 50 for the
+  k-means each has always run and 100 for random starts in the profile and
+  for `partition = "density"`.  A kept start that was cut off at the limit,
+  or at `kmeans_iter` in `get_voronoi_seeds()`, is a warning of class
+  `spatialkit_not_converged` that carries `level`, `iter` and `iter_max`.
+  The default calls report as before.
+
+* A result built with a `partition` or an `init` other than the default says
+  so: `attr(, "partition")` on a profile and on seeds, `$partition` on a
+  `select_resolution()` result, `params$partition` on a tessellation from
+  `build_tessellation()` or `create_voronoi_polygons()`.  The record holds
+  `kind`, `init`, `density_power` and `density_k`, and for a profile and for
+  seeds a seeding function placed, the iterations the kept start took and
+  whether it converged.  A selection or profile passed as the count gives
+  the centres it scored, so the regions built are the regions scored.
+  Default results carry no record and are unchanged.
+
+* Under `partition = "density"` the profile's `wss` is the within-cell sum
+  of squares with every point counted once, so `wss` and `elbow` compare
+  between kinds; the weighted sum the centres minimise is
+  `attr(, "partition")$objective`.  `print()` of the profile and of a
+  selection, and `summary()` of the profile, name the kind.
+  `determine_optimal_levels()` keeps plain k-means.
+
+* Two more warnings have a class.  `spatialkit_partition_unused`: a
+  selection or profile passed as the count together with a `partition`,
+  `init` or density setting it was not built with; the scored centres are
+  returned.  `spatialkit_empty_cells`: a density partition in which a centre
+  holds no point, which happens at counts from about a fifth of the points
+  up, mostly from random starts.
+
 * `make_folds()` gains `method = "knndm"`, the k-fold version of
   nearest-neighbour distance matching (Linnenbrink et al. 2024).  It builds
   `k` folds whose held-out distances are as close as a set of candidates
