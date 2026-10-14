@@ -1258,6 +1258,35 @@ assign_features_to_polygons <- function(
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
 #'   intervals"). Default `NULL`: no interval columns, and the frame is
 #'   exactly what it was before this argument existed.
+#' @param estimate Which value of a cell the frame reports: `"mean"`
+#'   (default) or `"pooled"`. With `"mean"` the frame is the one described
+#'   above. With `"pooled"` every numeric response and predictor column also
+#'   gets a pooled value, `w * m + (1 - w) * t`: the cell's own mean `m` and a
+#'   target `t`, the mean of the rows of the 8 cells whose observations'
+#'   centroids are nearest (all the other cells when there are fewer than 10;
+#'   the polygons are not read). The own weight is
+#'   `w = tau2 / (tau2 + sigma2 / n)`, where `n` is the cell's count,
+#'   `sigma2` the spread of the observations about their cell's mean and
+#'   `tau2` the mean squared distance between a cell's level and its target.
+#'   Each column is pooled on its own rows: those with a value, a cell and a
+#'   location. `agg_funs`, `deff`, `sac` and `conf_level` do not enter the
+#'   pooled columns, and every other column is computed as with `"mean"`.
+#'   Lon/lat coordinates, and coordinates without a CRS that look like
+#'   degrees, are projected for the distances between centroids, as
+#'   [resolution_profile()] projects them. The projection is chosen from
+#'   every row of the layer, those without a value or a cell included, so on
+#'   such input the rows a column does not use can still decide the CRS its
+#'   distances are measured in; a layer projected beforehand is used in its
+#'   own CRS. See "Value" for the columns, the attributes and the warnings.
+#' @param obs_level Optional level in (0, 1), such as `0.90`, of an interval
+#'   for one further observation in a cell, located like the data. It needs
+#'   `estimate = "pooled"`: the interval is the pooled value plus the
+#'   `(1 - obs_level) / 2` and `(1 + obs_level) / 2` quantiles of the
+#'   leave-one-out residuals of the pooled values, so its two offsets are the
+#'   same in every cell. It is a statement about observations on average,
+#'   not about each cell. It is a separate argument from `conf_level`, whose
+#'   interval is for a mean and is not a range for an observation. Default
+#'   `NULL`: no such interval.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell), one column per
 #'   `agg_funs` entry per variable, `..sd_*` / `..se_*` for every numeric
@@ -1321,6 +1350,60 @@ assign_features_to_polygons <- function(
 #'   returned ID column is therefore character. Whole numbers are written out
 #'   in full for that (`"100000"`, never `"1e+05"`), so an integer and a
 #'   double ID of the same cell still match.
+#'
+#'   With `estimate = "pooled"`, each numeric column `v` with its prefix
+#'   (`resp_` or `pred_`) gains `..pooled_<prefix><v>` (the pooled value),
+#'   `..pooled_w_<prefix><v>` (the own weight, 0 to 1; it is not a regression
+#'   weight) and `..pooled_target_<prefix><v>` (the target), and with
+#'   `obs_level` also `..obs_lo_<prefix><v>` and `..obs_hi_<prefix><v>`.
+#'   They follow every column listed above and precede `cell_area` and
+#'   `n_per_area`, the response's first, then each predictor's. A cell with
+#'   no row that has a value, a cell and a location gets `NA`, never a value
+#'   made from its neighbours. Two attributes are attached.
+#'   `attr(, "pooled")`, of class `"spatialkit_pooled"`, records what was
+#'   fitted: `toward`, `neighbours`, `crs` (the CRS the centroid distances
+#'   were measured in), `obs_level`, `conf_level`, `intervals` and `columns`,
+#'   a list with one entry per pooled column holding `column`, `role`
+#'   (`"response"` or `"predictor"`), `n` (rows used), `cells`, `df` (values
+#'   beyond one per cell, which `sigma2` rests on), `neighbours` (the cells
+#'   in each target), `sigma2`, `tau2`, `own_weight` (the median weight),
+#'   `share_alone` (the share of rows that are the only one in their cell),
+#'   `loo` and `loo_se` (the leave-one-out mean squared error of the pooled
+#'   value, and its standard error over rows), `loo_one_cell` (the same error
+#'   with one mean for all rows), `structured` and `structure_p` (whether the
+#'   cells predict a left-out observation better than one mean, and the
+#'   p-value of the F test of the cell means against one mean, which has to
+#'   be below 0.05 as well), `offsets` (the two offsets of the interval),
+#'   `repeated`, `skipped`, `constant` and `status`. `attr(, "intervals")` is
+#'   the same data frame as `attr(, "pooled")$intervals`: one row per family
+#'   of interval columns in the frame, saying what it covers, what it is
+#'   centred on, its level and its method. Away from the observations no
+#'   interval here is calibrated.
+#'
+#'   Where the pooled columns of a column cannot be computed they are `NA`,
+#'   with a warning of class `"spatialkit_pool_unavailable"` and not an
+#'   error: a layer without geometry, no row with a value, a cell and a
+#'   location, no cell with two values, or more cells than the neighbour
+#'   search may compare without the 'FNN' package
+#'   (`options(spatialkit.exact_pairs_max = )`, 2e9 pairs by default). The
+#'   other warnings of the pooled columns are of class
+#'   `"spatialkit_pool_degenerate"` (one cell, no spread inside any cell, or
+#'   every own weight 0), `"spatialkit_pool_few_cells"` (2 to 9 cells, where
+#'   each target is the mean of all the other cells),
+#'   `"spatialkit_pool_few_df"` (`sigma2` rests on fewer than 30 values
+#'   beyond one per cell), `"spatialkit_no_structure"` (`structured` is
+#'   `FALSE`: the pooled values predict a left-out observation no better
+#'   than one mean for all rows, or the F test does not tell the cell means
+#'   from one mean; the text says which, and `beats` in the condition is
+#'   `TRUE` for the second), `"spatialkit_pool_rows_skipped"` (rows with a
+#'   value and a cell and no location) and, with `obs_level`,
+#'   `"spatialkit_repeated_locations"` and `"spatialkit_few_residuals"`.
+#'   Each is raised once per call and reason, for all the columns it applies
+#'   to, and carries them in `columns`; the numbers of each column are in
+#'   `attr(, "pooled")`. The two about few cells and few values are raised
+#'   for columns whose weights were estimated, and the two of `obs_level` for
+#'   columns whose interval is read from residuals, so a constant column
+#'   raises `"spatialkit_pool_degenerate"` and no other.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -1381,14 +1464,35 @@ summarize_by_cell <- function(assigned_points_sf,
                               deff_max_n     = 500L,
                               quiet          = TRUE,
                               conf_level     = NULL,
-                              area           = FALSE) {
+                              area           = FALSE,
+                              estimate       = c("mean", "pooled"),
+                              obs_level      = NULL) {
   .msg <- function(...) if (!quiet) message(...)
+  estimate <- match.arg(estimate)
   if (!is.null(conf_level) &&
       (!is.numeric(conf_level) || length(conf_level) != 1L ||
        !is.finite(conf_level) || conf_level <= 0 || conf_level >= 1))
     stop("summarize_by_cell(): `conf_level` must be a single number strictly ",
          "between 0 and 1 (0.95 for a 95% interval), or NULL for no intervals.",
          call. = FALSE)
+  # Strictly between 0 and 1 as the interval reads the level: through its tail
+  # probability rounded to 12 decimals (.obs_offsets()).  That is 0.5 for a
+  # level of 0 and anything below, 0 for a level of 1 and anything above, and
+  # also for a level within 1e-12 of either, which would give the median
+  # twice or the range of the residuals.
+  if (!is.null(obs_level) &&
+      (!is.numeric(obs_level) || length(obs_level) != 1L || !is.finite(obs_level) ||
+       round((1 - obs_level) / 2, 12) <= 0 || round((1 - obs_level) / 2, 12) >= 0.5))
+    stop("summarize_by_cell(): `obs_level` must be a single number strictly ",
+         "between 0 and 1 (0.90 for a 90% interval), or NULL for no interval.",
+         call. = FALSE)
+  # The interval for one observation has one centre, the pooled value.  With
+  # plain means it is refused, not centred on the plain mean without a word.
+  if (!is.null(obs_level) && identical(estimate, "mean"))
+    stop("summarize_by_cell(): `obs_level` needs estimate = \"pooled\": the interval ",
+         "for an observation is built from the leave-one-out residuals of the pooled ",
+         "value and is centred on it. `conf_level` gives the plain mean's t interval, ",
+         "which is not a range for an observation.", call. = FALSE)
   if (!is.logical(area) || length(area) != 1L || is.na(area))
     stop("summarize_by_cell(): `area` must be TRUE or FALSE.", call. = FALSE)
   # c("val", "flag") used to stop with "the condition has length > 1", and a
@@ -2271,6 +2375,33 @@ summarize_by_cell <- function(assigned_points_sf,
       if (!is.null(vgm_fallback)) " (variogram fallback)" else "")
   }
 
+  # --- pooled values ---
+  # Appended after every column above, so each of those keeps its name, its
+  # values and its position, and before the join below adds the geometry.
+  # Nothing here reads `agg_funs` or `deff`: a column is pooled on its own
+  # scored rows, from their values, their cells and their coordinates.
+  if (identical(estimate, "pooled") && (has_resp || has_pred)) {
+    # The design effect the t interval carries is the one recorded above as
+    # applied, not the one asked for: a refused number, and Kish ICCs of 0 for
+    # every column, leave the default's numbers, and the table of intervals
+    # then describes them as the default's.
+    deff_carried <- attr(out, "deff_applied")
+    pooled <- .pooled_columns(
+      assigned_points_sf, df, id_col, out[[id_col]], resp_num, pred_num,
+      obs_level = obs_level, conf_level = conf_level,
+      deff_label = .deff_label(
+        deff_carried,
+        # Under Kish each column has its own ICC, and one of 0 leaves that
+        # column's standard error as it is.
+        kish_zero = if (use_kish)
+          unique(c(if (has_resp && resp_rho <= 0) resp_num,
+                   if (has_pred) pred_num[pred_rho <= 0]))))
+    for (nm in names(pooled$columns)) out[[nm]] <- pooled$columns[[nm]]
+    attr(out, "pooled")    <- pooled$record
+    attr(out, "intervals") <- pooled$record$intervals
+    .pooled_warnings(pooled$events, obs_level)
+  }
+
   if (!is.null(cells_sf)) {
     if (!inherits(cells_sf, "sf")) {
       # A warning, not a log line: the documented return is an sf layer.
@@ -2357,10 +2488,17 @@ summarize_by_cell <- function(assigned_points_sf,
         # observations get NA).
         deff_attr   <- attr(out, "deff_applied")
         icc_attr    <- attr(out, "icc")
+        pooled_attr <- attr(out, "pooled")
         pre_join_id <- as.character(out[[id_col]])
 
         out <- dplyr::left_join(cells_slim, out, by = id_col)
         if (!is.null(icc_attr)) attr(out, "icc") <- icc_attr
+        # The record of the pooled columns and its table of intervals, which
+        # the join drops as it drops "icc".
+        if (!is.null(pooled_attr)) {
+          attr(out, "pooled")    <- pooled_attr
+          attr(out, "intervals") <- pooled_attr$intervals
+        }
 
         if (isTRUE(area)) {
           # Planar areas in the cells' own (verified equal-area) CRS, as
@@ -2414,4 +2552,523 @@ summarize_by_cell <- function(assigned_points_sf,
   whole <- is.finite(x) & x == trunc(x) & abs(x) < 2^53
   out[whole] <- sprintf("%.0f", x[whole] + 0)   # + 0 turns -0 into 0
   out
+}
+
+
+# -----------------------------------------------------------------------------
+# Pooled values in summarize_by_cell()
+# -----------------------------------------------------------------------------
+
+# Beyond this a coordinate is not read as a location: the squared distance
+# between two such points is not a finite number, and the two neighbour
+# searches then stop or disagree.
+.POOL_XY_MAX <- 1e150
+
+#' The coordinates the pooled values are computed from
+#'
+#' One row per row of the layer, in a projected CRS.  Features that are not
+#' points are reduced to one point each first, and the points are then
+#' projected, in that order, which is the order \code{resolution_profile()}
+#' takes: lon/lat coordinates, and CRS-less ones that look like degrees, go
+#' through \code{ensure_projected()}, so degrees are never read as distances.
+#' The projection is chosen from every row of the layer, as the profile
+#' chooses it.
+#'
+#' A feature with an empty geometry has \code{NA} coordinates, and so has one
+#' with a coordinate beyond \code{.POOL_XY_MAX}: both are rows without a
+#' location to the caller.  The warning sf raises when it takes a point on
+#' the surface of a lon/lat polygon is not passed on: the point is one of the
+#' polygon's, and it is projected before any distance is taken.
+#'
+#' @param layer The assigned layer.
+#' @return \code{NULL} when the layer has no geometry (a plain data frame);
+#'   otherwise a list with \code{xy}, a two-column matrix, and \code{crs},
+#'   the CRS its distances are measured in.
+#' @keywords internal
+#' @noRd
+.pooled_xy <- function(layer) {
+  if (!inherits(layer, "sf")) return(NULL)
+  if (nrow(layer) == 0L)
+    return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
+  if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
+    layer <- withCallingHandlers(
+      coerce_to_points(layer, "auto"),
+      warning = function(w)
+        if (grepl("st_point_on_surface may not give correct results",
+                  conditionMessage(w), fixed = TRUE))
+          invokeRestart("muffleWarning"))
+  layer <- ensure_projected(layer)
+  xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
+  far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
+  xy[which(far), ] <- NA_real_
+  list(xy = xy, crs = sf::st_crs(layer))
+}
+
+
+#' The design effect the t interval carries, as a call writes it
+#'
+#' Read from what \code{summarize_by_cell()} recorded as applied, so that the
+#' table of intervals describes the standard errors the frame holds: a
+#' request that was refused, or that corrected no column, reads \code{1}.
+#'
+#' @param applied The \code{"deff_applied"} attribute of the summary, or
+#'   \code{NULL} when no correction was applied.
+#' @param kish_zero Under Kish's correction, the columns whose ICC is 0 and
+#'   whose standard errors are therefore the uncorrected ones.
+#' @return One string for \code{.intervals_table()}: \code{1},
+#'   \code{"kish"} or \code{"variogram"} with their quotes, or the number.
+#'   It reads \code{1} only when nothing was applied: the table takes the
+#'   words of its row from that.
+#' @keywords internal
+#' @noRd
+.deff_label <- function(applied, kish_zero = character(0)) {
+  if (is.null(applied)) return("1")
+  switch(applied$method,
+    kish = paste0(
+      "\"kish\"",
+      if (length(kish_zero))
+        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero))),
+    variogram = "\"variogram\"",
+    {
+      # A number applied is above 1, and is written so that it does not read 1.
+      lab <- format(applied$deff, digits = 15)
+      if (identical(lab, "1")) sprintf("%.17g", applied$deff) else lab
+    })
+}
+
+
+#' Pooled columns, their record and the events to warn about
+#'
+#' What \code{summarize_by_cell(estimate = "pooled")} adds to its grouped
+#' summary.  Every numeric column is fitted once, on its own scored rows
+#' (\code{.pool_column()}), the response first and then the predictors in the
+#' order given; a column named as both is fitted once and returned under both
+#' prefixes.  The centroids and neighbours of the cells depend on which rows
+#' are scored and not on their values, so a column whose scored rows are
+#' those of an earlier column is handed that column's.
+#'
+#' @param layer The assigned layer as the caller passed it.
+#' @param df Its attribute table, infinite values already set to \code{NA}.
+#' @param id_col Name of the ID column of \code{df}.
+#' @param out_ids The IDs of the summary's rows, in its order.
+#' @param resp_num,pred_num The numeric response and predictor columns.
+#' @param obs_level,conf_level The two levels of the call, or \code{NULL}.
+#' @param deff_label The design effect of the t interval, as
+#'   \code{.intervals_table()} takes it.
+#' @return A list: \code{columns}, the new columns by name, in the order they
+#'   are appended; \code{record}, the list of class \code{spatialkit_pooled};
+#'   and \code{events}, what \code{.pooled_warnings()} reads.
+#' @keywords internal
+#' @noRd
+.pooled_columns <- function(layer, df, id_col, out_ids, resp_num, pred_num,
+                            obs_level, conf_level, deff_label) {
+  use_fnn <- .has_backend("FNN")
+  id   <- df[[id_col]]
+  loc  <- .pooled_xy(layer)
+  xy   <- loc$xy
+  cols <- unique(c(resp_num, pred_num))
+  located <- if (is.null(xy)) NULL else is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+
+  fits <- stats::setNames(vector("list", length(cols)), cols)
+  kept <- list()                      # the scored rows and geometry of earlier columns
+  unlocated <- logical(nrow(df))      # rows with a value, a cell and no location
+  for (v in cols) {
+    geo <- NULL
+    if (!is.null(xy)) {
+      valued    <- is.finite(df[[v]]) & !is.na(id)
+      scored    <- valued & located
+      unlocated <- unlocated | (valued & !located)
+      for (k in kept) if (identical(k$mask, scored)) { geo <- k$geo; break }
+    }
+    res <- .pool_column(df[[v]], id, xy, obs_level, want = "pooled",
+                        use_fnn = use_fnn, geo = geo)
+    if (is.null(geo) && !is.null(res$geo))
+      kept[[length(kept) + 1L]] <- list(mask = res$mask, geo = res$geo)
+    # Kept of a column: what the frame, the record and the warnings read.  Its
+    # fit, with the residuals, and its own copy of the mask and the geometry
+    # are let go here, so that many columns do not hold them all at once.
+    fits[[v]] <- res[c("ids", "value", "w", "target", "obs_lo", "obs_hi", "record",
+                       "work", "limit")]
+  }
+
+  columns <- list()
+  records <- list()
+  roles <- rbind(
+    data.frame(prefix = rep("resp_", length(resp_num)), column = resp_num,
+               role = rep("response", length(resp_num)), stringsAsFactors = FALSE),
+    data.frame(prefix = rep("pred_", length(unique(pred_num))), column = unique(pred_num),
+               role = rep("predictor", length(unique(pred_num))), stringsAsFactors = FALSE))
+  for (i in seq_len(nrow(roles))) {
+    v   <- roles$column[i]
+    nm  <- paste0(roles$prefix[i], v)
+    res <- fits[[v]]
+    at  <- match(out_ids, res$ids)
+    columns[[paste0("..pooled_", nm)]]        <- res$value[at]
+    columns[[paste0("..pooled_w_", nm)]]      <- res$w[at]
+    columns[[paste0("..pooled_target_", nm)]] <- res$target[at]
+    if (!is.null(obs_level)) {
+      columns[[paste0("..obs_lo_", nm)]] <- res$obs_lo[at]
+      columns[[paste0("..obs_hi_", nm)]] <- res$obs_hi[at]
+    }
+    rec <- res$record
+    rec$column <- v
+    rec$role   <- roles$role[i]
+    records[[nm]] <- rec
+  }
+
+  record <- structure(
+    list(toward     = "neighbours",
+         neighbours = .POOL_NEIGHBOURS,
+         crs        = if (is.null(loc)) sf::NA_crs_ else loc$crs,
+         obs_level  = obs_level,
+         conf_level = conf_level,
+         intervals  = .intervals_table(obs_level, conf_level, deff_label),
+         columns    = records),
+    class = "spatialkit_pooled")
+
+  events <- list(
+    records = lapply(fits, function(r) r$record),
+    w_min   = vapply(fits, function(r)
+      if (length(r$w) && !all(is.na(r$w))) min(r$w, na.rm = TRUE) else NA_real_, numeric(1)),
+    work    = vapply(fits, function(r) as.numeric(r$work), numeric(1)),
+    limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
+    skipped_rows  = sum(unlocated),
+    skipped_cells = length(unique(id[unlocated])))
+  list(columns = columns, record = record, events = events)
+}
+
+
+#' Raise what happened to the pooled columns, once per call and reason
+#'
+#' Each event is raised once, for all the columns it applies to: the text
+#' names them (\code{.cols_text()}) and the condition carries them in
+#' \code{columns}, in the order of the frame.  A field "by column" is a
+#' vector named by those columns.  The numbers of each column are in
+#' \code{attr(, "pooled")}.
+#'
+#' @param ev The \code{events} of \code{.pooled_columns()}.
+#' @param obs_level The level of the interval for one observation, or
+#'   \code{NULL}.
+#' @return \code{NULL}, invisibly.
+#' @keywords internal
+#' @noRd
+.pooled_warnings <- function(ev, obs_level) {
+  rec  <- ev$records
+  cols <- names(rec)
+  if (!length(cols)) return(invisible(NULL))
+  of <- function(field, as = as.numeric)
+    stats::setNames(as(unlist(lapply(rec, function(r) r[[field]]))), cols)
+  status <- of("status", as.character)
+  n      <- of("n", as.integer)
+  cells  <- of("cells", as.integer)
+  df     <- of("df", as.integer)
+  one    <- function(w) length(w) == 1L
+  listed <- function(x) paste(format(x, trim = TRUE), collapse = ", ")
+
+  # ---- the pooled columns are NA --------------------------------------------
+  w <- cols[status == "no coordinates"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): estimate = \"pooled\" needs the observations' locations, ",
+      "and `assigned_points_sf` carries no geometry: the pooled columns are NA. The ",
+      "plain columns are unaffected."),
+      data = list(reason = "no coordinates", columns = w))
+  w <- cols[status == "no located value"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: no row has a value of ",
+      "%s, a cell and a location."),
+      .cols_text(w), if (one(w)) "it" else "any of them",
+      data = list(reason = "no located value", columns = w))
+  w <- cols[status == "no cell holds two values"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: %s, so the spread of ",
+      "values inside a cell cannot be estimated and nothing can set a weight. The ",
+      "plain columns are unaffected."),
+      .cols_text(w),
+      if (one(w)) "no cell holds two values of it"
+      else "for none of them does any cell hold two values",
+      data = list(reason = "no cell holds two values", columns = w,
+                  n = n[w], cells = cells[w]))
+  w <- cols[status == "work limit"]
+  if (length(w)) {
+    top <- w[which.max(cells[w])]             # the column with the most cells
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: finding each cell's ",
+      "neighbours among %d cells without the FNN package would compare %.2g pairs, ",
+      "above the limit of %.2g (options(spatialkit.exact_pairs_max = )). Install FNN: ",
+      "the result is the same. The plain columns are unaffected."),
+      .cols_text(w), cells[[top]], ev$work[[top]], ev$limit[[top]],
+      data = list(reason = "work limit", columns = w, work = ev$work[[top]],
+                  limit = ev$limit[[top]], cells = cells[w]))
+  }
+
+  # ---- the pooled values carry no pooling ------------------------------------
+  w <- cols[status == "one cell"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): the values of %s lie in one cell, so there is nothing to ",
+      "pool toward: the pooled value is the plain mean and its weight is 1."),
+      .cols_text(w),
+      data = list(reason = "one cell", columns = w, n = n[w]))
+  w <- cols[status == "no spread inside any cell"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): the values of %s do not vary inside any cell, so every ",
+      "own weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says ",
+      "which columns are constant."),
+      .cols_text(w),
+      data = list(reason = "no spread inside any cell", columns = w,
+                  constant = of("constant", as.logical)[w]))
+  w <- cols[status == "no signal between cells"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): every own weight of %s is 0: the cell means differ from ",
+      "their neighbours' means by no more than the spread inside the cells explains. ",
+      "Each pooled value is then the mean of the cell's nearest cells and holds none ",
+      "of the cell's own values."),
+      .cols_text(w),
+      data = list(reason = "no signal between cells", columns = w,
+                  sigma2 = of("sigma2")[w]))
+
+  # ---- values were computed, and rest on little -------------------------------
+  # The columns whose weights were estimated.  Where no value varies inside a
+  # cell the weights are set to 1 and `sigma2` to 0: nothing rests on the
+  # count of cells or of values there, and nothing is said of either.
+  fitted <- status %in% c("ok", "no signal between cells")
+  w <- cols[fitted & cells >= 2L & cells <= 9L]
+  if (length(w))
+    .warn_classed("spatialkit_pool_few_cells", paste0(
+      "summarize_by_cell(): %s %s values in fewer than 10 cells (%s), so each cell's ",
+      "target is the mean of all the other cells, not of cells near it. A cell with a ",
+      "small own weight then gets a pooled value on the far side of the overall mean ",
+      "from its plain mean, and two cells can change order. The `..pooled_w_*` columns ",
+      "hold the weights; estimate = \"mean\" gives the plain means."),
+      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]),
+      data = list(columns = w, cells = cells[w], own_weight = ev$w_min[w]))
+  w <- cols[fitted & cells >= 2L & df >= 1L & df < .POOL_MIN_DF]
+  if (length(w))
+    .warn_classed("spatialkit_pool_few_df", paste0(
+      "summarize_by_cell(): the spread of %s inside a cell is estimated from fewer ",
+      "than %d values beyond one per cell (%s), and every own weight rests on it: the ",
+      "pooled values and their weights are unstable."),
+      .cols_text(w), .POOL_MIN_DF, listed(df[w]),
+      data = list(columns = w, needed = .POOL_MIN_DF, df = df[w], n = n[w],
+                  cells = cells[w]))
+
+  # ---- the cells do no better than one mean -----------------------------------
+  # The rule has two tests (.no_structure()), and the text says which failed.
+  # `worse`: one mean predicts a left-out row as well as the pooled values do.
+  # `untold`: the pooled values predict it better, and the F test does not
+  # tell the cell means from one mean, which is what it returns where few
+  # values beyond one per cell stand behind it.
+  structured <- of("structured", as.logical)
+  w <- cols[!is.na(structured) & !structured]
+  if (length(w)) {
+    loo <- of("loo"); loo_one <- of("loo_one_cell"); p <- of("structure_p")
+    own <- of("own_weight")
+    beats  <- .beats_one_mean(loo[w], loo_one[w])
+    worse  <- w[!beats]
+    untold <- w[beats]
+    says <- sprintf(paste0("leave-one-out error %s against %s; F test of the cells ",
+                           "against one mean, p = %s; median own weight %.2f"),
+                    vapply(loo[w], function(v) format(signif(v, 4)), character(1)),
+                    vapply(loo_one[w], function(v) format(signif(v, 4)), character(1)),
+                    vapply(p[w], function(v) format(signif(v, 2)), character(1)),
+                    own[w])
+    # One column: its numbers stand in the sentence.  Several: they follow the
+    # sentences, which are what the reader has to see and R prints a warning's
+    # first getOption("warning.length") characters only.
+    inside <- if (one(w)) sprintf(" (%s)", says) else ""
+    text <- c(
+      if (length(worse)) sprintf(paste0(
+        "the pooled values of %s predict a left-out observation no better than one ",
+        "mean for all rows%s, so %s no spatial structure these cells can use. The ",
+        "values are returned. A map of them looks smooth because each is mostly its ",
+        "neighbours' mean, not because the response varies smoothly."),
+        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show"),
+      if (length(untold)) sprintf(paste0(
+        "%s pooled values of %s predict a left-out observation better than one mean ",
+        "for all rows, but the F test does not tell the cell means from one mean%s, so ",
+        "no spatial structure these cells can use is shown%s"),
+        if (length(worse)) "The" else "the", .cols_text(untold), inside,
+        if (length(worse)) sprintf(" for %s either.", if (one(untold)) "it" else "them")
+        else ". The values are returned."),
+      if (!one(w)) .each_text(sprintf("'%s': %s.", w, says)))
+    .warn_classed("spatialkit_no_structure", "summarize_by_cell(): %s",
+      paste(text, collapse = " "),
+      data = list(criterion = "loo", n = cells[w], one_cell = loo_one[w], columns = w,
+                  estimate = "pooled", loo = loo[w], structure_p = p[w],
+                  beats = stats::setNames(beats, w)))
+  }
+
+  # ---- rows left out, and what the interval rests on --------------------------
+  if (ev$skipped_rows > 0L)
+    .warn_classed("spatialkit_pool_rows_skipped", paste0(
+      "summarize_by_cell(): %d row(s) in %d cell(s) have empty or non-finite ",
+      "coordinates. They count in `n` and the plain columns and take no part in the ",
+      "pooled columns."),
+      ev$skipped_rows, ev$skipped_cells,
+      data = list(n = ev$skipped_rows, cells = ev$skipped_cells,
+                  columns = cols[of("skipped", as.integer) > 0L]))
+  if (!is.null(obs_level)) {
+    # The columns whose interval is read from residuals: both offsets are
+    # numbers, and the column is not constant.  The interval of a constant
+    # column has no width because its residuals are set to 0; it rests on no
+    # count of them and says nothing of where a further observation lies.
+    has <- vapply(rec, function(r) !is.null(r$offsets) && all(is.finite(r$offsets)) &&
+                    !isTRUE(r$constant), logical(1))
+    repeated <- of("repeated", as.integer)
+    w <- cols[has & repeated > 0L]
+    if (length(w))
+      .warn_classed("spatialkit_repeated_locations", paste0(
+        "summarize_by_cell(): rows with a value share a location with another row ",
+        "(%s). The leave-one-out error leaves one row out and keeps the others at its ",
+        "location, so it, and an interval built from it, describes a further ",
+        "observation at a place already observed, not an observation at a new place."),
+        .each_text(sprintf("%d of the %d rows of '%s'", repeated[w], n[w], w), sep = "; ",
+                   more = "and %d more"),
+        data = list(columns = w, n = repeated[w], total = n[w]))
+    # The count at which five residuals are expected beyond each end.  It is a
+    # whole number wherever it fits one, and a double above that.
+    p_lo   <- round((1 - obs_level) / 2, 12)
+    needed <- ceiling(round(.FEW_RESIDUALS / p_lo, 6))
+    if (needed <= .Machine$integer.max) needed <- as.integer(needed)
+    w <- cols[has & n * p_lo < .FEW_RESIDUALS]
+    if (length(w))
+      .warn_classed("spatialkit_few_residuals", paste0(
+        "summarize_by_cell(): the %s%% interval of %s rests on fewer than %s ",
+        "leave-one-out residuals (%s), the number at which five are expected beyond ",
+        "each end; its ends are unstable."),
+        .level_text(obs_level), .cols_text(w), format(needed, scientific = FALSE),
+        listed(n[w]),
+        data = list(columns = w, needed = needed, level = obs_level, n = n[w]))
+  }
+  invisible(NULL)
+}
+
+
+#' Whether the pooled values predict a left-out row better than one mean
+#'
+#' The first of the two tests of \code{.no_structure()}, with the margin the
+#' summary hands that rule.  The warning and the print read it to say which
+#' test a column failed.
+#'
+#' @param loo,loo_one The leave-one-out errors of the pooled values and of one
+#'   mean for all rows.
+#' @return \code{TRUE} where one mean's error is above the pooled values' by
+#'   more than \code{.STRUCTURE_TOL}.
+#' @keywords internal
+#' @noRd
+.beats_one_mean <- function(loo, loo_one) !(loo_one <= loo * (1 + .STRUCTURE_TOL))
+
+
+#' The numbers of each column, for at most six of them
+#'
+#' A warning that gives numbers column by column gives them for the first six
+#' columns, as \code{.cols_text()} names six: the text of a warning is printed
+#' to \code{getOption("warning.length")} characters, and the numbers of every
+#' column are in \code{attr(, "pooled")}.
+#'
+#' @param pieces One string per column.
+#' @param sep What joins them.
+#' @param more What stands for the columns left out, with \code{\%d} for
+#'   their number.
+#' @return One string.
+#' @keywords internal
+#' @noRd
+.each_text <- function(pieces, sep = " ", more = "And %d more, in attr(, \"pooled\").") {
+  k <- length(pieces)
+  if (k <= 6L) return(paste(pieces, collapse = sep))
+  paste(c(pieces[1:6], sprintf(more, k - 6L)), collapse = sep)
+}
+
+
+#' A level as a percentage, with the digits it was given with
+#'
+#' @param level A level strictly between 0 and 1.
+#' @return \code{"90"} for 0.9 and \code{"99.9999999"} for 0.999999999;
+#'   \code{format()} alone writes seven digits and reads the second as 100.
+#' @keywords internal
+#' @noRd
+.level_text <- function(level) format(100 * level, digits = 15)
+
+
+#' @export
+print.spatialkit_pooled <- function(x, ...) {
+  label  <- function(name) sprintf("  %-12s: ", name)
+  indent <- strrep(" ", 16L)
+  sci    <- function(v) sprintf("%.2e", v)
+  pct    <- function(level) paste0(.level_text(level), "%")
+  count  <- function(k, what) sprintf("%d %s%s", as.integer(k), what, if (k == 1L) "" else "s")
+  # The words beside an interval's columns, read from what the table says the
+  # interval covers.
+  target <- function(covers)
+    if (startsWith(covers, "one further observation")) "ONE OBSERVATION"
+    else if (grepl("population mean", covers, fixed = TRUE)) "THE POPULATION MEAN"
+    else "THE CELL'S MEAN"
+  offset <- function(o) sprintf("value %s %s", if (o < 0) "-" else "+",
+                                format(signif(abs(o), 3)))
+  iv    <- x$intervals
+  shown <- rep(FALSE, NROW(iv))
+  obs   <- which(iv$centre == "pooled value")
+
+  for (nm in names(x$columns)) {
+    r <- x$columns[[nm]]
+    cat(sprintf("Cell values: %s, %s in %s\n", r$column, count(r$n, "row"),
+                count(r$cells, "cell")))
+    if (!identical(r$status, "ok")) {
+      cat(label("status"), r$status, "\n", sep = "")
+      next
+    }
+    cat(label("value"), "..pooled_", nm, ", pooled toward ",
+        if (r$cells <= 9L) sprintf("all the other cells (%d of them)", r$neighbours)
+        else sprintf("the %d nearest cells (centroids of the rows)", r$neighbours),
+        "\n", sep = "")
+    cat(label("variances"), "inside cells ", sci(r$sigma2), " (from ",
+        count(r$df, "value"), " beyond one per cell);\n", indent,
+        "between a cell and its target ", sci(r$tau2), "\n", sep = "")
+    cat(label("own weight"), sprintf("median %.2f (..pooled_w_%s)\n", r$own_weight, nm),
+        sep = "")
+    cat(label("alone"), sprintf("%.1f%% of the rows are the only one in their cell\n",
+                                100 * r$share_alone), sep = "")
+    cat(label("loo"), sci(r$loo),
+        " (leave-one-out mean squared error of the pooled value);\n", indent,
+        "one mean for all rows: ", sci(r$loo_one_cell),
+        # Which of the rule's two tests failed (.no_structure()).
+        if (isFALSE(r$structured)) {
+          if (.beats_one_mean(r$loo, r$loo_one_cell))
+            sprintf(": the F test does not tell these cells from one mean (p = %s)",
+                    format(signif(r$structure_p, 2)))
+          else ": these cells do no better than one mean"
+        },
+        "\n", sep = "")
+    if (length(obs) && !is.null(r$offsets)) {
+      cat(label("interval"), pct(iv$level[obs]), " for ", target(iv$covers[obs]),
+          sprintf(" (..obs_lo_%s, ..obs_hi_%s):\n", nm, nm), indent,
+          if (all(is.finite(r$offsets)))
+            sprintf("%s to %s, quantiles of %s", offset(r$offsets[1L]),
+                    offset(r$offsets[2L]), count(r$n, "leave-one-out residual"))
+          else "not available",
+          "\n", sep = "")
+      shown[obs] <- TRUE
+    }
+  }
+
+  rest <- which(!shown)
+  if (length(rest)) {
+    cat("Also in the frame\n")
+    for (i in rest) {
+      covers <- strsplit(iv$covers[i], "; ", fixed = TRUE)[[1L]]
+      head   <- sprintf("  %s : ", iv$columns[i])
+      cat(head, pct(iv$level[i]), " for ", target(iv$covers[i]), " (", iv$method[i],
+          "), centred on the ", iv$centre[i],
+          if (length(covers) > 1L)
+            paste0(";\n", strrep(" ", nchar(head)), paste(covers[-1L], collapse = "; ")),
+          "\n", sep = "")
+    }
+  }
+  cat("Away from the observations no interval here is calibrated.\n")
+  invisible(x)
 }
