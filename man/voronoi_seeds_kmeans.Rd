@@ -25,7 +25,10 @@ of distinct point positions and \code{nrow(points_sf) - 1}, because k-means can
 produce neither more centres than there are distinct points nor as many
 centres as there are rows. Check \code{nrow()} on the result. A
 \code{\link[=select_resolution]{select_resolution()}} result or a \code{\link[=resolution_profile]{resolution_profile()}} is also
-accepted: its scored centres are returned when it carries them, and
+accepted: its scored centres are returned when it carries them,
+whatever \code{partition}, \code{init} and density settings the call names (see
+\code{n} in \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} for which arguments a call is taken to
+name), and
 otherwise its count is used. A profile is read as \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}
 reads one passed as \code{n}: by \code{cp} when it was built without an
 \code{estimate}, and by \code{select_resolution(criterion = "auto")} when it was
@@ -42,7 +45,8 @@ stream is left as it was. Pass \code{NULL} to draw the k-means starts from
 the session's stream instead (the default of \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).}
 
 \item{nstart}{Number of random starts for \code{\link[stats:kmeans]{stats::kmeans()}}; the best is
-kept. Default 10. The same number of starts is run under \code{partition = "density"} and with \code{init = "kmeans++"}.}
+kept. Default 10. The same number of starts is run under \code{partition = "density"} and with \code{init = "kmeans++"}. \code{NULL} is the kind's own
+number: 10 for \code{partition = "kmeans"} and 3 for \code{partition = "density"}.}
 
 \item{partition}{What the seeds minimise. \code{"kmeans"} (default): the sum of
 squared distances from the points to their nearest seed; compact cells
@@ -92,7 +96,12 @@ other than its default, also carry \code{attr(, "partition")}: a list with
 call placed \code{iter}, \code{iter_max} and \code{converged} (the iterations the kept
 start took, the limit, and whether it stopped before the limit).
 \code{\link[=build_tessellation]{build_tessellation()}} returns the list as \code{params$partition}. Seeds
-with no such record are plain k-means.
+with no such record are plain k-means. When \code{k} is a
+\code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule}, or a profile
+built with an \code{estimate}, the seeds carry that record as
+\code{attr(, "count_rule")}, with \code{scored_cells} \code{TRUE} for the scored
+centres and \code{FALSE} for centres this call fits itself at that count
+(see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).
 }
 \description{
 Places \code{k} seed points at k-means cluster centres of the observed

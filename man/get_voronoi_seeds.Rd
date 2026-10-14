@@ -76,7 +76,12 @@ sets the CRS and the cover (see "Details");
 \code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used, and neither
 are \code{partition}, \code{init} and the density settings: the centres are of
 the kind the profile was built with, and naming another here is a
-warning of class \code{"spatialkit_partition_unused"}. Pass the
+warning of class \code{"spatialkit_partition_unused"}. A call names what it
+supplies: a \code{partition} or an \code{init} passed in the call; with
+\code{partition = "density"} passed, both density settings at their values,
+defaults included; without it, a density setting other than its
+default. A call that supplies none of the four is told nothing,
+whichever kind and settings the profile was built with. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
@@ -90,13 +95,16 @@ cloud, or one with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
 before clustering.}
 
-\item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. The
+\item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. \code{NULL} is
+the kind's own number of starts: 10 for \code{partition = "kmeans"} and 3
+for \code{partition = "density"}. The
 partition is \code{\link[stats:kmeans]{stats::kmeans()}}, not the best-of-25 k-means++ run that
 \code{\link[=resolution_profile]{resolution_profile()}} scored a count on, so it is not that partition;
 pass the selection or profile itself as \code{n} for that one (see \code{n}).
 Under \code{partition = "density"}, and with \code{init = "kmeans++"}, it is the
-number of starts, of which the best is kept, and has to be a positive
-whole number.}
+number of starts, of which the best is kept, and has to be \code{NULL} or a
+positive whole number. It is not read by \code{method = "random"} or
+\code{"provided"}.}
 
 \item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100. Under
 \code{partition = "density"} it is the most steps of Lloyd's iteration a
@@ -165,6 +173,21 @@ record are plain k-means. Every method also
 attaches \code{attr(, "cover")} when the call says what ground the seeds stand
 for (see "Details"): an sfc holding the boundary's polygons or the hull
 of the clustered points, in its own CRS.
+
+When \code{n} is a \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule},
+or a profile built with an \code{estimate}, the seeds carry that record as
+\code{attr(, "count_rule")}: how the count was set, for which cell value, and
+what the profile scored at it. Its \code{scored_cells} is \code{TRUE} for the
+scored centres \code{method = "kmeans"} hands on, and \code{FALSE} for seeds this
+call places itself at that count: a k-means of its own when the
+selection holds no centres at the count, and every \code{method = "random"}
+seeding. \code{method = "provided"} does not read \code{n} and writes no record;
+seeds that already carry one (\code{sel$seeds}) keep it, marked \code{FALSE} when
+their number is not the record's count. \code{\link[=build_tessellation]{build_tessellation()}} and
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} hand the record on, and
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} checks its result against it. A count given as a
+number, or read off a profile without an estimate by \code{cp} or \code{elbow},
+has no record.
 }
 \description{
 Creates an sf POINT layer of "seed" locations. Multiple strategies are

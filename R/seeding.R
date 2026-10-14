@@ -75,7 +75,12 @@
 #'   `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used, and neither
 #'   are `partition`, `init` and the density settings: the centres are of
 #'   the kind the profile was built with, and naming another here is a
-#'   warning of class `"spatialkit_partition_unused"`. Pass the
+#'   warning of class `"spatialkit_partition_unused"`. A call names what it
+#'   supplies: a `partition` or an `init` passed in the call; with
+#'   `partition = "density"` passed, both density settings at their values,
+#'   defaults included; without it, a density setting other than its
+#'   default. A call that supplies none of the four is told nothing,
+#'   whichever kind and settings the profile was built with. Pass the
 #'   count as a number (`n = sel$best`) for a fresh k-means instead.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
@@ -86,13 +91,16 @@
 #'   cloud, or one with no CRS whose coordinates look like lon/lat (the
 #'   heuristic [ensure_projected()] applies, with its warning), is projected
 #'   before clustering.
-#' @param kmeans_nstart Integer; nstart for kmeans(). Default 10. The
+#' @param kmeans_nstart Integer; nstart for kmeans(). Default 10. `NULL` is
+#'   the kind's own number of starts: 10 for `partition = "kmeans"` and 3
+#'   for `partition = "density"`. The
 #'   partition is [stats::kmeans()], not the best-of-25 k-means++ run that
 #'   [resolution_profile()] scored a count on, so it is not that partition;
 #'   pass the selection or profile itself as `n` for that one (see `n`).
 #'   Under `partition = "density"`, and with `init = "kmeans++"`, it is the
-#'   number of starts, of which the best is kept, and has to be a positive
-#'   whole number.
+#'   number of starts, of which the best is kept, and has to be `NULL` or a
+#'   positive whole number. It is not read by `method = "random"` or
+#'   `"provided"`.
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100. Under
 #'   `partition = "density"` it is the most steps of Lloyd's iteration a
 #'   start takes. Under `partition = "density"`, and with `init =
@@ -157,6 +165,21 @@
 #'   attaches `attr(, "cover")` when the call says what ground the seeds stand
 #'   for (see "Details"): an sfc holding the boundary's polygons or the hull
 #'   of the clustered points, in its own CRS.
+#'
+#'   When `n` is a [select_resolution()] result that carries `count_rule`,
+#'   or a profile built with an `estimate`, the seeds carry that record as
+#'   `attr(, "count_rule")`: how the count was set, for which cell value, and
+#'   what the profile scored at it. Its `scored_cells` is `TRUE` for the
+#'   scored centres `method = "kmeans"` hands on, and `FALSE` for seeds this
+#'   call places itself at that count: a k-means of its own when the
+#'   selection holds no centres at the count, and every `method = "random"`
+#'   seeding. `method = "provided"` does not read `n` and writes no record;
+#'   seeds that already carry one (`sel$seeds`) keep it, marked `FALSE` when
+#'   their number is not the record's count. [build_tessellation()] and
+#'   [assign_features_to_polygons()] hand the record on, and
+#'   [summarize_by_cell()] checks its result against it. A count given as a
+#'   number, or read off a profile without an estimate by `cp` or `elbow`,
+#'   has no record.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -179,6 +202,11 @@ get_voronoi_seeds <- function(boundary = NULL,
                               density_k = 8) {
   method <- match.arg(method)
   partition_given <- !missing(partition)
+  # The density settings the caller supplied, as against those left at
+  # their defaults: read where the kind in force is this function's own
+  # and not one the call named.
+  density_given <- c(if (!missing(density_power)) "density_power",
+                     if (!missing(density_k)) "density_k")
   partition <- match.arg(partition)
 
   # --- validation ---
@@ -188,15 +216,24 @@ get_voronoi_seeds <- function(boundary = NULL,
   # returns: scored centres passed as `n` may be density ones.
   part <- .seed_partition_args(partition, init, density_power, density_k,
                                "get_voronoi_seeds")
-  if (!identical(method, "kmeans") && (!identical(partition, "kmeans") || !is.null(init)))
+  # Said of a kind the call named, not of the function's own: a random or
+  # provided seeding that names no kind has asked for nothing it does not get.
+  if (!identical(method, "kmeans") &&
+      ((partition_given && identical(partition, "density")) || !is.null(init)))
     .warn_and_log(paste0("get_voronoi_seeds(): `partition` and `init` are read by ",
                          "method = \"kmeans\" only; method = \"%s\" ignores them."), method)
   # The other paths, which are not the run this function has always made,
   # check the two counts before the engine reads them: a start count of 0
-  # ran one start and recorded none, and NA stopped inside rep().
+  # ran one start and recorded none, and NA stopped inside rep().  A NULL
+  # number of starts is the kind's own, and is replaced where the argument is
+  # read, here and at the fit below, and nowhere before.  method = "random"
+  # and "provided" never read it, and neither do scored centres passed beside
+  # this function's own run (k-means from random starts), so a call on those
+  # paths does not evaluate the argument.
   if (identical(method, "kmeans") && !part$present) {
-    kmeans_nstart <- .check_whole_count(kmeans_nstart, "kmeans_nstart", "get_voronoi_seeds",
-                                        "starts")
+    kmeans_nstart <- .check_whole_count(.seed_nstart(kmeans_nstart, part$kind),
+                                        "kmeans_nstart", "get_voronoi_seeds",
+                                        "starts", null_ok = TRUE)
     kmeans_iter   <- .check_whole_count(kmeans_iter, "kmeans_iter", "get_voronoi_seeds",
                                         "iterations")
   }
@@ -239,24 +276,36 @@ get_voronoi_seeds <- function(boundary = NULL,
                       attr(n_arg, "hull", exact = TRUE)
                     else NULL
     .scored_partition_unused(n_res$seeds, part, part$init_given, partition_given,
-                             arg = "n", caller = "get_voronoi_seeds")
+                             arg = "n", caller = "get_voronoi_seeds",
+                             density_given = density_given)
     out <- .use_scored_seeds(n_res$seeds,
                              like  = if (!is.null(boundary)) boundary else sample_points,
                              cloud = sample_points, caller = "get_voronoi_seeds",
-                             cover = scored_cover)
+                             cover = scored_cover, count_rule = n_res$count_rule)
     cov <- attr(out, "cover", exact = TRUE)
     rec <- attr(out, "partition", exact = TRUE)
+    rule <- .count_rule_get(out)
     out <- .align_crs(out, boundary)
     # Kept across the CRS alignment whatever sf does with custom attributes.
     attr(out, "cover") <- cov
     if (!is.null(rec)) attr(out, "partition") <- rec
     attr(out, "n_from") <- n_from
-    return(out)
+    return(.count_rule_put(out, rule))
   }
 
   # No scored centres: `density_power` or `density_k` set under partition =
   # "kmeans" is read by nothing in this call.
   .warn_density_unused(part, "get_voronoi_seeds")
+  # The same for a random or provided seeding with the density kind in force
+  # as this function's own: the warning above speaks of a kind the call did
+  # not get, and cannot fire here.
+  if (!identical(method, "kmeans") && identical(part$kind, "density") &&
+      !partition_given && length(density_given))
+    .warn_and_log(paste0("get_voronoi_seeds(): %s %s read by method = \"kmeans\" only; ",
+                         "method = \"%s\" ignores %s."),
+                  paste(sprintf("`%s`", density_given), collapse = " and "),
+                  if (length(density_given) > 1L) "are" else "is", method,
+                  if (length(density_given) > 1L) "them" else "it")
 
   # --- RNG handling (always restored) ---
   cleanup <- .with_seed(set_seed)
@@ -277,6 +326,13 @@ get_voronoi_seeds <- function(boundary = NULL,
       s <- seeds
       s$seed_id <- seq_len(nrow(s))
       s$method  <- "provided"
+      # Seeds that carry the record of a count are handed on with it (the
+      # scored centres of a selection, `sel$seeds`).  Fewer or more of them
+      # than the count are not the centres the profile scored, and the
+      # record says so.
+      carried <- .count_rule_get(s)
+      if (!is.null(carried) && !identical(nrow(s), as.integer(carried$cells)))
+        s <- .count_rule_put(s, carried, scored_cells = FALSE)
       s
     },
 
@@ -361,8 +417,11 @@ get_voronoi_seeds <- function(boundary = NULL,
       # `kmeans_nstart` random starts on the cloud's rows as they come; any
       # other kind or starting rule works on the rows in coordinate order,
       # so its seeds do not depend on the order of the cloud.
+      # `kmeans_nstart` is read by the fit when it first needs it, as it
+      # always was; NULL is then the kind's own number.
       fit <- .partition_centres(xy, k_use, partition = part$kind, init = part$init,
-                                nstart = kmeans_nstart, iter.max = kmeans_iter,
+                                nstart = .seed_nstart(kmeans_nstart, part$kind),
+                                iter.max = kmeans_iter,
                                 density_power = density_power, density_k = density_k,
                                 sort_rows = !part$present, one_call = part$present)
       if (is.null(fit))
@@ -400,7 +459,7 @@ get_voronoi_seeds <- function(boundary = NULL,
         withinss     = as.numeric(fit$withinss),
         tot_withinss = as.numeric(fit$wss),
         iter         = as.integer(fit$iter),
-        nstart       = as.integer(kmeans_nstart)
+        nstart       = as.integer(.seed_nstart(kmeans_nstart, part$kind))
       )
       # The density kind minimises a weighted sum, which `tot_withinss` (every
       # point counted once, about its cell's mean) is not.
@@ -425,6 +484,11 @@ get_voronoi_seeds <- function(boundary = NULL,
   # default (see `partition`); seeds with no record are plain k-means.
   if (identical(method, "kmeans") && !part$present)
     attr(out, "partition") <- c(part[.partition_fields()], run_record)
+  # How the count was set, when a selection or a profile gave it: these
+  # seeds were placed here, at that count, and are not the centres the
+  # profile scored.  `method = "provided"` does not read `n`, and writes none.
+  if (!identical(method, "provided"))
+    out <- .count_rule_put(out, n_res$count_rule, scored_cells = FALSE)
   # The ground the seeds stand for, set after the alignment so it is kept
   # whatever a transform does with custom attributes: the boundary when one
   # was given (random seeds, a cloud sampled in it, and a cloud the caller
@@ -575,7 +639,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   produce neither more centres than there are distinct points nor as many
 #'   centres as there are rows. Check `nrow()` on the result. A
 #'   [select_resolution()] result or a [resolution_profile()] is also
-#'   accepted: its scored centres are returned when it carries them, and
+#'   accepted: its scored centres are returned when it carries them,
+#'   whatever `partition`, `init` and density settings the call names (see
+#'   `n` in [get_voronoi_seeds()] for which arguments a call is taken to
+#'   name), and
 #'   otherwise its count is used. A profile is read as [get_voronoi_seeds()]
 #'   reads one passed as `n`: by `cp` when it was built without an
 #'   `estimate`, and by `select_resolution(criterion = "auto")` when it was
@@ -591,7 +658,8 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   the session's stream instead (the default of [get_voronoi_seeds()]).
 #' @param nstart Number of random starts for [stats::kmeans()]; the best is
 #'   kept. Default 10. The same number of starts is run under `partition =
-#'   "density"` and with `init = "kmeans++"`.
+#'   "density"` and with `init = "kmeans++"`. `NULL` is the kind's own
+#'   number: 10 for `partition = "kmeans"` and 3 for `partition = "density"`.
 #' @param partition What the seeds minimise. `"kmeans"` (default): the sum of
 #'   squared distances from the points to their nearest seed; compact cells
 #'   whose counts are several times higher in dense places than in sparse
@@ -636,7 +704,12 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   call placed `iter`, `iter_max` and `converged` (the iterations the kept
 #'   start took, the limit, and whether it stopped before the limit).
 #'   [build_tessellation()] returns the list as `params$partition`. Seeds
-#'   with no such record are plain k-means.
+#'   with no such record are plain k-means. When `k` is a
+#'   [select_resolution()] result that carries `count_rule`, or a profile
+#'   built with an `estimate`, the seeds carry that record as
+#'   `attr(, "count_rule")`, with `scored_cells` `TRUE` for the scored
+#'   centres and `FALSE` for centres this call fits itself at that count
+#'   (see [get_voronoi_seeds()]).
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -654,7 +727,12 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10,
                                  density_power = 1, density_k = 8, iter_max = NULL) {
   .assert_sf(points_sf, "POINT", "points_sf")
   partition_given <- !missing(partition)
+  # The density settings the caller supplied (see get_voronoi_seeds()).
+  density_given <- c(if (!missing(density_power)) "density_power",
+                     if (!missing(density_k)) "density_k")
   partition <- match.arg(partition)
+  # How the count was set, when a selection or a profile gives it.
+  count_rule <- NULL
   # The kind of partition and how its starts are drawn (R/partition.R).  A
   # density setting given where no density partition is built is reported
   # below, once it is known what the call returns: scored centres passed as
@@ -671,13 +749,16 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10,
     k_res <- .resolve_cell_count(k, "k", "voronoi_seeds_kmeans")
     if (!is.null(k_res$seeds)) {
       .scored_partition_unused(k_res$seeds, part, part$init_given, partition_given,
-                               arg = "k", caller = "voronoi_seeds_kmeans")
+                               arg = "k", caller = "voronoi_seeds_kmeans",
+                               density_given = density_given)
       out <- .use_scored_seeds(k_res$seeds, like = points_sf, cloud = NULL,
-                               caller = "voronoi_seeds_kmeans", cover = points_sf)
+                               caller = "voronoi_seeds_kmeans", cover = points_sf,
+                               count_rule = k_res$count_rule)
       attr(out, "n_from") <- k_res$from
       return(out)
     }
     k <- k_res$n
+    count_rule <- k_res$count_rule
   }
   # No scored centres: `density_power` or `density_k` set under partition =
   # "kmeans" is read by nothing in this call.
@@ -691,9 +772,13 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10,
                 max = .Machine$integer.max,
                 what = "a single positive number of seeds")
 
+  # NULL is the kind's own number of starts.  It is replaced here, where the
+  # argument is first read: a call that returned scored centres above never
+  # read it, and does not evaluate it.
+  nstart <- .seed_nstart(nstart, part$kind)
   .check_scalar(nstart, "nstart", "voronoi_seeds_kmeans", min = 1,
                 max = .Machine$integer.max,
-                what = "a single positive number of k-means restarts")
+                what = "NULL or a single positive number of k-means restarts")
 
   # Project to metric CRS if lon/lat to make k-means distance-faithful.  A
   # CRS-less layer gets the lon/lat heuristic ensure_projected() applies
@@ -781,6 +866,9 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10,
                                    list(iter = as.integer(fit$iter),
                                         iter_max = as.integer(limit),
                                         converged = isTRUE(fit$converged)))
+  # How the count was set, when a selection or a profile gave it and its
+  # scored centres were not at hand: these centres were fitted here.
+  result <- .count_rule_put(result, count_rule, scored_cells = FALSE)
   # The ground the centres stand for: the hull of the points clustered.
   .set_cover(result, points_sf)
 }
@@ -898,12 +986,17 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #'   kept of the points it was computed on.  \code{NULL} falls back to a
 #'   cover the centres themselves carry (\code{attr(seeds, "cover")}), and
 #'   to none when there is none.
+#' @param count_rule The record of how the count was set
+#'   (\code{.resolve_cell_count()}'s \code{count_rule}), or \code{NULL} for a
+#'   count that has none.
 #' @return An sf POINT layer with \code{seed_id} and \code{method = "kmeans"}
-#'   columns, \code{attr(, "kmeans")} when \code{cloud} is given, and
-#'   \code{attr(, "cover")} when a cover is known.
+#'   columns, \code{attr(, "kmeans")} when \code{cloud} is given,
+#'   \code{attr(, "cover")} when a cover is known, and
+#'   \code{attr(, "count_rule")}, marked \code{scored_cells = TRUE}, when
+#'   \code{count_rule} is a record: these are the centres the profile scored.
 #' @keywords internal
 #' @noRd
-.use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL) {
+.use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL, count_rule = NULL) {
   nstart <- attr(seeds, "nstart", exact = TRUE)
   # The kind that built the scored partition, when the profile recorded one.
   rec <- attr(seeds, "partition", exact = TRUE)
@@ -925,9 +1018,34 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
               caller, nrow(out), rec$kind, .partition_label(rec, nstart))
   if (!is.null(cloud)) attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart)
   if (!is.null(rec)) attr(out, "partition") <- rec
+  # These are the centres the profile scored at the count, so their Voronoi
+  # cells are the cells its numbers describe, and the record says so.
+  out <- .count_rule_put(out, count_rule, scored_cells = TRUE)
   # The centres lie inside the points they were fitted to; their cells have
   # to reach the points' own hull, not the centres'.
   .set_cover(out, cover)
+}
+
+
+#' The number of starts a seeding function runs
+#'
+#' \code{NULL} is the kind's own number: the 10 the seeding functions have
+#' always run for \code{partition = "kmeans"}, whichever starting rule, and
+#' \code{.NSTART_DENSITY} for \code{partition = "density"}.  Anything else
+#' is returned as it is, for the caller's check.  It is called where the
+#' argument is first read, so that a call on a path that never reads the
+#' number of starts does not evaluate it.
+#'
+#' @param nstart The argument: \code{kmeans_nstart} of
+#'   \code{get_voronoi_seeds()}, \code{nstart} of
+#'   \code{voronoi_seeds_kmeans()}.
+#' @param kind The kind in force, \code{"kmeans"} or \code{"density"}.
+#' @return \code{nstart}, or the kind's own number when it is \code{NULL}.
+#' @keywords internal
+#' @noRd
+.seed_nstart <- function(nstart, kind) {
+  if (!is.null(nstart)) return(nstart)
+  if (identical(kind, "density")) .NSTART_DENSITY else 10
 }
 
 
@@ -971,24 +1089,39 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' the caller would otherwise get regions of one kind having asked for
 #' another.
 #'
+#' The kind in force in a call is the one its \code{partition} resolves to:
+#' the kind the caller supplied, or else the function's own.  The density
+#' settings a call names follow from it.  With the density kind supplied,
+#' both, at the values in force: naming the kind names its settings.  With
+#' the density kind in force as the function's own, those the caller supplied
+#' (\code{density_given}).  With the k-means kind, those not at their
+#' defaults.  So a call that names no partition argument is told nothing,
+#' whichever kind and settings the profile was built with.
+#'
 #' @param seeds The scored centres.
 #' @param part The call's partition arguments, as
 #'   \code{.seed_partition_args()} resolved them.
 #' @param init The call's \code{init}, which may be \code{NULL}.
 #' @param partition_given Whether \code{partition} was set in the call.
 #' @param arg,caller Names for the message.
+#' @param density_given Which of \code{density_power} and \code{density_k}
+#'   the caller supplied, by name.
 #' @return \code{NULL}, invisibly; a warning of class
 #'   \code{spatialkit_partition_unused} when the two differ.
 #' @keywords internal
 #' @noRd
-.scored_partition_unused <- function(seeds, part, init, partition_given, arg, caller) {
+.scored_partition_unused <- function(seeds, part, init, partition_given, arg, caller,
+                                     density_given = character(0)) {
   rec <- attr(seeds, "partition", exact = TRUE)
   # A profile with no record is k-means from k-means++ starts.
   kind <- if (is.null(rec)) "kmeans" else rec$kind
   rule <- if (is.null(rec)) "kmeans++" else rec$init
-  # The density settings the call names: both under partition = "density",
-  # and under the default kind those set to something other than the default.
-  named <- if (identical(part$kind, "density")) c("density_power", "density_k")
+  # The density kind in force as the function's own, and not as a kind the
+  # call named.
+  own_density <- identical(part$kind, "density") && !isTRUE(partition_given)
+  # The density settings the call names.
+  named <- if (own_density) density_given
+           else if (identical(part$kind, "density")) c("density_power", "density_k")
            else part$unused
   differs <- (isTRUE(partition_given) && !identical(part$kind, kind)) ||
     (!is.null(init) && !identical(init, rule)) ||
@@ -997,7 +1130,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
        (("density_power" %in% named &&
            !isTRUE(all.equal(part$asked$density_power, rec$density_power))) ||
           ("density_k" %in% named &&
-             !identical(as.integer(part$asked$density_k), as.integer(rec$density_k)))))
+             !identical(as.integer(part$asked$density_k), as.integer(rec$density_k))))) ||
+    # Scored k-means centres, with a density setting supplied to a function
+    # whose own kind is the density kind: the setting is read by nothing.
+    (!identical(kind, "density") && own_density && length(density_given) > 0L)
   if (differs)
     .warn_classed("spatialkit_partition_unused",
                   paste0("%s(): `%s` carries the centres of the partition the profile ",
