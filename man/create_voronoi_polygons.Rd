@@ -90,7 +90,12 @@ from: \code{"boundary"} (the argument), \code{"cover"} (the
 \code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
 itself).  \code{params$cover_outside} is the number of \code{cover}
 points outside every cell when a point \code{cover} was given with a
-\code{boundary}, and \code{NULL} otherwise.
+\code{boundary}, and \code{NULL} otherwise.  \code{params$partition} is
+present when \code{points_sf} is a layer of seeds that records the kind
+of partition that placed it (\code{attr(points_sf, "partition")}, see
+\code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
+built them.  Seeds of plain k-means record nothing, and \code{params}
+then has no such element; neither has it for points that are not seeds.
 }
 \description{
 Assigns every location in the study area to its nearest input point, giving

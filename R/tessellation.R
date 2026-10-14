@@ -869,7 +869,12 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   \code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
 #'   itself).  \code{params$cover_outside} is the number of \code{cover}
 #'   points outside every cell when a point \code{cover} was given with a
-#'   \code{boundary}, and \code{NULL} otherwise.
+#'   \code{boundary}, and \code{NULL} otherwise.  \code{params$partition} is
+#'   present when \code{points_sf} is a layer of seeds that records the kind
+#'   of partition that placed it (\code{attr(points_sf, "partition")}, see
+#'   \code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
+#'   built them.  Seeds of plain k-means record nothing, and \code{params}
+#'   then has no such element; neither has it for points that are not seeds.
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -906,6 +911,10 @@ create_voronoi_polygons <- function(
     cover_from <- "seeds' cover"
   }
   seed_like <- .looks_like_seeds(points_sf)
+  # The kind of partition that placed the seeds, when they record one (see
+  # get_voronoi_seeds()): handed on in `params`, so the cells say what built
+  # them.  Read before the points are moved, as the cover is.
+  seed_partition <- attr(points_sf, "partition", exact = TRUE)
   # A layer as `crs` means its CRS (as ensure_projected(target_crs =) reads
   # it); passed on as it was, it stopped with "the condition has length > 1".
   if (inherits(crs, c("sf", "sfc"))) crs <- sf::st_crs(crs)
@@ -1070,7 +1079,7 @@ create_voronoi_polygons <- function(
                           method = "voronoi")
   else NULL
 
-  list(
+  res <- list(
     cells    = .to_output_crs(cells, crs_out),
     index    = index,
     # The boundary the cells were built in and clipped to.  With expand > 0
@@ -1088,6 +1097,11 @@ create_voronoi_polygons <- function(
                     boundary_source = boundary_source,
                     cover_outside = cover_outside)
   )
+  # Present only for seeds that record their kind; `params` is otherwise the
+  # list it always was.
+  if (is.list(seed_partition) && !is.null(seed_partition$kind))
+    res$params$partition <- seed_partition
+  res
 }
 
 # -----------------------------------------------------------------------------
@@ -1610,7 +1624,13 @@ create_grid_polygons <- function(
 #'       cell when a point `cover` was checked against the cells (`NULL`
 #'       otherwise). For `"voronoi"` also `boundary_source`, where the
 #'       boundary came from: `"boundary"`, `"cover"`, `"seeds' cover"` or
-#'       `"points"`. For `"hex"` and
+#'       `"points"`, and, when `points_sf` is a layer of seeds that records
+#'       the kind of partition that placed it (see [get_voronoi_seeds()]),
+#'       `partition`: that record, a list with `kind`, `init`,
+#'       `density_power` and `density_k` and, for seeds a seeding function
+#'       placed itself, `iter`, `iter_max` and `converged`. The cells are
+#'       the Voronoi cells of the seeds whatever kind placed them. For
+#'       `"hex"` and
 #'       `"square"` also `cells_occupied` and `cells_empty`, the number of
 #'       cells that hold at least one point and that hold none.}
 #'   }
@@ -1852,6 +1872,8 @@ build_tessellation <- function(
     # points.
     pts_v <- points_sf
     attr(pts_v, "cover") <- if (is.null(cover)) cover_now else NULL
+    # The record of the kind that placed the seeds (attr(, "partition")) goes
+    # down on the points themselves: the projections above keep it.
     res <- create_voronoi_polygons(
       points_sf = pts_v, boundary = boundary, expand = expand,
       clip = clip, keep_duplicates = keep_duplicates,

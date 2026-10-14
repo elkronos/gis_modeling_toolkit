@@ -12,7 +12,11 @@ get_voronoi_seeds(
   sample_points = NULL,
   kmeans_nstart = 10,
   kmeans_iter = 100,
-  set_seed = NULL
+  set_seed = NULL,
+  partition = c("kmeans", "density"),
+  init = NULL,
+  density_power = 1,
+  density_k = 8
 )
 }
 \arguments{
@@ -53,7 +57,10 @@ Voronoi partition of its centres, so their cells are the cells the
 criteria judged. \code{sample_points}, when given, is then only assigned to
 them (for \code{attr(, "kmeans")}) and gives the cover, and \code{boundary} only
 sets the CRS and the cover (see "Details");
-\code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used. Pass the
+\code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used, and neither
+are \code{partition}, \code{init} and the density settings: the centres are of
+the kind the profile was built with, and naming another here is a
+warning of class \code{"spatialkit_partition_unused"}. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
 \item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
@@ -70,11 +77,51 @@ before clustering.}
 \item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. The
 partition is \code{\link[stats:kmeans]{stats::kmeans()}}, not the best-of-25 k-means++ run that
 \code{\link[=resolution_profile]{resolution_profile()}} scored a count on, so it is not that partition;
-pass the selection or profile itself as \code{n} for that one (see \code{n}).}
+pass the selection or profile itself as \code{n} for that one (see \code{n}).
+Under \code{partition = "density"}, and with \code{init = "kmeans++"}, it is the
+number of starts, of which the best is kept, and has to be a positive
+whole number.}
 
-\item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100.}
+\item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100. Under
+\code{partition = "density"} it is the most steps of Lloyd's iteration a
+start takes. Under \code{partition = "density"}, and with \code{init = "kmeans++"}, it has to be a positive whole number, and a kept start that
+was cut off at it is a warning of class \code{"spatialkit_not_converged"}
+(the default run keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives).}
 
 \item{set_seed}{Optional integer RNG seed.}
+
+\item{partition}{For \code{method = "kmeans"}: what the seeds minimise.
+\code{"kmeans"} (default) is the sum of squared distances from the points of
+the cloud to their nearest seed: compact cells, with several times the
+points in a cell of a dense place that a cell of a sparse place holds.
+\code{"density"} weights each point by its local density to the power
+\code{density_power}: compact cells, many small ones where the points are
+dense and a few large ones where they are sparse. At the default power
+they hold about the same number of points each once \code{n} is above the
+number of dense places (clusters) in the cloud; below that the counts
+are about as uneven as under \code{"kmeans"}. It follows the
+density of \code{sample_points}; a cloud this function draws inside
+\code{boundary} is uniform and has none to follow. See "The partition" in
+\code{\link[=resolution_profile]{resolution_profile()}} for what each kind does and how.}
+
+\item{init}{For \code{method = "kmeans"}: how each start is drawn, \code{"random"}
+(\code{n} distinct locations at random, as \code{\link[stats:kmeans]{stats::kmeans()}} draws them) or
+\code{"kmeans++"} (the seeds one at a time, each in proportion to its squared
+distance from those already drawn, times its weight under \code{partition = "density"}). \code{NULL} (default) is each kind's own rule: \code{"random"} for
+\code{partition = "kmeans"}, the run this function has always made, and
+\code{"kmeans++"} for \code{partition = "density"}. With the default the cloud is
+clustered in the order its rows come in; with \code{init = "kmeans++"}, and
+under \code{partition = "density"}, the rows are put in coordinate order
+first, so the seeds do not depend on their order.}
+
+\item{density_power}{For \code{partition = "density"}: the power the local
+density is raised to for a point's weight, from 0 to 2. Default 1, which
+evens out the cell counts once the cells outnumber the dense places; 0
+weights every point alike. Setting it under \code{partition = "kmeans"} is a
+warning.}
+
+\item{density_k}{For \code{partition = "density"}: the number of nearest
+neighbours the local density is read from. Default 8.}
 }
 \value{
 An sf POINT object with seed_id and method columns. With
@@ -86,7 +133,19 @@ with unusable coordinates are dropped first), \code{size} (points per seed),
 \code{iter} and \code{nstart}. For the scored centres of a selection or profile
 (see \code{n}) it describes \code{sample_points} assigned to them, each point to
 its nearest seed, with \code{iter} \code{NA} and \code{nstart} the profile's restarts,
-and is absent when no \code{sample_points} were given. Every method also
+and is absent when no \code{sample_points} were given. Under \code{partition = "density"} \code{withinss} and \code{tot_withinss} count every point once, about
+its cell's mean. A run this call makes with \code{partition = "density"} or
+\code{init = "kmeans++"} also records \code{converged}, whether the kept start
+stopped before \code{kmeans_iter}, and under \code{partition = "density"}
+\code{objective}, the weighted sum the seeds minimise; scored centres have
+neither. Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and the scored centres of a profile built with a kind or
+starting rule other than its default, carry \code{attr(, "partition")}: a
+list with \code{kind}, \code{init}, \code{density_power} and \code{density_k}, and for
+seeds this call placed \code{iter}, \code{iter_max} and \code{converged} (the
+iterations the kept start took, the limit, and whether it stopped
+before the limit). \code{\link[=build_tessellation]{build_tessellation()}} returns the list as
+\code{params$partition}. Seeds with no such
+record are plain k-means. Every method also
 attaches \code{attr(, "cover")} when the call says what ground the seeds stand
 for (see "Details"): an sfc holding the boundary's polygons or the hull
 of the clustered points, in its own CRS.

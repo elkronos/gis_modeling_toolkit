@@ -16,7 +16,12 @@ resolution_profile(
   seed = 123L,
   sac = NULL,
   select_on = c("all", "split"),
-  range_floor = FALSE
+  range_floor = FALSE,
+  partition = c("kmeans", "density"),
+  init = c("kmeans++", "random"),
+  density_power = 1,
+  density_k = 8L,
+  iter_max = NULL
 )
 }
 \arguments{
@@ -64,7 +69,9 @@ describe the subsample; the bounds, \code{supported}, the variance term
 of \code{cp} and \code{reliability} describe the whole layer, so the
 answer does not change with \code{sample_n} except through the fits.}
 
-\item{nstart}{k-means++ restarts per level.  Default 25.}
+\item{nstart}{Starts per level; the best is kept.  Default 25.  They are
+k-means++ starts unless \code{init} says otherwise, and the same number
+is run under either \code{partition}.}
 
 \item{seed}{RNG seed for the subsample and the restarts; restored
 afterwards.  Default 123.  The rows are put in coordinate order before
@@ -131,11 +138,55 @@ without being applied.  \code{TRUE} starts the ladder at the floor when
 the data support it and the floor is below the ceiling, as the default
 did up to version 2.0.0; an estimated range then sets the fewest cells
 any criterion can choose (see "The ladder and its bounds").}
+
+\item{partition}{What the centres of the regions minimise, at every level
+of the ladder.  \code{"kmeans"} (default): the sum of squared distances
+from the points to their nearest centre; compact cells whose counts are
+several times higher in dense places than in sparse ones.
+\code{"density"}: the same sum with each point weighted by its local
+density to the power \code{density_power}; compact cells that, at the
+default power, hold about the same number of points each once there are
+more cells than dense places, and counts about as uneven as
+\code{"kmeans"} gives below that.  See "The partition".}
+
+\item{init}{How each start is drawn.  \code{"kmeans++"} (default): the
+centres one at a time, each in proportion to its squared distance from
+those already drawn, times its weight under \code{partition =
+"density"}.  \code{"random"}: \code{k} distinct locations at random, as
+\code{\link[stats]{kmeans}()} draws them.}
+
+\item{density_power}{For \code{partition = "density"}: the power the local
+density is raised to for a point's weight, a number from 0 to 2.
+Default 1, which evens out the cell counts once the cells outnumber the
+dense places (see "The partition").  \code{0} weights every
+point alike, the objective of \code{"kmeans"} (reached by Lloyd's
+iteration, so the centres are close to that kind's and not equal to
+them); values between give counts between the two; values above 1 give
+the cells of dense places fewer points than those of sparse places.
+Setting it under \code{partition = "kmeans"}, which does not read it,
+is a warning.}
+
+\item{density_k}{For \code{partition = "density"}: the number of nearest
+neighbours the local density is read from.  Default 8.  It is held to
+one fewer than the distinct locations.  A small number follows the
+density closely and noisily; a large one smooths it.  Setting it under
+\code{partition = "kmeans"} is a warning.}
+
+\item{iter_max}{The most iterations a start runs for: a single positive
+whole number, or \code{NULL} (default) for the kind's own limit, 50 for
+\code{partition = "kmeans"} from k-means++ starts and 100 for random
+starts and for \code{partition = "density"}.  A kept start that was cut
+off at the limit is a warning of class
+\code{"spatialkit_not_converged"}, except in the default call, which
+reports nothing, as before.}
 }
 \value{
 A data.frame of class \code{resolution_profile} with one row per
-level and columns \code{levels}, \code{wss}, \code{wss_spread} (relative
-spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
+level and columns \code{levels}, \code{wss} (the within-cell sum of
+squares of the coordinates, every point counted once, under either
+\code{partition}), \code{wss_spread} (relative
+spread of WSS across the restarts; under \code{partition = "density"},
+of the weighted sum the starts minimise), \code{elbow}, \code{cell_n_min},
 \code{cell_n_median}, \code{cell_diam_median} (twice the median RMS
 radius of the cells, in coordinate units: about 0.8 of the side of a
 square cell of the same area, and less for finer cells, so a size to
@@ -196,6 +247,19 @@ returns the chosen level's as \code{$seeds}, and
 use them when given the selection or the profile.  The centres carry the
 hull as their \code{"cover"} attribute, which those two functions hand on
 so that Voronoi cells built on the seeds reach the edge of the points.
+A profile built with \code{partition = "density"} or \code{init =
+  "random"} also carries \code{partition}: a list with \code{kind},
+\code{init}, \code{density_power} and \code{density_k} (both \code{NA}
+for \code{kind = "kmeans"}); for \code{kind = "density"},
+\code{objective}, the weighted sum the centres minimise, named by
+level; \code{iter_max}, the iteration limit; and \code{iter} and
+\code{converged}, the iterations each level's kept start took and
+whether it stopped before the limit, named by level.  The selection
+carries the first four as \code{$partition}, its
+seeds and the seeds the seeding functions return as
+\code{attr(, "partition")}, and a Voronoi tessellation built on them as
+\code{params$partition}.  A profile built with the defaults has no such
+attribute, and neither has anything made from it.
 }
 \description{
 A tessellation's resolution is the number of cells the points are cut
@@ -211,11 +275,115 @@ whole profile in place of one criterion's argmin.  Mallows (1973) presents
 candidates; he does not offer it as a rule that picks one.  This is that
 display, with the other criteria alongside.
 }
+\section{The partition}{
+
+The regions at every level are the Voronoi cells of a set of centres: a
+point belongs to the centre nearest to it.  \code{partition} says what the
+centres minimise, and every level of the ladder is built with the same
+kind.
+\describe{
+\item{\code{"kmeans"} (default)}{The sum, over the points, of the
+squared distance to the nearest centre.  The centres follow the square
+root of the point density.  The cells are compact, smaller where the
+points are dense and larger where they are sparse, and a cell in a
+dense place holds several times the points of a cell in a sparse
+place.}
+\item{\code{"density"}}{The same sum with each point weighted by its
+local density to the power \code{density_power}.  The local density at
+a point is the number of points in the disc that reaches its
+\code{density_k}-th nearest neighbour, over the area of that disc.
+With \code{density_power = 1} the centres follow the point density
+itself.  The cells are compact: many small ones where the points are
+dense, a few large ones where they are sparse.  They hold about the
+same number of points each once there are more cells than dense
+places (clusters of points).  With fewer cells than dense places a
+cell takes in whole clusters, large and small, and the counts are
+about as uneven as under \code{"kmeans"}.  \code{density_power = 0}
+weights every point alike, which is the objective of
+\code{"kmeans"}; a power above 1 goes past equal counts and gives the
+cells of dense places fewer points than those of sparse places.}
+}
+Two simulations show both ends.  The measure is the coefficient of
+variation of the cell counts (their standard deviation over their mean,
+0 when every cell holds the same number), as medians over 20 layers.  On
+1,200 points, 900 of them in four clusters over a sparse background, cut
+into 60 cells, it was 1.2 under \code{"kmeans"}, where the fullest cell
+held 42 times the points of the smallest, and 0.29 under
+\code{"density"}, where it held 4 times.  On 2,000 points with 28 dense
+places (half of the points in 3 large clusters, 30 percent in 25 small
+ones, the rest spread out) it was 0.90 under \code{"kmeans"} and 0.97
+under \code{"density"} at 10 cells and 1.08 and 1.01 at 20 cells; at 60
+cells it was 0.95 and 0.31, and at 130 cells 1.05 and 0.43.  A ladder
+starts at 2 cells, so its low levels are usually below the number of
+dense places, and the counts in \code{cell_n_min} and
+\code{cell_n_median} show where the two kinds part.
+
+\code{init} says how each of the \code{nstart} starts is drawn before it
+is refined; the best start is kept.  \code{"kmeans++"} draws the centres
+one at a time, each a point taken in proportion to its squared distance
+from the centres already drawn (times its weight, under
+\code{"density"}), which spreads the start over the points.
+\code{"random"} draws \code{k} distinct locations at random, as
+\code{\link[stats]{kmeans}()} does.
+
+A start of the kind \code{"kmeans"} is refined by
+\code{\link[stats]{kmeans}()} (Hartigan and Wong), for at most 50
+iterations from a k-means++ start and 100 from a random one.  A start of
+the kind \code{"density"} is refined by Lloyd's iteration, for at most 100
+steps: each point goes to its nearest centre, each centre moves to the
+weighted mean of its points, and a centre left without a point stays
+where it is.  \code{iter_max} sets another limit.  The start with the
+lowest sum is kept, and a kept start that was cut off at the limit is
+reported (see "Conditions"): its centres are those of the last step.
+Large layers can need more than 100 steps: on a simulated layer of 30,000
+points no start of six at 100 and 300 cells took more than 68, and on one
+of 60,000 points three of six took 102 to 152.
+
+The density kind depends on the points alone.  It works on the distinct
+locations in coordinate order, so the order of the rows does not matter.
+Its two tolerances are fractions of the extent of the points (the diagonal
+of their bounding box), so the unit of the coordinates does not matter:
+the neighbour distance is not taken below a millionth of the extent, and
+the iteration stops when no centre moves by \eqn{10^{-12}} of it.  Points
+at one location count as that many points at it and share a cell; the
+neighbour distance is measured to the \code{density_k}-th nearest
+\emph{other} location, so it is not zero where locations repeat.  The
+neighbour searches use \pkg{FNN} when it is installed.  The result is the
+same without it; the search then takes time that grows with the square of
+the number of points, about thirty times as long for 10,000 points and
+2,000 centres.
+
+The columns keep their meaning under \code{"density"}, because each is
+read off the cells and not off the way they were drawn.  \code{wss} is the
+within-cell sum of squares of the coordinates with every point counted
+once, taken about each cell's mean, so \code{wss} and \code{elbow}
+compare between kinds; the weighted sum the centres minimise is kept in
+\code{attr(, "partition")$objective}, and \code{wss_spread} is its spread
+over the starts.  \code{cp}, \code{moran_z} and the test against one cell
+need cells drawn without the response, which both kinds give.
+\code{reliability} is computed for square cells of the level's average
+area and count and never reads the cells, so it is the same number under
+either kind.  The \code{elbow} is found more readily under
+\code{"density"} where the points cluster: once each cluster has its
+centres, further centres go into the clusters, the sparse ground between
+them keeps its sum of squares, and the curve flattens.  On simulated
+layers of 800 points in 3 to 8 clusters over a sparse background an elbow
+was read on 24 of 30 under \code{"density"} and on 10 under
+\code{"kmeans"}; on 100 uniform layers, on none under either.
+
+A profile built with a \code{partition} or an \code{init} other than the
+default carries \code{attr(, "partition")}, and
+\code{\link{select_resolution}()}, the seeding functions and
+\code{\link{build_tessellation}()} hand that record on with the regions
+(see "Value").  A result with no such record was built by plain k-means.
+}
+
 \section{The ladder and its bounds}{
 
 Cells are k-means clusters of the (projected) coordinates, fitted at each
 level as the best of \code{nstart} k-means++ restarts (see
-\code{\link{determine_optimal_levels}} for why).  Levels are spaced
+\code{\link{determine_optimal_levels}} for why), unless \code{partition}
+or \code{init} says otherwise (see "The partition").  Levels are spaced
 logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
 step wastes fits at large \eqn{L} and starves resolution at small.  The
 ladder runs from 2 to a ceiling the data impose.  The ceiling is
@@ -439,6 +607,38 @@ the condition carries \code{n}, \code{n_response}, \code{ceiling},
 the scored variable is constant to within rounding (a response the
 predictors fit exactly leaves such residuals), so \code{cp},
 \code{moran_i} and \code{moran_z} are \code{NA} at every level.}
+\item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
+\code{\link{get_voronoi_seeds}()} and
+\code{\link{voronoi_seeds_kmeans}()} under \code{partition =
+    "density"}: a centre holds no point, so there are fewer occupied cells
+than the count.  A centre that loses its points stays where it is, and
+the start that is kept is the one with the lowest sum, whether or not
+all its centres hold points.  It happens at high counts, mostly from
+\code{init = "random"}.  On simulated layers of 800 points (in 4
+clusters, in 28, and uniform; 20 of each) no partition into 80 cells
+or fewer had such a centre.  At 400 cells, from random starts with
+the best of 10 kept, 2, 5 and 1 of the 20 layers had one; from
+k-means++ starts none of 840 partitions at 40 to 600 cells had one,
+though it can happen.  The condition carries \code{level}, the count,
+and \code{empty}.}
+\item{\code{spatialkit_not_converged}}{\code{resolution_profile()},
+\code{\link{get_voronoi_seeds}()} and
+\code{\link{voronoi_seeds_kmeans}()}, for every call except the
+plain k-means each has always run: the start that was kept was cut
+off at the iteration limit, so its centres are those of the last step
+and a longer run can still move points between cells.  The condition
+carries \code{level} (the count; for a profile every level it
+happened at), \code{iter} and \code{iter_max}.  Raise
+\code{iter_max} (\code{kmeans_iter} in
+\code{get_voronoi_seeds()}).}
+\item{\code{spatialkit_partition_unused}}{\code{\link{get_voronoi_seeds}()}
+and \code{\link{voronoi_seeds_kmeans}()}, given a profile or a
+\code{select_resolution()} result together with a \code{partition},
+an \code{init} or density settings other than those the profile was
+built with: the scored centres are returned, and what the call asked
+for is not used.  The
+condition carries \code{kind} and \code{init}, those of the centres
+returned.}
 \item{\code{spatialkit_bound_chosen}}{\code{\link{get_voronoi_seeds}()},
 \code{\link{voronoi_seeds_kmeans}()} and
 \code{\link{build_tessellation}()}, given a profile or a

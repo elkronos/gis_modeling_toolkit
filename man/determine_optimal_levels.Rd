@@ -244,6 +244,14 @@ names the number of rising steps, and the model-aware paths return it as
 version on a curve that had such a bump can differ from the one made now;
 where the earlier curve was clean, the selection is the same.
 
+\strong{The sweep is plain k-means, whatever the regions are built with
+afterwards.}  This function has no \code{partition} argument: the elbow is
+a reading of the sum of squares that plain k-means minimises, and the
+cells behind Moran's z are that partition's.  A count returned here says
+nothing about density-weighted regions;
+\code{\link{resolution_profile}(partition = "density")} scores a ladder of
+those.
+
 \strong{The model-aware criteria rank on the standardised deviate, not on
 |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
 cells, so \eqn{|I|} falls as \code{k} grows whether or not the finer
