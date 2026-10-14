@@ -168,7 +168,11 @@ sep = "")
 
 `elbow` sees the coordinates and knows nothing about what you measured. `cp` and
 `reliability` split the practical question in half: how well the cells represent
-the field, and whether the cell values can be told apart from noise. `moran_z`
+the field, and whether the cell values can be told apart from noise. What `cp`
+estimates is the error of re-measuring the sampled sites, each predicted by the
+mean of its cell, with the variogram's nugget as the noise of one measurement.
+For a new location the penalty would also need the spread of the field inside a
+cell, which the nugget leaves out. `moran_z`
 is a diagnostic of the cell means and not a count rule. It grows as the cells
 get finer than the range, because neighbouring cells then resemble each other,
 and it is near zero at the coarsest counts it is computed at whatever the data.
@@ -320,6 +324,142 @@ respects their own correlation structure. `supported` is `FALSE`, a warning says
 so, and the ladder still runs from 2 to the ceiling so the cost of each level
 stays visible. The usual causes are too few points for the extent, or a
 correlation range shorter than the spacing between observations.
+
+## Setting a size
+
+The criteria above score the plain mean of a cell. `summarize_by_cell()` can
+also report a *pooled* value: the cell's mean pulled toward the mean of the 8
+cells around it, by a weight that grows with the number of observations the
+cell holds (`estimate = "pooled"`; `vignette("reporting")` shows how to read
+and report one). For that value no criterion sets the count. A *size* does:
+the number of observations a cell is to hold on average, `obs_per_cell`. A
+size `s` on `n` observations is `max(2, round(n / s))` cells.
+
+`obs_per_cell` puts the profile's ladder in those terms, one level per size,
+with the centres fitted to every row. `estimate` names the cell value the
+profile scores:
+
+```{r size-profile}
+prof_size <- resolution_profile(pts, response_var = "z", estimate = "pooled",
+                                obs_per_cell = c(12, 9, 6, 4.5, 3),
+                                sac = "auto")
+as.data.frame(prof_size)[, c("levels", "scored_per_cell", "loo",
+                             "share_alone", "own_weight")]
+```
+
+Three of the columns say what a size leaves a cell value to stand on.
+
+- `loo` is the leave-one-out error of the pooled value: each observation is
+  predicted by the value of its cell computed without it, and the squared
+  errors are averaged. It needs no variogram. `sac = "auto"` fits none on a
+  ladder of sizes, so `cp` and `reliability` are `NA` in this profile.
+- `share_alone` is the share of the observations that are the only one in
+  their cell.
+- `own_weight` is the median weight a pooled value gives its cell's own mean.
+  At 1 the pooled values are the plain means; at 0 each is the mean of the
+  cell's neighbours.
+
+`select_resolution(criterion = "size")` returns the level of a size. It
+searches for no optimum, so the result has no flat region and sits on no
+bound:
+
+```{r size-select}
+sel_size <- select_resolution(prof_size, criterion = "size",
+                              obs_per_cell = 4.5)
+sel_size
+```
+
+`loo` is in the table to compare sizes by, not to choose one. For pooled
+values it tends to keep falling as the cells shrink, so its minimum tends to
+be the finest size offered, and the end of the ladder would then be choosing.
+On 200 simulated layers of 1,500 clustered observations of a field plus noise,
+profiled at seven sizes from 18 to 2, the lowest `loo` of the pooled value was
+at the size 2 on 176 (`dev/sim-pooled-values.R` in the package's repository;
+`?resolution_profile` gives the settings).
+
+```{r size-text, echo=FALSE, results='asis'}
+lowest <- prof_size$levels[which.min(prof_size$loo)]
+cat(sprintf(paste("In the table above the lowest `loo` is at %d cells, %s.\n"),
+            lowest,
+            if (lowest == max(prof_size$levels)) "the finest size offered"
+            else "which is not the finest size offered: a tendency, not a rule"))
+```
+
+The size is therefore the caller's choice, made on other grounds: how many
+observations a cell value should stand on, which `share_alone` and
+`own_weight` describe. Under a size neither the cells, which are fitted to the
+coordinates, nor their number, which is a count of rows, depend on the
+response, so the count is not fitted to the values it will summarise.
+
+A size does not ask whether the response has spatial structure the cells can
+use, so the selection asks it separately. `structured` is `FALSE` when one
+mean for the whole layer predicts a left-out observation as well as the cells
+do. The count stands either way, since the caller set it, and the functions
+that take the selection as a count then warn (class
+`spatialkit_no_structure`) that the cell values will say little that one mean
+does not.
+
+```{r size-structured}
+data.frame(structured = sel_size$structured, loo = sel_size$loo,
+           one_mean = sel_size$loo_one_cell)
+```
+
+The selection goes to `get_voronoi_seeds()`, as in "Next" below. It carries a
+record of how the count was set, `sel_size$count_rule`, which the seeds, the
+cells and the assigned layer hand on to `summarize_by_cell()`. The summary
+then checks that it reports the cell value the count was chosen for, on the
+cells and rows that were scored.
+
+## Leave-one-out for plain means
+
+With plain means the leave-one-out error does choose a count. Each observation
+is predicted by the mean of the other observations of its cell, or, when it is
+alone in its cell, by the mean of the cell of its nearest other observation.
+`estimate = "mean"` adds that error to the profile, and `obs_per_cell =
+"auto"` then offers the seven sizes 18, 12, 9, 6, 4.5, 3 and 2:
+
+```{r loo-profile}
+prof_loo <- resolution_profile(pts, response_var = "z", estimate = "mean",
+                               obs_per_cell = "auto", sac = "auto")
+as.data.frame(prof_loo)[, c("levels", "scored_per_cell", "loo", "loo_se",
+                            "share_alone")]
+
+sel_loo <- select_resolution(prof_loo, criterion = "loo")
+sel_loo
+```
+
+```{r loo-text, echo=FALSE, results='asis'}
+if (is.na(sel_loo$edge)) {
+  cat(sprintf(paste("The lowest error is at %d cells, inside the sizes offered,",
+                    "so the criterion chose it.\n"), sel_loo$best))
+} else {
+  cat(sprintf(paste("The lowest error is at %d cells, which is %s: an end of",
+                    "the ladder chose the count, and the functions that take",
+                    "the selection warn of it (class",
+                    "`spatialkit_bound_chosen`).\n"), sel_loo$best, sel_loo$edge))
+}
+```
+
+`sel_loo$flat` is every level whose error is within `tol` of the lowest, and
+it is the answer to quote, as for any criterion. `loo_se` is the standard
+error of one level's mean squared error. It is not the standard error of the
+difference between two levels: their errors come from the same observations.
+
+Three things to know before relying on this criterion. The count now depends
+on the values of the response, so the next section applies, and
+`select_on = "split"` reads `loo` on one half of the layer. The error
+describes locations among the observations: it compares counts where data are
+near, and says nothing about the error of a map away from them. And it sets
+the count of plain means only; for pooled values a size does, as above. In
+the simulation of that section the lowest `loo` of the plain mean was at the
+finest size on none of the 200 layers: it was at 6 observations per cell on
+86 of them, at 4.5 on 51 and at 9 on 49.
+
+`criterion = "auto"` is the rule that goes with the profile's estimate:
+`"size"` for pooled values and `"loo"` for plain means. A profile built with
+`estimate` and passed straight to `get_voronoi_seeds()` as `n` is read that
+way. `select_resolution()` itself still defaults to `"cp"`, which neither
+profile of these two sections has, so name the criterion.
 
 ## Choosing on one half, estimating on the other
 

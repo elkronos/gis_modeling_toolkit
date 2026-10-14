@@ -287,6 +287,17 @@
 #' flagged or left out. [area_of_applicability()] and [fold_separation()]
 #' are the tools for deciding where a prediction applies.
 #'
+#' A simulation shows how the interval's coverage falls with `dist_ratio`
+#' (`dev/sim-pooled-values.R` in the package's repository; "Pooled values" in
+#' [summarize_by_cell()] describes it). Each of 200 layers has 1,500
+#' clustered observations in 333 cells, 300 further observations held out
+#' at random among them and 300 held out as a block, which leaves a gap in
+#' the layer. Over the held-out observations of all layers, the interval at
+#' `obs_level = 0.90` held 91.5 percent of those with a `dist_ratio` below
+#' 1, 89.2 percent from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from
+#' 4 to 8 and 69.5 percent above 8. It held 89.6 percent of the observations
+#' held out at random and 75.1 percent of those in the block.
+#'
 #' @section Without the FNN package:
 #' The function makes three nearest-neighbour searches: each location's
 #' nearest scored location, each location's nearest seed, and each scored

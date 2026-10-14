@@ -1,7 +1,7 @@
 ---
 title: "Diagnostics"
 description: >
-  Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, and two ways a score can leak.
+  Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, two ways a score can leak, and the warnings about pooled cell values.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -54,7 +54,8 @@ values. It is silent on four things that decide whether the analysis holds up:
 whether the model left spatial structure in its residuals, whether the standard
 errors on aggregated values are the width they claim, whether a cell mean is the
 best estimate of that cell available, and where on the map the score applies at
-all. A fifth section shows two ways the score itself can be wrong.
+all. A fifth section shows two ways the score itself can be wrong, and a sixth
+reads the warnings `summarize_by_cell()` raises about pooled cell values.
 
 ## A fixture and a model that is wrong in a known way
 
@@ -316,6 +317,157 @@ Its inner folds default to the scheme you pass. Passing `random_kfold` there
 logs a caution, because a leaky inner loop can select a variable for being
 spatially close to the response and an honest outer loop will then report a
 respectable number for a dishonestly chosen feature set.
+
+## 6. Warnings about pooled cell values
+
+`summarize_by_cell(estimate = "pooled")` returns, beside each cell's mean, a
+pooled value: the mean pulled toward the mean of the cells around it. What it
+has to say about those values, and about whether the cells are the ones their
+count was chosen for, comes as R warnings with a class. Each is raised once
+per call and reason and carries its numbers as fields, so it can be caught and
+read without matching its text; a warning about the pooled columns also names
+the columns it applies to. This vignette hides warnings, so the helper below
+runs a call and returns the classes it raised:
+
+```{r raised}
+raised <- function(expr) {
+  seen <- character(0)
+  withCallingHandlers(expr, warning = function(w) {
+    seen <<- c(seen, class(w)[1])
+    invokeRestart("muffleWarning")
+  })
+  seen
+}
+```
+
+The cells are built for pooled values at 4.5 observations per cell, by the
+calls `vignette("resolution")` and `vignette("reporting")` walk through:
+
+```{r pooled-cells}
+prof  <- resolution_profile(pts, "z", estimate = "pooled", obs_per_cell = 4.5,
+                            sac = "auto")
+size  <- select_resolution(prof, criterion = "size")
+seeds <- get_voronoi_seeds(method = "kmeans", n = size, sample_points = pts)
+vor   <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
+asg_v <- assign_features_to_polygons(pts, vor$cells, polygon_id_col = "cell_id")
+
+raised(summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells,
+                         estimate = "pooled"))
+```
+
+A summary of the cell value the count was chosen for, on the cells and rows
+that were scored, raises nothing. Each of the five warnings below is a
+departure from that.
+
+**`spatialkit_estimate_mismatch`: the count was chosen for the other cell
+value.** The selection wrote down that the count was set for pooled values,
+the cells and the assigned layer carried that record, and this call asks for
+plain means:
+
+```{r mismatch}
+w <- tryCatch(
+  summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells,
+                    estimate = "mean"),
+  spatialkit_estimate_mismatch = function(w) w)
+unlist(unclass(w)[c("chosen_for", "reported", "rule", "cells")])
+```
+
+The summary is returned as asked. Report the value the count was chosen for,
+or choose the count for the value reported:
+`resolution_profile(estimate = "mean")` with
+`select_resolution(criterion = "loo")`.
+
+**`spatialkit_cells_differ`: these are not the cells and rows that were
+scored.** The summary fits the response again on what it is given and compares
+the rows, the cells that hold one and the leave-one-out error with the
+record. Here twenty rows were dropped after the assignment:
+
+```{r differ}
+w <- tryCatch(
+  summarize_by_cell(asg_v[-(1:20), ], "z", id_col = "cell_id",
+                    cells_sf = vor$cells, estimate = "pooled"),
+  spatialkit_cells_differ = function(w) w)
+w$what
+rbind(scored = unlist(w$scored), found = unlist(w$found))
+```
+
+`what` names the first comparison that failed: `"n"` for another number of
+rows with a response, `"cells"` for another number of cells that hold one,
+`"loo"` for the same rows in the same number of cells with another error,
+which means rows sit in other cells, and `"record"` when the assigned layer
+and `cells_sf` carry different records. The usual causes are rows filtered
+after the assignment, a boundary that leaves points in no cell, and a layer
+other than the one profiled. On gridded locations there is one more: a row
+the same distance from two centres lies on the boundary between their cells,
+the profile scores it in the cell of the lower-numbered centre, and the
+assignment can place it in the other, so the warning then speaks of rows
+nobody changed. The values returned describe the cells as given, and
+`attr(, "count_rule")$check` keeps the outcome. Cells the caller brings carry
+no record and are not checked.
+
+**`spatialkit_no_structure`: the cells predict no better than one mean.**
+`b` is noise by construction:
+
+```{r no-structure}
+noise <- summarize_by_cell(asg_v, "b", id_col = "cell_id", estimate = "pooled")
+raised(summarize_by_cell(asg_v, "b", id_col = "cell_id", estimate = "pooled"))
+as.data.frame(attr(noise, "pooled")$columns$resp_b[
+  c("loo", "loo_one_cell", "structure_p", "own_weight", "structured")])
+```
+
+`structured` is `FALSE` when the leave-one-out error of one mean for all rows
+(`loo_one_cell`) is within 2 percent of that of the pooled values (`loo`) or
+below it, or when the F test of the cell means against one mean has
+`p >= 0.05`. The values are returned, and a map of them still looks smooth,
+because each is mostly the mean of its neighbours. On 200 simulated layers
+with white noise as the response the median own weight was 0.11 and a cell's
+pooled value had a correlation of 0.79 with the mean of its 8 nearest cells'
+values, where the plain means had one of -0.02
+(`dev/sim-pooled-values.R` in the package's repository; `?summarize_by_cell`
+gives the settings). Read the warning as: one mean describes this column, and
+the map shows the pooling.
+
+**`spatialkit_pool_degenerate`: the values were computed and carry no
+pooling.** Its `reason` says which of three cases it is. A column that does
+not vary inside any cell is one of them:
+
+```{r degenerate}
+asg_v$flat <- 1
+w <- tryCatch(summarize_by_cell(asg_v, "flat", id_col = "cell_id",
+                                estimate = "pooled"),
+              spatialkit_pool_degenerate = function(w) w)
+w$reason
+```
+
+With `"no spread inside any cell"` and with `"one cell"` every own weight is
+1 and the pooled value is the plain mean. With `"no signal between cells"`
+the cell means differ from their neighbours' by no more than the spread
+inside the cells explains: every own weight is 0, and each pooled value is
+the mean of the cell's neighbours and holds none of the cell's own
+observations. That last case is not the test for a response without
+structure. In the simulation it came on 20 of the 200 white-noise layers and
+`spatialkit_no_structure` on all 200.
+
+**`spatialkit_pool_few_cells`: 2 to 9 cells.** The neighbours of a cell are
+then all the other cells, so its target is the mean of every observation
+outside it:
+
+```{r few-cells}
+few   <- create_grid_polygons(hull, target_cells = 4, type = "square")
+asg_f <- assign_features_to_polygons(pts, few, quiet = TRUE)
+raised(four <- summarize_by_cell(asg_f, "z", estimate = "pooled"))
+as.data.frame(four)[, c("poly_id", "n", "resp_mean_z", "..pooled_resp_z",
+                        "..pooled_w_resp_z", "..pooled_target_resp_z")]
+```
+
+The overall mean lies between a cell's own mean and that target. A cell whose
+own weight is below its share of the observations therefore gets a pooled
+value on the far side of the overall mean from its plain mean, and two cells
+can change order. The `..pooled_w_*` column shows how close each cell is to
+that, and `estimate = "mean"` gives the plain means.
+
+`?summarize_by_cell` lists these classes and the others of the pooled values
+under "Conditions", with the fields each carries.
 
 ## Next
 

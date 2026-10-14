@@ -182,6 +182,17 @@ calibrated. \code{dist_nearest} and \code{dist_ratio} say how far each location 
 from the data. No threshold is applied to either and no location is
 flagged or left out. \code{\link[=area_of_applicability]{area_of_applicability()}} and \code{\link[=fold_separation]{fold_separation()}}
 are the tools for deciding where a prediction applies.
+
+A simulation shows how the interval's coverage falls with \code{dist_ratio}
+(\code{dev/sim-pooled-values.R} in the package's repository; "Pooled values" in
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} describes it). Each of 200 layers has 1,500
+clustered observations in 333 cells, 300 further observations held out
+at random among them and 300 held out as a block, which leaves a gap in
+the layer. Over the held-out observations of all layers, the interval at
+\code{obs_level = 0.90} held 91.5 percent of those with a \code{dist_ratio} below
+1, 89.2 percent from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from
+4 to 8 and 69.5 percent above 8. It held 89.6 percent of the observations
+held out at random and 75.1 percent of those in the block.
 }
 
 \section{Without the FNN package}{

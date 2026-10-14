@@ -1618,7 +1618,13 @@ create_grid_polygons <- function(
 #'   over a near-global extent, say); the grid is then laid, and the points
 #'   indexed, in the equal-area CRS `ensure_projected(purpose = "area")` picks
 #'   for the boundary, with a logged warning, as [create_grid_polygons()]
-#'   does, so the cells stay equal-area.
+#'   does, so the cells stay equal-area. Seeds that carry the record of how
+#'   their count was set (`attr(, "count_rule")`) were scored in the CRS the
+#'   profile worked in, each row in the cell of its nearest centre. Voronoi
+#'   cells built in another projected CRS are the nearest-seed cells of that
+#'   CRS, so a row near a boundary can fall in the neighbouring cell, and
+#'   [summarize_by_cell()] then reports that the cells are not the ones
+#'   scored.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.

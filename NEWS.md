@@ -255,6 +255,91 @@ old behaviour where there is a way.
   holds no point, which happens at counts from about a fifth of the points
   up, mostly from random starts.
 
+* `summarize_by_cell()` gains `estimate = "pooled"`.  Beside each mean it
+  returns a pooled value, `..pooled_*`: the cell's mean pulled toward the
+  count-weighted mean of the 8 cells whose observations' centroids are
+  nearest, `..pooled_target_*`, with the weight `..pooled_w_*` on its own
+  mean.  The weight grows with the cell's count and with how much the cells
+  differ from their neighbours.  A cell with one observation gets a value; a
+  cell with none gets `NA`.  It works on any polygons.  Every present column
+  is unchanged, and the default, `estimate = "mean"`, returns the frame it
+  always did.  `attr(, "pooled")` records the fit, and whether the cells
+  predict a left-out observation better than one mean for all rows.  On 200
+  simulated layers of 1,500 clustered observations in cells of 4.5 on
+  average, the root mean squared error of the pooled value at held-out
+  observations among the others was 0.96 of the plain mean's
+  (`dev/sim-pooled-values.R`; `?summarize_by_cell` describes the
+  simulation).
+
+* `summarize_by_cell()` gains `obs_level`: `..obs_lo_*` and `..obs_hi_*`, a
+  range for one further observation in the cell, as the pooled value plus
+  two quantiles of its leave-one-out residuals.  It is a statement about
+  observations on average and describes observations among those
+  summarised; it is too narrow for a place with none nearby.  `conf_level`
+  and the `..ci_*` columns are unchanged; that interval is not a range for
+  an observation.  On the same layers the range at 0.90 held 89.6 percent of
+  the observations held out among the others and 75.1 percent of those in a
+  held-out block, and `..ci_*` at 0.90 read that way held 58.9 percent of
+  the first.  `attr(, "intervals")` says what each interval in the frame
+  covers.
+
+* `resolution_profile()` gains `estimate` and `obs_per_cell`.
+  `obs_per_cell` sets the ladder in observations per cell and accepts
+  fractions; the centres are then fitted to every row.  With `estimate` the
+  profile adds `loo`, the leave-one-out error of that cell value on every
+  row of the layer with a response, in the cells the seeds will build, with
+  `loo_se`, `scored_per_cell`, `share_alone` and `own_weight`.  It needs no
+  variogram.  `print()`, `summary()` and `plot()` of such a profile show
+  it.
+
+* `resolution_profile()`'s `sac` accepts `"auto"`: the variogram is
+  estimated as before unless `obs_per_cell` sets the ladder, where none is
+  fitted, `cp` and `reliability` are `NA`, and `attr(, "cp_noise")` says
+  why.  The default, `sac = NULL`, is unchanged.
+
+* `resolution_profile()`'s `nstart`, `get_voronoi_seeds()`'s `kmeans_nstart`
+  and `voronoi_seeds_kmeans()`'s `nstart` accept `NULL`, the kind's own
+  number of starts: the present default for `partition = "kmeans"` and 3 for
+  `partition = "density"`.  The defaults are unchanged.  On a ladder set by
+  `obs_per_cell` a fit whose cost grows with the square of the rows is
+  stopped above a limit, with an error of class `spatialkit_work_limit` that
+  names the ways on; so is the search behind the weights of `partition =
+  "density"` when the FNN package is not installed.
+
+* `select_resolution()` gains `criterion = "size"` (the level at
+  `obs_per_cell` observations per cell, 4.5 unless given), `"loo"` (the
+  lowest leave-one-out error) and `"auto"` (size for pooled values,
+  leave-one-out for plain means).  A size does not test the response, so
+  `structured` is computed for it from the leave-one-out error against one
+  mean for the layer.  A profile built with `estimate`, passed straight to a
+  seeding function as the count, is read by `"auto"`.
+
+* A selection made by these rules carries `count_rule`, and the seeds, the
+  tessellation, the assigned layer and the summary carry it on.
+  `summarize_by_cell()` warns (`spatialkit_estimate_mismatch`) when the
+  count was chosen for one cell value and the summary reports the other, and
+  (`spatialkit_cells_differ`) when the cells or rows it is given are not the
+  ones the count was scored on.
+
+* New `cell_values_at()`: the value and interval of the cell at other
+  locations, with each location's distance from the nearest observation.
+
+* Each warning of the pooled path of `summarize_by_cell()` is raised once
+  per call and reason and names the columns it applies to, in its text and in
+  a `columns` field.  Where the pooled columns cannot be computed they are
+  `NA` with a warning and the plain columns are returned; the function
+  raises no error for them.
+
+* New condition classes: `spatialkit_pool_unavailable`,
+  `spatialkit_pool_degenerate`, `spatialkit_pool_few_cells`,
+  `spatialkit_pool_few_df`, `spatialkit_pool_rows_skipped`,
+  `spatialkit_repeated_locations`, `spatialkit_few_residuals`,
+  `spatialkit_estimate_mismatch`, `spatialkit_cells_differ`,
+  `spatialkit_size_not_reached`, `spatialkit_ladder_unused`,
+  `spatialkit_moran_skipped`, and the error class `spatialkit_work_limit`.
+  `spatialkit_no_structure` is also raised by `summarize_by_cell(estimate =
+  "pooled")`, and by the seeding functions for a count set by a size.
+
 * `make_folds()` gains `method = "knndm"`, the k-fold version of
   nearest-neighbour distance matching (Linnenbrink et al. 2024).  It builds
   `k` folds whose held-out distances are as close as a set of candidates
@@ -3309,6 +3394,16 @@ old behaviour where there is a way.
   "'length = 2' in coercion to 'logical(1)'".
 
 ## Documentation
+
+* `?resolution_profile` describes `cp` as the error of re-measuring the
+  sampled sites.  It no longer says `cp` estimates the error of predicting a
+  new observation by its cell's mean.  The numbers are unchanged.
+
+* `?summarize_by_cell` says what `..se_*` and `..ci_*` cover at each `deff`:
+  at the default `deff = 1`, the cell's own mean, when its observations are
+  spread through the cell; under `"kish"`, `"variogram"` or a number, the
+  cell mean as an estimate of the population mean.  It no longer names the
+  grand mean at every `deff`.  The numbers are unchanged.
 
 * The README, the vignettes and the tour scripts describe the behaviour of
   this version: GWR needs `sp` alone, `moran_z` is a diagnostic, the ladder

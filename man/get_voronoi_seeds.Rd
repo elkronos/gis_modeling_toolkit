@@ -125,7 +125,10 @@ they hold about the same number of points each once \code{n} is above the
 number of dense places (clusters) in the cloud; below that the counts
 are about as uneven as under \code{"kmeans"}. It follows the
 density of \code{sample_points}; a cloud this function draws inside
-\code{boundary} is uniform and has none to follow. See "The partition" in
+\code{boundary} is uniform and has none to follow. Without the 'FNN' package
+the density kind finds its weights by comparing every pair of distinct
+locations, so its time grows with the square of their number; the seeds
+are the same, and nothing stops the call. See "The partition" in
 \code{\link[=resolution_profile]{resolution_profile()}} for what each kind does and how.}
 
 \item{init}{For \code{method = "kmeans"}: how each start is drawn, \code{"random"}

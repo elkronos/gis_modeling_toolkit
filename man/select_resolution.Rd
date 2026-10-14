@@ -152,7 +152,12 @@ without an estimate), \code{partition}, \code{crs} and
 \code{scored_cells} (\code{NA}: the record stands for a count).
 \code{seeds} carries the same record as \code{attr(, "count_rule")}
 with \code{scored_cells = TRUE}, since they are the centres that were
-scored.  Under \code{"loo"} and \code{"size"} \code{one_cell} holds
+scored.  The record travels on with the seeds, the cells and the
+assigned layer to \code{\link{summarize_by_cell}()}, which warns when
+it reports another cell value than the count was chosen for (class
+\code{spatialkit_estimate_mismatch}) and when the cells or rows it is
+given are not the ones the count was scored on
+(\code{spatialkit_cells_differ}).  Under \code{"loo"} and \code{"size"} \code{one_cell} holds
 the leave-one-out error of one mean and \code{range_floor} is
 \code{NA}.  \code{criterion} is the criterion applied, never
 \code{"auto"}.
@@ -176,9 +181,10 @@ cell count raise that as a warning of class
 
 \describe{
 \item{\code{cp}}{The level that minimises Mallows' \eqn{C_p}: the count
-at which predicting an observation by its cell's mean has the least
-estimated error.  On a smooth response with little noise that is the
-support ceiling.  The result also says whether the optimum beats one
+at which re-measuring the sampled sites, each predicted by its cell's
+mean, has the least estimated error (\code{\link{resolution_profile}}
+says what that leaves out for a new location).  On a smooth response
+with little noise that is the support ceiling.  The result also says whether the optimum beats one
 cell for the whole layer (\code{attr(profile, "one_cell")}), in
 \code{structured}.  It is \code{TRUE} when two things hold:
 \eqn{C_p} at one cell is above the optimum by more than \code{tol},
@@ -248,7 +254,12 @@ against one mean, adjusted for the levels searched, has
 Under this criterion the count depends on the values of the response.
 When the profile's estimate is the pooled value and the lowest error
 is at the finest level scored, a note says that the end of the ladder
-chose the count.  On a ladder \code{obs_per_cell} set, an optimum at
+chose the count.  For pooled values the error tends to keep falling to
+the finest level: in the simulation described under "Observations per
+cell" in \code{\link{resolution_profile}}, the lowest error of the
+pooled value was at the finest of seven sizes on 176 of 200 layers,
+and that of the plain mean on none.  On a ladder \code{obs_per_cell}
+set, an optimum at
 an end has the \code{edge} \code{"the finest size offered
     (obs_per_cell)"} or \code{"the coarsest size offered
     (obs_per_cell)"}; a finest level the profile held to the most cells
