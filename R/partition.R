@@ -43,6 +43,11 @@
 .DENSITY_FLOOR_REL <- 1e-6
 .DENSITY_TOL_REL   <- 1e-12
 
+# Starts of the density kind when the caller sets no number: the best of
+# three is kept.  The kind "kmeans" keeps the number each function has always
+# run.
+.NSTART_DENSITY <- 3L
+
 
 # The four fields of a partition record that say what built the regions.
 .partition_fields <- function() c("kind", "init", "density_power", "density_k")

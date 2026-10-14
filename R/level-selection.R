@@ -397,6 +397,16 @@
 #' @param predictors Numeric matrix of predictor values.
 #' @param cluster_ids Integer vector of cluster assignments. The cluster count
 #'   is derived from this vector, so it is not passed separately.
+#' @param grouped Whether the cell means are formed by grouped sums, one pass
+#'   over the rows for all the cells.  \code{FALSE} (default) makes a pass
+#'   over all the rows for each cell, which costs rows times cells and is
+#'   quadratic in the rows when the cells are a fixed size.  The two give the
+#'   same means to rounding, so a caller whose numbers are held to the last
+#'   bit keeps the default.
+#' @param use_fnn,use_matrix Whether \pkg{FNN} and \pkg{Matrix} may be used
+#'   for the neighbour weights of the cell means; handed to
+#'   \code{.build_knn_weights()}, which stops above \code{.KNN_DENSE_MAX}
+#'   cells without both.
 #' @return A named numeric vector \code{c(I = , z = )}: Moran's I on the
 #'   cell-level OLS residuals, and its standardised deviate.  With no
 #'   predictors those residuals are the centred cell means, so this is the
@@ -410,21 +420,37 @@
 #'   are \code{NA_real_} when the statistic is not computable at this \code{k}.
 #' @keywords internal
 #' @noRd
-.morans_i_for_k <- function(xy, response, predictors, cluster_ids) {
+.morans_i_for_k <- function(xy, response, predictors, cluster_ids, grouped = FALSE,
+                            use_fnn = .has_backend("FNN"),
+                            use_matrix = .has_backend("Matrix")) {
   # Aggregate to cell-level means
   cell_ids <- sort(unique(cluster_ids))
   n_cells <- length(cell_ids)
   if (n_cells < 4L) return(.morans_na())
 
-  cell_resp <- numeric(n_cells)
-  cell_xy   <- matrix(0, n_cells, 2)
-  cell_pred <- matrix(0, n_cells, ncol(predictors))
+  if (isTRUE(grouped)) {
+    # The means of the loop below from one pass over the rows: sums by cell
+    # over counts by cell.  A missing response is left out of its cell's mean,
+    # as mean(na.rm = TRUE) leaves it out, and a cell with none gets NaN.
+    g    <- match(cluster_ids, cell_ids)
+    cnt  <- tabulate(g, nbins = n_cells)
+    seen <- !is.na(response)
+    cell_resp <- as.numeric(rowsum(ifelse(seen, response, 0), g)) /
+      as.numeric(rowsum(as.numeric(seen), g))
+    cell_xy   <- unname(rowsum(xy[, 1:2, drop = FALSE], g)) / cnt
+    cell_pred <- if (ncol(predictors)) unname(rowsum(predictors, g)) / cnt
+                 else matrix(0, n_cells, 0L)
+  } else {
+    cell_resp <- numeric(n_cells)
+    cell_xy   <- matrix(0, n_cells, 2)
+    cell_pred <- matrix(0, n_cells, ncol(predictors))
 
-  for (j in seq_along(cell_ids)) {
-    mask <- cluster_ids == cell_ids[j]
-    cell_resp[j]    <- mean(response[mask], na.rm = TRUE)
-    cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
-    cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
+    for (j in seq_along(cell_ids)) {
+      mask <- cluster_ids == cell_ids[j]
+      cell_resp[j]    <- mean(response[mask], na.rm = TRUE)
+      cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
+      cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
+    }
   }
 
   # Fit OLS on cell means
@@ -454,7 +480,8 @@
   # to the geometric ranking when none of them clears the floor.
   if (n <= n_neighbors + 1L) return(.morans_na())
 
-  W <- .build_knn_weights(cell_xy[ok, , drop = FALSE], k = n_neighbors)
+  W <- .build_knn_weights(cell_xy[ok, , drop = FALSE], k = n_neighbors,
+                          use_fnn = use_fnn, use_matrix = use_matrix)
 
   # Moran's I = (n / S0) * (e' W e) / (e' e)
   S0 <- sum(W)
