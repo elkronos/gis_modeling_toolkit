@@ -945,7 +945,9 @@ assign_features_to_polygons <- function(
 #' Summarize features by polygon/cell ID
 #'
 #' Aggregates an sf point dataset into one row per cell. By default computes
-#' counts and means, but the aggregation function is configurable.
+#' counts and means, but the aggregation function is configurable. It can
+#' also return a pooled value for each cell, its mean pulled toward the mean
+#' of the cells around it, and a range for one further observation.
 #'
 #' This is the third step of the package's pipeline, taking the labelled layer
 #' from [assign_features_to_polygons()] down to cell level. What distinguishes
@@ -985,7 +987,8 @@ assign_features_to_polygons <- function(
 #' therefore never sees an infinite value: `max` returns the largest finite
 #' value, and infinities cannot be counted through `agg_funs`.
 #'
-#' @section Spatial autocorrelation and standard-error bias:
+#' # Spatial autocorrelation and standard-error bias
+#'
 #' By default (`deff = 1`), the `..se_*` columns are computed as
 #' `sd / sqrt(n)`, which treats the observations within each cell as
 #' independent. When data are spatially autocorrelated (the common case for the
@@ -1036,19 +1039,26 @@ assign_features_to_polygons <- function(
 #' For rigorous inference under spatial dependence, consider fitting an
 #' explicit spatial covariance model (e.g. via \code{\link{fit_bayesian_spatial_model}}).
 #'
-#' @section What the standard error estimates:
-#' The `..se_*` columns are the standard error of the cell mean **as an
-#' estimate of the population (grand) mean**: the unconditional quantity, in
-#' which the cell's own realised deviation is part of the error. That is the
-#' right quantity when cells are treated as samples from a common population,
-#' and the design-effect correction is calibrated for it: measured 95% interval
-#' coverage of the grand mean is 0.95 with `deff = "kish"` (and 0.29 with the
-#' naive SE) on exchangeable within-cell correlation, and 0.93 with
-#' `deff = "variogram"` on a simulated Gaussian field.
+#' # What the standard error estimates
 #'
-#' It is **not** the standard error of the cell's own mean (the block average
-#' over that cell), which is what a cell-level map or a regression on cell
-#' values usually wants. For that quantity the naive `sd / sqrt(n)` is the
+#' What the `..se_*` columns estimate follows `deff`. At the default,
+#' `deff = 1`, `sd / sqrt(n)` is the standard error of **the cell's own
+#' mean**, the mean of the units the cell holds, and it is the right one when
+#' the cell's observations are spread through the cell. Under
+#' `deff = "kish"`, `"variogram"` or a number other than 1 the columns are the
+#' standard error of the cell mean **as an estimate of the population (grand)
+#' mean**: the unconditional quantity, in which the cell's own realised
+#' deviation is part of the error, widened for the correlation inside the
+#' cell. That is the right quantity when cells are treated as samples from a
+#' common population: measured 95% interval coverage of the grand mean is
+#' 0.95 with `deff = "kish"` (and 0.29 with the naive SE) on exchangeable
+#' within-cell correlation, and 0.93 with `deff = "variogram"` on a simulated
+#' Gaussian field.
+#'
+#' The corrected standard error is **not** that of the cell's own mean (the
+#' block average over that cell), which is what a cell-level map or a
+#' regression on cell values usually wants. For that quantity the naive
+#' `sd / sqrt(n)` is the
 #' better of the two on offer: measured coverage 0.95 under exchangeable
 #' within-cell correlation, against very nearly 1.00 for the
 #' design-effect-corrected SE, which is too wide by the factor
@@ -1062,7 +1072,8 @@ assign_features_to_polygons <- function(
 #' they are measurements of the cells themselves and the sampling within cells
 #' is reasonably uniform.
 #'
-#' @section Design effects and variable types:
+#' # Design effects and variable types
+#'
 #' `deff = "kish"` estimates a separate ICC for each summarised column, the
 #' response and every predictor, and applies each to that column alone:
 #' listing or removing a predictor leaves every other column's standard error,
@@ -1086,15 +1097,19 @@ assign_features_to_polygons <- function(
 #' corrects response columns a warning says that their standard errors are
 #' understated, as [kriging_adequacy()] warns about the same mismatch.
 #'
-#' @section Confidence intervals:
+#' # Confidence intervals
+#'
 #' With `conf_level` set, every numeric response and predictor column gains
 #' four more columns: `..neff_*`, that column's effective sample size in the
 #' cell (its non-missing count over its design effect, the per-column version
 #' of `cell_weight`); `..df_*`, the degrees of freedom the interval uses; and
-#' `..ci_lo_*` / `..ci_hi_*`, a t interval for the **cell mean as an estimate
-#' of the grand mean**. The estimand is the same as `..se_*`'s, so everything
-#' in "What the standard error estimates" applies to it, including that it is
-#' not an interval for the cell's own block average. The interval is
+#' `..ci_lo_*` / `..ci_hi_*`, a t interval for a mean. Which mean follows
+#' `deff`, as for `..se_*`: at the default, `deff = 1`, **the cell's own
+#' mean**, when its observations are spread through the cell; under
+#' `deff = "kish"`, `"variogram"` or a number other than 1, the **cell mean as
+#' an estimate of the population (grand) mean**. Everything in "What the
+#' standard error estimates" applies to it, including that the corrected
+#' interval is not one for the cell's own block average. The interval is
 #' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
 #' the column's non-missing values whatever `agg_funs` computes, and is `NA`
 #' wherever the standard error is (a single observation; complete redundancy
@@ -1102,6 +1117,17 @@ assign_features_to_polygons <- function(
 #' non-missing value or none, like the standard error; `cell_weight` still
 #' counts such a cell (1, or `1 / deff` for a numeric `deff`), so the two
 #' differ there.
+#'
+#' At no setting is `..ci_*` a range for one observation: it is an interval
+#' for a mean, and it narrows as a cell's count grows where the spread of
+#' single observations does not. The interval for one further observation in
+#' a cell has its own argument and columns, `obs_level` with
+#' `estimate = "pooled"` and `..obs_lo_*` / `..obs_hi_*` (see "Intervals:
+#' which one answers which question"). In the simulation described there,
+#' `..ci_*` at `conf_level = 0.90` held 58.9 percent of the observations held
+#' out among the others, and the interval for one observation at
+#' `obs_level = 0.90` held 89.6 percent. Away from the observations no
+#' interval here is calibrated.
 #'
 #' The degrees of freedom are **not** `neff - 1`. The interval's spread comes
 #' from the within-cell sample variance, and under exchangeable correlation
@@ -1127,6 +1153,236 @@ assign_features_to_polygons <- function(
 #' `deff = 1` interval. The interval is only as good as the design effect
 #' under it: a mis-specified variogram, or an ICC estimated from too few
 #' cells, moves the coverage with it.
+#'
+#' # Pooled values
+#'
+#' With `estimate = "pooled"` every numeric column also gets a pooled value.
+#' A cell's value, plain or pooled, estimates the cell's *level*: the
+#' expected value of one further observation located in the cell the way its
+#' observations were. It is not the average of a surface over the cell's
+#' area, which would give weight to ground that holds no observation.
+#'
+#' For one column, write `n`, `S` and `m = S / n` for the count, the sum and
+#' the mean of a cell's rows, `N` for the rows in all and `K` for the cells
+#' that hold one. Then
+#'
+#' * `sigma2 = sum((y - m)^2) / (N - K)` is the spread of the observed values
+#'   about their cell's mean;
+#' * the target `t` of a cell is the mean of the rows of its neighbours,
+#'   `sum(S) / sum(n)` over them. The neighbours are the 8 cells whose
+#'   centroids are nearest, the centroid of a cell being the mean of the
+#'   coordinates of its rows. The polygons are not read, so two cells are
+#'   neighbours whether or not they touch, and a cell is never its own
+#'   neighbour;
+#' * `tau2 = max(0, (sum(n * (m - t)^2) - K * sigma2) / N)` is the mean
+#'   squared distance between a cell's level and its target, the target's own
+#'   error included;
+#' * the own weight is `w = tau2 / (tau2 + sigma2 / n)`;
+#' * the pooled value is `w * m + (1 - w) * t`.
+#'
+#' The own weight is the share of the pooled value that is the cell's own
+#' mean. It grows with the cell's count and with `tau2`. At 1 the pooled
+#' value is the plain mean; at 0 it is the target and holds none of the
+#' cell's own values. Pooled values are for maps and for predicting
+#' observations. `..pooled_w_*` is not a regression weight. The plain
+#' columns are the same under either `estimate`, and they are the ones to
+#' use, with `cell_weight`, in a regression on cell values: each column is
+#' pulled toward its neighbours by its own amount, so a regression of pooled
+#' responses on pooled predictors is not a regression of the levels.
+#'
+#' The cells can be any polygons the rows were assigned to, the package's
+#' own or ones the caller brings, with IDs of any type: only each row's cell
+#' and location are read. Each column is pooled on its own rows, those with
+#' a value, a cell and a location, with its own centroids, neighbours,
+#' `sigma2` and `tau2`; a
+#' missing value in one column changes nothing in another. A cell with one
+#' such row gets a value. A cell with none gets `NA`, never a value made from
+#' its neighbours. The pooled columns do not read `agg_funs` or `deff`: the
+#' mean that is pooled is the arithmetic mean whatever `agg_funs` computes,
+#' and no design effect enters `sigma2`, `tau2`, the weights or the interval
+#' of `obs_level`.
+#'
+#' Three cases change what the numbers rest on, and each is a warning (see
+#' "Conditions"). With 2 to 9 cells the neighbours of a cell are all the
+#' others, so its target is the mean of every row outside it, and the overall
+#' mean lies between that target and the cell's own mean. A cell whose own
+#' weight is below its share of the rows, `n / N`, then gets a pooled value
+#' on the far side of the overall mean from its plain mean, and two cells can
+#' change order. When few cells hold two rows, `sigma2` is estimated from few
+#' values and every weight rests on it: `df` in `attr(, "pooled")` is the
+#' number of values beyond one per cell. And when `tau2` comes out at 0,
+#' every own weight is 0 and each pooled value is its target.
+#'
+#' A tie between two candidate neighbours goes to the centroid with the
+#' lower x, then the lower y, and the centroids are summed with the rows in
+#' coordinate order, so a cell's neighbours do not depend on the order of the
+#' rows. The values then agree to rounding: a cell's sums are taken in the
+#' order of its rows.
+#' The tie is between distances computed from the coordinates in the CRS the
+#' distances are measured in (see `estimate`), so on gridded locations the
+#' same layer in another CRS or unit can give a cell another neighbour.
+#'
+#' The figures on this page that describe pooled values and the two
+#' intervals come from one simulation, `dev/sim-pooled-values.R` in the
+#' package's repository, whose header holds its settings and seeds. It draws 200
+#' layers on a square of side 1,000. Each has 2,100 clustered locations
+#' (four fifths of them round 25 parent points with a standard deviation of
+#' 40, the rest uniform) and a response that is a field with covariance
+#' `exp(-d / 100)` plus noise of variance 0.3. The 300 locations nearest a
+#' random centre are held out as a block, 300 of the others are held out at
+#' random, and the 1,500 left are the layer: 333 cells at 4.5 observations a
+#' cell from [resolution_profile()] with `partition = "density"`,
+#' `select_resolution(criterion = "size")`, [get_voronoi_seeds()],
+#' [build_tessellation()] and [assign_features_to_polygons()], summarised
+#' with `estimate = "pooled"`. A held-out observation is given the value of
+#' its cell by [cell_values_at()]. At the observations held out at random
+#' the root mean squared error of the pooled value was 0.96 of the plain
+#' mean's: 0.84 in cells that hold one of the layer's observations, 0.95 in
+#' cells of 2 to 4, 0.98 in cells of 5 to 9 and 0.99 in cells of 10 or
+#' more. In the held-out block it was 0.95.
+#'
+#' `structured` in `attr(, "pooled")` says whether these cells predict a
+#' left-out observation better than one mean for all rows. It is `FALSE`
+#' when the leave-one-out error of one mean (`loo_one_cell`) is within 2
+#' percent of that of the pooled values (`loo`) or below it, or when the F
+#' test of the cell means against one mean has `p >= 0.05`
+#' (`structure_p`). `FALSE` raises a warning of class
+#' `"spatialkit_no_structure"`, and the values are returned. On a response
+#' without spatial structure they still make a smooth map, because each is
+#' mostly the mean of its neighbours. With white noise as the response on
+#' the simulation's 200 layers the median own weight was 0.11, `tau2` was 0
+#' on 20 layers, the warning was raised on all 200, and a cell's pooled
+#' value had a correlation of 0.79 with the mean of the pooled values of its
+#' 8 nearest cells, where the plain means had one of -0.02.
+#'
+#' The pooling model implies an error variance for a pooled value as an
+#' estimate of the cell's level, `(1 - w) * tau2`. It is not returned, and
+#' neither is an interval for the level, because no check has confirmed an
+#' interval built from it; `sigma2`, `tau2` and `..pooled_w_*` are in the
+#' result for a reader who wants to form it. In the simulation, with a
+#' cell's level taken as the mean of the noise-free field over further
+#' locations drawn in it like the data's, the squared error of the pooled
+#' value was 0.98 of `(1 - w) * tau2` among the observations and 6.9 times
+#' it in the held-out block: away from the observations it is too small.
+#'
+#' # Intervals: which one answers which question
+#'
+#' Two families of interval columns can be in the frame. Each has its own
+#' argument, and neither changes the other.
+#'
+#' | Family | Columns | Target | Centre | Asked for by |
+#' |---|---|---|---|---|
+#' | observation | `..obs_lo_*`, `..obs_hi_*` | one further observation in the cell | pooled value | `obs_level` |
+#' | mean | `..ci_lo_*`, `..ci_hi_*` | a mean, never one observation | plain mean | `conf_level` |
+#'
+#' The observation of the first is one located in the cell the way the
+#' data's were. `obs_level` needs `estimate = "pooled"`: without it the call
+#' is an error, not an interval round the plain mean. The mean the second
+#' covers follows `deff`: at `deff = 1` the cell's own mean, when its
+#' observations are spread through the cell; under `deff = "kish"`,
+#' `"variogram"` or a number other than 1 the cell mean as an estimate of
+#' the population mean (see "Confidence intervals", which also describes
+#' `..neff_*` and `..df_*`). No interval and no standard error is returned
+#' for a cell's level as the pooled value estimates it.
+#' `attr(, "intervals")` says the same of the frame in hand, one row per
+#' family present.
+#'
+#' The interval for one observation is the pooled value plus two quantiles
+#' of the leave-one-out residuals of the pooled values. The residual `e` of
+#' a row is its value minus the pooled value of its cell computed without
+#' it: the cell's mean and own weight are computed again without the row,
+#' and `sigma2`, `tau2` and the targets are held. With
+#' `p = (1 - obs_level) / 2`,
+#' `..obs_lo = pooled + quantile(e, p)` and
+#' `..obs_hi = pooled + quantile(e, 1 - p)`.
+#'
+#' * It is a statement about observations on average: of further
+#'   observations located like the data, about `obs_level` of them fall
+#'   inside the interval of their cell. It does not hold cell by cell.
+#' * The two offsets are the same in every cell. The interval's centre
+#'   varies over the map and its width does not. It does not narrow where a
+#'   cell holds more rows: the offsets are quantiles of the errors of
+#'   predicting single observations, and the spread of observations inside a
+#'   cell is in every one of them.
+#' * It is wide. One observation is uncertain.
+#' * Only the level 0.90 has been checked. Another level is computed the
+#'   same way.
+#' * Each residual is the error of predicting an observation from the other
+#'   rows of its cell and from the cells around it, so the interval
+#'   describes locations among the observations. A cell's value and interval
+#'   describe the part of the cell where its observations lie, and a Voronoi
+#'   cell can reach far past them toward the edge of the study area. The
+#'   interval is too narrow for a cell with no observation, a gap in the
+#'   layer or ground beyond the layer's edge.
+#'
+#' In the simulation described under "Pooled values", the interval at
+#' `obs_level = 0.90` held 89.6 percent of the observations held out at
+#' random among the others (83.7 to 94.0 percent in single layers) and 75.1
+#' percent of those in the held-out block. `..ci_*` at `conf_level = 0.90`,
+#' read as a range for one observation, held 58.9 and 49.2 percent of them,
+#' over the held-out observations whose cell has that interval.
+#' [cell_values_at()] returns each location's distance from the nearest
+#' observation, and its help gives the coverage by that distance.
+#'
+#' Away from the observations no interval here is calibrated.
+#'
+#' # Conditions
+#'
+#' What the pooled columns and the count record have to say is raised as R
+#' warnings with a class, so `tryCatch(<class> = )` and
+#' `withCallingHandlers()` catch each without matching its text. A warning
+#' of the pooled columns is raised once per call and reason, for all the
+#' columns it applies to: its text names them and the condition carries them
+#' in `columns`, in the order of the pooled columns. A field said to be by
+#' column is a vector named by those columns, and the numbers of each column
+#' are in `attr(, "pooled")`.
+#'
+#' * `"spatialkit_pool_unavailable"`: the pooled columns of a column are
+#'   `NA`. The plain columns are returned, and this is never an error.
+#'   `reason` is `"no coordinates"` (a layer without geometry),
+#'   `"no located value"` (no row with a value, a cell and a location),
+#'   `"no cell holds two values"` (the condition also carries `n` and
+#'   `cells` by column) or `"work limit"`. The last is the case of many
+#'   cells without the 'FNN' package: the neighbour search then compares
+#'   every pair of cells and is not made above
+#'   `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
+#'   44,700 cells (the condition also carries `work`, `limit`, and `cells`
+#'   by column). With 'FNN' there is no such limit, and the result is the
+#'   same.
+#' * `"spatialkit_pool_degenerate"`: the pooled values were computed and
+#'   carry no pooling. `reason` is `"one cell"` (the pooled value is the
+#'   plain mean; also `n` by column), `"no spread inside any cell"` (every
+#'   own weight is 1; also `constant` by column) or `"no signal between
+#'   cells"` (`tau2` is 0 and every own weight is 0; also `sigma2` by
+#'   column).
+#' * `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the mean
+#'   of all the other cells (`cells`, and `own_weight`, the smallest, by
+#'   column).
+#' * `"spatialkit_pool_few_df"`: `sigma2` rests on fewer than 30 values
+#'   beyond one per cell (`needed`, and `df`, `n` and `cells` by column).
+#' * `"spatialkit_no_structure"`: `structured` is `FALSE` (see "Pooled
+#'   values"). The text says which of the two tests failed, and `beats` is
+#'   `TRUE` for a column whose pooled values beat one mean while the F test
+#'   does not tell the cell means from one mean (also `criterion = "loo"`,
+#'   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
+#'   and `structure_p`).
+#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have
+#'   empty or non-finite coordinates. They count in `n` and the plain
+#'   columns and take no part in the pooled ones (`n`, `cells`).
+#' * `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
+#'   share a location. A residual leaves one row out and keeps the others at
+#'   its location, so the interval then describes a further observation at a
+#'   place already observed (`n` and `total` by column).
+#' * `"spatialkit_few_residuals"`, with `obs_level`: fewer than five
+#'   residuals are expected beyond each end of the interval, which at 0.90
+#'   is fewer than 100 residuals (`needed`, `level`, and `n` by column).
+#' * `"spatialkit_estimate_mismatch"` and `"spatialkit_cells_differ"`: the
+#'   two checks of the count record, described under "Value".
+#'
+#' The two about few cells and few values are raised for columns whose
+#' weights were estimated, and the two of `obs_level` for columns whose
+#' interval is read from residuals, so a constant column raises
+#' `"spatialkit_pool_degenerate"` and no other.
 #'
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell
@@ -1300,7 +1556,11 @@ assign_features_to_polygons <- function(
 #'   own CRS. When the input carries the record of its cells' count (see
 #'   "Value") and that record names a projected CRS, the one the profile
 #'   worked in, the distances are measured in it, whatever CRS the layer is
-#'   in. See "Value" for the columns, the attributes and the warnings.
+#'   in. The value is matched as [match.arg()] matches a choice, so an
+#'   abbreviation (`"p"`) is accepted and `NULL` is the default. See "Pooled
+#'   values" for what the pooled value estimates and what its numbers rest
+#'   on, "Value" for the columns and the attributes, and "Conditions" for
+#'   the warnings.
 #' @param obs_level Optional level in (0, 1), such as `0.90`, of an interval
 #'   for one further observation in a cell, located like the data. It needs
 #'   `estimate = "pooled"`: the interval is the pooled value plus the
@@ -1308,7 +1568,9 @@ assign_features_to_polygons <- function(
 #'   leave-one-out residuals of the pooled values, so its two offsets are the
 #'   same in every cell. It is a statement about observations on average,
 #'   not about each cell. It is a separate argument from `conf_level`, whose
-#'   interval is for a mean and is not a range for an observation. Default
+#'   interval is for a mean and is not a range for an observation. Any level
+#'   strictly between 0 and 1 is computed the same way; only 0.90 has been
+#'   checked (see "Intervals: which one answers which question"). Default
 #'   `NULL`: no such interval.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell), one column per
@@ -1405,28 +1667,9 @@ assign_features_to_polygons <- function(
 #'
 #'   Where the pooled columns of a column cannot be computed they are `NA`,
 #'   with a warning of class `"spatialkit_pool_unavailable"` and not an
-#'   error: a layer without geometry, no row with a value, a cell and a
-#'   location, no cell with two values, or more cells than the neighbour
-#'   search may compare without the 'FNN' package
-#'   (`options(spatialkit.exact_pairs_max = )`, 2e9 pairs by default). The
-#'   other warnings of the pooled columns are of class
-#'   `"spatialkit_pool_degenerate"` (one cell, no spread inside any cell, or
-#'   every own weight 0), `"spatialkit_pool_few_cells"` (2 to 9 cells, where
-#'   each target is the mean of all the other cells),
-#'   `"spatialkit_pool_few_df"` (`sigma2` rests on fewer than 30 values
-#'   beyond one per cell), `"spatialkit_no_structure"` (`structured` is
-#'   `FALSE`: the pooled values predict a left-out observation no better
-#'   than one mean for all rows, or the F test does not tell the cell means
-#'   from one mean; the text says which, and `beats` in the condition is
-#'   `TRUE` for the second), `"spatialkit_pool_rows_skipped"` (rows with a
-#'   value and a cell and no location) and, with `obs_level`,
-#'   `"spatialkit_repeated_locations"` and `"spatialkit_few_residuals"`.
-#'   Each is raised once per call and reason, for all the columns it applies
-#'   to, and carries them in `columns`; the numbers of each column are in
-#'   `attr(, "pooled")`. The two about few cells and few values are raised
-#'   for columns whose weights were estimated, and the two of `obs_level` for
-#'   columns whose interval is read from residuals, so a constant column
-#'   raises `"spatialkit_pool_degenerate"` and no other.
+#'   error, and the plain columns are returned. "Conditions" lists that
+#'   class and the other warnings of the pooled columns, with what each
+#'   condition carries.
 #'
 #'   When `assigned_points_sf` carries `attr(, "count_rule")`, or `cells_sf`
 #'   does (the assigned layer's is read first), the result carries that
@@ -1521,6 +1764,32 @@ assign_features_to_polygons <- function(
 #'                         conf_level = 0.95)
 #' ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
 #'        "..ci_lo_resp_val", "..ci_hi_resp_val")]
+#'
+#' # Pooled values, and a range for one observation: a smooth field plus
+#' # noise at 400 points, on an 8 x 8 grid, so that a cell holds about six.
+#' set.seed(2)
+#' east  <- runif(400, 0, 8000)
+#' north <- runif(400, 0, 8000)
+#' pts2 <- st_as_sf(
+#'   data.frame(x = 5e5 + east, y = 5e6 + north,
+#'              val = 10 + 3 * sin(east / 1500) + 3 * cos(north / 1200) +
+#'                rnorm(400)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' bnd2 <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(5e5, 5e6), c(5e5 + 8000, 5e6), c(5e5 + 8000, 5e6 + 8000),
+#'   c(5e5, 5e6 + 8000), c(5e5, 5e6)
+#' ))), crs = 32632))
+#' grid2 <- create_grid_polygons(bnd2, target_cells = 64, type = "square")
+#' assigned2 <- assign_features_to_polygons(pts2, grid2)
+#' pooled <- summarize_by_cell(assigned2, response_var = "val",
+#'                             estimate = "pooled", obs_level = 0.90)
+#' # The plain mean, the pooled value and the weight on the cell's own mean.
+#' head(pooled[, c("poly_id", "n", "resp_mean_val", "..pooled_resp_val",
+#'                 "..pooled_w_resp_val")])
+#' # The range for one further observation in a cell.
+#' head(pooled[, c("poly_id", "..obs_lo_resp_val", "..obs_hi_resp_val")])
+#' attr(pooled, "pooled")   # what was fitted, and what the interval covers
 #' @references
 #' Faes, C., Molenberghs, G., Aerts, M., Verbeke, G. and Kenward, M. G. (2009).
 #' The effective sample size and an alternative small-sample

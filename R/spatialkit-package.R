@@ -56,6 +56,25 @@
 #'     seen; this is what tells you where the map should not be believed.
 #' }
 #'
+#' Two choices are the user's, one in choosing a resolution (step 1) and one
+#' in aggregating (step 4), and each has an argument.  They are arguments of
+#' \code{\link{resolution_profile}()} and \code{\link{select_resolution}()},
+#' which choose a count for a cell value, and of
+#' \code{\link{summarize_by_cell}()}; \code{determine_optimal_levels()}
+#' takes neither.
+#' The first is the cell value to report, \code{estimate}: the plain mean of
+#' a cell's observations, or the pooled value, which is that mean pulled
+#' toward the mean of the cells around it.
+#' \code{\link{resolution_profile}()} scores a count for the value it is
+#' given, and \code{\link{summarize_by_cell}()} reports the value it is
+#' given and warns when the count was chosen for the other one.  The second
+#' is the size, \code{obs_per_cell}: how many observations a cell is to hold
+#' on average.  For pooled values the size sets the count
+#' (\code{\link{select_resolution}(criterion = "size")}); for plain means the
+#' lowest leave-one-out error can set it (\code{criterion = "loo"}).  Both
+#' are asked for by argument: a call that names neither returns what it
+#' returned before the arguments existed.
+#'
 #' Supporting these throughout, \code{\link{ensure_projected}()} and
 #' \code{\link{coerce_to_points}()} handle coordinate reference systems and
 #' geometry coercion, and \code{\link{estimate_sac_range}()} estimates the
@@ -124,6 +143,37 @@
 #'     Kish's exchangeable-correlation model, not taken from a reference.
 #'     The derivation and its measured coverage are in the section "Spatial
 #'     autocorrelation and standard-error bias" of that help page.
+#'   \item The size of 4.5 observations per cell that
+#'     \code{select_resolution(criterion = "size")} and
+#'     \code{resolution_profile(obs_per_cell = "auto")} take when none is
+#'     given: a convention, a size at which most cells hold several
+#'     observations.
+#'   \item The 8 nearest cells a pooled value is pulled toward in
+#'     \code{summarize_by_cell(estimate = "pooled")}: a convention, a count
+#'     large enough to give a cell a stable target.  It is not an argument.
+#'   \item The 5 residuals expected beyond each end of the interval of
+#'     \code{summarize_by_cell(obs_level = )}, below which the warning
+#'     \code{spatialkit_few_residuals} is raised: a convention for when the
+#'     ends of an interval read from quantiles are unstable.
+#'   \item The 30 values beyond one per cell below which
+#'     \code{spatialkit_pool_few_df} is raised: a convention for when the
+#'     spread inside the cells, which every own weight rests on, is estimated
+#'     from little.
+#'   \item The 2 percent by which the cells have to beat one mean for the
+#'     whole layer, in leave-one-out error, for a response to be called
+#'     \code{structured} by \code{summarize_by_cell(estimate = "pooled")}:
+#'     a convention, and the default of \code{tol} in
+#'     \code{select_resolution()}, which sets the same margin there.
+#'   \item The two work limits,
+#'     \code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs for a search
+#'     made without the \pkg{FNN} package and
+#'     \code{getOption("spatialkit.fit_work_max", 1e10)} point-to-centre
+#'     comparisons for the fits of a ladder that \code{obs_per_cell} sets:
+#'     conventions that keep a search or a fit whose cost grows with the
+#'     square of the rows or of the cells from starting.  Above one,
+#'     \code{resolution_profile()} and \code{cell_values_at()} stop with an
+#'     error, and \code{summarize_by_cell()} returns \code{NA} pooled columns
+#'     with a warning.
 #' }
 #'
 #' @section Where to start:

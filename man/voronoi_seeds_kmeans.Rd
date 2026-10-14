@@ -55,7 +55,10 @@ ones. \code{"density"}: the same sum with each point weighted by its local
 density to the power \code{density_power}; compact cells that, at the
 default power, hold about the same number of points each once \code{k} is
 above the number of dense places, and counts about as uneven as
-\code{"kmeans"} gives below that. See "Details".}
+\code{"kmeans"} gives below that. Without the 'FNN' package the density kind
+finds its weights by comparing every pair of distinct locations, so its
+time grows with the square of their number; the seeds are the same, and
+nothing stops the call. See "Details".}
 
 \item{init}{How each start is drawn: \code{"random"} (\code{k} distinct locations
 at random, as \code{\link[stats:kmeans]{stats::kmeans()}} draws them) or \code{"kmeans++"} (the seeds

@@ -119,7 +119,10 @@
 #'   number of dense places (clusters) in the cloud; below that the counts
 #'   are about as uneven as under `"kmeans"`. It follows the
 #'   density of `sample_points`; a cloud this function draws inside
-#'   `boundary` is uniform and has none to follow. See "The partition" in
+#'   `boundary` is uniform and has none to follow. Without the 'FNN' package
+#'   the density kind finds its weights by comparing every pair of distinct
+#'   locations, so its time grows with the square of their number; the seeds
+#'   are the same, and nothing stops the call. See "The partition" in
 #'   [resolution_profile()] for what each kind does and how.
 #' @param init For `method = "kmeans"`: how each start is drawn, `"random"`
 #'   (`n` distinct locations at random, as [stats::kmeans()] draws them) or
@@ -667,7 +670,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   density to the power `density_power`; compact cells that, at the
 #'   default power, hold about the same number of points each once `k` is
 #'   above the number of dense places, and counts about as uneven as
-#'   `"kmeans"` gives below that. See "Details".
+#'   `"kmeans"` gives below that. Without the 'FNN' package the density kind
+#'   finds its weights by comparing every pair of distinct locations, so its
+#'   time grows with the square of their number; the seeds are the same, and
+#'   nothing stops the call. See "Details".
 #' @param init How each start is drawn: `"random"` (`k` distinct locations
 #'   at random, as [stats::kmeans()] draws them) or `"kmeans++"` (the seeds
 #'   one at a time, each in proportion to its squared distance from those
