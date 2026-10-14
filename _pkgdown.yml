@@ -95,11 +95,13 @@ reference:
 - title: Assign and aggregate
   desc: >
     One row per cell, with a count and a standard error for every aggregate,
-    the record of which rows were dropped or tied on the way, and whether a
-    block-kriging estimate would have beaten the plain cell mean.
+    the record of which rows were dropped or tied on the way, the value of a
+    cell at other locations, and whether a block-kriging estimate would have
+    beaten the plain cell mean.
   contents:
   - assign_features_to_polygons
   - summarize_by_cell
+  - cell_values_at
   - kriging_adequacy
   - "[.spatialkit_rows"
 
