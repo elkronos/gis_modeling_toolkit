@@ -276,6 +276,12 @@
 }
 
 
+# The most observations the dense fallback of .build_knn_weights() takes: it
+# holds an n x n matrix.  resolution_profile() reads the same number to know
+# at which levels Moran's z cannot be computed without FNN and Matrix.
+.KNN_DENSE_MAX <- 5000L
+
+
 #' Build a row-standardised k-nearest-neighbour sparse weight matrix
 #'
 #' For each observation the \code{k} closest \emph{other} observations receive
@@ -328,7 +334,7 @@
   # entered whenever either is missing and always allocates W <- matrix(0,n,n),
   # so keying it on FNN alone let an unbounded n x n allocation through whenever
   # FNN was present but Matrix was not (or use_matrix = FALSE).
-  if (!(has_fnn && has_matrix) && n > 5000L)
+  if (!(has_fnn && has_matrix) && n > .KNN_DENSE_MAX)
     stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
 
   # The sparse path is bounded too.  k >= n - 1 is a complete graph -- n(n-1)

@@ -1006,3 +1006,22 @@
                 if (ci)  sprintf("t, deff = %s", deff_label)),
     stringsAsFactors = FALSE)
 }
+
+
+# -----------------------------------------------------------------------------
+# Moran's z of the cell means above the dense limit
+# -----------------------------------------------------------------------------
+
+#' Whether Moran's z is left out, on every ladder, where it cannot be computed
+#'
+#' Above \code{.KNN_DENSE_MAX} cells the neighbour weights of the cell means
+#' need \pkg{FNN} and \pkg{Matrix}.  A profile whose ladder is set by
+#' \code{obs_per_cell} leaves \code{moran_i} and \code{moran_z} \code{NA}
+#' at such a level when either is missing, with a warning.  Every other
+#' ladder stops there with the error of \code{.build_knn_weights()}, as it
+#' always has, while this returns \code{FALSE}.
+#'
+#' @return \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.moran_skip_any_ladder <- function() FALSE

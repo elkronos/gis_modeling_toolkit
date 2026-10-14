@@ -257,7 +257,14 @@ test_that("determine_optimal_levels() takes no partition argument and keeps plai
 
 test_that("the argument order of the three functions is unchanged ahead of the new ones", {
   new_args <- c("partition", "init", "density_power", "density_k")
-  expect_identical(utils::tail(names(formals(resolution_profile)), 5L), c(new_args, "iter_max"))
+  # The five partition arguments of resolution_profile(), found by name: they
+  # stand together in this order, straight after the arguments the function
+  # had before them, and `estimate` and `obs_per_cell` follow `iter_max`.
+  prof_args <- names(formals(resolution_profile))
+  at <- match(c(new_args, "iter_max"), prof_args)
+  expect_identical(at, at[1L] + 0:4)
+  expect_identical(prof_args[at[1L] - 1L], "range_floor")
+  expect_identical(prof_args[at[5L] + 1:2], c("estimate", "obs_per_cell"))
   expect_identical(utils::tail(names(formals(get_voronoi_seeds)), 4L), new_args)
   expect_identical(utils::tail(names(formals(voronoi_seeds_kmeans)), 5L),
                    c(new_args, "iter_max"))

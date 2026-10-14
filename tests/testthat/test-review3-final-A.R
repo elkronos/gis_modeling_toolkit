@@ -220,7 +220,7 @@ test_that("resolution_profile() refuses a units `sac` and a character one by nam
   # cells, with nothing said.
   expect_error(resolution_profile(pts, "z", sac = units::set_units(1.5, "km"),
                                   n_levels = 4),
-               "`sac` must be an estimate_sac_range\\(\\) result.*got 1\\.5 \\[km\\]")
+               "`sac` must be NULL, \"auto\", an estimate_sac_range\\(\\) result.*got 1\\.5 \\[km\\]")
   expect_error(resolution_profile(pts, "z", sac = "300", n_levels = 4),
                "got an object of class character")
 })
