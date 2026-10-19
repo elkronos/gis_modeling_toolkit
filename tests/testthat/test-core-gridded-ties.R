@@ -257,9 +257,12 @@ test_that("the same lattices in two units and two CRSs are placed as the profile
 
 test_that("a lattice in degrees wider than a UTM zone is drawn and placed in the profile's equal-area CRS", {
   # 25 x 11 locations 2.4 degrees apart over the conterminous United States:
-  # the profile measures them in Lambert azimuthal equal-area, the seeds
-  # come back in degrees, and put back in that CRS they lie farther from the
-  # centres than the margin of an edge (about five times as far).
+  # the profile measures them in Lambert azimuthal equal-area and the seeds
+  # come back in degrees. Put back in that CRS they lie off the centres by
+  # what the round trip through degrees leaves, which depends on the PROJ
+  # build: about five times the margin of an edge on macOS, far less on
+  # Windows. Seeds moved by five times the margin are matched as well, so
+  # that case is tested on every platform.
   g <- expand.grid(i = 0:24, j = 0:10)
   z <- local({ .gt_seed(9001); sin(g$i / 6) + cos(g$j / 5) + stats::rnorm(nrow(g), 0, 0.4) })
   pts <- sf::st_as_sf(data.frame(x = -124 + 2.4 * g$i, y = 25 + 2.4 * g$j, z = z,
@@ -280,8 +283,13 @@ test_that("a lattice in degrees wider than a UTM zone is drawn and placed in the
     own <- build_tessellation(at_centres, method = "voronoi", quiet = TRUE)
     expect_identical(sf::st_geometry(P$tess$cells), sf::st_geometry(own$cells), info = kind)
     seed_xy <- unname(sf::st_coordinates(sf::st_transform(P$seeds, rec$crs))[, 1:2])
-    expect_gt(max(abs(seed_xy - cen)), .edge_tol(c(range(cen[, 1L]), range(cen[, 2L]))))
     expect_identical(.values_at_centres(attr(P$out, "count_rule"), seed_xy, rec$crs)$seed,
+                     seq_len(nrow(cen)), info = kind)
+    tol <- .edge_tol(c(range(cen[, 1L]), range(cen[, 2L])))
+    off <- cbind(rep(c(1, -1), length.out = nrow(cen)), rep(c(-1, 1), length.out = nrow(cen)))
+    moved <- cen + 5 * tol * off
+    expect_gt(max(abs(moved - cen)), tol)
+    expect_identical(.values_at_centres(attr(P$out, "count_rule"), moved, rec$crs)$seed,
                      seq_len(nrow(cen)), info = kind)
     .gt_expect_scored(P, pts, kind)
     .gt_expect_midpoints(P, kind)
