@@ -93,8 +93,9 @@ every fold is one contiguous region and the score depends heavily on
 which region each fold happened to get; with many, the blocks shrink
 towards single points and the scheme drifts back towards random k-fold.
 3 is a compromise between those two, not a published constant.  The
-block size that matters for leakage is the autocorrelation range, which
-is what \code{block_size} and \code{auto_range} control.}
+size of the blocks sets how far the held-out points sit from their
+training data; \code{block_size} and \code{auto_range} set it from a
+distance, where this sets it from a count.}
 
 \item{block_size}{Optional positive numeric minimum block edge length,
 \strong{in the units of the CRS the folds are built in}.  Takes
@@ -167,7 +168,8 @@ Default 1.0.}
 \code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a
 column of \code{points_sf} is an error, whether or not
 \code{auto_range} is set: with it off the response still feeds the
-leakage warning, which a misspelt name would silently disable.}
+warning on blocks smaller than the range, which a misspelt name would
+silently disable.}
 
 \item{group_var}{Character(1) naming a column of \code{points_sf} that
 identifies the location each observation belongs to.  Required for
@@ -209,8 +211,10 @@ warned about.}
 \item{min_train}{For \code{method = "nndm"}: the smallest fraction of the
 data any fold's training set may be reduced to by neighbour exclusion.
 Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
-distance matching stops short and the cross-validation stays optimistic;
-see \strong{Details}.  For \code{method = "knndm"}: the smallest fraction
+distance matching stops short: the held-out points stay closer to their
+training data than the prediction points are, and the error reads low
+for them; see \strong{Details}.  For \code{method = "knndm"}: the
+smallest fraction
 of the data a fold may leave for training, so a candidate whose largest
 fold holds more than \code{1 - min_train} of the rows is set aside (the
 \code{maxp = 0.5} of \code{CAST::knndm()} is \code{min_train = 0.5}).
@@ -377,25 +381,43 @@ leave-location-out, buffered leave-one-out, nearest-neighbour distance
 matching (NNDM) leave-one-out or its k-fold version (kNNDM).
 }
 \details{
+A cross-validated error is the error at the distances the folds put
+between the held-out points and their training data.  It reads low for
+predictions made farther from the data than the held-out points sit, and
+high for predictions made closer, so which folds to use depends on where
+the model will predict.  \code{\link{fold_separation}()} with
+\code{prediction_points} compares the two distances, and
+\code{method = "nndm"} and \code{"knndm"} build folds matched to them.
+
 For \code{block_kfold}, the default grid sizing is purely geometric and
-unrelated to the autocorrelation range of the data.  When blocks are
-smaller than the autocorrelation range, spatially correlated observations
-leak across folds and CV metrics become optimistic.  Use
-\code{block_size} to set a minimum block edge length (in CRS units), or
-set \code{auto_range = TRUE} to estimate the range from an empirical
-variogram and enforce it automatically.  When a response is given and the
-blocks come out smaller than the estimated range, the warning says what
-range-sized blocks would yield on this layout before recommending them:
+unrelated to the autocorrelation range of the data.  The wider the blocks,
+the farther the held-out points sit from their training data.  When blocks
+are smaller than the autocorrelation range, held-out points have training
+data within the range, and the score is the error of predicting that close
+to the data: it reads low for predictions made farther from the data, and
+is the error of a map whose locations sit as close.  Use
+\code{block_size} to set a minimum
+block edge length (in CRS units), or set \code{auto_range = TRUE} to
+estimate the range from an empirical variogram and use it as that minimum.
+When a response is given and the blocks come out smaller than the
+estimated range, the warning says so and what range-sized blocks would
+yield on this layout:
 the setting and the grid it builds when that gives \code{k} folds, and
 otherwise how many folds it gives (or that it leaves a single block), the
 largest block size that still gives \code{k} folds, and
 \code{method = "nndm"} as the design that needs no block size.
 
 \strong{Fold methods.}
-\code{"random_kfold"} ignores geography entirely and will overstate
-performance on autocorrelated data.  \code{"block_kfold"} separates folds
-geographically.  \code{"buffered_loo"} holds out one point at a time and
-excludes everything within a fixed \code{buffer}.
+\code{"random_kfold"} ignores geography: a held-out point keeps most of
+its neighbours in the training data, so the score is the error of
+predicting among the samples.  That is the error of a map over an area the
+samples cover evenly, and it reads low for predictions made farther from
+the data, such as a map of a whole region from clustered samples.
+\code{"block_kfold"} holds out whole blocks, so the held-out points sit
+farther from their training data the wider the blocks are, and the score
+is the error of predicting into unsampled gaps of that size; for a map of
+an area the samples cover, it reads high.  \code{"buffered_loo"} holds out
+one point at a time and excludes everything within a fixed \code{buffer}.
 
 \code{"leave_location_out"} groups by \code{group_var}, so all
 observations from a location share a fold.
@@ -427,7 +449,8 @@ neighbour is removed whenever the realised distribution exceeds the target,
 whereas CAST removes one only while the realised distribution, less the
 point about to move, is still at or above the target.  The rule here
 therefore removes up to one point more per distance value (a few percent
-more removals in all on clustered layouts), erring on the pessimistic side.
+more removals in all on clustered layouts), erring towards held-out
+distances longer than the target.
 And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
 their row index as in CAST, so the folds do not depend on the order of the
 rows.
@@ -440,9 +463,10 @@ statement about the distance to the one nearest training point.  A learner
 that draws on several neighbours (a forest, a k-nearest-neighbour mean, a
 kriging neighbourhood) also depends on how far the second and later
 neighbours are, which NNDM does not match, so on clustered samples its
-cross-validated error can still read low with the nearest-neighbour
-distances matched exactly.  Beyond \code{phi} no matching is attempted, by
-design.  \code{min_train} is different: when the prediction locations lie
+cross-validated error can still read low for the prediction points with
+the nearest-neighbour distances matched exactly.  Beyond \code{phi} no
+matching is attempted, by design.  \code{min_train} is different: when the
+prediction locations lie
 further from the samples than a fold can be made to hold out (clustered
 samples and a prediction domain well beyond them, the layout NNDM is meant
 for), it stops the matching early and the realised distances stay
@@ -584,7 +608,7 @@ target distance by more than a quarter of it and by at least half of
 \code{"closer"}), \code{make_folds()} raises a warning of class
 \code{"spatialkit_knndm_short_of_target"} and sets
 \code{params$short_of_target}: the cross-validated error then tends to
-read low for those locations.  Fewer folds hold out larger regions.
+read low for the prediction points.  Fewer folds hold out larger regions.
 Short of either warning the folds can still differ from the target at
 some distances; \code{params$max_ecdf_excess} and
 \code{params$max_ecdf_deficit} give the largest difference each way, and
@@ -624,7 +648,8 @@ lowered to the number of blocks that hold points when that is smaller.
 \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
 median over blocks that hold points of the side of the square with the
 block's area.  That is the length compared against the autocorrelation range
-for the leakage warning, since a polygon has no single edge length.
+for the warning on blocks smaller than the range, since a polygon has no
+single edge length.
 
 The connection to the rest of the package is
 \code{\link{build_tessellation}()}: every shape it builds can be a block

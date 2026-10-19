@@ -1,20 +1,26 @@
 # =============================================================================
-# Cross-validation error against block size: the inflation of a random-CV
-# number as something you see rather than something you argue.
+# Cross-validation error against block size: the error at each distance the
+# blocks put between the held-out points and their training data, as a curve.
 # =============================================================================
 
 #' Cross-validate at a ladder of block sizes
 #'
-#' A blocked cross-validation with blocks smaller than the autocorrelation
-#' range leaks: every held-out point has a near-identical neighbour in the
-#' training set, and the score is optimistic in proportion.  The single
-#' number a \code{cv_*()} call returns cannot show this.  This runs the same
+#' A cross-validated error is the error at the distance the folds put
+#' between the held-out points and their training data, and the wider the
+#' blocks, the farther that is.  The single number a \code{cv_*()} call
+#' returns is the error at one such distance.  This runs the same
 #' cross-validation at a ladder of block sizes, and by default once with
-#' random folds as the fully leaky reference.  It returns the metric at each,
-#' with the estimated autocorrelation range alongside so that the curve can be
-#' read against it: it rises as the blocks pass the range and then plateaus,
-#' and the height of the rise is how much the random-fold number overstated
-#' the model.
+#' random folds as the reference, whose held-out points keep most of their
+#' neighbours in the training data.  It returns the metric at each, with the
+#' estimated autocorrelation range alongside.  The rise of the curve with
+#' block size measures the error at that distance from the data: how much
+#' worse the model predicts a location the farther it lies from the
+#' observations.  It is the error of a map only at locations that far from
+#' the data, so the curve does not by itself say which size to report.  The
+#' size to read is the one whose held-out distances match those of the
+#' locations the model will predict at: \code{\link{fold_separation}()} with
+#' \code{prediction_points} reads the folds of each size (the \code{$folds}
+#' of each element of \code{attr(x, "results")}) against them.
 #'
 #' @section The fit budget:
 #' Each block size is a full cross-validation, so the cost is
@@ -82,8 +88,10 @@
 #' @param k Folds per cross-validation.  Default 5.
 #' @param metric Which column of \code{overall} to read.  Default
 #'   \code{"RMSE"}.
-#' @param include_random Also cross-validate with random folds, as the leaky
-#'   reference.  Default \code{TRUE}.
+#' @param include_random Also cross-validate with random folds, as the
+#'   reference: the error of predicting among the samples, where each
+#'   held-out point keeps most of its neighbours in the training data.
+#'   Default \code{TRUE}.
 #' @param max_fits The fit budget; see above.  Default 60.
 #' @param sac Optional \code{sac_range} from \code{\link{estimate_sac_range}()}
 #'   to mark on the curve, or a single number in the units of the CRS the
@@ -390,7 +398,7 @@ cv_block_size_sweep <- function(data_sf, response_var, predictor_vars, fit_fn,
   rows <- list(); results <- list()
   .gwr_tally_predict_warnings({
     if (isTRUE(include_random)) {
-      .msg("cv_block_size_sweep(): random folds (the leaky reference) ...")
+      .msg("cv_block_size_sweep(): random folds (the reference) ...")
       one <- suppressMessages(run_one(NA_real_, "random_kfold"))
       results[["random_kfold"]] <- one$cv
       rows[[length(rows) + 1L]] <- one$row
@@ -567,9 +575,11 @@ print.block_size_sweep <- function(x, ...) {
 #' The curve from \code{\link{cv_block_size_sweep}()}: the pooled metric at
 #' each block size, the fold-to-fold range as a band, the random-fold
 #' reference as a dashed line, and the estimated autocorrelation range as a
-#' vertical marker.  Blocks smaller than the range leak, so the curve rises
-#' from the reference towards the range and plateaus beyond it; the height
-#' of the rise is what the random-fold number overstated.  The caption says
+#' vertical marker.  The curve rises as the blocks widen because the
+#' held-out points sit farther from their training data: its height at a
+#' size is the error at that distance from the data, and the error of a map
+#' only where the locations it predicts at sit that far from the
+#' observations.  The caption says
 #' which way is better: higher for \code{R2} and \code{Adj_R2}, closer to
 #' the nominal level for a \code{coverage_*} column (0.975 for
 #' \code{coverage_97.5}), since over-coverage is miscalibration too, and
@@ -597,10 +607,9 @@ print.block_size_sweep <- function(x, ...) {
 #'                  seed = 1)
 #'   sw <- cv_block_size_sweep(dat, "z", "a", fit_fn = rf_fn, k = 4, n_sizes = 4,
 #'                             quiet = TRUE)
-#'   # Error rises from the random-fold reference (dashed) as the blocks grow
-#'   # towards the estimated autocorrelation range (vertical marker).  The
-#'   # height of that rise is what random folds were hiding; with four sizes the
-#'   # ladder stops near the range, so the plateau beyond it is not drawn here.
+#'   # Error rises from the random-fold reference (dashed) as the blocks grow,
+#'   # since the held-out points sit farther from their training data.  The
+#'   # vertical marker is the estimated autocorrelation range.
 #'   plot(sw)
 #' }
 #' @export
@@ -629,10 +638,10 @@ plot.block_size_sweep <- function(x, ...) {
     ggplot2::labs(
       title = sprintf("Cross-validated %s against block size", metric),
       subtitle = if (is.finite(r))
-        sprintf("Estimated autocorrelation range %.0f (dotted); blocks below it leak", r)
+        sprintf("Estimated autocorrelation range %.0f (dotted)", r)
       else "Autocorrelation range not identified; no marker drawn",
       caption = paste(c(
-        if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g (the leaky reference)", metric, rnd$value[1L]),
+        if (nrow(rnd)) sprintf("Dashed: random folds, %s = %.3g", metric, rnd$value[1L]),
         sprintf("Band: fold-to-fold range; %d folds per size, %d fits in total; %s",
                 attr(x, "k"), attr(x, "n_fits"), .sweep_better(metric))),
         collapse = "\n"),

@@ -330,10 +330,12 @@ in one dimension.  There is no start value, no iteration limit and no
 fit that fails to converge.
 
 Only the exponential family is fitted.  On fields smoother than
-exponential that makes the range long, which is the safe side (blocks too
-large, cross-validation pessimistic).  Choosing the family by the smaller
-weighted sum of squares would correct a spherical field but send
-exponential fields low, the direction that leaks.
+exponential that makes the range long, and blocks sized from it come out
+larger: they still hold the test points at least the field's range from
+their training data, which blocks sized from a short range do not.
+Choosing the family by the smaller weighted sum of squares would correct
+a spherical field but send exponential fields short, and blocks sized
+from them smaller than the range.
 
 \strong{Spatial structure is tested first.}  A variogram model can be
 fitted to anything, and on a layer with no structure the fit returns a
@@ -405,10 +407,10 @@ is the long one, unless the long structure carries under 3 percent of
 the model's semivariance at the largest lag: then the lags that resolve
 the layer give the equal-lag range nothing, and the single structure
 stands.  The bar is low because the two mistakes are not alike.  A long
-structure that is missed sizes blocks too small, which leaks.  One that
-is believed in error returns the equal-lag range, which is too long and
-makes a validation pessimistic, and \code{short_range} still holds the
-short one.  When the equal-lag range is one that \code{lags = "equal"}
+structure that is missed is lost: the range returned is the short one
+alone.  One that is believed in error returns the equal-lag range, which
+is too long, and \code{short_range} still holds the short one.  When the
+equal-lag range is one that \code{lags = "equal"}
 would itself refuse (past the fitted lags, as under an unremoved trend),
 the model with it is refused as well, the answer is taken away and not
 lengthened, and the long structure has to carry 10 percent.
@@ -439,10 +441,10 @@ The all-pairs fit is the best-powered estimate available and is invariant
 to rotation.  When it identifies no range, no range is returned: the
 largest directional range does not stand in for it.
 
-Where a field is \emph{known} to be anisotropic, blocks must be at least
-as large as the longest autocorrelation range to avoid leakage, and the
-conservative choice is to size them from the longest directional range
-explicitly.  Read it from \code{directional_fitted}, not
+Where a field is \emph{known} to be anisotropic and blocks are to be at
+least as large as its autocorrelation range in every direction, size them
+from the longest directional range explicitly.  Read it from
+\code{directional_fitted}, not
 \code{directional}: on a strongly anisotropic field the major axis is the
 direction most likely to run past the fitted lags, which leaves it
 \code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
@@ -476,8 +478,9 @@ blocks are at least as wide as the autocorrelation range.
 Fitting a variogram to the residuals of a least-squares trend
 underestimates both the sill and the range, because the trend fit absorbs
 part of the long-wavelength spatial variation (Lark, Cullis and Welham
-2006).  Blocks sized from that range are then too small and a blocked
-validation is less conservative than it claims.  How large the effect is
+2006).  Blocks sized from that range are then narrower than the field's
+range, and hold the test points less far from their training data than
+range-sized blocks are meant to.  How large the effect is
 depends on how smooth the trend terms are in space, and on how many there
 are: for ordinary covariates it is a few percent, and for trend surfaces
 in the coordinates it is large.  Iterating between a GLS trend
@@ -489,7 +492,8 @@ a single family (exponential with nugget), a cubic cost in \code{n}, and
 a somewhat wider sampling spread.  The default stays \code{"ols"} so that
 existing scripts keep their method; a script that detrends on smooth
 or coordinate-based terms should pass \code{detrend = "reml"}, or size its
-blocks with a margin.  Detrending removes a trend the predictors explain.
+blocks with a margin above the range returned, to make up the shortfall.
+Detrending removes a trend the predictors explain.
 It does not make an unidentified range identified.
 }
 
@@ -512,7 +516,7 @@ structure: the residuals of an OLS fit to a count still have a variance
 that tracks the fitted mean.  The principled remedy is a variogram of
 Pearson residuals from a model in the right family, which this function
 does not compute.  Treat the range from a count response as no
-more than an order of magnitude, size blocks conservatively from it, and
+more than an order of magnitude, since it can come out long or short, and
 prefer \code{\link{make_folds}(method = "nndm")}, which does not depend on a
 fitted range at all.
 }

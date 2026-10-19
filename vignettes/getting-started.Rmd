@@ -310,16 +310,17 @@ the model should see; the reporting vignette does exactly that. Either way
 the folds come from the points' locations, and the cells can serve as the
 blocks that define them (`make_folds(blocks = tess$cells)`).
 
-### A model, scored honestly
+### A model, scored on held-out regions
 
 ```{r folds}
 # 5. Build folds that hold out whole regions.  block_size is a distance in
-#    the CRS's units, here metres.  Blocks have to be at least as wide as the
-#    autocorrelation range for the folds to be honest; on these data no range
-#    could be identified for what the predictor leaves unexplained, so 100 km
-#    is set by hand.  vignette("spatial-cross-validation") is about that
-#    choice, and make_folds(auto_range = TRUE) makes it from the data when
-#    gstat is installed.
+#    the CRS's units, here metres.  The wider the blocks, the farther the
+#    held-out points sit from their training data, and the score is the
+#    error at that distance; on these data no range could be identified for
+#    what the predictor leaves unexplained, so 100 km is set by hand.
+#    vignette("spatial-cross-validation") is about that choice, and
+#    make_folds(auto_range = TRUE) makes it from the data when gstat is
+#    installed.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -358,8 +359,8 @@ if (ratio > 1.15) {
     "folds' RMSE runs from %.2f to %.2f and the blocked folds' from %.2f to",
     "%.2f, and each pooled value sits inside the other scheme's range. On a",
     "hundred observations that is all a fold scheme can say, and it is the",
-    "reason to read the per-fold range before the pooled number. The gap that",
-    "blocked folds exist to expose opens when a model can borrow from its",
+    "reason to read the per-fold range before the pooled number. The gap",
+    "between the schemes opens when a model can borrow from its",
     "neighbours, through the coordinates or a spatially smooth predictor; the",
     "README's quick start shows one of about 1.6 on a larger simulated field.\n"),
     rr[1], rr[2], rb[1], rb[2]))

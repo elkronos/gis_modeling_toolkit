@@ -1,5 +1,5 @@
 # =============================================================================
-# 03  Fold schemes: why random k-fold flatters a spatial model
+# 03  Fold schemes: what each one's score estimates
 # =============================================================================
 #   source(system.file("scripts", "03-folds.R", package = "spatialkit"))
 # =============================================================================
@@ -20,22 +20,37 @@ rmse_of <- function(folds, label) {
 step("03.1", "The same model, two fold schemes")
 # The learner here is a cubic trend surface, so it can memorise where things are.
 # Random folds leave a test point's neighbours in the training set, so the
-# memorised surface is still valid there and the score looks good. Block folds
-# hold out whole regions, so it is not.
+# score is the error of predicting among the samples, where the memorised
+# surface holds. Block folds hold out whole regions, so the score is the error
+# of predicting into gaps a block wide, where it does not.
 f_rand  <- make_folds(pts, k = 5, method = "random_kfold", seed = 1)
 f_block <- make_folds(pts, k = 5, method = "block_kfold", seed = 1,
                       boundary = bnd, block_size = 250)
 r1 <- rmse_of(f_rand,  "random_kfold")
 r2 <- rmse_of(f_block, "block_kfold (250 units)")
-cat(sprintf("  ratio %.2fx -- the optimism random folds buy you\n", r2$rmse / r1$rmse))
-cat("  Neither number is the truth. Report the one that matches how the model\n",
-    "  will be used: random for gap-filling inside the sampled area, blocked\n",
-    "  for predicting somewhere new.\n", sep = "")
+cat(sprintf("  ratio %.2fx -- how much worse the model predicts into a gap a block\n",
+            r2$rmse / r1$rmse),
+    "  wide than among the samples\n", sep = "")
+cat("  Neither number is the error of every map. Report the one whose folds\n",
+    "  match where the map will predict: random for filling in among the\n",
+    "  samples, blocked for predicting into gaps a block wide.\n", sep = "")
 
-step("03.2", "Let the data choose the block size")
+# Which one matches a map of the study area? fold_separation() sets the
+# distances from the map's locations to the data beside the held-out distances
+# of each scheme.
+set.seed(3)
+map_pts <- sf::st_sample(bnd, 900, type = "regular")
+reading <- function(f)
+  attr(fold_separation(f, pts, prediction_points = map_pts), "target")$reading
+cat(sprintf("  against a map of the study area: random folds read \"%s\", blocks \"%s\"\n",
+            reading(f_rand), reading(f_block)))
+cat("  \"matched\" is the error of that map; \"farther\" tends to read high for it\n",
+    "  and \"closer\" low.\n", sep = "")
+
+step("03.2", "A block size from the autocorrelation range")
 # `auto_range = TRUE` fits a variogram and uses the estimated range as the
 # minimum block size, so blocks are at least as wide as the autocorrelation
-# they are supposed to break.
+# and the score is the error of a map that has to reach that far from the data.
 f_auto <- make_folds(pts, k = 5, method = "block_kfold", seed = 1,
                      boundary = bnd, auto_range = TRUE, response_var = "z")
 cat(sprintf("  estimated range %.0f -> block_size %.0f, %d blocks over %d folds\n",
@@ -66,8 +81,8 @@ if (!skip_without("ggplot2", "the fold maps")) {
 
 step("03.4", "Two schemes for specific questions")
 # buffered_loo: hold out one point and everything within `buffer` of it. The
-# strictest answer to 'how well do I predict an unsampled location', and it
-# costs one model fit per row.
+# answer to 'how well do I predict a location `buffer` or more from every
+# sample', and it costs one model fit per row.
 f_loo <- make_folds(pts, k = 5, method = "buffered_loo", seed = 1, buffer = 240)
 cat(sprintf("  buffered_loo: %d folds; fold 1 trains on %d of %d rows\n",
             f_loo$k, length(f_loo$folds[[1]]$train), nrow(pts)))

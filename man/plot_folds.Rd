@@ -21,12 +21,13 @@ A \code{ggplot} object.
 }
 \description{
 Shows which fold each observation belongs to.  This is the fastest way to
-see whether spatial blocks are actually separating the data, or whether the
-blocks are smaller than the autocorrelation range and therefore leaking.
+see whether spatial blocks are actually separating the data, and how wide
+they are beside the autocorrelation range.
 For \code{"block_kfold"} folds the block outlines are drawn too, from
 \code{folds$params$blocks}, so a fold can be seen to be one region or
 several and an empty block can be seen to be empty.  The subtitle states
-the parameter that decides whether the scheme leaks, read from
+the parameter that sets how far the held-out points sit from their
+training data, read from
 \code{folds$params}: the block size (and the estimated range when
 \code{auto_range} found one), the buffer, the number of location groups,
 the median NNDM exclusion, or, for kNNDM folds, that they are matched to

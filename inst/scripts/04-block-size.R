@@ -1,5 +1,5 @@
 # =============================================================================
-# 04  Defending a block size instead of guessing one
+# 04  The cross-validated error at each block size
 # =============================================================================
 #   source(system.file("scripts", "04-block-size.R", package = "spatialkit"))
 # =============================================================================
@@ -57,32 +57,50 @@ shape <- function(x, label, tol = 0.03) {
   invisible(blk)
 }
 
-step("04.1", "Sweep the size, do not pick one")
+step("04.1", "Sweep the size")
 # Script 03 used block_size = 250 with no justification. A reviewer is entitled
 # to ask why. The sweep refits at several sizes and shows what the score does,
-# with a random-fold run on the same data as the leaky reference to compare to.
+# with a random-fold run on the same data as the reference: the error of
+# predicting among the samples.
 sw <- cv_block_size_sweep(pts, "z", character(0), fit_fn = idw_fit,
                           n_sizes = 6, k = 5, seed = 1, quiet = TRUE)
 print(sw)
 
 step("04.2", "Reading the shape")
 shape(sw, "interpolator")
-cat("  A climb followed by a flat stretch is the shape to hope for. While the\n",
-    "  blocks are narrower than the autocorrelation, test points still have\n",
-    "  training neighbours nearby and the score is optimistic. Once the blocks\n",
-    "  are wide enough the leak is gone, and widening them further changes\n",
-    "  nothing. Report a size from the flat stretch and say the score held\n",
-    "  across it. That sentence is what the sweep is for.\n", sep = "")
+cat("  The curve is the error at each distance from the data. While the blocks\n",
+    "  are narrower than the autocorrelation, test points still have training\n",
+    "  neighbours nearby, and the score is the error of predicting that close\n",
+    "  to the data. Past the range the neighbours tell the model little, and\n",
+    "  widening the blocks further changes little. The curve does not say which\n",
+    "  size to report: that is the size whose test points sit as far from the\n",
+    "  data as the locations the map will predict at, which 04.3 reads.\n", sep = "")
 
-step("04.3", "The picture for the appendix")
+step("04.3", "Which size matches a map of the area")
+# fold_separation() sets the held-out distances of each size's folds beside the
+# distances from the map's locations to the data. The size to report for that
+# map is the one that reads "matched"; "farther" tends to read high for it and
+# "closer" low.
+set.seed(3)
+map_pts <- sf::st_sample(tour_boundary(pts), 900, type = "regular")
+res <- attr(sw, "results")
+for (nm in names(res)) {
+  r <- attr(fold_separation(res[[nm]]$folds, pts, prediction_points = map_pts),
+            "target")$reading
+  cat(sprintf("  %-14s %s\n",
+              if (nm == "random_kfold") nm else sprintf("%.0f units", as.numeric(nm)), r))
+}
+
+step("04.4", "The picture for the appendix")
 if (!skip_without("ggplot2", "the sweep plot")) {
   look_for("where the curve flattens, and where that is relative to the dotted ",
            "red range line. The dashed grey line is the random-fold score, so ",
-           "the vertical gap up to the flat part is what honest blocking costs.")
+           "the vertical gap up to the curve is how much worse the model ",
+           "predicts at that distance from the data than among the samples.")
   show_plot(plot(sw), "04-sweep-interpolator.png")
 }
 
-step("04.4", "When the curve never flattens")
+step("04.5", "When the curve never flattens")
 # `tour_fit` is a cubic trend surface in x and y. Widening the blocks asks it to
 # extrapolate that surface further and further, so its score keeps climbing and
 # there is no size at which it settles.
@@ -93,12 +111,12 @@ if (!skip_without("ggplot2", "the second sweep plot")) {
   look_for("no flat stretch anywhere: every widening costs more than the last.")
   show_plot(plot(sw2), "04-sweep-trend.png")
 }
-cat("  A curve like that is not a statement about block size. It says the model\n",
-    "  degrades smoothly with distance from its training data, so there is no\n",
-    "  single honest number -- the score depends entirely on how far you intend\n",
-    "  to predict. Script 07 measures that distance directly.\n", sep = "")
+cat("  A curve like that says the model degrades smoothly with distance from\n",
+    "  its training data, so the score depends entirely on how far the map has\n",
+    "  to predict from the data. Script 07 measures that distance directly.\n",
+    sep = "")
 
-step("04.5", "What this costs")
+step("04.6", "What this costs")
 # Every size is a full k-fold CV: n_sizes * k fits, plus k more for the random
 # baseline. `max_fits` (default 60) is the brake. Ask for more than that and the
 # sweep refuses and names the budget it would have needed, so a wide sweep with
@@ -109,7 +127,7 @@ cat(sprintf("  %d fits per sweep (%d sizes at k = %d, metric %s)\n",
 cat("  With a slow learner start at n_sizes = 3, and widen only if the curve\n",
     "  has not flattened by the last size.\n", sep = "")
 
-step("04.6", "The rows to distrust: sizes that leave too few blocks")
+step("04.7", "The rows to distrust: sizes that leave too few blocks")
 # Wide sizes can run fewer folds than you asked for (script 03.5). The `k` and
 # `n_folds_succeeded` columns exist so a row resting on two folds does not sit
 # unlabelled beside a row resting on five.

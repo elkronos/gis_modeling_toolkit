@@ -654,12 +654,13 @@ plot.sac_range <- function(x, ...) {
 #' Map a cross-validation fold scheme
 #'
 #' Shows which fold each observation belongs to.  This is the fastest way to
-#' see whether spatial blocks are actually separating the data, or whether the
-#' blocks are smaller than the autocorrelation range and therefore leaking.
+#' see whether spatial blocks are actually separating the data, and how wide
+#' they are beside the autocorrelation range.
 #' For \code{"block_kfold"} folds the block outlines are drawn too, from
 #' \code{folds$params$blocks}, so a fold can be seen to be one region or
 #' several and an empty block can be seen to be empty.  The subtitle states
-#' the parameter that decides whether the scheme leaks, read from
+#' the parameter that sets how far the held-out points sit from their
+#' training data, read from
 #' \code{folds$params}: the block size (and the estimated range when
 #' \code{auto_range} found one), the buffer, the number of location groups,
 #' the median NNDM exclusion, or, for kNNDM folds, that they are matched to
@@ -792,13 +793,13 @@ plot_folds <- function(folds, points_sf, boundary = NULL, blocks = TRUE) {
       # Two lines: one long one is clipped at the width a help page or a
       # vignette draws these at.
       range <- if (!fin(prm$sac_range))
-        "Blocks smaller than the autocorrelation range leak"
+        "Wider blocks hold points out farther from the data"
       else if (fin(prm$block_size) &&
                isTRUE(all.equal(as.numeric(prm$block_size),
                                 as.numeric(prm$sac_range))))
         "Sized from the estimated autocorrelation range"
       else
-        sprintf("Estimated range %s; blocks below it leak", num(prm$sac_range))
+        sprintf("Estimated autocorrelation range %s", num(prm$sac_range))
       paste(size, range, sep = "\n")
     },
     buffered_loo = if (fin(prm$buffer))

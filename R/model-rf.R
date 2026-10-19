@@ -187,12 +187,16 @@
 #' the coordinates.
 #'
 #' What does not change is how such a forest has to be scored. It fits
-#' location closely, nearby points leak between random folds, and the
-#' out-of-bag error is a random hold-out too, so both overstate its
-#' accuracy. Score it with \code{\link{cv_rf}} and
-#' blocked folds (\code{make_folds(method = "block_kfold")}) or folds
-#' matched to the prediction distance (\code{method = "nndm"}), at the
-#' distances the map will be used at, never with the out-of-bag error, and
+#' location closely, so its error grows quickly with the distance from the
+#' data, and a cross-validated score is the error at the distance its folds
+#' put between the held-out points and their training data. Random folds,
+#' and the out-of-bag error, a random hold-out too, measure it among the
+#' samples: the error of a map over an area the samples cover evenly, which
+#' reads low for predictions made farther from the data. Score it with
+#' \code{\link{cv_rf}} on folds at the distances the map will be used at
+#' (folds matched to the prediction distance, \code{make_folds(method =
+#' "nndm")} or \code{"knndm"}, or blocks, \code{method = "block_kfold"},
+#' for predictions into unsampled gaps), not with the out-of-bag error, and
 #' compare the two forests on the same folds. That comparison is two calls:
 #' build the folds once and hand them to \code{cv_rf()} with and without
 #' the coordinates.
@@ -228,10 +232,13 @@
 #'
 #' @section The out-of-bag error is a random hold-out:
 #' \code{ranger}'s OOB error holds each observation out of the trees that did
-#' not sample it. That is a random hold-out, so under spatial autocorrelation
-#' it is optimistic for exactly the reason random k-fold is: the trees that
-#' "did not see" a point almost certainly saw its neighbours. It is reported
-#' as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and labelled as OOB
+#' not sample it. That is a random hold-out: the trees that "did not see" a
+#' point almost certainly saw its neighbours, so under spatial
+#' autocorrelation it is the error of predicting among the samples, as random
+#' k-fold is, and reads low for predictions made farther from the data than
+#' the samples sit from each other (see \code{\link{make_folds}()}). It is
+#' reported as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and
+#' labelled as OOB
 #' everywhere it appears. Use \code{\link{cv_rf}} for a spatial estimate.
 #'
 #' @section What fitted() returns:
@@ -688,8 +695,8 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'
 #' Thin wrapper over \code{\link{cv_spatial}} that refits a \code{ranger}
 #' forest on each training fold. Unlike the out-of-bag error, this holds out
-#' whole spatial blocks, so neighbours of a held-out point are not sitting in
-#' the training set.
+#' whole spatial blocks by default, so most neighbours of a held-out point are
+#' not in the training set; \code{folds} says what that score estimates.
 #'
 #' @section Comparing the forest with and without coordinates:
 #' Whether \code{include_coords = TRUE} lowers the error depends on how far
@@ -720,7 +727,19 @@ fit_rf_model <- function(data_sf, response_var, predictor_vars,
 #'   returns a label vector as \code{$folds_ids}.  Train and test must be
 #'   disjoint: a fold that trains on its own test rows is not a
 #'   cross-validation split and is refused with an error.  IDs naming no row in
-#'   the prepared data are dropped with a logged count.
+#'   the prepared data are dropped with a logged count.  Built via
+#'   \code{block_kfold} when \code{NULL}, as in \code{\link{cv_spatial}()}.
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param k Number of folds when \code{folds} is \code{NULL}. Default 5.
 #' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
 #'   through a per-fold draw, each fold's forest, so two different seeds give
@@ -998,8 +1017,9 @@ fitted.rf_fit <- function(object, ...) {
 #' unlike \code{residuals.gwr_fit()} and \code{residuals.bayesian_fit()},
 #' which are in-sample.  Feed them to \code{\link{residual_morans_i}()} to test
 #' whether spatial structure the forest failed to capture is still sitting in
-#' the residuals.  Out-of-bag is not a substitute for spatial CV: use
-#' \code{\link{cv_rf}()} for an honest map-accuracy figure.
+#' the residuals.  Out-of-bag is a random hold-out, not a substitute for
+#' spatial CV: use \code{\link{cv_rf}()} on folds at the distances the map
+#' will be used at for its accuracy.
 #'
 #' @param object An \code{rf_fit}.
 #' @param ... Ignored.
@@ -1038,9 +1058,10 @@ coef.rf_fit <- function(object, ...) {
 #' coordinates were used as predictors.  That line is the one to check.  A
 #' forest fitted without them prints "no spatial information used": it sees
 #' the covariates alone.  One fitted with \code{include_coords = TRUE} fits
-#' location closely, so its out-of-bag error overstates its accuracy and it
-#' has to be scored with blocked or distance-matched folds; see
-#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}.  When a
+#' location closely, so its out-of-bag error, a random hold-out, is its error
+#' among the samples and reads low for predictions made farther from the
+#' data; score it on folds at the distances the map will be used at (see
+#' \emph{Coordinates as predictors} in \code{\link{fit_rf_model}}).  When a
 #' predictor is an unordered factor or a character column, a line says how
 #' ranger was told to split it.
 #'

@@ -323,23 +323,36 @@ report$range <- sprintf("estimated range %s m against blocks of %s m",
 cat(paste0("- ", names(report), ": ", unlist(report)), sep = "\n")
 ```
 
-Read together, those lines say the run failed its own checks, which is what a
-report is for.
+Read together, those lines say the run failed two of its own checks, the score
+and the residuals, which is what a report is for.
 
 ```{r block-vs-range, echo=FALSE, results='asis', eval=has_gstat}
+# Which way the score errs for this map: the held-out distances of the folds
+# against the distances from the surface's cells to the same training data.
+reading <- attr(fold_separation(folds, pts, sac = sac, prediction_points = surface),
+                "target")$reading
+says <- c(
+  matched = "the held-out points sit about as far from their training data as the cells do, so the score is the error of this map.",
+  closer  = "the held-out points sit closer to their training data than the cells do, so the score tends to read low for this map; wider blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
+  farther = "the held-out points sit farther from their training data than the cells do, so the score tends to read high for this map; narrower blocks, or `make_folds(method = \"knndm\", prediction_points = surface)`, match it.",
+  mixed   = "the two sets of distances cross, so they give no single direction.")
 cat(sprintf(paste0(
-  "The blocks are %s m across and the correlation reaches about %s m, so ",
-  "training and test data sit inside one correlation length of each other. ",
-  "The score is still optimistic, and the fix is blocks at least as wide as ",
-  "the range, or `auto_range = TRUE` to size them from it.\n"),
-  m(folds$params$block_size), m(sac)))
+  "The range line is not a third. The blocks are %s m across and the ",
+  "correlation reaches about %s m, so ",
+  "training and test data sit inside one correlation length of each other, ",
+  "and the score is the error of predicting that close to the data. Whether ",
+  "that is the error of the map depends on where the map predicts. Against ",
+  "the cells of the surface above, `fold_separation()` reads `%s`: %s\n"),
+  m(folds$params$block_size), m(sac), reading, says[[reading]]))
 ```
 
 ```{r block-vs-range-nogstat, echo=FALSE, results='asis', eval=!has_gstat}
-cat("The block size has to be read against the estimated autocorrelation",
-    "range, which needs gstat. Blocks narrower than the range leave training",
-    "and test data inside one correlation length of each other, and the score",
-    "stays optimistic.\n")
+cat("The block size is read against the estimated autocorrelation range,",
+    "which needs gstat. Blocks narrower than the range leave training and test",
+    "data inside one correlation length of each other, and the score is the",
+    "error of predicting that close to the data: the error of a map only where",
+    "its locations sit as close. `fold_separation()` with the map's cells as",
+    "`prediction_points` says which way the score errs for that map.\n")
 ```
 
 The cross-validated R2 of `r sprintf("%.3f", cv$overall$R2)` is below zero,
@@ -361,7 +374,7 @@ is not.
 cat(
 "| Report | From | Because |\n",
 "|---|---|---|\n",
-"| The fold scheme, the block size and the estimated range, in named CRS units | `folds$params` | A cross-validation score means nothing without the geometry that produced it: blocks below the range leak, and the score comes back flattering (Roberts et al. 2017) |\n",
+"| The fold scheme, the block size and the estimated range, in named CRS units, and how the folds compare with the map | `folds$params`, `fold_separation()` | A cross-validation score means nothing without the geometry that produced it: it is the error at the distance the folds put between the held-out points and their training data, which reads low for a map that predicts farther from the data and high for one that predicts closer (Milà et al. 2022) |\n",
 "| The metric **with its per-fold spread**, not the pooled value alone | `cv$fold_metrics`, `plot_cv_metrics()` | 0.9 in four folds and 14 in one is a model that fails in one region, and the pooled number cannot tell that from uniform mediocrity |\n",
 "| Residual Moran's I with its null | `residual_morans_i()` | It is the check on whether the spatial structure the model was built for actually got modelled |\n",
 "| The share of the prediction area outside the area of applicability | `area_of_applicability()` | A fitted model returns a number everywhere, including ground nothing like its training data, and the CV score does not apply there (Meyer and Pebesma 2021) |\n",
@@ -547,10 +560,10 @@ the area of applicability of spatial prediction models. *Methods in Ecology
 and Evolution* 12(9), 1620-1633.
 <https://doi.org/10.1111/2041-210X.13650>
 
-Roberts, D. R., Bahn, V., Ciuti, S., et al. (2017). Cross-validation
-strategies for data with temporal, spatial, hierarchical, or phylogenetic
-structure. *Ecography* 40(8), 913-929.
-<https://doi.org/10.1111/ecog.02881>
+Milà, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
+distance matching Leave-One-Out Cross-Validation for map validation. *Methods
+in Ecology and Evolution* 13, 1304-1316.
+<https://doi.org/10.1111/2041-210X.13851>
 
 ```{r session, echo=FALSE}
 sessionInfo()

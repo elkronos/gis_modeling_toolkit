@@ -1,7 +1,7 @@
 ---
 title: "Diagnostics"
 description: >
-  Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, two ways a score can leak, and the warnings about pooled cell values.
+  Residual autocorrelation, aggregation standard errors, kriging adequacy, the area of applicability, coordinates as predictors and selection inside the folds, and the warnings about pooled cell values.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -273,14 +273,15 @@ inside <- !is.na(aoa$aoa$AOA) & aoa$aoa$AOA
 c(inside = sum(inside), outside_or_unknown = sum(!inside))
 ```
 
-## 5. Two ways to leak
+## 5. Coordinates as predictors, and selection inside the folds
 
 **Coordinates as predictors.** A model given `x` and `y` can reproduce the
-training surface by memorising location, and random folds will not detect it.
+training surface by memorising location, so its error grows quickly with the
+distance from the data, and random folds score it among the samples.
 `fit_rf_model(include_coords = TRUE)` logs a caution (once per session) for
-this reason. Score any such model with blocked folds, and read
-`vignette("spatial-cross-validation")` for what the blocking has to be wide
-enough to do.
+this reason. Score any such model on folds at the distances its map will
+predict at, and read `vignette("spatial-cross-validation")` for how to match
+the two.
 
 **Selection outside the fold.** Choosing predictors on the whole data set and
 then cross-validating the chosen set gives the selection a look at every test
@@ -314,9 +315,10 @@ error of that mean (`fold_gain_se`), from step 1 on; `rule = "tol"` tests the
 pooled gain alone.
 
 Its inner folds default to the scheme you pass. Passing `random_kfold` there
-logs a caution, because a leaky inner loop can select a variable for being
-spatially close to the response and an honest outer loop will then report a
-respectable number for a dishonestly chosen feature set.
+logs a caution: random inner folds choose the variables that predict best among
+the samples, where one that only tracks nearby values of the response can win,
+and a blocked outer loop then scores the chosen set at the blocks' distance,
+for which it was not chosen.
 
 ## 6. Warnings about pooled cell values
 

@@ -782,10 +782,11 @@ old behaviour where there is a way.
   empty, or tell whether a fold is one contiguous region or several.
   `plot_folds()` now draws those outlines under the points when the folds
   carry them, and takes `blocks = FALSE` to suppress them.  Its subtitle
-  states the parameter that decides whether the scheme leaks (the block
-  size, the buffer, the number of location groups or the median NNDM
-  exclusion), with the units of the folds' CRS; folds built from points
-  without a CRS get no units rather than "(NA units)".
+  states the parameter that sets how far the held-out points sit from
+  their training data (the block size, the buffer, the number of location
+  groups or the median NNDM exclusion), with the units of the folds' CRS;
+  folds built from points without a CRS get no units rather than "(NA
+  units)".
 
 * `estimate_sac_range()`'s returns are uniform.  The four directional
   variograms and their fits run unconditionally on every call, and the
@@ -1356,16 +1357,17 @@ old behaviour where there is a way.
     otherwise.
 
 * `cv_block_size_sweep()`: the same cross-validation at a ladder of block
-  sizes, with random folds as the leaky reference, returned as a table
-  with the fold-to-fold spread at each size and the estimated
-  autocorrelation range alongside; `plot()` draws the curve with the range
-  marked.  Blocks smaller than the range leak, so the curve rises from the
-  random-fold value towards the range and plateaus beyond it, and the
-  height of the rise is what the random-fold number overstated --- measured
-  on simulated fields with a 100--130-unit range and a random forest with
-  coordinates, the plateau begins at one to two times the estimated range.
-  Each size is a full `cv_spatial()`, so a fit budget (`max_fits`, default
-  60) refuses to start rather than run past it.  The default ladder runs up
+  sizes, with random folds as the reference, returned as a table with the
+  fold-to-fold spread at each size and the estimated autocorrelation range
+  alongside; `plot()` draws the curve with the range marked.  The curve
+  rises as the blocks widen because the held-out points sit farther from
+  their training data: its height at a size is the error at that distance
+  from the data, which is the error of a map only at locations that far
+  from it.  On simulated fields with a 100--130-unit range and a random
+  forest with coordinates, the curve levels off from one to two times the
+  estimated range.  Each size is a full `cv_spatial()`, so a fit budget
+  (`max_fits`, default 60) refuses to start rather than run past it.  The
+  default ladder runs up
   to the largest size, at most half the shorter side, whose grid still holds
   `k` cells.  At the default `k = 5` half the side is a 2 x 2 grid of four
   cells on any extent less than 1.5 times as long as it is wide, so that
@@ -1995,6 +1997,23 @@ old behaviour where there is a way.
   "density-weighted k-means fitted to a subsample of 1500" for the density
   kind, the default, and "k-means fitted to a subsample of 1500" for
   `partition = "kmeans"`.
+
+* **The warnings of `make_folds(method = "block_kfold")` on blocks smaller
+  than the autocorrelation range said "Spatial CV may leak correlated
+  information across folds".**  That read blocks below the range as a
+  defect whatever the map.  A cross-validated error is the error at the
+  distance the folds put between the held-out points and their training
+  data, and it reads low only for predictions made farther from the data
+  than that.  The five warnings now say so, name
+  `fold_separation(prediction_points = )` as the comparison, and say that
+  wider blocks give the error farther from the data before their advice on
+  the block size, which is unchanged.  The subtitles of `plot_folds()` and
+  of `plot()` on a `cv_block_size_sweep()` result no longer say that blocks
+  below the range leak, and the sweep's caption and progress message no
+  longer call random folds "the leaky reference".  When no range can be
+  estimated (no gstat, or fewer than 30 points), the line `make_folds()`
+  logs says that the check of the blocks against the range is skipped,
+  not a "leakage check".
 
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
@@ -3764,6 +3783,54 @@ old behaviour where there is a way.
   counts on more than `sample_n` points are those of the subsample, which
   `seed` draws, so the count read off such a profile can move with `seed`
   and with `sample_n`.
+
+* The help, the vignettes and the README no longer say which way a
+  cross-validated score errs without saying where the model will predict.
+  "Random folds flatter autocorrelated data" (`?spatialkit`), "the blocked
+  estimate is the one to report" (`vignette("spatialkit_nc_demo")`), "the
+  optimistic bound" (`vignette("spatial-cross-validation")`), "the score is
+  still optimistic" (`vignette("reporting")`) and the like in `?make_folds`,
+  `?cv_gwr`, `?fit_rf_model`, `?print.rf_fit`, `?residuals.rf_fit`,
+  `?select_features_forward`, `?estimate_sac_range`, `?plot_folds`,
+  `vignette("diagnostics")` and `vignette("getting-started")` now read as
+  `?fold_separation` does: a cross-validated error is the error at the
+  distance the folds put between the held-out points and their training
+  data, and it reads low for predictions made farther from the data and
+  high for predictions made closer.  Random folds give the error of
+  predicting among the samples, which is that of a map over an area the
+  samples cover evenly; blocks give the error of predicting into unsampled
+  gaps of their size.  The vignettes on cross-validation, on reporting and
+  on North Carolina read their folds against the locations of a map with
+  `fold_separation()`, and the README lists it.  The README no longer says
+  that cross-validation holds out regions sized to the autocorrelation
+  range: the blocks of the `cv_*()` functions are a geometric grid unless
+  `block_size` or `auto_range` sizes them.  No page presents
+  `cv_block_size_sweep()` as the way to choose a block size, and
+  `?spatialkit` no longer calls the autocorrelation range the number that
+  should set it: the sweep gives the error at each block size, and
+  `fold_separation()` says which size matches a map.
+
+* The tour scripts `03-folds.R`, `04-block-size.R`, `08-feature-select.R`
+  and `example_nc_demo.R` say the same.  `example_nc_demo.R`, the runnable
+  version of `vignette("spatialkit_nc_demo")`, no longer marks the blocked
+  score as the one to report, and it and `03-folds.R` read random folds and
+  blocks against a map of their area with `fold_separation()`, as the
+  vignettes do; `04-block-size.R` reads the folds of each size of its sweep
+  the same way.
+
+* `?cv_spatial`, `?cv_gwr`, `?cv_bayes`, `?cv_rf` and `?compare_models_cv`
+  say what `folds = NULL` estimates: the error at the distance the block
+  grid built there puts between the held-out points and their training
+  data, which overstates the error of a map where the samples cover the area
+  it predicts over by as much as the model's error grows between the two
+  distances.  No default changes.
+
+* `?cv_block_size_sweep` and `?plot.block_size_sweep` say that the rise of
+  the curve with block size measures the error at that distance from the
+  data, which is the error of a map only at locations that far from it, so
+  the curve does not by itself say which size to report.  They no longer
+  call random folds the leaky reference or say that the height of the rise
+  is what the random-fold number overstated.
 
 * `?summarize_by_cell` says what `..se_*` and `..ci_*` cover at each `deff`:
   at the default `deff = 1`, the cell's own mean, when its observations are

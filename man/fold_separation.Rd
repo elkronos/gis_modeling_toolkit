@@ -169,7 +169,7 @@ training data than the prediction points do, and the cross-validated
 error tends to read low for that target.}
 \item{\code{"farther"}}{The gap is above the tolerance and at least
 half of \eqn{W_1}: the held-out points sit farther, and the error
-tends to read high.}
+tends to read high for that target.}
 \item{\code{"matched"}}{The gap is within the tolerance and
 \eqn{W_1} within twice the tolerance.}
 \item{\code{"mixed"}}{The two distributions cross, closer at some
@@ -209,7 +209,9 @@ print(fold_separation(blocked, pts, sac = 200, prediction_points = cells))
 \seealso{
 \code{\link{make_folds}()} for the fold schemes and the block
 sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
-for choosing a block size by cross-validated error instead.
+for the cross-validated error at each block size.  The sweep does not
+say which size matches a map; this function does, read on the folds of
+each size with the map's locations as \code{prediction_points}.
 
 Other cross-validation:
 \code{\link[=area_of_applicability]{area_of_applicability()}},

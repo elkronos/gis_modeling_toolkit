@@ -1644,7 +1644,20 @@ compare_models <- function(fits, newdata = NULL, ...) {
 #'   trains on its own test rows is not a cross-validation split and is refused
 #'   with an error), and IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
-#'   the folds came from other data when they were not).
+#'   the folds came from other data when they were not).  When it is
+#'   \code{NULL}, one set of \code{block_kfold} folds is built and every
+#'   model is scored on it.
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param boundary Optional polygon sf/sfc.
 #' @param pointize Geometry coercion strategy.  It also decides where a
 #'   polygon or line row falls in the shared blocks, so each row is placed by

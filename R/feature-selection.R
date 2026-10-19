@@ -11,16 +11,17 @@
 #' variable has a baseline to beat with every learner, so the selection can
 #' be empty.
 #'
-#' \strong{The inner folds must be spatial, and that is the entire point.}
-#' Nested selection is only worth doing if the inner loop is blocked the same
-#' way the outer one is.  Random inner folds inside blocked outer folds select
-#' variables that look predictive only because nearby points leak between
-#' train and test.  The outer loop then reports honest-looking numbers for a
-#' dishonestly chosen feature set, which is worse than not selecting at all,
-#' because the dishonesty is now hidden behind a defensible-looking validation.
-#' \code{method} therefore defaults to \code{"block_kfold"} and logs a loud
-#' caution if set to \code{"random_kfold"} (a deliberate choice, so it is not
-#' raised as an R warning).
+#' \strong{The inner folds should hold points out as the outer ones do.}
+#' A cross-validated score is the error at the distance the folds put
+#' between the held-out points and their training data, so nested selection
+#' chooses the variables that predict best at the inner folds' distance.
+#' Random inner folds inside blocked outer folds choose for predicting among
+#' the samples, where a variable that only tracks nearby values of the
+#' response can win, and the outer loop then scores the chosen set at the
+#' blocks' distance, for which it was not chosen.  \code{method} therefore
+#' defaults to \code{"block_kfold"}, as the folds of the \code{cv_*()}
+#' functions do, and logs a loud caution if set to \code{"random_kfold"} (a
+#' deliberate choice, so it is not raised as an R warning).
 #'
 #' Call this \emph{inside} the \code{fit_fn} you pass to \code{cv_spatial()}.
 #' \code{.cv_fit_one_fold()} calls \code{fit_fn(train_sf)} on the training
@@ -231,11 +232,11 @@
 #'   response (detrended on the candidates) and used as the minimum block
 #'   size of the inner folds, exactly as in \code{\link{make_folds}()};
 #'   \code{block_size} still applies as a floor.  Default \code{FALSE}, which
-#'   keeps the geometric blocks.  Inner blocks smaller than the range let a
-#'   candidate be selected for spatial proximity to the response rather than
-#'   for predicting it, which is the same failure the \code{random_kfold}
-#'   caution above exists to prevent, so the leakage warning
-#'   \code{make_folds()} raises applies here with more force than usual.
+#'   keeps the geometric blocks.  With inner blocks smaller than the range a
+#'   candidate can be chosen for tracking nearby values of the response, the
+#'   case the \code{random_kfold} caution above is about, so the warning
+#'   \code{make_folds()} raises on blocks smaller than the range applies to
+#'   the inner folds too.
 #' @param select_on \code{"all"} (default) runs the sweep on every row of
 #'   \code{train_sf}.  \code{"split"} runs it on one spatially blocked half,
 #'   then fits the selected set on that half and scores it on the other:

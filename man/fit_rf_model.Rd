@@ -134,12 +134,16 @@ covariates that carry the spatial structure themselves, expect less from
 the coordinates.
 
 What does not change is how such a forest has to be scored. It fits
-location closely, nearby points leak between random folds, and the
-out-of-bag error is a random hold-out too, so both overstate its
-accuracy. Score it with \code{\link{cv_rf}} and
-blocked folds (\code{make_folds(method = "block_kfold")}) or folds
-matched to the prediction distance (\code{method = "nndm"}), at the
-distances the map will be used at, never with the out-of-bag error, and
+location closely, so its error grows quickly with the distance from the
+data, and a cross-validated score is the error at the distance its folds
+put between the held-out points and their training data. Random folds,
+and the out-of-bag error, a random hold-out too, measure it among the
+samples: the error of a map over an area the samples cover evenly, which
+reads low for predictions made farther from the data. Score it with
+\code{\link{cv_rf}} on folds at the distances the map will be used at
+(folds matched to the prediction distance, \code{make_folds(method =
+"nndm")} or \code{"knndm"}, or blocks, \code{method = "block_kfold"},
+for predictions into unsampled gaps), not with the out-of-bag error, and
 compare the two forests on the same folds. That comparison is two calls:
 build the folds once and hand them to \code{cv_rf()} with and without
 the coordinates.
@@ -179,10 +183,13 @@ for that rule, \code{"partition"}, is kept. The setting is recorded in
 \section{The out-of-bag error is a random hold-out}{
 
 \code{ranger}'s OOB error holds each observation out of the trees that did
-not sample it. That is a random hold-out, so under spatial autocorrelation
-it is optimistic for exactly the reason random k-fold is: the trees that
-"did not see" a point almost certainly saw its neighbours. It is reported
-as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and labelled as OOB
+not sample it. That is a random hold-out: the trees that "did not see" a
+point almost certainly saw its neighbours, so under spatial
+autocorrelation it is the error of predicting among the samples, as random
+k-fold is, and reads low for predictions made farther from the data than
+the samples sit from each other (see \code{\link{make_folds}()}). It is
+reported as \code{$info$oob_rmse} and \code{$info$oob_r_squared} and
+labelled as OOB
 everywhere it appears. Use \code{\link{cv_rf}} for a spatial estimate.
 }
 

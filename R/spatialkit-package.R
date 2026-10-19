@@ -29,8 +29,13 @@
 #'     aggregate, and can correct those errors for within-cell autocorrelation.
 #'   \item \strong{Fold.} \code{\link{make_folds}()} builds spatial
 #'     cross-validation folds: blocked, buffered, leave-location-out or
-#'     nearest-neighbour distance-matched. Random folds flatter autocorrelated
-#'     data; these do not.
+#'     nearest-neighbour distance-matched. A cross-validated error is the
+#'     error at the distance the folds put between the held-out points and
+#'     their training data: it reads low for predictions made farther from
+#'     the data and high for predictions made closer, so the folds to use
+#'     are the ones matched to where the model will predict.
+#'     \code{\link{fold_separation}()} with \code{prediction_points}
+#'     compares the two distances.
 #'   \item \strong{Fit.} \code{\link{fit_gwr_model}()} for coefficients that
 #'     vary across the map, \code{\link{fit_bayesian_spatial_model}()} for an
 #'     explicit spatial Gaussian process with calibrated uncertainty, or
@@ -94,8 +99,9 @@
 #' Supporting these throughout, \code{\link{ensure_projected}()} and
 #' \code{\link{coerce_to_points}()} handle coordinate reference systems and
 #' geometry coercion, and \code{\link{estimate_sac_range}()} estimates the
-#' distance over which observations remain correlated.  That is the number that
-#' should be setting your block size.
+#' distance over which observations remain correlated.  Sizing blocks from
+#' it is one way to set how far the held-out points sit from their training
+#' data, and suits a map that has to reach that far from the data.
 #'
 #' @section Defaults and their sources:
 #' A stated design principle of this package is that defaults follow current
@@ -233,7 +239,7 @@
 #' Useful entry points by task:
 #' \code{\link{build_tessellation}()} (build regions),
 #' \code{\link{summarize_by_cell}()} (aggregate to them),
-#' \code{\link{make_folds}()} (split them without flattering the model),
+#' \code{\link{make_folds}()} (split the data into cross-validation folds),
 #' \code{\link{compare_models_cv}()} (score several models at once),
 #' \code{\link{area_of_applicability}()} (find where not to trust the result).
 #'

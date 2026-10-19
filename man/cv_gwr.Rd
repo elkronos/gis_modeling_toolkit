@@ -40,7 +40,18 @@ refused by name.  Train and test must be disjoint: a fold that trains on
 its own test rows is not a cross-validation split and is refused with an
 error.  IDs naming no row in the prepared data are dropped with
 a logged count (expected when rows were removed for missing values; a sign
-the folds came from other data when they were not).}
+the folds came from other data when they were not).
+With \code{folds = NULL} the score estimates the error at the distance
+the block grid built here puts between the held-out points and their
+training data, which overstates the error of a map where the samples
+cover the area it predicts over.  The excess is how much the model's
+error grows from the map's distances to the data to the block grid's,
+and is small for a model whose error changes little with the distance
+from the data.  \code{\link{fold_separation}()}
+with \code{prediction_points} compares the held-out distances with those
+of the locations the model will predict at, and
+\code{make_folds(method = "knndm", prediction_points = )} builds folds
+matched to them.}
 
 \item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
 read when \code{folds} is supplied.  Default 5.}
@@ -125,9 +136,11 @@ cross-validation, with no tuning on the full data first.
 }
 \details{
 Folds default to spatial blocks (\code{\link{make_folds}(method =
-"block_kfold")}), not random ones.  With autocorrelated data a random split
-leaves a held-out point's neighbours in the training set and the score comes
-back flattering.  Use \code{\link{cv_bayes}()} for the same treatment
+"block_kfold")}), not random ones.  A random split leaves a held-out
+point's neighbours in the training set, so its score is the error of
+predicting among the samples; blocks hold out whole areas, and
+\code{folds} says what their score estimates.  Use
+\code{\link{cv_bayes}()} for the same treatment
 of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
 \code{\link{compare_models_cv}()} to score several backends on one set of
 folds.

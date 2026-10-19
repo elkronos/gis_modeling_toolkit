@@ -21,8 +21,9 @@ trees that did not see it.  These are therefore already held-out residuals,
 unlike \code{residuals.gwr_fit()} and \code{residuals.bayesian_fit()},
 which are in-sample.  Feed them to \code{\link{residual_morans_i}()} to test
 whether spatial structure the forest failed to capture is still sitting in
-the residuals.  Out-of-bag is not a substitute for spatial CV: use
-\code{\link{cv_rf}()} for an honest map-accuracy figure.
+the residuals.  Out-of-bag is a random hold-out, not a substitute for
+spatial CV: use \code{\link{cv_rf}()} on folds at the distances the map
+will be used at for its accuracy.
 }
 \seealso{
 Other methods on a fitted model:

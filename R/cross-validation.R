@@ -2612,10 +2612,12 @@ sac_nugget <- function(x) {
 #' fit that fails to converge.
 #'
 #' Only the exponential family is fitted.  On fields smoother than
-#' exponential that makes the range long, which is the safe side (blocks too
-#' large, cross-validation pessimistic).  Choosing the family by the smaller
-#' weighted sum of squares would correct a spherical field but send
-#' exponential fields low, the direction that leaks.
+#' exponential that makes the range long, and blocks sized from it come out
+#' larger: they still hold the test points at least the field's range from
+#' their training data, which blocks sized from a short range do not.
+#' Choosing the family by the smaller weighted sum of squares would correct
+#' a spherical field but send exponential fields short, and blocks sized
+#' from them smaller than the range.
 #'
 #' \strong{Spatial structure is tested first.}  A variogram model can be
 #' fitted to anything, and on a layer with no structure the fit returns a
@@ -2687,10 +2689,10 @@ sac_nugget <- function(x) {
 #' the model's semivariance at the largest lag: then the lags that resolve
 #' the layer give the equal-lag range nothing, and the single structure
 #' stands.  The bar is low because the two mistakes are not alike.  A long
-#' structure that is missed sizes blocks too small, which leaks.  One that
-#' is believed in error returns the equal-lag range, which is too long and
-#' makes a validation pessimistic, and \code{short_range} still holds the
-#' short one.  When the equal-lag range is one that \code{lags = "equal"}
+#' structure that is missed is lost: the range returned is the short one
+#' alone.  One that is believed in error returns the equal-lag range, which
+#' is too long, and \code{short_range} still holds the short one.  When the
+#' equal-lag range is one that \code{lags = "equal"}
 #' would itself refuse (past the fitted lags, as under an unremoved trend),
 #' the model with it is refused as well, the answer is taken away and not
 #' lengthened, and the long structure has to carry 10 percent.
@@ -2721,10 +2723,10 @@ sac_nugget <- function(x) {
 #' to rotation.  When it identifies no range, no range is returned: the
 #' largest directional range does not stand in for it.
 #'
-#' Where a field is \emph{known} to be anisotropic, blocks must be at least
-#' as large as the longest autocorrelation range to avoid leakage, and the
-#' conservative choice is to size them from the longest directional range
-#' explicitly.  Read it from \code{directional_fitted}, not
+#' Where a field is \emph{known} to be anisotropic and blocks are to be at
+#' least as large as its autocorrelation range in every direction, size them
+#' from the longest directional range explicitly.  Read it from
+#' \code{directional_fitted}, not
 #' \code{directional}: on a strongly anisotropic field the major axis is the
 #' direction most likely to run past the fitted lags, which leaves it
 #' \code{NA} in \code{directional}, so \code{max()} of that is \code{NA}, or
@@ -2867,8 +2869,9 @@ sac_nugget <- function(x) {
 #' Fitting a variogram to the residuals of a least-squares trend
 #' underestimates both the sill and the range, because the trend fit absorbs
 #' part of the long-wavelength spatial variation (Lark, Cullis and Welham
-#' 2006).  Blocks sized from that range are then too small and a blocked
-#' validation is less conservative than it claims.  How large the effect is
+#' 2006).  Blocks sized from that range are then narrower than the field's
+#' range, and hold the test points less far from their training data than
+#' range-sized blocks are meant to.  How large the effect is
 #' depends on how smooth the trend terms are in space, and on how many there
 #' are: for ordinary covariates it is a few percent, and for trend surfaces
 #' in the coordinates it is large.  Iterating between a GLS trend
@@ -2880,7 +2883,8 @@ sac_nugget <- function(x) {
 #' a somewhat wider sampling spread.  The default stays \code{"ols"} so that
 #' existing scripts keep their method; a script that detrends on smooth
 #' or coordinate-based terms should pass \code{detrend = "reml"}, or size its
-#' blocks with a margin.  Detrending removes a trend the predictors explain.
+#' blocks with a margin above the range returned, to make up the shortfall.
+#' Detrending removes a trend the predictors explain.
 #' It does not make an unidentified range identified.
 #'
 #' @section Count and other non-Gaussian responses:
@@ -2901,7 +2905,7 @@ sac_nugget <- function(x) {
 #' that tracks the fitted mean.  The principled remedy is a variogram of
 #' Pearson residuals from a model in the right family, which this function
 #' does not compute.  Treat the range from a count response as no
-#' more than an order of magnitude, size blocks conservatively from it, and
+#' more than an order of magnitude, since it can come out long or short, and
 #' prefer \code{\link{make_folds}(method = "nndm")}, which does not depend on a
 #' fitted range at all.
 #'
@@ -4301,11 +4305,11 @@ print.sac_range <- function(x, ...) {
 .sac_range_for_diagnostic <- function(pts, response_var, predictor_vars,
                                       range_frac, seed) {
   if (!requireNamespace("gstat", quietly = TRUE)) {
-    .log_info("make_folds(block_kfold): leakage check skipped: package 'gstat' is not installed, so no autocorrelation range could be estimated to compare the blocks against.")
+    .log_info("make_folds(block_kfold): the check of the blocks against the autocorrelation range is skipped: package 'gstat' is not installed, so no range could be estimated to compare the blocks against.")
     return(NA_real_)
   }
   if (nrow(pts) < 30L) {
-    .log_info("make_folds(block_kfold): leakage check skipped: fewer than 30 points, below the floor at which a variogram range is estimated.")
+    .log_info("make_folds(block_kfold): the check of the blocks against the autocorrelation range is skipped: fewer than 30 points, below the floor at which a variogram range is estimated.")
     return(NA_real_)
   }
   r <- tryCatch(
@@ -4327,15 +4331,27 @@ print.sac_range <- function(x, ...) {
 #' leave-location-out, buffered leave-one-out, nearest-neighbour distance
 #' matching (NNDM) leave-one-out or its k-fold version (kNNDM).
 #'
+#' A cross-validated error is the error at the distances the folds put
+#' between the held-out points and their training data.  It reads low for
+#' predictions made farther from the data than the held-out points sit, and
+#' high for predictions made closer, so which folds to use depends on where
+#' the model will predict.  \code{\link{fold_separation}()} with
+#' \code{prediction_points} compares the two distances, and
+#' \code{method = "nndm"} and \code{"knndm"} build folds matched to them.
+#'
 #' For \code{block_kfold}, the default grid sizing is purely geometric and
-#' unrelated to the autocorrelation range of the data.  When blocks are
-#' smaller than the autocorrelation range, spatially correlated observations
-#' leak across folds and CV metrics become optimistic.  Use
-#' \code{block_size} to set a minimum block edge length (in CRS units), or
-#' set \code{auto_range = TRUE} to estimate the range from an empirical
-#' variogram and enforce it automatically.  When a response is given and the
-#' blocks come out smaller than the estimated range, the warning says what
-#' range-sized blocks would yield on this layout before recommending them:
+#' unrelated to the autocorrelation range of the data.  The wider the blocks,
+#' the farther the held-out points sit from their training data.  When blocks
+#' are smaller than the autocorrelation range, held-out points have training
+#' data within the range, and the score is the error of predicting that close
+#' to the data: it reads low for predictions made farther from the data, and
+#' is the error of a map whose locations sit as close.  Use
+#' \code{block_size} to set a minimum
+#' block edge length (in CRS units), or set \code{auto_range = TRUE} to
+#' estimate the range from an empirical variogram and use it as that minimum.
+#' When a response is given and the blocks come out smaller than the
+#' estimated range, the warning says so and what range-sized blocks would
+#' yield on this layout:
 #' the setting and the grid it builds when that gives \code{k} folds, and
 #' otherwise how many folds it gives (or that it leaves a single block), the
 #' largest block size that still gives \code{k} folds, and
@@ -4398,8 +4414,9 @@ print.sac_range <- function(x, ...) {
 #'   which region each fold happened to get; with many, the blocks shrink
 #'   towards single points and the scheme drifts back towards random k-fold.
 #'   3 is a compromise between those two, not a published constant.  The
-#'   block size that matters for leakage is the autocorrelation range, which
-#'   is what \code{block_size} and \code{auto_range} control.
+#'   size of the blocks sets how far the held-out points sit from their
+#'   training data; \code{block_size} and \code{auto_range} set it from a
+#'   distance, where this sets it from a count.
 #' @param block_size Optional positive numeric minimum block edge length,
 #'   \strong{in the units of the CRS the folds are built in}.  Takes
 #'   precedence over \code{block_nx}/\code{block_ny} and
@@ -4468,7 +4485,8 @@ print.sac_range <- function(x, ...) {
 #'   \code{auto_range = TRUE}.  For \code{"block_kfold"} a name that is not a
 #'   column of \code{points_sf} is an error, whether or not
 #'   \code{auto_range} is set: with it off the response still feeds the
-#'   leakage warning, which a misspelt name would silently disable.
+#'   warning on blocks smaller than the range, which a misspelt name would
+#'   silently disable.
 #' @param predictor_vars Optional character vector of predictor column names.
 #'   Passed to \code{estimate_sac_range()} for residual variogram estimation.
 #' @param boundary Optional polygonal sf/sfc for block_kfold.  The grid is
@@ -4504,8 +4522,10 @@ print.sac_range <- function(x, ...) {
 #' @param min_train For \code{method = "nndm"}: the smallest fraction of the
 #'   data any fold's training set may be reduced to by neighbour exclusion.
 #'   Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
-#'   distance matching stops short and the cross-validation stays optimistic;
-#'   see \strong{Details}.  For \code{method = "knndm"}: the smallest fraction
+#'   distance matching stops short: the held-out points stay closer to their
+#'   training data than the prediction points are, and the error reads low
+#'   for them; see \strong{Details}.  For \code{method = "knndm"}: the
+#'   smallest fraction
 #'   of the data a fold may leave for training, so a candidate whose largest
 #'   fold holds more than \code{1 - min_train} of the rows is set aside (the
 #'   \code{maxp = 0.5} of \code{CAST::knndm()} is \code{min_train = 0.5}).
@@ -4525,10 +4545,16 @@ print.sac_range <- function(x, ...) {
 #'   distance, which matches everywhere (\code{CAST}'s \code{phi = "max"}).
 #' @details
 #' \strong{Fold methods.}
-#' \code{"random_kfold"} ignores geography entirely and will overstate
-#' performance on autocorrelated data.  \code{"block_kfold"} separates folds
-#' geographically.  \code{"buffered_loo"} holds out one point at a time and
-#' excludes everything within a fixed \code{buffer}.
+#' \code{"random_kfold"} ignores geography: a held-out point keeps most of
+#' its neighbours in the training data, so the score is the error of
+#' predicting among the samples.  That is the error of a map over an area the
+#' samples cover evenly, and it reads low for predictions made farther from
+#' the data, such as a map of a whole region from clustered samples.
+#' \code{"block_kfold"} holds out whole blocks, so the held-out points sit
+#' farther from their training data the wider the blocks are, and the score
+#' is the error of predicting into unsampled gaps of that size; for a map of
+#' an area the samples cover, it reads high.  \code{"buffered_loo"} holds out
+#' one point at a time and excludes everything within a fixed \code{buffer}.
 #'
 #' \code{"leave_location_out"} groups by \code{group_var}, so all
 #' observations from a location share a fold.
@@ -4560,7 +4586,8 @@ print.sac_range <- function(x, ...) {
 #' whereas CAST removes one only while the realised distribution, less the
 #' point about to move, is still at or above the target.  The rule here
 #' therefore removes up to one point more per distance value (a few percent
-#' more removals in all on clustered layouts), erring on the pessimistic side.
+#' more removals in all on clustered layouts), erring towards held-out
+#' distances longer than the target.
 #' And ties in \eqn{G_j^*} are broken by the points' coordinates, not by
 #' their row index as in CAST, so the folds do not depend on the order of the
 #' rows.
@@ -4573,9 +4600,10 @@ print.sac_range <- function(x, ...) {
 #' that draws on several neighbours (a forest, a k-nearest-neighbour mean, a
 #' kriging neighbourhood) also depends on how far the second and later
 #' neighbours are, which NNDM does not match, so on clustered samples its
-#' cross-validated error can still read low with the nearest-neighbour
-#' distances matched exactly.  Beyond \code{phi} no matching is attempted, by
-#' design.  \code{min_train} is different: when the prediction locations lie
+#' cross-validated error can still read low for the prediction points with
+#' the nearest-neighbour distances matched exactly.  Beyond \code{phi} no
+#' matching is attempted, by design.  \code{min_train} is different: when the
+#' prediction locations lie
 #' further from the samples than a fold can be made to hold out (clustered
 #' samples and a prediction domain well beyond them, the layout NNDM is meant
 #' for), it stops the matching early and the realised distances stay
@@ -4717,7 +4745,7 @@ print.sac_range <- function(x, ...) {
 #' \code{"closer"}), \code{make_folds()} raises a warning of class
 #' \code{"spatialkit_knndm_short_of_target"} and sets
 #' \code{params$short_of_target}: the cross-validated error then tends to
-#' read low for those locations.  Fewer folds hold out larger regions.
+#' read low for the prediction points.  Fewer folds hold out larger regions.
 #' Short of either warning the folds can still differ from the target at
 #' some distances; \code{params$max_ecdf_excess} and
 #' \code{params$max_ecdf_deficit} give the largest difference each way, and
@@ -4821,7 +4849,8 @@ print.sac_range <- function(x, ...) {
 #' \code{params$grid_ny} are \code{NA}, and \code{params$block_scale} is the
 #' median over blocks that hold points of the side of the square with the
 #' block's area.  That is the length compared against the autocorrelation range
-#' for the leakage warning, since a polygon has no single edge length.
+#' for the warning on blocks smaller than the range, since a polygon has no
+#' single edge length.
 #'
 #' The connection to the rest of the package is
 #' \code{\link{build_tessellation}()}: every shape it builds can be a block
@@ -5337,8 +5366,8 @@ make_folds <- function(points_sf, k,
           ))
           if (block_size < sac_range)
             .warn_and_log(
-              "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. %s",
-              block_size, sac_range,
+              "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). %s %s",
+              block_size, sac_range, .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k, mention_auto = FALSE)
             )
         }
@@ -5402,8 +5431,8 @@ make_folds <- function(points_sf, k,
         if (!isTRUE(auto_range) && is.finite(sac_range) && sac_range > 0 &&
             block_size < sac_range) {
           .warn_and_log(
-            "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. %s",
-            block_size, sac_range,
+            "make_folds(): block_size (%.1f) < estimated autocorrelation range (%.1f). %s %s",
+            block_size, sac_range, .blocks_below_range(),
             .block_range_advice(pts, reg, bb, sac_range, k, mention_auto = FALSE)
           )
         }
@@ -5456,8 +5485,8 @@ make_folds <- function(points_sf, k,
             # here.  .block_range_advice() builds the grid the advice asks
             # for and says what comes back.
             .warn_and_log(
-              "make_folds(): block dimension (%.1f) < autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. %s",
-              min_cell, sac_range,
+              "make_folds(): block dimension (%.1f) < autocorrelation range (%.1f). %s %s",
+              min_cell, sac_range, .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k)
             )
           }
@@ -5487,8 +5516,8 @@ make_folds <- function(points_sf, k,
           min_cell <- min(split_cells)
           if (min_cell < sac_range) {
             .warn_and_log(
-              "make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%.1f). Spatial CV may leak correlated information across folds. %s",
-              sac_range,
+              "make_folds(): block_nx/block_ny yield blocks smaller than autocorrelation range (%.1f). %s %s",
+              sac_range, .blocks_below_range(),
               .block_range_advice(pts, reg, bb, sac_range, k)
             )
           }
@@ -5801,8 +5830,8 @@ make_folds <- function(points_sf, k,
       if (is.finite(sac_range) && sac_range > 0 && is.finite(block_scale) &&
           block_scale < sac_range) {
         .warn_and_log(
-          "make_folds(): the supplied blocks (median scale %.1f) are smaller than the autocorrelation range (%.1f). Spatial CV may leak correlated information across folds; supply blocks at least %.0f units across.",
-          block_scale, sac_range, ceiling(sac_range)
+          "make_folds(): the supplied blocks (median scale %.1f) are smaller than the autocorrelation range (%.1f). %s For the error farther from the data, supply blocks at least %.0f units across.",
+          block_scale, sac_range, .blocks_below_range(advice = FALSE), ceiling(sac_range)
         )
       }
     }
@@ -7425,6 +7454,35 @@ make_folds <- function(points_sf, k,
 }
 
 
+#' What a score on blocks smaller than the range estimates
+#'
+#' The sentences the five warnings of \code{make_folds(method =
+#' "block_kfold")} on blocks smaller than the autocorrelation range give
+#' after their first.  The score is the error at the distance the folds put
+#' between the held-out points and their training data, which reads low or
+#' high only against the locations the model will predict at; the sentences
+#' say so and name the function that compares the two.  The warnings used to
+#' say "Spatial CV may leak correlated information across folds", which read
+#' blocks below the range as a defect whatever the target.
+#'
+#' @param advice Whether the advice that follows widens the blocks
+#'   (\code{TRUE}: the grid branches, whose advice comes from
+#'   \code{.block_range_advice()}) or names its own size (\code{FALSE}:
+#'   supplied blocks).
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+.blocks_below_range <- function(advice = TRUE) {
+  paste0("Held-out points then have training data within the range, so the ",
+         "score is the error of predicting that close to the data: it reads ",
+         "low for predictions made farther from the data, and is the error of ",
+         "a map whose locations sit as close (fold_separation(",
+         "prediction_points = ) compares the held-out distances with the ",
+         "map's).",
+         if (isTRUE(advice)) " For the error farther from the data, widen the blocks." else "")
+}
+
+
 #' What following a leakage warning's advice yields on this layout
 #'
 #' The leakage warnings of \code{make_folds(method = "block_kfold")} used to
@@ -7504,9 +7562,11 @@ make_folds <- function(points_sf, k,
 #' cross-validation, with no tuning on the full data first.
 #'
 #' Folds default to spatial blocks (\code{\link{make_folds}(method =
-#' "block_kfold")}), not random ones.  With autocorrelated data a random split
-#' leaves a held-out point's neighbours in the training set and the score comes
-#' back flattering.  Use \code{\link{cv_bayes}()} for the same treatment
+#' "block_kfold")}), not random ones.  A random split leaves a held-out
+#' point's neighbours in the training set, so its score is the error of
+#' predicting among the samples; blocks hold out whole areas, and
+#' \code{folds} says what their score estimates.  Use
+#' \code{\link{cv_bayes}()} for the same treatment
 #' of a Bayesian GP model, \code{\link{cv_rf}()} for a forest, and
 #' \code{\link{compare_models_cv}()} to score several backends on one set of
 #' folds.
@@ -7526,6 +7586,17 @@ make_folds <- function(points_sf, k,
 #'   error.  IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param k Number of folds to build when \code{folds} is \code{NULL}; not
 #'   read when \code{folds} is supplied.  Default 5.
 #' @param seed RNG seed. Default 123.
@@ -7789,6 +7860,17 @@ cv_gwr <- function(data_sf, response_var, predictor_vars,
 #'   error.  IDs naming no row in the prepared data are dropped with
 #'   a logged count (expected when rows were removed for missing values; a sign
 #'   the folds came from other data when they were not).
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param k Number of folds to build when \code{folds} is \code{NULL}; not
 #'   read when \code{folds} is supplied.  Default 5.
 #' @param seed RNG seed. Default 123.  It seeds fold construction \strong{and},
@@ -8276,6 +8358,17 @@ cv_bayes <- function(data_sf, response_var, predictor_vars,
 #'   error.  IDs naming no row in the prepared data are dropped with
 #'   a logged count.
 #'   Built via \code{block_kfold} when \code{NULL}.
+#'   With \code{folds = NULL} the score estimates the error at the distance
+#'   the block grid built here puts between the held-out points and their
+#'   training data, which overstates the error of a map where the samples
+#'   cover the area it predicts over.  The excess is how much the model's
+#'   error grows from the map's distances to the data to the block grid's,
+#'   and is small for a model whose error changes little with the distance
+#'   from the data.  \code{\link{fold_separation}()}
+#'   with \code{prediction_points} compares the held-out distances with those
+#'   of the locations the model will predict at, and
+#'   \code{make_folds(method = "knndm", prediction_points = )} builds folds
+#'   matched to them.
 #' @param k Number of folds to build when \code{folds} is \code{NULL}; not
 #'   read when \code{folds} is supplied.
 #' @param seed RNG seed.

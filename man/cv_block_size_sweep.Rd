@@ -44,8 +44,10 @@ run, with a warning naming it and the largest size that still gives
 \item{metric}{Which column of \code{overall} to read.  Default
 \code{"RMSE"}.}
 
-\item{include_random}{Also cross-validate with random folds, as the leaky
-reference.  Default \code{TRUE}.}
+\item{include_random}{Also cross-validate with random folds, as the
+reference: the error of predicting among the samples, where each
+held-out point keeps most of its neighbours in the training data.
+Default \code{TRUE}.}
 
 \item{max_fits}{The fit budget; see above.  Default 60.}
 
@@ -82,16 +84,22 @@ requested, which \code{print()} and \code{plot()} report),
 \code{plot()} draws it.
 }
 \description{
-A blocked cross-validation with blocks smaller than the autocorrelation
-range leaks: every held-out point has a near-identical neighbour in the
-training set, and the score is optimistic in proportion.  The single
-number a \code{cv_*()} call returns cannot show this.  This runs the same
+A cross-validated error is the error at the distance the folds put
+between the held-out points and their training data, and the wider the
+blocks, the farther that is.  The single number a \code{cv_*()} call
+returns is the error at one such distance.  This runs the same
 cross-validation at a ladder of block sizes, and by default once with
-random folds as the fully leaky reference.  It returns the metric at each,
-with the estimated autocorrelation range alongside so that the curve can be
-read against it: it rises as the blocks pass the range and then plateaus,
-and the height of the rise is how much the random-fold number overstated
-the model.
+random folds as the reference, whose held-out points keep most of their
+neighbours in the training data.  It returns the metric at each, with the
+estimated autocorrelation range alongside.  The rise of the curve with
+block size measures the error at that distance from the data: how much
+worse the model predicts a location the farther it lies from the
+observations.  It is the error of a map only at locations that far from
+the data, so the curve does not by itself say which size to report.  The
+size to read is the one whose held-out distances match those of the
+locations the model will predict at: \code{\link{fold_separation}()} with
+\code{prediction_points} reads the folds of each size (the \code{$folds}
+of each element of \code{attr(x, "results")}) against them.
 }
 \section{The fit budget}{
 
