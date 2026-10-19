@@ -20,7 +20,8 @@ old behaviour where there is a way.
   `select_resolution()` with no criterion reads it by the size: it returns
   the level nearest `round(n / 4.5)`, on the automatic ladder its top level,
   with `spatialkit_size_not_reached`, where 2.0.0 returned Cp's pick.
-  `criterion = "cp"`, or `estimate = NULL` in the profile, gives Cp's count.
+  `criterion = "cp"`, or `estimate = NULL` in the profile, gives Cp's count,
+  with the noise variance of the entry on Cp below.
   On the default ladder no variogram is fitted (`sac = "auto"`): `cp` and
   `reliability` are `NA`, `attr(, "cp_noise")` says why, and nothing is said
   about a variogram; on any other ladder it is estimated as before.  The
@@ -33,7 +34,8 @@ old behaviour where there is a way.
   A profile passed straight as a count (`get_voronoi_seeds(n = prof)`,
   `voronoi_seeds_kmeans(k = prof)`, `build_tessellation(approx_n_cells =
   prof)`) is read by the size and no longer by `cp`.  `estimate = NULL,
-  obs_per_cell = NULL` gives the previous ladder and columns; `sac = NULL`
+  obs_per_cell = NULL` gives the previous ladder and columns, except `cp`
+  wherever the entry on Cp's noise variance below applies; `sac = NULL`
   estimates the variogram on a ladder of sizes too.
 
 * `resolution_profile()`, `get_voronoi_seeds()` and `voronoi_seeds_kmeans()`
@@ -54,10 +56,13 @@ old behaviour where there is a way.
   `spatialkit_not_converged`.  A cloud `get_voronoi_seeds()` draws inside a
   `boundary` is uniform, so the kind has no density to follow there.
   `method = "random"` and `"provided"` are unchanged, and a selection or a
-  profile passed as the count returns the centres it scored, as before.
-  `partition = "kmeans"` gives the previous regions with their previous
-  starts: the profile's best of 25 k-means++ starts, the seeding functions'
-  `stats::kmeans()` from 10 random starts on the rows as they come.  A call
+  profile passed as the count returns the centres it scored, as before,
+  except off a profile without an estimate fitted to a subsample, whose
+  chosen level is refitted to every point (see the entry below on the
+  refit of the chosen level).  `partition = "kmeans"` gives the previous
+  regions with their previous starts: the profile's best of 25 k-means++
+  starts, the seeding functions' `stats::kmeans()` from 10 random starts on
+  the rows as they come.  A call
   that named `partition = "density"` and no number of starts runs 3 starts
   where it ran 25 (the profile) or 10 (the seeding functions); `nstart =
   25`, `kmeans_nstart = 10` or `nstart = 10` restores that.
@@ -79,12 +84,18 @@ old behaviour where there is a way.
   from the leave-one-out error against one mean.  The count is then the
   size's where Cp's was 2 cells or the like, since a size does not shrink
   for want of structure, and `spatialkit_bound_chosen` is not raised for a
-  size.  On a profile without an estimate nothing changes.  `criterion =
-  "cp"` reads `cp` as before on a profile that has it.  The default profile,
-  one level with no variogram, has none, and `criterion = "cp"` or
-  `"reliability"` on it is an error that says what to pass.  For the count
-  Cp gave before, build the profile with `estimate = NULL, obs_per_cell =
-  NULL` (and `partition = "kmeans"` for the same regions).
+  size.  On a profile without an estimate the criteria are read as before,
+  and `criterion = "cp"` reads `cp` on a profile that has it; what is new
+  there is the `cp` column itself where the entry on Cp's noise variance
+  below applies, the record a cp selection carries, and the seeds of a
+  profile fitted to a subsample (see the entry below on the refit of the
+  chosen level).  The default profile, one level with no variogram, has
+  none, and `criterion = "cp"` or `"reliability"` on it is an error that
+  says what to pass.  For Cp's count as 2.0.0 read it, build the profile
+  with `estimate = NULL, obs_per_cell = NULL` (and `partition = "kmeans"`
+  for the same regions): Cp's noise variance is then the variogram's
+  nugget, as in 2.0.0, wherever that nugget is above the fit's lower bound
+  and no more than the semivariance of nearest-neighbour pairs.
 
 * `summarize_by_cell()` adds the pooled columns by default (`estimate =
   "pooled"`): `..pooled_*`, `..pooled_w_*` and `..pooled_target_*` for
@@ -327,6 +338,30 @@ old behaviour where there is a way.
   `build_tessellation()` and `get_voronoi_seeds()` stop on the `NA` and say
   where it came from.  `on_no_elbow = "warn"` returns the count, with the
   same warning and without the `structured` and `sag` attributes.
+
+* Cp's noise variance in `resolution_profile()` is no longer a nugget at
+  the variogram fit's lower bound (0, or at most 1e-4 of the sill), and it
+  is held to the semivariance of nearest-neighbour pairs the variogram
+  carries (`attr(sac, "short_lag_semivariance")`); Bug fixes has the
+  details.  Wherever either applies, the `cp` column, Cp at one cell
+  (`attr(, "one_cell")`) and Cp's count differ from 2.0.0's on every ladder
+  that fits a variogram, `estimate = NULL, obs_per_cell = NULL` included,
+  and no argument gives the earlier noise variance back.
+  `attr(, "cp_noise")` names the source used and, under the hold, the one
+  it replaced.  A selection by `cp` off a profile without an estimate gains
+  `count_rule`, which its seeds, the cells built on them and the assigned
+  layer carry on.
+
+* `select_resolution()` refits the level it chooses off a profile without
+  an estimate fitted to a subsample (a ladder of counts on more than
+  `sample_n` points) to every point before it hands the seeds on (Bug fixes
+  has the details).  So those seeds, and the seeds `get_voronoi_seeds()`
+  and `voronoi_seeds_kmeans()` return for such a selection or profile, are
+  not the centres 2.0.0 returned, `partition = "kmeans"` and `estimate =
+  NULL, obs_per_cell = NULL` included.  The centres the profile scored,
+  which 2.0.0 returned, are
+  `attr(profile, "centres")[[as.character(sel$best)]]`, in the CRS
+  `attr(profile, "centres_crs")`.
 
 ## New features
 
@@ -1880,6 +1915,86 @@ old behaviour where there is a way.
   ladder; it now counts the steps between its own levels.  `plot()` of a
   profile of one level has the subtitle "1 level of 133 cells" where it had
   "1 levels from 133 to 133 cells".
+
+* **Cp took a nugget at the fit's lower bound as its noise variance, and one
+  that the closest pairs of points contradict.**  `resolution_profile()`
+  read Cp's noise variance off the variogram's nugget, and a nugget of 0 (or
+  of at most 1e-4 of the sill), which `estimate_sac_range()` marks as
+  `nugget_at_bound` since it is the bound and not an estimate, left Cp no
+  penalty: it fell with every finer level to the ceiling whatever the field,
+  with an unclassed warning.  Such a nugget is no longer taken: Cp's noise
+  variance comes from the finest level whose cells hold two scored rows on
+  average, as when the variogram gives no nugget, and the range still serves
+  `reliability`.  Whatever its source, the noise variance is now held to the
+  semivariance of nearest-neighbour pairs the variogram carries
+  (`attr(sac, "short_lag_semivariance")`), which bounds a nugget from above:
+  a nugget or a residual mean square above it is replaced by it.
+  `attr(, "cp_noise")$source` names the source used, `"short-lag
+  semivariance"` among them, and under the hold the record adds `cap`, the
+  semivariance, and `uncapped`, the source, value and level it replaced; the
+  print's `variogram` line says which.  The `cp` column, its value at one cell and
+  Cp's count change wherever either applies.  A profile on a ladder of
+  sizes under `sac = "auto"` fits no variogram and is unchanged.
+
+* **The two variogram warnings of `resolution_profile()` had no class.**
+  The warning that the variogram gives no usable range now has class
+  `spatialkit_variogram_unusable` (fields `reason`, `converged`, `nugget`,
+  `nugget_used`), and the warning on where Cp's noise variance came from
+  has class `spatialkit_cp_noise` (fields `source`, `value`, `level`, `cap`,
+  `uncapped_source`, `uncapped_value`), so a script can catch each by its
+  class.  The warning that the nugget is 0 is no longer raised, since Cp
+  does not take such a nugget: `spatialkit_cp_noise` says where its noise
+  variance came from instead.  Points dropped and a variogram of another
+  variable are still warned about without a class.
+
+* **A count chosen by `cp` carried no record of how it was set.**  On a
+  profile without an estimate (one with `predictor_vars` or a logical
+  response, or one built with `estimate = NULL`), `select_resolution(criterion
+  = "cp")` returned no `count_rule`, so `summarize_by_cell(estimate =
+  "pooled")`, the default, pooled on cells whose count was chosen for plain
+  means and said nothing.  A cp selection now carries the record
+  (`estimate = "mean"`, no `scored` list), and so do its seeds, the cells
+  built on them and the assigned layer, and a summary of pooled values on
+  them raises `spatialkit_estimate_mismatch`.  The selection gains
+  `count_rule` and nothing else.  A profile without an estimate passed
+  straight as the count is read by `cp` and carries it too.  Selections by
+  `reliability`, `elbow` and `moran_z` off such a profile still carry none.
+
+* **The seeds of a profile without an estimate fitted to a subsample were
+  the subsample's centres.**  On a ladder of counts the centres are fitted
+  to `sample_n` (1,500) points, and `select_resolution()` handed the chosen
+  level's centres on as they were, so on a larger layer the cells built on
+  them were fitted to a few rows each, far from the cells a fit to every
+  point gives (their within-cell sum of squares over every point is
+  higher).  Such a profile now keeps every point's coordinates
+  (`attr(, "refit_rows")`), and `select_resolution()` refits the level it
+  chooses to every point before its seeds are handed on: the kind's own
+  iteration (Hartigan and Wong's for `"kmeans"`, Lloyd's on every point's
+  density weights for `"density"`) from the centres scored, with the
+  profile's iteration limit and no random draw; where Hartigan and Wong's
+  algorithm refuses the centres, Lloyd's iteration with every weight one
+  runs in its place, with a log line.  The seeds carry
+  `attr(, "refit")` (`rows`, `subsample`, `kind`, `iter`, `iter_max`,
+  `converged`, `wss_scored`, `wss`), the seeding functions hand them on, and
+  the selection's print says so.  The count is still the one the subsample
+  gave, and the cells are not the ones scored: the record on the seeds says
+  `scored_cells = FALSE`.  The refit costs one fit of that level to every
+  point; `summary()` and `plot()` of a profile, and `build_tessellation()`
+  given a profile as the count of a lattice, refit nothing, and a refit that
+  would pass the work limits of a profile's own fits is not run (a logged
+  warning says so), and a profile saved by an earlier version, which keeps
+  no coordinates, is not refitted (a log line says so).  The centres the
+  profile scored are `attr(profile, "centres")[[as.character(sel$best)]]`.
+  A profile with an estimate is not refitted: it scores the estimate on every
+  row of the layer in the cells of the centres fitted to the subsample, so
+  those centres are its seeds, and `summarize_by_cell()` checks the cells
+  built on them against its record.
+
+* **The print of a profile fitted to a subsample called density cells
+  "k-means fitted to a subsample".**  The header now names the kind:
+  "density-weighted k-means fitted to a subsample of 1500" for the density
+  kind, the default, and "k-means fitted to a subsample of 1500" for
+  `partition = "kmeans"`.
 
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
@@ -3644,6 +3759,11 @@ old behaviour where there is a way.
 * `?resolution_profile` describes `cp` as the error of re-measuring the
   sampled sites.  It no longer says `cp` estimates the error of predicting a
   new observation by its cell's mean.  The numbers are unchanged.
+
+* `?resolution_profile` says under `sample_n` that the fits of a ladder of
+  counts on more than `sample_n` points are those of the subsample, which
+  `seed` draws, so the count read off such a profile can move with `seed`
+  and with `sample_n`.
 
 * `?summarize_by_cell` says what `..se_*` and `..ci_*` cover at each `deff`:
   at the default `deff = 1`, the cell's own mean, when its observations are

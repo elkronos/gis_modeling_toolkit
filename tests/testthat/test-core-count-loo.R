@@ -146,17 +146,25 @@
 # the call without is in the call with, identical; every condition of the
 # call without is raised again, same class and text, same order; and what the
 # estimate adds is five columns, one attribute and conditions of `extra`.
+# One attribute goes: the call without an estimate fitted to a subsample
+# keeps every point's coordinates (`refit_rows`) for select_resolution() to
+# refit the chosen level, and the call with one, scored on every row in the
+# cells of the centres fitted, keeps none (BUG-02).
 .co_expect_unchanged <- function(call, what, extra = character(0)) {
   base <- .co_catch(call(NULL))
   cols <- names(base$value)
   at   <- attributes(base$value)
+  sub  <- attr(base$value, "bounds")$n_sample < attr(base$value, "bounds")$n
+  expect_identical(!is.null(at$refit_rows), sub, info = what)
   for (est in c("pooled", "mean")) {
     info <- paste(what, est)
     r <- .co_catch(call(est))
     expect_identical(names(r$value), c(cols, .co_new), info = info)
     for (col in cols) expect_identical(r$value[[col]], base$value[[col]], info = paste(info, col))
     expect_identical(setdiff(names(attributes(r$value)), names(at)), "estimate", info = info)
-    for (a in setdiff(names(at), "names"))
+    expect_identical(setdiff(names(at), names(attributes(r$value))),
+                     if (sub) "refit_rows" else character(0), info = info)
+    for (a in setdiff(names(at), c("names", "refit_rows")))
       expect_identical(attr(r$value, a, exact = TRUE), at[[a]], info = paste(info, a))
     added <- .co_classes(r) %in% extra
     expect_identical(.co_classes(r)[!added], .co_classes(base), info = info)

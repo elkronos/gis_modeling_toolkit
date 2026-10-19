@@ -48,13 +48,30 @@ cpn_warnings <- function(expr) {
   list(value = val, warnings = w)
 }
 
+# The residual mean square of the finest level Cp read, as attr(, "cp_noise")
+# records it: the noise variance itself, or the number the semivariance of
+# nearest-neighbour pairs held when that is smaller (`uncapped`).
+cpn_finest <- function(p) {
+  cn <- attr(p, "cp_noise")
+  if (identical(cn$source, "short-lag semivariance")) cn$uncapped else cn
+}
+
 # Cp took Mallows' noise variance from the finest level, and nothing from the
-# variogram: no nugget, no reliability, no variogram record.
+# variogram: no nugget, no reliability, no variogram record.  Since BUG-02 the
+# noise variance is held to the semivariance of nearest-neighbour pairs the
+# sac carries, so it is that residual mean square, or that semivariance
+# where it is the smaller.
 expect_cp_from_finest_level <- function(p) {
   cn <- attr(p, "cp_noise")
-  expect_identical(cn$source, "finest-level residual mean square")
-  expect_true(is.finite(cn$value) && cn$value > 0)
-  expect_true(cn$level %in% p$levels)
+  rms <- cpn_finest(p)
+  expect_identical(rms$source, "finest-level residual mean square")
+  expect_true(is.finite(rms$value) && rms$value > 0)
+  expect_true(rms$level %in% p$levels)
+  if (!identical(cn$source, "finest-level residual mean square")) {
+    expect_identical(cn$source, "short-lag semivariance")
+    expect_identical(cn$value, attr(attr(p, "sac"), "short_lag_semivariance"))
+    expect_lt(cn$value, rms$value)
+  }
   expect_true(all(is.finite(p$cp)))
   expect_true(all(is.na(p$reliability)))
   expect_null(attr(p, "variogram"))
@@ -258,8 +275,9 @@ test_that("a fit that did not converge, refused as past the lags, gives cp no nu
   # With no subsample and every row scored, Cp is Mallows' RSS / n + 2 s2 L / n
   # with s2 the residual mean square of the level it was read at.
   cn <- attr(p, "cp_noise"); n <- nrow(pts)
-  j <- which(p$levels == cn$level)
-  expect_equal(cn$value, p$rss[j] / (n - cn$level))
+  rms <- cpn_finest(p)
+  j <- which(p$levels == rms$level)
+  expect_equal(rms$value, p$rss[j] / (n - rms$level))
   expect_equal(p$cp, p$rss / n + cn$value * 2 * p$levels / n)
   # The warning names both facts: why the range was refused, and that the
   # fit did not converge.

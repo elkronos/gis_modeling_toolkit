@@ -41,6 +41,14 @@ fvc_warnings <- function(expr) {
        classes = lapply(w, class))
 }
 
+# Where Cp's noise variance came from: the residual mean square of the
+# finest level, the nugget, or, when the semivariance of nearest-neighbour
+# pairs held either (BUG-02), the one it held (attr(, "cp_noise")$uncapped).
+fvc_finest <- function(p) {
+  cn <- attr(p, "cp_noise")
+  if (identical(cn$source, "short-lag semivariance")) cn$uncapped else cn
+}
+
 test_that("the object keeps its class, its value and the attributes callers read", {
   skip_if_not_installed("gstat")
   s <- fvc_setup()
@@ -98,16 +106,18 @@ test_that("resolution_profile() takes no nugget from a layer with no structure",
   no <- suppressWarnings(estimate_sac_range(s$pts, "noise"))
   res <- fvc_warnings(resolution_profile(s$pts, "noise", sac = no, n_levels = 4, nstart = 2))
   p <- res$value
-  # Cp's noise variance is Mallows' own, read at the finest level, and there
-  # is no reliability curve: the pure-nugget model has no correlation to give.
-  expect_identical(attr(p, "cp_noise")$source, "finest-level residual mean square")
+  # Cp's noise variance is Mallows' own, read at the finest level (held to
+  # the semivariance of nearest-neighbour pairs where that is smaller, since
+  # BUG-02), and there is no reliability curve: the pure-nugget model has no
+  # correlation to give.
+  expect_identical(fvc_finest(p)$source, "finest-level residual mean square")
   expect_true(all(is.finite(p$cp)))
   expect_true(all(is.na(p$reliability)))
   expect_false(any(grepl("nugget is 0", res$messages, fixed = TRUE)))
   # The same when the profile estimates the variogram itself.
   p2 <- suppressWarnings(resolution_profile(s$pts, "noise", n_levels = 4, nstart = 2))
   expect_identical(attr(attr(p2, "sac"), "rejected_reason"), NO_STRUCTURE_REASON)
-  expect_identical(attr(p2, "cp_noise")$source, "finest-level residual mean square")
+  expect_identical(fvc_finest(p2)$source, "finest-level residual mean square")
   # And with an accepted range the nugget is read from the model, as before.
   ok <- estimate_sac_range(s$pts, "z")
   p3 <- suppressWarnings(resolution_profile(s$pts, "z", sac = ok, n_levels = 4, nstart = 2))
@@ -139,7 +149,7 @@ test_that("a fit with a minimum, refused as past the lags, still gives cp its nu
   expect_identical(attr(attr(sac2, "variogram_model"), "converged", exact = TRUE), FALSE)
   expect_equal(attr(sac2, "rejected_range"), 4 * attr(sac2, "cutoff_dist"))
   res2 <- fvc_warnings(resolution_profile(tr, "t", sac = sac2, n_levels = 4, nstart = 2))
-  expect_identical(attr(res2$value, "cp_noise")$source, "finest-level residual mean square")
+  expect_identical(fvc_finest(res2$value)$source, "finest-level residual mean square")
   expect_false(any(grepl("still takes its nugget", res2$messages, fixed = TRUE)))
 })
 

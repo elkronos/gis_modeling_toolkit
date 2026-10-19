@@ -971,7 +971,11 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' [get_voronoi_seeds()] or [voronoi_seeds_kmeans()] return for one, are the
 #' centres [resolution_profile()] scored, and their record of the count
 #' (`attr(, "count_rule")`) says so (`scored_cells = TRUE`) and holds the
-#' centres in the CRS the profile worked in. Unless a projected `crs` is
+#' centres in the CRS the profile worked in. (On a profile without an
+#' estimate fitted to a subsample the seeds are those centres refitted to
+#' every point, which carry `attr(, "refit")`; their record says
+#' `scored_cells = FALSE`, and their cells are built as other seeds' are.)
+#' Unless a projected `crs` is
 #' given, their cells are built in that CRS, whatever CRS the seeds arrive
 #' in (degrees, or the CRS of a boundary they were placed in), and returned
 #' in it, or in a geographic `crs` when one is given. When the seeds are
@@ -1791,7 +1795,9 @@ create_grid_polygons <- function(
 #'   \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 #'   given the \code{select_resolution()} result or the profile itself, it
 #'   returns the centres of the partition the profile scored, whose Voronoi
-#'   cells are the cells the criteria judged.  Seeds made that way carry the
+#'   cells are the cells the criteria judged (refitted to every point when
+#'   the profile, without an estimate, was fitted to a subsample).  Seeds
+#'   made that way carry the
 #'   hull of \code{sample_points} as their cover, so the cells built on them
 #'   hold every point; made with neither \code{sample_points} nor a boundary,
 #'   they carry the hull of the points the profile was computed on.
@@ -1977,7 +1983,10 @@ build_tessellation <- function(
 
   # The level-selection step's own answer is accepted here, so the count
   # need not be carried between the two calls by hand.
-  n_cells <- .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation")
+  # Only the count is read here, never the seeds, so a selection off a
+  # profile fitted to a subsample refits nothing (.without_refit()).
+  n_cells <- .without_refit(
+    .resolve_cell_count(approx_n_cells, "approx_n_cells", "build_tessellation"))
   approx_n_cells      <- if (is.null(n_cells)) NULL else n_cells$n
   approx_n_cells_from <- if (is.null(n_cells)) NULL else n_cells$from
 

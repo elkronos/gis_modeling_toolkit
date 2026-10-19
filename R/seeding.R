@@ -82,7 +82,11 @@
 #'   centres of the partition the profile scored at that count, and those
 #'   are returned instead of a new k-means: a k-means partition, weighted or
 #'   not, is the Voronoi partition of its centres, so their cells are the
-#'   cells the criteria judged. `sample_points`, when given, is then only
+#'   cells the criteria judged. On a profile without an estimate whose
+#'   centres were fitted to a subsample, [select_resolution()] refits them
+#'   to every point first, and those centres are returned, with
+#'   `attr(, "refit")`: their cells are near the cells judged but not the
+#'   same. `sample_points`, when given, is then only
 #'   assigned to them (for `attr(, "kmeans")`) and gives the cover, and
 #'   `boundary` only
 #'   sets the CRS and the cover (see "Details");
@@ -193,10 +197,12 @@
 #'   of the clustered points, in its own CRS.
 #'
 #'   When `n` is a [select_resolution()] result that carries `count_rule`,
-#'   or a profile built with an `estimate`, the seeds carry that record as
+#'   or a profile built with an `estimate` or read by `cp`, the seeds carry
+#'   that record as
 #'   `attr(, "count_rule")`: how the count was set, for which cell value, and
 #'   what the profile scored at it. Its `scored_cells` is `TRUE` for the
-#'   scored centres `method = "kmeans"` hands on, and `FALSE` for seeds this
+#'   scored centres `method = "kmeans"` hands on, and `FALSE` for centres
+#'   refitted to every point (see `n`) and for seeds this
 #'   call places itself at that count: a k-means of its own when the
 #'   selection holds no centres at the count, and every `method = "random"`
 #'   seeding. `method = "provided"` does not read `n` and writes no record;
@@ -326,11 +332,13 @@ get_voronoi_seeds <- function(boundary = NULL,
                              cover = scored_cover, count_rule = n_res$count_rule)
     cov <- attr(out, "cover", exact = TRUE)
     rec <- attr(out, "partition", exact = TRUE)
+    refit <- attr(out, "refit", exact = TRUE)
     rule <- .count_rule_get(out)
     out <- .align_crs(out, boundary)
     # Kept across the CRS alignment whatever sf does with custom attributes.
     attr(out, "cover") <- cov
     if (!is.null(rec)) attr(out, "partition") <- rec
+    if (!is.null(refit)) attr(out, "refit") <- refit
     attr(out, "n_from") <- n_from
     return(.count_rule_put(out, rule))
   }
@@ -640,6 +648,9 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' [select_resolution()] result or the profile itself as `k` to get the
 #' scored one: the centres of the scored partition are then returned (in
 #' the CRS of `points_sf`, with `attr(, "n_from")`), and no k-means is run.
+#' On a profile without an estimate whose centres were fitted to a
+#' subsample, they are those centres refitted to every point by
+#' [select_resolution()], with `attr(, "refit")`.
 #'
 #' `partition` says what the seeds minimise. `"kmeans"` is the sum of
 #' squared distances from the points to their nearest seed, from `nstart`
@@ -757,10 +768,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   placed them, or the scored centres of a k-means profile from k-means++
 #'   starts. When `k` is a
 #'   [select_resolution()] result that carries `count_rule`, or a profile
-#'   built with an `estimate`, the seeds carry that record as
+#'   built with an `estimate` or read by `cp`, the seeds carry that record as
 #'   `attr(, "count_rule")`, with `scored_cells` `TRUE` for the scored
-#'   centres and `FALSE` for centres this call fits itself at that count
-#'   (see [get_voronoi_seeds()]).
+#'   centres and `FALSE` for refitted centres and for centres this call fits
+#'   itself at that count (see [get_voronoi_seeds()]).
 #' @family tessellation
 #' @examples
 #' library(sf)
@@ -1024,7 +1035,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #' \code{resolution_profile()} keeps, for every level, the centres of the
 #' best-of-\code{nstart} k-means++ partition its criteria were computed on.
 #' A k-means partition is the Voronoi partition of its centres, so these are
-#' the seeds of exactly the cells that were scored.
+#' the seeds of exactly the cells that were scored.  On a profile without an
+#' estimate fitted to a subsample, \code{select_resolution()} refits the
+#' chosen level to every point first (\code{attr(seeds, "refit")}), and the
+#' seeds are then those centres, whose cells are not the cells scored.
 #'
 #' @param seeds The centres, from \code{.resolve_cell_count()}'s \code{seeds}
 #'   (an sf POINT layer in the profile's projected CRS, with
@@ -1044,20 +1058,32 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
 #'   count that has none.
 #' @return An sf POINT layer with \code{seed_id} and \code{method = "kmeans"}
 #'   columns, \code{attr(, "kmeans")} when \code{cloud} is given,
-#'   \code{attr(, "cover")} when a cover is known, and
-#'   \code{attr(, "count_rule")}, marked \code{scored_cells = TRUE}, when
-#'   \code{count_rule} is a record: these are the centres the profile scored.
+#'   \code{attr(, "cover")} when a cover is known, \code{attr(, "refit")}
+#'   when the centres were refitted to every point, and
+#'   \code{attr(, "count_rule")} when \code{count_rule} is a record, marked
+#'   \code{scored_cells = TRUE} when these are the centres the profile scored
+#'   and \code{FALSE} when they were refitted.
 #' @keywords internal
 #' @noRd
 .use_scored_seeds <- function(seeds, like, cloud, caller, cover = NULL, count_rule = NULL) {
   nstart <- attr(seeds, "nstart", exact = TRUE)
   # The kind that built the scored partition, when the profile recorded one.
   rec <- attr(seeds, "partition", exact = TRUE)
+  # The centres refitted to every point, when the profile was fitted to a
+  # subsample (select_resolution()).
+  refit <- attr(seeds, "refit", exact = TRUE)
   if (is.null(cover)) cover <- attr(seeds, "cover", exact = TRUE)
   moved  <- .seeds_in_crs_of(seeds, like)
   out <- sf::st_sf(seed_id = seq_len(nrow(moved)), method = "kmeans",
                    geometry = sf::st_geometry(moved))
-  if (is.null(rec))
+  if (!is.null(refit))
+    .log_info(paste0("%s(): returning the %d centres of the partition resolution_profile() ",
+                     "scored at that count on a subsample of %d points, refitted to all %d ",
+                     "points by select_resolution(), rather than running a new fit; their ",
+                     "Voronoi cells are near the cells the criteria judged but not the same. ",
+                     "Pass the count as a number for a fresh fit."),
+              caller, nrow(out), as.integer(refit$subsample), as.integer(refit$rows))
+  else if (is.null(rec))
     .log_info(paste0("%s(): returning the %d centres of the partition resolution_profile() ",
                      "scored at that count (the best of %s k-means++ restarts) rather than ",
                      "running a new k-means, so their Voronoi cells are the cells the ",
@@ -1071,9 +1097,12 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
               caller, nrow(out), rec$kind, .partition_label(rec, nstart))
   if (!is.null(cloud)) attr(out, "kmeans") <- .scored_seeds_record(cloud, seeds, nstart)
   if (!is.null(rec)) attr(out, "partition") <- rec
+  if (!is.null(refit)) attr(out, "refit") <- refit
   # These are the centres the profile scored at the count, so their Voronoi
-  # cells are the cells its numbers describe, and the record says so.
-  out <- .count_rule_put(out, count_rule, scored_cells = TRUE)
+  # cells are the cells its numbers describe, and the record says so; or the
+  # centres refitted to every point, which are other cells built from the
+  # count.
+  out <- .count_rule_put(out, count_rule, scored_cells = is.null(refit))
   # The centres lie inside the points they were fitted to; their cells have
   # to reach the points' own hull, not the centres'.
   .set_cover(out, cover)

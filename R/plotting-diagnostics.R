@@ -771,7 +771,8 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
     rows[[cn]] <- data.frame(panel = labels[[cn]], x = lv[ok], y = v[ok],
                              stringsAsFactors = FALSE)
     if (cn %in% selectable && !one_size) {
-      sel <- try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE)
+      # The level alone is drawn, so no seeds are refitted (.without_refit()).
+      sel <- .without_refit(try(select_resolution(x, criterion = cn, tol = tol), silent = TRUE))
       if (!inherits(sel, "try-error")) {
         chosen[[cn]] <- data.frame(panel = labels[[cn]], x = sel$best,
                                    y = v[match(sel$best, lv)], stringsAsFactors = FALSE)

@@ -547,7 +547,11 @@ tessellation that is `get_voronoi_seeds()`. Given the `select_resolution()`
 result itself, it returns the centres of the partition the profile scored, and a
 k-means partition, weighted or not, is the Voronoi partition of its centres, so
 the cells built on those seeds are the cells the criteria judged; the bare
-count `sel$best` would run a new k-means, whose cells are not. This selection
+count `sel$best` would run a new k-means, whose cells are not. (A profile
+without an estimate that fitted its centres to a subsample, on a layer larger
+than `sample_n`, has its chosen level refitted to every point first, and those
+centres are returned; their cells are then not the cells the criteria judged.)
+This selection
 sits on the range floor, so the call warns that a bound chose the count (class
 `spatialkit_bound_chosen`; warnings are not shown in this article).
 `build_tessellation()` then works on the seeds:

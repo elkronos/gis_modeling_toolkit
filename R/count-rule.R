@@ -3,11 +3,12 @@
 # The record of how a cell count was set
 # -----------------------------------------------------------------------------
 # select_resolution() writes one list, `count_rule`, when the count is set on
-# the path that names an estimate: the profile carries one, or the criterion
-# is "size" or "loo".  It says which rule set the count, for which estimate,
-# and what the profile scored at that count.  A selection from a profile
-# without an estimate by "cp", "reliability", "elbow" or "moran_z" carries
-# none, and neither does a count given as a number.
+# the path that names an estimate (the profile carries one, or the criterion
+# is "size" or "loo") and when it is set by "cp", which scores plain means.
+# It says which rule set the count, for which estimate, and what the profile
+# scored at that count.  A selection from a profile without an estimate by
+# "reliability", "elbow" or "moran_z" carries none, and neither does a count
+# given as a number.
 #
 # The record travels as the attribute "count_rule": from the selection's
 # seeds to the seeds a seeding function returns, to the cells built on them

@@ -90,7 +90,11 @@ test_that("every caller acts on the no-structure verdict, and none treats it as 
   rp <- fic_conditions(resolution_profile(s$pts, "noise", sac = no, n_levels = 4, nstart = 2,
                                           estimate = NULL, obs_per_cell = NULL,
                                           partition = "kmeans"))
-  expect_identical(attr(rp$value, "cp_noise")$source, "finest-level residual mean square")
+  # The residual mean square of the finest level, or the semivariance of
+  # nearest-neighbour pairs that holds it (BUG-02): never the nugget.
+  cn <- attr(rp$value, "cp_noise")
+  expect_identical(if (identical(cn$source, "short-lag semivariance")) cn$uncapped$source
+                   else cn$source, "finest-level residual mean square")
   expect_false(any(grepl("not a fitted value|optimiser|did not converge", rp$messages)))
   sel <- suppressWarnings(select_resolution(rp$value, criterion = "cp"))
   expect_false(sel$structured)

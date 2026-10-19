@@ -178,7 +178,11 @@ The seeds of a \code{\link[=select_resolution]{select_resolution()}} result, and
 \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} return for one, are the
 centres \code{\link[=resolution_profile]{resolution_profile()}} scored, and their record of the count
 (\code{attr(, "count_rule")}) says so (\code{scored_cells = TRUE}) and holds the
-centres in the CRS the profile worked in. Unless a projected \code{crs} is
+centres in the CRS the profile worked in. (On a profile without an
+estimate fitted to a subsample the seeds are those centres refitted to
+every point, which carry \code{attr(, "refit")}; their record says
+\code{scored_cells = FALSE}, and their cells are built as other seeds' are.)
+Unless a projected \code{crs} is
 given, their cells are built in that CRS, whatever CRS the seeds arrive
 in (degrees, or the CRS of a boundary they were placed in), and returned
 in it, or in a geographic \code{crs} when one is given. When the seeds are

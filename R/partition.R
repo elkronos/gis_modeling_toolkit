@@ -756,6 +756,11 @@
 #' @param init \code{"kmeans++"} or \code{"random"}.
 #' @param nstart,iter.max Starts, and Lloyd steps per start.
 #' @param use_fnn Whether to use \pkg{FNN}.
+#' @param centers Optional \code{k x 2} matrix of starting centres, in the
+#'   units of \code{xy}.  Given, it is the one start: \code{k} is its number
+#'   of rows, \code{init} and \code{nstart} are not read, and no random
+#'   number is drawn.  \code{select_resolution()} refits a level of a
+#'   profile fitted to a subsample this way, from the centres scored.
 #' @return As \code{.partition_centres()}, with \code{km} \code{NULL} and
 #'   two further elements: \code{weights} (the weight of each row of
 #'   \code{xy}) and \code{converged} (whether the best start stopped before
@@ -765,11 +770,18 @@
 #' @noRd
 .density_kmeans <- function(xy, k, power = 1, k_nn = 8L, init = "kmeans++",
                             nstart = 3L, iter.max = 50L,
-                            use_fnn = requireNamespace("FNN", quietly = TRUE)) {
+                            use_fnn = requireNamespace("FNN", quietly = TRUE),
+                            centers = NULL) {
   xy <- unname(as.matrix(xy)[, 1:2, drop = FALSE])
   storage.mode(xy) <- "double"
   if (!all(is.finite(xy)))
     stop(".density_kmeans(): non-finite coordinates.", call. = FALSE)
+  if (!is.null(centers)) {
+    centers <- unname(as.matrix(centers)[, 1:2, drop = FALSE])
+    if (!all(is.finite(centers)))
+      stop(".density_kmeans(): non-finite starting centres.", call. = FALSE)
+    k <- nrow(centers); nstart <- 1L
+  }
   n <- nrow(xy); k <- as.integer(k)
   loc <- .partition_locations(xy)
   n_u <- nrow(loc$u)
@@ -804,8 +816,14 @@
   best <- NULL
   objs <- rep(NA_real_, nstart)
   for (r in seq_len(nstart)) {
-    start <- if (identical(init, "random")) sample.int(n_u, k) else .wkmeanspp(zx, zy, W, k)
-    cx <- zx[start]; cy <- zy[start]
+    if (is.null(centers)) {
+      start <- if (identical(init, "random")) sample.int(n_u, k) else .wkmeanspp(zx, zy, W, k)
+      cx <- zx[start]; cy <- zy[start]
+    } else {
+      # The centres given, in the same centred and scaled units.
+      cx <- (centers[, 1L] - mid[1L]) / extent
+      cy <- (centers[, 2L] - mid[2L]) / extent
+    }
     it <- 0L; moved <- Inf
     while (it < iter.max) {
       it <- it + 1L

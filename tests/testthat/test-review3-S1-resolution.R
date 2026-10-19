@@ -248,7 +248,10 @@ test_that("a nugget next to zero is warned about like a nugget of zero", {
   pts <- r3_pts(200)
   out <- r3_warnings(resolution_profile(pts, "z", sac = r3_sac(300, nugget = 6e-7, psill = 0.99),
                                         n_levels = 4, nstart = 2))
-  expect_true(any(grepl("nugget is 0 \\(6e-07 against a sill of 0.99\\)", out$warnings)))
+  # Not taken by Cp, as a nugget of zero is not (BUG-02).
+  expect_true(any(grepl("nugget (6e-07 against a sill of 0.99) is at the fit's lower bound",
+                        out$warnings, fixed = TRUE)))
+  expect_false(identical(attr(out$value, "cp_noise")$source, "variogram nugget"))
   # A nugget that is a real share of the sill raises nothing.
   expect_length(r3_warnings(resolution_profile(pts, "z", sac = r3_sac(300, nugget = 0.01),
                                                n_levels = 4, nstart = 2))$warnings, 0L)

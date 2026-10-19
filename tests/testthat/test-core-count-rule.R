@@ -102,7 +102,7 @@
 
 # ---- Where no record is written ------------------------------------------------
 
-test_that("a count given as a number, or read by a present criterion off a profile without an estimate, carries no record", {
+test_that("a count given as a number, or read by a diagnostic off a profile without an estimate, carries no record; one read by cp carries cp's", {
   pts <- .cr_600()
   bare <- function(x) is.null(attr(x, "count_rule"))
   none <- function(P) {
@@ -125,20 +125,50 @@ test_that("a count given as a number, or read by a present criterion off a profi
                             quiet = TRUE)
   expect_false("count_rule" %in% names(hex$params))
   expect_true(bare(hex$cells))
-  # A profile as it is built without the new arguments, read by cp: as a
-  # selection, and as the count itself.
+  # A profile as it is built without the new arguments.
   plain <- suppressWarnings(
     .cr_profile(pts, n_levels = 6L, partition = "kmeans", nstart = 5, sac = 3e4,
                 estimate = NULL, obs_per_cell = NULL))
-  sel <- select_resolution(plain, criterion = "cp")
-  expect_null(sel$count_rule)
-  none(suppressWarnings(.cr_cells(pts, sel)))
-  none(suppressWarnings(.cr_cells(pts, plain)))
-  expect_true(bare(suppressWarnings(voronoi_seeds_kmeans(pts, sel))))
+  # Read by the diagnostic moran_z, which writes no record: as a selection.
+  z <- suppressWarnings(select_resolution(plain, criterion = "moran_z", diagnostic = TRUE))
+  expect_null(z$count_rule)
+  none(suppressWarnings(.cr_cells(pts, z)))
+  expect_true(bare(suppressWarnings(voronoi_seeds_kmeans(pts, z))))
   hex <- suppressWarnings(build_tessellation(pts, boundary = .cr_bnd(pts), method = "hex",
-                                             approx_n_cells = sel, quiet = TRUE))
+                                             approx_n_cells = z, quiet = TRUE))
   expect_false("count_rule" %in% names(hex$params))
   expect_true(bare(hex$cells))
+  # Read by cp, as a selection and as the count itself, the count carries a
+  # record: cp scores plain means, so a summary of pooled values on its cells
+  # says the count was chosen for others.  It used to carry none, and pooled
+  # values went unremarked (BUG-02).
+  sel <- select_resolution(plain, criterion = "cp")
+  rec <- sel$count_rule
+  expect_identical(rec$rule, "cp")
+  expect_identical(rec$estimate, "mean")
+  expect_null(rec$scored)
+  on_seeds <- rec; on_seeds$scored_cells <- TRUE
+  cp_record <- function(P) {
+    expect_identical(attr(P$seeds, "count_rule"), on_seeds)
+    expect_identical(P$tess$params$count_rule, on_seeds)
+    expect_identical(attr(P$tess$cells, "count_rule"), on_seeds)
+    expect_identical(attr(P$asg, "count_rule"), on_seeds)
+    r <- suppressWarnings(.cr_sum(P$asg, P$tess$cells, "mean"))
+    expect_identical(.cr_check(r), list(estimate = "match",
+                                        cells = "not checked: the profile scored no estimate"))
+    r <- .cr_sum(P$asg, P$tess$cells, "pooled")
+    expect_identical(.cr_check(r)$estimate, "mismatch")
+    expect_length(.cr_of(r, "spatialkit_estimate_mismatch"), 1L)
+    expect_length(.cr_of(r, "spatialkit_cells_differ"), 0L)
+  }
+  cp_record(suppressWarnings(.cr_cells(pts, sel)))
+  cp_record(suppressWarnings(.cr_cells(pts, plain)))
+  expect_identical(attr(suppressWarnings(voronoi_seeds_kmeans(pts, sel)), "count_rule"), on_seeds)
+  hex <- suppressWarnings(build_tessellation(pts, boundary = .cr_bnd(pts), method = "hex",
+                                             approx_n_cells = sel, quiet = TRUE))
+  off_seeds <- rec; off_seeds$scored_cells <- FALSE
+  expect_identical(hex$params$count_rule, off_seeds)
+  expect_identical(attr(hex$cells, "count_rule"), off_seeds)
 })
 
 test_that("cells the caller brings have no record and are not checked", {

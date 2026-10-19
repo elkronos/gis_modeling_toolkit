@@ -89,7 +89,9 @@ seed a Voronoi tessellation with
 \code{get_voronoi_seeds(method = "kmeans", n = <the selection>, sample_points = <the points>)}:
 given the \code{select_resolution()} result or the profile itself, it
 returns the centres of the partition the profile scored, whose Voronoi
-cells are the cells the criteria judged.  Seeds made that way carry the
+cells are the cells the criteria judged (refitted to every point when
+the profile, without an estimate, was fitted to a subsample).  Seeds
+made that way carry the
 hull of \code{sample_points} as their cover, so the cells built on them
 hold every point; made with neither \code{sample_points} nor a boundary,
 they carry the hull of the points the profile was computed on.}

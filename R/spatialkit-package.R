@@ -79,8 +79,17 @@
 #' returned before the argument existed.  \code{estimate = NULL,
 #' obs_per_cell = NULL} in the profile gives the earlier ladder and its
 #' columns, and with \code{partition = "kmeans"} the earlier regions as
-#' well: the profile it returned before.  The seeding functions take
-#' \code{partition = "kmeans"} for their earlier seeds.
+#' well: the profile it returned before, with two exceptions.  \eqn{C_p}'s
+#' noise variance is no longer a nugget at the variogram fit's lower bound,
+#' and it is held to the semivariance of nearest-neighbour pairs, so
+#' \code{cp} and the count it chooses differ wherever either applies, and
+#' nothing gives the earlier noise variance back.  And on a layer of more
+#' than \code{sample_n} points the level \code{\link{select_resolution}()}
+#' chooses off such a profile is refitted to every point before its seeds
+#' are handed on; the centres the profile scored are
+#' \code{attr(profile, "centres")[[as.character(sel$best)]]}.  Given a
+#' number of cells, the seeding functions take \code{partition = "kmeans"}
+#' for their earlier seeds.
 #'
 #' Supporting these throughout, \code{\link{ensure_projected}()} and
 #' \code{\link{coerce_to_points}()} handle coordinate reference systems and

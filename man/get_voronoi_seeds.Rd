@@ -70,7 +70,11 @@ With \code{method = "kmeans"}, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those
 are returned instead of a new k-means: a k-means partition, weighted or
 not, is the Voronoi partition of its centres, so their cells are the
-cells the criteria judged. \code{sample_points}, when given, is then only
+cells the criteria judged. On a profile without an estimate whose
+centres were fitted to a subsample, \code{\link[=select_resolution]{select_resolution()}} refits them
+to every point first, and those centres are returned, with
+\code{attr(, "refit")}: their cells are near the cells judged but not the
+same. \code{sample_points}, when given, is then only
 assigned to them (for \code{attr(, "kmeans")}) and gives the cover, and
 \code{boundary} only
 sets the CRS and the cover (see "Details");
@@ -186,10 +190,12 @@ for (see "Details"): an sfc holding the boundary's polygons or the hull
 of the clustered points, in its own CRS.
 
 When \code{n} is a \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule},
-or a profile built with an \code{estimate}, the seeds carry that record as
+or a profile built with an \code{estimate} or read by \code{cp}, the seeds carry
+that record as
 \code{attr(, "count_rule")}: how the count was set, for which cell value, and
 what the profile scored at it. Its \code{scored_cells} is \code{TRUE} for the
-scored centres \code{method = "kmeans"} hands on, and \code{FALSE} for seeds this
+scored centres \code{method = "kmeans"} hands on, and \code{FALSE} for centres
+refitted to every point (see \code{n}) and for seeds this
 call places itself at that count: a k-means of its own when the
 selection holds no centres at the count, and every \code{method = "random"}
 seeding. \code{method = "provided"} does not read \code{n} and writes no record;

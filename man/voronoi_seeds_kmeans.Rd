@@ -107,10 +107,10 @@ with no such record are plain k-means: from random starts when this call
 placed them, or the scored centres of a k-means profile from k-means++
 starts. When \code{k} is a
 \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule}, or a profile
-built with an \code{estimate}, the seeds carry that record as
+built with an \code{estimate} or read by \code{cp}, the seeds carry that record as
 \code{attr(, "count_rule")}, with \code{scored_cells} \code{TRUE} for the scored
-centres and \code{FALSE} for centres this call fits itself at that count
-(see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).
+centres and \code{FALSE} for refitted centres and for centres this call fits
+itself at that count (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).
 }
 \description{
 Places \code{k} seed points at k-means cluster centres of the observed
@@ -142,6 +142,9 @@ subsample, and keep the best of their own starts. Pass the
 \code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to get the
 scored one: the centres of the scored partition are then returned (in
 the CRS of \code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
+On a profile without an estimate whose centres were fitted to a
+subsample, they are those centres refitted to every point by
+\code{\link[=select_resolution]{select_resolution()}}, with \code{attr(, "refit")}.
 
 \code{partition} says what the seeds minimise. \code{"kmeans"} is the sum of
 squared distances from the points to their nearest seed, from \code{nstart}

@@ -355,7 +355,11 @@ test_that("rows without a response lower a size's count and raise no warning abo
   for (sac in list("auto", NULL)) {
     r <- .cl_catch(.cl_profile(pts, obs_per_cell = c(9, 4.5), sac = sac))
     expect_false("spatialkit_response_ceiling" %in% .cl_classes(r))
-    expect_false(any(grepl("spatialkit_", .cl_classes(r))))
+    # No other classed warning but the two of the variogram, which carry
+    # classes since BUG-02 and come only when one is fitted (sac = NULL).
+    variogram <- c("spatialkit_variogram_unusable", "spatialkit_cp_noise")
+    expect_false(any(grepl("spatialkit_", setdiff(.cl_classes(r), variogram))))
+    if (identical(sac, "auto")) expect_false(any(grepl("spatialkit_", .cl_classes(r))))
     expect_identical(r$value$levels, c(50L, 100L))
     expect_identical(attr(r$value, "bounds")$n_response, 450L)
     expect_identical(attr(r$value, "bounds")$n_sample, 900L)

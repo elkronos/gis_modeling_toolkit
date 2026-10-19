@@ -79,7 +79,15 @@ columns read off the fitted cells (\code{wss}, the \code{cell_} and
 \code{cells_} columns, \code{rss}, \code{moran_i}, \code{moran_z})
 describe the subsample; the bounds, \code{supported}, the variance term
 of \code{cp} and \code{reliability} describe the whole layer, so the
-answer does not change with \code{sample_n} except through the fits.}
+answer does not change with \code{sample_n} except through the fits.
+The fits are those of the subsample, which \code{seed} draws, so on a
+layer of more than \code{sample_n} points the count read off the
+profile can move with \code{seed} and with \code{sample_n}.
+The level \code{\link{select_resolution}()} chooses off such a profile
+without an estimate is refitted to every point before its seeds are
+handed on (see \code{refit_rows} under "Value"); a profile with an
+estimate scores it on every row in the cells of the centres fitted, and
+hands those centres on.}
 
 \item{nstart}{Starts per level; the best is kept.  They are k-means++
 starts unless \code{init} says otherwise.  \code{NULL} (default) is the
@@ -103,7 +111,9 @@ warning.  Its range is read in its own CRS (\code{attr(sac, "crs")}),
 to which the points are transformed first, so the area, the floor and
 \code{cell_diam_median} are then in that CRS's units.  A sac whose
 range was rejected (\code{NA} with a \code{rejected_reason}) gives
-\code{cp} its nugget, with a warning, and leaves \code{reliability}
+\code{cp} its nugget (held to the semivariance of nearest-neighbour
+pairs, and not at all when it is at the fit's lower bound), with a
+warning, and leaves \code{reliability}
 \code{NA}, since that needs the range; one whose model did not converge
 (its fit has no minimum inside the ranges searched, so its nugget and
 sill are not fitted values), or whose range is below the shortest lag
@@ -306,10 +316,13 @@ say); \code{NULL} when none was usable), \code{variable} (\code{"response"},
   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 and \code{estimation}, integer row positions in \code{data_sf}, with
 the \code{method} and \code{seed} that made them), \code{cp_noise} (a
-list with \code{source}, \code{"variogram nugget"} or
-\code{"finest-level residual mean square"}, \code{value}, the
-\eqn{\tau^2} used, and \code{level}, the level it was read at or
-\code{NA}; \code{NULL} when \code{cp} has neither), \code{one_cell}
+list with \code{source}, \code{"variogram nugget"},
+\code{"finest-level residual mean square"} or \code{"short-lag
+  semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
+the level it was read at or \code{NA}; under the short-lag semivariance
+also \code{cap}, that semivariance, and \code{uncapped}, a list of the
+\code{source}, \code{value} and \code{level} it held; \code{NULL}
+when \code{cp} has none; see \code{cp} above), \code{one_cell}
 (what one cell for the whole layer scores, the reference a level has to
 beat: a list with \code{n}, the scored rows, \code{rss}, their total
 sum of squares, \code{cp}, the same formula at one cell or \code{NA}
@@ -323,12 +336,20 @@ without a response), \code{centres}
 (a list named by level of the two-column matrices of the scored
 partitions' centres), \code{centres_crs} (the CRS they are in) and
 \code{hull} (the convex hull of the points profiled, an \code{sfc} in
-that CRS).  A
+that CRS), and, when the centres were fitted to a subsample and the
+profile has no estimate, \code{refit_rows}: a list with \code{xy}, the
+coordinates of every point in that CRS, and \code{iter_max}, the
+iteration limit of the fits, from which
+\code{\link{select_resolution}()} refits the level it chooses to every
+point.  A
 k-means partition is the Voronoi partition of its centres, so these
 seed the very cells each level was scored on: \code{select_resolution()}
 returns the chosen level's as \code{$seeds}, and
 \code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
-use them when given the selection or the profile.  The centres carry the
+use them when given the selection or the profile.  On a profile fitted
+to a subsample without an estimate the seeds are the chosen level's
+centres refitted to every point, whose cells are not the cells scored
+(see \code{\link{select_resolution}}, "Value").  The centres carry the
 hull as their \code{"cover"} attribute, which those two functions hand on
 so that Voronoi cells built on the seeds reach the edge of the points.
 A profile built with \code{partition = "density"} or \code{init =
@@ -802,20 +823,31 @@ approximation keeps improving as cells shrink and the penalty is too
 small to stop it, so \eqn{C_p} says "as fine as the support allows"
 and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 says so when that happens.  It becomes a genuine interior criterion
-only when the nugget is a large share of the sill.  With a nugget of 0
-(under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
-bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
-the field; the profile warns.  When the variogram gives no nugget (none
-was fitted, its fit has no minimum inside the ranges searched, its
-range is below the shortest lag, it found no spatial structure, or
-\code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
-choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
-finest level whose cells hold at least two scored rows on average.  It
-counts the structure within those cells as noise too, so on average it
-is no smaller than the nugget and errs towards fewer cells; the profile warns,
-and \code{attr(, "cp_noise")} records which was used.  When no level's
-cells hold that many, \code{cp} is \code{NA} at every level, as it is
-for a constant response, which the profile warns about.
+only when the nugget is a large share of the sill.  A nugget of 0, or
+of at most \eqn{10^{-4}} of the sill, which
+\code{\link{estimate_sac_range}()} marks as \code{nugget_at_bound}, is
+the fit's lower bound and not an estimate, and as \eqn{\tau^2} it would
+leave no penalty, with which \eqn{C_p} descended to the ceiling
+whatever the field: \eqn{C_p} does not take it.  When the variogram
+gives no nugget (none was fitted, its nugget is at that bound, its fit
+has no minimum inside the ranges searched, its range is below the
+shortest lag, it found no spatial structure, or \code{sac} is a range
+alone), \eqn{\tau^2} is Mallows' own choice instead: the residual mean
+square \eqn{RSS / (m - L_m)} of the finest level whose cells hold at
+least two scored rows on average.  It counts the structure within
+those cells as noise too, so on average it is no smaller than the
+nugget and errs towards fewer cells.  When no level's cells hold that
+many, \code{cp} is \code{NA} at every level, as it is for a constant
+response, which the profile warns about.  Whatever its source,
+\eqn{\tau^2} is held to the semivariance of nearest-neighbour pairs the
+variogram carries (\code{attr(sac, "short_lag_semivariance")}, see
+\code{\link{sac_nugget}}): a semivariance does not fall as the lag
+shrinks, so it bounds the nugget from above, and a larger
+\eqn{\tau^2} is contradicted by the closest pairs and stops \eqn{C_p}
+early.  A semivariance of 0 holds nothing.  When \eqn{\tau^2} is not
+the nugget as it stands, a warning of class \code{spatialkit_cp_noise}
+says where it came from, and \code{attr(, "cp_noise")} records the
+source and, when the semivariance held it, the number it replaced.
 \strong{In practice its minimum is often a bound}, the support
 ceiling when the nugget is a small share of the sill, and
 \code{select_resolution()} then names the bound in \code{edge}.  The
@@ -1025,16 +1057,35 @@ hold a scored row are counted after a level's fit, so where rows
 without a response leave fewer of them the two columns are computed
 after all.  The condition carries \code{limit}, \code{levels} (the
 levels above the limit) and \code{missing}.}
+\item{\code{spatialkit_variogram_unusable}}{\code{resolution_profile()}:
+the variogram, the one estimated or \code{sac}, gives no usable range
+(\code{rejected_reason} of \code{\link{estimate_sac_range}()}), so
+\code{reliability} is \code{NA}, and the message says whether
+\code{cp} may still take its nugget.  The condition carries
+\code{reason}, \code{converged} (whether the variogram model
+converged; \code{NA} when it does not say), \code{nugget} and
+\code{nugget_used}.}
+\item{\code{spatialkit_cp_noise}}{\code{resolution_profile()}:
+\code{cp} does not take the variogram's nugget as it stands.  Its
+noise variance is the residual mean square of the finest level
+(the variogram gives no nugget, or its nugget is at the fit's lower
+bound), or the semivariance of nearest-neighbour pairs, which holds
+the nugget or that residual mean square where they are larger; or
+there is none and \code{cp} is \code{NA} at every level.  The
+condition carries \code{source}, \code{value} and \code{level} (as
+\code{attr(, "cp_noise")} holds them), \code{cap} (the semivariance,
+\code{NA} when the variogram carries none), \code{uncapped_source}
+and \code{uncapped_value} (what \code{cp} would take without the
+hold).}
 }
 Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
 (\code{select_resolution(criterion = "moran_z")} without
 \code{diagnostic = TRUE}) and \code{spatialkit_no_default_criterion} (a
 profile passed as a cell count whose \code{cp} is \code{NA} at every
 level while another criterion is finite).  The remaining warnings of
-these functions (points dropped, a variogram that gives \code{cp} no
-nugget, a zero nugget, a variogram of another variable) are R warnings
-without a class; rows left out for a missing response, a rising WSS
-curve and a subsample too small to reach the floor are logged only.
+these functions (points dropped, a variogram of another variable) are R
+warnings without a class; rows left out for a missing response, a rising
+WSS curve and a subsample too small to reach the floor are logged only.
 
 A third refusal is an error of class \code{spatialkit_work_limit}:
 \code{resolution_profile()} stops before a step whose count of

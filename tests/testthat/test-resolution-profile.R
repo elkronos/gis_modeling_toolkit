@@ -317,7 +317,12 @@ test_that("resolution_profile is reproducible from its seed and subsamples large
   expect_identical(attr(sub, "bounds")$n_sample, 120L)
   expect_identical(attr(sub, "bounds")$ceiling, 22L)
   expect_identical(attr(sub, "bounds")$ceiling_from, "min_cell_n")
-  expect_output(print(sub), "on 200 points \\(k-means fitted to a subsample of 120\\)")
+  # The kind the profile fitted to the subsample is named: the default is
+  # the density kind, which the header used to call k-means.
+  expect_output(print(sub),
+                "on 200 points \\(density-weighted k-means fitted to a subsample of 120\\)")
+  expect_output(print(resolution_profile(pts, n_levels = 5, sample_n = 120, partition = "kmeans")),
+                "on 200 points \\(k-means fitted to a subsample of 120\\)")
   # A subsample too small to fit that many cells holds the ceiling to two of
   # its points per cell, and says which bound is choosing.
   tiny <- resolution_profile(pts, n_levels = 4, sample_n = 30, min_cell_n = 3)

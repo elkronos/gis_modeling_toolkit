@@ -378,7 +378,11 @@ test_that("a long range at the edge of the search marks the two-structure model 
   # model, and resolution_profile() takes nothing from a model without a
   # minimum.
   out <- suppressWarnings(resolution_profile(pts, "z", sac = r, n_levels = 4, nstart = 2))
-  expect_identical(attr(out, "cp_noise")$source, "finest-level residual mean square")
+  # The residual mean square of the finest level, or the semivariance of
+  # nearest-neighbour pairs that holds it (BUG-02): never the nugget.
+  cn <- attr(out, "cp_noise")
+  expect_identical(if (identical(cn$source, "short-lag semivariance")) cn$uncapped$source
+                   else cn$source, "finest-level residual mean square")
   # The helper passes the flag through, and defaults to a minimum.
   f <- spatialkit:::.sac_fit_nested
   vg <- attr(r, "variogram")

@@ -63,9 +63,11 @@
 # parts of each named record that changed (and the printed lines that
 # differ), replaces those records, and lists each in the fixture's `retaken`
 # with the reason, the parts, the date and the git tree of R/ it was taken
-# from.  A later run of the full mode takes every record from the baseline
-# code again, the retaken ones included, and says which to take again with
-# --retake.
+# from.  A record taken again a second time keeps the first reason, with the
+# second after it ("Taken again: "), and the parts of both; the date and the
+# tree are the second's.  A later run of the full mode takes every record
+# from the baseline code again, the retaken ones included, and says which to
+# take again with --retake.
 #
 # `dev/` is in .Rbuildignore, so nothing here ships.
 # ---------------------------------------------------------------------------
@@ -199,9 +201,15 @@ if (retake) {
     baseline$records[[nm]] <- now[[nm]]
     if (identical(bare[[nm]], now[[nm]])) baseline$without$records[[nm]] <- NULL
     else baseline$without$records[[nm]] <- bare[[nm]]
-    baseline$retaken[[nm]] <- list(reason = retake_reason, parts = changed,
-                                   parts_without = changed_bare, date = format(Sys.Date()),
-                                   code = git_tree("R"))
+    # A record taken again before keeps what that retake said: its reason
+    # comes first, and the parts of both are listed.
+    was_taken <- baseline$retaken[[nm]]
+    baseline$retaken[[nm]] <- list(
+      reason = if (is.null(was_taken)) retake_reason
+               else paste0(was_taken$reason, " Taken again: ", retake_reason),
+      parts = union(was_taken$parts, changed),
+      parts_without = union(was_taken$parts_without, changed_bare),
+      date = format(Sys.Date()), code = git_tree("R"))
   }
   saveRDS(baseline, fixture, compress = "xz")
   cat(sprintf("\n%d record%s taken again from the working tree (R/ tree %s); the other %d as they were.\n",

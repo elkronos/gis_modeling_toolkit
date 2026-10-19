@@ -203,7 +203,12 @@ test_that("a zero nugget, and a sac of the other variable, are warned about", {
   pts <- r2_pts(300)
   out <- r2_warnings(resolution_profile(pts, "z", sac = r2_sac(300, nugget = 0),
                                         n_levels = 4, nstart = 2))
-  expect_true(any(grepl("nugget is 0", out$warnings)))
+  # Cp does not take the nugget, which is the fit's lower bound (BUG-02), and
+  # says where its noise variance comes from instead.
+  expect_true(any(grepl("nugget (0 against a sill of", out$warnings, fixed = TRUE)))
+  expect_true(any(grepl("is at the fit's lower bound, which is not an estimate", out$warnings,
+                        fixed = TRUE)))
+  expect_false(identical(attr(out$value, "cp_noise")$source, "variogram nugget"))
   # A residual variogram applied to the raw response, and the reverse.
   det <- r2_sac(300, detrended = TRUE)
   out <- r2_warnings(resolution_profile(pts, "z", sac = det, n_levels = 4, nstart = 2))

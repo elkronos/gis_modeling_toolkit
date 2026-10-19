@@ -881,20 +881,31 @@
 #'     small to stop it, so \eqn{C_p} says "as fine as the support allows"
 #'     and \code{min_cell_n} is what is choosing; \code{select_resolution()}
 #'     says so when that happens.  It becomes a genuine interior criterion
-#'     only when the nugget is a large share of the sill.  With a nugget of 0
-#'     (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
-#'     bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
-#'     the field; the profile warns.  When the variogram gives no nugget (none
-#'     was fitted, its fit has no minimum inside the ranges searched, its
-#'     range is below the shortest lag, it found no spatial structure, or
-#'     \code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
-#'     choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
-#'     finest level whose cells hold at least two scored rows on average.  It
-#'     counts the structure within those cells as noise too, so on average it
-#'     is no smaller than the nugget and errs towards fewer cells; the profile warns,
-#'     and \code{attr(, "cp_noise")} records which was used.  When no level's
-#'     cells hold that many, \code{cp} is \code{NA} at every level, as it is
-#'     for a constant response, which the profile warns about.
+#'     only when the nugget is a large share of the sill.  A nugget of 0, or
+#'     of at most \eqn{10^{-4}} of the sill, which
+#'     \code{\link{estimate_sac_range}()} marks as \code{nugget_at_bound}, is
+#'     the fit's lower bound and not an estimate, and as \eqn{\tau^2} it would
+#'     leave no penalty, with which \eqn{C_p} descended to the ceiling
+#'     whatever the field: \eqn{C_p} does not take it.  When the variogram
+#'     gives no nugget (none was fitted, its nugget is at that bound, its fit
+#'     has no minimum inside the ranges searched, its range is below the
+#'     shortest lag, it found no spatial structure, or \code{sac} is a range
+#'     alone), \eqn{\tau^2} is Mallows' own choice instead: the residual mean
+#'     square \eqn{RSS / (m - L_m)} of the finest level whose cells hold at
+#'     least two scored rows on average.  It counts the structure within
+#'     those cells as noise too, so on average it is no smaller than the
+#'     nugget and errs towards fewer cells.  When no level's cells hold that
+#'     many, \code{cp} is \code{NA} at every level, as it is for a constant
+#'     response, which the profile warns about.  Whatever its source,
+#'     \eqn{\tau^2} is held to the semivariance of nearest-neighbour pairs the
+#'     variogram carries (\code{attr(sac, "short_lag_semivariance")}, see
+#'     \code{\link{sac_nugget}}): a semivariance does not fall as the lag
+#'     shrinks, so it bounds the nugget from above, and a larger
+#'     \eqn{\tau^2} is contradicted by the closest pairs and stops \eqn{C_p}
+#'     early.  A semivariance of 0 holds nothing.  When \eqn{\tau^2} is not
+#'     the nugget as it stands, a warning of class \code{spatialkit_cp_noise}
+#'     says where it came from, and \code{attr(, "cp_noise")} records the
+#'     source and, when the semivariance held it, the number it replaced.
 #'     \strong{In practice its minimum is often a bound}, the support
 #'     ceiling when the nugget is a small share of the sill, and
 #'     \code{select_resolution()} then names the bound in \code{edge}.  The
@@ -1102,16 +1113,35 @@
 #'     without a response leave fewer of them the two columns are computed
 #'     after all.  The condition carries \code{limit}, \code{levels} (the
 #'     levels above the limit) and \code{missing}.}
+#'   \item{\code{spatialkit_variogram_unusable}}{\code{resolution_profile()}:
+#'     the variogram, the one estimated or \code{sac}, gives no usable range
+#'     (\code{rejected_reason} of \code{\link{estimate_sac_range}()}), so
+#'     \code{reliability} is \code{NA}, and the message says whether
+#'     \code{cp} may still take its nugget.  The condition carries
+#'     \code{reason}, \code{converged} (whether the variogram model
+#'     converged; \code{NA} when it does not say), \code{nugget} and
+#'     \code{nugget_used}.}
+#'   \item{\code{spatialkit_cp_noise}}{\code{resolution_profile()}:
+#'     \code{cp} does not take the variogram's nugget as it stands.  Its
+#'     noise variance is the residual mean square of the finest level
+#'     (the variogram gives no nugget, or its nugget is at the fit's lower
+#'     bound), or the semivariance of nearest-neighbour pairs, which holds
+#'     the nugget or that residual mean square where they are larger; or
+#'     there is none and \code{cp} is \code{NA} at every level.  The
+#'     condition carries \code{source}, \code{value} and \code{level} (as
+#'     \code{attr(, "cp_noise")} holds them), \code{cap} (the semivariance,
+#'     \code{NA} when the variogram carries none), \code{uncapped_source}
+#'     and \code{uncapped_value} (what \code{cp} would take without the
+#'     hold).}
 #' }
 #' Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
 #' (\code{select_resolution(criterion = "moran_z")} without
 #' \code{diagnostic = TRUE}) and \code{spatialkit_no_default_criterion} (a
 #' profile passed as a cell count whose \code{cp} is \code{NA} at every
 #' level while another criterion is finite).  The remaining warnings of
-#' these functions (points dropped, a variogram that gives \code{cp} no
-#' nugget, a zero nugget, a variogram of another variable) are R warnings
-#' without a class; rows left out for a missing response, a rising WSS
-#' curve and a subsample too small to reach the floor are logged only.
+#' these functions (points dropped, a variogram of another variable) are R
+#' warnings without a class; rows left out for a missing response, a rising
+#' WSS curve and a subsample too small to reach the floor are logged only.
 #'
 #' A third refusal is an error of class \code{spatialkit_work_limit}:
 #' \code{resolution_profile()} stops before a step whose count of
@@ -1192,6 +1222,14 @@
 #'   describe the subsample; the bounds, \code{supported}, the variance term
 #'   of \code{cp} and \code{reliability} describe the whole layer, so the
 #'   answer does not change with \code{sample_n} except through the fits.
+#'   The fits are those of the subsample, which \code{seed} draws, so on a
+#'   layer of more than \code{sample_n} points the count read off the
+#'   profile can move with \code{seed} and with \code{sample_n}.
+#'   The level \code{\link{select_resolution}()} chooses off such a profile
+#'   without an estimate is refitted to every point before its seeds are
+#'   handed on (see \code{refit_rows} under "Value"); a profile with an
+#'   estimate scores it on every row in the cells of the centres fitted, and
+#'   hands those centres on.
 #' @param nstart Starts per level; the best is kept.  They are k-means++
 #'   starts unless \code{init} says otherwise.  \code{NULL} (default) is the
 #'   kind's own number: 3 for the kind \code{"density"} and 25 for the kind
@@ -1212,7 +1250,9 @@
 #'   to which the points are transformed first, so the area, the floor and
 #'   \code{cell_diam_median} are then in that CRS's units.  A sac whose
 #'   range was rejected (\code{NA} with a \code{rejected_reason}) gives
-#'   \code{cp} its nugget, with a warning, and leaves \code{reliability}
+#'   \code{cp} its nugget (held to the semivariance of nearest-neighbour
+#'   pairs, and not at all when it is at the fit's lower bound), with a
+#'   warning, and leaves \code{reliability}
 #'   \code{NA}, since that needs the range; one whose model did not converge
 #'   (its fit has no minimum inside the ranges searched, so its nugget and
 #'   sill are not fitted values), or whose range is below the shortest lag
@@ -1404,10 +1444,13 @@
 #'   "split"}, \code{split} (a \code{spatialkit_split}: \code{selection}
 #'   and \code{estimation}, integer row positions in \code{data_sf}, with
 #'   the \code{method} and \code{seed} that made them), \code{cp_noise} (a
-#'   list with \code{source}, \code{"variogram nugget"} or
-#'   \code{"finest-level residual mean square"}, \code{value}, the
-#'   \eqn{\tau^2} used, and \code{level}, the level it was read at or
-#'   \code{NA}; \code{NULL} when \code{cp} has neither), \code{one_cell}
+#'   list with \code{source}, \code{"variogram nugget"},
+#'   \code{"finest-level residual mean square"} or \code{"short-lag
+#'   semivariance"}, \code{value}, the \eqn{\tau^2} used, and \code{level},
+#'   the level it was read at or \code{NA}; under the short-lag semivariance
+#'   also \code{cap}, that semivariance, and \code{uncapped}, a list of the
+#'   \code{source}, \code{value} and \code{level} it held; \code{NULL}
+#'   when \code{cp} has none; see \code{cp} above), \code{one_cell}
 #'   (what one cell for the whole layer scores, the reference a level has to
 #'   beat: a list with \code{n}, the scored rows, \code{rss}, their total
 #'   sum of squares, \code{cp}, the same formula at one cell or \code{NA}
@@ -1421,12 +1464,20 @@
 #'   (a list named by level of the two-column matrices of the scored
 #'   partitions' centres), \code{centres_crs} (the CRS they are in) and
 #'   \code{hull} (the convex hull of the points profiled, an \code{sfc} in
-#'   that CRS).  A
+#'   that CRS), and, when the centres were fitted to a subsample and the
+#'   profile has no estimate, \code{refit_rows}: a list with \code{xy}, the
+#'   coordinates of every point in that CRS, and \code{iter_max}, the
+#'   iteration limit of the fits, from which
+#'   \code{\link{select_resolution}()} refits the level it chooses to every
+#'   point.  A
 #'   k-means partition is the Voronoi partition of its centres, so these
 #'   seed the very cells each level was scored on: \code{select_resolution()}
 #'   returns the chosen level's as \code{$seeds}, and
 #'   \code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
-#'   use them when given the selection or the profile.  The centres carry the
+#'   use them when given the selection or the profile.  On a profile fitted
+#'   to a subsample without an estimate the seeds are the chosen level's
+#'   centres refitted to every point, whose cells are not the cells scored
+#'   (see \code{\link{select_resolution}}, "Value").  The centres carry the
 #'   hull as their \code{"cover"} attribute, which those two functions hand on
 #'   so that Voronoi cells built on the seeds reach the edge of the points.
 #'   A profile built with \code{partition = "density"} or \code{init =
@@ -1878,6 +1929,21 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # sizes are fitted to every row: no subsample is drawn, and `sample_n` is
   # not read.
   idx <- if (!size_ladder && n_all > sample_n) ord[sample(seq_len(n_all), sample_n)] else ord
+  # The centres of such a ladder are fitted to the subsample, and at a few
+  # subsample rows per cell they are far from the centres a fit to every row
+  # gives: a few steps of the kind's own iteration on every row, from the
+  # same centres, lower the rows' within-cell sum of squares a long way.
+  # Without an estimate every column is read off the subsample, so
+  # select_resolution() refits the level it chooses to every point before
+  # its seeds are handed on (.refit_level()), from the coordinates kept
+  # here, in the same order, with the same iteration limit.  An estimate is
+  # scored on every row of the layer (`lay`) in the cells of the centres as
+  # fitted, so those are the cells its record describes and the cells
+  # summarize_by_cell() checks: they are handed on as they are, and nothing
+  # is kept to refit them.
+  refit_rows <- if (length(idx) < n_all && is.null(est))
+    list(xy = unname(xy[ord, , drop = FALSE]), iter_max = as.integer(part_iter))
+  else NULL
   xy <- xy[idx, , drop = FALSE]
   data_sf <- data_sf[idx, , drop = FALSE]
   if (has_resp) { resp <- resp[idx]; resp_ok <- resp_ok[idx] }
@@ -2002,6 +2068,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                 length(printed), paste(unique(printed), collapse = " | "))
   }
   range_eff <- NA_real_
+  # What Cp's noise variance may not exceed, and whether the variogram's
+  # nugget is the fit's lower bound (both read off `sac` below).
+  cp_cap <- NA_real_
+  nugget_bound <- FALSE
   if (!is.null(sac)) {
     vm <- attr(sac, "variogram_model")
     r  <- suppressWarnings(as.numeric(sac))[1L]
@@ -2047,7 +2117,40 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       if (!is.finite(vg$nugget)) vg$nugget <- 0
       if (!is.finite(vg$psill) || vg$psill <= 0) vg <- NULL
     }
+    # The semivariance of nearest-neighbour pairs, which estimate_sac_range()
+    # computes with no model (attr(sac, "short_lag_semivariance")).  A
+    # semivariance does not fall as the lag shrinks, so it bounds the nugget
+    # from above, and Cp's noise variance is held to it whatever its source.
+    # A noise variance above it is contradicted by the closest pairs: one
+    # that is too large stops Cp early.  A value of 0 holds nothing: it would
+    # take away the penalty that the refusal of a nugget at its bound keeps.
+    cp_cap <- suppressWarnings(as.numeric(attr(sac, "short_lag_semivariance",
+                                               exact = TRUE))[1L])
+    if (length(cp_cap) != 1L || !is.finite(cp_cap) || cp_cap <= 0) cp_cap <- NA_real_
+    # A nugget at the fit's lower bound (0, or at most 1e-4 of the sill) is
+    # the bound and not an estimate: estimate_sac_range() marks it as
+    # `nugget_at_bound`, and a sac that carries no mark is judged by the same
+    # rule.  As Cp's noise variance it is no penalty at all, and Cp then fell
+    # with every finer level to the ceiling whatever the field.  Cp does not
+    # take it: its noise variance comes from the finest level instead (see
+    # below).  Its range and sill still serve `reliability`.  Anything up to
+    # 1e-4 of the sill: a REML fit stops short of its bound, and a nugget of
+    # 6e-7 on a sill of 0.99 slipped past a test for exactly 0.
+    nugget_bound <- !is.null(vg) &&
+      (isTRUE(attr(sac, "nugget_at_bound", exact = TRUE)) ||
+         vg$nugget <= 1e-4 * (vg$nugget + vg$psill))
+    # What a warning that refuses the nugget says of Cp's noise variance.
+    held <- if (is.finite(cp_cap))
+      sprintf(", held to the semivariance of nearest-neighbour pairs (%.3g)", cp_cap)
+    else ""
     if (!is.null(vg) && !is.null(rejected)) {
+      # Classed, so a script can tell this outcome from the others without
+      # reading the text: the variogram gives no usable range, and `reason`
+      # says why.  `nugget_used` is whether Cp may still take its nugget.
+      unusable <- function(fmt, ..., nugget_used)
+        .warn_classed("spatialkit_variogram_unusable", fmt, ...,
+                      data = list(reason = rejected, converged = .vgm_converged(vm),
+                                  nugget = vg$nugget, nugget_used = nugget_used))
       if (not_converged) {
         # Both facts are named: why the range was refused, and that the fit
         # behind it did not converge, which the reason leaves out whenever it
@@ -2060,24 +2163,25 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # more sacs arrive here now that the model's own verdict is read: one
         # refused as past the lags gave `cp` 0.82 and 0.87 from its nugget of
         # 0.5 at 200 and 250 cells of 300 points, and gives NA.
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s)%s; ",
-                             "its nugget and sill are where the fit stopped without ",
-                             "reaching a minimum, not ",
-                             "fitted values, so neither is used: `reliability` is NA and ",
-                             "`cp` takes its noise variance from the finest level whose ",
-                             "cells hold at least two scored rows on average, and is NA ",
-                             "at every level when none does."),
-                      sac_what, rejected,
-                      if (grepl("converge", rejected, fixed = TRUE)) ""
-                      else ", and its variogram model did not converge")
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s)%s; ",
+                        "its nugget and sill are where the fit stopped without ",
+                        "reaching a minimum, not ",
+                        "fitted values, so neither is used: `reliability` is NA and ",
+                        "`cp` takes its noise variance from the finest level whose ",
+                        "cells hold at least two scored rows on average%s, and is NA ",
+                        "at every level when none does."),
+                 sac_what, rejected,
+                 if (grepl("converge", rejected, fixed = TRUE)) ""
+                 else ", and its variogram model did not converge",
+                 held, nugget_used = FALSE)
         vg <- NULL
       } else if (grepl("shortest lag", rejected, fixed = TRUE)) {
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s): ",
-                             "a structure that dies out before the closest pairs of ",
-                             "points cannot be told from a nugget, so its nugget (%.3g) ",
-                             "is not identified either: `reliability` is NA and `cp` ",
-                             "takes its noise variance from the finest level."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s): ",
+                        "a structure that dies out before the closest pairs of ",
+                        "points cannot be told from a nugget, so its nugget (%.3g) ",
+                        "is not identified either: `reliability` is NA and `cp` ",
+                        "takes its noise variance from the finest level%s."),
+                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
         vg <- NULL
       } else if (.sac_no_structure(sac)) {
         # A variogram refused because the response shows no spatial structure
@@ -2092,45 +2196,44 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         # Its nugget is no more identified than its range, so Cp takes its
         # noise variance from the finest level, as for a range below the
         # shortest lag.
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s), ",
-                             "so its nugget (%.3g) is not a fitted value either: ",
-                             "`reliability` is NA and `cp` takes its noise variance ",
-                             "from the finest level."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s), ",
+                        "so its nugget (%.3g) is not a fitted value either: ",
+                        "`reliability` is NA and `cp` takes its noise variance ",
+                        "from the finest level%s."),
+                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
         vg <- NULL
+      } else if (nugget_bound) {
+        # The range is refused and the nugget is the fit's bound: Cp takes
+        # neither (see the rule above), and the warning on its noise variance
+        # follows the sweep.
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s), and ",
+                        "its nugget (%.3g) is at the fit's lower bound, which is not an ",
+                        "estimate: `reliability` needs the range and is NA, and `cp` ",
+                        "takes its noise variance from the finest level%s."),
+                 sac_what, rejected, vg$nugget, held, nugget_used = FALSE)
+        vg$cor_fn <- NULL
       } else {
-        .warn_and_log(paste0("resolution_profile(): %s reports no usable range (%s). ",
-                             "`cp` still takes its nugget (%.3g), fitted at the short lags; ",
-                             "`reliability` needs the range and is NA."),
-                      sac_what, rejected, vg$nugget)
+        unusable(paste0("resolution_profile(): %s reports no usable range (%s). ",
+                        "`cp` still takes its nugget (%.3g), fitted at the short lags%s; ",
+                        "`reliability` needs the range and is NA."),
+                 sac_what, rejected, vg$nugget,
+                 if (is.finite(cp_cap) && vg$nugget > cp_cap)
+                   sprintf(", held to the semivariance of nearest-neighbour pairs (%.3g)", cp_cap)
+                 else "",
+                 nugget_used = TRUE)
         vg$cor_fn <- NULL
       }
     } else if (is.null(vg)) {
       if (.sac_no_structure(sac))
         .log_info(paste0("resolution_profile(): %s found no spatial structure (%s), ",
                          "and its model is a pure nugget; `reliability` is NA and ",
-                         "`cp` takes its noise variance from the finest level."),
-                  sac_what, rejected %||% "no reason recorded")
+                         "`cp` takes its noise variance from the finest level%s."),
+                  sac_what, rejected %||% "no reason recorded", held)
       else
-        .log_info("resolution_profile(): the variogram carries no usable model; `reliability` is NA and `cp` takes its noise variance from the finest level.")
+        .log_info(paste0("resolution_profile(): the variogram carries no usable model; ",
+                         "`reliability` is NA and `cp` takes its noise variance from the ",
+                         "finest level%s."), held)
     }
-    # A nugget of 0 is usually the fit's lower bound, not an estimate
-    # (estimate_sac_range() marks it as `nugget_at_bound`), and with it Cp's
-    # penalty is 0: Cp
-    # is the RSS alone and falls with every finer level to the ceiling,
-    # whatever the field.  Zero to within 1e-4 of the sill: a REML fit stops
-    # short of its bound, and a nugget of 6e-7 on a sill of 0.99 slipped past
-    # a test for exactly 0.
-    if (has_resp && !is.null(vg) && vg$nugget <= 1e-4 * (vg$nugget + vg$psill))
-      .warn_and_log(paste0("resolution_profile(): the variogram's nugget is 0 (%.2g ",
-                           "against a sill of %.3g), so Cp has ",
-                           "no penalty and falls as the cells get finer: its minimum ",
-                           "will sit at or near the finest level whatever the field. ",
-                           "A zero nugget is usually the fit's lower bound; %s"),
-                    vg$nugget, vg$nugget + vg$psill,
-                    if (sac_given) "check it with plot() on the sac, or pass one whose nugget you trust."
-                    else paste0("check it with plot(attr(<profile>, \"sac\")), or pass a ",
-                                "`sac` whose nugget you trust."))
     # The variogram has to describe the variable the profile scores.  A
     # residual variogram's nugget put into Cp for the raw response (or the
     # reverse) moved the Cp pick from 2-4 cells to the ceiling of 44 in five
@@ -2595,14 +2698,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
         cm  <- stats::ave(y[okr], cl[okr])
         out$rss[i] <- sum((y[okr] - cm)^2)
         m_ok_v[i] <- m_ok; L_ok_v[i] <- L_ok
-        # Cp for the cells of the whole layer, estimated from the subsample.
-        # RSS / m + tau^2 L_ok / m estimates the approximation error plus
-        # tau^2 (it adds back the optimism of the subsample's own cell means,
-        # tau^2 per cell); tau^2 L / N is the sampling variance of cell means
-        # built from the layer's N rows with a response.  With no subsample
-        # (m = N, L_ok = L) it is Mallows' RSS / n + 2 tau^2 L / n.
-        if (!is.null(vg) && !is_const)
-          out$cp[i] <- out$rss[i] / m_ok + vg$nugget * (L_ok / m_ok + L_fit / n_resp)
+        # Cp is computed after the sweep, once its noise variance is known.
       }
       # Moran's I of cell means that differ by rounding error alone is
       # rounding error too.
@@ -2660,8 +2756,10 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   # the residual mean square of the most flexible model, here the finest
   # level whose cells hold at least two scored rows on average.  It counts
   # the structure within those cells as noise as well, so on average it is
-  # no smaller than the nugget and errs towards fewer cells.
-  cp_noise <- if (!is.null(vg) && !is_const)
+  # no smaller than the nugget and errs towards fewer cells.  A nugget at the
+  # fit's lower bound is not taken (`nugget_bound`, above), and the fallback
+  # stands in for it too.
+  cp_noise <- if (!is.null(vg) && !is_const && !nugget_bound)
     list(source = "variogram nugget", value = vg$nugget, level = NA_integer_)
   else NULL
   # A ladder of sizes under sac = "auto" fits no variogram, and `cp` gets no
@@ -2672,23 +2770,27 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     cp_noise <- list(source = "none", value = NA_real_, level = NA_integer_,
                      reason = paste0("no variogram: a size ladder fits one only when ",
                                      "`sac` is given"))
-  if (is.null(vg) && !is.null(y) && !is_const && !no_vg) {
+  # Why the variogram gave Cp no nugget, when the fallback stands in.
+  why <- NULL
+  if (is.null(cp_noise) && !is.null(y) && !is_const && !no_vg) {
     dfree <- m_ok_v - L_ok_v
     cand  <- which(is.finite(out$rss) & is.finite(dfree) & dfree >= L_ok_v)
     if (length(cand)) {
       j  <- cand[which.max(levels[cand])]
       s2 <- out$rss[j] / dfree[j]
       if (is.finite(s2) && s2 > 0) {
-        fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
-        out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
-          s2 * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + L_fit_v[fin_cp] / n_resp)
         cp_noise <- list(source = "finest-level residual mean square", value = s2,
                          level = as.integer(levels[j]))
         # A variogram that found no spatial structure does carry a model, the
         # pure nugget summarize_by_cell() and kriging_adequacy() use, so "no
         # usable variogram model" was untrue of it and contradicted the line
         # logged above.  What it lacks is a nugget apart from the sill.
-        why <- if (is.null(sac))
+        why <- if (!is.null(vg))
+          sprintf(paste0("the variogram's nugget (%.2g against a sill of %.3g) is at the ",
+                         "fit's lower bound, which is not an estimate and as a noise ",
+                         "variance would leave Cp no penalty"),
+                  vg$nugget, vg$nugget + vg$psill)
+        else if (is.null(sac))
           "no variogram was fitted (gstat is not installed, or estimate_sac_range() failed; see the log)"
         else if (!is.data.frame(attr(sac, "variogram_model")))
           sprintf("%s carries no variogram model and so no nugget", sac_what)
@@ -2696,16 +2798,78 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
           sprintf("%s found no spatial structure and gives no nugget that can be told from the sill",
                   sac_what)
         else sprintf("%s gives no usable variogram model", sac_what)
-        .warn_and_log(paste0("resolution_profile(): %s, so `cp` takes its noise ",
-                             "variance from the residual mean square of the finest ",
-                             "level (%d cells: %.3g), Mallows' own choice. It counts ",
-                             "the structure within those cells as noise too, so it ",
-                             "errs towards fewer cells; attr(<profile>, \"cp_noise\") ",
-                             "records it. `reliability` needs the variogram's range ",
-                             "and is NA."),
-                      why, levels[j], s2)
       }
     }
+  }
+  # Held to the semivariance of nearest-neighbour pairs (`cp_cap`, above),
+  # whatever the source: the record keeps the value it replaced.
+  uncapped <- NULL
+  if (!is.null(y) && !is.null(cp_noise) && is.finite(cp_noise$value) && is.finite(cp_cap) &&
+      cp_noise$value > cp_cap) {
+    uncapped <- cp_noise[c("source", "value", "level")]
+    cp_noise <- list(source = "short-lag semivariance", value = cp_cap, level = NA_integer_,
+                     cap = cp_cap, uncapped = uncapped)
+  }
+  # Said when Cp does not take the variogram's nugget as it stands: the
+  # fallback, the cap, and a nugget at its bound with no level to fall back
+  # on.  One classed warning for the noise variance Cp was given, with where
+  # it came from.
+  if (!is.null(why) || !is.null(uncapped)) {
+    rms <- if (!is.null(uncapped)) uncapped else cp_noise
+    sl_dist <- suppressWarnings(as.numeric(attr(sac, "short_lag_dist", exact = TRUE))[1L])
+    cap_text <- sprintf(paste0("the semivariance of nearest-neighbour pairs (%.3g%s), which ",
+                               "bounds %s from above"),
+                        cp_cap,
+                        if (length(sl_dist) == 1L && is.finite(sl_dist))
+                          sprintf(" at a median separation of %.3g", sl_dist) else "",
+                        if (identical(rms$source, "variogram nugget")) "the nugget"
+                        else "the noise variance")
+    msg <- if (identical(rms$source, "variogram nugget"))
+      sprintf(paste0("resolution_profile(): the variogram's nugget (%.3g) is above %s, so ",
+                     "`cp` takes that semivariance as its noise variance. ",
+                     "attr(<profile>, \"cp_noise\") records both."),
+              rms$value, cap_text)
+    else if (is.null(uncapped))
+      sprintf(paste0("resolution_profile(): %s, so `cp` takes its noise variance from the ",
+                     "residual mean square of the finest level (%d cells: %.3g), Mallows' ",
+                     "own choice. It counts the structure within those cells as noise too, ",
+                     "so it errs towards fewer cells; attr(<profile>, \"cp_noise\") ",
+                     "records it.%s"),
+              why, rms$level, rms$value,
+              if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+              else "")
+    else
+      sprintf(paste0("resolution_profile(): %s, so `cp` takes its noise variance from %s, ",
+                     "in place of the residual mean square of the finest level (%d cells: ",
+                     "%.3g), Mallows' own choice, which is above it. attr(<profile>, ",
+                     "\"cp_noise\") records both.%s"),
+              why, cap_text, rms$level, rms$value,
+              if (is.null(vg$cor_fn)) " `reliability` needs the variogram's range and is NA."
+              else "")
+    .warn_classed("spatialkit_cp_noise", "%s", msg,
+                  data = list(source = cp_noise$source, value = cp_noise$value,
+                              level = cp_noise$level, cap = cp_cap,
+                              uncapped_source = rms$source, uncapped_value = rms$value))
+  } else if (nugget_bound && !is.null(vg) && !is.null(y) && !is_const && is.null(cp_noise))
+    .warn_classed("spatialkit_cp_noise",
+                  paste0("resolution_profile(): the variogram's nugget (%.2g against a sill ",
+                         "of %.3g) is at the fit's lower bound, which is not an estimate, and ",
+                         "no level's cells hold at least two scored rows on average to take ",
+                         "a noise variance from, so `cp` is NA at every level."),
+                  vg$nugget, vg$nugget + vg$psill,
+                  data = list(source = NA_character_, value = NA_real_, level = NA_integer_,
+                              cap = cp_cap, uncapped_source = "variogram nugget",
+                              uncapped_value = vg$nugget))
+  # Cp for the cells of the whole layer, estimated from the subsample.  RSS /
+  # m + tau^2 L_ok / m estimates the approximation error plus tau^2 (it adds
+  # back the optimism of the subsample's own cell means, tau^2 per cell);
+  # tau^2 L / N is the sampling variance of cell means built from the
+  # layer's N rows with a response.  With no subsample (m = N, L_ok = L) it
+  # is Mallows' RSS / n + 2 tau^2 L / n.
+  if (!is.null(y) && !is_const && !is.null(cp_noise) && is.finite(cp_noise$value)) {
+    fin_cp <- is.finite(out$rss) & is.finite(m_ok_v) & m_ok_v > 0
+    out$cp[fin_cp] <- out$rss[fin_cp] / m_ok_v[fin_cp] +
+      cp_noise$value * (L_ok_v[fin_cp] / m_ok_v[fin_cp] + L_fit_v[fin_cp] / n_resp)
   }
 
   # Cp at one cell, by the formula of the sweep (L = L_ok = 1) and with the
@@ -2858,6 +3022,9 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       cells        = stats::setNames(est_cols$cells, levels),
       f_p          = stats::setNames(est_cols$f_p, levels))
   }
+  # Every point's coordinates, when the centres were fitted to a subsample:
+  # what select_resolution() refits the chosen level to.
+  if (!is.null(refit_rows)) attr(out, "refit_rows") <- refit_rows
   out
 }
 
@@ -2899,10 +3066,16 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # What a row carries to be counted: with predictors, a predictor missing
   # leaves it out as much as a response missing does.
   carry <- if (isTRUE(b$predictors)) "with a response and every predictor" else "with a response"
+  # What was fitted to the subsample, by the kind that built the cells: the
+  # density kind's centres are not a k-means fit, and the header called them
+  # one.
+  fitted <- if (identical(attr(x, "partition", exact = TRUE)$kind, "density"))
+    "density-weighted k-means" else "k-means"
   cat("Resolution profile:", nrow(x), if (nrow(x) == 1L) "level on" else "levels on", b$n,
       if (isTRUE(n_fit < b$n) && some_missing)
-        sprintf("points (%d %s; k-means fitted to a subsample of %d)\n", n_rsp, carry, n_fit)
-      else if (isTRUE(n_fit < b$n)) sprintf("points (k-means fitted to a subsample of %d)\n", n_fit)
+        sprintf("points (%d %s; %s fitted to a subsample of %d)\n", n_rsp, carry, fitted, n_fit)
+      else if (isTRUE(n_fit < b$n))
+        sprintf("points (%s fitted to a subsample of %d)\n", fitted, n_fit)
       else if (some_missing) sprintf("points (%d %s)\n", n_rsp, carry)
       else "points\n")
   # A ladder `obs_per_cell` set: its levels are the counts the sizes give,
@@ -2970,20 +3143,39 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   }
   vg <- attr(x, "variogram", exact = TRUE)
   cn <- attr(x, "cp_noise", exact = TRUE)
+  # Where Cp's noise variance came from when it is not the nugget as it
+  # stands: the residual mean square of a level, or the semivariance of
+  # nearest-neighbour pairs that holds either of the two (see
+  # resolution_profile()).
+  rms_at <- function(level) sprintf("the residual mean square at %d cells", level)
+  noise <- if (identical(cn$source, "finest-level residual mean square"))
+    sprintf("cp's noise variance %.3g is %s", cn$value, rms_at(cn$level))
+  else if (identical(cn$source, "short-lag semivariance"))
+    sprintf("cp's noise variance %.3g is the semivariance of nearest-neighbour pairs, below %s (%.3g)",
+            cn$value,
+            if (identical(cn$uncapped$source, "finest-level residual mean square"))
+              rms_at(cn$uncapped$level) else "the nugget",
+            cn$uncapped$value)
+  else NULL
+  # The nugget is still the variogram's when Cp takes another number: it is
+  # then at the fit's lower bound, unless the cap replaced it.
+  bound <- !is.null(vg) && !is.null(noise) &&
+    !identical(cn$uncapped$source, "variogram nugget")
   cat(sprintf("  variogram   : %s\n",
               if (is.null(vg))
-                (if (identical(cn$source, "finest-level residual mean square"))
-                   sprintf(paste0("none usable (reliability is NA; cp's noise ",
-                                  "variance %.3g is the residual mean square at %d cells)"),
-                           cn$value, cn$level)
+                (if (!is.null(noise))
+                   sprintf("none usable (reliability is NA; %s)", noise)
                  # A ladder of sizes that was given no `sac` fits none.
                  else if (identical(cn$source, "none"))
                    paste0("none fitted: a size ladder fits one only when `sac` is given ",
                           "(cp and reliability are NA)")
                  else "none usable (cp and reliability are NA)")
               else
-                sprintf("nugget %.3g, partial sill %.3g, range %s", vg$nugget, vg$psill,
-                        if (is.finite(vg$range)) sprintf("%.0f", vg$range) else "unidentified")))
+                paste0(sprintf("nugget %.3g%s, partial sill %.3g, range %s", vg$nugget,
+                               if (bound) " (at the fit's lower bound)" else "", vg$psill,
+                               if (is.finite(vg$range)) sprintf("%.0f", vg$range)
+                               else "unidentified"),
+                       if (is.null(noise)) "" else paste0("; ", noise))))
   # The kind that built the cells: unrecorded for k-means from k-means++
   # starts, whose line is the one it always was.
   part <- attr(x, "partition", exact = TRUE)
@@ -3389,7 +3581,33 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   computed in; \code{NULL} for a profile that does not carry them).  Their
 #'   Voronoi cells are the cells that were scored;
 #'   \code{\link{get_voronoi_seeds}(method = "kmeans", n = <this>)} and
-#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  For a
+#'   \code{\link{voronoi_seeds_kmeans}(k = <this>)} return them.  On a
+#'   profile without an estimate whose centres were fitted to a subsample
+#'   (\code{n_sample} below \code{n} in \code{attr(profile, "bounds")}) the
+#'   seeds are those centres refitted to every point: the kind's own
+#'   iteration (Hartigan and Wong's for \code{"kmeans"}, Lloyd's on every
+#'   point's density weights for \code{"density"}) run from the centres
+#'   scored, with the profile's iteration limit and no random draw.  Where
+#'   Hartigan and Wong's algorithm refuses the centres, Lloyd's iteration
+#'   with every weight one runs in its place, and a log line says so.  They
+#'   carry \code{attr(, "refit")}: \code{rows} (the points),
+#'   \code{subsample} (the points the profile fitted to), \code{kind},
+#'   \code{iter}, \code{iter_max}, \code{converged}, \code{wss_scored}
+#'   (the within-cell sum of squares of every point in the cells of the
+#'   centres scored, each cell about its own mean) and \code{wss} (the same
+#'   of the refitted cells).  Their cells are then not the cells scored, and
+#'   the count is still the one the subsample gave; the centres scored are
+#'   \code{attr(profile, "centres")[[as.character(best)]]}.  The refit reads
+#'   every point's coordinates from \code{attr(profile, "refit_rows")}, which
+#'   every such profile this version builds carries; on one built before it
+#'   the centres scored are the seeds, and a log line says so.  The refit is
+#'   not run either, and the centres scored are the seeds, when it would
+#'   pass the work limits of a profile's own fits (see "Conditions" in
+#'   \code{\link{resolution_profile}}); a log line says so.  A profile with
+#'   an estimate scores it on every row of the layer in the cells of the
+#'   centres fitted to the subsample, so its seeds are those centres, whose
+#'   cells are the cells scored.  \code{summary()} and \code{plot()} of a
+#'   profile read no seeds and refit nothing.  For a
 #'   profile built with \code{partition = "density"} or \code{init =
 #'   "random"} the list also has \code{partition} (\code{kind},
 #'   \code{init}, \code{density_power}, \code{density_k}), and the seeds
@@ -3432,7 +3650,12 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'   \code{scored_cells} (\code{NA}: the record stands for a count).
 #'   \code{seeds} carries the same record as \code{attr(, "count_rule")}
 #'   with \code{scored_cells = TRUE}, since they are the centres that were
-#'   scored.  The record travels on with the seeds, the cells and the
+#'   scored, or \code{FALSE} when they were refitted to every point, since
+#'   they are then other cells built from the count.  A \code{"cp"}
+#'   selection off a profile without an estimate has \code{count_rule} as
+#'   well, after \code{seeds}, and nothing else of this list: its
+#'   \code{estimate} is \code{"mean"}, since \eqn{C_p} scores plain means,
+#'   and \code{scored} is \code{NULL}.  The record travels on with the seeds, the cells and the
 #'   assigned layer to \code{\link{summarize_by_cell}()}, which warns when
 #'   it reports another cell value than the count was chosen for (class
 #'   \code{spatialkit_estimate_mismatch}) and when the cells or rows it is
@@ -3871,7 +4094,8 @@ select_resolution <- function(profile,
 #' profile scored at the chosen level and the record of how the count was
 #' set, and its seeds carry that record.  The kind that built the profile's
 #' cells, when the profile records one, is the last element either way.  A
-#' selection from a profile without an estimate by \code{"cp"},
+#' selection from a profile without an estimate by \code{"cp"} gains the
+#' record alone, since \eqn{C_p} scores plain means; one by
 #' \code{"reliability"}, \code{"elbow"} or \code{"moran_z"} gains nothing
 #' but that kind, as before.
 #'
@@ -3911,11 +4135,17 @@ select_resolution <- function(profile,
                            obs_per_cell_asked = asked, structured = scored_structured,
                            scored_cells = NA)
     sel$count_rule <- rec
-    # The seeds are the centres the profile scored at this count.
-    if (inherits(sel$seeds, "sf")) {
-      rec$scored_cells <- TRUE
-      attr(sel$seeds, "count_rule") <- rec
-    }
+    # Assigned only to seeds there are: `sel$seeds <- NULL` would drop the
+    # element a selection without seeds keeps.
+    if (inherits(sel$seeds, "sf")) sel$seeds <- .count_rule_on_seeds(sel$seeds, rec)
+  } else if (identical(sel$criterion, "cp")) {
+    # Cp scores plain means, so a count it chose on a profile without an
+    # estimate carries a record too: summarize_by_cell() then warns when it
+    # pools on it.  Such a profile scored no estimate, so the record has no
+    # `scored` list, and the selection gains nothing else.
+    rec <- .count_rule_new(profile, rule = "cp", cells = sel$best, scored_cells = NA)
+    sel$count_rule <- rec
+    if (inherits(sel$seeds, "sf")) sel$seeds <- .count_rule_on_seeds(sel$seeds, rec)
   }
   # The kind that built the profile's cells, when it is not the present one
   # (see resolution_profile()): the selection names it, and its seeds carry
@@ -3924,6 +4154,28 @@ select_resolution <- function(profile,
   if (is.list(part) && !is.null(part$kind))
     sel$partition <- part[.partition_fields()]
   sel
+}
+
+
+#' Put a selection's record on its seeds
+#'
+#' The seeds of a selection are the centres the profile scored at the
+#' count, and the record says so (\code{scored_cells = TRUE}).  Centres the
+#' selection refitted to every point (\code{attr(, "refit")}, see
+#' \code{.refit_level()}) are other cells built from the count, and the
+#' record says that (\code{FALSE}): the numbers it keeps describe the cells
+#' the profile scored, so \code{summarize_by_cell()} does not check the
+#' refitted cells against them.
+#'
+#' @param seeds The selection's seeds, an sf layer.
+#' @param rec The record.
+#' @return \code{seeds}, with \code{attr(, "count_rule")} set.
+#' @keywords internal
+#' @noRd
+.count_rule_on_seeds <- function(seeds, rec) {
+  rec$scored_cells <- is.null(attr(seeds, "refit", exact = TRUE))
+  attr(seeds, "count_rule") <- rec
+  seeds
 }
 
 
@@ -4065,6 +4317,11 @@ select_resolution <- function(profile,
 
 #' The scored partition's centres at one level, as an sf POINT layer
 #'
+#' On a profile whose centres were fitted to a subsample, and which kept
+#' every point's coordinates for it (\code{attr(, "refit_rows")}), the
+#' centres are first refitted to every point (\code{.refit_level()}) and
+#' carry what that did as \code{attr(, "refit")}.
+#'
 #' @param profile A \code{resolution_profile}.
 #' @param L The level (cell count).
 #' @return An sf POINT layer of \code{L} centres in the CRS the profile was
@@ -4075,6 +4332,8 @@ select_resolution <- function(profile,
   cen <- attr(profile, "centres", exact = TRUE)
   xy  <- if (is.list(cen)) cen[[as.character(L)]] else NULL
   if (!is.matrix(xy) || nrow(xy) < 1L || ncol(xy) < 2L) return(NULL)
+  refit <- if (isTRUE(.refit_state$off)) NULL else .refit_level(profile, xy)
+  if (!is.null(refit)) xy <- refit$centers
   crs <- attr(profile, "centres_crs", exact = TRUE)
   s <- sf::st_as_sf(data.frame(seed_id = seq_len(nrow(xy)), x = xy[, 1L], y = xy[, 2L]),
                     coords = c("x", "y"),
@@ -4090,7 +4349,154 @@ select_resolution <- function(profile,
   part <- attr(profile, "partition", exact = TRUE)
   if (is.list(part) && !is.null(part$kind))
     attr(s, "partition") <- part[.partition_fields()]
+  if (!is.null(refit)) attr(s, "refit") <- refit$record
   s
+}
+
+
+# summary() and plot() of a profile read every criterion through
+# select_resolution() and use no seeds, so they ask it not to refit
+# (.without_refit()): on a large layer a refit is the costliest step of a
+# selection.
+.refit_state <- new.env(parent = emptyenv())
+.refit_state$off <- FALSE
+
+#' Evaluate an expression in which select_resolution() refits nothing
+#'
+#' @param expr The expression.
+#' @return Its value.  The seeds of a selection made inside are the centres
+#'   the profile scored, as they were before any refit.
+#' @keywords internal
+#' @noRd
+.without_refit <- function(expr) {
+  old <- .refit_state$off
+  .refit_state$off <- TRUE
+  on.exit(.refit_state$off <- old, add = TRUE)
+  force(expr)
+}
+
+
+#' Refit a level of a profile fitted to a subsample to every point
+#'
+#' The centres a profile fits to a subsample of \code{sample_n} points are
+#' far from the centres a fit to every point gives: at a few subsample rows
+#' per cell every point of the layer, given to its nearest centre, sits in
+#' cells whose within-cell sum of squares a few more steps on every point
+#' lowers a long way.  A profile without an estimate reads every column off
+#' the subsample, and keeps every point's coordinates for this
+#' (\code{attr(, "refit_rows")}); one with an estimate scored it on every
+#' row in the cells of the centres as fitted, keeps none, and is not
+#' refitted.  The level chosen is refitted to every point by the
+#' kind's own iteration, from the centres scored: \code{stats::kmeans()}
+#' (Hartigan and Wong) for the kind \code{"kmeans"}, Lloyd's iteration on
+#' the density weights of every point for the kind \code{"density"}, with
+#' the profile's iteration limit.  No start is drawn, so no random number
+#' is used, and the count is the level's.  Where Hartigan and Wong's
+#' algorithm refuses the centres (two centres in one place, or a centre
+#' with no point of the layer nearest it), Lloyd's iteration with every
+#' weight one is run in its place, with a log line.
+#'
+#' The work is bounded as a profile bounds its fits: the points times the
+#' centres (times the iteration limit for the density kind without
+#' \pkg{FNN}) may not pass \code{getOption("spatialkit.fit_work_max")}, and
+#' without \pkg{FNN} the square of the distinct locations may not pass
+#' \code{getOption("spatialkit.exact_pairs_max")} for the density weights.
+#' Above either the centres are handed on as scored, with a logged warning.
+#'
+#' @param profile A \code{resolution_profile}.
+#' @param centres The level's scored centres, a two-column matrix.
+#' @return \code{NULL} when the profile was not fitted to a subsample, keeps
+#'   no coordinates of its points (a profile with an estimate, or one built
+#'   before the refit, which a log line names), or the refit is not run;
+#'   otherwise a list
+#'   with \code{centers}, the refitted centres, and \code{record}, which
+#'   the seeds carry as \code{attr(, "refit")}: \code{rows} (the points
+#'   refitted to), \code{subsample} (the points the profile fitted to),
+#'   \code{kind}, \code{iter}, \code{iter_max}, \code{converged},
+#'   \code{wss_scored} (the within-cell sum of squares of every point in the
+#'   cells of the scored centres, each cell about its own mean) and
+#'   \code{wss} (the same of the refitted cells).
+#' @keywords internal
+#' @noRd
+.refit_level <- function(profile, centres) {
+  rows <- attr(profile, "refit_rows", exact = TRUE)
+  b    <- attr(profile, "bounds", exact = TRUE)
+  if (!is.list(rows) || !is.matrix(rows$xy) || !is.list(b)) {
+    # A profile without an estimate fitted to a subsample that keeps no
+    # coordinates was built before the refit: its centres are handed on as
+    # they were then, and the log says why.
+    one <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
+    if (is.list(b) && one(b$n_sample) && one(b$n) && b$n_sample < b$n &&
+        is.null(attr(profile, "estimate", exact = TRUE)))
+      .log_info(paste0("select_resolution(): this profile was fitted to a subsample of %d ",
+                       "of %d points and keeps no coordinates of its points (attr(, ",
+                       "\"refit_rows\"), which a profile built by this version of spatialkit ",
+                       "carries), so the seeds are the centres fitted to the subsample, not ",
+                       "refitted to every point."),
+                as.integer(b$n_sample), as.integer(b$n))
+    return(NULL)
+  }
+  xy <- rows$xy
+  n  <- nrow(xy)
+  if (!(is.numeric(b$n_sample) && length(b$n_sample) == 1L && b$n_sample < n)) return(NULL)
+  centres <- unname(centres[, 1:2, drop = FALSE])
+  L <- nrow(centres)
+  if (L < 2L || L > n) return(NULL)
+  part <- .partition_record(profile)
+  density <- identical(part$kind, "density")
+  iter_max <- rows$iter_max %||% 50L
+  use_fnn <- .has_backend("FNN")
+  # The bounds of the profile's own fits (see .fit_guard()).
+  work <- as.numeric(n) * L * (if (density && !use_fnn) iter_max else 1)
+  n_u  <- if (density && !use_fnn && part$density_power > 0)
+    sum(!duplicated(complex(real = xy[, 1L], imaginary = xy[, 2L]))) else 0
+  if (work > .fit_work_max() || as.numeric(n_u)^2 > .exact_pairs_max()) {
+    .log_warn(paste0("select_resolution(): refitting %d cells to the %d points would pass a ",
+                     "limit of the work a fit may do (options(spatialkit.fit_work_max = ), ",
+                     "spatialkit.exact_pairs_max), so the seeds are the centres fitted to ",
+                     "the subsample of %d."), L, n, as.integer(b$n_sample))
+    return(NULL)
+  }
+  # Every point in the cells of the scored centres, each cell about its own
+  # mean: what the refit is measured against.
+  wss_of <- function(a) {
+    m  <- rowsum(xy, a, reorder = TRUE) / as.numeric(tabulate(a)[sort(unique(a))])
+    mu <- m[match(a, as.integer(rownames(m))), , drop = FALSE]
+    sum((xy - mu)^2)
+  }
+  a0 <- .nearest_centre(xy[, 1L], xy[, 2L], centres[, 1L], centres[, 2L], use_fnn)
+  fit <- NULL
+  if (!density) {
+    km <- tryCatch(suppressWarnings(stats::kmeans(xy, centers = centres, iter.max = iter_max)),
+                   error = function(e) NULL)
+    if (!is.null(km))
+      fit <- list(centers = unname(km$centers[, 1:2, drop = FALSE]), wss = km$tot.withinss,
+                  iter = min(as.integer(km$iter), as.integer(iter_max)),
+                  converged = is.null(km$ifault) || identical(as.integer(km$ifault), 0L))
+  }
+  if (is.null(fit)) {
+    if (!density)
+      .log_info(paste0("select_resolution(): Hartigan and Wong's algorithm refuses the %d ",
+                       "centres scored as a start, so they are refitted to the %d points by ",
+                       "Lloyd's iteration in its place."), L, n)
+    dk <- .density_kmeans(xy, L, power = if (density) part$density_power else 0,
+                          k_nn = if (density) part$density_k else 8L,
+                          iter.max = iter_max, use_fnn = use_fnn, centers = centres)
+    if (!is.null(dk))
+      fit <- list(centers = unname(dk$centers), wss = dk$wss, iter = as.integer(dk$iter),
+                  converged = isTRUE(dk$converged))
+  }
+  if (is.null(fit) || !all(is.finite(fit$centers))) {
+    .log_warn(paste0("select_resolution(): the refit of %d cells to the %d points failed; the ",
+                     "seeds are the centres fitted to the subsample of %d."),
+              L, n, as.integer(b$n_sample))
+    return(NULL)
+  }
+  list(centers = fit$centers,
+       record = list(rows = as.integer(n), subsample = as.integer(b$n_sample),
+                     kind = if (density) "density" else "kmeans",
+                     iter = fit$iter, iter_max = as.integer(iter_max),
+                     converged = fit$converged, wss_scored = wss_of(a0), wss = fit$wss))
 }
 
 # Which bound an optimum at the end of the scored levels is sitting on.  NA
@@ -4196,6 +4602,15 @@ print.resolution_selection <- function(x, ...) {
     cat(paste0(c(sprintf("  %-12s: ", label), rep("                ", length(body) - 1L)), body),
         sep = "\n")
   }
+  # Seeds refitted to every point, from centres the profile fitted to a
+  # subsample: they are not the cells the criterion was read on.
+  refit <- if (inherits(x$seeds, "sf")) attr(x$seeds, "refit", exact = TRUE) else NULL
+  if (is.list(refit))
+    say(sprintf(paste0("refitted to all %d points from the centres scored on a subsample of %d ",
+                       "(within-cell sum of squares %s, against %s in the scored cells)"),
+                as.integer(refit$rows), as.integer(refit$subsample),
+                format(signif(refit$wss, 3)), format(signif(refit$wss_scored, 3))),
+        label = "seeds")
   # What the profile scored at this count for its estimate, under the two
   # criteria that read it.
   est <- x$estimate %||% NA_character_
@@ -4463,11 +4878,12 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
 
   sels <- if (explicit)
     # Naming moran_z in `criteria` is the request select_resolution() asks for.
-    lapply(criteria, function(cn) select_resolution(object, criterion = cn, tol = tol,
-                                                     diagnostic = TRUE))
+    # No seeds are read here, so no level is refitted (.without_refit()).
+    .without_refit(lapply(criteria, function(cn)
+      select_resolution(object, criterion = cn, tol = tol, diagnostic = TRUE)))
   else {
-    got <- lapply(criteria, function(cn)
-      try(select_resolution(object, criterion = cn, tol = tol), silent = TRUE))
+    got <- .without_refit(lapply(criteria, function(cn)
+      try(select_resolution(object, criterion = cn, tol = tol), silent = TRUE)))
     ok <- !vapply(got, inherits, logical(1), "try-error")
     if (!any(ok))
       stop("summary.resolution_profile(): no criterion could be read off this profile.",
@@ -4909,7 +5325,7 @@ print.resolution_summary <- function(x, ...) {
        criterion = sel$criterion, edge = sel$edge, at_floor = sel$at_floor,
        at_ceiling = sel$at_ceiling, structured = sel$structured,
        # How the count was set, for the functions that turn it into cells:
-       # NULL for a number, and for a count a present criterion read off a
-       # profile without an estimate.
+       # NULL for a number, and for a count "reliability", "elbow" or
+       # "moran_z" read off a profile without an estimate.
        count_rule = sel$count_rule)
 }

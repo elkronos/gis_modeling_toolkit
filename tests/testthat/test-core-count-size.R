@@ -125,26 +125,33 @@
 
 # ---- What exists today is what it was ----------------------------------------
 
-test_that("a selection by a present criterion from a profile without an estimate has today's names", {
+test_that("a selection by a present criterion from a profile without an estimate has today's names, and cp's its record", {
   p <- .cs_plain()
   expect_null(attr(p, "estimate"))
-  for (cr in c("cp", "moran_z")) {
-    s <- select_resolution(p, criterion = cr, diagnostic = TRUE)
-    expect_identical(names(s), .cs_present, info = cr)
-    expect_null(s$count_rule, info = cr)
-    expect_null(attr(s$seeds, "count_rule"), info = cr)
-    expect_identical(s$criterion, cr)
-  }
-  # A profile of the density kind names its kind last, and nothing else.
+  s <- select_resolution(p, criterion = "moran_z", diagnostic = TRUE)
+  expect_identical(names(s), .cs_present)
+  expect_null(s$count_rule)
+  expect_null(attr(s$seeds, "count_rule"))
+  expect_identical(s$criterion, "moran_z")
+  # A cp selection gains the record of how the count was set, after its
+  # seeds, and nothing else (BUG-02): it used to carry none.
+  s <- select_resolution(p, criterion = "cp")
+  expect_identical(names(s), c(.cs_present, "count_rule"))
+  expect_identical(s$count_rule$rule, "cp")
+  expect_identical(s$count_rule$estimate, "mean")
+  expect_identical(attr(s$seeds, "count_rule")$scored_cells, TRUE)
+  expect_identical(s$criterion, "cp")
+  # A profile of the density kind names its kind last.
   d <- suppressWarnings(.cs_profile(.cs_600(), n_levels = 6L, sac = 3e4, estimate = NULL,
                                     obs_per_cell = NULL))
   s <- select_resolution(d, criterion = "cp")
-  expect_identical(names(s), c(.cs_present, "partition"))
-  expect_null(attr(s$seeds, "count_rule"))
-  # The names the baseline's selections have.
+  expect_identical(names(s), c(.cs_present, "count_rule", "partition"))
+  expect_identical(attr(s$seeds, "count_rule")$rule, "cp")
+  # The names the baseline's selections have, as the fixture holds them now.
   base <- readRDS(test_path("fixtures", "core-frozen.rds"))
-  expect_identical(names(base$records$select_default_cp$value), .cs_present)
-  expect_identical(names(base$records$select_density_cp$value), c(.cs_present, "partition"))
+  expect_identical(names(base$records$select_default_cp$value), c(.cs_present, "count_rule"))
+  expect_identical(names(base$records$select_density_cp$value),
+                   c(.cs_present, "count_rule", "partition"))
 })
 
 test_that("a profile of today, read by cp, by \"auto\" or as a count, gives the baseline's results", {
@@ -205,8 +212,9 @@ test_that("a profile of today, read by cp, by \"auto\" or as a count, gives the 
                "is a resolution profile with no criterion finite at any level", fixed = TRUE)
   expect_true("spatialkit_no_structure" %in%
                 unlist(lapply(got$count_seeds_noise$conditions, function(c) c$class)))
-  expect_false("count_rule" %in% names(got$select_default_cp$value))
-  expect_null(attr(got$seeds_profile$value, "count_rule"))
+  # A count cp chose carries its record (BUG-02).
+  expect_identical(got$select_default_cp$value$count_rule$rule, "cp")
+  expect_identical(attr(got$seeds_profile$value, "count_rule")$rule, "cp")
 })
 
 
@@ -681,7 +689,7 @@ test_that("\"size\" on a column subset is the error that names the row count", {
   l <- .cs_levels()
   s <- select_resolution(l[, c("levels", "cp")], criterion = "cp")
   expect_identical(s$best, select_resolution(l, criterion = "cp")$best)
-  expect_identical(names(s), .cs_present)
+  expect_identical(names(s), c(.cs_present, "count_rule"))
 })
 
 test_that("no bound chooses a size: no spatialkit_bound_chosen downstream", {
@@ -1120,7 +1128,7 @@ test_that("what the selection reads before it applies a rule: the size, the subs
   s <- select_resolution(q, criterion = "auto")
   expect_identical(s$criterion, "cp")
   expect_identical(s, select_resolution(q, criterion = "cp"))
-  expect_identical(names(s), .cs_present)
+  expect_identical(names(s), c(.cs_present, "count_rule"))
   # A profile built as today whose column is NA at every level has the
   # present error, not the one of a ladder of sizes.
   na <- .cs_plain(); na$cp <- NA_real_; na$reliability <- NA_real_
@@ -1621,10 +1629,11 @@ test_that("with a variogram cp on a ladder of one size returns the level, and sa
   expect_identical(s$edge, "the only level scored")
   expect_identical(s$note[c("estimate", "ladder")],
                    c(estimate = .cs_pooled_note, ladder = note("cp")))
-  # Without an estimate the list is today's, with the note in it.
+  # Without an estimate the list is today's and cp's record, with the note
+  # in it.
   bare <- suppressWarnings(.cs_profile(pts, sac = 3e4, estimate = NULL))
   s <- select_resolution(bare, criterion = "cp")
-  expect_identical(names(s), c(.cs_present, "partition"))
+  expect_identical(names(s), c(.cs_present, "count_rule", "partition"))
   expect_identical(s$note[["ladder"]], note("cp"))
   expect_false("estimate" %in% names(s$note))
   expect_identical(s$edge, "the only level scored")
@@ -1827,13 +1836,18 @@ test_that(".resolve_cell_count() returns the record with the count", {
   expect_identical(res$count_rule, s$count_rule)
   expect_identical(res$from, paste0("select_resolution(criterion = \"loo\")",
                                     if (is.na(s$edge)) "" else sprintf(", an optimum at %s", s$edge)))
-  # A number, and a selection of today, carry none.
+  # A number carries none; a count cp chose, from a selection or from a
+  # profile without an estimate, carries cp's (BUG-02).
   expect_null(.resolve_cell_count(12, "n", "f")$count_rule)
   expect_identical(.resolve_cell_count(12, "n", "f")$n, 12)
   plain <- select_resolution(.cs_plain(), criterion = "cp")
-  expect_null(suppressWarnings(.resolve_cell_count(plain, "n", "f"))$count_rule)
-  expect_null(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$count_rule)
+  expect_identical(suppressWarnings(.resolve_cell_count(plain, "n", "f"))$count_rule,
+                   plain$count_rule)
+  expect_identical(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$count_rule,
+                   plain$count_rule)
   expect_identical(suppressWarnings(.resolve_cell_count(.cs_plain(), "n", "f"))$criterion, "cp")
+  z <- select_resolution(.cs_plain(), criterion = "moran_z", diagnostic = TRUE)
+  expect_null(suppressWarnings(.resolve_cell_count(z, "n", "f"))$count_rule)
 })
 
 test_that("a profile of a constant response passed as a count: a size has one, a minimum has none", {
