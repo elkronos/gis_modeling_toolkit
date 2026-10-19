@@ -64,7 +64,11 @@ CRS.}
 \item{chunk_size}{Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a \code{bayesian_fit} the
 GP boundary is held at its fitted value whatever the chunk holds; see
-\code{\link{predict.bayesian_fit}}.}
+\code{\link{predict.bayesian_fit}}.  The two warnings in which
+\code{\link{predict.gwr_fit}()} counts locations (classes
+\code{"spatialkit_gwr_extrapolation"} and
+\code{"spatialkit_gwr_not_estimable"}) are raised once for the grid,
+with its totals, whatever the number of chunks.}
 
 \item{se}{Logical; also return a standard-error/posterior-SD column where the
 backend supports it.  Default FALSE.  For a \code{bayesian_fit} this is
@@ -131,7 +135,7 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other prediction: 
-\code{\link{area_of_applicability}()}
+Other prediction:
+\code{\link[=area_of_applicability]{area_of_applicability()}}
 }
 \concept{prediction}

@@ -1,7 +1,7 @@
 ---
 title: "What to save, and what to report"
 description: >
-  What leaves the session: grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report.
+  What leaves the session: grouping an existing layer, membership lookups, exporting the regions, which six numbers to report, and how to report a cell value.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -108,11 +108,15 @@ names(cells)
 sum(is.na(cells$n))
 ```
 
-`r sum(is.na(cells$n))` of the `r nrow(cells)` regions are empty, carrying `NA`
-rather than being silently dropped. A region with no data in it is a fact about
-the map, and one worth keeping: it is where the model has nothing to stand on.
+The three `..pooled_` columns are each region's pooled value, its weight on
+the region's own mean and the mean it is pulled toward; `summarize_by_cell()`
+adds them by default, `estimate = "mean"` leaves them out, and "Reporting a
+cell value" below reads them. `r sum(is.na(cells$n))` of the `r nrow(cells)`
+regions are empty, carrying `NA` rather than being silently dropped. A region
+with no data in it is a fact about the map, and one worth keeping: it is where
+the model has nothing to stand on.
 
-```{r map, eval=has_ggplot, fig.height=3.6, fig.alt="The North Carolina counties grouped into eighteen hexagonal regions, each shaded by the mean 1974 SIDS rate of the counties inside it. County outlines show underneath. Six regions along the edges hold no county and are grey."}
+```{r map, eval=has_ggplot, fig.height=3.6, fig.alt="The North Carolina counties grouped into seventeen hexagonal regions, each shaded by the mean 1974 SIDS rate of the counties inside it. County outlines show underneath. Five regions along the edges hold no county and are grey."}
 library(ggplot2)
 
 ggplot() +
@@ -211,8 +215,9 @@ c(columns = length(attr_names(cells)),
 attr_names(shp)
 ```
 
-A shapefile field name is capped at ten characters, so the standard errors and
-confidence bounds arrive as `X__s_rs_` and `X__c_l__`: of the
+A shapefile field name is capped at ten characters, so the standard errors,
+confidence bounds and pooled values arrive as `X__s_rs_`, `X__c_l__` and
+`X__pld__`: of the
 `r length(setdiff(names(cells), attr(cells, "sf_column")))` columns
 `summarize_by_cell()` produced, `r length(intersect(setdiff(names(shp), attr(shp, "sf_column")), setdiff(names(cells), attr(cells, "sf_column"))))`
 survive the trip. GeoPackage keeps every one of them, and renames only the
@@ -385,6 +390,128 @@ populated <- cells[!is.na(cells$n), ]
 summary(populated$n)
 range(populated$..se_resp_rate, na.rm = TRUE)
 ```
+
+## Reporting a cell value
+
+`summarize_by_cell()` returns by default, beside each cell's mean, a pooled
+value: the mean pulled toward the mean of the 8 cells around it. This section
+builds cells sized for that value on a simulated layer and reads off what a
+report of them has to carry. The layer is 600 points on a square of
+20 km, with a smooth field plus noise:
+
+```{r value-fixture}
+set.seed(7)
+sx <- runif(600, 0, 2e4)
+sy <- runif(600, 0, 2e4)
+obs <- st_as_sf(
+  data.frame(x = 4e5 + sx, y = 4e6 + sy,
+             yield = 50 + 6 * sin(sx / 3000) + 6 * cos(sy / 2500) +
+               rnorm(600, sd = 3)),
+  coords = c("x", "y"), crs = 32617)
+```
+
+The count comes from a size, 4.5 observations per cell, scored for the pooled
+value, in density-weighted cells. Those are the defaults, so the calls name
+none of them. The cells are the ones that were scored, and the summary reports
+the same cell value:
+
+```{r value-pipeline}
+prof  <- resolution_profile(obs, "yield")
+sel   <- select_resolution(prof)
+seeds <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs)
+tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
+asg   <- assign_features_to_polygons(obs, tess$cells,
+                                     polygon_id_col = "cell_id")
+vals  <- summarize_by_cell(asg, "yield", id_col = "cell_id",
+                           cells_sf = tess$cells, obs_level = 0.90)
+
+st_drop_geometry(vals)[1:4, c("cell_id", "n", "resp_mean_yield",
+                              "..pooled_resp_yield", "..pooled_w_resp_yield",
+                              "..obs_lo_resp_yield", "..obs_hi_resp_yield")]
+```
+
+Each earlier default is one argument away: `estimate = "mean"` in the summary
+for the plain means alone, `estimate = NULL, obs_per_cell = NULL` in the
+profile for the ladder of counts, `criterion = "cp"` for Mallows' Cp on that
+ladder, and `partition = "kmeans"` in the profile and the seeding functions
+for k-means cells.
+
+Two attributes of the frame hold the wording. `attr(, "pooled")` says what was
+fitted and what each interval covers, and `attr(, "count_rule")` says how the
+count was set and whether these are the cells and rows it was scored on:
+
+```{r value-records}
+attr(vals, "pooled")
+attr(vals, "count_rule")
+```
+
+A report of cell values reads four things off them.
+
+- **The value, and which one it is.** `..pooled_resp_yield` is the pooled
+  value and `resp_mean_yield` the plain mean. Both estimate the cell's level:
+  the expected value of one further observation located in the cell the way
+  its observations were. Neither is the average of a surface over the cell's
+  area. Give `n` beside either.
+- **The own weight.** `..pooled_w_resp_yield` is the share of the pooled value
+  that is the cell's own mean; the rest is the mean of its neighbours. A cell
+  of two observations has a smaller weight than a cell of ten, so its value
+  says more about its surroundings and less about itself. It is not a
+  regression weight; for a regression on cell values use the plain mean with
+  `cell_weight`.
+- **The interval, and what it covers.** `..obs_lo_*` and `..obs_hi_*` are a
+  range for one further observation in the cell, located like the data. The
+  statement holds on average over observations and not cell by cell, and the
+  two offsets are the same in every cell. It is not an interval for the
+  cell's level: none is returned. `..ci_*`, from `conf_level`, is an interval
+  for a mean and never a range for an observation. The table in
+  `attr(vals, "intervals")` gives the sentence for each family in the frame.
+- **Where the value applies.** A cell's value and interval describe the part
+  of the cell where its observations lie, and a Voronoi cell can reach far
+  past them. A cell with no observation has `NA`. Away from the observations
+  no interval here is calibrated.
+
+The lines of a report can be written from the two records, so that they
+describe the run that happened:
+
+```{r value-report}
+rec <- attr(vals, "pooled")$columns$resp_yield
+iv  <- attr(vals, "intervals")
+cr  <- attr(vals, "count_rule")
+
+cat(
+  sprintf("- cells: %d, set by a %s of %s observations per cell; checked: %s",
+          cr$cells, cr$rule, format(cr$obs_per_cell_asked), cr$check$cells),
+  sprintf("- value: the cell mean pooled toward its %d nearest cells; median own weight %.2f",
+          rec$neighbours, rec$own_weight),
+  sprintf("- %s: %g%% for %s", iv$columns[1], 100 * iv$level[1], iv$covers[1]),
+  sprintf("- leave-one-out error %.3g against %.3g for one mean; structured: %s",
+          rec$loo, rec$loo_one_cell, rec$structured),
+  sprintf("- %.1f%% of observations are the only one in their cell",
+          100 * rec$share_alone),
+  sep = "\n")
+```
+
+`cell_values_at()` gives the value at other locations, with each location's
+distance from the nearest observation. `dist_ratio` is that distance over the
+layer's typical spacing, and it is the number to report beside a value read
+at a place that is not an observation. The third location below lies outside
+the layer:
+
+```{r value-at}
+seeds$cell_id <- tess$index
+elsewhere <- st_as_sf(
+  data.frame(x = 4e5 + c(5000, 12000, 26000), y = 4e6 + c(5000, 9000, 10000)),
+  coords = c("x", "y"), crs = 32617)
+cell_values_at(elsewhere, vals, asg, "yield", id_col = "cell_id",
+               seeds = seeds)
+```
+
+It gets a value and an interval like the others, because every location has a
+nearest seed. Nothing flags it: the `dist_ratio` beside it does. On simulated
+layers the interval at 0.90 held 91.5 percent of held-out observations with a
+`dist_ratio` below 1 and 69.5 percent of those above 8
+(`dev/sim-pooled-values.R` in the package's repository; `?cell_values_at` gives
+the settings and the classes between).
 
 ## What to save
 

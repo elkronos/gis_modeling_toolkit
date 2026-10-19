@@ -126,23 +126,25 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     coords = c("x", "y"), crs = 32632
   )
   # Cells from the points, the response aggregated onto them, and the map
-  # shaded by the cell mean rather than by an arbitrary ID.
+  # shaded by the cell mean rather than by an arbitrary ID.  Each cell
+  # holds one point, so there is nothing to pool: estimate = "mean".
   tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
   cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                             response_var = "z", cells_sf = tess$cells)
+                             response_var = "z", cells_sf = tess$cells,
+                             estimate = "mean")
   plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
                         legend_title = "mean z")
 }
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{create_voronoi_polygons}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

@@ -6,7 +6,7 @@
 \alias{spatialkit-package}
 \title{spatialkit: Spatial Tessellation, Modeling, and Cross-Validation Toolkit}
 \description{
-Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers, selects a cell count from the spatial structure of the observations, assigns features to cells, and aggregates to cell level with optional design-effect corrections so that standard errors account for within-cell autocorrelation. Also manages coordinate reference systems. Fits geographically weighted regression (via 'GWmodel'; Lu et al. (2014) \doi{10.1080/10095020.2014.917453}), Bayesian spatial Gaussian process regression (via 'brms', using the Hilbert space approximation of Riutort-Mayol et al. (2023) \doi{10.1007/s11222-022-10167-2}) and random forests (via 'ranger', with the permutation importance of Strobl et al. (2007) \doi{10.1186/1471-2105-8-25}), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Mila et al. (2022) \doi{10.1111/2041-210X.13851}), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) \doi{10.1111/2041-210X.13650} to flag where a fitted model extrapolates beyond its training data.
+Constructs analysis regions from the distribution of the data itself, as an alternative to aggregating onto administrative boundaries that were drawn for unrelated purposes. Seeds and builds Voronoi, Delaunay, hexagonal and square tessellations with reproducible identifiers, selects a cell count from the spatial structure of the observations, assigns features to cells, and aggregates to cell level with optional design-effect corrections so that standard errors account for within-cell autocorrelation. Also manages coordinate reference systems. Fits geographically weighted regression (with the kernels, diagnostics and forward selection of 'GWmodel'; Lu et al. (2014) \doi{10.1080/10095020.2014.917453}), Bayesian spatial Gaussian process regression (via 'brms', using the Hilbert space approximation of Riutort-Mayol et al. (2023) \doi{10.1007/s11222-022-10167-2}) and random forests (via 'ranger', with the permutation importance of Strobl et al. (2007) \doi{10.1186/1471-2105-8-25}), each behind one S3 class with consistent predict, fitted, residuals and plot methods. Provides spatial cross-validation with random, block, buffered, leave-location-out and nearest-neighbour distance-matched folds (Mila et al. (2022) \doi{10.1111/2041-210X.13851}), forward variable selection, model comparison, prediction onto a regular surface, and the area of applicability of Meyer and Pebesma (2021) \doi{10.1111/2041-210X.13650} to flag where a fitted model extrapolates beyond its training data.
 }
 \section{The pipeline, in order}{
 
@@ -66,6 +66,31 @@ flags where that surface extrapolates beyond the training data. A
 cross-validation score says nothing about ground the model has never
 seen; this is what tells you where the map should not be believed.
 }
+
+Two choices are the user's, one in choosing a resolution (step 1) and one
+in aggregating (step 4), and each has an argument.  They are arguments of
+\code{\link{resolution_profile}()} and \code{\link{select_resolution}()},
+which choose a count for a cell value, and of
+\code{\link{summarize_by_cell}()}; \code{determine_optimal_levels()}
+takes neither.
+The first is the cell value to report, \code{estimate}: the plain mean of
+a cell's observations, or the pooled value, which is that mean pulled
+toward the mean of the cells around it.
+\code{\link{resolution_profile}()} scores a count for the value it is
+given, and \code{\link{summarize_by_cell}()} reports the value it is
+given and warns when the count was chosen for the other one.  The second
+is the size, \code{obs_per_cell}: how many observations a cell is to hold
+on average.  For pooled values the size sets the count
+(\code{\link{select_resolution}(criterion = "size")}); for plain means the
+lowest leave-one-out error can set it (\code{criterion = "loo"}).  Each
+has a default: the pooled value, and a size of 4.5, from which
+\code{select_resolution()}'s default criterion, \code{"auto"}, sets the
+count.  \code{estimate = "mean"} in the summary gives the frame it
+returned before the argument existed.  \code{estimate = NULL,
+obs_per_cell = NULL} in the profile gives the earlier ladder and its
+columns, and with \code{partition = "kmeans"} the earlier regions as
+well: the profile it returned before.  The seeding functions take
+\code{partition = "kmeans"} for their earlier seeds.
 
 Supporting these throughout, \code{\link{ensure_projected}()} and
 \code{\link{coerce_to_points}()} handle coordinate reference systems and
@@ -137,6 +162,44 @@ effect in \code{summarize_by_cell()}: the package's own derivation from
 Kish's exchangeable-correlation model, not taken from a reference.
 The derivation and its measured coverage are in the section "Spatial
 autocorrelation and standard-error bias" of that help page.
+\item The size of 4.5 observations per cell that
+\code{select_resolution(criterion = "size")} and
+\code{resolution_profile(obs_per_cell = "auto")} take when none is
+given: a convention, a size at which most cells hold several
+observations.
+\item The density kind of partition, kept from the best of 3
+k-means++ starts, in \code{resolution_profile()},
+\code{get_voronoi_seeds()} and \code{voronoi_seeds_kmeans()}: a
+convention, a kind that puts small cells where observations are dense
+and holds the counts per cell close once the cells outnumber the
+dense places, from a number of starts that keeps the cost of a fit
+to every row down.  \code{partition = "kmeans"} gives plain k-means.
+\item The 8 nearest cells a pooled value is pulled toward in
+\code{summarize_by_cell(estimate = "pooled")}: a convention, a count
+large enough to give a cell a stable target.  It is not an argument.
+\item The 5 residuals expected beyond each end of the interval of
+\code{summarize_by_cell(obs_level = )}, below which the warning
+\code{spatialkit_few_residuals} is raised: a convention for when the
+ends of an interval read from quantiles are unstable.
+\item The 30 values beyond one per cell below which
+\code{spatialkit_pool_few_df} is raised: a convention for when the
+spread inside the cells, which every own weight rests on, is estimated
+from little.
+\item The 2 percent by which the cells have to beat one mean for the
+whole layer, in leave-one-out error, for a response to be called
+\code{structured} by \code{summarize_by_cell(estimate = "pooled")}:
+a convention, and the default of \code{tol} in
+\code{select_resolution()}, which sets the same margin there.
+\item The two work limits,
+\code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs for a search
+made without the \pkg{FNN} package and
+\code{getOption("spatialkit.fit_work_max", 1e10)} point-to-centre
+comparisons for the fits of a ladder that \code{obs_per_cell} sets:
+conventions that keep a search or a fit whose cost grows with the
+square of the rows or of the cells from starting.  Above one,
+\code{resolution_profile()} and \code{cell_values_at()} stop with an
+error, and \code{summarize_by_cell()} returns \code{NA} pooled columns
+with a warning.
 }
 }
 
@@ -182,6 +245,11 @@ Useful entry points by task:
 }
 \author{
 \strong{Maintainer}: Justin Chase \email{jchase.msu@gmail.com} [copyright holder]
+
+Authors:
+\itemize{
+  \item Justin Chase \email{jchase.msu@gmail.com} [copyright holder]
+}
 
 }
 \keyword{internal}

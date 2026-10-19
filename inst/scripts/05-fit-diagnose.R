@@ -93,6 +93,7 @@ step("05.6", "Is aggregating to cells even worth it?")
 # 'should I report cell means or a surface'.
 if (!skip_without("gstat", "the adequacy check")) {
   bnd   <- tour_boundary(pts)
+  # Twenty density-weighted k-means cells, the default kind of seeds.
   seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 20,
                              sample_points = pts, set_seed = 1)
   tess  <- build_tessellation(seeds, boundary = bnd, method = "voronoi", quiet = TRUE)
@@ -108,12 +109,14 @@ if (!skip_without("gstat", "the adequacy check")) {
     if (zv > 0.7 && zv < 1.4) "yes, near 1: the standard errors mean what they say"
     else if (zv >= 1.4) "no, above 1: the model understates its own error"
     else "no, below 1: the model overstates its own error"))
-  cat(sprintf("  would kriging move the cell means?     %d of %d cells by > 1 SE\n",
-              moved, nrow(ka)))
-  cat(sprintf("     %s\n", if (moved == 0)
-    "no: report the plain cell means, kriging buys nothing here" else
-    "yes: the plain means are biased by where the samples fell inside each cell"))
-  cat("  The interesting case is honest uncertainties AND large shifts: that is\n",
+  cat(sprintf(paste0("  would kriging move the cell means?     %d of %d cells by more than 1\n",
+                     "     standard deviation of the difference under the variogram (about a\n",
+                     "     third when the variogram is right)\n"),
+              moved, sum(is.finite(ka$kr_shift))))
+  cat(sprintf(paste0("  what would it buy?                     median kr_gain %.2f, the share of\n",
+                     "     the plain mean's error variance that kriging removes in a cell\n"),
+              stats::median(ka$kr_gain, na.rm = TRUE)))
+  cat("  The interesting case is honest uncertainties AND a large gain: that is\n",
       "  when the extra machinery earns its place in the methods section.\n",
       sep = "")
 }

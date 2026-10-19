@@ -24,8 +24,7 @@ has_ggplot  <- requireNamespace("ggplot2",  quietly = TRUE)
 has_geom    <- requireNamespace("geometry", quietly = TRUE)
 has_ranger  <- requireNamespace("ranger",   quietly = TRUE)
 has_gstat   <- requireNamespace("gstat",    quietly = TRUE)
-has_gwmodel <- requireNamespace("GWmodel",  quietly = TRUE) &&
-               requireNamespace("sp",       quietly = TRUE)
+has_gwr     <- requireNamespace("sp",       quietly = TRUE)
 
 knitr::opts_chunk$set(
   echo       = TRUE,
@@ -54,12 +53,18 @@ walks through the `spatialkit` workflow end to end:
    cell means
 5. Estimate the autocorrelation range, build spatial CV folds, and score a
    model under **blocked** versus **random** folds
-6. Fit the models to keep: a random forest, GWR when it is installed, and the
+6. Fit the models to keep: a random forest, GWR when `sp` is installed, and the
    two compared on identical folds
 7. Predict onto a surface and mark where that surface is extrapolation
 
 Everything is self-contained — the boundary comes from the `nc.shp` demo
 shapefile bundled with `sf`, so no external files are needed.
+
+The cell functions run at their defaults: density-weighted seeds
+(`partition = "density"`, from 3 starts) and a pooled value beside each cell
+mean (`estimate = "pooled"`). `partition = "kmeans"` in `get_voronoi_seeds()`
+and `estimate = "mean"` in `summarize_by_cell()` give the k-means seeds and
+the plain frame of earlier versions.
 
 Optional backends are checked at the top and every section that needs one is
 guarded, so this document renders with whatever you happen to have installed.
@@ -69,9 +74,9 @@ which backend is missing when the code stops producing output:
 ```{r backend-report, echo=FALSE, eval=TRUE}
 data.frame(
   package   = c("ggplot2", "patchwork", "geometry", "ranger", "gstat",
-                "GWmodel + sp"),
+                "sp"),
   available = c(has_ggplot, requireNamespace("patchwork", quietly = TRUE),
-                has_geom, has_ranger, has_gstat, has_gwmodel),
+                has_geom, has_ranger, has_gstat, has_gwr),
   used_for  = c("all plots", "the stacked comparison panels",
                 "true Delaunay triangulation", "random forest backend",
                 "variogram / autocorrelation range", "GWR backend")
@@ -166,13 +171,14 @@ ggplot() +
 
 ## 3. Four tessellations
 
-### 3a. Voronoi from ~40 k-means seeds
+### 3a. Voronoi from ~40 density-weighted k-means seeds
 
 Voronoi cells are built around *seed* points, not the observations themselves.
 Seeding one cell per observation would give 300 cells each containing a single
 point — a nearest-neighbour interpolation rather than an aggregation, with no
 within-cell variation to compute a standard error from. `get_voronoi_seeds()`
-clusters the observations first, so cell size follows sampling density.
+clusters the observations first, each weighted by its local density, so cells
+are small where the observations are dense.
 
 ```{r tess-voronoi}
 seeds <- get_voronoi_seeds(
@@ -186,7 +192,17 @@ tess_voronoi <- build_tessellation(
   seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
+sum(is.na(tess_voronoi$index))   # seeds that lie in no cell
 ```
+
+A k-means centre is a mean of observations, and it can lie outside a boundary
+that is not convex. Here one density-weighted centre lies just outside the
+state outline, over a sound that coastal observations surround, and
+`build_tessellation()` warns (class `spatialkit_unassigned`) that one point
+falls in no cell; this vignette does not print warnings. The points are the
+seeds, not the observations: the seed's cell is built inside the outline, every
+observation falls in a cell, and the seed has `NA` in `tess_voronoi$index`.
+`?cell_values_at` shows how to give such a seed its cell's ID.
 
 ### 3b and 3c. Hex and square grids (~50 cells)
 
@@ -244,7 +260,8 @@ cat(sprintf(
 
 `assign_features_to_polygons()` joins points to cells; `summarize_by_cell()`
 does the aggregation — means, standard deviations and standard errors for the
-response and every predictor, plus `n` and `cell_weight`. There is no need to
+response and every predictor, plus `n` and `cell_weight`, and beside each mean
+a pooled value, the mean pulled toward the cells around it. There is no need to
 write the `group_by()`/`summarise()` by hand, and doing so loses the
 design-effect machinery below.
 
@@ -383,9 +400,8 @@ principal directions and reports their ranges in the `directional` attribute
 diagnostic: each direction sees about a quarter of the point pairs, the maximum
 of four such fits is biased upward, and the windows are fixed to the coordinate
 axes, so nothing built from them is invariant to rotating the layer. The
-all-pairs fit is the estimate whenever it is usable; the directional maximum
-stands in for it only when the all-pairs fit fails, and the `anisotropy_used`
-attribute is `TRUE` in that case alone. If you *know* the field is anisotropic,
+all-pairs fit is the estimate or there is none: the largest directional range
+never stands in for it. If you *know* the field is anisotropic,
 size blocks from the longest directional range explicitly:
 `max(attr(sac, "directional_fitted"), na.rm = TRUE)`, after checking
 `attr(sac, "directional_status")`, since `directional` is `NA` for a direction
@@ -402,9 +418,8 @@ sac
 if (is.na(sac)) {
   cat("no identified range:", attr(sac, "rejected_reason"), "\n")
 } else {
-  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f; used %s\n",
-              as.numeric(sac), attr(sac, "anisotropy"),
-              attr(sac, "anisotropy_used")))
+  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f\n",
+              as.numeric(sac), attr(sac, "anisotropy")))
 }
 ```
 
@@ -445,9 +460,9 @@ library(patchwork)
 ### 5c. The number the fold scheme changes
 
 `fit_rf_model()` and `cv_rf()` need `ranger`. `include_coords = TRUE` hands the
-forest the coordinates, which lets it memorise the training surface — the
-failure mode the default (`FALSE`) exists to prevent, and the one random folds
-cannot see. Scoring the same model on both fold schemes shows the size of the
+forest the coordinates, which lets it fit the training surface by location. A
+random hold-out then overstates its accuracy, which random folds cannot
+show. Scoring the same model on both fold schemes shows the size of the
 gap:
 
 ```{r cv-contrast, eval=has_ggplot && has_ranger}
@@ -522,9 +537,9 @@ cat(sprintf("Moran's I = %.4f (z = %.2f, p = %.3g)\n",
             mi$observed, mi$z, mi$p_value))
 ```
 
-### GWR, if `GWmodel` is installed
+### GWR, if `sp` is installed
 
-```{r gwr-fit, eval=has_ggplot && has_gwmodel}
+```{r gwr-fit, eval=has_ggplot && has_gwr}
 gwr_fit <- fit_gwr_model(
   data_sf        = points_sf,
   response_var   = "y",
@@ -545,7 +560,7 @@ The fit raises no collinearity warning, but its survey of the local designs
 `?fit_gwr_model`) is worth a look: in 25 of the 300 windows the condition
 index that includes the intercept (`cn`) is above 30. The cause is
 `elevation`: it averages about 3,000 but has a standard deviation of only about
-400 inside a 42-neighbour window, so locally it is nearly collinear with the
+400 inside a 44-neighbour window, so locally it is nearly collinear with the
 intercept. What that leaves poorly determined is the local intercepts, not the
 slopes: the slope index (`cn_slopes`), which centres the predictors in each
 window, stays below 30 everywhere, so no slope is masked and the fit does not
@@ -664,8 +679,8 @@ about it:
 | for | read |
 |:---|:---|
 | getting your own data in, and what the coordinates are in | `vignette("getting-started")` |
-| how many cells, and the four criteria that disagree | `vignette("resolution")` |
-| the five fold schemes, and sizing a block by measurement | `vignette("spatial-cross-validation")` |
+| how many cells, and the criteria that disagree | `vignette("resolution")` |
+| the six fold schemes, and sizing a block by measurement | `vignette("spatial-cross-validation")` |
 | residual autocorrelation, aggregation standard errors, and two ways to leak | `vignette("diagnostics")` |
 | handing the regions to someone else, and what to report | `vignette("reporting")` |
 

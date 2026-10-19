@@ -150,36 +150,39 @@ test_that("the all-pairs fit is the estimate, not the widest direction", {
   expect_lt(abs(as.numeric(r) / TRUE_RANGE - 1), 0.5)
 })
 
-test_that("the variogram fit does not depend on gstat's default starting range", {
-  # gstat starts the optimiser at a third of the longest lag.  For a field
-  # whose range is a small fraction of the extent that is ten times too long,
-  # and whether the iteration lands or collapses to a singular model depended
-  # on floating-point details: the same 250-point field fitted on Linux and
-  # came back singular on an arm64 Mac, where the estimate then fell through
-  # to the directional maximum (315 against a true range of 80).  Several
-  # starting ranges are tried now, and the best converged fit by gstat's own
-  # criterion is kept.  Made deterministic: the default start (range = NA)
-  # is forced singular, and the answer must be the one the other starts give.
+test_that("the variogram fit has no start value and does not call gstat's iterative fit", {
+  # gstat::fit.variogram() starts its optimiser at a third of the longest
+  # lag.  For a field whose range is a small fraction of the extent that is
+  # ten times too long, and whether the iteration landed or collapsed to a
+  # singular model depended on floating-point details: the same 250-point
+  # field fitted on Linux and came back singular on an arm64 Mac, where the
+  # estimate then fell through to the directional maximum (315 against a
+  # true range of 80).  The model is now fitted by a search over the range
+  # with the nugget and the partial sill solved exactly at each trial range
+  # (.sac_fit_model()), which has no start and cannot be singular.  This
+  # test used to force gstat's default start to fail and expect the other
+  # starts to agree; fit.variogram() is not called at all now, so that mock
+  # did nothing and the test compared an estimate with itself.  What is
+  # true now is asserted instead: the call would stop if it were made.
   skip_if_not_installed("gstat")
   pts <- sac_test_field()
   plain <- estimate_sac_range(pts, "z", seed = 1)
   expect_false(is.na(plain))
-  real_fit <- gstat::fit.variogram
   local_mocked_bindings(
-    fit.variogram = function(object, model, ...) {
-      if (anyNA(model$range)) {
-        model$psill <- c(0, 0); model$range <- c(0, max(object$dist) / 3)
-        attr(model, "singular") <- TRUE
-        return(model)
-      }
-      real_fit(object, model, ...)
-    },
+    fit.variogram = function(...) stop("gstat::fit.variogram() was called"),
     .package = "gstat")
-  retried <- estimate_sac_range(pts, "z", seed = 1)
-  expect_false(is.na(retried))
-  expect_false(isTRUE(attr(retried, "anisotropy_used")))
-  expect_equal(as.numeric(retried), as.numeric(plain), tolerance = 0.1)
-  expect_lt(abs(as.numeric(retried) / TRUE_RANGE - 1), 0.5)
+  for (binning in c("adaptive", "equal")) {
+    again <- estimate_sac_range(pts, "z", seed = 1, lags = binning)
+    expect_false(is.na(again), info = binning)
+    expect_false(isTRUE(attr(again, "anisotropy_used")), info = binning)
+    expect_lt(abs(as.numeric(again) / TRUE_RANGE - 1), 0.5)
+    # No start, so nothing to differ by: the model is marked as a minimum
+    # and the same call gives the identical object.
+    expect_true(attr(attr(again, "variogram_model"), "converged"), info = binning)
+    expect_identical(estimate_sac_range(pts, "z", seed = 1, lags = binning), again,
+                     info = binning)
+  }
+  expect_identical(estimate_sac_range(pts, "z", seed = 1), plain)
 })
 
 test_that("the returned range behaves as an ordinary number", {
@@ -760,8 +763,15 @@ test_that("an all-pairs fit past the fitted lags is refused even when two direct
   # while the documentation said a trend is caught by the fitted-lag bound.
   # Whether two directions happened to fit flipped the answer between NA and
   # a finite range from draw to draw (12 of 30 went this way).
+  #
+  # Those numbers are of seed 11 under gstat's iterative fit, where the test
+  # then waited, behind a skip, for two directions to converge.  The fit is
+  # deterministic now and seed 11 never gave it two, so the test was skipped
+  # on every run.  Seed 15 gives the case outright: the pooled range is 1491
+  # against a largest lag of 686, and the 0 and 135 degree directions are
+  # identified at 151 and 431.
   skip_if_not_installed("gstat")
-  set.seed(11)
+  set.seed(15)
   n <- 300
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
   d <- as.matrix(stats::dist(cbind(x, y)))
@@ -769,9 +779,8 @@ test_that("an all-pairs fit past the fitted lags is refused even when two direct
   pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
   lines <- capture_spatialkit_log(r <- suppressWarnings(estimate_sac_range(pts, "z")))
   st <- attr(r, "directional_status")
-  # The path under test needs two directions that reached a sill; that is a
-  # property of this draw on this platform's gstat, not of the code.
-  skip_if(sum(st == "ok") < 2L, "fewer than two directions reached a sill on this platform")
+  # The path under test needs two directions that reached a sill.
+  expect_gte(sum(st == "ok"), 2L)
   expect_true(is.na(r))
   expect_s3_class(r, "sac_range")
   expect_identical(attr(r, "rejected_reason"), "fitted range exceeds the largest lag fitted")
@@ -796,8 +805,13 @@ test_that("a REML range shorter than the shortest lag is refused, not returned",
   d <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000),
                   z = rnorm(n), w = rnorm(n))
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  # structure_alpha = 1: white noise is refused for want of spatial structure
+  # before any range is looked at (asserted at the end), and this test is
+  # about the floor a REML range has to clear when that refusal is off.
+  # lags = "equal": the first lag "about 30 m" above is that of equal bins.
   lines <- capture_spatialkit_log(
-    r <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml")))
+    r <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml",
+                                             lags = "equal", structure_alpha = 1)))
   expect_true(is.na(r))
   expect_s3_class(r, "sac_range")
   expect_identical(attr(r, "rejected_reason"), "fitted range is below the shortest lag fitted")
@@ -812,6 +826,11 @@ test_that("a REML range shorter than the shortest lag is refused, not returned",
   expect_true(is.finite(ok))
   vg_ok <- attr(ok, "variogram")
   expect_gt(as.numeric(ok), min(vg_ok$dist[vg_ok$np > 0]))
+  # At the default the same white noise gets no range for the plainer reason.
+  r0 <- suppressWarnings(estimate_sac_range(pts, "z", "w", detrend = "reml"))
+  expect_true(is.na(r0))
+  expect_identical(attr(r0, "rejected_reason"),
+                   "no spatial structure detected at the nearest-neighbour scale")
 })
 
 test_that("print() says what the range is a length in, and of what", {
@@ -856,20 +875,27 @@ test_that("the anisotropy note points at the directional ranges that stay usable
 })
 
 test_that("a small sample refused as 'decreases with distance' says sampling noise can do it", {
-  # 30 points of an ordinary exponential field: the short-lag bins are noisy
-  # enough to fall by 15%, and the refusal named only a periodic structure or
-  # a cluster whose variance differs.
+  # A small sample of an ordinary exponential field: the short-lag bins are
+  # noisy enough to fall by 15%, and the refusal named only a periodic
+  # structure or a cluster whose variance differs.
+  #
+  # The draw was 30 points at seed 2, behind a skip for the case that its
+  # short lags did not fall, and they did not on any run: the message for
+  # samples under 100 points had no test.  These 80 points pass the test for
+  # spatial structure (p under 0.001) and their variogram falls from 1.42 at
+  # a lag of 95 to 1.02 at 258.
   skip_if_not_installed("gstat")
-  set.seed(2)
-  n <- 30
+  set.seed(11)
+  n <- 80
   x <- runif(n, 0, 1000); y <- runif(n, 0, 1000)
   d <- as.matrix(stats::dist(cbind(x, y)))
   z <- as.numeric(t(chol(exp(-d / 50) + diag(0.2 + 1e-8, n))) %*% rnorm(n))
   pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z), coords = c("x", "y"), crs = 32632)
   lines <- capture_spatialkit_log(r <- suppressWarnings(estimate_sac_range(pts, "z")))
-  skip_if(!identical(attr(r, "rejected_reason"), "empirical variogram decreases with distance"),
-          "this draw's short lags did not fall on this platform")
-  expect_true(log_has(lines, "With 30 points the short-lag bins are noisy"))
+  expect_true(is.na(r))
+  expect_identical(attr(r, "rejected_reason"), "empirical variogram decreases with distance")
+  expect_true(spatialkit:::.variogram_decreasing(attr(r, "variogram")))
+  expect_true(log_has(lines, "With 80 points the short-lag bins are noisy"))
   # A large sample is not told that.
   big <- capture_spatialkit_log(suppressWarnings(estimate_sac_range(sac_test_field(), "z",
                                                                     range_frac = 1e-6)))

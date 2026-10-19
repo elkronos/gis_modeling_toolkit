@@ -88,7 +88,7 @@ if (!skip_without("ggplot2", "the metric plot")) {
 step("06.4", "The built-in backends")
 # compare_models_cv() drives the package's own model families (RF, GWR,
 # Bayesian) through one interface and one set of folds.
-avail <- c(RF = have("ranger"), GWR = have("GWmodel"), Bayesian = have("brms"))
+avail <- c(RF = have("ranger"), GWR = have("sp"), Bayesian = have("brms"))
 cat("  backends available here:",
     paste(names(avail)[avail], collapse = ", "), "\n")
 if (any(avail[c("RF", "GWR")])) {
@@ -105,7 +105,7 @@ if (any(avail[c("RF", "GWR")])) {
   cat("  Bayesian is left out here because it is slow; script 10 runs it and\n",
       "  shows what its extra output buys.\n", sep = "")
 } else {
-  cat("  SKIPPED: install.packages(c(\"ranger\", \"GWmodel\"))\n")
+  cat("  SKIPPED: install.packages(c(\"ranger\", \"sp\"))\n")
 }
 
 step("06.5", "The score that picked the winner cannot also grade it")

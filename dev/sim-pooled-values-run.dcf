@@ -1,0 +1,11 @@
+script: dev/sim-pooled-values.R
+script_md5: 038636f8e1df87dc54d5d9e4e0bbace5
+csv_md5: f7ba879982e0c6116dc4005a344795e1
+layers: 200
+date: 2026-10-14
+seconds: 194
+R: 4.6.1
+platform: aarch64-apple-darwin23
+sf: 1.1.2
+FNN: 1.1.4.1
+spatialkit: 2.0.0.9000

@@ -95,11 +95,16 @@ test_that("select_resolution() carries the centres of the partition it scored", 
 test_that("get_voronoi_seeds() and voronoi_seeds_kmeans() return the scored centres", {
   d <- .fx_pts()
   p <- suppressWarnings(suppressMessages(
-    resolution_profile(d, "z", sac = 400, n_levels = 6, nstart = 5)))
+    resolution_profile(d, "z", sac = 400, n_levels = 6, nstart = 5, estimate = NULL,
+                       obs_per_cell = NULL, partition = "kmeans")))
   sel <- select_resolution(p, "cp")
   cen <- attr(p, "centres")[[as.character(sel$best)]]
 
-  s1 <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = d)
+  # Cp's optimum on this smooth field is the support ceiling, which each of
+  # these calls now says with a warning of class spatialkit_bound_chosen.
+  expect_warning(s1 <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = d,
+                                         partition = "kmeans"),
+                 class = "spatialkit_bound_chosen")
   expect_equal(unname(sf::st_coordinates(s1)[, 1:2]), cen)
   expect_identical(s1$method, rep("kmeans", nrow(s1)))
   expect_match(attr(s1, "n_from"), "select_resolution\\(criterion = \"cp\"\\)")
@@ -114,16 +119,21 @@ test_that("get_voronoi_seeds() and voronoi_seeds_kmeans() return the scored cent
   means <- cbind(tapply(xy[, 1], km$cluster, mean), tapply(xy[, 2], km$cluster, mean))
   expect_equal(unname(means), cen, tolerance = 1e-8)
 
-  # The same from the profile itself, which is read at its default criterion.
-  s2 <- get_voronoi_seeds(method = "kmeans", n = p, sample_points = d)
+  # The same from the profile itself, which is read by Cp: it has no estimate.
+  expect_warning(s2 <- get_voronoi_seeds(method = "kmeans", n = p, sample_points = d,
+                                         partition = "kmeans"),
+                 class = "spatialkit_bound_chosen")
   expect_equal(unname(sf::st_coordinates(s2)[, 1:2]),
-               unname(sf::st_coordinates(select_resolution(p)$seeds)[, 1:2]))
+               unname(sf::st_coordinates(select_resolution(p, criterion = "cp")$seeds)[, 1:2]))
 
   # voronoi_seeds_kmeans() takes the selection too, and returns the seeds in
   # the points' CRS.
-  s3 <- voronoi_seeds_kmeans(d, k = sel)
+  expect_warning(s3 <- voronoi_seeds_kmeans(d, k = sel, partition = "kmeans"),
+                 class = "spatialkit_bound_chosen")
   expect_equal(unname(sf::st_coordinates(s3)[, 1:2]), cen)
-  s4 <- voronoi_seeds_kmeans(sf::st_transform(d, 4326), k = sel)
+  expect_warning(s4 <- voronoi_seeds_kmeans(sf::st_transform(d, 4326), k = sel,
+                                            partition = "kmeans"),
+                 class = "spatialkit_bound_chosen")
   expect_identical(sf::st_crs(s4)$epsg, 4326L)
   expect_equal(unname(sf::st_coordinates(sf::st_transform(s4, 32632))[, 1:2]), cen,
                tolerance = 1e-6)
@@ -139,10 +149,14 @@ test_that("a count as a number, or a selection without seeds, still runs a k-mea
   expect_false(is.na(attr(fresh, "kmeans")$iter))
   old <- sel
   old$seeds <- NULL                 # a selection made before seeds were kept
-  s <- get_voronoi_seeds(method = "kmeans", n = old, sample_points = d, set_seed = 1)
+  # (The selection sits at the support ceiling: a classed warning now.)
+  expect_warning(
+    s <- get_voronoi_seeds(method = "kmeans", n = old, sample_points = d, set_seed = 1),
+    class = "spatialkit_bound_chosen")
   expect_false(is.na(attr(s, "kmeans")$iter))
   expect_identical(nrow(s), as.integer(sel$best))
-  expect_identical(nrow(voronoi_seeds_kmeans(d, k = old)), as.integer(sel$best))
+  expect_warning(s_km <- voronoi_seeds_kmeans(d, k = old), class = "spatialkit_bound_chosen")
+  expect_identical(nrow(s_km), as.integer(sel$best))
 })
 
 

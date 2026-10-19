@@ -301,8 +301,12 @@ test_that("voronoi with expand > 0 returns the grown boundary its cells fill", {
   expect_equal(as.numeric(sum(sf::st_area(tess$boundary))),
                as.numeric(sum(sf::st_area(tess$cells))), tolerance = 1e-6)
   expect_gt(as.numeric(sum(sf::st_area(tess$boundary))), 1.5e6)
-  # expand = 0 is unchanged.
-  t0 <- build_tessellation(p, boundary = sq, quiet = TRUE)
+  # expand = 0 is unchanged: the two outside points have no cell, which is
+  # now counted and warned about.
+  expect_warning(t0 <- build_tessellation(p, boundary = sq, quiet = TRUE),
+                 "2 of 32 point\\(s\\) \\(6.2%\\) fall in no cell",
+                 class = "spatialkit_unassigned")
+  expect_identical(t0$params$n_outside, 2L)
   expect_equal(as.numeric(sf::st_area(t0$boundary)), 1e6)
 })
 

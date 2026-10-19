@@ -2,9 +2,9 @@
 % Please edit documentation in R/fold-separation.R
 \name{fold_separation}
 \alias{fold_separation}
-\title{How far the held-out points actually sit from the training data}
+\title{How far the held-out points sit from the training data}
 \usage{
-fold_separation(folds, data_sf, sac = NULL)
+fold_separation(folds, data_sf, sac = NULL, prediction_points = NULL)
 }
 \arguments{
 \item{folds}{A \code{\link{make_folds}()} result, or its \code{$folds}
@@ -22,7 +22,8 @@ the other is not.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying
-one adds the \code{within_range} column and the closing verdict.  A
+one adds the \code{mean_cor} column and, with a prediction target,
+the gap on the correlation scale.  A
 range that records its CRS (the folds' own, or an
 \code{estimate_sac_range()} result) is compared with distances measured
 in that CRS, whatever CRS \code{data_sf} is in.  A bare number is taken
@@ -31,6 +32,23 @@ to be in the units the distances are otherwise measured in: those of
 metres, in the CRS \code{\link{ensure_projected}()} chooses (as for
 \code{make_folds()}'s \code{block_size}), not degrees.  A \code{units}
 object is refused.}
+
+\item{prediction_points}{Optional \code{sf} or \code{sfc} layer of the
+locations the model will predict at: the grid from
+\code{\link{predict_surface}()}, or a grid over the region of interest
+(\code{sf::st_make_grid(region, what = "centers")}).  A non-POINT layer
+is reduced to one representative point per feature, as in
+\code{make_folds(method = "nndm")}, so pass grid cells or points, not
+one polygon of the region.  It is brought into the CRS the distances are
+measured in.  Default \code{NULL}: no target and no reading, except for
+NNDM and kNNDM folds (\code{method = "nndm"} and \code{"knndm"}), which
+carry the distances from the prediction points they were built for and
+are compared against those, measured to all sites.  The carried
+distances are lengths in the CRS the folds were built in
+(\code{folds$params$crs}).  When the distances here are measured in
+another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
+records another), the two are not compared, \code{print()} says so, and
+passing \code{prediction_points} has the target measured here.}
 }
 \value{
 A data.frame of class \code{fold_separation}, one row per fold:
@@ -40,34 +58,130 @@ which differs from the list position once a fold has been dropped),
 \code{n_train}, \code{n_test}, \code{n_blocks} (\code{NA}
 for a scheme with no blocks), \code{min_dist} and \code{median_dist}
 (distance from a held-out point to its nearest training point, in the
-units of the CRS the \code{crs} attribute names), and
-\code{within_range} (the share of held-out points closer to
-training data than \code{sac}; \code{NA} without one).  Attributes:
-\code{method}, \code{sac_range}, \code{crs} (the CRS the distances were
-measured in) and \code{n_unknown_ids}.
+units of the CRS the \code{crs} attribute names), \code{mean_cor},
+\code{target_median_dist} (the median distance from the prediction
+points to the fold's training data) and \code{dist_gap} (the fold's mean
+held-out distance minus its mean prediction distance); the last two are
+\code{NA} without a target, and \code{print()} shows them under the
+headings \code{target} and \code{gap}.
+
+\code{mean_cor} is a mean correlation, \code{NA} without a
+range: the mean over the fold's held-out points of \eqn{\rho(d)}, the
+correlation the range leaves between a point and its nearest training
+point at distance \eqn{d}.  It is 1 for a point on top of training data
+and falls towards 0 beyond the range, so a point at a twentieth of the
+range counts for more than one at nine tenths of it.  \eqn{\rho(d)} is
+\eqn{\exp(-3 d / range)}, the exponential model whose effective range is
+the range given (0.05 at the range), or the spherical model when the
+range comes from an \code{estimate_sac_range()} fit that was spherical;
+the \code{range_model} attribute says which.  Earlier development
+versions had a column \code{within_range} in its place: the share of
+held-out points closer than the range, which counted every such point
+the same.
+
+Attributes: \code{method}, \code{sac_range}, \code{range_model},
+\code{crs} (the CRS the distances were measured in),
+\code{n_unknown_ids} (the number of distinct rows the folds name that
+\code{data_sf} does not have, each counted once however many folds
+mention it, as in the \code{cv_*()} field of the same name),
+\code{pooled} (a list with the number, minimum, median and mean of the
+held-out distances over all folds, and the pooled \code{mean_cor})
+and \code{target}: \code{NULL} without a prediction target, otherwise a
+list with \code{n_prediction_points}, \code{source}, \code{basis}
+(\code{"each fold's training data"} or \code{"all sites"}),
+\code{held_out_mean}, \code{held_out_median}, \code{target_mean},
+\code{target_median}, \code{target_all_mean}, \code{target_all_median}
+(the prediction distances to all sites), \code{mean_diff}, \code{w1},
+\code{cor_gap}, \code{cor_w1} (\code{NA} without a range), \code{scale}
+(\code{"correlation"} or \code{"distance"}), \code{tolerance},
+\code{reading} (see \strong{Reading the gap}) and
+\code{nndm_out_of_reach} (for NNDM and kNNDM folds, the
+\code{params$target_out_of_reach} that \code{make_folds()} recorded;
+\code{NA} for other schemes).  \code{not_compared} is \code{NULL}, or,
+for NNDM or kNNDM folds whose carried target was not compared because the
+distances here are measured in another CRS, one sentence naming the two
+CRSs; \code{target} is then \code{NULL} and \code{print()} gives the
+sentence where it would otherwise say that no target is given.
 }
 \description{
 Blocked cross-validation exists to put distance between a test point and
 the training points that could tell you its value.  Whether it succeeded is
-a measurement, and until now the package only offered a proxy for it: the
-block size compared against the estimated autocorrelation range, reported
-by \code{\link{make_folds}()} as a warning.  That comparison is about the
-\emph{design}.  This is about the \emph{result}: for every held-out point,
-the distance to its nearest training point, summarised per fold.
+a measurement, and \code{\link{make_folds}()} only offers a proxy for it:
+the block size compared against the estimated autocorrelation range,
+reported as a warning.  That comparison is about the \emph{design}.  This
+is about the \emph{result}: for every held-out point, the distance to its
+nearest training point, summarised per fold.
 }
 \details{
-The two can disagree, and the direction is not obvious.  Blocks wider than
-the range still leak wherever a test point sits near a block edge with
-training data just across it, which is most of the points in a fine block
-grid; conversely a fold whose blocks are narrower than the range can still
-separate well if the points inside them are clustered.  The share of
-held-out points closer to training data than the correlation range is the
-number that settles it, and it is the last column here.
+The distances do not say by themselves which way a score errs.  A
+cross-validated error reads low when the held-out points sit closer to
+their training data than the locations the model will predict at, and high
+when they sit farther, so the same held-out distances can go with either,
+depending on the target.  Random folds on evenly sited data, scored for a
+map of the sampled area, are close to unbiased although nearly every
+held-out point has a training neighbour inside the range; range-sized
+blocks on the same data read high; random folds on clustered data scored
+for a map of the whole region read low.  So without a prediction target
+the function reports the distances and draws no conclusion.  Give it
+\code{prediction_points} and it sets the held-out distances beside the
+distances from those points to the same training data, and words its
+reading by the signed gap between the two.
 
 Nothing is estimated: the distances come from the geometry, and the range,
 when one is shown, is the one the folds already carry (\code{make_folds(
 auto_range = TRUE)} records it) or the one you pass as \code{sac}.
 }
+\section{Reading the gap}{
+
+With a target, the held-out distances and the prediction distances are
+compared as two distributions.  Each fold's prediction distances are
+measured to that fold's own training rows, so that a five-fold design is
+not read as too far only because each fold trains on four fifths of the
+sites; the distances to all sites are reported beside them.  (With more
+than 50 folds, the leave-one-out schemes, every training set is nearly the
+whole sample and the prediction points are measured against all sites
+once.)  Folds count by their share of the held-out points.
+
+Two numbers summarise the comparison: the signed difference of the means,
+held-out minus prediction (the signed area between the two cumulative
+distributions), and the Wasserstein distance \eqn{W_1} (the unsigned
+area).  When a range is available both are also given on the correlation
+scale, after each distance \eqn{d} is replaced by \eqn{1 - \rho(d)}, with
+\eqn{\rho} the correlation the range implies (see \code{mean_cor}
+under Value).  That scale counts a difference between two distances well
+inside the range and ignores one between two distances beyond it.
+
+The reading is taken on the correlation scale when there is a range, with
+a tolerance of 0.1, and otherwise on the mean distance, with a tolerance
+of a quarter of the prediction mean.  (When the prediction points are
+measured to all sites and every one lies on a site, as when the sites
+themselves are passed as \code{prediction_points} to a leave-one-out
+design, the prediction mean and with it that tolerance
+are 0: held-out distances above 0 then read \code{"farther"}, and
+held-out distances that are all 0 as well read \code{"matched"}.  With
+50 folds or fewer the points are measured to each fold's own training
+rows, which leave out that fold's held-out sites, so the mean is above 0
+and the quarter rule gives the reading.)
+\describe{
+\item{\code{"closer"}}{The gap is below minus the tolerance and at least
+half of \eqn{W_1} in size: the held-out points sit closer to their
+training data than the prediction points do, and the cross-validated
+error tends to read low for that target.}
+\item{\code{"farther"}}{The gap is above the tolerance and at least
+half of \eqn{W_1}: the held-out points sit farther, and the error
+tends to read high.}
+\item{\code{"matched"}}{The gap is within the tolerance and
+\eqn{W_1} within twice the tolerance.}
+\item{\code{"mixed"}}{The two distributions cross, closer at some
+distances and farther at others (the gap is under half of
+\eqn{W_1}, or it is within the tolerance while \eqn{W_1} is not), so
+the distances give no single direction.}
+}
+The reading is a statement about nearest-neighbour distances, not a
+measured bias.  A learner that draws on several neighbours can still score
+low on clustered samples whose nearest-neighbour distances match.
+}
+
 \examples{
 library(sf)
 set.seed(1)
@@ -77,7 +191,7 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 
-# Random folds put a training point almost on top of every held-out one.
+# Random folds put a training point close to every held-out one.
 random  <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
 print(fold_separation(random, pts, sac = 200))
 
@@ -85,23 +199,29 @@ print(fold_separation(random, pts, sac = 200))
 blocked <- make_folds(pts, k = 4, method = "block_kfold",
                       block_size = 250, seed = 1)
 print(fold_separation(blocked, pts, sac = 200))
+
+# Which of the two suits a map of the sampled square?  Compare each with
+# the distances from the cells of that map to the training data.
+cells <- st_make_grid(pts, n = c(20, 20), what = "centers")
+print(fold_separation(random, pts, sac = 200, prediction_points = cells))
+print(fold_separation(blocked, pts, sac = 200, prediction_points = cells))
 }
 \seealso{
 \code{\link{make_folds}()} for the fold schemes and the block
 sizing this measures the outcome of; \code{\link{cv_block_size_sweep}()}
 for choosing a block size by cross-validated error instead.
 
-Other cross-validation: 
-\code{\link{area_of_applicability}()},
-\code{\link{cv_bayes}()},
-\code{\link{cv_block_size_sweep}()},
-\code{\link{cv_gwr}()},
-\code{\link{cv_rf}()},
-\code{\link{cv_spatial}()},
-\code{\link{estimate_sac_range}()},
-\code{\link{gwr_model_selection}()},
-\code{\link{make_folds}()},
-\code{\link{sac_nugget}()},
-\code{\link{select_features_forward}()}
+Other cross-validation:
+\code{\link[=area_of_applicability]{area_of_applicability()}},
+\code{\link[=cv_bayes]{cv_bayes()}},
+\code{\link[=cv_block_size_sweep]{cv_block_size_sweep()}},
+\code{\link[=cv_gwr]{cv_gwr()}},
+\code{\link[=cv_rf]{cv_rf()}},
+\code{\link[=cv_spatial]{cv_spatial()}},
+\code{\link[=estimate_sac_range]{estimate_sac_range()}},
+\code{\link[=gwr_model_selection]{gwr_model_selection()}},
+\code{\link[=make_folds]{make_folds()}},
+\code{\link[=sac_nugget]{sac_nugget()}},
+\code{\link[=select_features_forward]{select_features_forward()}}
 }
 \concept{cross-validation}

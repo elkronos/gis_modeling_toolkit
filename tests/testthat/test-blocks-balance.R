@@ -255,16 +255,24 @@ test_that("k is lowered to the number of blocks that hold points", {
                                            rect_poly(700, 1000, 0, 1000),
                                            rect_poly(3000, 4000, 0, 1000)),
                      crs = 32632)
+  # The reduction was a log line only ("blocks < k; reducing k"), which this
+  # test pinned.  It is now a warning of class spatialkit_k_reduced, logged
+  # as well.
   lines <- capture_spatialkit_log(
-    f <- make_folds(pts, k = 5, method = "block_kfold", seed = 1, blocks = three))
+    expect_warning(
+      f <- make_folds(pts, k = 5, method = "block_kfold", seed = 1, blocks = three),
+      "returning 3 folds, not the k = 5 asked for: 3 of the 4 supplied blocks hold points",
+      class = "spatialkit_k_reduced"))
   expect_equal(f$k, 3L)
   expect_equal(f$params$blocks_used, 3L)
   expect_equal(f$params$n_blocks, 4L)
-  expect_true(log_has(lines, "blocks < k; reducing k"))
+  expect_true(log_has(lines, "returning 3 folds, not the k = 5 asked for"))
   # Without dropping empties the fourth (empty) block is still absent from
   # every fold, and the folds are the same.
-  f2 <- make_folds(pts, k = 5, method = "block_kfold", seed = 1, blocks = three,
-                   drop_empty_blocks = FALSE)
+  expect_warning(
+    f2 <- make_folds(pts, k = 5, method = "block_kfold", seed = 1, blocks = three,
+                     drop_empty_blocks = FALSE),
+    class = "spatialkit_k_reduced")
   expect_identical(f2$assignment, f$assignment)
 })
 

@@ -79,20 +79,20 @@ expect_gstat_verdict <- function(sac) {
   invisible(if (ok) v else NA)
 }
 
-# gstat::fit.variogram() stubbed, as test-review3-S4-range-kriging.R stubs it:
-# one exponential model with a nugget of 0.4 whose effective range (3 x 5000)
-# is past every lag of a 1000 m square, returned with the warning gstat raises
-# when its optimiser stops at the iteration limit, or without it.  Whether
-# the real optimiser reaches that limit on a given draw depends on the LAPACK
-# build.  What estimate_sac_range() and the profile make of the warning does
-# not, and that is the part under test.
+# The fit stubbed, as test-review3-S4-range-kriging.R stubs it: one
+# exponential model with a nugget of 0.4 whose effective range (3 x 5000) is
+# past every lag of a 1000 m square, marked as a fit whose criterion has no
+# minimum inside the ranges searched, or as one that has.  The stub replaces
+# .sac_fit_model(), the profile least-squares fit estimate_sac_range() makes
+# (gstat::fit.variogram() is no longer called, so stubbing that would change
+# nothing).  What estimate_sac_range() and the profile make of the mark is
+# the part under test.
 cpn_fit_stub <- function(converges) {
-  function(object, model, ...) {
+  function(vg, cutoff_dist, family = "Exp", upper = 4, ...) {
     m <- gstat::vgm(psill = 1, model = "Exp", range = 5000, nugget = 0.4)
     attr(m, "singular") <- FALSE
     attr(m, "SSErr") <- 1
-    if (!converges)
-      warning("No convergence after 200 iterations: try different initial values?")
+    attr(m, "converged") <- converges
     m
   }
 }
@@ -168,14 +168,15 @@ test_that("a model built from REML parameters carries no verdict", {
 })
 
 
-test_that("a fit gstat gave up on, past the lags, gives cp no nugget on any platform", {
+test_that("a fit with no minimum, past the lags, gives cp no nugget on any platform", {
   skip_if_not_installed("gstat")
-  # The whole chain with nothing left to the optimiser: gstat warns that it
-  # did not converge, estimate_sac_range() refuses the range as past the
-  # largest lag and marks the model, and the profile reads the mark.  Nothing
-  # here is skipped, so a verdict that is lost or wrong on the way fails.
+  # The whole chain with nothing left to the fit: it reports a model whose
+  # criterion has no minimum inside the ranges searched, estimate_sac_range()
+  # refuses the range as past the largest lag and hands the mark on, and the
+  # profile reads the mark.  Nothing here is skipped, so a verdict that is
+  # lost or wrong on the way fails.
   pts <- cpn_field(seed = 2)
-  local_mocked_bindings(fit.variogram = cpn_fit_stub(converges = FALSE), .package = "gstat")
+  local_mocked_bindings(.sac_fit_model = cpn_fit_stub(converges = FALSE))
   sac <- suppressWarnings(estimate_sac_range(pts, "z", seed = 1))
   expect_true(is.na(sac))
   expect_identical(attr(sac, "rejected_reason"), PAST_LAGS)
@@ -186,7 +187,7 @@ test_that("a fit gstat gave up on, past the lags, gives cp no nugget on any plat
   expect_cp_from_finest_level(out$value)
   expect_true(any(grepl(paste0("`sac` reports no usable range (", PAST_LAGS,
                                "), and its variogram model did not converge; ",
-                               "its nugget and sill are where the optimiser stopped"),
+                               "its nugget and sill are where the fit stopped without reaching a minimum"),
                         out$warnings, fixed = TRUE)))
   expect_false(any(grepl("still takes its nugget", out$warnings, fixed = TRUE)))
 
@@ -201,13 +202,13 @@ test_that("a fit gstat gave up on, past the lags, gives cp no nugget on any plat
 })
 
 
-test_that("the same fit without gstat's warning still gives cp its nugget", {
+test_that("the same fit with a minimum still gives cp its nugget", {
   skip_if_not_installed("gstat")
   # The counterpart, and the documented behaviour that does not change: the
-  # model is the one above and so is the refusal, but the optimiser did not
-  # give up, so the nugget was fitted at the short lags and serves Cp.
+  # model is the one above and so is the refusal, but the fit has a minimum,
+  # so the nugget was fitted at the short lags and serves Cp.
   pts <- cpn_field(seed = 2)
-  local_mocked_bindings(fit.variogram = cpn_fit_stub(converges = TRUE), .package = "gstat")
+  local_mocked_bindings(.sac_fit_model = cpn_fit_stub(converges = TRUE))
   sac <- suppressWarnings(estimate_sac_range(pts, "z", seed = 1))
   expect_true(is.na(sac))
   expect_identical(attr(sac, "rejected_reason"), PAST_LAGS)
@@ -246,7 +247,10 @@ test_that("a fit that did not converge, refused as past the lags, gives cp no nu
                 identical(attr(sac, "rejected_reason"), PAST_LAGS) &&
                 isFALSE(attr(attr(sac, "variogram_model"), "converged")),
               "gstat's all-pairs fit did not end as 'not converged, past the largest lag' here")
-  expect_gt(sac_nugget(sac), 0)
+  # The nugget of such a fit is whatever the edge of the search gives (0 here,
+  # at its bound and marked so; 1.29 where gstat's optimiser used to halt).
+  # Either way it is a number that must not reach Cp.
+  expect_true(is.finite(sac_nugget(sac)))
 
   out <- cpn_warnings(resolution_profile(pts, "z", sac = sac, n_levels = 6, nstart = 3))
   p <- out$value
@@ -261,7 +265,7 @@ test_that("a fit that did not converge, refused as past the lags, gives cp no nu
   # fit did not converge.
   expect_true(any(grepl(paste0("`sac` reports no usable range (", PAST_LAGS,
                                "), and its variogram model did not converge; ",
-                               "its nugget and sill are where the optimiser stopped"),
+                               "its nugget and sill are where the fit stopped without reaching a minimum"),
                         out$warnings, fixed = TRUE)))
   expect_false(any(grepl("still takes its nugget", out$warnings, fixed = TRUE)))
   expect_true(any(grepl("`sac` gives no usable variogram model, so `cp` takes its noise variance",
@@ -298,7 +302,7 @@ test_that("the model's own verdict decides, whatever the reason says", {
     expect_cp_from_finest_level(out$value)
     expect_true(any(grepl(paste0("reports no usable range (", reason,
                                  "), and its variogram model did not converge; ",
-                                 "its nugget and sill are where the optimiser stopped"),
+                                 "its nugget and sill are where the fit stopped without reaching a minimum"),
                           out$warnings, fixed = TRUE)), info = reason)
     expect_false(any(grepl("still takes its nugget", out$warnings, fixed = TRUE)), info = reason)
   }
@@ -307,7 +311,7 @@ test_that("the model's own verdict decides, whatever the reason says", {
                                          n_levels = 4, nstart = 2))
   expect_cp_from_finest_level(out$value)
   expect_true(any(grepl(paste0("reports no usable range (", NOT_CONV,
-                               "); its nugget and sill are where the optimiser stopped"),
+                               "); its nugget and sill are where the fit stopped without reaching a minimum"),
                         out$warnings, fixed = TRUE)))
   expect_length(grep("did not converge", out$warnings), 1L)
   expect_false(any(grepl("and its variogram model did not converge", out$warnings, fixed = TRUE)))
@@ -363,18 +367,24 @@ test_that("a converged fit refused as past the lags still gives cp its nugget", 
 })
 
 
-test_that("a converged fit of gstat's own, past the lags, still gives cp its nugget", {
+test_that("a fit of the package's own with a minimum, past the lags, still gives cp its nugget", {
   skip_if_not_installed("gstat")
-  # An effective range of 5000 on a 1000 m square: the fit converges to a
-  # range near 5000, past the largest lag of 647, with a nugget of 0.049
-  # where the field's is 0.05.
-  pts <- cpn_field(eff_range = 5000, nugget = 0.05, seed = 1)
+  # An effective range of 5000 on a 1000 m square.  Under gstat's iterative
+  # fit seed 1 converged to a range near 5000, past the largest lag of 647,
+  # and the test skipped itself wherever that fit ended otherwise.  The fit
+  # is a search now, and on seed 1 its criterion is still falling at four
+  # cutoffs (no minimum: the test before this one), so the skip held on
+  # every run.  Seed 5 has the case this test is for: a minimum at 1363,
+  # past the largest lag of 660 and inside the ranges searched, with a
+  # nugget of 0.060 where the field's is 0.05.
+  pts <- cpn_field(eff_range = 5000, nugget = 0.05, seed = 5)
   sac <- suppressWarnings(estimate_sac_range(pts, "z", seed = 1))
-  expect_gstat_verdict(sac)
-  skip_if_not(is.na(sac) &&
-                identical(attr(sac, "rejected_reason"), PAST_LAGS) &&
-                isTRUE(attr(attr(sac, "variogram_model"), "converged")),
-              "gstat's all-pairs fit did not end as 'converged, past the largest lag' here")
+  expect_true(is.na(sac))
+  expect_identical(attr(sac, "rejected_reason"), PAST_LAGS)
+  expect_identical(expect_gstat_verdict(sac), TRUE)
+  expect_gt(attr(sac, "rejected_range"), attr(sac, "cutoff_dist"))
+  expect_lt(attr(sac, "rejected_range"), 3.5 * attr(sac, "cutoff_dist"))
+  expect_lt(abs(sac_nugget(sac) - 0.05), 0.04)
   out <- cpn_warnings(resolution_profile(pts, "z", sac = sac, n_levels = 6, nstart = 3))
   p <- out$value
   expect_identical(attr(p, "cp_noise")$source, "variogram nugget")
@@ -393,7 +403,7 @@ test_that("a sac whose model carries no verdict is judged by its reason", {
                                          n_levels = 4, nstart = 2))
   expect_cp_from_finest_level(out$value)
   expect_true(any(grepl(paste0("reports no usable range (", NOT_CONV,
-                               "); its nugget and sill are where the optimiser stopped"),
+                               "); its nugget and sill are where the fit stopped without reaching a minimum"),
                         out$warnings, fixed = TRUE)))
   for (reason in c(PAST_LAGS, DECREASING)) {
     out <- cpn_warnings(resolution_profile(pts, "z", sac = cpn_refused(reason),

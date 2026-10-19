@@ -10,10 +10,17 @@
 \item{x}{A \code{resolution_profile}.}
 
 \item{criteria}{Character vector of criteria to draw, any of
-\code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"moran_z"},
-\code{"wss"}.  Default: every one of the four selectable criteria that
-is finite at some level.  \code{"wss"} is the raw curve behind
-\code{"elbow"} and has no selected point.}
+\code{"cp"}, \code{"reliability"}, \code{"elbow"}, \code{"loo"},
+\code{"moran_z"}, \code{"wss"}.  Default: the first five, each where it
+is finite at some level.  \code{"cp"}, \code{"reliability"},
+\code{"elbow"} and \code{"loo"} (the leave-one-out error of the
+estimate the profile was built for; a profile built without
+\code{estimate} has no such column, and a column of that name added
+to one is drawn only when named here) are count criteria and get a
+selected level and a shaded band.  \code{"moran_z"}
+is a diagnostic of the cell means and not a count rule (see
+\code{\link{select_resolution}()}), and \code{"wss"} is the raw curve
+behind \code{"elbow"}: both are drawn as curves with no selected point.}
 
 \item{tol}{Passed to \code{\link{select_resolution}()} for the flat region.}
 
@@ -34,6 +41,13 @@ first level the criterion is computable at), because there the bound is
 choosing, not the criterion.  A criterion that is \code{NA} at every
 level is left out with a log line rather than drawn empty.
 }
+\details{
+A profile whose ladder is one size (\code{obs_per_cell} set to one
+number, or the default profile) has one level, set by the size.  Each
+criterion that is finite there is drawn as one point in its panel, with
+no selected level and no band, and the caption says that the size set
+the count.
+}
 \examples{
 if (requireNamespace("gstat", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
@@ -53,15 +67,15 @@ if (requireNamespace("gstat", quietly = TRUE) &&
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

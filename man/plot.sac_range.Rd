@@ -26,8 +26,11 @@ rather than refused.
 }
 \details{
 Nothing is recomputed: the plot reads the \code{variogram},
-\code{variogram_model}, \code{crs}, \code{directional} and
-\code{anisotropy_used} attributes the estimate already carries.  The
+\code{variogram_model}, \code{crs} and \code{rejected_reason}
+attributes the estimate already carries.  The variogram is the one over
+all point pairs; a result stored by an earlier version, whose range could
+be that of the widest of four directions (\code{anisotropy_used}
+\code{TRUE}), is titled with its azimuth.  The
 distance axis is in the units of the CRS the variogram was actually fitted
 in, which \code{estimate_sac_range()} may have chosen itself for lon/lat
 input.
@@ -60,15 +63,15 @@ if (requireNamespace("gstat", quietly = TRUE) &&
 \code{\link{plot.spatial_fit}(type = "variogram")}, which draws
 the same picture for a fitted model's residuals.
 
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()},
-\code{\link{plot_folds}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}},
+\code{\link[=plot_folds]{plot_folds()}}
 }
 \concept{plotting}

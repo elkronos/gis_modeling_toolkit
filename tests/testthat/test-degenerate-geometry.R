@@ -220,7 +220,7 @@ test_that("ensure_stable_poly_id refuses an empty layer and numbers a single pol
 test_that("summarize_by_cell returns the full column set for degenerate input", {
   empty <- sf::st_sf(poly_id = integer(0), y = numeric(0),
                      geometry = sf::st_sfc(crs = 32632))
-  out <- summarize_by_cell(empty, response_var = "y")
+  out <- summarize_by_cell(empty, response_var = "y", estimate = "mean")
   expect_equal(nrow(out), 0L)
   # The columns must still be there, or rbind()ing per-region results ragged.
   expect_true(all(c("poly_id", "n", "resp_mean_y", "..sd_resp_y",
@@ -230,7 +230,7 @@ test_that("summarize_by_cell returns the full column set for degenerate input", 
   # reporting 0 would claim perfect precision from one measurement.
   one <- sf::st_sf(poly_id = 1L, y = 3,
                    geometry = sf::st_sfc(sf::st_point(c(1, 1)), crs = 32632))
-  o1 <- summarize_by_cell(one, response_var = "y")
+  o1 <- summarize_by_cell(one, response_var = "y", estimate = "mean")
   expect_equal(nrow(o1), 1L)
   expect_equal(o1$n, 1L)
   expect_equal(o1[["resp_mean_y"]], 3)
@@ -242,13 +242,13 @@ test_that("summarize_by_cell returns the full column set for degenerate input", 
   # row over 10 values, with a real sd.
   dup <- .dg_coincident()
   dup$poly_id <- 1L
-  od <- summarize_by_cell(dup, response_var = "z")
+  od <- summarize_by_cell(dup, response_var = "z", estimate = "mean")
   expect_equal(nrow(od), 1L)
   expect_equal(od$n, 10L)
   expect_equal(od[["resp_mean_z"]], mean(dup$z))
   expect_equal(od[["..se_resp_z"]], stats::sd(dup$z) / sqrt(10))
 
-  expect_error(summarize_by_cell(.dg_one(), response_var = "z"),
+  expect_error(summarize_by_cell(.dg_one(), response_var = "z", estimate = "mean"),
                "could not find an ID column")
 })
 

@@ -19,10 +19,25 @@
 #'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
-#' @param polygon_id_col Name of the polygon identifier column. Default "poly_id".
+#' @param polygon_id_col Name of the polygon identifier column: the column of
+#'   `polygons_sf` the IDs are read from, and the name they are returned
+#'   under. Default "poly_id". When `polygons_sf` has no column of that name,
+#'   the IDs are read from the first of `"poly_id"`, `"polygon_id"`, `"id"`,
+#'   `"cell_id"` and `"grid_id"` it carries, and a message names the column
+#'   that was used; when it has none of them, the polygons are numbered
+#'   `1, 2, ...` in row order, and a message says so. The column the IDs are
+#'   read from must hold one distinct, non-missing value per polygon: a
+#'   duplicated or missing ID is an error, because features in different
+#'   polygons would come back under one ID. That includes a unit stored as
+#'   several rows that share its ID (a region split into `POLYGON` parts):
+#'   merge the parts into one row per ID first, for example with
+#'   `dplyr::summarise(dplyr::group_by(polygons_sf, <ID column>))`, which
+#'   keeps the unit one cell. Numbering the rows would make each part a cell
+#'   of its own.
 #' @param keep_unassigned Logical; retain features that fall inside no
 #'   polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
-#'   them.
+#'   them with a warning of class \code{"spatialkit_unassigned"} that gives
+#'   their number.
 #' @param predicate Binary spatial predicate function. Default sf::st_intersects.
 #'   Not used when \code{largest} applies: sf then assigns polygon features by
 #'   overlap area and never calls the predicate.
@@ -49,7 +64,12 @@
 #'   edge of two grid cells), the one whose bounding-box centre is lowest,
 #'   then leftmost, so the choice does not depend on the order of the rows;
 #'   \code{"first"} keeps the first match (original order-dependent
-#'   behavior).
+#'   behavior). On cells built from the centres a profile scored, a point on
+#'   the edge between two of them is placed by the profile's rule whichever
+#'   is given (see Value).
+#' @param quiet Logical; suppress this function's \code{message()}s (the one
+#'   naming a fallback ID column). It does not silence R warnings. Default
+#'   \code{FALSE}.
 #' @return An sf object with `polygon_id_col` attached, one row per input
 #'   feature (fewer if `keep_unassigned = FALSE` dropped unmatched ones), in
 #'   the CRS `features_sf` arrived in. A column of `features_sf` already
@@ -61,10 +81,26 @@
 #'   falls inside any polygon
 #'   the result is empty (or all-`NA` with `keep_unassigned = TRUE`) and a
 #'   warning is raised, since the usual cause is two layers in different
-#'   places (a CRS that could only be stamped, not reprojected). The
+#'   places (a CRS that could only be stamped, not reprojected).
+#'
+#'   Features that fall inside no polygon are counted on the attribute
+#'   `"unassigned"`: a list with `n`, `which` (their row positions in
+#'   `features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
+#'   in the result, and a warning of class `"spatialkit_unassigned"` gives
+#'   their number (`tryCatch(spatialkit_unassigned = )` catches it without
+#'   matching the message; the condition carries `n` and `total`). The usual
+#'   causes are a polygon layer that stops short of the data (a coastline
+#'   drawn at another scale, a tessellation of seeds built without a
+#'   `boundary` or `cover`; see [build_tessellation()]) and points outside
+#'   the study area. With `keep_unassigned = TRUE` they are kept with an
+#'   `NA` ID and no warning is raised, unless every feature is unassigned.
+#'
+#'   The
 #'   attribute `"ties"` records how many features matched more than one
 #'   polygon (with `largest`, overlapped several by exactly the same area)
-#'   and had the `tie_break` rule decide for them: a list with `n`,
+#'   and had the `tie_break` rule decide for them (on cells built from the
+#'   centres a profile scored, the profile's rule then places the points
+#'   among them, as the last paragraph says): a list with `n`,
 #'   `which` (their row positions in `features_sf`), `rule` and `n_rows`
 #'   (the number of rows returned, which the record was made for). A large
 #'   `n` means the polygon layer overlaps, and per-cell counts built from the
@@ -74,7 +110,56 @@
 #'   with no `"ties"` attribute, so nothing reports the parent's count
 #'   for a different set of rows. `sf::st_drop_geometry()` keeps the record,
 #'   since the rows are the same; see \code{\link{[.spatialkit_rows}} for
-#'   what binding such data frames does.
+#'   what binding such data frames does. The `"unassigned"` record is
+#'   stamped and removed the same way.
+#'
+#'   When `polygons_sf` carries `attr(, "count_rule")`, the record of how
+#'   its cell count was set (cells from [build_tessellation()] on seeds
+#'   placed from a [select_resolution()] result or from a profile built with
+#'   an `estimate`), the result carries the same record.
+#'   [summarize_by_cell()] reads it and checks that the rows and cells it is
+#'   given are the ones the count was scored on. It is a plain attribute: a
+#'   row subset keeps it and `dplyr::mutate()`, `dplyr::select()` and
+#'   `dplyr::arrange()` drop it, which is why the summary also looks for it
+#'   on its `cells_sf`. The profile scores a feature that is not a point at
+#'   one point of it (`coerce_to_points(, "auto")`), in the cell of the
+#'   nearest centre; this function gives a polygon feature to the cell it
+#'   overlaps most. A feature that straddles a cell boundary can therefore
+#'   be assigned to another cell than the one it was scored in, and the
+#'   summary does not compare the two for such a layer. To assign the
+#'   features as they were scored, assign their points:
+#'   `assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
+#'
+#'   When that record says the cells are the ones the profile scored
+#'   (`scored_cells` is `TRUE`: the cells [build_tessellation()] builds on a
+#'   selection's seeds, or on the seeds a seeding function returns for one)
+#'   and holds the centres it scored (`count_rule$scored$centres`), a point
+#'   on the edge between two or more of those cells is given the cell
+#'   [resolution_profile()] scored it in: that of its nearest centre,
+#'   measured in the CRS the record names, and of centres the same distance
+#'   away the lower-numbered one. Such points occur on gridded locations
+#'   (raster cell centres, a regular sampling grid), where a row can lie the
+#'   same distance from two centres and the polygons hold it in either cell
+#'   or in both. The rows each cell holds are then the rows its count was
+#'   scored on, and [summarize_by_cell()]'s check of them reads `"match"`.
+#'   A point counts as on the edge when it lies within a margin of both
+#'   cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
+#'   at a UTM northing of 4,400 km. [build_tessellation()] draws such cells
+#'   in the CRS the record names, around the centres as the record holds
+#'   them, whatever CRS the seeds came back in (unless its `crs` names
+#'   another projected CRS), so their corners carry only the rounding of
+#'   that computation, far less than the margin. A point
+#'   farther from its nearest centre's cell keeps the polygon that holds it,
+#'   and so do features that are not points, points without a CRS beside a
+#'   record with one, and a join in longitude and latitude. A centre's cell
+#'   is the one cell that holds it and no other centre; a centre outside a
+#'   boundary that clipped its cell away from it has the cell, among those
+#'   that hold no centre, whose inside is nearest it. Cells built from other
+#'   seeds leave most centres without a cell, and their points to the
+#'   polygons. Polygons without the record, such as polygons
+#'   the caller brings, and cells whose record says `scored_cells` is
+#'   `FALSE` or `NA` (other cells built from the count, such as a lattice
+#'   sized by it) are placed by the polygons alone.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -98,8 +183,10 @@ assign_features_to_polygons <- function(
     features_sf, polygons_sf, polygon_id_col = "poly_id",
     keep_unassigned = FALSE, predicate = sf::st_intersects,
     largest = TRUE,
-    tie_break = c("smallest_area", "first")
+    tie_break = c("smallest_area", "first"),
+    quiet = FALSE
 ) {
+  .msg <- function(...) if (!isTRUE(quiet)) message(...)
   if (!inherits(features_sf, "sf"))
     stop("assign_features_to_polygons(): `features_sf` must be an sf object.")
   if (!inherits(polygons_sf, "sf")) {
@@ -109,6 +196,9 @@ assign_features_to_polygons <- function(
   if (nrow(polygons_sf) == 0L)
     stop("assign_features_to_polygons(): `polygons_sf` has zero rows.")
   tie_break <- match.arg(tie_break)
+  # The record of how the cells' count was set, when they carry one: copied
+  # onto the assigned rows, where summarize_by_cell() looks for it first.
+  count_rule <- .count_rule_get(polygons_sf)
 
   orig_crs <- sf::st_crs(features_sf)
   # The join runs in the polygons' CRS whenever that is projected: it is the
@@ -128,12 +218,66 @@ assign_features_to_polygons <- function(
   # CRS and returned there, as before.
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
 
-  id_candidates <- c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id")
+  id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
   id_col <- id_candidates[id_candidates %in% names(p)][1]
+  # Which column the IDs came from is said whenever it is not the one asked
+  # for.  A fallback used to be taken without a word: nine polygons carrying a
+  # zone attribute called `id` came back as three "polygons", and nine keyed
+  # by `GEOID` came back numbered 1 to 9 with the GEOIDs unused.
+  id_source <- "the column named by `polygon_id_col`"
   if (length(id_col) == 0L || is.na(id_col)) {
     id_col <- polygon_id_col
     p[[id_col]] <- seq_len(nrow(p))
+    id_source <- "row numbers"
+    .log_info(paste0("assign_features_to_polygons(): `polygons_sf` has no '%s' ",
+                     "column and none of the fallback ID columns; polygons numbered ",
+                     "1 to %d in row order."), polygon_id_col, nrow(p))
+    .msg(sprintf(paste0(
+      "assign_features_to_polygons(): `polygons_sf` has no '%s' column, and none ",
+      "of the fallback ID columns (%s); the polygons are numbered 1 to %d in row ",
+      "order. To use an ID the polygons already carry, name its column with ",
+      "`polygon_id_col`."),
+      polygon_id_col,
+      paste(sprintf("'%s'", setdiff(id_candidates, polygon_id_col)), collapse = ", "),
+      nrow(p)))
+  } else if (!identical(id_col, polygon_id_col)) {
+    id_source <- sprintf("read because `polygons_sf` has no '%s' column", polygon_id_col)
+    .log_info(paste0("assign_features_to_polygons(): `polygons_sf` has no '%s' ",
+                     "column; polygon IDs read from its '%s' column."),
+              polygon_id_col, id_col)
+    .msg(sprintf(paste0(
+      "assign_features_to_polygons(): `polygons_sf` has no '%s' column; the ",
+      "polygon IDs are read from its '%s' column and returned as `%s`."),
+      polygon_id_col, id_col, polygon_id_col))
   }
+  # One distinct, non-missing ID per polygon.  A duplicated ID merged the
+  # features of two polygons under one label (a `poly_id` repeated once gave 8
+  # IDs for 9 polygons), and a missing one made the features inside that
+  # polygon look unassigned, so they were dropped: neither raised a condition.
+  # Rows that share an ID on purpose (one unit stored as several POLYGON
+  # rows) are refused with the rest, since the two cases look the same from
+  # here; the message says how to keep such a unit whole, because numbering
+  # the rows would split it into one cell per part.
+  ids_p  <- p[[id_col]]
+  id_na  <- sum(is.na(ids_p))
+  id_dup <- sum(duplicated(ids_p[!is.na(ids_p)]))
+  if (id_na > 0L || id_dup > 0L)
+    stop(sprintf(paste0(
+      "assign_features_to_polygons(): the polygon ID column '%s' (%s) holds %d ",
+      "duplicated and %d missing value(s) among %d polygon(s), so features in ",
+      "different polygons would share an ID or lose theirs. Give every polygon ",
+      "its own ID (polygons_sf$%s <- seq_len(nrow(polygons_sf)), or ",
+      "ensure_stable_poly_id()), or name the column that holds one with ",
+      "`polygon_id_col`.%s"),
+      id_col, id_source, id_dup, id_na, nrow(p), polygon_id_col,
+      if (id_dup > 0L) sprintf(paste0(
+        " If the rows that share an ID are the parts of one unit (a region ",
+        "stored as several polygons), merge them into one row per ID first, so ",
+        "the unit stays one cell: dplyr::summarise(dplyr::group_by(polygons_sf, ",
+        "%s)). Numbering the rows would make each part a cell of its own."),
+        if (identical(make.names(id_col), id_col)) id_col
+        else sprintf("`%s`", id_col))
+      else ""), call. = FALSE)
 
   # The polygons' ID travels through the join under a reserved name and is
   # renamed to `polygon_id_col` afterwards.  Under its source name, a
@@ -343,24 +487,61 @@ assign_features_to_polygons <- function(
   } else {
     joined <- joined[!duplicated(joined[["..pre_join_row_id"]]), , drop = FALSE]
   }
+  # On cells built from the centres a profile scored, a point on the edge
+  # between two of them goes to the cell the profile scored it in, whatever
+  # `tie_break` picked or which side of the edge rounding put it on: its
+  # nearest centre, a tie to the lower-numbered one.  Then the rows each cell
+  # holds are the rows its count was scored on.
+  if (!is.null(count_rule)) {
+    on_edge <- .scored_edge_cells(f, p, id_col, joined, polygon_id_col, count_rule,
+                                  features_sf)
+    if (length(on_edge$rows)) {
+      joined[[polygon_id_col]][on_edge$rows] <- on_edge$ids
+      .log_info(paste0("assign_features_to_polygons(): %d point(s) on the edge between two ",
+                       "cells resolution_profile() scored were given the cell it scored ",
+                       "them in, that of their nearest centre."),
+                length(on_edge$rows))
+    }
+  }
+  # Which features matched no polygon, by their row in `features_sf`, read
+  # before the row key goes.
+  unassigned_rows <- sort(joined[["..pre_join_row_id"]][is.na(joined[[polygon_id_col]])])
   joined[["..pre_join_row_id"]] <- NULL
 
-  n_unassigned <- sum(is.na(joined[[polygon_id_col]]))
+  n_unassigned <- length(unassigned_rows)
+  n_features   <- nrow(joined)
   # Zero matches is almost never what the caller meant, and it is silent: the
   # function returns an empty sf and every downstream step reports zero rows
   # without saying why.  The usual cause is a CRS mismatch that could only be
   # stamped rather than reprojected, which puts the two layers in different
   # places.
-  if (n_unassigned == nrow(joined) && nrow(joined) > 0L)
-    .warn_and_log(paste0("assign_features_to_polygons(): none of the %d ",
+  if (n_unassigned == n_features && n_features > 0L)
+    .warn_classed("spatialkit_unassigned",
+                  paste0("assign_features_to_polygons(): none of the %d ",
                          "feature(s) fall inside any polygon. Check that the ",
                          "two layers cover the same ground -- a CRS that had to ",
                          "be stamped rather than reprojected is the usual ",
                          "cause -- or pass a different `predicate`."),
-                  nrow(joined))
+                  n_features, data = list(n = n_unassigned, total = n_features))
+  else if (n_unassigned > 0L && !keep_unassigned)
+    # Rows removed from the result are data dropped, which the caller has to
+    # be able to catch: this was one INFO line in the temp log, and a
+    # tessellation of 25 k-means seeds built without a boundary lost 764 of
+    # 3,000 observations (the edge of the study area, so the cell means moved
+    # too) with no condition raised and nothing on the result.
+    .warn_classed("spatialkit_unassigned",
+                  paste0("assign_features_to_polygons(): %d of %d feature(s) ",
+                         "(%.1f%%) fall inside no polygon and are left out of ",
+                         "the result; attr(, \"unassigned\")$which gives their ",
+                         "rows in `features_sf`. Check that the polygons cover ",
+                         "the features (cells built from seeds need a ",
+                         "`boundary` or a `cover`; see build_tessellation()), or ",
+                         "pass keep_unassigned = TRUE to keep them with an NA ID."),
+                  n_unassigned, n_features, 100 * n_unassigned / n_features,
+                  data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L)
-    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon.",
-              n_unassigned, nrow(joined))
+    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID.",
+              n_unassigned, n_features)
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -373,7 +554,13 @@ assign_features_to_polygons <- function(
                             list(n = length(tie_rows),
                                  which = as.integer(tie_rows),
                                  rule = tie_break))
-  joined
+  # The features no polygon holds, beside the ties: the count used to exist
+  # only in a log line.  Stamped the same way, and removed by a subset with
+  # the other records named in .row_record_attrs (R/utils.R).
+  joined <- .set_row_record(joined, "unassigned",
+                            list(n = n_unassigned,
+                                 which = as.integer(unassigned_rows)))
+  .count_rule_put(joined, count_rule)
 }
 
 
@@ -421,6 +608,125 @@ assign_features_to_polygons <- function(
     out_ids  <- c(out_ids, p_sel[[join_id]][pick])
   }
   list(rows = out_rows, ids = out_ids)
+}
+
+
+#' Points on the edge between cells a profile scored, placed as it placed them
+#'
+#' On cells whose record of their count sits beside the centres the profile
+#' scored (\code{.scored_centres()}), \code{resolution_profile()} gave each
+#' row to its nearest centre in the record's CRS, a tie to the lower-numbered
+#' centre (\code{.nearest_centre()}), and the polygons hold a row that is the
+#' same distance from two centres in either cell, or in both.  A point the
+#' join placed in a cell, that lies within \code{.edge_tol()} of the edge of
+#' that cell and of the cell of the centre the profile's rule gives it, is
+#' given that cell.  A point farther from that cell than the margin keeps
+#' the cell it has: it is not on their shared edge, so the cells are not the
+#' ones scored there (built in another CRS, say), and the summary's check
+#' says so.
+#'
+#' The cell of a centre is the one cell that holds it, when it holds no
+#' other centre: a Voronoi cell holds its own centre and no other, so cells
+#' built from other seeds (a subset of the centres) leave most centres
+#' without one, and the points tied to those keep their cells.  A centre in
+#' no cell stands outside a boundary that clipped its cell away from it;
+#' its cell is then the one cell holding no centre whose point on the
+#' surface has it as its nearest centre, when no other such cell has.
+#'
+#' Edges are measured in the CRS of the join: a projected one, or none on
+#' either side when the record names none.  Polygons in longitude and
+#' latitude, features without a CRS beside a record with one, or the
+#' reverse, are left as the join placed them.
+#'
+#' @param f The join's copy of the features, in the join's CRS, one row per
+#'   row of \code{features}.
+#' @param p The polygons, in the join's CRS, with their IDs in \code{id_col}.
+#' @param id_col The ID column of \code{p}.
+#' @param joined The join, one row per feature: \code{..pre_join_row_id}
+#'   (the row of \code{f}) and the polygon's ID in \code{id}.
+#' @param id The name of the ID column of \code{joined}.
+#' @param rec The record of the count the polygons carry.
+#' @param features The features as the caller passed them.
+#' @return A list: \code{rows}, the rows of \code{joined} whose cell
+#'   changes, and \code{ids}, the ID each gets.
+#' @keywords internal
+#' @noRd
+.scored_edge_cells <- function(f, p, id_col, joined, id, rec, features) {
+  none <- list(rows = integer(0), ids = p[[id_col]][integer(0)])
+  cen <- .scored_centres(rec)
+  if (is.null(cen)) return(none)
+  crs_j <- sf::st_crs(p)
+  crs_r <- rec$crs
+  crs_f <- sf::st_crs(features)
+  if (!is.na(crs_j) && isTRUE(sf::st_is_longlat(crs_j))) return(none)
+  if (!is.na(crs_r) && isTRUE(sf::st_is_longlat(crs_r))) return(none)
+  if (is.na(crs_r) != is.na(crs_j) || is.na(crs_r) != is.na(crs_f)) return(none)
+
+  # The points the join placed in a cell.
+  ids_p <- p[[id_col]]
+  at    <- match(joined[[id]], ids_p)
+  src   <- joined[["..pre_join_row_id"]]
+  gf    <- sf::st_geometry(f)
+  point <- sf::st_geometry_type(gf, by_geometry = TRUE) == "POINT" & !sf::st_is_empty(gf)
+  rows  <- which(!is.na(at) & point[src])
+  if (!length(rows)) return(none)
+
+  # Those within the margin of their own cell's edge.  The others lie inside
+  # it, away from every other cell.
+  gp  <- sf::st_geometry(p)
+  tol <- .edge_tol(sf::st_bbox(gp))
+  edge <- suppressWarnings(sf::st_boundary(gp))
+  d    <- as.numeric(sf::st_distance(gf[src[rows]], edge[at[rows]], by_element = TRUE))
+  rows <- rows[which(d <= tol)]
+  if (!length(rows)) return(none)
+
+  # Their nearest centre, from their coordinates in the record's CRS, as the
+  # profile measured them.
+  pts <- features[src[rows], , drop = FALSE]
+  if (!is.na(crs_r) && !isTRUE(crs_f == crs_r)) pts <- sf::st_transform(pts, crs_r)
+  xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
+  ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+  rows <- rows[ok]
+  if (!length(rows)) return(none)
+  g <- .nearest_centre(xy[ok, 1L], xy[ok, 2L], cen[, 1L], cen[, 2L],
+                       use_fnn = .has_backend("FNN"))
+
+  # The cell of each centre: the one cell that holds it and no other centre.
+  where <- sf::st_as_sf(data.frame(x = cen[, 1L], y = cen[, 2L]), coords = c("x", "y"),
+                        crs = crs_r)
+  if (!is.na(crs_r) && !isTRUE(crs_r == crs_j)) where <- sf::st_transform(where, crs_j)
+  hit  <- sf::st_intersects(where, gp)
+  cell <- rep(NA_integer_, nrow(cen))
+  one  <- lengths(hit) == 1L
+  cell[one] <- vapply(hit[one], function(h) h[1L], integer(1))
+  cell[cell %in% cell[duplicated(cell) & !is.na(cell)]] <- NA_integer_
+  # A centre in no cell lies outside a boundary that clipped its cell away
+  # from it.  Its cell is the one, among the cells that hold no centre, whose
+  # inside is nearer it than any other centre: a point on that cell's surface
+  # has it as its nearest centre, and no other such cell has.
+  lost <- which(lengths(hit) == 0L)
+  if (length(lost)) {
+    empty <- setdiff(seq_along(gp), unlist(hit))
+    if (length(empty)) {
+      inside <- suppressWarnings(sf::st_point_on_surface(gp[empty]))
+      if (!is.na(crs_r) && !isTRUE(crs_r == crs_j)) inside <- sf::st_transform(inside, crs_r)
+      ixy <- unname(sf::st_coordinates(inside)[, 1:2, drop = FALSE])
+      fin <- is.finite(ixy[, 1L]) & is.finite(ixy[, 2L])
+      k <- rep(NA_integer_, length(empty))
+      k[fin] <- .nearest_centre(ixy[fin, 1L], ixy[fin, 2L], cen[, 1L], cen[, 2L],
+                                use_fnn = .has_backend("FNN"))
+      own <- !is.na(k) & k %in% lost & !(k %in% k[duplicated(k) & !is.na(k)])
+      cell[k[own]] <- empty[own]
+    }
+  }
+
+  # A point goes to its centre's cell when it lies on that cell's edge too.
+  to   <- cell[g]
+  move <- which(!is.na(to) & to != at[rows])
+  if (!length(move)) return(none)
+  d_to <- as.numeric(sf::st_distance(gf[src[rows[move]]], gp[to[move]], by_element = TRUE))
+  move <- move[which(d_to <= tol)]
+  list(rows = rows[move], ids = ids_p[to[move]])
 }
 
 
@@ -792,30 +1098,28 @@ assign_features_to_polygons <- function(
 }
 
 
-#' Warn that a requested design effect fell back to 1
+#' Warn that a requested design effect was not the one applied
 #'
-#' \code{.warn_and_log()} with a condition class, so that a caller running
-#' many summaries can catch exactly this case -- the standard errors are the
-#' uncorrected ones although a correction was asked for -- with
-#' \code{tryCatch(spatialkit_deff_fallback = )} or
-#' \code{withCallingHandlers()}, rather than by matching message text.
+#' The classed warning for a design effect that fell back: to 1 for a refused
+#' number, and to \code{"kish"} (or, when its ICCs are 0, to nothing) for a
+#' \code{"variogram"} request with no usable model.  The class is
+#' \code{"spatialkit_deff_fallback"} in both cases.
 #'
 #' @keywords internal
 #' @noRd
-.warn_deff_fallback <- function(fmt, ...) {
-  msg <- sprintf(fmt, ...)
-  # raising = TRUE: the warning below shows it, so a knitted document must
-  # not repeat the line as a message (see .sk_console_appender()).
-  .sk_log(logger::WARN, msg, raising = TRUE)
-  warning(warningCondition(msg, class = "spatialkit_deff_fallback"))
-  invisible(msg)
+.warn_deff_fallback <- function(fmt, ..., data = list()) {
+  .warn_classed("spatialkit_deff_fallback", fmt, ..., data = data)
 }
 
 
 #' Summarize features by polygon/cell ID
 #'
 #' Aggregates an sf point dataset into one row per cell. By default computes
-#' counts and means, but the aggregation function is configurable.
+#' counts and means, but the aggregation function is configurable. It also
+#' returns a pooled value for each cell, its mean pulled toward the mean of
+#' the cells around it (`estimate = "pooled"`, the default; `estimate =
+#' "mean"` leaves it out), and can return a range for one further
+#' observation.
 #'
 #' This is the third step of the package's pipeline, taking the labelled layer
 #' from [assign_features_to_polygons()] down to cell level. What distinguishes
@@ -843,7 +1147,20 @@ assign_features_to_polygons <- function(
 #' `deff` applied one. With `deff = 1` and no missing values it equals `n`.
 #' Pass it as the `weights` argument of a downstream regression.
 #'
-#' @section Spatial autocorrelation and standard-error bias:
+#' An infinite value (`Inf`, `-Inf`) in a response or predictor column is
+#' treated as missing, as `NA` and `NaN` are, in every statistic of that
+#' column: the `agg_funs` results, `..sd_*`, `..se_*`, the interval columns,
+#' `..neff_*`, `cell_weight` and the design effect. `n` still counts the row.
+#' A warning of class `"spatialkit_nonfinite"` names the columns and gives the
+#' number of rows and cells affected (the condition carries `n` and
+#' `columns`). [kriging_adequacy()], [resolution_profile()],
+#' [estimate_sac_range()] and [prep_model_data()] leave such rows out too, so
+#' the steps of one pipeline agree on a cell's mean. A function in `agg_funs`
+#' therefore never sees an infinite value: `max` returns the largest finite
+#' value, and infinities cannot be counted through `agg_funs`.
+#'
+#' # Spatial autocorrelation and standard-error bias
+#'
 #' By default (`deff = 1`), the `..se_*` columns are computed as
 #' `sd / sqrt(n)`, which treats the observations within each cell as
 #' independent. When data are spatially autocorrelated (the common case for the
@@ -859,13 +1176,13 @@ assign_features_to_polygons <- function(
 #' wide; see "What the standard error estimates" before setting `deff`.
 #'
 #' Setting `deff = "kish"` applies an approximate correction using Kish's
-#' design effect. Separate intra-class correlations (ICCs) are estimated for
-#' response and predictor variables via a one-way random-effects decomposition
-#' across all cells. Each variable type's ICC is used for its own SE
-#' adjustment, and each cell's effective sample size is reduced to
-#' `n_i / (1 + (n_i - 1) * rho)`. This is a first-order correction that
-#' does not require a full spatial covariance model but does require enough
-#' cells and observations for a stable ICC estimate.
+#' design effect. An intra-class correlation (ICC) is estimated for every
+#' summarised column on its own, the response and each predictor, via a
+#' one-way random-effects decomposition across all cells. Each column's ICC
+#' is used for that column's SE adjustment, and each cell's effective sample
+#' size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a first-order
+#' correction that does not require a full spatial covariance model but does
+#' require enough cells and observations for a stable ICC estimate.
 #'
 #' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
 #' with a second, small-sample correction. The within-cell correlation that
@@ -894,19 +1211,26 @@ assign_features_to_polygons <- function(
 #' For rigorous inference under spatial dependence, consider fitting an
 #' explicit spatial covariance model (e.g. via \code{\link{fit_bayesian_spatial_model}}).
 #'
-#' @section What the standard error estimates:
-#' The `..se_*` columns are the standard error of the cell mean **as an
-#' estimate of the population (grand) mean**: the unconditional quantity, in
-#' which the cell's own realised deviation is part of the error. That is the
-#' right quantity when cells are treated as samples from a common population,
-#' and the design-effect correction is calibrated for it: measured 95% interval
-#' coverage of the grand mean is 0.95 with `deff = "kish"` (and 0.29 with the
-#' naive SE) on exchangeable within-cell correlation, and 0.93 with
-#' `deff = "variogram"` on a simulated Gaussian field.
+#' # What the standard error estimates
 #'
-#' It is **not** the standard error of the cell's own mean (the block average
-#' over that cell), which is what a cell-level map or a regression on cell
-#' values usually wants. For that quantity the naive `sd / sqrt(n)` is the
+#' What the `..se_*` columns estimate follows `deff`. At the default,
+#' `deff = 1`, `sd / sqrt(n)` is the standard error of **the cell's own
+#' mean**, the mean of the units the cell holds, and it is the right one when
+#' the cell's observations are spread through the cell. Under
+#' `deff = "kish"`, `"variogram"` or a number other than 1 the columns are the
+#' standard error of the cell mean **as an estimate of the population (grand)
+#' mean**: the unconditional quantity, in which the cell's own realised
+#' deviation is part of the error, widened for the correlation inside the
+#' cell. That is the right quantity when cells are treated as samples from a
+#' common population: measured 95% interval coverage of the grand mean is
+#' 0.95 with `deff = "kish"` (and 0.29 with the naive SE) on exchangeable
+#' within-cell correlation, and 0.93 with `deff = "variogram"` on a simulated
+#' Gaussian field.
+#'
+#' The corrected standard error is **not** that of the cell's own mean (the
+#' block average over that cell), which is what a cell-level map or a
+#' regression on cell values usually wants. For that quantity the naive
+#' `sd / sqrt(n)` is the
 #' better of the two on offer: measured coverage 0.95 under exchangeable
 #' within-cell correlation, against very nearly 1.00 for the
 #' design-effect-corrected SE, which is too wide by the factor
@@ -920,9 +1244,15 @@ assign_features_to_polygons <- function(
 #' they are measurements of the cells themselves and the sampling within cells
 #' is reasonably uniform.
 #'
-#' @section Design effects and variable types:
-#' `deff = "kish"` estimates a separate ICC for response and predictor
-#' variables and applies each to its own columns. `deff = "variogram"` fits or
+#' # Design effects and variable types
+#'
+#' `deff = "kish"` estimates a separate ICC for each summarised column, the
+#' response and every predictor, and applies each to that column alone:
+#' listing or removing a predictor leaves every other column's standard error,
+#' effective n and interval as they were. (One ICC used to be pooled over all
+#' the predictors, which was right for a column only when they all shared it:
+#' beside a predictor with an ICC of 0.87, one with an ICC of 0 had its
+#' standard error multiplied by 3.1.) `deff = "variogram"` fits or
 #' accepts **one** correlation function and applies it to every numeric column,
 #' because a variogram is a property of the field being modelled rather than of
 #' a variable type; a predictor whose spatial structure differs markedly from
@@ -939,15 +1269,19 @@ assign_features_to_polygons <- function(
 #' corrects response columns a warning says that their standard errors are
 #' understated, as [kriging_adequacy()] warns about the same mismatch.
 #'
-#' @section Confidence intervals:
+#' # Confidence intervals
+#'
 #' With `conf_level` set, every numeric response and predictor column gains
 #' four more columns: `..neff_*`, that column's effective sample size in the
 #' cell (its non-missing count over its design effect, the per-column version
 #' of `cell_weight`); `..df_*`, the degrees of freedom the interval uses; and
-#' `..ci_lo_*` / `..ci_hi_*`, a t interval for the **cell mean as an estimate
-#' of the grand mean**. The estimand is the same as `..se_*`'s, so everything
-#' in "What the standard error estimates" applies to it, including that it is
-#' not an interval for the cell's own block average. The interval is
+#' `..ci_lo_*` / `..ci_hi_*`, a t interval for a mean. Which mean follows
+#' `deff`, as for `..se_*`: at the default, `deff = 1`, **the cell's own
+#' mean**, when its observations are spread through the cell; under
+#' `deff = "kish"`, `"variogram"` or a number other than 1, the **cell mean as
+#' an estimate of the population (grand) mean**. Everything in "What the
+#' standard error estimates" applies to it, including that the corrected
+#' interval is not one for the cell's own block average. The interval is
 #' `mean +/- qt((1 + conf_level) / 2, df) * se`, centred on the plain mean of
 #' the column's non-missing values whatever `agg_funs` computes, and is `NA`
 #' wherever the standard error is (a single observation; complete redundancy
@@ -955,6 +1289,17 @@ assign_features_to_polygons <- function(
 #' non-missing value or none, like the standard error; `cell_weight` still
 #' counts such a cell (1, or `1 / deff` for a numeric `deff`), so the two
 #' differ there.
+#'
+#' At no setting is `..ci_*` a range for one observation: it is an interval
+#' for a mean, and it narrows as a cell's count grows where the spread of
+#' single observations does not. The interval for one further observation in
+#' a cell has its own argument and columns, `obs_level` with
+#' `estimate = "pooled"` and `..obs_lo_*` / `..obs_hi_*` (see "Intervals:
+#' which one answers which question"). In the simulation described there,
+#' `..ci_*` at `conf_level = 0.90` held 58.9 percent of the observations held
+#' out among the others, and the interval for one observation at
+#' `obs_level = 0.90` held 89.6 percent. Away from the observations no
+#' interval here is calibrated.
 #'
 #' The degrees of freedom are **not** `neff - 1`. The interval's spread comes
 #' from the within-cell sample variance, and under exchangeable correlation
@@ -981,6 +1326,276 @@ assign_features_to_polygons <- function(
 #' under it: a mis-specified variogram, or an ICC estimated from too few
 #' cells, moves the coverage with it.
 #'
+#' # Pooled values
+#'
+#' With `estimate = "pooled"` every numeric column also gets a pooled value.
+#' That is the default; `estimate = "mean"` leaves the pooled columns out
+#' and returns the frame of earlier versions.
+#' A cell's value, plain or pooled, estimates the cell's *level*: the
+#' expected value of one further observation located in the cell the way its
+#' observations were. It is not the average of a surface over the cell's
+#' area, which would give weight to ground that holds no observation.
+#'
+#' For one column, write `n`, `S` and `m = S / n` for the count, the sum and
+#' the mean of a cell's rows, `N` for the rows in all and `K` for the cells
+#' that hold one. Then
+#'
+#' * `sigma2 = sum((y - m)^2) / (N - K)` is the spread of the observed values
+#'   about their cell's mean;
+#' * the target `t` of a cell is the mean of the rows of its neighbours,
+#'   `sum(S) / sum(n)` over them. The neighbours are the 8 cells whose
+#'   centroids are nearest, the centroid of a cell being the mean of the
+#'   coordinates of its rows. The polygons are not read, so two cells are
+#'   neighbours whether or not they touch, and a cell is never its own
+#'   neighbour;
+#' * `tau2 = max(0, (sum(n * (m - t)^2) - K * sigma2) / N)` is the mean
+#'   squared distance between a cell's level and its target, the target's own
+#'   error included;
+#' * the own weight is `w = tau2 / (tau2 + sigma2 / n)`;
+#' * the pooled value is `w * m + (1 - w) * t`.
+#'
+#' The own weight is the share of the pooled value that is the cell's own
+#' mean. It grows with the cell's count and with `tau2`. At 1 the pooled
+#' value is the plain mean; at 0 it is the target and holds none of the
+#' cell's own values. Pooled values are for maps and for predicting
+#' observations. `..pooled_w_*` is not a regression weight. The plain
+#' columns are the same under either `estimate`, and they are the ones to
+#' use, with `cell_weight`, in a regression on cell values: each column is
+#' pulled toward its neighbours by its own amount, so a regression of pooled
+#' responses on pooled predictors is not a regression of the levels.
+#'
+#' The cells can be any polygons the rows were assigned to, the package's
+#' own or ones the caller brings, with IDs of any type: only each row's cell
+#' and location are read. Each column is pooled on its own rows, those with
+#' a value, a cell and a location, with its own centroids, neighbours,
+#' `sigma2` and `tau2`; a
+#' missing value in one column changes nothing in another. A cell with one
+#' such row gets a value. A cell with none gets `NA`, never a value made from
+#' its neighbours. The pooled columns do not read `agg_funs` or `deff`: the
+#' mean that is pooled is the arithmetic mean whatever `agg_funs` computes,
+#' and no design effect enters `sigma2`, `tau2`, the weights or the interval
+#' of `obs_level`.
+#'
+#' Three cases change what the numbers rest on, and each is a warning (see
+#' "Conditions"). With 2 to 9 cells the neighbours of a cell are all the
+#' others, so its target is the mean of every row outside it, and the overall
+#' mean lies between that target and the cell's own mean. A cell whose own
+#' weight is below its share of the rows, `n / N`, then gets a pooled value
+#' on the far side of the overall mean from its plain mean, and two cells can
+#' change order. When few cells hold two rows, `sigma2` is estimated from few
+#' values and every weight rests on it: `df` in `attr(, "pooled")` is the
+#' number of values beyond one per cell. And when `tau2` comes out at 0,
+#' every own weight is 0 and each pooled value is its target; with two
+#' cells that is the other cell's mean, so the two values change places.
+#'
+#' A tie between two candidate neighbours goes to the centroid with the
+#' lower x, then the lower y, and the centroids are summed with the rows in
+#' coordinate order, so a cell's neighbours do not depend on the order of the
+#' rows. The values then agree to rounding: a cell's sums are taken in the
+#' order of its rows.
+#' The tie is between distances computed from the coordinates in the CRS the
+#' distances are measured in (see `estimate`), so on gridded locations the
+#' same layer in another CRS or unit can give a cell another neighbour.
+#'
+#' The figures on this page that describe pooled values and the two
+#' intervals come from one simulation, `dev/sim-pooled-values.R` in the
+#' package's repository, whose header holds its settings and seeds. It draws 200
+#' layers on a square of side 1,000. Each has 2,100 clustered locations
+#' (four fifths of them round 25 parent points with a standard deviation of
+#' 40, the rest uniform) and a response that is a field with covariance
+#' `exp(-d / 100)` plus noise of variance 0.3. The 300 locations nearest a
+#' random centre are held out as a block, 300 of the others are held out at
+#' random, and the 1,500 left are the layer: 333 cells at 4.5 observations a
+#' cell from [resolution_profile()] with `partition = "density"`,
+#' `select_resolution(criterion = "size")`, [get_voronoi_seeds()],
+#' [build_tessellation()] and [assign_features_to_polygons()], summarised
+#' with `estimate = "pooled"`. A held-out observation is given the value of
+#' its cell by [cell_values_at()]. At the observations held out at random
+#' the root mean squared error of the pooled value was 0.96 of the plain
+#' mean's: 0.84 in cells that hold one of the layer's observations, 0.95 in
+#' cells of 2 to 4, 0.98 in cells of 5 to 9 and 0.99 in cells of 10 or
+#' more. In the held-out block it was 0.95.
+#'
+#' `structured` in `attr(, "pooled")` says whether these cells predict a
+#' left-out observation better than one mean for all rows. It is `FALSE`
+#' when the leave-one-out error of one mean (`loo_one_cell`) is within 2
+#' percent of that of the pooled values (`loo`) or below it, or when the F
+#' test of the cell means against one mean has `p >= 0.05`
+#' (`structure_p`). `FALSE` raises a warning of class
+#' `"spatialkit_no_structure"`, and the values are returned. On a response
+#' without spatial structure they still make a smooth map, because each is
+#' mostly the mean of its neighbours. With white noise as the response on
+#' the simulation's 200 layers the median own weight was 0.11, `tau2` was 0
+#' on 20 layers, the warning was raised on all 200, and a cell's pooled
+#' value had a correlation of 0.79 with the mean of the pooled values of its
+#' 8 nearest cells, where the plain means had one of -0.02.
+#'
+#' The pooling model implies an error variance for a pooled value as an
+#' estimate of the cell's level, `(1 - w) * tau2`. It is not returned, and
+#' neither is an interval for the level, because no check has confirmed an
+#' interval built from it; `sigma2`, `tau2` and `..pooled_w_*` are in the
+#' result for a reader who wants to form it. In the simulation, with a
+#' cell's level taken as the mean of the noise-free field over further
+#' locations drawn in it like the data's, the squared error of the pooled
+#' value was 0.98 of `(1 - w) * tau2` among the observations and 6.9 times
+#' it in the held-out block: away from the observations it is too small.
+#'
+#' Beside a sharp boundary the pooled value can be further from a cell's
+#' level than the plain mean, because its target takes in cells across the
+#' boundary. A second simulation measured this on fields whose level jumps
+#' at county boundaries: one level for each county, alone and with a smooth
+#' field added, on two layouts of real locations (892 and 2,634 points, each
+#' in a county), with noise of 5, 20 or 50 percent of an observation's
+#' variance, 200 layers of each, five random folds, and on each fold the
+#' cells the package's defaults build from the training observations. A
+#' held-out observation is a boundary row when every training observation
+#' of its cell lies in its own county and more than half of those of the
+#' cell's neighbours lie in other counties. Boundary rows were 21.75 to
+#' 28.04 percent of the held-out observations. Over them the root mean
+#' squared error of the pooled value against the noise-free field, as a
+#' geometric mean over the layers of its ratio to the plain mean's, was
+#' from 9.16 percent lower to 56.36 percent higher. On county levels alone
+#' it was 43.21 and 56.36 percent higher with 5 percent noise, 11.23 and
+#' 20.58 percent higher with 20 percent, and from 3.79 percent lower to 1.47
+#' percent higher with 50 percent; with the smooth field added it was from
+#' 9.16 percent lower to 1.59 percent higher. Over all held-out observations
+#' the pooled value's error was the lower of the two in every setting, by
+#' 1.75 to 18.73 percent.
+#'
+#' # Intervals: which one answers which question
+#'
+#' Two families of interval columns can be in the frame. Each has its own
+#' argument, and neither changes the other.
+#'
+#' | Family | Columns | Target | Centre | Asked for by |
+#' |---|---|---|---|---|
+#' | observation | `..obs_lo_*`, `..obs_hi_*` | one further observation in the cell | pooled value | `obs_level` |
+#' | mean | `..ci_lo_*`, `..ci_hi_*` | a mean, never one observation | plain mean | `conf_level` |
+#'
+#' The observation of the first is one located in the cell the way the
+#' data's were. `obs_level` needs `estimate = "pooled"`: without it the call
+#' is an error, not an interval round the plain mean. The mean the second
+#' covers follows `deff`: at `deff = 1` the cell's own mean, when its
+#' observations are spread through the cell; under `deff = "kish"`,
+#' `"variogram"` or a number other than 1 the cell mean as an estimate of
+#' the population mean (see "Confidence intervals", which also describes
+#' `..neff_*` and `..df_*`). No interval and no standard error is returned
+#' for a cell's level as the pooled value estimates it.
+#' `attr(, "intervals")` says the same of the frame in hand, one row per
+#' family present.
+#'
+#' The interval for one observation is the pooled value plus two quantiles
+#' of the leave-one-out residuals of the pooled values. The residual `e` of
+#' a row is its value minus the pooled value of its cell computed without
+#' it: the cell's mean and own weight are computed again without the row,
+#' and `sigma2`, `tau2` and the targets are held. With
+#' `p = (1 - obs_level) / 2`,
+#' `..obs_lo = pooled + quantile(e, p)` and
+#' `..obs_hi = pooled + quantile(e, 1 - p)`.
+#'
+#' * It is a statement about observations on average: of further
+#'   observations located like the data, about `obs_level` of them fall
+#'   inside the interval of their cell. It does not hold cell by cell (the
+#'   second simulation below gives the coverage in cells of one
+#'   observation).
+#' * The two offsets are the same in every cell. The interval's centre
+#'   varies over the map and its width does not. It does not narrow where a
+#'   cell holds more rows: the offsets are quantiles of the errors of
+#'   predicting single observations, and the spread of observations inside a
+#'   cell is in every one of them.
+#' * It is wide. One observation is uncertain.
+#' * Only the level 0.90 has been checked. Another level is computed the
+#'   same way.
+#' * Each residual is the error of predicting an observation from the other
+#'   rows of its cell and from the cells around it, so the interval
+#'   describes locations among the observations. A cell's value and interval
+#'   describe the part of the cell where its observations lie, and a Voronoi
+#'   cell can reach far past them toward the edge of the study area. The
+#'   interval is too narrow for a cell with no observation, a gap in the
+#'   layer or ground beyond the layer's edge.
+#'
+#' In the simulation described under "Pooled values", the interval at
+#' `obs_level = 0.90` held 89.6 percent of the observations held out at
+#' random among the others (83.7 to 94.0 percent in single layers) and 75.1
+#' percent of those in the held-out block. `..ci_*` at `conf_level = 0.90`,
+#' read as a range for one observation, held 58.9 and 49.2 percent of them,
+#' over the held-out observations whose cell has that interval.
+#' [cell_values_at()] returns each location's distance from the nearest
+#' observation, and its help gives the coverage by that distance.
+#'
+#' The second simulation described under "Pooled values" read the
+#' interval at `obs_level = 0.90` on smooth fields of two ranges and on
+#' county levels with a smooth field, with 20 or 50 percent noise, on both
+#' layouts: twelve settings. Setting by setting it held 89.38 to 89.79
+#' percent of the held-out observations. Counted by the training
+#' observations in an observation's cell (1, 2 to 4, 5 to 9, 10 or more), it
+#' held at least 85.65 percent in every class but one: on county levels with
+#' a smooth field, on the layout of 892 points with 20 percent noise, it
+#' held 83.74 percent of the 4,878 observations whose cell held one training
+#' observation. On fields of that kind it is not a 90 percent interval in
+#' such cells: there it held 83.74 to 87.83 percent with 20 or 50 percent
+#' noise, and 82.64 and 82.94 percent with 5 percent.
+#'
+#' Away from the observations no interval here is calibrated.
+#'
+#' # Conditions
+#'
+#' What the pooled columns and the count record have to say is raised as R
+#' warnings with a class, so `tryCatch(<class> = )` and
+#' `withCallingHandlers()` catch each without matching its text. A warning
+#' of the pooled columns is raised once per call and reason, for all the
+#' columns it applies to: its text names them and the condition carries them
+#' in `columns`, in the order of the pooled columns. A field said to be by
+#' column is a vector named by those columns, and the numbers of each column
+#' are in `attr(, "pooled")`.
+#'
+#' * `"spatialkit_pool_unavailable"`: the pooled columns of a column are
+#'   `NA`. The plain columns are returned, and this is never an error.
+#'   `reason` is `"no coordinates"` (a layer without geometry),
+#'   `"no located value"` (no row with a value, a cell and a location),
+#'   `"no cell holds two values"` (the condition also carries `n` and
+#'   `cells` by column) or `"work limit"`. The last is the case of many
+#'   cells without the 'FNN' package: the neighbour search then compares
+#'   every pair of cells and is not made above
+#'   `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
+#'   44,700 cells (the condition also carries `work`, `limit`, and `cells`
+#'   by column). With 'FNN' there is no such limit, and the result is the
+#'   same.
+#' * `"spatialkit_pool_degenerate"`: the pooled values were computed and
+#'   carry no pooling. `reason` is `"one cell"` (the pooled value is the
+#'   plain mean; also `n` by column), `"no spread inside any cell"` (every
+#'   own weight is 1; also `constant` by column) or `"no signal between
+#'   cells"` (`tau2` is 0 and every own weight is 0; also `sigma2` by
+#'   column).
+#' * `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the mean
+#'   of all the other cells (`cells`, and `own_weight`, the smallest, by
+#'   column).
+#' * `"spatialkit_pool_few_df"`: `sigma2` rests on fewer than 30 values
+#'   beyond one per cell (`needed`, and `df`, `n` and `cells` by column).
+#' * `"spatialkit_no_structure"`: `structured` is `FALSE` (see "Pooled
+#'   values"). The text says which of the two tests failed, and `beats` is
+#'   `TRUE` for a column whose pooled values beat one mean while the F test
+#'   does not tell the cell means from one mean (also `criterion = "loo"`,
+#'   `estimate = "pooled"`, and by column `n`, the cells, `one_cell`, `loo`
+#'   and `structure_p`).
+#' * `"spatialkit_pool_rows_skipped"`: rows with a value and a cell have
+#'   empty or non-finite coordinates. They count in `n` and the plain
+#'   columns and take no part in the pooled ones (`n`, `cells`).
+#' * `"spatialkit_repeated_locations"`, with `obs_level`: rows with a value
+#'   share a location. A residual leaves one row out and keeps the others at
+#'   its location, so the interval then describes a further observation at a
+#'   place already observed (`n` and `total` by column).
+#' * `"spatialkit_few_residuals"`, with `obs_level`: fewer than five
+#'   residuals are expected beyond each end of the interval, which at 0.90
+#'   is fewer than 100 residuals (`needed`, `level`, and `n` by column).
+#' * `"spatialkit_estimate_mismatch"` and `"spatialkit_cells_differ"`: the
+#'   two checks of the count record, described under "Value".
+#'
+#' The two about few cells and few values are raised for columns whose
+#' weights were estimated, and the two of `obs_level` for columns whose
+#' interval is read from residuals, so a constant column raises
+#' `"spatialkit_pool_degenerate"` and no other.
+#'
 #' @param assigned_points_sf An sf object with a cell identifier column.
 #' @param response_var Optional response column name for per-cell
 #'   aggregation: a single character string. A name that is not a column, or
@@ -998,7 +1613,10 @@ assign_features_to_polygons <- function(
 #'   \code{f} for a variable \code{f} holding a function),
 #'   \code{stats::median} gives \code{median}, and any other expression gives
 #'   \code{agg1}; pass a named list to choose the name. Anything else falls
-#'   back to the default mean with a warning.
+#'   back to the default mean with a warning. The functions receive each
+#'   column with its infinite values already set to \code{NA} (see
+#'   "Details"), so they need \code{na.rm = TRUE} as they do for missing
+#'   values.
 #' @param cells_sf Optional polygon sf layer to join cell geometries onto
 #'   the output. When supplied, the return value is an sf object with
 #'   the polygon geometry from cells_sf, with one row per cell in `cells_sf`.
@@ -1030,40 +1648,46 @@ assign_features_to_polygons <- function(
 #'       supported, with a nugget and with several structured components
 #'       (each weighted by its partial sill) and with gstat's 2-D geometric
 #'       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
-#'       applies it. A model of any other family falls back to `deff = 1`
-#'       with a warning naming it, and so does a request with no usable
-#'       model (none supplied and none could be estimated, or a rejected
-#'       fit that could not be replaced by an estimate); see "Value" for how
-#'       to detect a fallback. A model with no structured component (a pure
+#'       applies it. A request that cannot be met falls back to `"kish"`,
+#'       with a warning of class `"spatialkit_deff_fallback"` that gives the
+#'       reason and the ICCs: a model of any other family (named in the
+#'       warning), or no usable model (none supplied and none could be
+#'       estimated, or a rejected fit that could not be replaced by an
+#'       estimate). The standard errors, intervals and `cell_weight` are then
+#'       Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+#'       `deff_method` column says which on every row (see "Value"). The
+#'       variogram route needs an identified range, which a layer does not
+#'       always have, so read `deff_method` for the fallback. A model with
+#'       no structured component (a pure
 #'       nugget) implies that distinct observations are uncorrelated, so it
 #'       is applied as a design effect of 1 in every cell, not treated as a
-#'       fallback. Points with empty
+#'       fallback. That includes the model [estimate_sac_range()] returns
+#'       when it finds no spatial structure (an `NA` range whose
+#'       `rejected_reason` says so): the answer is then a design effect of
+#'       1, `deff_method` reads `"variogram"`, and no fallback warning is
+#'       raised. Points with empty
 #'       geometry count towards their cells' values but not towards the
 #'       correlation, with a warning.}
-#'     \item{`"kish"`}{Estimate per-variable-type intra-class correlations
-#'       (ICCs) from the grouped data using a one-way random-effects ANOVA
-#'       decomposition (one ICC for the response variable and a separate
-#'       ICC for the predictor variables), then apply Kish's formula per
+#'     \item{`"kish"`}{Estimate an intra-class correlation (ICC) for each
+#'       summarised column from the grouped data using a one-way
+#'       random-effects ANOVA decomposition (one ICC for the response and one
+#'       for each predictor), then apply Kish's formula per
 #'       cell: `deff_i = 1 + (n_i - 1) * rho`. The ICC is the ANOVA
 #'       (method-of-moments) estimator with Donner's `n0` for unequal cell
 #'       sizes, not the REML estimate a mixed model returns: on a single
 #'       unbalanced draw the two can differ by 0.1--0.2 (one check with cell
 #'       sizes 3 to 77 and a true ICC of 0.5 gave 0.33 against REML's 0.51),
 #'       while balanced designs agree to about 0.01. Neither is wrong, so do
-#'       not read the difference as a defect. When multiple columns are
-#'       pooled for a single ICC estimate (e.g. several predictor variables),
-#'       each column is z-scored before pooling so that variables with
-#'       different scales contribute equally to the variance decomposition.
-#'       The response-specific ICC
-#'       is used for response SEs and the predictor-specific ICC for
-#'       predictor SEs. The response's ICC is never applied to predictor
-#'       columns or vice versa, and it is the response's ICC (not the
-#'       predictors') that sets `cell_weight` whenever a response was given.
+#'       not read the difference as a defect. Each column's ICC is used
+#'       for that column's SEs and for no other: the response's ICC is never
+#'       applied to a predictor, nor one predictor's to another. It is the
+#'       response's ICC that sets `cell_weight` whenever a response was
+#'       given, and the first predictor's own ICC otherwise.
 #'       Requires at least 2 cells with 2+ observations and at least 2 residual
 #'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 (no
-#'       correction for that variable type) otherwise, and likewise when the
+#'       correction for that column) otherwise, and likewise when the
 #'       estimate itself comes out at or below 0. The `"deff_applied"`
-#'       attribute is attached when either ICC is positive, so when both are
+#'       attribute is attached when any ICC is positive, so when all are
 #'       0 there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
@@ -1081,8 +1705,10 @@ assign_features_to_polygons <- function(
 #'   it is set aside rather than correcting by a shape that was not trusted
 #'   enough to report a range: the variogram is then estimated as if no `sac`
 #'   had been given, with a plain warning saying so, or, where that is not
-#'   possible, `deff` falls back to 1 with the fallback warning, which names
-#'   the rejection. A `sac` with no `variogram_model` attribute -- a plain
+#'   possible, `deff` falls back to `"kish"` with the fallback warning, which
+#'   names the rejection. The exception is a `sac` refused because no spatial
+#'   structure was found, whose model is a pure nugget: it is used, and gives
+#'   a design effect of 1. A `sac` with no `variogram_model` attribute -- a plain
 #'   number or a `units` object, say -- is a range without a correlation
 #'   function, and is set aside the same way. A `sac` fitted to residuals
 #'   (`attr(sac, "detrended")` `TRUE`) is used as given, with a warning when
@@ -1118,37 +1744,86 @@ assign_features_to_polygons <- function(
 #' @param conf_level Optional confidence level in (0, 1), such as `0.95`.
 #'   When given, every numeric response and predictor column also gets
 #'   `..neff_*`, `..df_*`, `..ci_lo_*` and `..ci_hi_*` (see "Confidence
-#'   intervals"). Default `NULL`: no interval columns, and the frame is
-#'   exactly what it was before this argument existed.
+#'   intervals"). Default `NULL`: no such columns.
+#' @param estimate Which value of a cell the frame reports: `"pooled"`
+#'   (default) or `"mean"`. With `"mean"` the frame is the one described
+#'   above, the frame of earlier versions, whose default this was. With
+#'   `"pooled"` every numeric response and predictor column also
+#'   gets a pooled value, `w * m + (1 - w) * t`: the cell's own mean `m` and a
+#'   target `t`, the mean of the rows of the 8 cells whose observations'
+#'   centroids are nearest (all the other cells when there are fewer than 10;
+#'   the polygons are not read). The own weight is
+#'   `w = tau2 / (tau2 + sigma2 / n)`, where `n` is the cell's count,
+#'   `sigma2` the spread of the observations about their cell's mean and
+#'   `tau2` the mean squared distance between a cell's level and its target.
+#'   Each column is pooled on its own rows: those with a value, a cell and a
+#'   location. `agg_funs`, `deff`, `sac` and `conf_level` do not enter the
+#'   pooled columns, and every other column is computed as with `"mean"`.
+#'   Lon/lat coordinates, and coordinates without a CRS that look like
+#'   degrees, are projected for the distances between centroids, as
+#'   [resolution_profile()] projects them. The projection is chosen from
+#'   every row of the layer, those without a value or a cell included, so on
+#'   such input the rows a column does not use can still decide the CRS its
+#'   distances are measured in; a layer projected beforehand is used in its
+#'   own CRS. When the input carries the record of its cells' count (see
+#'   "Value") and that record names a projected CRS, the one the profile
+#'   worked in, the distances are measured in it, whatever CRS the layer is
+#'   in. The value is matched as [match.arg()] matches a choice, so an
+#'   abbreviation (`"m"`) is accepted and `NULL` is the default. See "Pooled
+#'   values" for what the pooled value estimates and what its numbers rest
+#'   on, "Value" for the columns and the attributes, and "Conditions" for
+#'   the warnings.
+#' @param obs_level Optional level in (0, 1), such as `0.90`, of an interval
+#'   for one further observation in a cell, located like the data. It needs
+#'   `estimate = "pooled"`: the interval is the pooled value plus the
+#'   `(1 - obs_level) / 2` and `(1 + obs_level) / 2` quantiles of the
+#'   leave-one-out residuals of the pooled values, so its two offsets are the
+#'   same in every cell. It is a statement about observations on average,
+#'   not about each cell. It is a separate argument from `conf_level`, whose
+#'   interval is for a mean and is not a range for an observation. Any level
+#'   strictly between 0 and 1 is computed the same way; only 0.90 has been
+#'   checked (see "Intervals: which one answers which question"). Default
+#'   `NULL`: no such interval.
 #' @return A tibble/data.frame (or sf if cells_sf given) with per-cell
 #'   summaries: the ID column, `n` (rows in the cell), one column per
 #'   `agg_funs` entry per variable, `..sd_*` / `..se_*` for every numeric
 #'   response and predictor, `..neff_*` / `..df_*` / `..ci_lo_*` /
 #'   `..ci_hi_*` for the same columns when `conf_level` is given,
-#'   `cell_weight`, `deff_applied` when a design effect was requested (any
-#'   `deff` other than 1), and `cell_area` / `n_per_area` when
-#'   `area = TRUE`. An input column also called `n` is not allowed to shadow
-#'   the count.
+#'   `cell_weight`, `deff_applied` and `deff_method` when a design effect
+#'   was requested (any `deff` other than 1), and `cell_area` / `n_per_area`
+#'   when `area = TRUE`. An input column also called `n` is not allowed to
+#'   shadow the count.
 #'
-#'   `deff_applied` is `TRUE` on every row when the requested correction was
-#'   applied (exactly when the `"deff_applied"` attribute below is attached;
-#'   under `"kish"`, when any standard-error column was corrected)
-#'   and `FALSE` when it fell back to the uncorrected standard errors: a
-#'   refused `deff`, a `"variogram"` request with no usable model, or
-#'   `"kish"` ICCs of 0 for every variable type (and `NA` on a `cells_sf`
-#'   row no point fell in).
-#'   Unlike the attribute it survives `rbind()` and
+#'   `deff_applied` is `TRUE` on every row when a design-effect correction
+#'   was applied (exactly when the `"deff_applied"` attribute below is
+#'   attached; under `"kish"`, when any standard-error column was corrected)
+#'   and `FALSE` when the standard errors are the uncorrected ones: a
+#'   refused `deff`, or `"kish"` ICCs of 0 for every column (and `NA` on a
+#'   `cells_sf` row no point fell in). `deff_method` names the correction
+#'   the standard errors carry, since their column names do not change with
+#'   it: `"variogram"`, `"kish"` or `"fixed"` when the one requested was
+#'   applied, `"none"` when none was, and `"kish (variogram fallback)"` or
+#'   `"none (variogram fallback)"` when a `"variogram"` request could not be
+#'   met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+#'   So `deff_applied` is `TRUE` on a Kish fallback row: test
+#'   `deff_method == "variogram"` to keep only rows the variogram corrected.
+#'   Unlike the attribute, both columns survive `rbind()` and
 #'   `dplyr::bind_rows()` of many results. A fallback is also signalled by a
-#'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 is
-#'   reported on `attr(, "icc")` instead), which
+#'   warning of class `"spatialkit_deff_fallback"` (a Kish ICC of 0 under a
+#'   `"kish"` request is reported on `attr(, "icc")` instead), which
 #'   `tryCatch(spatialkit_deff_fallback = )` catches without matching the
-#'   message; it is raised only when the standard errors really are the
-#'   uncorrected ones.
+#'   message. It is raised when the correction requested was not the one
+#'   applied: a refused number (the standard errors are then the uncorrected
+#'   ones) or a `"variogram"` request that fell back to Kish; the condition
+#'   of the second carries `requested` and `used`.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
-#'   for `"kish"` (`deff` is the primary variable's per-cell design effect,
-#'   all 1 when only the predictor ICC was positive),
+#'   for `"kish"` (`icc_pred` is a vector named by predictor column, one ICC
+#'   each; `deff` is the primary variable's per-cell design effect,
+#'   all 1 when only a predictor's ICC was positive; `requested` and
+#'   `fallback_reason` are added when a `"variogram"` request fell back to
+#'   it),
 #'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
 #'   the design effect at the primary variable's non-missing count per cell,
 #'   `deff_rows` at the cell's row count, which is the vector the log line
@@ -1157,12 +1832,14 @@ assign_features_to_polygons <- function(
 #'   (`deff`, `deff_rows` and `rbar` alike) is realigned to the joined row
 #'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
-#'   applied: `deff = 1`, a `deff = "kish"` request whose ICCs are all 0, or
-#'   a `"variogram"` request that could not be fitted. A `deff = "kish"` request always
-#'   records the ICCs it estimated on an attribute `"icc"` (`resp` and
-#'   `pred`, `NA` for a variable type with no numeric column), whether or not
+#'   applied: `deff = 1`, or a `deff = "kish"` request (or Kish fallback)
+#'   whose ICCs are all 0. A `deff = "kish"` request, and a `"variogram"`
+#'   request that fell back to it, always
+#'   records the ICCs it estimated on an attribute `"icc"` (`resp`, and
+#'   `pred`, a vector named by predictor column; `NA` for a variable type
+#'   with no numeric column), whether or not
 #'   they were positive enough to apply, so a result with no `"deff_applied"`
-#'   still says what the ICC came out as.
+#'   still says what the ICCs came out as.
 #'
 #'   The ID column keeps its input type when `cells_sf`'s ID column and the
 #'   summarised IDs already have the same class. When the classes differ, both
@@ -1170,6 +1847,108 @@ assign_features_to_polygons <- function(
 #'   returned ID column is therefore character. Whole numbers are written out
 #'   in full for that (`"100000"`, never `"1e+05"`), so an integer and a
 #'   double ID of the same cell still match.
+#'
+#'   With `estimate = "pooled"`, each numeric column `v` with its prefix
+#'   (`resp_` or `pred_`) gains `..pooled_<prefix><v>` (the pooled value),
+#'   `..pooled_w_<prefix><v>` (the own weight, 0 to 1; it is not a regression
+#'   weight) and `..pooled_target_<prefix><v>` (the target), and with
+#'   `obs_level` also `..obs_lo_<prefix><v>` and `..obs_hi_<prefix><v>`.
+#'   They follow every column listed above and precede `cell_area` and
+#'   `n_per_area`, the response's first, then each predictor's. A cell with
+#'   no row that has a value, a cell and a location gets `NA`, never a value
+#'   made from its neighbours. Two attributes are attached.
+#'   `attr(, "pooled")`, of class `"spatialkit_pooled"`, records what was
+#'   fitted: `toward`, `neighbours`, `crs` (the CRS the centroid distances
+#'   were measured in), `obs_level`, `conf_level`, `intervals` and `columns`,
+#'   a list with one entry per pooled column holding `column`, `role`
+#'   (`"response"` or `"predictor"`), `n` (rows used), `cells`, `df` (values
+#'   beyond one per cell, which `sigma2` rests on), `neighbours` (the cells
+#'   in each target), `sigma2`, `tau2`, `own_weight` (the median weight),
+#'   `share_alone` (the share of rows that are the only one in their cell),
+#'   `loo` and `loo_se` (the leave-one-out mean squared error of the pooled
+#'   value, and its standard error over rows), `loo_one_cell` (the same error
+#'   with one mean for all rows), `structured` and `structure_p` (whether the
+#'   cells predict a left-out observation better than one mean, and the
+#'   p-value of the F test of the cell means against one mean, which has to
+#'   be below 0.05 as well), `offsets` (the two offsets of the interval),
+#'   `repeated`, `skipped`, `constant` and `status`. `attr(, "intervals")` is
+#'   the same data frame as `attr(, "pooled")$intervals`: one row per family
+#'   of interval columns in the frame, saying what it covers, what it is
+#'   centred on, its level and its method. Away from the observations no
+#'   interval here is calibrated.
+#'
+#'   Where the pooled columns of a column cannot be computed they are `NA`,
+#'   with a warning of class `"spatialkit_pool_unavailable"` and not an
+#'   error, and the plain columns are returned. "Conditions" lists that
+#'   class and the other warnings of the pooled columns, with what each
+#'   condition carries.
+#'
+#'   When `assigned_points_sf` carries `attr(, "count_rule")`, or `cells_sf`
+#'   does (the assigned layer's is read first), the result carries that
+#'   record with one more element, `check`, whatever `estimate` is. The
+#'   record is the one [select_resolution()] wrote: `rule`, `estimate` (the
+#'   cell value the count was chosen for), `cells`, `obs_per_cell`,
+#'   `response`, `scored` (what the profile scored at the count: the rows,
+#'   the cells that hold one, the leave-one-out error among them, and the
+#'   centres the rows were given to),
+#'   `partition`, `crs` and `scored_cells`. It has class
+#'   `"spatialkit_count_rule"` and a print method. `check$estimate` is
+#'   `"match"` or `"mismatch"`: whether the summary reports the estimate the
+#'   count was chosen for (`NA` for a count chosen for neither). A mismatch
+#'   is a warning of class `"spatialkit_estimate_mismatch"` (fields
+#'   `chosen_for`, `reported`, `rule`, `cells`), and the summary is returned
+#'   as asked. `check$cells` is `"match"`, `"differ"` or `"not checked:
+#'   <reason>"`: the response is fitted again on the rows and cells given,
+#'   with the estimate the profile scored, and its scored rows, its occupied
+#'   cells and its leave-one-out error are compared with the record's, the
+#'   error to a relative tolerance of 1e-8. The first that differs is a
+#'   warning of class `"spatialkit_cells_differ"` (fields `what`: `"n"`,
+#'   `"cells"` or `"loo"`; `scored`; `found`): rows were dropped or moved
+#'   between cells, or the layer is another one. The same class with `what =
+#'   "record"` (fields `field`, `scored`, `found`) is raised when the
+#'   assigned layer and `cells_sf` carry different records, so the rows were
+#'   assigned to other cells than the `cells_sf` given: the cells of another
+#'   selection, or the scored cells of a selection beside other cells built
+#'   from its count, such as a lattice sized by it. `check$cells` is then
+#'   `"differ"`, whatever the comparison of the rows finds. The comparison
+#'   is not made, and `check$cells` says why, when the response is another
+#'   column or was not summarised, the profile read the selection half
+#'   (`select_on = "split"`), the cells are not the ones the profile scored
+#'   (`scored_cells` is `FALSE` or `NA`), the profile scored no estimate, the
+#'   input has no coordinates, the features are not points (see
+#'   [assign_features_to_polygons()]), or the fit was stopped by the limit on
+#'   an exact search without the 'FNN' package. Cells and rows without a
+#'   record, such as polygons the caller brings, are not checked and raise
+#'   neither warning.
+#'
+#'   A row that is the same distance from two centres lies on the boundary
+#'   between their cells, which happens on gridded locations.
+#'   [resolution_profile()] scores such a row in the cell of the
+#'   lower-numbered centre, and [assign_features_to_polygons()], on cells
+#'   built from the centres the profile scored, gives a point on that
+#'   boundary the same cell, measured in the CRS the record names, so the
+#'   comparison reads `"match"` on gridded locations too.
+#'   [build_tessellation()] draws those cells in the CRS the record names,
+#'   whatever CRS the seeds arrive in, unless its `crs` names another
+#'   projected CRS. Cells built in another projected CRS are the
+#'   nearest-centre cells of that CRS, so a row near a boundary, on it or
+#'   not, can sit in another cell than the profile put it in. So can a row
+#'   joined in longitude and latitude (rows and cells both in degrees), and
+#'   a row that reached the record's CRS by another transformation than the
+#'   profile's, which can settle a tie the other way. The comparison then
+#'   reports `"differ"`, with `what = "loo"` when it finds the same rows in
+#'   the same number of cells with another leave-one-out error. The
+#'   summary's own numbers describe the cells as assigned.
+#'
+#'   The comparison uses the fit of the pooled columns when that is a fit of
+#'   the estimate the profile scored, and fits the response once more
+#'   otherwise. Without the 'FNN' package that fit compares every pair of
+#'   cell centroids (pooled values) or, for each row alone in its cell,
+#'   every other location (plain means), and above
+#'   `options(spatialkit.exact_pairs_max = )` pairs it is not made
+#'   (`"not checked: work limit"`). A summary is not compared when neither
+#'   layer carries the record: `attr(x, "count_rule") <- NULL` on the
+#'   assigned layer and on `cells_sf` removes it.
 #' @examples
 #' library(sf)
 #' set.seed(1)
@@ -1189,12 +1968,16 @@ assign_features_to_polygons <- function(
 #' grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 #' assigned <- assign_features_to_polygons(pts, grid)
 #'
+#' # Nine cells are too few for pooled values (each would be pulled toward
+#' # all the other cells), so these summaries report plain means alone:
+#' # estimate = "mean".
 #' # IID standard errors (default) vs Kish design-effect adjustment.  The
 #' # correction is large here, and meant to be: about 22 points per cell that
 #' # all share the cell's part of the trend carry far fewer than 22
 #' # independent pieces of information about the cell mean.
-#' naive <- summarize_by_cell(assigned, response_var = "val")
-#' kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
+#' naive <- summarize_by_cell(assigned, response_var = "val", estimate = "mean")
+#' kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
+#'                            estimate = "mean")
 #' data.frame(n = naive$n,
 #'            se_naive = naive$..se_resp_val,
 #'            se_kish  = kish$..se_resp_val)
@@ -1203,9 +1986,35 @@ assign_features_to_polygons <- function(
 #' # A 95% interval for each cell mean as an estimate of the grand mean, on
 #' # the Kish-corrected standard error and n - 1 degrees of freedom.
 #' ci <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
-#'                         conf_level = 0.95)
+#'                         conf_level = 0.95, estimate = "mean")
 #' ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
 #'        "..ci_lo_resp_val", "..ci_hi_resp_val")]
+#'
+#' # Pooled values, and a range for one observation: a smooth field plus
+#' # noise at 400 points, on an 8 x 8 grid, so that a cell holds about six.
+#' set.seed(2)
+#' east  <- runif(400, 0, 8000)
+#' north <- runif(400, 0, 8000)
+#' pts2 <- st_as_sf(
+#'   data.frame(x = 5e5 + east, y = 5e6 + north,
+#'              val = 10 + 3 * sin(east / 1500) + 3 * cos(north / 1200) +
+#'                rnorm(400)),
+#'   coords = c("x", "y"), crs = 32632
+#' )
+#' bnd2 <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
+#'   c(5e5, 5e6), c(5e5 + 8000, 5e6), c(5e5 + 8000, 5e6 + 8000),
+#'   c(5e5, 5e6 + 8000), c(5e5, 5e6)
+#' ))), crs = 32632))
+#' grid2 <- create_grid_polygons(bnd2, target_cells = 64, type = "square")
+#' assigned2 <- assign_features_to_polygons(pts2, grid2)
+#' # estimate = "pooled" is the default.
+#' pooled <- summarize_by_cell(assigned2, response_var = "val", obs_level = 0.90)
+#' # The plain mean, the pooled value and the weight on the cell's own mean.
+#' head(pooled[, c("poly_id", "n", "resp_mean_val", "..pooled_resp_val",
+#'                 "..pooled_w_resp_val")])
+#' # The range for one further observation in a cell.
+#' head(pooled[, c("poly_id", "..obs_lo_resp_val", "..obs_hi_resp_val")])
+#' attr(pooled, "pooled")   # what was fitted, and what the interval covers
 #' @references
 #' Faes, C., Molenberghs, G., Aerts, M., Verbeke, G. and Kenward, M. G. (2009).
 #' The effective sample size and an alternative small-sample
@@ -1230,14 +2039,35 @@ summarize_by_cell <- function(assigned_points_sf,
                               deff_max_n     = 500L,
                               quiet          = TRUE,
                               conf_level     = NULL,
-                              area           = FALSE) {
+                              area           = FALSE,
+                              estimate       = c("pooled", "mean"),
+                              obs_level      = NULL) {
   .msg <- function(...) if (!quiet) message(...)
+  estimate <- match.arg(estimate)
   if (!is.null(conf_level) &&
       (!is.numeric(conf_level) || length(conf_level) != 1L ||
        !is.finite(conf_level) || conf_level <= 0 || conf_level >= 1))
     stop("summarize_by_cell(): `conf_level` must be a single number strictly ",
          "between 0 and 1 (0.95 for a 95% interval), or NULL for no intervals.",
          call. = FALSE)
+  # Strictly between 0 and 1 as the interval reads the level: through its tail
+  # probability rounded to 12 decimals (.obs_offsets()).  That is 0.5 for a
+  # level of 0 and anything below, 0 for a level of 1 and anything above, and
+  # also for a level within 1e-12 of either, which would give the median
+  # twice or the range of the residuals.
+  if (!is.null(obs_level) &&
+      (!is.numeric(obs_level) || length(obs_level) != 1L || !is.finite(obs_level) ||
+       round((1 - obs_level) / 2, 12) <= 0 || round((1 - obs_level) / 2, 12) >= 0.5))
+    stop("summarize_by_cell(): `obs_level` must be a single number strictly ",
+         "between 0 and 1 (0.90 for a 90% interval), or NULL for no interval.",
+         call. = FALSE)
+  # The interval for one observation has one centre, the pooled value.  With
+  # plain means it is refused, not centred on the plain mean without a word.
+  if (!is.null(obs_level) && identical(estimate, "mean"))
+    stop("summarize_by_cell(): `obs_level` needs estimate = \"pooled\": the interval ",
+         "for an observation is built from the leave-one-out residuals of the pooled ",
+         "value and is centred on it. `conf_level` gives the plain mean's t interval, ",
+         "which is not a range for an observation.", call. = FALSE)
   if (!is.logical(area) || length(area) != 1L || is.na(area))
     stop("summarize_by_cell(): `area` must be TRUE or FALSE.", call. = FALSE)
   # c("val", "flag") used to stop with "the condition has length > 1", and a
@@ -1252,8 +2082,8 @@ summarize_by_cell <- function(assigned_points_sf,
     stop("summarize_by_cell(): `predictor_vars` must be a character vector of ",
          "column names, or NULL.", call. = FALSE)
   # Whether the caller asked for a design effect at all.  Only then does the
-  # result carry the per-row `deff_applied` column, so a default call returns
-  # exactly the frame it always has.
+  # result carry the per-row `deff_applied` column, so a call at the default
+  # deff = 1 gains no column for it.
   deff_requested <- !(is.numeric(deff) && length(deff) == 1L &&
                         isTRUE(deff == 1))
   # A density needs the cells, and it needs them in a CRS whose areas are
@@ -1283,6 +2113,17 @@ summarize_by_cell <- function(assigned_points_sf,
                           "lon/lat input -- and pass those."),
                    .fold_crs_label(cells_sf), 100 * area_err), call. = FALSE)
   }
+  # The record of how the cells' count was set, when the input carries one:
+  # on the assigned rows first, on the cells second.  It is read from the
+  # cells here, before that layer is cut down to its ID column.
+  rule_rows  <- .count_rule_get(assigned_points_sf)
+  rule_cells <- if (is.null(cells_sf)) NULL else .count_rule_get(cells_sf)
+  count_rule <- if (!is.null(rule_rows)) rule_rows else rule_cells
+  # The CRS the profile worked in, in which the pooled values' distances are
+  # then measured too.
+  count_crs <- if (!is.null(count_rule) && inherits(count_rule$crs, "crs") &&
+                   !is.na(count_rule$crs) && !isTRUE(sf::st_is_longlat(count_rule$crs)))
+    count_rule$crs else NULL
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
@@ -1361,8 +2202,15 @@ summarize_by_cell <- function(assigned_points_sf,
 
   # Helper: estimate intra-class correlation via one-way random-effects ANOVA.
   # Returns a single rho in [0, 1] or 0 if estimation fails.
+  #
+  # Called with ONE column at a time (see .kish_iccs() below): an ICC is a
+  # property of a variable, and one pooled value for several predictors was
+  # right for none of them unless they all shared it.  With an ICC-0 and an
+  # ICC-0.87 predictor on 60 cells of 12, the pooled 0.42 multiplied both
+  # standard errors by 3.13 where their own ICCs give 1.00 and 8.96, so the
+  # grand-mean interval covered 1.000 and 0.492 against 0.958 and 0.950.
+  # The body still accepts several columns, and what follows describes that.
   .estimate_icc <- function(df, id_col, var_cols) {
-    # Pool across all supplied numeric columns for a single global ICC estimate.
     # Each variable is z-scored before pooling so that variables with larger
     # scales do not dominate the between/within variance decomposition.
     #
@@ -1463,39 +2311,92 @@ summarize_by_cell <- function(assigned_points_sf,
     if (length(present)) pred_num <- .resolve_numeric(df, present, "predictor")
   }
 
+  # --- infinite values are missing values ---
+  # One rule, applied once, before anything reads the columns: an infinite
+  # value in a summarised column is treated as NA is.  Left in, one Inf made
+  # its cell's mean Inf and its SE NA while ..neff_ and cell_weight still
+  # counted the row, and under deff = "kish" it set the ICC to 0 (sd() of the
+  # column is NaN), so EVERY cell's standard error came back uncorrected (0.169
+  # against 1.365 on the clean cells) with no condition raised.
+  # kriging_adequacy(), resolution_profile(), estimate_sac_range() and
+  # prep_model_data() already drop such rows, so one pipeline reported two
+  # means for the same cell.  Masking `df` here, and not at each site that
+  # counts or averages, is what keeps the mean, sd, se, interval, effective n,
+  # cell_weight, the Kish ICC and the variogram's row selection on the same
+  # rows.  NaN is missing already (is.na(NaN) is TRUE), so it is not counted.
+  inf_cols <- character(0)
+  inf_note <- character(0)
+  inf_rows <- 0L
+  for (v in unique(c(resp_num, pred_num))) {
+    is_inf <- is.infinite(df[[v]])
+    if (!any(is_inf)) next
+    inf_cols <- c(inf_cols, v)
+    inf_rows <- inf_rows + sum(is_inf)
+    inf_note <- c(inf_note, sprintf(
+      "%s '%s' %d row(s) in %d cell(s)",
+      if (v %in% resp_num) "response" else "predictor", v, sum(is_inf),
+      length(unique(df[[id_col]][is_inf]))))
+    df[[v]][is_inf] <- NA
+  }
+  if (length(inf_cols))
+    .warn_classed("spatialkit_nonfinite", paste0(
+      "summarize_by_cell(): %d infinite value(s) are treated as missing: %s. ",
+      "Every statistic of %s (`agg_funs`, sd, se, the interval, the effective ",
+      "n, cell_weight and the design effect) leaves them out, as it leaves out ",
+      "NA; `n` still counts the rows. Recode or remove them to silence this."),
+      inf_rows, paste(inf_note, collapse = "; "),
+      if (length(inf_cols) > 1L) "those columns" else "that column",
+      data = list(n = inf_rows, columns = inf_cols))
+
   # --- estimate ICC for Kish correction if requested ---
+  # One ICC per summarised column, the response's and each predictor's own.
+  # Called here for deff = "kish", and from the variogram block below when a
+  # "variogram" request cannot be met and falls back to Kish.
   resp_rho <- NULL
   pred_rho <- NULL
-  if (use_kish) {
+  .kish_iccs <- function() {
+    resp <- NULL
+    pred <- NULL
     if (length(resp_num) > 0L) {
-      resp_rho <- .estimate_icc(df, id_col, resp_num)
-      if (resp_rho > 0) {
+      resp <- .estimate_icc(df, id_col, resp_num)
+      if (resp > 0) {
         .msg(sprintf(
-          "summarize_by_cell(): Kish deff using response ICC = %.4f", resp_rho
+          "summarize_by_cell(): Kish deff using response ICC = %.4f", resp
         ))
       } else {
         .msg("summarize_by_cell(): response ICC estimate <= 0; Kish deff not applied for response.")
       }
     }
     if (length(pred_num) > 0L) {
-      pred_rho <- .estimate_icc(df, id_col, pred_num)
-      if (pred_rho > 0) {
-        .msg(sprintf(
-          "summarize_by_cell(): Kish deff using predictor ICC = %.4f", pred_rho
-        ))
-      } else {
-        .msg("summarize_by_cell(): predictor ICC estimate <= 0; Kish deff not applied for predictors.")
+      # Named by column; the SE closures look their own column up.
+      pred <- vapply(pred_num, function(v) .estimate_icc(df, id_col, v),
+                     numeric(1))
+      names(pred) <- pred_num
+      for (v in pred_num) {
+        if (pred[[v]] > 0) {
+          .msg(sprintf(
+            "summarize_by_cell(): Kish deff using predictor ICC = %.4f for '%s'",
+            pred[[v]], v
+          ))
+        } else {
+          .msg(sprintf(paste0("summarize_by_cell(): predictor ICC estimate <= 0 for ",
+                              "'%s'; Kish deff not applied for it."), v))
+        }
       }
     }
-    if (is.null(resp_rho) && is.null(pred_rho)) {
+    if (is.null(resp) && is.null(pred))
       .msg("summarize_by_cell(): no numeric columns for ICC estimation; deff = 1.")
-      resp_rho <- 0
-      pred_rho <- 0
-    }
-    # Fill in zeros for the type that has no columns
-    if (is.null(resp_rho)) resp_rho <- 0
-    if (is.null(pred_rho)) pred_rho <- 0
+    # Zero for the type that has no columns
+    list(resp = if (is.null(resp)) 0 else resp,
+         pred = if (is.null(pred)) 0 else pred)
   }
+  if (use_kish) {
+    icc_est  <- .kish_iccs()
+    resp_rho <- icc_est$resp
+    pred_rho <- icc_est$pred
+  }
+  # Set when a "variogram" request fell back to Kish: why, for the record.
+  vgm_fallback <- NULL
 
   # --- build combined function list for across() ---
   # Each prefix (resp_, pred_) gets user agg_funs + sd + se, with names
@@ -1551,7 +2452,11 @@ summarize_by_cell <- function(assigned_points_sf,
         # NA row contributes nothing to the mean, so it cannot contribute to
         # the mean's clustering either.
         if (.kish) {
-          deff_i <- max(1, 1 + (n_valid - 1) * .rho)
+          # A named `.rho` holds one ICC per column (the predictors'); each
+          # column takes its own.  across() runs one closure list over all
+          # the predictor columns, so the column is asked for here.
+          rho_i  <- if (!is.null(names(.rho))) .rho[[dplyr::cur_column()]] else .rho
+          deff_i <- max(1, 1 + (n_valid - 1) * rho_i)
         } else if (!is.null(.rbar)) {
           # Variogram path.  The mean pairwise correlation is over the
           # locations of the observations that ENTER this column's mean, so
@@ -1663,7 +2568,19 @@ summarize_by_cell <- function(assigned_points_sf,
     no_fit    <- NULL       # why no model is available, for the warning below
     set_aside <- NULL       # why a supplied `sac` was not used
     set_aside_so <- ""      # and what that means, for the replacement warning
-    if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
+    # One refusal is an answer and not a failed fit.  When
+    # estimate_sac_range() finds no spatial structure it returns NA with a
+    # pure-nugget model at the variance of the variable (.sac_no_structure(),
+    # R/utils.R).  Under that model distinct observations are uncorrelated and
+    # the design effect is 1 exactly, which is the pure-nugget route below.
+    # Set aside with the other refusals, it raised the fallback warning and
+    # handed the request to Kish for a layer the variogram had just answered.
+    no_structure <- function(s)
+      .sac_no_structure(s) && .vgm_is_pure_nugget(attr(s, "variogram_model"))
+    structure_note <- NULL  # the refusal that gave the pure nugget, for the log
+    if (no_structure(sac)) {
+      structure_note <- as.character(attr(sac, "rejected_reason"))[1L]
+    } else if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
       set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
                            as.character(attr(sac, "rejected_reason"))[1L])
@@ -1714,6 +2631,11 @@ summarize_by_cell <- function(assigned_points_sf,
         if (inherits(est, "try-error")) {
           no_fit <- sprintf("estimate_sac_range() failed: %s",
                             conditionMessage(attr(est, "condition")))
+        } else if (no_structure(est)) {
+          # No structure in the response: the pure nugget is the model.
+          structure_note <- as.character(attr(est, "rejected_reason"))[1L]
+          vgm_model <- attr(est, "variogram_model")
+          vgm_crs   <- attr(est, "crs")
         } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
                    !is.null(attr(est, "rejected_reason"))) {
           no_fit <- sprintf(paste0("the variogram estimated from `response_var` ",
@@ -1734,8 +2656,10 @@ summarize_by_cell <- function(assigned_points_sf,
       # be reported as "the supplied model could not be read", with the
       # fallback warning and deff_applied FALSE.
       .log_info(paste0("summarize_by_cell(): the variogram model is a pure ",
-                       "nugget, so distinct observations are uncorrelated and ",
-                       "the design effect is 1 in every cell."))
+                       "nugget%s, so distinct observations are uncorrelated and ",
+                       "the design effect is 1 in every cell."),
+                if (is.null(structure_note)) ""
+                else sprintf(" (the variogram's verdict: %s)", structure_note))
       cor_fn <- function(h) 0 * h
     }
     if (is.null(cor_fn)) {
@@ -1744,25 +2668,52 @@ summarize_by_cell <- function(assigned_points_sf,
       other <- if (is.data.frame(vgm_model) && "model" %in% names(vgm_model))
         setdiff(unique(as.character(vgm_model$model)),
                 c("Nug", names(.vgm_shape_fns))) else character(0)
-      if (length(other)) {
-        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" ",
-                                   "supports exponential, spherical and Gaussian ",
-                                   "variogram models (plus a nugget); the supplied ",
-                                   "model uses %s. Falling back to deff = 1."),
-                            paste(sQuote(other, FALSE), collapse = ", "))
-      } else {
-        .warn_deff_fallback(paste0("summarize_by_cell(): deff = \"variogram\" requires ",
-                                   "a fitted variogram model; none was available (%s). ",
-                                   "Pass one via `sac = estimate_sac_range(...)`. ",
-                                   "Falling back to deff = 1, so the standard errors ",
-                                   "are the uncorrected ones."),
-                            paste(c(set_aside,
-                                    if (is.null(no_fit)) "the supplied model could not be read"
-                                    else no_fit),
-                                  collapse = "; "))
-      }
-      use_vgm <- FALSE
-      deff <- 1
+      why <- if (length(other))
+        sprintf(paste0("deff = \"variogram\" supports exponential, spherical and ",
+                       "Gaussian variogram models (plus a nugget); the supplied ",
+                       "model uses %s."),
+                paste(sQuote(other, FALSE), collapse = ", "))
+      else
+        sprintf(paste0("deff = \"variogram\" requires a fitted variogram model; ",
+                       "none was available (%s). Pass one via ",
+                       "`sac = estimate_sac_range(...)`."),
+                paste(c(set_aside,
+                        if (is.null(no_fit)) "the supplied model could not be read"
+                        else no_fit),
+                      collapse = "; "))
+      # The request cannot be met.  It used to fall back to deff = 1, the
+      # uncorrected interval, under the same column names: the interval with
+      # no correction at all for a caller who asked for one.  A range goes
+      # unidentified often enough that this is an ordinary case, not a
+      # corner.  Kish needs no variogram, so it is the fallback; the
+      # uncorrected SE is returned only when Kish's own ICC is 0, and either
+      # way the rows say which.
+      use_vgm  <- FALSE
+      use_kish <- TRUE
+      deff     <- 1
+      vgm_fallback <- why
+      icc_est  <- .kish_iccs()
+      resp_rho <- icc_est$resp
+      pred_rho <- icc_est$pred
+      icc_txt <- paste(c(
+        if (length(resp_num)) sprintf("response '%s' %.3f", resp_num[[1L]], resp_rho),
+        if (length(pred_num)) sprintf("predictor '%s' %.3f", pred_num, pred_rho)),
+        collapse = ", ")
+      if (max(resp_rho, pred_rho, 0) > 0)
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\" (ICC: %s): ",
+          "the standard errors carry Kish's correction in place of the ",
+          "variogram's, and `deff_method` reads \"kish (variogram fallback)\" ",
+          "on every row."),
+          why, icc_txt, data = list(requested = "variogram", used = "kish"))
+      else
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
+          "is 0 (%s), so the standard errors are the uncorrected ones; ",
+          "`deff_method` reads \"none (variogram fallback)\" on every row."),
+          why,
+          if (nzchar(icc_txt)) icc_txt else "no numeric column to estimate it from",
+          data = list(requested = "variogram", used = "none"))
     } else {
       if (!is.null(set_aside))
         .warn_and_log(paste0("summarize_by_cell(): %s%s. It was set aside, ",
@@ -1907,23 +2858,31 @@ summarize_by_cell <- function(assigned_points_sf,
     # 20), deflating a cell whose response is uncorrelated on the strength of a
     # predictor that happens to be clustered.  The response SE is already left
     # at deff = 1 in that case, as documented; cell_weight has to agree with it.
+    # With no response the primary variable is the FIRST predictor, and the
+    # weight is built from that predictor's own ICC.  From an ICC pooled over
+    # every predictor listed, an unclustered primary predictor's weight fell
+    # from 12 to 2.12 when a clustered one was listed after it.
     primary_rho <- if (has_resp) max(resp_rho, 0)
-                   else if (has_pred) max(pred_rho, 0)
+                   else if (has_pred) max(pred_rho[[1L]], 0)
                    else 0
     deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
     if (primary_rho > 0)
       out$cell_weight <- n_valid_primary / deff_per_cell
-    # Recorded whenever EITHER ICC corrected its columns.  Keyed on the
+    # Recorded whenever ANY ICC corrected its column.  Keyed on the
     # primary variable alone, a clustered predictor beside an unclustered
     # response had its SEs inflated 11x on rows marked deff_applied = FALSE,
     # with no attribute.  `deff` stays the primary variable's (all 1 then).
     if (max(resp_rho, pred_rho, 0) > 0) {
-      attr(out, "deff_applied") <- list(
+      attr(out, "deff_applied") <- c(list(
         method   = "kish",
         icc_resp = if (has_resp) resp_rho else NA_real_,
+        # One ICC per predictor column, named by column.
         icc_pred = if (has_pred) pred_rho else NA_real_,
         deff     = deff_per_cell
-      )
+      ),
+      # A "variogram" request that fell back here says so, and why.
+      if (!is.null(vgm_fallback))
+        list(requested = "variogram", fallback_reason = vgm_fallback))
     }
   } else if (use_vgm && !is.null(vgm_rbar)) {
     # The ..se_ closures have already applied the per-column design effect
@@ -1979,7 +2938,8 @@ summarize_by_cell <- function(assigned_points_sf,
   if (use_kish)
     attr(out, "icc") <- list(
       resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
-      pred = if (has_pred) as.numeric(pred_rho) else NA_real_)
+      # Named by predictor column: each has its own.
+      pred = if (has_pred) pred_rho else NA_real_)
   # The same fact per row.  The attribute does not survive rbind(),
   # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
   # (a simulation, a benchmark over many layers) could not tell a row whose
@@ -1987,8 +2947,78 @@ summarize_by_cell <- function(assigned_points_sf,
   # fires when the variogram is rejected -- often when correlation is
   # strongest.  Only when a design effect was requested, so the default
   # frame is unchanged.
-  if (deff_requested)
-    out$deff_applied <- !is.null(attr(out, "deff_applied"))
+  if (deff_requested) {
+    applied <- !is.null(attr(out, "deff_applied"))
+    out$deff_applied <- applied
+    # Which correction the standard errors carry, by name, since the columns
+    # keep their names whatever was applied: "variogram", "kish" or "fixed"
+    # when the one asked for was applied, "none" when it was not (a refused
+    # number, Kish ICCs of 0), and "kish (variogram fallback)" or
+    # "none (variogram fallback)" when a "variogram" request could not be
+    # met and Kish stood in for it.
+    out$deff_method <- paste0(
+      if (applied) attr(out, "deff_applied")$method else "none",
+      if (!is.null(vgm_fallback)) " (variogram fallback)" else "")
+  }
+
+  # --- pooled values ---
+  # Appended after every column above, so each of those keeps its name, its
+  # values and its position, and before the join below adds the geometry.
+  # Nothing here reads `agg_funs` or `deff`: a column is pooled on its own
+  # scored rows, from their values, their cells and their coordinates.
+  pooled <- NULL
+  if (identical(estimate, "pooled") && (has_resp || has_pred)) {
+    # The design effect the t interval carries is the one recorded above as
+    # applied, not the one asked for: a refused number, and Kish ICCs of 0 for
+    # every column, leave the default's numbers, and the table of intervals
+    # then describes them as the default's.
+    deff_carried <- attr(out, "deff_applied")
+    pooled <- .pooled_columns(
+      assigned_points_sf, df, id_col, out[[id_col]], resp_num, pred_num,
+      obs_level = obs_level, conf_level = conf_level,
+      deff_label = .deff_label(
+        deff_carried,
+        # Under Kish each column has its own ICC, and one of 0 leaves that
+        # column's standard error as it is.
+        kish_zero = if (use_kish)
+          unique(c(if (has_resp && resp_rho <= 0) resp_num,
+                   if (has_pred) pred_num[pred_rho <= 0]))),
+      crs = count_crs)
+    for (nm in names(pooled$columns)) out[[nm]] <- pooled$columns[[nm]]
+    attr(out, "pooled")    <- pooled$record
+    attr(out, "intervals") <- pooled$record$intervals
+    .pooled_warnings(pooled$events, obs_level)
+  }
+
+  # --- the record of how the cells' count was set ---
+  # Read and checked whatever `estimate` is, and attached with the result of
+  # its checks: whether the summary reports the estimate the count was
+  # chosen for, and whether the cells and rows it was given are the ones the
+  # profile scored.  Nothing above depends on it but the CRS of the pooled
+  # values' distances.
+  if (!is.null(count_rule)) {
+    # What the engine finds for the response on the rows summarised.  Under
+    # pooled values with a count scored for them it is the fit just made;
+    # otherwise one more fit of the response.
+    found <- function(est) {
+      if (identical(est, "pooled") && !is.null(pooled)) {
+        r <- pooled$record$columns[[paste0("resp_", response_var)]]
+        return(list(n = r$n, cells = r$cells, loo = r$loo, status = r$status))
+      }
+      loc <- if (!is.null(pooled)) pooled$loc else .pooled_xy(assigned_points_sf, count_crs)
+      res <- .pool_column(df[[response_var]], df[[id_col]], loc$xy, NULL, want = est,
+                          use_fnn = .has_backend("FNN"))
+      list(n = res$record$n, cells = res$record$cells,
+           loo = if (is.null(res$fit)) NA_real_
+                 else if (identical(est, "pooled")) res$fit$loo_pooled
+                 else res$fit$loo_mean,
+           status = res$record$status)
+    }
+    attr(out, "count_rule") <- .count_rule_check(
+      count_rule, other = if (!is.null(rule_rows)) rule_cells,
+      estimate = estimate, response_var = response_var, summarised = resp_num,
+      layer = assigned_points_sf, found = found)
+  }
 
   if (!is.null(cells_sf)) {
     if (!inherits(cells_sf, "sf")) {
@@ -2076,10 +3106,21 @@ summarize_by_cell <- function(assigned_points_sf,
         # observations get NA).
         deff_attr   <- attr(out, "deff_applied")
         icc_attr    <- attr(out, "icc")
+        pooled_attr <- attr(out, "pooled")
+        rule_attr   <- attr(out, "count_rule")
         pre_join_id <- as.character(out[[id_col]])
 
         out <- dplyr::left_join(cells_slim, out, by = id_col)
         if (!is.null(icc_attr)) attr(out, "icc") <- icc_attr
+        # The record of the count, with the result of its checks.  It is the
+        # one read above, not whatever the cells' own attribute holds.
+        attr(out, "count_rule") <- rule_attr
+        # The record of the pooled columns and its table of intervals, which
+        # the join drops as it drops "icc".
+        if (!is.null(pooled_attr)) {
+          attr(out, "pooled")    <- pooled_attr
+          attr(out, "intervals") <- pooled_attr$intervals
+        }
 
         if (isTRUE(area)) {
           # Planar areas in the cells' own (verified equal-area) CRS, as
@@ -2133,4 +3174,530 @@ summarize_by_cell <- function(assigned_points_sf,
   whole <- is.finite(x) & x == trunc(x) & abs(x) < 2^53
   out[whole] <- sprintf("%.0f", x[whole] + 0)   # + 0 turns -0 into 0
   out
+}
+
+
+# -----------------------------------------------------------------------------
+# Pooled values in summarize_by_cell()
+# -----------------------------------------------------------------------------
+
+# Beyond this a coordinate is not read as a location: the squared distance
+# between two such points is not a finite number, and the two neighbour
+# searches then stop or disagree.
+.POOL_XY_MAX <- 1e150
+
+#' The coordinates the pooled values are computed from
+#'
+#' One row per row of the layer, in a projected CRS.  Features that are not
+#' points are reduced to one point each first, and the points are then
+#' projected, in that order, which is the order \code{resolution_profile()}
+#' takes: lon/lat coordinates, and CRS-less ones that look like degrees, go
+#' through \code{ensure_projected()}, so degrees are never read as distances.
+#' The projection is chosen from every row of the layer, as the profile
+#' chooses it.
+#'
+#' A feature with an empty geometry has \code{NA} coordinates, and so has one
+#' with a coordinate beyond \code{.POOL_XY_MAX}: both are rows without a
+#' location to the caller.  The warning sf raises when it takes a point on
+#' the surface of a lon/lat polygon is not passed on: the point is one of the
+#' polygon's, and it is projected before any distance is taken.
+#'
+#' @param layer The assigned layer.
+#' @param crs \code{NULL}, or the projected CRS to measure in: the one the
+#'   record of the cells' count names, in which the profile measured.  The
+#'   points are then put in that CRS, and no other is chosen.
+#' @return \code{NULL} when the layer has no geometry (a plain data frame);
+#'   otherwise a list with \code{xy}, a two-column matrix, and \code{crs},
+#'   the CRS its distances are measured in.
+#' @keywords internal
+#' @noRd
+.pooled_xy <- function(layer, crs = NULL) {
+  if (!inherits(layer, "sf")) return(NULL)
+  if (nrow(layer) == 0L)
+    return(list(xy = matrix(numeric(0), 0L, 2L), crs = sf::st_crs(layer)))
+  if (!all(sf::st_geometry_type(layer, by_geometry = TRUE) == "POINT"))
+    layer <- withCallingHandlers(
+      coerce_to_points(layer, "auto"),
+      warning = function(w)
+        if (grepl("st_point_on_surface may not give correct results",
+                  conditionMessage(w), fixed = TRUE))
+          invokeRestart("muffleWarning"))
+  layer <- if (is.null(crs)) ensure_projected(layer)
+           else ensure_projected(layer, target_crs = crs)
+  xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])
+  far <- abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX
+  xy[which(far), ] <- NA_real_
+  list(xy = xy, crs = sf::st_crs(layer))
+}
+
+
+#' The design effect the t interval carries, as a call writes it
+#'
+#' Read from what \code{summarize_by_cell()} recorded as applied, so that the
+#' table of intervals describes the standard errors the frame holds: a
+#' request that was refused, or that corrected no column, reads \code{1}.
+#'
+#' @param applied The \code{"deff_applied"} attribute of the summary, or
+#'   \code{NULL} when no correction was applied.
+#' @param kish_zero Under Kish's correction, the columns whose ICC is 0 and
+#'   whose standard errors are therefore the uncorrected ones.
+#' @return One string for \code{.intervals_table()}: \code{1},
+#'   \code{"kish"} or \code{"variogram"} with their quotes, or the number.
+#'   It reads \code{1} only when nothing was applied: the table takes the
+#'   words of its row from that.
+#' @keywords internal
+#' @noRd
+.deff_label <- function(applied, kish_zero = character(0)) {
+  if (is.null(applied)) return("1")
+  switch(applied$method,
+    kish = paste0(
+      "\"kish\"",
+      if (length(kish_zero))
+        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero))),
+    variogram = "\"variogram\"",
+    {
+      # A number applied is above 1, and is written so that it does not read 1.
+      lab <- format(applied$deff, digits = 15)
+      if (identical(lab, "1")) sprintf("%.17g", applied$deff) else lab
+    })
+}
+
+
+#' Pooled columns, their record and the events to warn about
+#'
+#' What \code{summarize_by_cell(estimate = "pooled")} adds to its grouped
+#' summary.  Every numeric column is fitted once, on its own scored rows
+#' (\code{.pool_column()}), the response first and then the predictors in the
+#' order given; a column named as both is fitted once and returned under both
+#' prefixes.  The centroids and neighbours of the cells depend on which rows
+#' are scored and not on their values, so a column whose scored rows are
+#' those of an earlier column is handed that column's.
+#'
+#' @param layer The assigned layer as the caller passed it.
+#' @param df Its attribute table, infinite values already set to \code{NA}.
+#' @param id_col Name of the ID column of \code{df}.
+#' @param out_ids The IDs of the summary's rows, in its order.
+#' @param resp_num,pred_num The numeric response and predictor columns.
+#' @param obs_level,conf_level The two levels of the call, or \code{NULL}.
+#' @param deff_label The design effect of the t interval, as
+#'   \code{.intervals_table()} takes it.
+#' @param crs \code{NULL}, or the CRS the distances are measured in, as
+#'   \code{.pooled_xy()} takes it.
+#' @return A list: \code{columns}, the new columns by name, in the order they
+#'   are appended; \code{record}, the list of class \code{spatialkit_pooled};
+#'   \code{events}, what \code{.pooled_warnings()} reads; and \code{loc}, the
+#'   coordinates the columns were fitted on (\code{.pooled_xy()}'s list).
+#' @keywords internal
+#' @noRd
+.pooled_columns <- function(layer, df, id_col, out_ids, resp_num, pred_num,
+                            obs_level, conf_level, deff_label, crs = NULL) {
+  use_fnn <- .has_backend("FNN")
+  id   <- df[[id_col]]
+  loc  <- .pooled_xy(layer, crs)
+  xy   <- loc$xy
+  cols <- unique(c(resp_num, pred_num))
+  located <- if (is.null(xy)) NULL else is.finite(xy[, 1L]) & is.finite(xy[, 2L])
+
+  fits <- stats::setNames(vector("list", length(cols)), cols)
+  kept <- list()                      # the scored rows and geometry of earlier columns
+  unlocated <- logical(nrow(df))      # rows with a value, a cell and no location
+  for (v in cols) {
+    geo <- NULL
+    if (!is.null(xy)) {
+      valued    <- is.finite(df[[v]]) & !is.na(id)
+      scored    <- valued & located
+      unlocated <- unlocated | (valued & !located)
+      for (k in kept) if (identical(k$mask, scored)) { geo <- k$geo; break }
+    }
+    res <- .pool_column(df[[v]], id, xy, obs_level, want = "pooled",
+                        use_fnn = use_fnn, geo = geo)
+    if (is.null(geo) && !is.null(res$geo))
+      kept[[length(kept) + 1L]] <- list(mask = res$mask, geo = res$geo)
+    # Kept of a column: what the frame, the record and the warnings read.  Its
+    # fit, with the residuals, and its own copy of the mask and the geometry
+    # are let go here, so that many columns do not hold them all at once.
+    fits[[v]] <- res[c("ids", "value", "w", "target", "obs_lo", "obs_hi", "record",
+                       "work", "limit")]
+  }
+
+  columns <- list()
+  records <- list()
+  roles <- rbind(
+    data.frame(prefix = rep("resp_", length(resp_num)), column = resp_num,
+               role = rep("response", length(resp_num)), stringsAsFactors = FALSE),
+    data.frame(prefix = rep("pred_", length(unique(pred_num))), column = unique(pred_num),
+               role = rep("predictor", length(unique(pred_num))), stringsAsFactors = FALSE))
+  for (i in seq_len(nrow(roles))) {
+    v   <- roles$column[i]
+    nm  <- paste0(roles$prefix[i], v)
+    res <- fits[[v]]
+    at  <- match(out_ids, res$ids)
+    columns[[paste0("..pooled_", nm)]]        <- res$value[at]
+    columns[[paste0("..pooled_w_", nm)]]      <- res$w[at]
+    columns[[paste0("..pooled_target_", nm)]] <- res$target[at]
+    if (!is.null(obs_level)) {
+      columns[[paste0("..obs_lo_", nm)]] <- res$obs_lo[at]
+      columns[[paste0("..obs_hi_", nm)]] <- res$obs_hi[at]
+    }
+    rec <- res$record
+    rec$column <- v
+    rec$role   <- roles$role[i]
+    records[[nm]] <- rec
+  }
+
+  record <- structure(
+    list(toward     = "neighbours",
+         neighbours = .POOL_NEIGHBOURS,
+         crs        = if (is.null(loc)) sf::NA_crs_ else loc$crs,
+         obs_level  = obs_level,
+         conf_level = conf_level,
+         intervals  = .intervals_table(obs_level, conf_level, deff_label),
+         columns    = records),
+    class = "spatialkit_pooled")
+
+  events <- list(
+    records = lapply(fits, function(r) r$record),
+    w_min   = vapply(fits, function(r)
+      if (length(r$w) && !all(is.na(r$w))) min(r$w, na.rm = TRUE) else NA_real_, numeric(1)),
+    work    = vapply(fits, function(r) as.numeric(r$work), numeric(1)),
+    limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
+    skipped_rows  = sum(unlocated),
+    skipped_cells = length(unique(id[unlocated])))
+  list(columns = columns, record = record, events = events, loc = loc)
+}
+
+
+#' Raise what happened to the pooled columns, once per call and reason
+#'
+#' Each event is raised once, for all the columns it applies to: the text
+#' names them (\code{.cols_text()}) and the condition carries them in
+#' \code{columns}, in the order of the frame.  A field "by column" is a
+#' vector named by those columns.  The numbers of each column are in
+#' \code{attr(, "pooled")}.
+#'
+#' @param ev The \code{events} of \code{.pooled_columns()}.
+#' @param obs_level The level of the interval for one observation, or
+#'   \code{NULL}.
+#' @return \code{NULL}, invisibly.
+#' @keywords internal
+#' @noRd
+.pooled_warnings <- function(ev, obs_level) {
+  rec  <- ev$records
+  cols <- names(rec)
+  if (!length(cols)) return(invisible(NULL))
+  of <- function(field, as = as.numeric)
+    stats::setNames(as(unlist(lapply(rec, function(r) r[[field]]))), cols)
+  status <- of("status", as.character)
+  n      <- of("n", as.integer)
+  cells  <- of("cells", as.integer)
+  df     <- of("df", as.integer)
+  one    <- function(w) length(w) == 1L
+  listed <- function(x) paste(format(x, trim = TRUE), collapse = ", ")
+
+  # ---- the pooled columns are NA --------------------------------------------
+  w <- cols[status == "no coordinates"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): estimate = \"pooled\" needs the observations' locations, ",
+      "and `assigned_points_sf` carries no geometry: the pooled columns are NA. The ",
+      "plain columns are unaffected."),
+      data = list(reason = "no coordinates", columns = w))
+  w <- cols[status == "no located value"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: no row has a value of ",
+      "%s, a cell and a location."),
+      .cols_text(w), if (one(w)) "it" else "any of them",
+      data = list(reason = "no located value", columns = w))
+  w <- cols[status == "no cell holds two values"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: %s, so the spread of ",
+      "values inside a cell cannot be estimated and nothing can set a weight. The ",
+      "plain columns are unaffected."),
+      .cols_text(w),
+      if (one(w)) "no cell holds two values of it"
+      else "for none of them does any cell hold two values",
+      data = list(reason = "no cell holds two values", columns = w,
+                  n = n[w], cells = cells[w]))
+  w <- cols[status == "work limit"]
+  if (length(w)) {
+    top <- w[which.max(cells[w])]             # the column with the most cells
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: finding each cell's ",
+      "neighbours among %d cells without the FNN package would compare %.2g pairs, ",
+      "above the limit of %.2g (options(spatialkit.exact_pairs_max = )). Install FNN: ",
+      "the result is the same. The plain columns are unaffected."),
+      .cols_text(w), cells[[top]], ev$work[[top]], ev$limit[[top]],
+      data = list(reason = "work limit", columns = w, work = ev$work[[top]],
+                  limit = ev$limit[[top]], cells = cells[w]))
+  }
+
+  # ---- the pooled values carry no pooling ------------------------------------
+  w <- cols[status == "one cell"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): the values of %s lie in one cell, so there is nothing to ",
+      "pool toward: the pooled value is the plain mean and its weight is 1."),
+      .cols_text(w),
+      data = list(reason = "one cell", columns = w, n = n[w]))
+  w <- cols[status == "no spread inside any cell"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): the values of %s do not vary inside any cell, so every ",
+      "own weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says ",
+      "which columns are constant."),
+      .cols_text(w),
+      data = list(reason = "no spread inside any cell", columns = w,
+                  constant = of("constant", as.logical)[w]))
+  w <- cols[status == "no signal between cells"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_degenerate", paste0(
+      "summarize_by_cell(): every own weight of %s is 0: the cell means differ from ",
+      "their neighbours' means by no more than the spread inside the cells explains. ",
+      "Each pooled value is then the mean of the cell's nearest cells and holds none ",
+      "of the cell's own values."),
+      .cols_text(w),
+      data = list(reason = "no signal between cells", columns = w,
+                  sigma2 = of("sigma2")[w]))
+
+  # ---- values were computed, and rest on little -------------------------------
+  # The columns whose weights were estimated.  Where no value varies inside a
+  # cell the weights are set to 1 and `sigma2` to 0: nothing rests on the
+  # count of cells or of values there, and nothing is said of either.
+  fitted <- status %in% c("ok", "no signal between cells")
+  w <- cols[fitted & cells >= 2L & cells <= 9L]
+  if (length(w))
+    .warn_classed("spatialkit_pool_few_cells", paste0(
+      "summarize_by_cell(): %s %s values in fewer than 10 cells (%s), so each cell's ",
+      "target is the mean of all the other cells, not of cells near it. A cell with a ",
+      "small own weight then gets a pooled value on the far side of the overall mean ",
+      "from its plain mean, and two cells can change order. The `..pooled_w_*` columns ",
+      "hold the weights; estimate = \"mean\" gives the plain means."),
+      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]),
+      data = list(columns = w, cells = cells[w], own_weight = ev$w_min[w]))
+  w <- cols[fitted & cells >= 2L & df >= 1L & df < .POOL_MIN_DF]
+  if (length(w))
+    .warn_classed("spatialkit_pool_few_df", paste0(
+      "summarize_by_cell(): the spread of %s inside a cell is estimated from fewer ",
+      "than %d values beyond one per cell (%s), and every own weight rests on it: the ",
+      "pooled values and their weights are unstable."),
+      .cols_text(w), .POOL_MIN_DF, listed(df[w]),
+      data = list(columns = w, needed = .POOL_MIN_DF, df = df[w], n = n[w],
+                  cells = cells[w]))
+
+  # ---- the cells do no better than one mean -----------------------------------
+  # The rule has two tests (.no_structure()), and the text says which failed.
+  # `worse`: one mean predicts a left-out row as well as the pooled values do.
+  # `untold`: the pooled values predict it better, and the F test does not
+  # tell the cell means from one mean, which is what it returns where few
+  # values beyond one per cell stand behind it.
+  structured <- of("structured", as.logical)
+  w <- cols[!is.na(structured) & !structured]
+  if (length(w)) {
+    loo <- of("loo"); loo_one <- of("loo_one_cell"); p <- of("structure_p")
+    own <- of("own_weight")
+    beats  <- .beats_one_mean(loo[w], loo_one[w])
+    worse  <- w[!beats]
+    untold <- w[beats]
+    says <- sprintf(paste0("leave-one-out error %s against %s; F test of the cells ",
+                           "against one mean, p = %s; median own weight %.2f"),
+                    vapply(loo[w], function(v) format(signif(v, 4)), character(1)),
+                    vapply(loo_one[w], function(v) format(signif(v, 4)), character(1)),
+                    vapply(p[w], function(v) format(signif(v, 2)), character(1)),
+                    own[w])
+    # One column: its numbers stand in the sentence.  Several: they follow the
+    # sentences, which are what the reader has to see and R prints a warning's
+    # first getOption("warning.length") characters only.
+    inside <- if (one(w)) sprintf(" (%s)", says) else ""
+    text <- c(
+      if (length(worse)) sprintf(paste0(
+        "the pooled values of %s predict a left-out observation no better than one ",
+        "mean for all rows%s, so %s no spatial structure these cells can use. The ",
+        "values are returned. A map of them looks smooth because each is mostly its ",
+        "neighbours' mean, not because the response varies smoothly."),
+        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show"),
+      if (length(untold)) sprintf(paste0(
+        "%s pooled values of %s predict a left-out observation better than one mean ",
+        "for all rows, but the F test does not tell the cell means from one mean%s, so ",
+        "no spatial structure these cells can use is shown%s"),
+        if (length(worse)) "The" else "the", .cols_text(untold), inside,
+        if (length(worse)) sprintf(" for %s either.", if (one(untold)) "it" else "them")
+        else ". The values are returned."),
+      if (!one(w)) .each_text(sprintf("'%s': %s.", w, says)))
+    .warn_classed("spatialkit_no_structure", "summarize_by_cell(): %s",
+      paste(text, collapse = " "),
+      data = list(criterion = "loo", n = cells[w], one_cell = loo_one[w], columns = w,
+                  estimate = "pooled", loo = loo[w], structure_p = p[w],
+                  beats = stats::setNames(beats, w)))
+  }
+
+  # ---- rows left out, and what the interval rests on --------------------------
+  if (ev$skipped_rows > 0L)
+    .warn_classed("spatialkit_pool_rows_skipped", paste0(
+      "summarize_by_cell(): %d row(s) in %d cell(s) have empty or non-finite ",
+      "coordinates. They count in `n` and the plain columns and take no part in the ",
+      "pooled columns."),
+      ev$skipped_rows, ev$skipped_cells,
+      data = list(n = ev$skipped_rows, cells = ev$skipped_cells,
+                  columns = cols[of("skipped", as.integer) > 0L]))
+  if (!is.null(obs_level)) {
+    # The columns whose interval is read from residuals: both offsets are
+    # numbers, and the column is not constant.  The interval of a constant
+    # column has no width because its residuals are set to 0; it rests on no
+    # count of them and says nothing of where a further observation lies.
+    has <- vapply(rec, function(r) !is.null(r$offsets) && all(is.finite(r$offsets)) &&
+                    !isTRUE(r$constant), logical(1))
+    repeated <- of("repeated", as.integer)
+    w <- cols[has & repeated > 0L]
+    if (length(w))
+      .warn_classed("spatialkit_repeated_locations", paste0(
+        "summarize_by_cell(): rows with a value share a location with another row ",
+        "(%s). The leave-one-out error leaves one row out and keeps the others at its ",
+        "location, so it, and an interval built from it, describes a further ",
+        "observation at a place already observed, not an observation at a new place."),
+        .each_text(sprintf("%d of the %d rows of '%s'", repeated[w], n[w], w), sep = "; ",
+                   more = "and %d more"),
+        data = list(columns = w, n = repeated[w], total = n[w]))
+    # The count at which five residuals are expected beyond each end.  It is a
+    # whole number wherever it fits one, and a double above that.
+    p_lo   <- round((1 - obs_level) / 2, 12)
+    needed <- ceiling(round(.FEW_RESIDUALS / p_lo, 6))
+    if (needed <= .Machine$integer.max) needed <- as.integer(needed)
+    w <- cols[has & n * p_lo < .FEW_RESIDUALS]
+    if (length(w))
+      .warn_classed("spatialkit_few_residuals", paste0(
+        "summarize_by_cell(): the %s%% interval of %s rests on fewer than %s ",
+        "leave-one-out residuals (%s), the number at which five are expected beyond ",
+        "each end; its ends are unstable."),
+        .level_text(obs_level), .cols_text(w), format(needed, scientific = FALSE),
+        listed(n[w]),
+        data = list(columns = w, needed = needed, level = obs_level, n = n[w]))
+  }
+  invisible(NULL)
+}
+
+
+#' Whether the pooled values predict a left-out row better than one mean
+#'
+#' The first of the two tests of \code{.no_structure()}, with the margin the
+#' summary hands that rule.  The warning and the print read it to say which
+#' test a column failed.
+#'
+#' @param loo,loo_one The leave-one-out errors of the pooled values and of one
+#'   mean for all rows.
+#' @return \code{TRUE} where one mean's error is above the pooled values' by
+#'   more than \code{.STRUCTURE_TOL}.
+#' @keywords internal
+#' @noRd
+.beats_one_mean <- function(loo, loo_one) !(loo_one <= loo * (1 + .STRUCTURE_TOL))
+
+
+#' The numbers of each column, for at most six of them
+#'
+#' A warning that gives numbers column by column gives them for the first six
+#' columns, as \code{.cols_text()} names six: the text of a warning is printed
+#' to \code{getOption("warning.length")} characters, and the numbers of every
+#' column are in \code{attr(, "pooled")}.
+#'
+#' @param pieces One string per column.
+#' @param sep What joins them.
+#' @param more What stands for the columns left out, with \code{\%d} for
+#'   their number.
+#' @return One string.
+#' @keywords internal
+#' @noRd
+.each_text <- function(pieces, sep = " ", more = "And %d more, in attr(, \"pooled\").") {
+  k <- length(pieces)
+  if (k <= 6L) return(paste(pieces, collapse = sep))
+  paste(c(pieces[1:6], sprintf(more, k - 6L)), collapse = sep)
+}
+
+
+#' A level as a percentage, with the digits it was given with
+#'
+#' @param level A level strictly between 0 and 1.
+#' @return \code{"90"} for 0.9 and \code{"99.9999999"} for 0.999999999;
+#'   \code{format()} alone writes seven digits and reads the second as 100.
+#' @keywords internal
+#' @noRd
+.level_text <- function(level) format(100 * level, digits = 15)
+
+
+#' @export
+print.spatialkit_pooled <- function(x, ...) {
+  label  <- function(name) sprintf("  %-12s: ", name)
+  indent <- strrep(" ", 16L)
+  sci    <- function(v) sprintf("%.2e", v)
+  pct    <- function(level) paste0(.level_text(level), "%")
+  count  <- function(k, what) sprintf("%d %s%s", as.integer(k), what, if (k == 1L) "" else "s")
+  # The words beside an interval's columns, read from what the table says the
+  # interval covers.
+  target <- function(covers)
+    if (startsWith(covers, "one further observation")) "ONE OBSERVATION"
+    else if (grepl("population mean", covers, fixed = TRUE)) "THE POPULATION MEAN"
+    else "THE CELL'S MEAN"
+  offset <- function(o) sprintf("value %s %s", if (o < 0) "-" else "+",
+                                format(signif(abs(o), 3)))
+  iv    <- x$intervals
+  shown <- rep(FALSE, NROW(iv))
+  obs   <- which(iv$centre == "pooled value")
+
+  for (nm in names(x$columns)) {
+    r <- x$columns[[nm]]
+    cat(sprintf("Cell values: %s, %s in %s\n", r$column, count(r$n, "row"),
+                count(r$cells, "cell")))
+    if (!identical(r$status, "ok")) {
+      cat(label("status"), r$status, "\n", sep = "")
+      next
+    }
+    cat(label("value"), "..pooled_", nm, ", pooled toward ",
+        if (r$cells <= 9L) sprintf("all the other cells (%d of them)", r$neighbours)
+        else sprintf("the %d nearest cells (centroids of the rows)", r$neighbours),
+        "\n", sep = "")
+    cat(label("variances"), "inside cells ", sci(r$sigma2), " (from ",
+        count(r$df, "value"), " beyond one per cell);\n", indent,
+        "between a cell and its target ", sci(r$tau2), "\n", sep = "")
+    cat(label("own weight"), sprintf("median %.2f (..pooled_w_%s)\n", r$own_weight, nm),
+        sep = "")
+    cat(label("alone"), sprintf("%.1f%% of the rows are the only one in their cell\n",
+                                100 * r$share_alone), sep = "")
+    cat(label("loo"), sci(r$loo),
+        " (leave-one-out mean squared error of the pooled value);\n", indent,
+        "one mean for all rows: ", sci(r$loo_one_cell),
+        # Which of the rule's two tests failed (.no_structure()).
+        if (isFALSE(r$structured)) {
+          if (.beats_one_mean(r$loo, r$loo_one_cell))
+            sprintf(": the F test does not tell these cells from one mean (p = %s)",
+                    format(signif(r$structure_p, 2)))
+          else ": these cells do no better than one mean"
+        },
+        "\n", sep = "")
+    if (length(obs) && !is.null(r$offsets)) {
+      cat(label("interval"), pct(iv$level[obs]), " for ", target(iv$covers[obs]),
+          sprintf(" (..obs_lo_%s, ..obs_hi_%s):\n", nm, nm), indent,
+          if (all(is.finite(r$offsets)))
+            sprintf("%s to %s, quantiles of %s", offset(r$offsets[1L]),
+                    offset(r$offsets[2L]), count(r$n, "leave-one-out residual"))
+          else "not available",
+          "\n", sep = "")
+      shown[obs] <- TRUE
+    }
+  }
+
+  rest <- which(!shown)
+  if (length(rest)) {
+    cat("Also in the frame\n")
+    for (i in rest) {
+      covers <- strsplit(iv$covers[i], "; ", fixed = TRUE)[[1L]]
+      head   <- sprintf("  %s : ", iv$columns[i])
+      cat(head, pct(iv$level[i]), " for ", target(iv$covers[i]), " (", iv$method[i],
+          "), centred on the ", iv$centre[i],
+          if (length(covers) > 1L)
+            paste0(";\n", strrep(" ", nchar(head)), paste(covers[-1L], collapse = "; ")),
+          "\n", sep = "")
+    }
+  }
+  cat("Away from the observations no interval here is calibrated.\n")
+  invisible(x)
 }

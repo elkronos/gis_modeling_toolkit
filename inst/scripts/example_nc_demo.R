@@ -27,7 +27,7 @@
 #        install.packages("ranger")                   # random forest backend
 #        install.packages("gstat")                    # autocorrelation range
 #        install.packages("geometry")                 # Delaunay triangulation
-#        install.packages(c("sp", "GWmodel"))         # GWR backend (optional)
+#        install.packages("sp")                       # GWR backend (optional)
 #      Anything missing is skipped with a message rather than failing.
 #
 #   3. Run it:
@@ -52,8 +52,7 @@ has_ggplot  <- requireNamespace("ggplot2",  quietly = TRUE)
 has_ranger  <- requireNamespace("ranger",   quietly = TRUE)
 has_gstat   <- requireNamespace("gstat",    quietly = TRUE)
 has_geom    <- requireNamespace("geometry", quietly = TRUE)
-has_gwmodel <- requireNamespace("GWmodel",  quietly = TRUE) &&
-               requireNamespace("sp",       quietly = TRUE)
+has_gwr     <- requireNamespace("sp",       quietly = TRUE)
 
 if (!has_ggplot)
   stop("This demo draws maps and needs ggplot2. install.packages(\"ggplot2\")",
@@ -141,10 +140,15 @@ predictor_vars <- c("elevation", "pop_density")
 
 cat("\n--- Building tessellations ---\n")
 
-# 3a. Voronoi from ~40 k-means seeds.  Cells are built around the SEEDS, not
-# the observations: one cell per observation is a nearest-neighbour
-# interpolation rather than an aggregation, and leaves no within-cell
-# variation to compute a standard error from.
+# 3a. Voronoi from ~40 density-weighted k-means seeds, the default
+# (partition = "kmeans" gives the plain k-means seeds of earlier versions).
+# Cells are built around the SEEDS, not the observations: one cell per
+# observation is a nearest-neighbour interpolation rather than an
+# aggregation, and leaves no within-cell variation to compute a standard
+# error from.  A density-weighted centre can lie just outside the state
+# outline, over a sound that coastal observations surround; build_tessellation()
+# then warns that one seed falls in no cell.  Its cell is still built inside
+# the outline, and every observation falls in a cell.
 seeds <- get_voronoi_seeds(
   boundary      = nc_boundary,
   sample_points = points_sf,
@@ -156,6 +160,12 @@ tess_voronoi <- build_tessellation(
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 cat(sprintf("  Voronoi: %d cells\n", nrow(tess_voronoi$cells)))
+n_out <- sum(is.na(tess_voronoi$index))
+if (n_out > 0)
+  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline, so the ",
+                     "warning above says\n  they fall in no cell; their cells are ",
+                     "built inside the outline, and every\n  observation falls in ",
+                     "a cell.\n"), n_out, nrow(seeds)))
 
 # 3b / 3c. Hex and square grids (~50 cells).  Both keep `cell_id`.
 tess_hex <- build_tessellation(
@@ -188,9 +198,10 @@ if (has_geom) {
 # 4. CELL-LEVEL AGGREGATION AND CHOROPLETHS
 # =============================================================================
 # summarize_by_cell() does the aggregation: mean, sd and se for the response
-# and every predictor, plus n and cell_weight.  There is no need to write the
-# group_by()/summarise() by hand, and doing so loses the design-effect
-# machinery shown below.
+# and every predictor, plus n and cell_weight, and by default a pooled value
+# beside each mean (estimate = "mean" leaves it out).  There is no need to
+# write the group_by()/summarise() by hand, and doing so loses the
+# design-effect machinery shown below.
 
 make_choropleth <- function(tess, boundary, points, title = NULL,
                             fill_col = "resp_mean_y",
@@ -312,9 +323,9 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 }
 
 if (has_ranger) {
-  # include_coords = TRUE hands the forest the coordinates, so it can memorise
-  # the training surface.  That is the failure mode the default (FALSE) exists
-  # to prevent, and the one random folds cannot see.
+  # include_coords = TRUE hands the forest the coordinates, so it can fit the
+  # training surface by location.  A random hold-out then overstates its
+  # accuracy, which random folds cannot show.
   rf_args <- list(include_coords = TRUE, num_trees = 300, seed = 1)
   cv_random  <- do.call(cv_rf, c(list(points_sf, response_var, predictor_vars,
                                       folds = folds_random),  rf_args))
@@ -354,7 +365,7 @@ if (has_ranger) {
 }
 
 gwr_fit <- NULL
-if (has_gwmodel) {
+if (has_gwr) {
   gwr_fit <- tryCatch(
     fit_gwr_model(data_sf = points_sf, response_var = response_var,
                   predictor_vars = predictor_vars,
@@ -369,7 +380,7 @@ if (has_gwmodel) {
                 gwr_fit$info$bandwidth, met$R2, met$RMSE))
   }
 } else {
-  cat("  Skipping GWR: install.packages(c(\"sp\", \"GWmodel\"))\n")
+  cat("  Skipping GWR: install.packages(\"sp\")\n")
 }
 
 # Aggregate absolute model error onto each tessellation.

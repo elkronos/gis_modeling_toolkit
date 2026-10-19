@@ -37,8 +37,10 @@ step("02.2", "Candidate cell counts, cheapest first")
 lv <- determine_optimal_levels(pts, max_levels = 40)
 cat("  geometric candidates:", paste(lv, collapse = ", "), "\n")
 
-# With a response and predictors it can also score levels on residual spatial
-# autocorrelation. `criterion = "combined"` REQUIRES both.
+# With a response it can also rank the counts around the elbow by Moran's z of
+# the cell means (of their residuals on the predictors when those are given).
+# That statistic is a diagnostic and not a count rule, and the call says so in
+# a warning of class "spatialkit_diagnostic_ranking".
 lv2 <- determine_optimal_levels(pts, max_levels = 40, criterion = "combined",
                                 response_var = "z", predictor_vars = "elev")
 cat("  combined candidates:", paste(lv2, collapse = ", "), "\n")
@@ -46,7 +48,11 @@ cat("  combined candidates:", paste(lv2, collapse = ", "), "\n")
 step("02.3", "The full ladder")
 # resolution_profile() actually builds each level and reports what it costs:
 # how many points land in the smallest cell, how much of the variance survives,
-# and whether the residuals are still autocorrelated.
+# whether the residuals are still autocorrelated, and the leave-one-out error
+# of the pooled cell value. n_levels asks for the ladder; with nothing named
+# but the response the profile is one size instead (02.7). The cells are
+# density-weighted k-means, the default; partition = "kmeans" gives the
+# k-means cells of earlier versions.
 prof <- resolution_profile(pts, response_var = "z", n_levels = 16)
 print(prof)
 
@@ -54,18 +60,22 @@ step("02.4", "Four criteria, four answers")
 # Each criterion also reports the band of levels it cannot tell apart from its
 # own pick. The spread BETWEEN criteria is usually wider than any one of those
 # bands, and it is the more honest measure of how much the data pins this down.
-for (cr in c("cp", "reliability", "elbow", "moran_z")) {
+# loo is the leave-one-out error of the pooled value. A pick at the finest
+# level is the end of the ladder choosing, and the selection says so. The
+# profile's fifth column, moran_z, is a diagnostic of the cell means and not a
+# count rule: select_resolution() refuses it unless asked with
+# diagnostic = TRUE, so it is not read here.
+for (cr in c("cp", "reliability", "elbow", "loo")) {
   s <- try(select_resolution(prof, criterion = cr), silent = TRUE)
   if (inherits(s, "try-error")) {
     cat(sprintf("  %-12s not available on this profile\n", cr))
     next
   }
-  # `edge` names the bound an optimum sits on: the range floor, the support
-  # ceiling, or the first level the criterion can be computed at (above nine
-  # cells for moran_z). There the bound chose and the criterion did not.
+  # `edge` names the bound an optimum sits on: the range floor or the support
+  # ceiling. There the bound chose and the criterion did not.
   # n_levels only sets how many rungs fall between the ends, so it cannot move
-  # them: lower min_cell_n to move the ceiling, or set range_floor = FALSE (or
-  # pass `levels`) to move the floor, and run it again.
+  # them: lower min_cell_n to move the ceiling, or pass range_floor = FALSE to
+  # select_resolution() to read reliability below the floor, and run it again.
   edge <- if (!is.na(s$edge)) paste0("  <- at ", s$edge) else ""
   # The flat region is a SET: it can skip a rung, so printing its first two
   # members as "a to b" both truncated it and implied the levels between were
@@ -83,7 +93,8 @@ if (!skip_without("ggplot2", "the profile plot")) {
   look_for("where the curves stop moving. A criterion whose optimum sits at ",
            "the first or last level it was scored at did not choose: the bound ",
            "did, and the caption says which. Lower min_cell_n to move the ",
-           "ceiling, or set range_floor = FALSE to move the floor, and run it again.")
+           "ceiling, or pass range_floor = FALSE to select_resolution() to read ",
+           "reliability below the floor, and run it again.")
   show_plot(plot(prof), "02-profile.png", height = 7)
 }
 
@@ -124,8 +135,8 @@ cat("  What the split buys: the estimation half's response never enters the\n",
 step("02.6", "What the chosen resolution looks like")
 if (!skip_without("ggplot2", "the maps")) {
   bnd <- tour_boundary(pts)
-  # Cp, the default criterion: these evenly spread points have no elbow (see
-  # 02.2), so the elbow names no count to draw.
+  # Cp, the criterion a ladder of counts has been read by: these evenly spread
+  # points have no elbow (see 02.2), so the elbow names no count to draw.
   s_cp   <- select_resolution(prof, "cp")
   chosen <- s_cp$best
   for (k in sort(unique(c(min(prof$levels), chosen, max(prof$levels))))) {
@@ -133,8 +144,11 @@ if (!skip_without("ggplot2", "the maps")) {
                               sample_points = pts, set_seed = 1)
     tess  <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
                                 quiet = TRUE)
+    # The maps show the plain mean of each cell: estimate = "mean" leaves out
+    # the pooled values the summary adds by default.
     cel   <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                               "z", cells_sf = tess$cells, deff = 1)
+                               "z", cells_sf = tess$cells, deff = 1,
+                               estimate = "mean")
     note <- if (k == chosen)
       paste0("the Cp pick", if (!is.na(s_cp$edge)) paste0(" (at ", s_cp$edge, ")") else "",
              ": enough cells to show the field, few enough to fill.")
@@ -149,5 +163,16 @@ if (!skip_without("ggplot2", "the maps")) {
               sprintf("02-cells-%02d.png", k))
   }
 }
+
+step("02.7", "The default: a size, not a criterion")
+# Called with the response alone, resolution_profile() scores one level: 4.5
+# observations per cell, for the pooled value summarize_by_cell() reports by
+# default. select_resolution() reads the count off that size, which neither a
+# criterion nor the response chose: round(n / 4.5) cells. share_alone and
+# own_weight say what a cell value stands on at that size. The earlier
+# defaults are estimate = NULL, obs_per_cell = NULL in the profile and
+# criterion = "cp" in the selection.
+prof_size <- resolution_profile(pts, response_var = "z")
+print(select_resolution(prof_size))
 
 }

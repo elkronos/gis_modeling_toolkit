@@ -78,7 +78,7 @@ test_that("a rejected sac replaced by an estimate is not reported as a fallback"
   # estimate was then applied.
   local_mocked_bindings(estimate_sac_range = function(...) .r3_sac())
   res <- .r3_conditions(summarize_by_cell(pts, "z", deff = "variogram",
-                                          sac = .r3_rejected()))
+                                          sac = .r3_rejected(), estimate = "mean"))
   expect_false(any(.r3_is_fallback(res)))
   expect_length(res$warnings, 1L)
   expect_match(res$warnings, "no usable range \\(fitted range exceeds")
@@ -87,7 +87,7 @@ test_that("a rejected sac replaced by an estimate is not reported as a fallback"
   expect_identical(attr(res$value, "deff_applied")$method, "variogram")
   # tryCatch() on the class no longer throws the corrected result away.
   kept <- suppressWarnings(tryCatch(
-    summarize_by_cell(pts, "z", deff = "variogram", sac = .r3_rejected()),
+    summarize_by_cell(pts, "z", deff = "variogram", sac = .r3_rejected(), estimate = "mean"),
     spatialkit_deff_fallback = function(w) "caught"))
   expect_s3_class(kept, "data.frame")
 })
@@ -98,17 +98,20 @@ test_that("a rejected sac that cannot be replaced gives one fallback warning nam
   local_mocked_bindings(estimate_sac_range = function(...)
     .r3_rejected("variogram model did not converge"))
   res <- .r3_conditions(summarize_by_cell(pts, "z", deff = "variogram",
-                                          sac = .r3_rejected()))
+                                          sac = .r3_rejected(), estimate = "mean"))
   expect_length(res$warnings, 1L)
   expect_true(.r3_is_fallback(res))
   expect_match(res$warnings, "supplied `sac` reports no usable range \\(fitted range exceeds")
   expect_match(res$warnings, "estimated from `response_var` reports no usable range \\(variogram model did not converge")
-  expect_false(any(res$value$deff_applied))
+  # The one fallback is to Kish (this used to assert deff_applied FALSE, the
+  # uncorrected SE); the rows carry the label.
+  expect_true(all(res$value$deff_applied))
+  expect_identical(unique(res$value$deff_method), "kish (variogram fallback)")
 
   # No response to estimate from: the rejection is still named.
   res2 <- .r3_conditions(summarize_by_cell(pts, predictor_vars = "z",
                                            deff = "variogram",
-                                           sac = .r3_rejected()))
+                                           sac = .r3_rejected(), estimate = "mean"))
   expect_length(res2$warnings, 1L)
   expect_true(.r3_is_fallback(res2))
   expect_match(res2$warnings, "fitted range exceeds.*no `response_var`")
@@ -121,16 +124,17 @@ test_that("a residual (detrended) sac correcting response SEs is warned about", 
   pts <- .r3_field()
   res <- .r3_sac(detrended = TRUE, detrend_method = "ols")
   # Used as given, as documented, but no longer in silence.
-  expect_warning(out <- summarize_by_cell(pts, "z", "w", deff = "variogram", sac = res),
+  expect_warning(out <- summarize_by_cell(pts, "z", "w", deff = "variogram", sac = res,
+                                          estimate = "mean"),
                  "residuals on predictors \\(detrend = \"ols\"\\).*understated")
   expect_true(all(out$deff_applied))
-  quiet <- summarize_by_cell(pts, "z", "w", deff = "variogram", sac = .r3_sac())
+  quiet <- summarize_by_cell(pts, "z", "w", deff = "variogram", sac = .r3_sac(), estimate = "mean")
   expect_equal(out[["..se_resp_z"]], quiet[["..se_resp_z"]])
   # Nothing to warn about without response columns, or with a response variogram.
   expect_no_warning(summarize_by_cell(pts, predictor_vars = "w", deff = "variogram",
-                                      sac = res))
+                                      sac = res, estimate = "mean"))
   expect_no_warning(summarize_by_cell(pts, "z", deff = "variogram",
-                                      sac = .r3_sac(detrended = FALSE)))
+                                      sac = .r3_sac(detrended = FALSE), estimate = "mean"))
 })
 
 
@@ -145,8 +149,8 @@ test_that("deff = 'kish' records a correction made to the predictor SEs only", {
   pts$poly_id <- 1L + (xy[, 1] %/% 50) + 4L * (xy[, 2] %/% 50)
   pts$v <- rnorm(n)                                    # response: unclustered
   pts$p <- rnorm(16, sd = 2)[pts$poly_id] + rnorm(n)   # predictor: clustered
-  naive <- summarize_by_cell(pts, "v", "p")
-  k <- summarize_by_cell(pts, "v", "p", deff = "kish")
+  naive <- summarize_by_cell(pts, "v", "p", estimate = "mean")
+  k <- summarize_by_cell(pts, "v", "p", deff = "kish", estimate = "mean")
   expect_identical(attr(k, "icc")$resp, 0)
   expect_gt(attr(k, "icc")$pred, 0.5)
   # The predictor SEs were inflated about elevenfold; the rows used to say
@@ -164,15 +168,17 @@ test_that("deff = 'kish' records a correction made to the predictor SEs only", {
 test_that("a pure-nugget variogram is applied as deff = 1, not reported as a fallback", {
   pts <- .r3_field()
   nug <- .r3_sac(model = data.frame(model = "Nug", psill = 1, range = 0))
-  expect_no_warning(out <- summarize_by_cell(pts, "z", deff = "variogram", sac = nug))
-  naive <- summarize_by_cell(pts, "z")
+  expect_no_warning(out <- summarize_by_cell(pts, "z", deff = "variogram", sac = nug,
+                                             estimate = "mean"))
+  naive <- summarize_by_cell(pts, "z", estimate = "mean")
   expect_true(all(out$deff_applied))
   expect_equal(out[["..se_resp_z"]], naive[["..se_resp_z"]])
   expect_equal(attr(out, "deff_applied")$rbar, rep(0, nrow(out)))
   # So is a structured component with no sill.
   nug2 <- .r3_sac(model = data.frame(model = c("Nug", "Exp"), psill = c(1, 0),
                                      range = c(0, 40)))
-  expect_no_warning(out2 <- summarize_by_cell(pts, "z", deff = "variogram", sac = nug2))
+  expect_no_warning(out2 <- summarize_by_cell(pts, "z", deff = "variogram", sac = nug2,
+                                              estimate = "mean"))
   expect_true(all(out2$deff_applied))
 })
 
@@ -182,11 +188,11 @@ test_that("deff_max_n must be a number of at least 2 for deff = 'variogram'", {
     # 1 and 0 returned uncorrected SEs marked deff_applied = TRUE; NA stopped
     # with "missing value where TRUE/FALSE needed".
     expect_error(summarize_by_cell(pts, "z", deff = "variogram", sac = .r3_sac(),
-                                   deff_max_n = bad),
+                                   deff_max_n = bad, estimate = "mean"),
                  "`deff_max_n` must be")
   }
   # Unused, so unchecked, by every other deff.
-  expect_no_error(summarize_by_cell(pts, "z", deff = "kish", deff_max_n = 0))
+  expect_no_error(summarize_by_cell(pts, "z", deff = "kish", deff_max_n = 0, estimate = "mean"))
 })
 
 test_that("the rows with no cell ID get a cell_weight like any other group", {
@@ -195,7 +201,7 @@ test_that("the rows with no cell ID get a cell_weight like any other group", {
                                  y = 5e6 + runif(40, 0, 300), v = rnorm(40)),
                       coords = c("x", "y"), crs = 32632)
   a <- assign_features_to_polygons(pts, .r3_grid(), keep_unassigned = TRUE)
-  s <- summarize_by_cell(a, "v")
+  s <- summarize_by_cell(a, "v", estimate = "mean")
   na_row <- which(is.na(s$poly_id))
   expect_length(na_row, 1L)
   expect_gt(s$n[na_row], 0)
@@ -209,14 +215,14 @@ test_that("a fixed deff stays a scalar on the record when one cell is summarised
                       coords = c("x", "y"), crs = 32632)
   grid <- .r3_grid()
   out <- summarize_by_cell(assign_features_to_polygons(pts, grid), "v",
-                           cells_sf = grid, deff = 2)
+                           cells_sf = grid, deff = 2, estimate = "mean")
   # It came back as c(2, NA, NA, ...).
   expect_identical(attr(out, "deff_applied"), list(method = "fixed", deff = 2))
 })
 
 test_that("agg_funs = pkg::fn is named after the function", {
   pts <- .r3_field()
-  out <- summarize_by_cell(pts, "z", agg_funs = stats::median)
+  out <- summarize_by_cell(pts, "z", agg_funs = stats::median, estimate = "mean")
   expect_true("resp_median_z" %in% names(out))
   expect_false("resp_agg1_z" %in% names(out))
 })
@@ -294,7 +300,8 @@ test_that("dplyr's row verbs drop a row record as `[` does", {
   dat <- sf::st_as_sf(data.frame(x = 1:5, y = 5:1, resp = c(1, 2, NA, 4, 5),
                                  pred = c(1, 2, 3, 4, Inf)),
                       coords = c("x", "y"), crs = 32632)
-  clean <- prep_model_data(dat, "resp", "pred")
+  expect_warning(clean <- prep_model_data(dat, "resp", "pred"),
+                 class = "spatialkit_rows_dropped")
   expect_null(attr(dplyr::filter(clean, resp > 1), "dropped"))
   # And for a geometry-free frame carrying a record (what st_drop_geometry()
   # of such a layer is).
@@ -320,7 +327,7 @@ test_that("under knitr a caution raised as a warning is not repeated as a messag
                                  v = rnorm(20), poly_id = rep(1:4, each = 5)),
                       coords = c("x", "y"), crs = 32632)
   # A design-effect fallback: it was a message and a warning.
-  res <- .r3_conditions(summarize_by_cell(pts, "v", deff = 0.5))
+  res <- .r3_conditions(summarize_by_cell(pts, "v", deff = 0.5, estimate = "mean"))
   expect_identical(res$messages, 0L)
   expect_length(res$warnings, 1L)
   # The cross-validation cautions that are also R warnings (they used to be

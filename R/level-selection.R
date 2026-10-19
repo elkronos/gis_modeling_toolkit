@@ -301,22 +301,40 @@
 #' it says how rough the objective is at this \code{k}, which a profile can
 #' report so that a flat region is shown at its real width.
 #'
+#' With \code{init = "random"} each restart starts from \code{k} distinct
+#' locations drawn at random (\code{.random_centers()}), the draws
+#' \code{stats::kmeans(centers = k, nstart = nstart)} makes, so the best of
+#' them is the fit that call returns, and their spread is kept as well.
+#'
 #' @param xy Numeric matrix of coordinates.
 #' @param k Number of clusters (\code{>= 2}).
 #' @param nstart Number of restarts.
 #' @param iter.max Passed to \code{stats::kmeans()}.
+#' @param init \code{"kmeans++"} (default) or \code{"random"}: how each
+#'   restart's starting centres are drawn.
 #' @return \code{NULL} when every restart failed; otherwise a list with
 #'   \code{km} (the best \code{kmeans} fit), \code{wss} (its
 #'   \code{tot.withinss}), \code{spread} (\code{(max - min) / min} of
 #'   \code{tot.withinss} across the restarts that ran) and \code{n_ok}.
 #' @keywords internal
 #' @noRd
-.kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L) {
+.kmeans_best <- function(xy, k, nstart = 25L, iter.max = 50L, init = "kmeans++") {
   best <- NULL; w <- rep(NA_real_, nstart)
+  random <- identical(init, "random")
+  # The distinct rows random starts are drawn from, found once.  Fewer of
+  # them than centres is what stats::kmeans() refuses as "more cluster
+  # centers than distinct data points".
+  cn <- if (random) unique(xy) else NULL
+  if (random && nrow(cn) < k) return(NULL)
   for (r in seq_len(nstart)) {
-    km <- try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
-                                             iter.max = iter.max, nstart = 1L)),
-              silent = TRUE)
+    km <- if (random)
+      try(suppressWarnings(stats::kmeans(xy, centers = .random_centers(xy, cn, k, nstart),
+                                         iter.max = iter.max, nstart = 1L)),
+          silent = TRUE)
+    else
+      try(suppressWarnings(stats::kmeans(xy, centers = .kmeanspp_centers(xy, k),
+                                         iter.max = iter.max, nstart = 1L)),
+          silent = TRUE)
     if (inherits(km, "try-error")) next
     w[r] <- km$tot.withinss
     if (is.null(best) || km$tot.withinss < best$tot.withinss) best <- km
@@ -379,28 +397,60 @@
 #' @param predictors Numeric matrix of predictor values.
 #' @param cluster_ids Integer vector of cluster assignments. The cluster count
 #'   is derived from this vector, so it is not passed separately.
+#' @param grouped Whether the cell means are formed by grouped sums, one pass
+#'   over the rows for all the cells.  \code{FALSE} (default) makes a pass
+#'   over all the rows for each cell, which costs rows times cells and is
+#'   quadratic in the rows when the cells are a fixed size.  The two give the
+#'   same means to rounding, so a caller whose numbers are held to the last
+#'   bit keeps the default.
+#' @param use_fnn,use_matrix Whether \pkg{FNN} and \pkg{Matrix} may be used
+#'   for the neighbour weights of the cell means; handed to
+#'   \code{.build_knn_weights()}, which stops above \code{.KNN_DENSE_MAX}
+#'   cells without both.
 #' @return A named numeric vector \code{c(I = , z = )}: Moran's I on the
-#'   cell-level OLS residuals, and its standardised deviate.  Values of
-#'   \code{z} near 0 indicate the resolution captures the spatial pattern;
-#'   positive values indicate residual spatial autocorrelation remains.  Both
+#'   cell-level OLS residuals, and its standardised deviate.  With no
+#'   predictors those residuals are the centred cell means, so this is the
+#'   autocorrelation among the cell means: a \code{z} near 0 says that
+#'   neighbouring cell means are unrelated, which happens when the cells are
+#'   as wide as the range of the field or wider (and at about 10 to 20 cells
+#'   whatever the data, where the 8-neighbour graph is close to complete),
+#'   and a positive \code{z} that neighbouring cells resemble each other,
+#'   which they do more and more as the cells get finer than the range.  It
+#'   is not a measure of the structure the cells leave unexplained.  Both
 #'   are \code{NA_real_} when the statistic is not computable at this \code{k}.
 #' @keywords internal
 #' @noRd
-.morans_i_for_k <- function(xy, response, predictors, cluster_ids) {
+.morans_i_for_k <- function(xy, response, predictors, cluster_ids, grouped = FALSE,
+                            use_fnn = .has_backend("FNN"),
+                            use_matrix = .has_backend("Matrix")) {
   # Aggregate to cell-level means
   cell_ids <- sort(unique(cluster_ids))
   n_cells <- length(cell_ids)
   if (n_cells < 4L) return(.morans_na())
 
-  cell_resp <- numeric(n_cells)
-  cell_xy   <- matrix(0, n_cells, 2)
-  cell_pred <- matrix(0, n_cells, ncol(predictors))
+  if (isTRUE(grouped)) {
+    # The means of the loop below from one pass over the rows: sums by cell
+    # over counts by cell.  A missing response is left out of its cell's mean,
+    # as mean(na.rm = TRUE) leaves it out, and a cell with none gets NaN.
+    g    <- match(cluster_ids, cell_ids)
+    cnt  <- tabulate(g, nbins = n_cells)
+    seen <- !is.na(response)
+    cell_resp <- as.numeric(rowsum(ifelse(seen, response, 0), g)) /
+      as.numeric(rowsum(as.numeric(seen), g))
+    cell_xy   <- unname(rowsum(xy[, 1:2, drop = FALSE], g)) / cnt
+    cell_pred <- if (ncol(predictors)) unname(rowsum(predictors, g)) / cnt
+                 else matrix(0, n_cells, 0L)
+  } else {
+    cell_resp <- numeric(n_cells)
+    cell_xy   <- matrix(0, n_cells, 2)
+    cell_pred <- matrix(0, n_cells, ncol(predictors))
 
-  for (j in seq_along(cell_ids)) {
-    mask <- cluster_ids == cell_ids[j]
-    cell_resp[j]    <- mean(response[mask], na.rm = TRUE)
-    cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
-    cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
+    for (j in seq_along(cell_ids)) {
+      mask <- cluster_ids == cell_ids[j]
+      cell_resp[j]    <- mean(response[mask], na.rm = TRUE)
+      cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
+      cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
+    }
   }
 
   # Fit OLS on cell means
@@ -430,7 +480,8 @@
   # to the geometric ranking when none of them clears the floor.
   if (n <= n_neighbors + 1L) return(.morans_na())
 
-  W <- .build_knn_weights(cell_xy[ok, , drop = FALSE], k = n_neighbors)
+  W <- .build_knn_weights(cell_xy[ok, , drop = FALSE], k = n_neighbors,
+                          use_fnn = use_fnn, use_matrix = use_matrix)
 
   # Moran's I = (n / S0) * (e' W e) / (e' e)
   S0 <- sum(W)
@@ -494,8 +545,14 @@
 #' triangles, an L-shape, density gradients and jittered lattices sagged at
 #' most 0.16, and two to ten separated clusters at least 0.6 once
 #' \code{max_levels} passed the cluster count.  With no elbow the function
-#' warns and returns the linear-axis answer, which the ladder chose, not the
-#' data.  An elongated extent also bends, at about its aspect ratio, because
+#' warns (a warning of class \code{spatialkit_no_elbow}, which carries the
+#' count as \code{k} and the largest sag as \code{sag}) and returns the
+#' linear-axis answer, which the ladder chose, not the data: about
+#' \eqn{\sqrt{K_{max}}}, 3 or 4 cells at the default, close to one mean for
+#' the whole layer.  \code{on_no_elbow = "na"} returns \code{NA} there and
+#' \code{"error"} stops, so that a count which is not a finding is not
+#' passed on as one.  An elongated extent also bends, at about its aspect
+#' ratio, because
 #' the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
 #' past the threshold that bend is reported as an elbow, and it describes
 #' the extent's shape rather than clusters in it.  When locations repeat
@@ -506,13 +563,35 @@
 #' curve has no elbow, the number of distinct locations is the elbow.
 #'
 #' When \code{response_var} and \code{predictor_vars} are provided, the
-#' geometric WSS elbow is supplemented with Moran's I computed on OLS
-#' residuals at each candidate k.  The Moran's I profile measures how much
-#' spatial autocorrelation in the response remains *unexplained* at a given
-#' tessellation resolution.  It is a direct reflection of the spatial process
-#' being modeled instead of the mere geometric compactness of coordinates.
-#' The combined criterion selects the k that best balances geometric parsimony
-#' and residual spatial independence.
+#' geometric WSS elbow is supplemented with Moran's I of the cell means at
+#' each candidate k: the cell means are regressed on the cell-mean
+#' predictors (on an intercept alone when \code{criterion = "morans_i"} or
+#' \code{"combined"} is asked for with a response and no predictors) and
+#' Moran's I is computed on the residuals over each cell's 8 nearest cells.
+#' That statistic tests whether \emph{neighbouring cells} are independent.
+#' It does not measure the autocorrelation the cells leave unexplained in
+#' the response, and it does not say how well they represent it: on an
+#' autocorrelated response it grows as the cells get finer than the range,
+#' because neighbouring cells then resemble each other, and it is close to 0
+#' at about 10 to 20 cells whatever the data, where the neighbour graph is
+#' nearly complete.  The model-aware criteria prefer the candidate with the
+#' smallest \eqn{|z|}, which is the count at which neighbouring cell means
+#' stop resembling each other, cells about as wide as the range.  Only the
+#' elbow's neighbourhood is scored, so the response moves the answer by at
+#' most a few cells either side of the geometric elbow.  \strong{A ranking
+#' that Moran's z took part in is a ranking by a diagnostic, not by a count
+#' rule}, and it is returned with a warning of class
+#' \code{spatialkit_diagnostic_ranking} that says so and gives the count
+#' ranked first, the first count the statistic could be computed at and the
+#' counts scored.  Measured on 500 points with a response alone and
+#' \code{criterion = "morans_i"}: the first-ranked count was 10 to 13 on 16
+#' of 16 white-noise layers and on 16 of 16 exponential fields
+#' (\code{max_levels} 40 and 80), and 10 was the first count the statistic
+#' could be computed at on all 32.  \code{\link{select_resolution}()}
+#' refuses the same statistic unless asked with \code{diagnostic = TRUE};
+#' here the criterion is asked for by name, or taken when both model
+#' variables are supplied, so the count is returned and the warning carries
+#' the caveat.
 #'
 #' To keep memory use and runtime bounded for large \code{max_levels}, the
 #' initial k-means sweep records only within-cluster sum-of-squares (WSS)
@@ -540,6 +619,14 @@
 #' \code{k}.  Because the optimiser changed, a selection made by an earlier
 #' version on a curve that had such a bump can differ from the one made now;
 #' where the earlier curve was clean, the selection is the same.
+#'
+#' \strong{The sweep is plain k-means, whatever the regions are built with
+#' afterwards.}  This function has no \code{partition} argument: the elbow is
+#' a reading of the sum of squares that plain k-means minimises, and the
+#' cells behind Moran's z are that partition's.  A count returned here says
+#' nothing about density-weighted regions;
+#' \code{\link{resolution_profile}()}, whose regions are of that kind by
+#' default, scores counts of those.
 #'
 #' \strong{The model-aware criteria rank on the standardised deviate, not on
 #' |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of
@@ -620,8 +707,9 @@
 #'   coordinate order before either, so the answer does not depend on the
 #'   order they come in.
 #' @param response_var Optional response column name. When provided alongside
-#'   \code{predictor_vars}, enables model-aware level selection via Moran's I
-#'   on OLS residuals. Must be numeric or logical (logicals are read as 0/1);
+#'   \code{predictor_vars}, or with \code{criterion = "morans_i"} or
+#'   \code{"combined"}, enables model-aware level selection via Moran's I
+#'   of the cell means. Must be numeric or logical (logicals are read as 0/1);
 #'   a factor or character response raises an error and is never coerced,
 #'   because the residuals of an OLS fit to arbitrary level codes carry no
 #'   meaning to test for autocorrelation.  Rows where it, or a predictor, is
@@ -629,29 +717,60 @@
 #'   out of Moran's I; a logged warning gives their number.
 #' @param predictor_vars Optional predictor column names. Must be numeric or
 #'   logical (logicals are read as 0/1); factor/character columns raise an
-#'   error.
+#'   error.  Without them the model-aware criteria regress the cell means on
+#'   an intercept alone, as \code{\link{resolution_profile}()} does.
 #' @param criterion One of \code{"geometric"} (default when no response given),
-#'   \code{"morans_i"} (select the k whose residual Moran's I is least
-#'   \emph{significant}), or \code{"combined"} (rank-average of the WSS
+#'   \code{"morans_i"} (among the candidates around the elbow, the k at which
+#'   Moran's I of the cell means, or of their regression residuals, is least
+#'   \emph{significant}: the count at which neighbouring cells stop
+#'   resembling each other, not the count that represents the response
+#'   best), or \code{"combined"} (rank-average of the WSS
 #'   curve's log-log sag, the quantity the elbow is read from, and that same
-#'   significance).  Falls back to \code{"geometric"},
-#'   with a warning, when \code{response_var} or \code{predictor_vars} is not
+#'   significance).  Whenever Moran's z orders the candidates returned,
+#'   under either, a warning of class
+#'   \code{spatialkit_diagnostic_ranking} says that the ranking is by a
+#'   diagnostic of the cell means; its condition carries \code{k} (the
+#'   count ranked first), \code{criterion}, \code{first_computable} (the
+#'   first count at which the statistic is finite), \code{window}
+#'   (the first and last count tried) and \code{upgraded} (whether
+#'   \code{"combined"} was taken because both model variables were
+#'   supplied).  Falls back to \code{"geometric"},
+#'   with a warning, when \code{response_var} is not
 #'   given, and with a logged warning when no candidate clears the
 #'   nine-cell resolution floor described in \strong{Details}.  A
 #'   \code{response_var} or \code{predictor_vars} naming a column that is not
 #'   in \code{data_sf} is an error.  Supplying
 #'   both \code{response_var} and \code{predictor_vars} upgrades
 #'   \code{"geometric"} to \code{"combined"}: the selection then depends on
-#'   the response (see "Post-selection inference").
+#'   the response (see "Post-selection inference").  A \code{response_var}
+#'   alone leaves \code{"geometric"} as it is.
 #' @param select_on \code{"all"} (default) selects on every point;
 #'   \code{"split"} reads the response on one spatially blocked half of the
 #'   points only and returns the other half as the set to estimate on, so
 #'   that the standard errors computed downstream on the chosen cells are not
 #'   post-selection.  The count is still chosen for the whole layer.  See
 #'   "Post-selection inference".
+#' @param on_no_elbow What to do when the count is not a finding about the
+#'   data: the WSS curve has no elbow, the ladder is too short to show one,
+#'   or there are too few points or locations for a ladder at all.
+#'   \code{"warn"} (default) returns the count the chord rule or the ladder
+#'   gives, with a warning of class \code{spatialkit_no_elbow} whose
+#'   condition carries \code{k} (that count), \code{sag} (the largest
+#'   log-log sag of the curve; an elbow needs \eqn{\log 1.25}) and
+#'   \code{structured = FALSE}, so a caller can catch it without matching
+#'   the message.  \code{"na"} returns \code{NA_integer_} there and logs the
+#'   reason, and every result under \code{"na"} carries the attributes
+#'   \code{structured} (\code{FALSE} with the \code{NA}, \code{TRUE} with a
+#'   count the elbow chose) and \code{sag}, so one test of
+#'   \code{attr(k, "structured")} covers both outcomes;
+#'   \code{"error"} stops with an error of that class.  Under the
+#'   model-aware criteria the candidates are scored around the elbow, so
+#'   with no elbow the ladder places that window and the same applies.
 #' @section Post-selection inference:
-#' When the selection reads the response (here, whenever both
-#' \code{response_var} and \code{predictor_vars} are supplied), everything
+#' When the selection reads the response (here, whenever a model-aware
+#' criterion runs: both \code{response_var} and \code{predictor_vars}
+#' supplied, or \code{"morans_i"} or \code{"combined"} asked for with a
+#' response), everything
 #' estimated afterwards on the chosen cells is estimated on data that already
 #' influenced the choice, and its standard errors are post-selection ones:
 #' descriptive, not at nominal coverage (Gao, Bien and Witten 2022; Chen and
@@ -701,9 +820,17 @@
 #' and read inferential results only off cells whose points all are.
 #' @return An integer vector of candidate level counts, \strong{best first}:
 #'   under the geometric criterion the elbow, then its lower and upper
-#'   neighbours (with a warning when the WSS curve has no elbow and the first
-#'   is the ladder's choice; see Details); under the model-aware criteria the
-#'   candidates in rank order.
+#'   neighbours (with a warning of class \code{spatialkit_no_elbow} when the
+#'   WSS curve has no elbow and the first is the ladder's choice, or
+#'   \code{NA_integer_} under \code{on_no_elbow = "na"}, where the result
+#'   also carries the attributes \code{structured} and \code{sag}; see
+#'   Details); under the model-aware
+#'   criteria the candidates in rank order, with a warning of class
+#'   \code{spatialkit_diagnostic_ranking} when Moran's z took part in the
+#'   ranking.  A layer with no points is an
+#'   error, and one with fewer than three points, or with every point on
+#'   one location, has no ladder: it returns 1 under the same
+#'   \code{on_no_elbow} rule.
 #'   \code{k[1]} is therefore the top-ranked count on every path, and
 #'   \code{top_n = 1} returns it alone. When
 #'   \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
@@ -712,7 +839,9 @@
 #'   the relative between-restart spread at each \code{k} (\code{wss_spread}),
 #'   the number of rising steps on it (\code{wss_bumps}), the restart
 #'   budget (\code{nstart}), the geometric elbow the evaluated
-#'   neighbourhood was drawn around (\code{knee_k}), the \code{k} at which
+#'   neighbourhood was drawn around (\code{knee_k}), whether the WSS curve
+#'   has an elbow (\code{structured}) and its largest log-log sag
+#'   (\code{sag}), the \code{k} at which
 #'   k-means failed (\code{failed_k}; their \code{wss} entries are
 #'   interpolated from the neighbours, not measured) and the \code{k} the
 #'   model-aware pass actually scored (\code{eval_ks}, the elbow's
@@ -788,12 +917,18 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                                      predictor_vars = NULL,
                                      criterion = c("geometric", "morans_i",
                                                     "combined"),
-                                     select_on = c("all", "split")) {
+                                     select_on = c("all", "split"),
+                                     on_no_elbow = c("warn", "na", "error")) {
   if (!inherits(data_sf, "sf"))
     stop("determine_optimal_levels(): `data_sf` must be an sf object.")
 
   criterion <- match.arg(criterion)
   select_on <- match.arg(select_on)
+  on_no_elbow <- match.arg(on_no_elbow)
+  # A layer with no rows used to return 1, a cell count for nothing.
+  if (nrow(data_sf) == 0L)
+    stop("determine_optimal_levels(): `data_sf` has no rows, so there is no layer to ",
+         "choose a cell count for.", call. = FALSE)
   # A named column that is not there is an error, as it is in
   # resolution_profile().  It used to count as "no model variables": a typo
   # in response_var silently kept the geometric criterion that supplying both
@@ -812,25 +947,31 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   if (length(missing_p))
     stop("determine_optimal_levels(): predictor_vars ",
          paste(sQuote(missing_p, FALSE), collapse = ", "), " not found.", call. = FALSE)
-  has_model_vars <- !is.null(response_var) && !is.null(predictor_vars)
-
-  # Auto-upgrade to combined when model variables are available
-  if (has_model_vars && criterion == "geometric") {
+  # Auto-upgrade to combined when both model variables are available
+  upgraded <- FALSE
+  both_given <- !is.null(response_var) && !is.null(predictor_vars)
+  if (both_given && criterion == "geometric") {
     criterion <- "combined"
+    upgraded <- TRUE
     .log_info("determine_optimal_levels(): response_var and predictor_vars supplied; using combined criterion (geometric + Moran's I).")
   }
-  # Fall back if model variables not available for model-aware criteria.  A
+  # Fall back when a model-aware criterion has no response to read.  A
   # warning, not a log line: the caller asked for a criterion and gets another.
-  if (!has_model_vars && criterion != "geometric") {
-    .warn_and_log(paste0("determine_optimal_levels(): criterion = '%s' needs both ",
-                         "response_var and predictor_vars, and %s not given; falling ",
-                         "back to geometric."),
+  # A response without predictors is enough: .morans_i_for_k() regresses the
+  # cell means on an intercept alone, as resolution_profile() has it do, and
+  # a caller who asked for "morans_i" with a response used to be told it
+  # "needs both" and handed the geometric ranking.
+  if (is.null(response_var) && criterion != "geometric") {
+    .warn_and_log(paste0("determine_optimal_levels(): criterion = '%s' needs a ",
+                         "response_var, and none was given%s; falling back to geometric."),
                   criterion,
-                  if (is.null(response_var) && is.null(predictor_vars)) "neither was"
-                  else if (is.null(response_var)) "response_var was"
-                  else "predictor_vars were")
+                  if (is.null(predictor_vars)) "" else " (predictor_vars alone score nothing)")
     criterion <- "geometric"
   }
+  # The model-aware pass runs whenever a model-aware criterion stands, with
+  # the predictors given or with none.
+  has_model_vars <- criterion != "geometric"
+  if (has_model_vars && is.null(predictor_vars)) predictor_vars <- character(0)
 
   # MULTIPOINT must be coerced too, not merely admitted: st_coordinates()
   # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
@@ -878,13 +1019,52 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     # half's extent and clusters (2 where the layer has 4) was then applied
     # to the whole layer.
   }
+  # `found` is set once the elbow has been read, under on_no_elbow = "na":
+  # the result then carries `structured` and `sag` whichever way it went, so
+  # one test of attr(, "structured") covers both.
+  found <- NULL
   .with_split <- function(out) {
     if (!is.null(split)) attr(out, "split") <- split
+    if (!is.null(found)) {
+      attr(out, "structured") <- found$structured
+      attr(out, "sag") <- found$sag
+    }
     out
   }
 
+  # A count that is not a finding about the data: what the caller is told,
+  # and what is returned, under `on_no_elbow`.  The warning carries a class
+  # and the numbers: code that runs this over many layers could otherwise
+  # tell such a count from an elbow only by matching the message.  Returns
+  # NULL when the caller goes on to return the count ("warn"), or the value
+  # to return ("na").
+  .not_a_finding <- function(k, sag, fmt, ...) {
+    msg <- sprintf(fmt, ...)
+    fields <- list(k = as.integer(k), sag = as.numeric(sag), structured = FALSE)
+    if (identical(on_no_elbow, "error"))
+      stop(do.call(errorCondition,
+                   c(list(message = msg, class = "spatialkit_no_elbow", call = NULL), fields)))
+    if (identical(on_no_elbow, "na")) {
+      .log_warn("%s Returning NA (on_no_elbow = \"na\").", msg)
+      return(.with_split(structure(NA_integer_, structured = FALSE, sag = as.numeric(sag))))
+    }
+    .warn_classed("spatialkit_no_elbow", "%s", msg, data = fields)
+    NULL
+  }
+
   n  <- nrow(xy)
-  if (n < 3L) return(.with_split(1L))
+  if (n < 1L)
+    stop("determine_optimal_levels(): no point of `data_sf` has coordinates, so there ",
+         "is no layer to choose a cell count for.", call. = FALSE)
+  # One or two points used to return 1 with nothing said.
+  if (n < 3L) {
+    na <- .not_a_finding(1L, NA_real_,
+                         paste0("determine_optimal_levels(): %d point%s too few for a ",
+                                "ladder of cell counts (it takes three). k = 1 is not a ",
+                                "finding about the data."),
+                         n, if (n == 1L) " is" else "s are")
+    return(if (is.null(na)) .with_split(1L) else na)
+  }
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)
@@ -977,7 +1157,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # thirty times each could not reach k = 5.
   n_uniq <- nrow(unique(round(xy, 8)))
   k_max <- min(k_max, n_uniq)
-  if (k_max < 2L) return(.with_split(1L))
+  if (k_max < 2L) {
+    na <- .not_a_finding(1L, NA_real_,
+                         paste0("determine_optimal_levels(): the %d points sit on %d ",
+                                "distinct location, so there is no ladder of cell counts. ",
+                                "k = 1 is not a finding about the data."),
+                         nrow(xy), n_uniq)
+    return(if (is.null(na)) .with_split(1L) else na)
+  }
   # Which bound ended the ladder, for the messages below: they used to name
   # max_levels whatever did, and on five stations at max_levels = 12 it was
   # the stations.
@@ -1006,6 +1193,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # WSS curve is read for its shape, and optimisation noise on it is what
   # produced the concave bump the elbow rule once selected.  See
   # .kmeans_best() for the measured effect and the citations.
+  # The sweep is plain k-means, the kind "kmeans" of .partition_centres(),
+  # from k-means++ starts: the elbow is a reading of the sum of squares that
+  # kind minimises.  resolution_profile(partition = "density") is where a
+  # density-weighted partition is scored.
   nstart <- 25L
   wss <- numeric(k_max)
   wss_spread <- numeric(k_max)
@@ -1018,7 +1209,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     } else {
       # Assignments are discarded on purpose: only the WSS is kept from this
       # sweep, which bounds memory for large max_levels (see Details).
-      kb <- .kmeans_best(xy, k, nstart = nstart)
+      kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",
+                               nstart = nstart)
       if (is.null(kb)) {
         wss[k] <- wss[k - 1L]
         failed_k <- c(failed_k, k)
@@ -1043,7 +1235,13 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       }
       wss[fk] <- (wss[lo] + wss[hi]) / 2
     }
-    if (k_max < 2L) return(.with_split(1L))
+    if (k_max < 2L) {
+      na <- .not_a_finding(1L, NA_real_,
+                           paste0("determine_optimal_levels(): k-means failed at every k ",
+                                  "from 2, so there is no ladder of cell counts. k = 1 is ",
+                                  "not a finding about the data."))
+      return(if (is.null(na)) .with_split(1L) else na)
+    }
   }
 
   elbow <- .elbow_from_wss(wss, max_k = k_max, min_k = 1L, return_neighbors = TRUE)
@@ -1053,8 +1251,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # silently: it used to be handed on as if the data had chosen it.
   # A ladder of two levels has no line to test, and used to be told it fell
   # in one.
+  # The largest sag the curve reaches: what an elbow is measured by, and
+  # reported whether or not it is one.
+  max_sag <- suppressWarnings(max(elbow$diagnostics$sag, na.rm = TRUE))
+  if (!is.finite(max_sag)) max_sag <- NA_real_
+  not_found <- NULL
   if (!isTRUE(elbow$structured) && k_max < 3L)
-    .warn_and_log(paste0("determine_optimal_levels(): a ladder of k = 1 to %d (ended ",
+    not_found <- .not_a_finding(elbow$knee_k, max_sag,
+                  paste0("determine_optimal_levels(): a ladder of k = 1 to %d (ended ",
                          "by %s) is too short to read an elbow from: it takes three ",
                          "levels to see a bend. k = %d is not a finding about the ",
                          "data; %s"),
@@ -1063,7 +1267,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                     "raise max_levels to 3 or more."
                   else "choose the count on other grounds.")
   else if (!isTRUE(elbow$structured))
-    .warn_and_log(paste0("determine_optimal_levels(): the WSS curve has no elbow: on ",
+    not_found <- .not_a_finding(elbow$knee_k, max_sag,
+                  paste0("determine_optimal_levels(): the WSS curve has no elbow: on ",
                          "log-log axes it falls in a straight line, as it does for ",
                          "points with no cluster structure. k = %d is where the chord ",
                          "rule lands on such a curve, set by the ladder (k = 1 to %d, ",
@@ -1072,6 +1277,10 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
                   elbow$knee_k, k_max, k_max_from,
                   if (criterion == "geometric") ""
                   else "; the model-aware criteria are evaluated around it")
+  # on_no_elbow = "na": NA, with the flag and the sag, in place of the count;
+  # and the same two attributes on a count the elbow did choose.
+  if (!is.null(not_found)) return(not_found)
+  if (identical(on_no_elbow, "na")) found <- list(structured = TRUE, sag = max_sag)
 
   # A WSS curve that rises anywhere is one where some k landed in a worse
   # optimum than its neighbour, and the elbow read from it is partly noise.
@@ -1121,7 +1330,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   moran_z    <- rep(NA_real_, k_max)   # standardised deviate, used for ranking
   wss_eval   <- wss
   for (k in eval_ks) {
-    kb <- .kmeans_best(xy, k, nstart = nstart)
+    kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",
+                             nstart = nstart)
     if (is.null(kb)) next
     km <- kb$km
     wss_eval[k]   <- km$tot.withinss
@@ -1135,6 +1345,54 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
 
   # Ranking is on |z|.  |I| is not comparable across k -- see .morans_i_for_k().
   valid_moran <- is.finite(moran_z[eval_ks])
+
+  # Said, with a class, whenever Moran's z orders the candidates returned.
+  # It is a diagnostic of the cell means and not a count rule (see Details),
+  # and select_resolution() refuses the same statistic unless asked with
+  # `diagnostic = TRUE`.  Here the caller asked for the criterion, or got it
+  # by supplying both model variables, so the count is returned, and what
+  # ranked it is not left to the help page: with a response alone,
+  # criterion = "morans_i" returned 10 to 13 cells on 16 of 16 white-noise
+  # layers and 16 of 16 exponential fields of 500 points, 10 being the first
+  # count the statistic can be computed at.
+  .ranked_by_diagnostic <- function(k_first) {
+    scored <- eval_ks[valid_moran]
+    .warn_classed(
+      "spatialkit_diagnostic_ranking",
+      paste0("determine_optimal_levels(): criterion = '%s'%s ranks the candidates by %s",
+             "|Moran's z| of %s over each cell's 8 nearest cells. That is a diagnostic ",
+             "of whether neighbouring cells are independent, not a count rule: |z| is ",
+             "near 0 at about 10 to 20 cells whatever the response and grows as the ",
+             "cells get finer than the range, so the smallest |z| does not say how well ",
+             "the cells represent the response. k = %d is ranked first; the statistic is ",
+             "computable from k = %d, and the window tried was k = %d to %d. %s for the elbow's ",
+             "ranking; resolution_profile() with select_resolution(criterion = \"cp\") ",
+             "reads a count off the response."),
+      criterion,
+      if (upgraded) " (taken because `response_var` and `predictor_vars` were both supplied)"
+      else "",
+      if (criterion == "morans_i") ""
+      else if (isTRUE(elbow$structured))
+        "the average of two ranks, the WSS curve's sag and "
+      else "the average of two ranks of which one, the WSS curve's sag, is flat (the curve has no elbow), so in effect by ",
+      if (ncol(pred_mat) > 0L)
+        "the residuals of the cell means regressed on the cell-mean predictors"
+      else "the cell means",
+      as.integer(k_first), as.integer(min(scored)),
+      as.integer(min(eval_ks)), as.integer(max(eval_ks)),
+      # With both model variables "geometric" is read as "combined", so
+      # there it is the variables that have to go; and when the criterion
+      # was named as well, leaving a variable out is not enough, because the
+      # named criterion still ranks by Moran's z.
+      if (upgraded) "Leave out `response_var` or `predictor_vars`"
+      else if (both_given)
+        paste0("Use criterion = \"geometric\" and leave out `response_var` or ",
+               "`predictor_vars` (with both, \"geometric\" is read as \"combined\")")
+      else "Use criterion = \"geometric\"",
+      data = list(k = as.integer(k_first), criterion = criterion,
+                  first_computable = as.integer(min(scored)),
+                  window = as.integer(range(eval_ks)), upgraded = upgraded))
+  }
 
   if (!any(valid_moran)) {
     # A window that ends at nine cells or fewer cannot score anything (see
@@ -1188,12 +1446,15 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     out <- as.integer(head(ranked, max(1L, as.integer(top_n))))
     out[out < 1L] <- 1L; out[out > k_max] <- k_max
     out <- unique(out)
+    .ranked_by_diagnostic(out[1L])
     attr(out, "diagnostics") <- list(moran_i = moran_vals, moran_z = moran_z,
                                       wss = wss[1:k_max],
                                       wss_spread = wss_spread[1:k_max],
                                       wss_bumps = wss_bumps, nstart = nstart,
                                       knee_k = knee_k, failed_k = failed_k,
-                                      eval_ks = eval_ks)
+                                      eval_ks = eval_ks,
+                                      structured = isTRUE(elbow$structured),
+                                      sag = max_sag)
     return(.with_split(out))
   }
 
@@ -1237,7 +1498,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
       eval_ks = eval_ks,
       criterion = "geometric",
       fallback = sprintf(paste0("the elbow (k = %d) is below the ten cells ",
-                                "Moran's I needs"), knee_k)
+                                "Moran's I needs"), knee_k),
+      structured = isTRUE(elbow$structured), sag = max_sag
     )
     return(.with_split(out))
   }
@@ -1270,6 +1532,7 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   out <- as.integer(eval_ks[head(best_idx, max(1L, as.integer(top_n)))])
   out[out < 1L] <- 1L; out[out > k_max] <- k_max
   out <- unique(out)
+  .ranked_by_diagnostic(out[1L])
   attr(out, "diagnostics") <- list(
     moran_i = moran_vals, moran_z = moran_z, wss = wss[1:k_max],
     wss_eval = wss_eval[1:k_max],
@@ -1281,7 +1544,8 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
     knee_k = knee_k, failed_k = failed_k,
     combined_rank = stats::setNames(combined_rank, eval_ks),
     eval_ks = eval_ks,
-    criterion = "combined"
+    criterion = "combined",
+    structured = isTRUE(elbow$structured), sag = max_sag
   )
   .with_split(out)
 }

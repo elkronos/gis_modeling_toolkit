@@ -7,8 +7,8 @@
   system.file("scripts", package = "spatialkit") else "."
 source(file.path(.tour_dir, "_common.R"))
 
-if (skip_without(c("GWmodel", "sp"), "the whole of script 09")) {
-  cat("  GWR needs GWmodel, which needs sp. Nothing else in the tour does.\n")
+if (skip_without("sp", "the whole of script 09")) {
+  cat("  GWR needs sp, which holds a fit's local estimates. Nothing else in the tour does.\n")
 } else {
 
 pts <- tour_points()

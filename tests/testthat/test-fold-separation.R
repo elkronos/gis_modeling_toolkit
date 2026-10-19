@@ -46,22 +46,31 @@ test_that("the distances are the real nearest-training distances", {
   expect_equal(s$median_dist[1], stats::median(d))
 })
 
-test_that("a supplied range gives the share of the hold-out inside it", {
+test_that("a supplied range gives the correlation-weighted share of the hold-out", {
   pts <- make_pts()
   f <- make_folds(pts, k = 4, method = "random_kfold", seed = 1)
   s <- fold_separation(f, pts, sac = 200)
-  expect_false(any(is.na(s$within_range)))
-  expect_true(all(s$within_range >= 0 & s$within_range <= 1))
+  expect_false(any(is.na(s$mean_cor)))
+  expect_true(all(s$mean_cor >= 0 & s$mean_cor <= 1))
   # On random folds over a 1000-unit square, every held-out point has a
-  # training neighbour far closer than 200 units.
-  expect_equal(unique(s$within_range), 1)
+  # training neighbour far closer than 200 units.  The column used to count
+  # each such point as 1, so it read exactly 1 for every fold whatever the
+  # distances were; it is now the mean of exp(-3 d / range), which weighs a
+  # point by how close its nearest training point is.
+  xy <- sf::st_coordinates(pts)
+  te <- f$folds[[1]]$test; tr <- f$folds[[1]]$train
+  d  <- apply(xy[te, , drop = FALSE], 1L, function(p)
+    min(sqrt((xy[tr, 1] - p[1])^2 + (xy[tr, 2] - p[2])^2)))
+  expect_true(all(d < 200))
+  expect_equal(s$mean_cor[1], mean(exp(-3 * d / 200)))
+  expect_true(all(s$mean_cor > 0.3 & s$mean_cor < 1))
   # Without a range the column is present but empty, and the print method
   # then omits it rather than showing a column of NAs.
   s0 <- fold_separation(f, pts)
-  expect_true(all(is.na(s0$within_range)))
-  expect_false(grepl("within_range", paste(utils::capture.output(print(s0)),
+  expect_true(all(is.na(s0$mean_cor)))
+  expect_false(grepl("mean_cor", paste(utils::capture.output(print(s0)),
                                            collapse = " ")))
-  expect_true(grepl("within_range", paste(utils::capture.output(print(s)),
+  expect_true(grepl("mean_cor", paste(utils::capture.output(print(s)),
                                           collapse = " ")))
 })
 
@@ -109,7 +118,9 @@ test_that("print() survives folds with nothing measurable in them", {
   # before matching or the pattern depends on where the line happened to break.
   flatten <- function(x) gsub("\\s+", " ", paste(x, collapse = " "))
   flat1 <- flatten(out1)
-  expect_match(flat1, "closer to a training point")
+  # The summary line.  It was "N% of held-out points sit closer to a training
+  # point than the correlation range", the count that carried the verdict.
+  expect_match(flat1, "Held-out points sit a median of .* from their nearest training point")
   expect_true(any(grepl("\\bNA\\b", out1)))          # rendered NA, not "NA%"
   expect_false(any(grepl("NA%", out1, fixed = TRUE)))
 
@@ -121,7 +132,7 @@ test_that("print() survives folds with nothing measurable in them", {
   for (j in seq_along(fa$folds)) fa$folds[[j]]$test <- integer(0)
   flat2 <- flatten(utils::capture.output(print(fold_separation(fa, pts, sac = 50))))
   expect_match(flat2, "no separation to report")
-  expect_no_match(flat2, "closer to a training point")
+  expect_no_match(flat2, "from their nearest training point")
 })
 
 test_that("a lon/lat layer is measured in projected units, not degrees", {

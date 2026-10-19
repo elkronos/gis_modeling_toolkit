@@ -4,7 +4,6 @@
 # number it returns describes the predictions it returns.
 
 test_that("cv_gwr() pools the fold predictions it returns", {
-  skip_if_not_installed("GWmodel")
   skip_if_not_installed("sp")
 
   set.seed(21); n <- 90

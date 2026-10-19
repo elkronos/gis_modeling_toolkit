@@ -10,8 +10,15 @@
 \item{object}{A \code{\link{resolution_profile}()}.}
 
 \item{criteria}{Character vector, any of \code{"cp"},
-\code{"reliability"}, \code{"elbow"}, \code{"moran_z"}.  Default: every
-one of the four that is finite at some level.}
+\code{"reliability"}, \code{"elbow"}, \code{"moran_z"}, \code{"loo"}.
+Default: every one of \code{"cp"}, \code{"reliability"},
+\code{"elbow"} and \code{"loo"} that is finite at some level
+(\code{loo} is a column of a profile built with \code{estimate}; a
+column of that name on a profile built without one is read only when
+named here).
+\code{"moran_z"}, a diagnostic, is read only when named here.
+\code{"size"} and \code{"auto"} are not criteria of the table: a size
+sets the count and has no flat region to compare.}
 
 \item{tol}{Passed to \code{\link{select_resolution}()} for the flat
 region.  Default 0.02.}
@@ -24,12 +31,15 @@ criterion in the order given, with columns \code{criterion},
 \code{best}, \code{flat_min}, \code{flat_max}, \code{n_flat},
 \code{value} (the optimum itself, on that criterion's own scale and so
 not comparable across rows, which is why the print method leaves it out),
-\code{at_floor}, \code{at_ceiling} and \code{edge} (which bound an
+\code{at_floor}, \code{at_ceiling}, \code{edge} (which bound an
 edge optimum sits on, as \code{\link{select_resolution}()} reports it;
-\code{NA} when interior).  Attributes: \code{bands} (a named list holding each
+\code{NA} when interior) and \code{structured} (as
+\code{select_resolution()} reports it: \code{FALSE} for a \code{cp}
+that one cell matches).  Attributes: \code{bands} (a named list holding each
 criterion's flat region in full, since \code{flat_min} and
 \code{flat_max} are only its ends and the region can have holes in it),
-\code{common} (the levels in every flat region, an integer vector that is
+\code{common} (the levels in every flat region of the count criteria,
+\code{moran_z} left out; an integer vector that is
 empty when the regions do not overlap), \code{scored} (the levels each
 criterion returned a finite value at, which is what decides whether a gap
 in a band is a rejection or a level nothing was computed at),
@@ -40,12 +50,21 @@ honestly.
 }
 \description{
 \code{\link{select_resolution}()} reads one criterion at a time.  This puts
-all of them in one table: the level each prefers, the flat region around
-it, and whether a ladder bound is doing the choosing rather than the
-criterion.  The closing line gives the levels that lie in \emph{every} flat
-region, the cell counts no criterion objects to.
+the count criteria in one table: the level each prefers, the flat region
+around it, and whether a ladder bound is doing the choosing rather than
+the criterion.  The closing line gives the levels that lie in \emph{every}
+flat region, the cell counts no criterion objects to.
 }
 \details{
+The criteria are not peers, and the table should be read with what each
+returns in practice in mind (see \code{\link{resolution_profile}()}):
+\code{reliability} is read at or above the range floor and usually
+returns it, \code{elbow} is absent unless the points cluster, and
+\code{cp}'s optimum is often the support ceiling.  \code{moran_z} is a
+diagnostic of the cell means and not a count rule, so it is not in the
+default set; named in \code{criteria} it gets a row, and it is left out
+of the closing comparison.
+
 A flat region is a set, not an interval.  The criterion curves are not
 monotone, so a region can skip a rung of the ladder, and the table prints
 what the criterion actually accepts (\code{"26, 31"}, not \code{"26 to
@@ -55,24 +74,28 @@ rejected.
 That set is often empty, and an empty one is a result rather than a
 failure.  The criteria answer different questions: how well the cells
 represent the field (\eqn{C_p}), whether the cell values are
-distinguishable from noise (\code{reliability}), where the within-cluster
-sum of squares bends (\code{elbow}), and whether the cell means still carry
-autocorrelation (\code{moran_z}).  A field with no single right resolution
-shows up here as disjoint bands, and the spread between the picks is
-printed for the same reason.
+distinguishable from noise (\code{reliability}), and where the
+within-cluster sum of squares bends (\code{elbow}).  A field with no
+single right resolution shows up here as disjoint bands, and the spread
+between the picks is printed for the same reason.
 
 Nothing in the table is a decision procedure.  Each flat region is
 routinely wide, the choice within it belongs to the analyst, and
 \code{\link{plot.resolution_profile}()} draws the curves the bands were
 read from.
+
+A profile whose ladder is one size (\code{obs_per_cell} set to one
+number, or the default profile) has one level, and the size set it.  The
+table then has one row per criterion that is finite at that level, and
+the line under it says
+that the count is set by the size and that no criterion chooses among
+levels.  The result carries the size as \code{attr(, "obs_per_cell")}.
 }
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
   # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
-  # noise for Mallows' Cp to have an interior optimum rather than descend
-  # to the ceiling.
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
   set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
@@ -93,12 +116,13 @@ if (requireNamespace("gstat", quietly = TRUE)) {
 per-level values attached; \code{\link{plot.resolution_profile}()} for
 the curves behind these bands.
 
-Other aggregation: 
-\code{\link{assign_features_to_polygons}()},
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{resolution_profile}()},
-\code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()}
+Other aggregation:
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=cell_values_at]{cell_values_at()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}}
 }
 \concept{aggregation}

@@ -106,8 +106,11 @@ test_that("determine_optimal_levels reports the restart budget and bumps in its 
   pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], w = rnorm(640)),
                       coords = c("x", "y"), crs = 32632)
   pts$z <- pts$w + rnorm(640)
-  out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
-                                  predictor_vars = "w", criterion = "combined")
+  # Moran's z takes part in this ranking, and the call says so with a class.
+  expect_warning(
+    out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
+                                    predictor_vars = "w", criterion = "combined"),
+    class = "spatialkit_diagnostic_ranking")
   d <- attr(out, "diagnostics")
   expect_false(is.null(d))
   expect_identical(d$nstart, 25L)
@@ -165,12 +168,14 @@ test_that(".reliability_at has an interior optimum and the measured shape", {
 
 test_that("a geometry-only profile scores the ladder on WSS, elbow and support", {
   pts <- rp_field(300)
-  prof <- resolution_profile(pts, n_levels = 8)
+  prof <- resolution_profile(pts, n_levels = 8, estimate = NULL, obs_per_cell = NULL,
+                             sac = NULL, partition = "kmeans")
   expect_s3_class(prof, "resolution_profile")
   expect_s3_class(prof, "data.frame")
   expect_named(prof, c("levels", "wss", "wss_spread", "elbow", "cell_n_min",
                        "cell_n_median", "cell_diam_median", "rss", "cp",
-                       "moran_i", "moran_z", "reliability"))
+                       "moran_i", "moran_z", "reliability",
+                       "cells_resp", "cell_resp_mean"))
   b <- attr(prof, "bounds")
   expect_identical(b$floor, 2L)
   expect_identical(b$ceiling, 33L)                  # floor(300 / 9)
@@ -195,7 +200,10 @@ test_that("a geometry-only profile scores the ladder on WSS, elbow and support",
 test_that("a response adds cp, moran_z and reliability, with the floor from the range", {
   skip_if_not_installed("gstat")
   pts <- rp_field(500)
-  prof <- resolution_profile(pts, response_var = "z", predictor_vars = "w", n_levels = 10)
+  # range_floor = TRUE: the ladder starts at the floor only when asked, since
+  # the default became FALSE.
+  prof <- resolution_profile(pts, response_var = "z", predictor_vars = "w", n_levels = 10,
+                             range_floor = TRUE)
   expect_identical(attr(prof, "variable"), "residuals")
   vg <- attr(prof, "variogram")
   expect_false(is.null(vg))
@@ -246,8 +254,10 @@ test_that("a floor above the ceiling is reported as a finding, not resolved sile
                     stringsAsFactors = FALSE)
   sac <- structure(120, class = c("sac_range", "numeric"), variogram_model = vm,
                    crs = sf::st_crs(pts))
-  lines <- capture_spatialkit_log(
-    prof <- resolution_profile(pts, response_var = "z", sac = sac, n_levels = 5))
+  # An R warning with a class as well as a log line.
+  lines <- capture_spatialkit_log(expect_warning(
+    prof <- resolution_profile(pts, response_var = "z", sac = sac, n_levels = 5),
+    class = "spatialkit_not_supported"))
   b <- attr(prof, "bounds")
   expect_false(b$supported)
   expect_gt(b$floor, b$ceiling)
@@ -307,7 +317,10 @@ test_that("resolution_profile is reproducible from its seed and subsamples large
 test_that("select_resolution reads the optimum and the flat region off each criterion", {
   skip_if_not_installed("gstat")
   pts <- rp_field(500)
-  prof <- resolution_profile(pts, response_var = "z", predictor_vars = "w", n_levels = 10)
+  # A ladder that starts at the range floor, as the default did when this
+  # was written: reliability is then read over every level of it.
+  prof <- resolution_profile(pts, response_var = "z", predictor_vars = "w", n_levels = 10,
+                             range_floor = TRUE)
 
   s_cp <- select_resolution(prof, "cp")
   expect_s3_class(s_cp, "resolution_selection")
@@ -331,7 +344,8 @@ test_that("select_resolution reads the optimum and the flat region off each crit
   s_el <- select_resolution(cl, "elbow")
   expect_identical(s_el$best, cl$levels[which.max(cl$elbow)])
 
-  s_z <- select_resolution(prof, "moran_z", tol = 0.1)
+  # moran_z is a diagnostic and is read only when asked for.
+  s_z <- select_resolution(prof, "moran_z", tol = 0.1, diagnostic = TRUE)
   ok <- is.finite(prof$moran_z)
   expect_identical(s_z$best, prof$levels[ok][which.min(abs(prof$moran_z[ok]))])
   expect_true(all(s_z$flat %in% prof$levels[ok]))
@@ -398,7 +412,11 @@ test_that("summary() puts every criterion's pick in one table", {
   expect_true(all(c("criterion", "best", "flat_min", "flat_max", "n_flat",
                     "value", "at_floor", "at_ceiling") %in% names(s)))
   expect_true(nrow(s) >= 1L)
-  expect_true(all(s$criterion %in% c("cp", "reliability", "elbow", "moran_z")))
+  # The profile scores the pooled value, so its leave-one-out error is a
+  # criterion of the table beside the present four.
+  expect_identical(attr(prof, "estimate")$value, "pooled")
+  expect_true("loo" %in% s$criterion)
+  expect_true(all(s$criterion %in% c("cp", "reliability", "elbow", "moran_z", "loo")))
   expect_false(anyDuplicated(s$criterion) > 0L)
 
   # Each row has to agree with select_resolution() on the same criterion:
@@ -604,10 +622,12 @@ test_that("a band is read as a set everywhere it is reported", {
                        levels = unique(round(exp(seq(log(4), log(60),
                                                      length.out = 12)))))))
   expect_true(max(wide$levels) / min(wide$levels) > 8)
-  # Every criterion the profile scored.  The fixture's locations are uniform,
-  # so its WSS curve has no elbow and `elbow` is NA throughout.
+  # Every count criterion the profile scored.  The fixture's locations are
+  # uniform, so its WSS curve has no elbow and `elbow` is NA throughout.
+  # (moran_z is a diagnostic: select_resolution() reads it only when asked,
+  # and the plot draws its curve with no band.)
   for (cn in Filter(function(cn) any(is.finite(wide[[cn]])),
-                    c("cp", "reliability", "elbow", "moran_z"))) {
+                    c("cp", "reliability", "elbow"))) {
     w <- drawn(wide, cn)
     sw <- select_resolution(wide, cn)
     expect_identical(nrow(w$rects),
@@ -661,7 +681,9 @@ test_that("print() survives every subset `[` produces, and stays inside 80 colum
   edge$reliability <- seq(0.1, 0.9, length.out = length(lv))
   edge$elbow       <- seq(0.1, 0.9, length.out = length(lv))
   edge$moran_z     <- seq(5, 0.1, length.out = length(lv))
-  out <- utils::capture.output(print(summary(edge)))
+  # Named, because moran_z is no longer in the default set.
+  out <- utils::capture.output(print(summary(
+    edge, criteria = c("cp", "reliability", "elbow", "moran_z"))))
   expect_lte(max(nchar(out)), 80L)
   expect_lte(max(nchar(utils::capture.output(print(s)))), 80L)
 })

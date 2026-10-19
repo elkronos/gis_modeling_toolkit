@@ -11,7 +11,8 @@ assign_features_to_polygons(
   keep_unassigned = FALSE,
   predicate = sf::st_intersects,
   largest = TRUE,
-  tie_break = c("smallest_area", "first")
+  tie_break = c("smallest_area", "first"),
+  quiet = FALSE
 )
 }
 \arguments{
@@ -19,11 +20,26 @@ assign_features_to_polygons(
 
 \item{polygons_sf}{An sf or sfc polygonal layer.}
 
-\item{polygon_id_col}{Name of the polygon identifier column. Default "poly_id".}
+\item{polygon_id_col}{Name of the polygon identifier column: the column of
+\code{polygons_sf} the IDs are read from, and the name they are returned
+under. Default "poly_id". When \code{polygons_sf} has no column of that name,
+the IDs are read from the first of \code{"poly_id"}, \code{"polygon_id"}, \code{"id"},
+\code{"cell_id"} and \code{"grid_id"} it carries, and a message names the column
+that was used; when it has none of them, the polygons are numbered
+\verb{1, 2, ...} in row order, and a message says so. The column the IDs are
+read from must hold one distinct, non-missing value per polygon: a
+duplicated or missing ID is an error, because features in different
+polygons would come back under one ID. That includes a unit stored as
+several rows that share its ID (a region split into \code{POLYGON} parts):
+merge the parts into one row per ID first, for example with
+\verb{dplyr::summarise(dplyr::group_by(polygons_sf, <ID column>))}, which
+keeps the unit one cell. Numbering the rows would make each part a cell
+of its own.}
 
 \item{keep_unassigned}{Logical; retain features that fall inside no
 polygon, carrying \code{NA} in the ID column. Default FALSE, which drops
-them.}
+them with a warning of class \code{"spatialkit_unassigned"} that gives
+their number.}
 
 \item{predicate}{Binary spatial predicate function. Default sf::st_intersects.
 Not used when \code{largest} applies: sf then assigns polygon features by
@@ -53,7 +69,13 @@ smallest area and, among polygons of equal area (a point on the shared
 edge of two grid cells), the one whose bounding-box centre is lowest,
 then leftmost, so the choice does not depend on the order of the rows;
 \code{"first"} keeps the first match (original order-dependent
-behavior).}
+behavior). On cells built from the centres a profile scored, a point on
+the edge between two of them is placed by the profile's rule whichever
+is given (see Value).}
+
+\item{quiet}{Logical; suppress this function's \code{message()}s (the one
+naming a fallback ID column). It does not silence R warnings. Default
+\code{FALSE}.}
 }
 \value{
 An sf object with \code{polygon_id_col} attached, one row per input
@@ -67,10 +89,26 @@ the polygons' own ID column when that is read from a fallback such as
 falls inside any polygon
 the result is empty (or all-\code{NA} with \code{keep_unassigned = TRUE}) and a
 warning is raised, since the usual cause is two layers in different
-places (a CRS that could only be stamped, not reprojected). The
+places (a CRS that could only be stamped, not reprojected).
+
+Features that fall inside no polygon are counted on the attribute
+\code{"unassigned"}: a list with \code{n}, \code{which} (their row positions in
+\code{features_sf}) and \code{n_rows}. With \code{keep_unassigned = FALSE} they are not
+in the result, and a warning of class \code{"spatialkit_unassigned"} gives
+their number (\code{tryCatch(spatialkit_unassigned = )} catches it without
+matching the message; the condition carries \code{n} and \code{total}). The usual
+causes are a polygon layer that stops short of the data (a coastline
+drawn at another scale, a tessellation of seeds built without a
+\code{boundary} or \code{cover}; see \code{\link[=build_tessellation]{build_tessellation()}}) and points outside
+the study area. With \code{keep_unassigned = TRUE} they are kept with an
+\code{NA} ID and no warning is raised, unless every feature is unassigned.
+
+The
 attribute \code{"ties"} records how many features matched more than one
 polygon (with \code{largest}, overlapped several by exactly the same area)
-and had the \code{tie_break} rule decide for them: a list with \code{n},
+and had the \code{tie_break} rule decide for them (on cells built from the
+centres a profile scored, the profile's rule then places the points
+among them, as the last paragraph says): a list with \code{n},
 \code{which} (their row positions in \code{features_sf}), \code{rule} and \code{n_rows}
 (the number of rows returned, which the record was made for). A large
 \code{n} means the polygon layer overlaps, and per-cell counts built from the
@@ -80,7 +118,56 @@ returned and does not survive subsetting: \code{joined[i, ]}, like
 with no \code{"ties"} attribute, so nothing reports the parent's count
 for a different set of rows. \code{sf::st_drop_geometry()} keeps the record,
 since the rows are the same; see \code{\link{[.spatialkit_rows}} for
-what binding such data frames does.
+what binding such data frames does. The \code{"unassigned"} record is
+stamped and removed the same way.
+
+When \code{polygons_sf} carries \code{attr(, "count_rule")}, the record of how
+its cell count was set (cells from \code{\link[=build_tessellation]{build_tessellation()}} on seeds
+placed from a \code{\link[=select_resolution]{select_resolution()}} result or from a profile built with
+an \code{estimate}), the result carries the same record.
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} reads it and checks that the rows and cells it is
+given are the ones the count was scored on. It is a plain attribute: a
+row subset keeps it and \code{dplyr::mutate()}, \code{dplyr::select()} and
+\code{dplyr::arrange()} drop it, which is why the summary also looks for it
+on its \code{cells_sf}. The profile scores a feature that is not a point at
+one point of it (\code{coerce_to_points(, "auto")}), in the cell of the
+nearest centre; this function gives a polygon feature to the cell it
+overlaps most. A feature that straddles a cell boundary can therefore
+be assigned to another cell than the one it was scored in, and the
+summary does not compare the two for such a layer. To assign the
+features as they were scored, assign their points:
+\code{assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)}.
+
+When that record says the cells are the ones the profile scored
+(\code{scored_cells} is \code{TRUE}: the cells \code{\link[=build_tessellation]{build_tessellation()}} builds on a
+selection's seeds, or on the seeds a seeding function returns for one)
+and holds the centres it scored (\code{count_rule$scored$centres}), a point
+on the edge between two or more of those cells is given the cell
+\code{\link[=resolution_profile]{resolution_profile()}} scored it in: that of its nearest centre,
+measured in the CRS the record names, and of centres the same distance
+away the lower-numbered one. Such points occur on gridded locations
+(raster cell centres, a regular sampling grid), where a row can lie the
+same distance from two centres and the polygons hold it in either cell
+or in both. The rows each cell holds are then the rows its count was
+scored on, and \code{\link[=summarize_by_cell]{summarize_by_cell()}}'s check of them reads \code{"match"}.
+A point counts as on the edge when it lies within a margin of both
+cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
+at a UTM northing of 4,400 km. \code{\link[=build_tessellation]{build_tessellation()}} draws such cells
+in the CRS the record names, around the centres as the record holds
+them, whatever CRS the seeds came back in (unless its \code{crs} names
+another projected CRS), so their corners carry only the rounding of
+that computation, far less than the margin. A point
+farther from its nearest centre's cell keeps the polygon that holds it,
+and so do features that are not points, points without a CRS beside a
+record with one, and a join in longitude and latitude. A centre's cell
+is the one cell that holds it and no other centre; a centre outside a
+boundary that clipped its cell away from it has the cell, among those
+that hold no centre, whose inside is nearest it. Cells built from other
+seeds leave most centres without a cell, and their points to the
+polygons. Polygons without the record, such as polygons
+the caller brings, and cells whose record says \code{scored_cells} is
+\code{FALSE} or \code{NA} (other cells built from the count, such as a lattice
+sized by it) are placed by the polygons alone.
 }
 \description{
 Joins an sf layer of input features to a polygon layer via spatial join.
@@ -121,12 +208,13 @@ table(assigned$poly_id)
 \code{\link[=build_tessellation]{build_tessellation()}} to build the polygon layer;
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the aggregation step that consumes the result.
 
-Other aggregation: 
-\code{\link{determine_optimal_levels}()},
-\code{\link{kriging_adequacy}()},
-\code{\link{resolution_profile}()},
-\code{\link{select_resolution}()},
-\code{\link{summarize_by_cell}()},
-\code{\link{summary.resolution_profile}()}
+Other aggregation:
+\code{\link[=cell_values_at]{cell_values_at()}},
+\code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
+\code{\link[=kriging_adequacy]{kriging_adequacy()}},
+\code{\link[=resolution_profile]{resolution_profile()}},
+\code{\link[=select_resolution]{select_resolution()}},
+\code{\link[=summarize_by_cell]{summarize_by_cell()}},
+\code{\link[=summary.resolution_profile]{summary.resolution_profile()}}
 }
 \concept{aggregation}

@@ -29,7 +29,8 @@ several and an empty block can be seen to be empty.  The subtitle states
 the parameter that decides whether the scheme leaks, read from
 \code{folds$params}: the block size (and the estimated range when
 \code{auto_range} found one), the buffer, the number of location groups,
-or the median NNDM exclusion.
+the median NNDM exclusion, or, for kNNDM folds, that they are matched to
+the prediction distances.
 }
 \examples{
 if (requireNamespace("ggplot2", quietly = TRUE)) {
@@ -45,15 +46,15 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 }
 \seealso{
-Other plotting: 
-\code{\link{plot.aoa}()},
-\code{\link{plot.block_size_sweep}()},
-\code{\link{plot.feature_selection}()},
-\code{\link{plot.gwr_model_selection}()},
-\code{\link{plot.resolution_profile}()},
-\code{\link{plot.sac_range}()},
-\code{\link{plot.spatial_fit}()},
-\code{\link{plot_calibration}()},
-\code{\link{plot_cv_metrics}()}
+Other plotting:
+\code{\link[=plot.aoa]{plot.aoa()}},
+\code{\link[=plot.block_size_sweep]{plot.block_size_sweep()}},
+\code{\link[=plot.feature_selection]{plot.feature_selection()}},
+\code{\link[=plot.gwr_model_selection]{plot.gwr_model_selection()}},
+\code{\link[=plot.resolution_profile]{plot.resolution_profile()}},
+\code{\link[=plot.sac_range]{plot.sac_range()}},
+\code{\link[=plot.spatial_fit]{plot.spatial_fit()}},
+\code{\link[=plot_calibration]{plot_calibration()}},
+\code{\link[=plot_cv_metrics]{plot_cv_metrics()}}
 }
 \concept{plotting}

@@ -146,34 +146,46 @@ test_that("estimate_sac_range()'s early NA returns carry a rejected_reason and n
 })
 
 
-# ---- S11-contracts-7: the verdict fits the fold scheme ----------------------
+# ---- S11-contracts-7: the closing lines fit what was measured ---------------
 
-test_that("fold_separation()'s verdict names a remedy the fold scheme has", {
+# This test pinned a verdict per fold scheme ("optimistic: widen the blocks",
+# "widen the buffer", "use blocked or buffered folds"), drawn from the share
+# of held-out points inside the range.  That share gives no direction (the
+# same 100% goes with an unbiased score on even siting and a score 20% low on
+# clustered siting), so the verdict and its remedies are gone: without a
+# prediction target the print states distances and concludes nothing, for
+# every scheme.  The new behaviour is tested in
+# test-fix-folds-separation-target.R; what is kept here is that no scheme is
+# given a remedy it does not have, or any remedy at all.
+test_that("fold_separation() names no verdict and no remedy without a target", {
   adv <- spatialkit:::.fold_separation_advice
-  expect_match(adv("block_kfold", 0.9), "optimistic: widen the blocks\\.$")
-  expect_match(adv("block_kfold", 0.3), "contiguous blocks at the edges")
-  expect_match(adv("buffered_loo", 0.9), "widen the buffer")
-  for (m in c("random_kfold", "leave_location_out", "supplied splits", NA)) {
-    expect_no_match(adv(m, 0.9), "blocks")
-    expect_match(adv(m, 0.9), "use blocked or buffered folds")
-    expect_no_match(adv(m, 0.3), "contiguous blocks")
+  for (m in c("block_kfold", "buffered_loo", "random_kfold", "leave_location_out",
+              "nndm", "supplied splits", NA)) {
+    txt <- adv(NULL, m)
+    expect_match(txt, "No prediction target is given")
+    for (gone in c("optimistic", "leak", "widen", "use blocked or buffered folds",
+                   "contiguous blocks"))
+      expect_no_match(txt, gone)
   }
-  expect_no_match(adv("nndm", 0.9), "optimistic")
-  expect_match(adv("nndm", 0.9), "prediction points")
-  expect_match(adv("nndm", 0.05), "Little of the hold-out")
 
   set.seed(1)
   p <- r2_pts(runif(60, 0, 1000), runif(60, 0, 1000))
   flatten <- function(x) gsub("\\s+", " ", paste(x, collapse = " "))
   rnd <- make_folds(p, k = 3, method = "random_kfold", seed = 1)
   out <- flatten(utils::capture.output(print(fold_separation(rnd, p, sac = 500))))
-  expect_match(out, "closer to a training point")
+  expect_match(out, "from their nearest training point")
+  expect_match(out, "No prediction target is given")
   expect_no_match(out, "widen the blocks")
+  expect_no_match(out, "optimistic")
+  # NNDM folds carry the distances from the prediction points they were
+  # built for, so they are read against those, and still not called
+  # optimistic.
   grid <- sf::st_as_sf(sf::st_make_grid(p, n = c(8, 8), what = "centers"))
   nn <- r2_quiet(suppressWarnings(make_folds(p, k = 5, method = "nndm",
                                              prediction_points = grid)))
   out_nn <- flatten(utils::capture.output(print(fold_separation(nn, p, sac = 500))))
-  expect_match(out_nn, "closer to a training point")
+  expect_match(out_nn, "from their nearest training point")
+  expect_match(out_nn, "the prediction points the NNDM folds were built for")
   expect_no_match(out_nn, "optimistic")
   expect_no_match(out_nn, "widen the blocks")
 })

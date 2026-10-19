@@ -41,11 +41,23 @@ Subsamples large datasets to avoid O(n^2) memory and time cost.
 These are the bounds a length-scale \emph{prior} is calibrated over, not
 the scales a fitted model can resolve: that depends on the basis size
 (\code{gp_k} in \code{\link{fit_bayesian_spatial_model}()}, which reports
-it as \code{$info$gp_ell_min}).  Both bounds are fixed fractions of the
+it as \code{$info$gp_ell_min}, and in map units as
+\code{$info$gp_resolution}).  Both bounds are fixed fractions of the
 spread of pairwise distances, so they do not shrink as points are added to
-the same area.  A surface whose range sits below what the basis resolves
-needs a larger \code{gp_k}: more points help the data identify a short
-range, but they make neither these bounds nor the derived basis finer.
+the same area: more points help the data identify a short range, but they
+make neither these bounds nor the derived basis finer.
+
+The lower bound is the 25th percentile of the pairwise distances, as an
+effective range.  On real layouts that is 14 to 33 percent of the extent
+along each axis (about 32 km on a uniform 100 km square), and the prior
+built on it puts 1 percent of its mass below it.  A surface whose range
+is shorter needs two things, not one: a basis fine enough to represent it
+and a prior that allows it.  A larger \code{gp_k} under the prior
+calibrated here changes almost nothing, because the prior still holds the
+length-scale above this bound.  \code{fit_bayesian_spatial_model()}
+therefore moves the prior's lower tail down to the length-scale the basis
+resolves whenever \code{gp_resolution} or an explicit \code{gp_k} asks
+for a finer basis than the one derived from these bounds.
 }
 \examples{
 set.seed(1)
@@ -53,11 +65,11 @@ xy <- cbind(runif(50), runif(50))
 gp_lengthscale_bounds(xy)
 }
 \seealso{
-Other model fitting: 
-\code{\link{fit_bayesian_spatial_model}()},
-\code{\link{fit_gwr_model}()},
-\code{\link{fit_rf_model}()},
-\code{\link{new_spatial_fit}()},
-\code{\link{prep_model_data}()}
+Other model fitting:
+\code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},
+\code{\link[=fit_gwr_model]{fit_gwr_model()}},
+\code{\link[=fit_rf_model]{fit_rf_model()}},
+\code{\link[=new_spatial_fit]{new_spatial_fit()}},
+\code{\link[=prep_model_data]{prep_model_data()}}
 }
 \concept{model fitting}

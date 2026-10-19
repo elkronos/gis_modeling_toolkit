@@ -32,7 +32,7 @@ compare_models_cv(
 \item{predictor_vars}{Predictor column names.}
 
 \item{models}{Character vector: any subset of \code{c("GWR", "Bayesian",
-  "RF")}, in any order.  Each is cross-validated on the same \code{folds}.
+"RF")}, in any order.  Each is cross-validated on the same \code{folds}.
 Names outside that set raise a warning and are dropped; if nothing
 recognised remains, this is an error.  There is no silent fallback.
 A recognised model whose backend package is not installed is dropped with
@@ -41,7 +41,8 @@ a message so the call still returns the models that could run.  But if
 compare and the call errors with \code{"no viable models."}.  Guard with
 \code{requireNamespace()} when the model set is not known in advance.}
 
-\item{k}{Number of folds. Default 5.}
+\item{k}{Number of folds to build when \code{folds} is \code{NULL}; not
+read when \code{folds} is supplied.  Default 5.}
 
 \item{seed}{RNG seed. Default 123.}
 
@@ -83,7 +84,10 @@ It does not silence R warnings, nor the package's console log echo
 
 \item{block_size}{Optional minimum block edge length for the shared spatial
 CV blocks (projected CRS units), passed to \code{\link{make_folds}()}
-when \code{folds} is \code{NULL}.  Default \code{NULL}.}
+when \code{folds} is \code{NULL}.  Default \code{NULL}.  Beside
+supplied \code{folds} it has nothing to size and raises a warning
+(class \code{spatialkit_fold_args_ignored}); so does
+\code{auto_range = TRUE}.}
 
 \item{auto_range}{Logical.  If \code{TRUE} and \code{folds} is \code{NULL},
 the autocorrelation range of the response (detrended on
@@ -122,6 +126,11 @@ an \code{NA} row.  Each model's metrics over all the rows it predicted
 stay in its \code{*_cv} element and in \code{attr(overall, "all_rows")},
 a table of the same shape.  \code{by_fold} and the Bayesian coverage and
 CRPS columns are per fold and are not recomputed.
+Every model is cross-validated on the layer as passed, so the warnings
+\code{\link{prep_model_data}()} raises about that layer (class
+\code{spatialkit_rows_dropped}, counting the incomplete rows dropped,
+and \code{spatialkit_constant_predictor}) are raised once for the
+comparison, not once per model.
 Only the models that actually ran appear, so check which names are
 present; there is not always one entry per requested model, because a
 backend whose package is missing is dropped with a message.  When \strong{no} requested backend
@@ -218,11 +227,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
-  # The random forest, and GWR beside it when GWmodel is installed, on the
+  # The random forest, and GWR beside it when sp is installed, on the
   # same folds.  "Bayesian" is left out here because a Stan fit per fold
   # takes minutes; add it to `models` for a run to report.
-  models <- c("RF", if (requireNamespace("GWmodel", quietly = TRUE) &&
-                       requireNamespace("sp", quietly = TRUE)) "GWR")
+  models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
   cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
                            rf_args = list(num_trees = 100),
                            gwr_args = list(bandwidth = 30))
@@ -238,10 +246,10 @@ study competition among methods for analyzing large spatial data.
 24(3), 398--425. \doi{10.1007/s13253-018-00348-w}
 }
 \seealso{
-Other model evaluation: 
-\code{\link{compare_models}()},
-\code{\link{evaluate_insample}()},
-\code{\link{model_metrics}()},
-\code{\link{residual_morans_i}()}
+Other model evaluation:
+\code{\link[=compare_models]{compare_models()}},
+\code{\link[=evaluate_insample]{evaluate_insample()}},
+\code{\link[=model_metrics]{model_metrics()}},
+\code{\link[=residual_morans_i]{residual_morans_i()}}
 }
 \concept{model evaluation}

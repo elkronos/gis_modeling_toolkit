@@ -668,6 +668,35 @@
 # Row-indexed record attributes
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# estimate_sac_range()'s verdict "no spatial structure"
+# ---------------------------------------------------------------------------
+# estimate_sac_range() refuses a range in two ways that both say the modelled
+# variable has no spatial structure: its test on the nearest neighbours finds
+# none, or the variogram is flat at the lags it resolves.  Either way the
+# model it attaches is a pure nugget.  resolution_profile(),
+# select_resolution(), summarize_by_cell(deff = "variogram"),
+# kriging_adequacy() and plot.sac_range() each act on that verdict, so the
+# wording lives here and they ask .sac_no_structure() instead of matching a
+# string of their own.
+.sac_reason_no_structure <-
+  "no spatial structure detected at the nearest-neighbour scale"
+.sac_reason_flat <-
+  "the empirical variogram is flat: no spatial structure at the lags resolved"
+
+# TRUE when `sac` is a range estimate refused because the variable shows no
+# spatial structure.  A reason that was not written by estimate_sac_range()
+# (a stored object, a `sac` built by hand) counts when it says "no spatial
+# structure", which both of the reasons above do.
+.sac_no_structure <- function(sac) {
+  if (is.null(sac)) return(FALSE)
+  if (is.finite(suppressWarnings(as.numeric(sac))[1L])) return(FALSE)
+  why <- attr(sac, "rejected_reason", exact = TRUE)
+  is.character(why) && length(why) >= 1L && !is.na(why[1L]) &&
+    grepl("no spatial structure", why[1L], fixed = TRUE)
+}
+
+
 # Two functions hand back a layer with a record of what happened to its rows:
 # prep_model_data() records the rows it dropped, assign_features_to_polygons()
 # records the features that matched more than one polygon and had the tie-break
@@ -699,7 +728,7 @@
 # inconsistent with that.
 setOldClass(c("spatialkit_rows", "sf"))
 
-.row_record_attrs <- c("dropped", "ties")
+.row_record_attrs <- c("dropped", "ties", "unassigned")
 
 # Attach `value` as the `which` record of `x`, stamped and classed.
 #
@@ -742,8 +771,9 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'
 #' \code{\link{prep_model_data}()} and
 #' \code{\link{assign_features_to_polygons}()} return a layer with an
-#' attribute recording what happened to its rows (\code{"dropped"} and
-#' \code{"ties"} respectively).  Those records describe the rows the layer was
+#' attribute recording what happened to its rows (\code{"dropped"} for the
+#' first; \code{"ties"} and \code{"unassigned"} for the second).  Those
+#' records describe the rows the layer was
 #' built with, and \code{[} on an \code{sf} object copies attributes through
 #' unchanged, which would leave a subset reporting its parent's numbers for a
 #' different set of rows.  Subsetting therefore returns a plain layer with the
@@ -761,8 +791,9 @@ setOldClass(c("spatialkit_rows", "sf"))
 #' and class, so the record then describes only the first input's rows: its
 #' \code{n_rows} no longer equals \code{nrow()} of the result.  The
 #' package's own readers ignore a record whose \code{n_rows} does not match;
-#' when reading \code{attr(x, "dropped")} or \code{attr(x, "ties")} yourself
-#' from a layer that has been through such steps, check it the same way.
+#' when reading \code{attr(x, "dropped")}, \code{attr(x, "ties")} or
+#' \code{attr(x, "unassigned")} yourself from a layer that has been through
+#' such steps, check it the same way.
 #'
 #' @param x A layer returned by \code{\link{prep_model_data}()} or
 #'   \code{\link{assign_features_to_polygons}()}.
@@ -777,7 +808,7 @@ setOldClass(c("spatialkit_rows", "sf"))
 #'              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' clean <- prep_model_data(dat, "resp", "pred")
+#' clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
 #' attr(clean, "dropped")$n          # 2
 #' attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow
 #' @seealso \code{\link{prep_model_data}()} and
@@ -891,3 +922,130 @@ setOldClass(c("spatialkit_rows", "sf"))
   else if (identical(msg, diag)) msg
   else paste0(msg, " (", diag, ")")
 }
+
+
+#' Log a warning and raise it with a condition class
+#'
+#' \code{.warn_and_log()} with a condition class, so that a caller can catch
+#' exactly this case with \code{tryCatch(<class> = )} or
+#' \code{withCallingHandlers()}, rather than by matching message text.  Used
+#' where code running many calls has to tell one outcome from another, and
+#' for a warning that changes what a result means.  Every classed warning of
+#' the package is raised here: the helpers that fix a class
+#' (\code{.warn_deff_fallback()}, \code{.warn_k_reduced()},
+#' \code{.aoa_warn_zero_threshold()} and the like) and \code{.gwr_warn()}
+#' call it, so each is logged once and raised the same way.  The classes are
+#' named \code{spatialkit_<what>}.
+#'
+#' @param class Character vector of condition classes, most specific first
+#'   (\code{"spatialkit_..."}).
+#' @param fmt,... Passed to \code{sprintf()}.
+#' @param data Named list of fields to carry on the condition (counts a
+#'   handler can read without parsing the message).
+#' @keywords internal
+#' @noRd
+.warn_classed <- function(class, fmt, ..., data = list()) {
+  msg <- sprintf(fmt, ...)
+  # Taken over by the caller for the length of this call (see
+  # .answer_for_classed()): neither logged nor raised.
+  if (any(class %in% .answered_state$classes)) return(invisible(msg))
+  # Already said, in these words, by an earlier call of the same run (see
+  # .once_per_run()): neither logged nor raised again.
+  if (.said_in_run(class, msg)) return(invisible(msg))
+  # raising = TRUE: the warning below shows it, so a knitted document must
+  # not repeat the line as a message (see .sk_console_appender()).
+  .sk_log(logger::WARN, msg, raising = TRUE)
+  warning(do.call(warningCondition,
+                  c(list(message = msg, class = class, call = NULL), data)))
+  invisible(msg)
+}
+
+
+# ---------------------------------------------------------------------------
+# A classed warning the caller answers for itself
+# ---------------------------------------------------------------------------
+# cell_values_at() places its locations with assign_features_to_polygons()
+# and reports a location in no polygon row by row, so that function's
+# warning that no feature falls in any polygon says nothing new there.  A
+# calling handler can muffle the warning, but not the line .warn_classed()
+# logs before it raises it, which reaches the console.  A function that
+# answers for a class itself opens a span here around the one call.  While
+# the span is open a warning of that class is neither logged nor raised;
+# every other warning is logged and raised as usual.
+
+# The classes taken over by the open spans.
+.answered_state <- new.env(parent = emptyenv())
+
+#' Open a span in which a classed warning is neither logged nor raised
+#'
+#' @param classes Condition classes the caller answers for itself.
+#' @return A function that closes the span; call it when the call the span
+#'   was opened for returns or stops (\code{tryCatch(, finally = )}).  A span
+#'   opened inside another adds its classes to the outer one's, and closing
+#'   it leaves the outer one's.
+#' @keywords internal
+#' @noRd
+.answer_for_classed <- function(classes) {
+  outer <- .answered_state$classes
+  .answered_state$classes <- union(outer, classes)
+  function() {
+    .answered_state$classes <- outer
+    invisible(NULL)
+  }
+}
+
+
+# ---------------------------------------------------------------------------
+# One warning for a run of calls on the same rows
+# ---------------------------------------------------------------------------
+# compare_models_cv() runs one cv_*() per model and cv_block_size_sweep() one
+# cv_spatial() per block size.  Each of those prepares the layer for itself,
+# so each found the same incomplete rows and raised the same
+# "spatialkit_rows_dropped" warning: two for two models, eight for the default
+# ladder.  A function that makes such a run opens it here with the classes it
+# wants said once.  While the run is open, a warning of one of those classes
+# whose text has been raised before is neither logged nor raised again; one
+# with other text (other rows, another layer) is raised as usual.
+
+# The open run: `classes`, and `said`, the class and text of what was raised.
+.once_state <- new.env(parent = emptyenv())
+
+#' Open a run in which a classed warning is raised once per text
+#'
+#' @param classes Condition classes to raise once per distinct message.
+#' @return A function that closes the run; register it with \code{on.exit()}.
+#'   A run opened inside another adds its classes to the outer one's and
+#'   shares its record, so the text is still raised once.
+#' @keywords internal
+#' @noRd
+.once_per_run <- function(classes) {
+  outer <- .once_state$run
+  .once_state$run <- list(classes = union(outer$classes, classes),
+                          said = outer$said %||% character(0))
+  function() {
+    if (is.null(outer)) {
+      .once_state$run <- NULL
+    } else {
+      outer$said <- .once_state$run$said %||% outer$said
+      .once_state$run <- outer
+    }
+    invisible(NULL)
+  }
+}
+
+# TRUE when a warning of this class and text was already raised in the open
+# run; records it otherwise.  FALSE with no run open or a class it does not
+# cover.
+.said_in_run <- function(class, msg) {
+  run <- .once_state$run
+  if (is.null(run) || !any(class %in% run$classes)) return(FALSE)
+  key <- paste(class[1L], msg, sep = "\r")
+  if (key %in% run$said) return(TRUE)
+  .once_state$run$said <- c(run$said, key)
+  FALSE
+}
+
+# The two classed warnings prep_model_data() raises about a layer.  A function
+# that prepares one layer several times raises each once (.once_per_run()).
+.prep_warning_classes <- c("spatialkit_rows_dropped",
+                           "spatialkit_constant_predictor")

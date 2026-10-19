@@ -11,7 +11,8 @@ create_voronoi_polygons(
   clip = TRUE,
   keep_duplicates = FALSE,
   crs = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  cover = NULL
 )
 }
 \arguments{
@@ -47,14 +48,33 @@ one cell and all of them are indexed to it.}
 \item{crs}{Optional target CRS: anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working
 CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
-in:
-the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
+in: the cells are built in the local projected CRS \code{\link[=ensure_projected]{ensure_projected()}}
 picks for the points, so they are nearest-point cells on the ground, and
-are then transformed, with long edges densified.}
+are then transformed, with long edges densified. Seeds that are the
+centres a profile scored are built in the CRS the profile worked in
+instead (see "Seeds a profile scored").}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
 (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.}
+
+\item{cover}{Optional sf or sfc layer the cells have to hold, read when
+there is no \code{boundary}: the observations (points), or a polygon. The
+boundary is then derived from it instead of from \code{points_sf}: the convex
+hull of the cover's points, or its polygons, grown by 2 percent of the
+diagonal. This is what seeds need, because seeds lie inside the data they
+stand for and their own hull stops short of it (see "Details").
+When \code{NULL}, the cover the seeding functions attach is used
+(\code{attr(points_sf, "cover")}, set by \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} and \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}). A cover with no
+CRS is read in the coordinates of \code{points_sf}, and one in another CRS is
+transformed. A generator outside the cover keeps its ground (the hull of
+the generators is added); a cover that holds none of the generators is
+set aside with a warning. With a \code{boundary}, the boundary sets the cells
+and \code{cover} is only checked against them: the number of its points that
+fall outside every cell is returned as \code{params$cover_outside}, with a
+warning of class \code{"spatialkit_unassigned"} when it is not 0 (a polygon
+cover is not checked).}
 }
 \value{
 A list with \code{cells}, \code{index}, \code{boundary},
@@ -62,9 +82,30 @@ A list with \code{cells}, \code{index}, \code{boundary},
 per row of \code{points_sf}, and \code{NA} for a point that falls outside
 every cell, which means outside the study area (grown by \code{expand}
 when it is positive), so a summary built from it counts only the points
-the tessellation actually covers.  \code{boundary} is the boundary the
-cells were built in: the one supplied or derived, grown by
-\code{expand}.
+the tessellation actually covers.  Such points are counted in
+\code{params$n_outside}, and a warning of class
+\code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+the boundary the cells were built in: the one supplied or derived, grown
+by \code{expand}.  \code{params$boundary_source} says where it came
+from: \code{"boundary"} (the argument), \code{"cover"} (the
+\code{cover} argument), \code{"seeds' cover"} (the cover attached to
+\code{points_sf}) or \code{"points"} (the hull of \code{points_sf}
+itself).  \code{params$cover_outside} is the number of \code{cover}
+points outside every cell when a point \code{cover} was given with a
+\code{boundary}, and \code{NULL} otherwise.  \code{params$partition} is
+present when \code{points_sf} is a layer of seeds that records the kind
+of partition that placed it (\code{attr(points_sf, "partition")}, see
+\code{\link{get_voronoi_seeds}()}): the same list, so the cells say what
+built them.  Seeds of plain k-means record nothing, and \code{params}
+then has no such element; neither has it for points that are not seeds.
+\code{params$count_rule} is present when \code{points_sf} carries the
+record of how its count was set (\code{attr(points_sf, "count_rule")}:
+the seeds of a \code{\link{select_resolution}()} result, or seeds a
+seeding function placed from one): the same list, which the cells carry
+too as \code{attr(cells, "count_rule")}.
+\code{\link{assign_features_to_polygons}()} copies it to the rows it
+assigns, and \code{\link{summarize_by_cell}()} checks its result
+against it.
 }
 \description{
 Assigns every location in the study area to its nearest input point, giving
@@ -77,7 +118,7 @@ instead when you need equal-area cells or a resolution independent of where
 the data happen to be.
 }
 \details{
-The heavy lifting is \code{\link[sf:geos_unary]{sf::st_voronoi()}}.  What this adds is the surrounding
+The heavy lifting is \code{\link[sf:st_voronoi]{sf::st_voronoi()}}.  What this adds is the surrounding
 bookkeeping: projecting lon/lat input, building and buffering an envelope
 so edge cells are bounded, clipping to \code{boundary}, restoring the
 point-to-cell correspondence that \code{st_voronoi()} scrambles, and stamping
@@ -90,7 +131,39 @@ others are referenced by no feature. Other functions in the package
 (\code{\link[=prep_model_data]{prep_model_data()}}, \code{\link[=make_folds]{make_folds()}}) reduce such a feature to its
 centroid instead, so cast to POINT, or take centroids, first if one cell
 per feature is what you want.
+
+With no \code{boundary} the cells are clipped to a boundary derived from the
+data. For observations that is their own convex hull grown by 2 percent of
+its diagonal, so every observation has a cell. Seeds are different: k-means
+centres, random points in a study area and the centres a resolution
+profile scored all lie inside the ground they stand for, and cells clipped
+to the hull of the seeds leave the edge of that ground uncovered (on 3,000
+uniform points, 72 percent of them at 4 seeds, 25 percent at 25 and 4
+percent at 100). The boundary is therefore derived from the \code{cover} when
+there is one: the argument, or the cover the seeding functions attach to
+their result. A layer that looks like seeds and has neither a boundary nor
+a cover (seeds bound with \code{rbind()}, which drops the attribute, or built
+by hand) gets the seeds' own hull and a warning of class
+\code{"spatialkit_no_cover"}.
 }
+\section{Seeds a profile scored}{
+
+The seeds of a \code{\link[=select_resolution]{select_resolution()}} result, and the seeds
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} or \code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}} return for one, are the
+centres \code{\link[=resolution_profile]{resolution_profile()}} scored, and their record of the count
+(\code{attr(, "count_rule")}) says so (\code{scored_cells = TRUE}) and holds the
+centres in the CRS the profile worked in. Unless a projected \code{crs} is
+given, their cells are built in that CRS, whatever CRS the seeds arrive
+in (degrees, or the CRS of a boundary they were placed in), and returned
+in it, or in a geographic \code{crs} when one is given. When the seeds are
+those centres (as many, each at a different centre, within a thousandth
+of its distance from the next nearest), each is first put at its centre
+as the record holds it, so rounding the seeds took on in another CRS
+does not move an edge. The cells are then the cells each row was scored
+in, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} gives a point on an edge between
+two of them the cell the profile scored it in.
+}
+
 \examples{
 library(sf)
 set.seed(1)
@@ -103,14 +176,14 @@ res$cells   # one polygon per unique point, with stable cell_id
 res$index   # cell_id assignment for each input point
 }
 \seealso{
-Other tessellation: 
-\code{\link{build_tessellation}()},
-\code{\link{create_grid_polygons}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{ensure_stable_poly_id}()},
-\code{\link{get_voronoi_seeds}()},
-\code{\link{plot_tessellation_map}()},
-\code{\link{voronoi_seeds_kmeans}()},
-\code{\link{voronoi_seeds_random}()}
+Other tessellation:
+\code{\link[=build_tessellation]{build_tessellation()}},
+\code{\link[=create_grid_polygons]{create_grid_polygons()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=ensure_stable_poly_id]{ensure_stable_poly_id()}},
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=plot_tessellation_map]{plot_tessellation_map()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}},
+\code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}
 }
 \concept{tessellation}

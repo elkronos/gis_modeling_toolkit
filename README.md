@@ -38,17 +38,22 @@ unit problem, and it is not a rounding error: the same observations can
 support materially different conclusions under different boundaries.
 
 `spatialkit` lets the data draw the boundaries. `get_voronoi_seeds()`
-places seeds by k-means on the point cloud, so cell density follows
-sampling density. `resolution_profile()` scores every candidate cell
-count against the spatial structure of the observations, and
-`determine_optimal_levels()` reads one off their clustering when they
-have any. `build_tessellation()` produces Voronoi, hex, square
-or Delaunay cells clipped to your study area, with IDs that stay stable
-when the input row order changes. `summarize_by_cell()` aggregates onto
-them with a count and a standard error for every cell mean. When the
-cell means stand in for a population mean, it corrects those standard
-errors for within-cell autocorrelation, which on a correlated field can
-double them or more.
+places seeds by density-weighted k-means on the point cloud, so cells
+are small where observations are dense, and hold about the same number
+of observations each once there are more cells than dense places.
+`resolution_profile()` scores the cell count a number of observations
+per cell gives, 4.5 by default, by the leave-one-out error of the cell
+values, and `select_resolution()` sets it; given a ladder of counts the
+profile scores every one against the spatial structure of the
+observations, and `determine_optimal_levels()` reads one off their
+clustering when they have any. `build_tessellation()` produces Voronoi,
+hex, square or Delaunay cells clipped to your study area, with IDs that
+stay stable when the input row order changes. `summarize_by_cell()`
+aggregates onto them with a count and a standard error for every cell
+mean, and beside each mean a pooled value, the mean pulled toward the
+cells around it. When the cell means stand in for a population mean, it
+corrects those standard errors for within-cell autocorrelation, which on
+a correlated field can double them or more.
 
 Redrawing boundaries is easy. Knowing whether the result means anything
 is the hard part, so the second half of the package is the evidence
@@ -69,22 +74,23 @@ methods aggregating it over North Carolina</figcaption>
 
 How many cells is a decision with visible consequences. The same field
 below is cut at three resolutions beside the raw observations: too
-coarse blurs the hotspot, too fine chases noise with near-empty cells,
-and the middle count, the one `resolution_profile()` rates most
-reliable, keeps the trend without tracing the sampling pattern. It is a
-reading, not a verdict: the reliability of the cell means stays within 2
-percent of its best from 3 to 25 cells here, and the sites are spread
-evenly, so there is no elbow for `determine_optimal_levels()` to find.
-`vignette("resolution")` covers how that number is chosen and the four
-criteria that disagree about it.
+coarse blurs the hotspot, too fine chases noise with cells of a handful
+of observations, and the middle count, the one a ladder of counts from
+`resolution_profile(n_levels = )` rates most reliable, keeps the trend
+without tracing the sampling pattern. It is a reading, not a verdict:
+the reliability of the cell means stays within 2 percent of its best
+from 2 to 15 cells here, and the sites are spread evenly, so there is no
+elbow for `determine_optimal_levels()` to find. `vignette("resolution")`
+covers how that number is chosen and the criteria that disagree about
+it.
 
 <figure>
 <img
 src="https://raw.githubusercontent.com/elkronos/gis_modeling_toolkit/main/man/figures/readme-resolution.png"
-alt="Raw observations and the same spatial field tessellated at three resolutions, including the count resolution_profile() rates most reliable" />
+alt="Raw observations and the same spatial field tessellated at three resolutions, including the count a ladder of counts from resolution_profile() rates most reliable" />
 <figcaption aria-hidden="true">Raw observations and the same spatial
-field tessellated at three resolutions, including the count
-resolution_profile() rates most reliable</figcaption>
+field tessellated at three resolutions, including the count a ladder of
+counts from resolution_profile() rates most reliable</figcaption>
 </figure>
 
 The number a random fold reports on autocorrelated data is the reason
@@ -128,20 +134,20 @@ remotes::install_github("elkronos/gis_modeling_toolkit")
 remotes::install_github("elkronos/gis_modeling_toolkit", build_vignettes = TRUE)
 ```
 
-`sf`, `dplyr`, `logger` and `digest` install with it. Everything below
-is optional and needed only for the feature that uses it. A missing one
-produces a message naming it.
+`sf`, `dplyr`, `logger`, `digest` and `FNN` install with it. Everything
+below is optional and needed only for the feature that uses it. A
+missing one produces a message naming it.
 
 | install                        | for                                                                       |
 |--------------------------------|---------------------------------------------------------------------------|
 | `gstat`                        | variogram fitting: `estimate_sac_range()`, design effects, kriging checks |
 | `ranger`                       | `fit_rf_model()`, `cv_rf()`                                               |
-| `sp`, `GWmodel`                | `fit_gwr_model()`, `cv_gwr()`                                             |
+| `sp`                           | `fit_gwr_model()`, `cv_gwr()`                                             |
 | `brms` (plus a Stan toolchain) | `fit_bayesian_spatial_model()`, `cv_bayes()`                              |
 | `geometry`                     | Delaunay triangle tessellations                                           |
 | `ggplot2`                      | every `plot_*()` function and `plot()` method                             |
 | `patchwork`                    | the combined panels in `vignette("spatialkit_nc_demo")` and its script    |
-| `FNN`, `Matrix`                | sparse k-nearest-neighbour weights for Moran’s I on large layers          |
+| `Matrix`                       | sparse k-nearest-neighbour weights for Moran’s I on large layers          |
 | `loo`                          | PSIS-LOO for the Bayesian backend                                         |
 | `nlme`                         | REML detrending in `estimate_sac_range()`                                 |
 | `spdep`                        | cross-checks in the test suite only                                       |
@@ -177,15 +183,19 @@ asg   <- assign_features_to_polygons(site, tess$cells)
 cells <- summarize_by_cell(asg, "z", cells_sf = tess$cells, deff = "kish")
 
 populated <- st_drop_geometry(cells)[cells$n > 1 & !is.na(cells$n), ]
-head(populated[, c("poly_id", "n", "resp_mean_z", "..se_resp_z")], 4)
-#>   poly_id  n resp_mean_z ..se_resp_z
-#> 2       2 12  -0.3553720   0.3840250
-#> 3       3  6  -0.7977035   0.6491918
-#> 4       4  2  -1.8546732   0.1801251
-#> 5       5 14   0.0554452   0.7258217
+head(populated[, c("poly_id", "n", "resp_mean_z", "..se_resp_z",
+                   "..pooled_resp_z")], 4)
+#>   poly_id  n resp_mean_z ..se_resp_z ..pooled_resp_z
+#> 2       2 12  -0.3553720   0.3840250     -0.32153305
+#> 3       3  6  -0.7977035   0.6491918     -0.54245922
+#> 4       4  2  -1.8546732   0.1801251     -0.82499383
+#> 5       5 14   0.0554452   0.7258217      0.04565301
 ```
 
-Every aggregate arrives with a count and a standard error.
+Every aggregate arrives with a count and a standard error, and beside
+each mean a pooled value, `..pooled_resp_z`: the cell’s mean pulled
+toward the mean of the 8 cells around it, by a weight that grows with
+the cell’s count (`?summarize_by_cell`, “Pooled values”).
 `deff = "kish"` makes that the standard error of each cell mean as an
 estimate of the population mean, widened by the design effect of the
 within-cell correlation. For a map of the cells’ own values leave `deff`
@@ -194,6 +204,19 @@ mean when its points are spread through it (`?summarize_by_cell` says
 which to use when). A lattice laid over an irregular point cloud leaves
 some cells with one observation or none, which is why `n` travels with
 every row.
+
+These are the package’s defaults for cell values: pooled values beside
+the plain means, and, when the data draw the cells, 4.5 observations per
+cell in density-weighted cells. Each earlier default is one argument
+away. `summarize_by_cell(estimate = "mean")` leaves the pooled columns
+out. `resolution_profile(estimate = NULL, obs_per_cell = NULL)` gives
+the ladder of cell counts and its columns, and `sac = NULL` fits the
+variogram on a ladder of sizes too.
+`select_resolution(criterion = "cp")` reads Mallows’ Cp off a profile
+that has it. `partition = "kmeans"` in `resolution_profile()`,
+`get_voronoi_seeds()` and `voronoi_seeds_kmeans()` gives the k-means
+cells, from their earlier numbers of starts. `NEWS.md` says what each of
+these changes in a result.
 
 Now score a model. The learner below is a cubic trend surface in the
 coordinates, which is a realistic thing to fit and also the leakage
@@ -271,12 +294,14 @@ approximate.
 | cut my study area into cells                                            | `build_tessellation()` (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`)                                    |
 | place the seeds a Voronoi grows from                                    | `get_voronoi_seeds()`                                                                                       |
 | choose how many cells, quickly (coordinates only, no optional packages) | `determine_optimal_levels()`                                                                                |
-| see what every cell count costs                                         | `resolution_profile()`, then `summary()` on it for every criterion’s pick, or `select_resolution()` for one |
+| set the cell count from a number of observations per cell              | `resolution_profile()`, then `select_resolution()` (by default 4.5 per cell, for pooled values)             |
+| see what every cell count costs                                         | `resolution_profile(n_levels = )`, then `summary()` on it for every criterion’s pick, or `select_resolution(criterion = )` for one criterion’s pick |
+| read a cell’s value and interval at other locations                     | `cell_values_at()`                                                                                          |
 | put points into cells and aggregate                                     | `assign_features_to_polygons()` → `summarize_by_cell()`                                                     |
 | check whether a cell mean is the best estimate of that cell             | `kriging_adequacy()`                                                                                        |
 | draw the result                                                         | `plot_tessellation_map()`                                                                                   |
 | know how far spatial correlation reaches                                | `estimate_sac_range()`, and `sac_nugget()` for its nugget                                                   |
-| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`)                |
+| build honest CV folds                                                   | `make_folds()` (`random_kfold`, `block_kfold`, `buffered_loo`, `leave_location_out`, `nndm`, `knndm`)       |
 | see whether my folds actually separate                                  | `plot_folds()`                                                                                              |
 | size the blocks by measurement                                          | `cv_block_size_sweep()`, and `plot()` on the result                                                         |
 | fit a model                                                             | `fit_gwr_model()`, `fit_bayesian_spatial_model()`, `fit_rf_model()`                                         |
@@ -313,8 +338,8 @@ afternoon comparing them:
 
 | Backend                                                          | Reach for it when you want                                                                                                                                                                                                                                                 | Cost                                              |
 |------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
-| **GWR** (`fit_gwr_model()`, `GWmodel` + `sp`)                    | spatially varying **coefficients** you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east”                                                                                                                | moderate; grows quickly with n                    |
-| **Bayesian spatial GP** (`fit_bayesian_spatial_model()`, `brms`) | calibrated **uncertainty**: posterior predictive intervals, `se = TRUE` surfaces (the SD of the mean surface; add `type = "predict"` for the predictive SD), CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
+| **GWR** (`fit_gwr_model()`, `sp`)                                | spatially varying **coefficients** you can interpret and map. Only this backend answers “the elevation effect is strong in the west and absent in the east”                                                                                                                | moderate; grows quickly with n                    |
+| **Bayesian spatial GP** (`fit_bayesian_spatial_model()`, `brms`) | **uncertainty**: posterior predictive intervals (check their coverage with `cv_bayes()`), `se = TRUE` surfaces (the SD of the mean surface; add `type = "predict"` for the predictive SD), CRPS. Also the natural spatial null: `predictor_vars = character(0)` fits an intercept-only GP, which asks how much of the surface is spatial structure and how much is covariate effect | far the highest; every CV fold is a full MCMC run |
 | **Random forest** (`fit_rf_model()`, `ranger`)                   | **nonlinearity and interactions** without specifying them, and no inference: you get permutation importance in place of coefficients                                                                                                                                       | far the lowest; the one to prototype with         |
 
 Two things that are not backend choices. First, none of them fixes bad
@@ -333,8 +358,8 @@ in them is computed on the spot.
 | vignette                               | covers                                                                                                                  |
 |----------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
 | `vignette("getting-started")`          | installing, getting your data in, what the coordinates are in, and the pipeline from points to a scored model and a map |
-| `vignette("resolution")`               | choosing a cell count, the four criteria, and why they disagree                                                         |
-| `vignette("spatial-cross-validation")` | the five fold schemes, block sizing, and reading a CV result down to the last row                                       |
+| `vignette("resolution")`               | choosing a cell count, the criteria, and why they disagree                                                              |
+| `vignette("spatial-cross-validation")` | the six fold schemes, block sizing, and reading a CV result down to the last row                                        |
 | `vignette("diagnostics")`              | residual autocorrelation, aggregation standard errors, kriging adequacy, area of applicability, and two ways to leak    |
 | `vignette("spatialkit_nc_demo")`       | the whole pipeline end to end on real boundaries, with maps                                                             |
 | `vignette("reporting")`                | grouping an existing layer, membership lookups, exporting the regions, and which six numbers to report                  |
@@ -365,14 +390,14 @@ source(file.path(dir, "00-run-all.R"))  # all ten, seven minutes or so
 | script                | topic                                                              | needs, beyond ggplot2                                   |
 |-----------------------|--------------------------------------------------------------------|---------------------------------------------------------|
 | `01-tessellations.R`  | Voronoi, hex, square and Delaunay cells, and what seeding changes  | geometry for the Delaunay part                          |
-| `02-resolution.R`     | the range, the ladder, four criteria that disagree, and the leak   | gstat                                                   |
+| `02-resolution.R`     | the range, the ladder, the criteria that disagree, the leak, and the default size | gstat                                    |
 | `03-folds.R`          | random against blocked folds, plus buffered leave-one-out and NNDM |                                                         |
 | `04-block-size.R`     | sweeping the block size, and the two shapes the curve takes        | gstat, for the range marker                             |
 | `05-fit-diagnose.R`   | wrapping your own model, residual autocorrelation, cell means      | gstat, for the residual variogram and the kriging check |
-| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                  | ranger and GWmodel, for the backend comparison          |
+| `06-cv-compare.R`     | comparing models fold by fold on one set of folds                  | ranger and sp, for the backend comparison               |
 | `07-surface-aoa.R`    | predicting onto a grid, and where the map stops meaning anything   | stars for the raster part                               |
 | `08-feature-select.R` | forward selection, and measuring the selection effect              |                                                         |
-| `09-gwr.R`            | coefficients that vary over space                                  | GWmodel                                                 |
+| `09-gwr.R`            | coefficients that vary over space                                  | sp                                                      |
 | `10-bayes.R`          | a Bayesian GP, and whether its intervals are calibrated            | brms and a Stan toolchain; slow                         |
 
 Every script draws with ggplot2. When a package a script needs is absent
@@ -395,7 +420,7 @@ telling you.
 lattice has no extent of its own. Pass `boundary =` a polygon;
 dissolving your source polygons with `st_union()` is the usual way to
 get one. Voronoi and `"triangles"` do not need it; Voronoi falls back to
-the convex hull of the points.
+the convex hull of the points, or of their cover for seeds.
 
 **`prep_model_data(): missing required column(s): X`** A `response_var`
 or `predictor_vars` name that is not in the data. Usually a typo, a case
@@ -441,8 +466,8 @@ above 5,000,000 grid cells for the same reason.
 
 **`n = 6000 requires FNN for k-NN weights, and Matrix to hold them sparsely`**
 `residual_morans_i()` above n = 5,000. The fallback allocates a dense n
-x n matrix, which is why it stops here.
-`install.packages(c("FNN", "Matrix"))`, both of them.
+x n matrix, which is why it stops here. FNN installs with spatialkit, so
+the missing one is Matrix: `install.packages("Matrix")`.
 
 **`compare_models_cv(): no recognised model requested.`** None of the
 names in `models` is `"GWR"`, `"Bayesian"` or `"RF"`, which are matched
@@ -466,7 +491,7 @@ asked for.
 
 **`estimate_sac_range()` returned `NA`.** The range was not identified,
 so nothing is reported. `attr(x, "rejected_reason")` names which of the
-six refusals it was, `?estimate_sac_range` says what each one means,
+seven refusals it was, `?estimate_sac_range` says what each one means,
 and `plot()` on the returned object draws the variogram behind it.
 `vignette("spatial-cross-validation")` covers what an `NA` there leaves
 you to decide about the block size.
@@ -503,9 +528,8 @@ changed, and seeing what the package is doing.
 for fold-level parallelism via `parallel::mclapply()` (macOS/Linux; falls
 back to sequential on Windows with a message). `cv_gwr()` accepts it too
 but always runs its folds one after another, with a warning if you ask
-for more: GWmodel runs OpenMP code, which deadlocks forked workers once a
-GWR has been fitted in the session. Parallel folds matter most for
-`cv_bayes()`, where every fold is a full MCMC run:
+for more. Parallel folds matter most for `cv_bayes()`, where every fold
+is a full MCMC run:
 
 ``` r
 # cv_bayes() needs `brms`. Without it every fold fails and you get an empty
@@ -609,9 +633,9 @@ reproduces them.
 
 The README figures are generated from actual package output; regenerate
 them with `Rscript dev/make_readme_figures.R`. `readme-resolution.png`
-labels the cell count `resolution_profile()` rates most reliable on that
-data, so it goes stale whenever that criterion’s answer changes and must
-be rebuilt alongside it.
+labels the cell count a ladder of counts from `resolution_profile()`
+rates most reliable on that data, so it goes stale whenever that
+criterion’s answer changes and must be rebuilt alongside it.
 
 The test suite covers the geometry/tessellation pipeline, every exported
 function, and targeted regression tests for the statistical internals
@@ -657,7 +681,8 @@ the method references you should cite alongside it if you rely on
 `make_folds(method = "nndm")` (Milà et al. 2022), the Bayesian GP basis
 (Riutort-Mayol et al. 2023), permutation importance in `fit_rf_model()`
 (Strobl et al. 2007), coordinate predictors and blocked validation
-(Meyer et al. 2019), or GWR via `GWmodel` (Lu et al. 2014).
+(Meyer et al. 2019), or GWR, whose kernels and diagnostics follow
+`GWmodel` (Lu et al. 2014).
 
 ### Maintainer
 

@@ -58,7 +58,7 @@ test_that("a non-finite numeric deff falls back to 1 with the classed warning", 
     # NA and NaN used to stop with "missing value where TRUE/FALSE needed";
     # Inf passed the check and gave uncorrected SEs beside cell_weight 0.
     expect_warning(
-      out <- summarize_by_cell(pts, "v", deff = bad),
+      out <- summarize_by_cell(pts, "v", deff = bad, estimate = "mean"),
       "must be a single number >= 1", class = "spatialkit_deff_fallback")
     expect_equal(out$cell_weight, out$n)
     expect_null(attr(out, "deff_applied"))
@@ -69,11 +69,11 @@ test_that("a non-finite numeric deff falls back to 1 with the classed warning", 
 test_that("deff_applied marks each row, and survives binding results together", {
   pts <- .r2_points()
   # The default frame is unchanged: no column.
-  expect_false("deff_applied" %in% names(summarize_by_cell(pts, "v")))
-  fixed <- summarize_by_cell(pts, "v", deff = 2)
+  expect_false("deff_applied" %in% names(summarize_by_cell(pts, "v", estimate = "mean")))
+  fixed <- summarize_by_cell(pts, "v", deff = 2, estimate = "mean")
   expect_identical(fixed$deff_applied, rep(TRUE, 4))
   expect_false(is.null(attr(fixed, "deff_applied")))
-  fell <- suppressWarnings(summarize_by_cell(pts, "v", deff = 0.5))
+  fell <- suppressWarnings(summarize_by_cell(pts, "v", deff = 0.5, estimate = "mean"))
   expect_identical(fell$deff_applied, rep(FALSE, 4))
   # Combined, the attribute is at best the first result's (bind_rows()) or
   # gone (rbind()); the column describes every row.
@@ -83,7 +83,7 @@ test_that("deff_applied marks each row, and survives binding results together", 
                    rep(c(FALSE, TRUE), each = 4))
 })
 
-test_that("a rejected sac falls back with the classed warning and FALSE rows", {
+test_that("a rejected sac falls back to Kish with the classed warning, and the rows say so", {
   pts <- .r2_field()
   rejected <- structure(NA_real_, class = c("sac_range", "numeric"),
                         rejected_reason = "fitted range exceeds the largest lag fitted",
@@ -91,13 +91,19 @@ test_that("a rejected sac falls back with the classed warning and FALSE rows", {
                                                      range = 1e6))
   expect_warning(
     out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram",
-                             sac = rejected),
+                             sac = rejected, estimate = "mean"),
     "fitted range exceeds", class = "spatialkit_deff_fallback")
-  expect_identical(out$deff_applied, rep(FALSE, 6))
+  # The fallback is Kish now (this used to assert deff_applied FALSE on every
+  # row, the uncorrected SE): a correction was applied, and `deff_method`
+  # says it was not the one asked for.
+  expect_identical(out$deff_applied, rep(TRUE, 6))
+  expect_identical(out$deff_method, rep("kish (variogram fallback)", 6))
+  kish <- summarize_by_cell(pts, predictor_vars = "z", deff = "kish", estimate = "mean")
+  expect_equal(out[["..se_pred_z"]], kish[["..se_pred_z"]], tolerance = 1e-12)
   # Caught by class, without matching the message.
   caught <- tryCatch(
     summarize_by_cell(pts, predictor_vars = "z", deff = "variogram",
-                      sac = rejected),
+                      sac = rejected, estimate = "mean"),
     spatialkit_deff_fallback = function(w) "caught")
   expect_identical(caught, "caught")
   # Joined to cells, an empty cell carries NA rather than a verdict.
@@ -105,7 +111,7 @@ test_that("a rejected sac falls back with the classed warning and FALSE rows", {
                      geometry = sf::st_sfc(lapply(0:6, function(i) .r2_sq(100 * i, 0, 60)),
                                            crs = 32632))
   ok <- summarize_by_cell(pts, "z", deff = "variogram", sac = .r2_sac(),
-                          cells_sf = cells)
+                          cells_sf = cells, estimate = "mean")
   expect_identical(ok$deff_applied, c(rep(TRUE, 6), NA))
 })
 
@@ -130,7 +136,7 @@ test_that("each cell's correlation matrix is built once, not once per column sta
     n_builds <<- n_builds + 1L
     real(...)
   })
-  summarize_by_cell(pts, "z", deff = "variogram", sac = sac)
+  summarize_by_cell(pts, "z", deff = "variogram", sac = sac, estimate = "mean")
   # One per cell; the design effect at the row count reuses them (it used to
   # rebuild all six).
   expect_identical(n_builds, 6L)
@@ -140,7 +146,7 @@ test_that("each cell's correlation matrix is built once, not once per column sta
   p2$z[c(1, 30, 60)] <- NA         # one missing value in cells 1, 2 and 3
   p2$w <- p2$z + 1
   summarize_by_cell(p2, "z", predictor_vars = "w", deff = "variogram",
-                    sac = sac, conf_level = 0.95)
+                    sac = sac, conf_level = 0.95, estimate = "mean")
   # 6 for the cells, then per column the three incomplete cells once each
   # (z and w), and cell_weight's three: 15.  The se/neff/df/ci closures used
   # to rebuild each of those five times: 45.
@@ -154,7 +160,7 @@ test_that("an empty point no longer stops deff = 'variogram'", {
   empty <- pts
   sf::st_geometry(empty) <- g
   res <- .r2_warnings(summarize_by_cell(empty, "z", deff = "variogram",
-                                        sac = .r2_sac()))
+                                        sac = .r2_sac(), estimate = "mean"))
   expect_true(any(grepl("1 point\\(s\\) have empty or non-finite coordinates",
                         res$warnings)))
   out <- res$value
@@ -162,7 +168,7 @@ test_that("an empty point no longer stops deff = 'variogram'", {
   # Its value still counts in its cell; the other cells are untouched.
   expect_identical(out$n[1], 25L)
   expect_equal(out$resp_mean_z[1], mean(pts$z[1:25]))
-  ref <- summarize_by_cell(pts, "z", deff = "variogram", sac = .r2_sac())
+  ref <- summarize_by_cell(pts, "z", deff = "variogram", sac = .r2_sac(), estimate = "mean")
   expect_equal(out[["..se_resp_z"]][-1], ref[["..se_resp_z"]][-1])
   # The design effect of cell 1 is 1 + (25 - 1) * rbar over its 24 located
   # points.
@@ -204,7 +210,7 @@ test_that("an anisotropic variogram is evaluated in its own geometry", {
                       coords = c("x", "y"), crs = 32632)
   sac <- structure(300, class = c("sac_range", "numeric"),
                    variogram_model = m, crs = sf::st_crs(32632))
-  out <- summarize_by_cell(pts, "v", deff = "variogram", sac = sac)
+  out <- summarize_by_cell(pts, "v", deff = "variogram", sac = sac, estimate = "mean")
   d <- as.matrix(stats::dist(cbind(seq(0, 450, by = 50), 0)))
   R <- 0.8 * exp(-d / 60); diag(R) <- 1
   expect_equal(attr(out, "deff_applied")$deff, sum(R) / 10)
@@ -215,15 +221,15 @@ test_that("an anisotropic variogram is evaluated in its own geometry", {
 
 test_that("a response_var that cannot be summarised is a warning, not a silent skip", {
   pts <- .r2_points()
-  expect_warning(out <- summarize_by_cell(pts, "vall"),
+  expect_warning(out <- summarize_by_cell(pts, "vall", estimate = "mean"),
                  "response_var 'vall' is not a column")
   expect_false(any(grepl("^resp_", names(out))))
   pts$flag <- pts$v > 0
-  expect_warning(summarize_by_cell(pts, "flag"), "'flag' are not numeric")
-  expect_warning(summarize_by_cell(pts, "v", predictor_vars = c("v", "nope")),
+  expect_warning(summarize_by_cell(pts, "flag", estimate = "mean"), "'flag' are not numeric")
+  expect_warning(summarize_by_cell(pts, "v", predictor_vars = c("v", "nope"), estimate = "mean"),
                  "predictor_vars 'nope' are not columns")
   # Two names used to stop with "the condition has length > 1".
-  expect_error(summarize_by_cell(pts, c("v", "flag")),
+  expect_error(summarize_by_cell(pts, c("v", "flag"), estimate = "mean"),
                "`response_var` must be a single column name")
 })
 
@@ -237,7 +243,7 @@ test_that("a double ID of 100000 still joins an integer cell ID", {
                       coords = c("x", "y"), crs = 32632)
   a <- assign_features_to_polygons(pts, cells)
   a$poly_id <- as.double(a$poly_id)      # as from a GeoPackage Integer64 field
-  res <- .r2_warnings(summarize_by_cell(a, "v", cells_sf = cells))
+  res <- .r2_warnings(summarize_by_cell(a, "v", cells_sf = cells, estimate = "mean"))
   out <- res$value
   # as.character(1e5) is "1e+05": that cell came back NA and its 11 points
   # were lost, with no R warning.
@@ -253,7 +259,7 @@ test_that("summarised IDs that match no cell are reported", {
   cells <- sf::st_sf(poly_id = 1:3,
                      geometry = sf::st_sfc(lapply(0:2, function(i) .r2_sq(10 * i, 0)),
                                            crs = 32632))
-  expect_warning(out <- summarize_by_cell(pts, "v", cells_sf = cells),
+  expect_warning(out <- summarize_by_cell(pts, "v", cells_sf = cells, estimate = "mean"),
                  "1 of the 4 summarised cell ID\\(s\\) \\(4\\) match no")
   expect_identical(nrow(out), 3L)
 })
@@ -268,7 +274,7 @@ test_that("cells keyed by 'id' are joined like assign_features_to_polygons() rea
                                  y = runif(18, 0, 10), v = rnorm(18)),
                       coords = c("x", "y"), crs = 32632)
   a <- assign_features_to_polygons(pts, cells)      # takes the 'id' column
-  out <- summarize_by_cell(a, "v", cells_sf = cells, area = TRUE)
+  out <- summarize_by_cell(a, "v", cells_sf = cells, area = TRUE, estimate = "mean")
   expect_s3_class(out, "sf")
   # Joined on 'id', not on the differently numbered 'cell_id': each count
   # sits on its own polygon.
@@ -280,25 +286,26 @@ test_that("cells keyed by 'id' are joined like assign_features_to_polygons() rea
   # No ID column at all: a warning and a plain table, or an error when an
   # area was asked for.  It used to be one log line and a plain table.
   nocol <- cells[, "geometry"]
-  expect_warning(plain <- summarize_by_cell(a, "v", cells_sf = nocol),
+  expect_warning(plain <- summarize_by_cell(a, "v", cells_sf = nocol, estimate = "mean"),
                  "has none of the ID columns")
   expect_false(inherits(plain, "sf"))
-  expect_error(summarize_by_cell(a, "v", cells_sf = nocol, area = TRUE),
+  expect_error(summarize_by_cell(a, "v", cells_sf = nocol, area = TRUE, estimate = "mean"),
                "`area = TRUE` needs the cells' areas")
-  expect_warning(summarize_by_cell(a, "v", cells_sf = sf::st_drop_geometry(cells)),
+  expect_warning(summarize_by_cell(a, "v", cells_sf = sf::st_drop_geometry(cells),
+                                   estimate = "mean"),
                  "`cells_sf` is not an sf object")
 })
 
 test_that("agg_funs takes a bare function or function names", {
   pts <- .r2_points()
   med <- tapply(pts$v, pts$poly_id, median)
-  out <- summarize_by_cell(pts, "v", agg_funs = median)
+  out <- summarize_by_cell(pts, "v", agg_funs = median, estimate = "mean")
   # It used to become the mean, with only a log line.
   expect_equal(out$resp_median_v, as.numeric(med))
-  out2 <- summarize_by_cell(pts, "v", agg_funs = c("median", "sum"))
+  out2 <- summarize_by_cell(pts, "v", agg_funs = c("median", "sum"), estimate = "mean")
   expect_equal(out2$resp_median_v, as.numeric(med))
   expect_equal(out2$resp_sum_v, as.numeric(tapply(pts$v, pts$poly_id, sum)))
-  expect_warning(out3 <- summarize_by_cell(pts, "v", agg_funs = 3),
+  expect_warning(out3 <- summarize_by_cell(pts, "v", agg_funs = 3, estimate = "mean"),
                  "Falling back to the mean")
   expect_true("resp_mean_v" %in% names(out3))
 })

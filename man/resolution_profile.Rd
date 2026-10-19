@@ -12,11 +12,18 @@ resolution_profile(
   n_levels = 20L,
   min_cell_n = 9L,
   sample_n = 1500L,
-  nstart = 25L,
+  nstart = NULL,
   seed = 123L,
-  sac = NULL,
+  sac = "auto",
   select_on = c("all", "split"),
-  range_floor = TRUE
+  range_floor = FALSE,
+  partition = c("density", "kmeans"),
+  init = c("kmeans++", "random"),
+  density_power = 1,
+  density_k = 8L,
+  iter_max = NULL,
+  estimate = "auto",
+  obs_per_cell = "auto"
 )
 }
 \arguments{
@@ -25,11 +32,17 @@ representative points).  Features with empty or non-finite coordinates
 are dropped with a warning.}
 
 \item{response_var}{Optional response column name (numeric or logical).
-Enables \code{cp} and \code{moran_z}.  A variogram estimated from it also
-sets the floor of the ladder and \code{reliability}.  Rows where it, or a
-predictor, is missing or non-finite stay in the geometry and are left out
-of the OLS fit, the RSS, \code{cp} and \code{moran_z}; a logged warning
-gives their number.}
+Enables \code{cp} and \code{moran_z}, and, when it is numeric, the
+pooled estimate the default profile scores by \code{loo}.  A variogram
+estimated from it also gives the range floor the bounds report and
+\code{reliability}; it is estimated on a ladder of counts or when
+\code{sac} asks for it, and not on the default ladder of one size, so
+\code{cp} and \code{reliability} are \code{NA} there.  Rows
+where it, or a predictor, is missing or non-finite stay in the geometry
+and are left out of the OLS fit, the RSS, \code{cp}, \code{moran_z} and
+the count the support ceiling divides by \code{min_cell_n}; a logged
+warning gives their number, and an R warning says so when they lower
+the ceiling.}
 
 \item{predictor_vars}{Optional predictor column names (numeric or
 logical).  With them, \code{cp} scores the OLS residuals of the response
@@ -42,20 +55,39 @@ at or above the number of points, are dropped (k-means cannot place more
 centres than there are distinct points, and \code{stats::kmeans()}
 refuses as many centres as points).}
 
-\item{n_levels}{Number of levels on the ladder.  Default 20.}
+\item{n_levels}{Number of levels on the ladder.  Default 20.  The ladder
+has fewer when rounding puts two of them on one count, and one more
+when the range floor is added as a level (see "The ladder and its
+bounds").  Supplying it, or \code{min_cell_n}, \code{sample_n},
+\code{levels} or \code{range_floor}, gives that ladder in place of the
+ladder of sizes \code{obs_per_cell = "auto"} would set.}
 
-\item{min_cell_n}{Minimum average number of points per cell that a level
-must keep; sets the ceiling.  Default 9.}
+\item{min_cell_n}{Minimum average number of rows per cell that a level
+must keep (scored rows when \code{response_var} is given: those with a
+response and every predictor; points otherwise); sets the ceiling.
+Default 9.  A layer that cannot give two cells that many is profiled at
+two cells, or at the \code{levels} asked for, with
+\code{supported = FALSE} and a warning.  It is floored to a whole
+number, and it is not read on a ladder \code{obs_per_cell} sets (see
+"The ladder and its bounds").}
 
 \item{sample_n}{Points are subsampled to this many before the k-means
-fits, as in \code{determine_optimal_levels()}.  Default 1500.  The
-columns read off the fitted cells (\code{wss}, the \code{cell_} columns,
-\code{rss}, \code{moran_i}, \code{moran_z}) describe the subsample; the
-bounds, \code{supported}, the variance term of \code{cp} and
-\code{reliability} describe every point of the layer, so the answer does
-not change with \code{sample_n} except through the fits.}
+fits, as in \code{determine_optimal_levels()}, on the ladder of "The
+ladder and its bounds"; on a ladder of sizes, the default, the centres
+are fitted to every row.  Default 1500.  The
+columns read off the fitted cells (\code{wss}, the \code{cell_} and
+\code{cells_} columns, \code{rss}, \code{moran_i}, \code{moran_z})
+describe the subsample; the bounds, \code{supported}, the variance term
+of \code{cp} and \code{reliability} describe the whole layer, so the
+answer does not change with \code{sample_n} except through the fits.}
 
-\item{nstart}{k-means++ restarts per level.  Default 25.}
+\item{nstart}{Starts per level; the best is kept.  They are k-means++
+starts unless \code{init} says otherwise.  \code{NULL} (default) is the
+kind's own number: 3 for the kind \code{"density"} and 25 for the kind
+\code{"kmeans"}, the number earlier versions ran.  A number is run
+under either \code{partition}: \code{nstart = 25} gives the density
+kind the starts it had when 25 was the default.
+\code{attr(, "nstart")} holds the number that was run.}
 
 \item{seed}{RNG seed for the subsample and the restarts; restored
 afterwards.  Default 123.  The rows are put in coordinate order before
@@ -72,16 +104,19 @@ to which the points are transformed first, so the area, the floor and
 \code{cell_diam_median} are then in that CRS's units.  A sac whose
 range was rejected (\code{NA} with a \code{rejected_reason}) gives
 \code{cp} its nugget, with a warning, and leaves \code{reliability}
-\code{NA}, since that needs the range; one whose model did not converge,
-or whose range is below the shortest lag fitted (a structure that
-cannot be told from a nugget, so the nugget is not identified either),
+\code{NA}, since that needs the range; one whose model did not converge
+(its fit has no minimum inside the ranges searched, so its nugget and
+sill are not fitted values), or whose range is below the shortest lag
+fitted (a structure that cannot be told from a nugget, so the nugget is
+not identified either),
 gives neither, and \code{cp} takes its noise variance from the finest
 level (see \code{cp} above).  Whether the model converged is read from
 the model (\code{attr(attr(sac, "variogram_model"), "converged")}, which
-\code{estimate_sac_range()} sets), not from the reason: the reason names
-one ground for the refusal, and a fit that did not converge is most
-often refused as past the largest lag.  The warning then names both.  A
-sac that carries no such flag (one made by hand, say) is judged by its
+\code{\link{estimate_sac_range}()} sets and describes), not from the
+reason: the reason names one ground for the refusal, and such a fit is
+refused as past the largest lag.  The warning then names both.  A
+sac that carries no such flag (one made by hand, or built from REML
+parameters) is judged by its
 reason.  Under \code{select_on = "split"} the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on \code{data_sf[attr(p, "split")$selection, ]} and pass it to a second
@@ -90,10 +125,27 @@ call with the same \code{seed}, which makes the same split.  When
 (its selection half under \code{"split"}) with the same
 \code{predictor_vars}.  A plain number is taken as the range alone, in
 the units of the CRS the profile is computed in (metres for lon/lat
-input): it sets the floor, \code{reliability}, which needs a fitted
-model, is \code{NA}, and \code{cp} takes its noise variance from the
-finest level.  A \code{units} object is refused
-rather than read as a number in whatever unit it was written in.}
+input): it gives the range floor, \code{reliability}, which needs a
+fitted model, is \code{NA}, and \code{cp} takes its noise variance from
+the finest level.  A sac refused because the response shows no spatial
+structure (either of the two \code{rejected_reason} values of
+\code{\link{estimate_sac_range}()} that say so; the model it attaches
+is a pure nugget) gives \code{cp} no
+nugget either, and \code{select_resolution()} then returns
+\code{structured = FALSE}.  A \code{units} object is refused
+rather than read as a number in whatever unit it was written in.
+The string \code{"auto"}, the default, is \code{NULL} on every ladder
+but one that \code{obs_per_cell} sets.  On that ladder no variogram is
+estimated or
+read: \code{cp} and \code{reliability} are \code{NA} at every level,
+\code{cp} takes no noise variance from the finest level in its place,
+\code{attr(, "cp_noise")} is a list whose \code{source} is
+\code{"none"} and whose \code{reason} says why, and the
+\code{variogram} and \code{sac} attributes are \code{NULL}.  The
+other columns do not read the variogram and are the numbers
+\code{sac = NULL} gives.  \code{sac = NULL}, the default of earlier
+versions, estimates the variogram on a ladder of sizes too, and gives
+\code{cp} and \code{reliability} there.}
 
 \item{select_on}{\code{"all"} (default) profiles every point;
 \code{"split"} reads the response on one spatially blocked half only
@@ -108,27 +160,143 @@ never touches them.  See the "Post-selection inference" section of
 \code{\link{determine_optimal_levels}}; the profile reads the response
 whenever \code{response_var} is given.}
 
-\item{range_floor}{\code{TRUE} (default) starts the ladder at the range
-floor when the data support it; \code{FALSE} starts it at 2 whatever
-the range, and the floor is only reported in the bounds and the print.
-Use \code{FALSE} to compare profiles whose range estimates differ (see
-"The ladder and its bounds").}
+\item{range_floor}{\code{FALSE} (default) starts the ladder at 2 whatever
+the range, and the range floor is reported in the bounds and the print
+without being applied.  \code{TRUE} starts the ladder at the floor when
+the data support it and the floor is below the ceiling, as the default
+did up to version 2.0.0; an estimated range then sets the fewest cells
+any criterion can choose (see "The ladder and its bounds").}
+
+\item{partition}{What the centres of the regions minimise, at every level
+of the ladder.  \code{"density"} (default): the sum of squared
+distances from the points to their nearest centre, each point weighted
+by its local density to the power \code{density_power}; compact cells
+that, at the default power, hold about the same number of points each
+once there are more cells than dense places, and counts about as uneven
+as \code{"kmeans"} gives below that.  \code{"kmeans"}: the same sum
+unweighted; compact cells whose counts are several times higher in
+dense places than in sparse ones.  \code{"kmeans"} was the default of
+earlier versions, and with \code{nstart = NULL} it runs their 25
+starts.  See "The partition".}
+
+\item{init}{How each start is drawn.  \code{"kmeans++"} (default): the
+centres one at a time, each in proportion to its squared distance from
+those already drawn, times its weight under \code{partition =
+"density"}.  \code{"random"}: \code{k} distinct locations at random, as
+\code{\link[stats]{kmeans}()} draws them.}
+
+\item{density_power}{For \code{partition = "density"}: the power the local
+density is raised to for a point's weight, a number from 0 to 2.
+Default 1, which evens out the cell counts once the cells outnumber the
+dense places (see "The partition").  \code{0} weights every
+point alike, the objective of \code{"kmeans"} (reached by Lloyd's
+iteration, so the centres are close to that kind's and not equal to
+them); values between give counts between the two; values above 1 give
+the cells of dense places fewer points than those of sparse places.
+Setting it under \code{partition = "kmeans"}, which does not read it,
+is a warning.}
+
+\item{density_k}{For \code{partition = "density"}: the number of nearest
+neighbours the local density is read from.  Default 8.  It is held to
+one fewer than the distinct locations.  A small number follows the
+density closely and noisily; a large one smooths it.  Setting it under
+\code{partition = "kmeans"} is a warning.}
+
+\item{iter_max}{The most iterations a start runs for: a single positive
+whole number, or \code{NULL} (default) for the kind's own limit, 50 for
+\code{partition = "kmeans"} from k-means++ starts and 100 for random
+starts and for \code{partition = "density"}.  A kept start that was cut
+off at the limit is a warning of class
+\code{"spatialkit_not_converged"}, except for the kind \code{"kmeans"}
+from k-means++ starts under \code{iter_max = NULL}, which reports
+nothing, as it always has.}
+
+\item{estimate}{The cell value the profile scores, which is the one
+\code{\link{summarize_by_cell}()} is to report: \code{"auto"}
+(default; see below), \code{NULL} for none, \code{"mean"} for the
+plain mean of a cell's rows, \code{"pooled"} for the mean pulled toward
+the mean of the 8 nearest cells.  With an estimate the profile gains
+five columns and \code{attr(, "estimate")} (see "Value"), and every
+column and attribute it has without one is unchanged.  \code{loo} is
+the leave-one-out mean squared error of that estimate: each row predicted
+by the value of its cell computed without it.  Under \code{"mean"} a
+row in a cell of two or more is predicted by the mean of the others,
+and a row alone in its cell by the mean of the cell of its nearest
+other row.  Under \code{"pooled"} the cell's mean and its own weight
+are computed again without the row, and the spread inside the cells,
+the spread between a cell and its target, and the targets are held.
+It is computed on every row of the layer with a finite response (of the
+selection half under \code{select_on = "split"}), not on the subsample
+the centres were fitted to, and each row is scored in the cell of its
+nearest centre, the cell \code{\link{get_voronoi_seeds}()} hands on.
+It needs no variogram.  Rows at one location are left out one at a
+time.  \code{"auto"} is \code{"pooled"} when there is a numeric
+\code{response_var} with a finite value and no \code{predictor_vars},
+and \code{NULL} otherwise.  \code{NULL}, the default of earlier
+versions, scores none and gives the profile without the five columns.
+\code{"mean"} and \code{"pooled"} are
+errors without a \code{response_var}, with \code{predictor_vars} (the
+profile would then score residuals, and the summary reports cell values
+of the response), with a logical response, and with a response that has
+no finite value.}
+
+\item{obs_per_cell}{Rows per cell: \code{"auto"} (default; see below);
+\code{NULL} for the ladder described under "The ladder and its
+bounds", the default of earlier versions, whatever the other arguments
+are; or one number or several, each at least 1 (fractions are
+allowed), for a ladder of sizes.  The level of a size \eqn{s} is
+\code{max(2, round(n / s))} cells, with \eqn{n} the rows that have a
+response (and, with \code{predictor_vars}, every predictor), or every
+point when there is no \code{response_var} or no row has a response.
+Under \code{select_on = "split"} \eqn{n} counts the rows of both
+halves, since the cells are built on every point.  On a ladder of sizes
+the centres are fitted to every row, no subsample is drawn, and
+\code{n_levels}, \code{min_cell_n}, \code{sample_n} and
+\code{range_floor} are not read: supplying \code{n_levels},
+\code{min_cell_n}, \code{sample_n} or \code{range_floor = TRUE} beside
+a numeric \code{obs_per_cell} is a warning of class
+\code{spatialkit_ladder_unused}, and \code{levels} beside it is an
+error.  A level is held to the most centres k-means can place (the
+distinct locations, and one short of the points).  \code{"auto"} is
+\code{NULL} when \code{levels} is given or the caller supplies any of
+those four arguments; otherwise 4.5 when the estimate is
+\code{"pooled"}, the seven sizes 18, 12, 9, 6, 4.5, 3 and 2 when it is
+\code{"mean"}, and \code{NULL} without an estimate.  The cost of a
+ladder of sizes is bounded before any fit (see "Conditions").}
 }
 \value{
 A data.frame of class \code{resolution_profile} with one row per
-level and columns \code{levels}, \code{wss}, \code{wss_spread} (relative
-spread of WSS across the restarts), \code{elbow}, \code{cell_n_min},
+level and columns \code{levels}, \code{wss} (the within-cell sum of
+squares of the coordinates, every point counted once, under either
+\code{partition}), \code{wss_spread} (relative
+spread of WSS across the restarts; under \code{partition = "density"},
+of the weighted sum the starts minimise), \code{elbow}, \code{cell_n_min},
 \code{cell_n_median}, \code{cell_diam_median} (twice the median RMS
 radius of the cells, in coordinate units: about 0.8 of the side of a
 square cell of the same area, and less for finer cells, so a size to
 compare levels by rather than a width), \code{rss}, \code{cp},
-\code{moran_i}, \code{moran_z} and \code{reliability}; columns a missing
-input leaves undefined are \code{NA}.  Attributes: \code{bounds} (a list
-with \code{floor}, \code{ceiling}, \code{ceiling_from} (\code{"min_cell_n"},
-\code{"distinct locations"} or \code{"sample_n"}, whichever bound it),
-\code{supported}, \code{area}, \code{range}, \code{n} (the points in the
-layer), \code{n_sample} (the points the k-means fits ran on),
-\code{n_distinct}, \code{min_cell_n}, \code{range_floor}),
+\code{moran_i}, \code{moran_z}, \code{reliability}, \code{cells_resp}
+(the cells that hold at least one scored row) and \code{cell_resp_mean}
+(the scored rows per such cell; compare it with \code{min_cell_n}).
+Like the other columns read off the fitted cells, the last two count
+rows of the subsample when the layer is larger than \code{sample_n}:
+the cells of the layer then hold about \code{n_response / n_scored}
+times as many scored rows as \code{cell_resp_mean} shows.
+Columns a missing input leaves undefined are \code{NA}.  Attributes:
+\code{bounds} (a list with \code{floor}, \code{ceiling},
+\code{ceiling_from} (\code{"min_cell_n"}, \code{"min_cell_n (rows with a
+  response)"}, \code{"distinct locations"}, \code{"sample_n"},
+\code{"fewer than two supported cells"} or \code{"fewer than two
+  distinct locations"}, whichever bound it), \code{supported}, \code{area},
+\code{range}, \code{n} (the points in the layer), \code{n_sample} (the
+points the k-means fits ran on), \code{n_distinct}, \code{min_cell_n},
+\code{range_floor}, \code{n_response} (the rows of the layer that carry
+a response and, with \code{predictor_vars}, every predictor, which the
+support ceiling counts; \code{NA} without a
+\code{response_var}), \code{n_scored} (the rows of the subsample the
+response criteria read; \code{NA} without a \code{response_var}),
+\code{levels_given} (whether \code{levels} set the ladder) and
+\code{predictors} (whether \code{predictor_vars} were given)),
 \code{variogram} (a list with \code{nugget}, \code{psill}, \code{range}
 (\code{NA} when rejected), \code{model} and \code{detrended} (whether
 the sac says it is a variogram of residuals; \code{NA} when it does not
@@ -141,69 +309,450 @@ the \code{method} and \code{seed} that made them), \code{cp_noise} (a
 list with \code{source}, \code{"variogram nugget"} or
 \code{"finest-level residual mean square"}, \code{value}, the
 \eqn{\tau^2} used, and \code{level}, the level it was read at or
-\code{NA}; \code{NULL} when \code{cp} has neither), \code{centres}
+\code{NA}; \code{NULL} when \code{cp} has neither), \code{one_cell}
+(what one cell for the whole layer scores, the reference a level has to
+beat: a list with \code{n}, the scored rows, \code{rss}, their total
+sum of squares, \code{cp}, the same formula at one cell or \code{NA}
+when \code{cp} has no noise variance, \code{constant}, whether the
+scored variable is constant to within rounding, \code{cp_levels}, the
+\code{cp} column it belongs to, and \code{f_p}, named by level, the
+p-value of the F test of that level's cell means against one mean,
+\eqn{(TSS - RSS) / (L - 1)} over \eqn{RSS / (m - L)} on the \eqn{L}
+cells that hold a scored row and the \eqn{m} scored rows; \code{NULL}
+without a response), \code{centres}
 (a list named by level of the two-column matrices of the scored
-partitions' centres) and \code{centres_crs} (the CRS they are in).  A
+partitions' centres), \code{centres_crs} (the CRS they are in) and
+\code{hull} (the convex hull of the points profiled, an \code{sfc} in
+that CRS).  A
 k-means partition is the Voronoi partition of its centres, so these
 seed the very cells each level was scored on: \code{select_resolution()}
 returns the chosen level's as \code{$seeds}, and
 \code{\link{get_voronoi_seeds}()} and \code{\link{voronoi_seeds_kmeans}()}
-use them when given the selection or the profile.
+use them when given the selection or the profile.  The centres carry the
+hull as their \code{"cover"} attribute, which those two functions hand on
+so that Voronoi cells built on the seeds reach the edge of the points.
+A profile built with \code{partition = "density"} or \code{init =
+  "random"} also carries \code{partition}: a list with \code{kind},
+\code{init}, \code{density_power} and \code{density_k} (both \code{NA}
+for \code{kind = "kmeans"}); for \code{kind = "density"},
+\code{objective}, the weighted sum the centres minimise, named by
+level; \code{iter_max}, the iteration limit; and \code{iter} and
+\code{converged}, the iterations each level's kept start took and
+whether it stopped before the limit, named by level.  The selection
+carries the first four as \code{$partition}, its
+seeds and the seeds the seeding functions return as
+\code{attr(, "partition")}, and a Voronoi tessellation built on them as
+\code{params$partition}.  A profile of the kind \code{"kmeans"} from
+k-means++ starts has no such attribute, and neither has anything made
+from it.
+
+With an \code{estimate} the frame has five more columns, after
+\code{cell_resp_mean}: \code{scored_per_cell} (the rows \code{loo}
+read over the cells that hold one; the layer's counterpart of
+\code{cell_resp_mean}, which counts the subsample's rows), \code{loo}
+(the leave-one-out mean squared error of the estimate; lower is
+better), \code{loo_se} (the standard error over rows of that level's
+mean squared error; it is not the standard error of a difference
+between two levels, whose errors come from the same rows),
+\code{share_alone} (the share of the scored rows that are the only
+scored row of their cell) and \code{own_weight} (the median over cells
+of the weight a pooled value gives the cell's own mean; \code{NA}
+under \code{"mean"}).  \code{loo}, \code{loo_se} and
+\code{own_weight} are \code{NA} at a level where no cell holds two
+scored rows, and at every level when the response is constant over the
+rows \code{loo} reads.  It also carries \code{estimate}: a list with
+\code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
+(8, or \code{NA} under \code{"mean"}), \code{response} (the column),
+\code{n} (the rows \code{loo} read), \code{rows} (\code{"all"} or
+\code{"selection half"}), \code{features} (\code{"points"}, or
+\code{"other"} when the layer held features that were reduced to
+points), \code{seed}, \code{constant} (whether the response is constant
+over those rows; \code{FALSE} for fewer than two), \code{loo_one_cell}
+and \code{loo_one_cell_se} (the same error with one mean for all those
+rows, the reference a level has to beat), \code{loo_levels} (the
+\code{loo} column those references belong to, named by level), and,
+named by level, \code{sigma2} (the spread of the rows about their
+cell's mean), \code{tau2} (the mean squared distance between a cell's
+level and its target; \code{NA} under \code{"mean"}), \code{cells}
+(the cells that hold a scored row) and \code{f_p} (the p-value of the F
+test of those cells' means against one mean).
+
+On a ladder that \code{obs_per_cell} sets, \code{bounds} describes that
+ladder: \code{ceiling} is the finest level; \code{ceiling_from} is
+\code{"obs_per_cell"}, \code{"distinct locations"},
+\code{"fewer than two cells of the size"} or
+\code{"fewer than two distinct locations"};
+\code{supported} is \code{FALSE} when the finest size gives fewer than
+two cells or the range floor is above the finest level;
+\code{levels_given} is \code{TRUE}; \code{n_sample} is every point;
+\code{min_cell_n} holds the argument, which is not read; and two fields
+are added, \code{obs_per_cell} (the sizes, largest first) and
+\code{size_levels} (the level of each, named by size; \code{NA} for a
+size of \code{"auto"} that gives fewer than two cells and was left
+out).
 }
 \description{
 A tessellation's resolution is the number of cells the points are cut
 into, and no single number settles it: the within-cluster sum of squares
 of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \eqn{C_p}, the residual autocorrelation of the cell
-means has a \eqn{z}, and the cell means have a reliability.  This function
-computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen, by
+means has a \eqn{z}, the cell means have a reliability, and a cell value
+has a leave-one-out error.  On a ladder of counts this function computes
+all of them at every level the data bound, and returns the table, so that
+the level chosen, by
 \code{\link{select_resolution}()} or by eye, can be defended with the
 whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \eqn{C_p} itself as a display of the bias-variance trade-off across
 candidates; he does not offer it as a rule that picks one.  This is that
 display, with the other criteria alongside.
 }
-\section{The ladder and its bounds}{
+\details{
+Called with a numeric response and no predictors and none of
+\code{levels}, \code{n_levels}, \code{min_cell_n}, \code{sample_n} or
+\code{range_floor}, the profile is one level: 4.5 rows per cell
+(\code{obs_per_cell = "auto"}), scored for pooled values
+(\code{estimate = "auto"}) by the leave-one-out error \code{loo}, with
+no variogram fitted (\code{sac = "auto"}), in regions of the density
+kind (\code{partition = "density"}) kept from 3 k-means++ starts
+(\code{nstart = NULL}).  \code{cp} and \code{reliability} need the
+variogram and \code{elbow} needs a curve, so the three are \code{NA}
+there; \code{moran_z} is computed.  \code{\link{select_resolution}()}
+reads the count off it by the size.  Any of those five ladder arguments
+gives the
+ladder of counts described below, scored for pooled values as well.
+\code{estimate = NULL, obs_per_cell = NULL, sac = NULL, partition =
+"kmeans"} gives the profile of earlier versions: the ladder, its columns
+and its k-means regions from 25 starts.
+}
+\section{The partition}{
 
-Cells are k-means clusters of the (projected) coordinates, fitted at each
-level as the best of \code{nstart} k-means++ restarts (see
-\code{\link{determine_optimal_levels}} for why).  Levels are spaced
-logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
-step wastes fits at large \eqn{L} and starves resolution at small.  The
-ladder runs from a floor to a ceiling the data impose.  The ceiling is
-\code{floor(n / min_cell_n)}, with \eqn{n} every point of the layer (not
-the subsample): cells with fewer than \code{min_cell_n} points
-on average have too little support, and Moran's z is not computable at
-nine cells or fewer in any case.  It is also held to the number of
-distinct locations, one cell on each, and to one short of the number of
-points, which \code{stats::kmeans()} needs.  The floor is
-\code{ceiling(area / range^2)} when an autocorrelation range is available:
-cells wider than the range average over more than one patch of the field.
-When the floor exceeds the ceiling the data cannot support a tessellation
-that respects their own correlation structure; that is reported as a
-finding (a logged warning, and \code{attr(x, "bounds")$supported} is
-\code{FALSE}) and the ladder runs from 2 to the ceiling anyway, so the
-profile still shows what each level costs.  On a layer larger than
-\code{sample_n} the ceiling is also held to half the subsample (two
-subsample points per cell, the least a fitted cell can be scored on);
-\code{ceiling_from} is then \code{"sample_n"}, a floor above that is logged
-with a request to raise \code{sample_n}, and it does not make
-\code{supported} \code{FALSE}.
+The regions at every level are the Voronoi cells of a set of centres: a
+point belongs to the centre nearest to it.  \code{partition} says what the
+centres minimise, and every level of the ladder is built with the same
+kind.
+\describe{
+\item{\code{"kmeans"}}{The sum, over the points, of the
+squared distance to the nearest centre.  The centres follow the square
+root of the point density.  The cells are compact, smaller where the
+points are dense and larger where they are sparse, and a cell in a
+dense place holds several times the points of a cell in a sparse
+place.}
+\item{\code{"density"} (default)}{The same sum with each point weighted
+by its local density to the power \code{density_power}.  The local
+density at a point is the number of points in the disc that reaches
+its \code{density_k}-th nearest neighbour, over the area of that disc.
+With \code{density_power = 1} the centres follow the point density
+itself.  The cells are compact: many small ones where the points are
+dense, a few large ones where they are sparse.  They hold about the
+same number of points each once there are more cells than dense
+places (clusters of points).  With fewer cells than dense places a
+cell takes in whole clusters, large and small, and the counts are
+about as uneven as under \code{"kmeans"}.  \code{density_power = 0}
+weights every point alike, which is the objective of
+\code{"kmeans"}; a power above 1 goes past equal counts and gives the
+cells of dense places fewer points than those of sparse places.}
+}
+Two simulations show both ends.  The measure is the coefficient of
+variation of the cell counts (their standard deviation over their mean,
+0 when every cell holds the same number), as medians over 20 layers.  On
+1,200 points, 900 of them in four clusters over a sparse background, cut
+into 60 cells, it was 1.2 under \code{"kmeans"}, where the fullest cell
+held 42 times the points of the smallest, and 0.29 under
+\code{"density"}, where it held 4 times.  On 2,000 points with 28 dense
+places (half of the points in 3 large clusters, 30 percent in 25 small
+ones, the rest spread out) it was 0.90 under \code{"kmeans"} and 0.97
+under \code{"density"} at 10 cells and 1.08 and 1.01 at 20 cells; at 60
+cells it was 0.95 and 0.31, and at 130 cells 1.05 and 0.43.  A ladder
+starts at 2 cells, so its low levels are usually below the number of
+dense places, and the counts in \code{cell_n_min} and
+\code{cell_n_median} show where the two kinds part.
 
-The floor moves with the range estimate, and the ceiling with \eqn{n}, so
-two profiles of similar data (the folds of a cross-validation, say) can
-sit on either side of the point where the floor applies: one ladder then
-starts at the floor and the other at 2, and the criteria that sit near
-the bottom of the ladder (\code{reliability}, which routinely peaks at the
-floor, and \code{elbow}) can differ between them by a factor of 10 or
-more.  To compare profiles, pass the same \code{levels} to each, or
-\code{range_floor = FALSE} to start every ladder at 2 while the floor is
-still reported.
+The density kind is the default.  The default size, 4.5 rows per cell,
+puts the count above the number of dense places on a layer whose
+clusters hold more than a few observations each, so the default kind and
+the default count go together.  A coarse ladder the caller sets (with
+\code{levels}, large sizes, or the low levels of the automatic ladder)
+may not, and at those levels the density kind does not even the counts.
+\code{partition = "kmeans"} gives the k-means regions, with 25
+k-means++ starts, as earlier versions built them.
+
+\code{init} says how each of the \code{nstart} starts is drawn before it
+is refined; the best start is kept.  \code{"kmeans++"} draws the centres
+one at a time, each a point taken in proportion to its squared distance
+from the centres already drawn (times its weight, under
+\code{"density"}), which spreads the start over the points.
+\code{"random"} draws \code{k} distinct locations at random, as
+\code{\link[stats]{kmeans}()} does.
+
+A start of the kind \code{"kmeans"} is refined by
+\code{\link[stats]{kmeans}()} (Hartigan and Wong), for at most 50
+iterations from a k-means++ start and 100 from a random one.  A start of
+the kind \code{"density"} is refined by Lloyd's iteration, for at most 100
+steps: each point goes to its nearest centre, each centre moves to the
+weighted mean of its points, and a centre left without a point stays
+where it is.  \code{iter_max} sets another limit.  The start with the
+lowest sum is kept, and a kept start that was cut off at the limit is
+reported (see "Conditions"): its centres are those of the last step.
+Large layers can need more than 100 steps: on a simulated layer of 30,000
+points no start of six at 100 and 300 cells took more than 68, and on one
+of 60,000 points three of six took 102 to 152.
+
+The density kind depends on the points alone.  It works on the distinct
+locations in coordinate order, so the order of the rows does not matter.
+Its two tolerances are fractions of the extent of the points (the diagonal
+of their bounding box), so the unit of the coordinates does not matter:
+the neighbour distance is not taken below a millionth of the extent, and
+the iteration stops when no centre moves by \eqn{10^{-12}} of it.  Points
+at one location count as that many points at it and share a cell; the
+neighbour distance is measured to the \code{density_k}-th nearest
+\emph{other} location, so it is not zero where locations repeat.  The
+neighbour searches use \pkg{FNN} when it is installed.  The result is the
+same without it; the search then takes time that grows with the square of
+the number of points, about thirty times as long for 10,000 points and
+2,000 centres.
+
+The columns keep their meaning under \code{"density"}, because each is
+read off the cells and not off the way they were drawn.  \code{wss} is the
+within-cell sum of squares of the coordinates with every point counted
+once, taken about each cell's mean, so \code{wss} and \code{elbow}
+compare between kinds; the weighted sum the centres minimise is kept in
+\code{attr(, "partition")$objective}, and \code{wss_spread} is its spread
+over the starts.  \code{cp}, \code{moran_z} and the test against one cell
+need cells drawn without the response, which both kinds give.
+\code{reliability} is computed for square cells of the level's average
+area and count and never reads the cells, so it is the same number under
+either kind.  The \code{elbow} is found more readily under
+\code{"density"} where the points cluster: once each cluster has its
+centres, further centres go into the clusters, the sparse ground between
+them keeps its sum of squares, and the curve flattens.  On simulated
+layers of 800 points in 3 to 8 clusters over a sparse background an elbow
+was read on 24 of 30 under \code{"density"} and on 10 under
+\code{"kmeans"}; on 100 uniform layers, on none under either.
+
+A profile of the density kind, or of either kind from random starts,
+carries \code{attr(, "partition")}, and
+\code{\link{select_resolution}()}, the seeding functions and
+\code{\link{build_tessellation}()} hand that record on with the regions
+(see "Value").  A result with no such record was built by plain k-means:
+from k-means++ starts when it comes from a profile, and from random
+starts when a seeding function fitted it.
 }
 
-\section{The criteria, and how each behaved when measured}{
+\section{The ladder and its bounds}{
 
+This is the ladder of a call that sets \code{levels}, \code{n_levels},
+\code{min_cell_n}, \code{sample_n} or \code{range_floor}, or passes
+\code{obs_per_cell = NULL}, and of a call with no estimate: one without
+a response, with \code{predictor_vars}, or with a logical or wholly
+missing response.  Cells are clusters of the (projected)
+coordinates of the kind \code{partition} names, fitted at each level as
+the best of \code{nstart} k-means++ starts (see
+\code{\link{determine_optimal_levels}} for why) unless \code{init} says
+otherwise (see "The partition").  Levels are spaced
+logarithmically, because cell diameter scales as \eqn{L^{-1/2}}: a unit
+step wastes fits at large \eqn{L} and starves resolution at small.  The
+ladder runs from 2 to a ceiling the data impose.  The ceiling is
+\code{floor(n / min_cell_n)}: cells with fewer than \code{min_cell_n}
+rows on average have too little support.  With a \code{response_var},
+\eqn{n} is the number of rows of the layer (not of the subsample) that
+are scored: those with a response and, with \code{predictor_vars}, every
+predictor, since the cell means the criteria read are built from those
+rows alone.  \code{ceiling_from} is then \code{"min_cell_n (rows with a
+response)"} when some rows are not scored (the label is the same when it
+is a predictor they lack), and a warning of class
+\code{spatialkit_response_ceiling} gives both counts and names the bound
+in force.  Without a
+\code{response_var}, or when no row has a response, \eqn{n} is every
+point.  The ceiling is also held to the number of distinct locations, one
+cell on each, and to one short of the number of points, which
+\code{stats::kmeans()} needs.  The count \eqn{n / L} is the rows per cell
+only when the scored rows are spread over the whole extent.
+Where they sit in one part of it, the cells elsewhere hold none and the
+occupied cells hold more than \eqn{n / L}, so the ceiling is lower than
+those cells need: \code{cells_resp} and \code{cell_resp_mean} give the
+cells that hold a scored row and the scored rows per such cell at each
+level (of the subsample, when the cells are fitted to one), and
+profiling the scored rows alone bounds the ladder by the area they
+cover.
+
+When fewer than two cells meet \code{min_cell_n}
+(\code{floor(n / min_cell_n) < 2}), or the layer has one distinct
+location, there is no ladder: the profile scores two cells so that level
+is still visible (or the \code{levels} asked for, as given),
+\code{supported} is \code{FALSE}, \code{ceiling_from}
+is \code{"fewer than two supported cells"} (or \code{"fewer than two
+distinct locations"}) and a warning of class
+\code{spatialkit_not_supported} names both numbers.
+
+\code{min_cell_n} sets the ceiling of this ladder.  It is a mean number
+of rows per cell and not a minimum: a cell of a level at the ceiling can
+hold fewer (\code{cell_n_min}).  It is floored to a whole number, so 4.5
+is read as 4.  With \code{levels} it does not choose the levels scored,
+and it still sets \code{bounds$ceiling}, \code{supported} and the
+\code{spatialkit_not_supported} warning.
+
+The range floor is \code{ceiling(area / range^2)} when an autocorrelation
+range is available: cells wider than the range average over more than one
+patch of the field.  It is reported in the bounds and the print, and by
+default it is not applied: the ladder starts at 2.  When the layer
+supports the floor and it lies between the ladder's ends, the floor is
+one of the ladder's levels all the same (so the ladder can have one more
+level than \code{n_levels}): \code{select_resolution(criterion =
+"reliability")} reads from the floor up and returns the floor itself, not
+the next level the spacing happened to put above it.  The range is an
+estimate, and a response with no spatial structure can still be given
+one: over 100 simulated white-noise layers of 900 points the variogram
+returned a range on 29, and started at the floor, 11 of those ladders
+began at 11 to 98 cells of a ceiling of 100 and \eqn{C_p} took the floor
+or a level beside it, where the best count was 2 to 8.
+\code{range_floor = TRUE} starts the ladder at the floor, as the default
+did up to version 2.0.0.  When
+the floor exceeds the ceiling the data cannot support a tessellation
+that respects their own correlation structure; that is reported as a
+finding (a warning of class \code{spatialkit_not_supported}, and
+\code{attr(x, "bounds")$supported} is \code{FALSE}) and the ladder runs
+from 2 to the ceiling, so the profile still shows what each level costs.
+A floor equal to the ceiling would leave one level and nothing to compare
+it with, so that ladder starts at 2 as well.  On a layer larger than
+\code{sample_n} the ceiling is also held to half the subsample's scored
+rows (two per cell, the least a fitted cell can be scored on; half the
+subsample without a response); \code{ceiling_from} is then
+\code{"sample_n"}, a floor above that is logged with a request to raise
+\code{sample_n}, and it does not make \code{supported} \code{FALSE}.
+
+The floor moves with the range estimate, and the ceiling with \eqn{n}.
+To compare profiles of similar data (the folds of a cross-validation,
+say), pass the same \code{levels} to each.  \code{reliability} is the one
+criterion that still reads the floor: \code{\link{select_resolution}()}
+holds it to the levels at or above the floor by default, so its pick can
+differ between two such profiles by a factor of 10 or more when the floor
+is supported on one and not on the other; pass \code{range_floor = FALSE}
+there to read the whole ladder.
+
+A ladder that \code{obs_per_cell} sets is a ladder of sizes (see
+"Observations per cell").  It has one level per size \eqn{s},
+\code{max(2, round(n / s))} cells, held to the most centres k-means can
+place: the distinct locations, and one short of the points.  Its centres
+are fitted to every row.  No subsample is drawn, and \code{n_levels},
+\code{min_cell_n}, \code{sample_n} and \code{range_floor} are not read.
+The finest size takes the part \code{min_cell_n} has on the ladder above:
+\code{bounds$ceiling} is the finest level, and \code{supported} is
+\code{FALSE} when the finest size gives fewer than two cells or the range
+floor is above the finest level.  The range floor is reported and not
+applied.
+
+A ladder of sizes under \code{sac = "auto"} fits no variogram, so
+\code{cp} and \code{reliability} are \code{NA} at every level there, and
+\code{attr(, "cp_noise")} says why.  \code{sac = NULL}, or a \code{sac} of
+the caller's own, gives them.  \code{sac = "auto"} and
+\code{obs_per_cell = "auto"} are the defaults, so the default profile
+has neither column.
+}
+
+\section{Observations per cell}{
+
+\code{obs_per_cell} sets the ladder by a size: the mean number of rows a
+cell is to hold.  The level of a size \eqn{s} is
+\code{max(2, round(n / s))} cells, with \eqn{n} the rows the size
+divides (see the argument).  A size says how many observations a cell
+value is to stand on, and that is the caller's choice: no criterion makes
+it.  Under a size neither the cells, which are fitted to the coordinates,
+nor their number, which is a count of rows, depend on the values of the
+response.  Under \code{select_resolution(criterion = "loo")} the count
+does.
+
+For pooled values the leave-one-out error tends to keep falling as the
+cells shrink, so its minimum tends to be the finest size offered, and the
+end of the ladder would then choose the count.  In a simulation
+of 200 layers, each 1,500 clustered observations of a field with
+covariance \code{exp(-d / 100)} plus noise on a square of side 1,000
+(\code{dev/sim-pooled-values.R} in the package's repository;
+\code{\link{summarize_by_cell}} describes it), profiled at the sizes 18,
+12, 9, 6, 4.5, 3 and 2 with \code{partition = "density"}, the lowest
+\code{loo} of the pooled value was at the size 2 on 176 layers, at 3 on
+22 and at 4.5 on 2.  That of the plain mean was at 2 on none: it was at 6
+on 86 layers, at 4.5 on 51, at 9 on 49, at 12 on 12, and at 18 and at 3
+on one each.  \code{select_resolution(criterion = "size")} therefore sets
+the count of pooled values from a size, 4.5 unless another is given, and
+\code{criterion = "loo"} reads the lowest error for plain means.  These
+figures are of those seven sizes and say nothing of another ladder.
+
+Two columns say what a size leaves a cell value to stand on.
+\code{share_alone} is the share of the scored rows that are the only
+scored row of their cell: the plain mean of such a cell is one
+observation, and its pooled value has the smallest own weight a cell can
+have.  \code{own_weight} is the median weight a pooled value gives the
+cell's own mean: at 1 the pooled values are the plain means, and at 0
+each is the mean of the cell's neighbours.
+
+\code{obs_per_cell = "auto"}, the default, is resolved against the other
+ladder arguments, in this order.  Whether the caller supplied an argument
+is what counts, so a value a wrapper passes on counts as supplied.
+\enumerate{
+\item With \code{levels}, \code{"auto"} is \code{NULL}: the levels are
+scored as given.  A numeric \code{obs_per_cell} beside \code{levels}
+is an error, since each sets the ladder.
+\item With \code{n_levels}, \code{min_cell_n}, \code{sample_n} or
+\code{range_floor} supplied, \code{"auto"} is \code{NULL}: those
+arguments describe the ladder of "The ladder and its bounds", and the
+caller gets it, with the estimate's columns when there is an
+estimate.
+\item Otherwise \code{"auto"} is 4.5 when the estimate is
+\code{"pooled"}, the seven sizes 18, 12, 9, 6, 4.5, 3 and 2 when it
+is \code{"mean"}, and \code{NULL} without an estimate.
+\item A numeric \code{obs_per_cell} beside \code{n_levels},
+\code{min_cell_n}, \code{sample_n} or \code{range_floor = TRUE} sets
+the ladder, with a warning of class \code{spatialkit_ladder_unused}
+that names the arguments that are not read.
+}
+
+On a ladder of sizes the centres are fitted to every row and the count of
+cells grows with the rows, so a step that compares every point with every
+centre grows with the square of the rows.  \code{partition = "kmeans"}
+has such a step in every pass and in a k-means++ start.  \code{partition
+= "density"} has it in a k-means++ start and, without \pkg{FNN}, in every
+pass; with \pkg{FNN} and \code{init = "random"} it has none.  The profile
+stops before any fit, with an error of class
+\code{spatialkit_work_limit}, when the points times the cells of the
+finest level times \code{nstart} (times \code{iter_max} for the density
+kind without \pkg{FNN}) is above
+\code{getOption("spatialkit.fit_work_max", 1e10)}.  The message names the
+ways on: fewer starts, which keep the best of fewer; a coarser size;
+\code{partition = "density"} with \code{init = "random"} and \pkg{FNN}
+installed, which leaves a cell without a point more often (see
+\code{spatialkit_empty_cells} under "Conditions"); or a higher limit.
+The limit counts the finest level, and a ladder of several sizes fits
+every one of its levels.  At the default size the work grows with the
+square of the rows, and the limit is set where the default call's fit
+takes about a minute: a call just below it runs that long, and prints
+nothing while it runs.
+
+Without \pkg{FNN} the density kind also finds its weights by comparing
+every pair of distinct locations.  A profile on a ladder of sizes stops,
+with the same class, when the square of their number is above
+\code{getOption("spatialkit.exact_pairs_max", 2e9)}, which is about
+44,700 locations.  The result of every search is the same with and
+without the package.  \code{moran_i} and \code{moran_z} need \pkg{FNN}
+and \pkg{Matrix} at a level where more than 5,000 cells hold a scored
+row.  Without them a ladder of sizes has \code{NA} in both columns
+there, with a warning of class \code{spatialkit_moran_skipped}, and so
+does a ladder set any other way (see "Conditions").
+At a level of up to 5,000 such cells, when either package is missing, the
+neighbour weights of the cell means are held as a dense matrix of cells
+by cells.
+}
+
+\section{The criteria, and what each returns in practice}{
+
+The four columns are not four interchangeable count rules.
+\code{select_resolution()} reads \code{cp} by default on a profile
+without an estimate; on one with an estimate it reads the size (pooled
+values) or \code{loo} (plain means).  \code{reliability}
+needs a variogram range and is \code{NA} without one; \code{elbow} is
+\code{NA} unless the points cluster; and \code{moran_z} is a diagnostic
+and not a count rule.  With an \code{estimate} the profile has a fifth
+column, \code{loo}, which is the last entry.  Each entry below says what
+the column measures and what it returns in practice.
 \describe{
 \item{\code{elbow}}{How far the WSS curve sags below a power law: on
 log-log axes, \eqn{\log} WSS below the straight line from \eqn{k = 1}
@@ -221,13 +770,22 @@ locations repeat, is left out of the line; when the other levels have
 no elbow, that fall to zero is the elbow, and its sag is measured with
 the WSS floored at \eqn{10^{-12}} of the total, which puts it far
 above any other level's.  Geometry only; it knows nothing of the
-response.}
+response.  \strong{In practice it is \code{NA} unless the points
+cluster}, and where they do it names the number of clusters, which
+is usually the first level or two of the ladder.}
 \item{\code{cp}}{Mallows' \eqn{C_p} of the piecewise-constant
 approximation of the response (or of its OLS residuals on
 \code{predictor_vars}) by cell means: \eqn{RSS(L)/n + 2 \tau^2 L / n},
 with \eqn{\tau^2} the nugget of the fitted variogram (lower is better).
-It estimates the error of predicting a new observation by the mean of
-its cell.  When the cells are fitted to a subsample of \eqn{m} of the
+It estimates the error of re-measuring the sampled sites: each scored
+row observed again at its own location, with fresh noise of variance
+\eqn{\tau^2}, and predicted by the mean of its cell.  For an
+observation at a new location the penalty needs the spread of the
+field inside a cell as well, which the nugget leaves out.  This
+\eqn{\tau^2} is the nugget, the noise of one measurement; it is not
+the \code{tau2} of a pooled value, which is the mean squared distance
+between a cell's level and its target.  When the
+cells are fitted to a subsample of \eqn{m} of the
 \eqn{N} points with a response, the penalty is split between the two:
 \eqn{RSS(L)/m + \tau^2 L_m / m + \tau^2 L / N}, where the first two
 terms estimate the approximation error from the subsample (adding back
@@ -248,36 +806,103 @@ only when the nugget is a large share of the sill.  With a nugget of 0
 (under \eqn{10^{-4}} of the sill; usually a fit clipped at its lower
 bound) the penalty is 0 and \eqn{C_p} descends to the ceiling whatever
 the field; the profile warns.  When the variogram gives no nugget (none
-was fitted, its fit did not converge, its range is below the shortest
-lag, or \code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
+was fitted, its fit has no minimum inside the ranges searched, its
+range is below the shortest lag, it found no spatial structure, or
+\code{sac} is a range alone), \eqn{\tau^2} is Mallows' own
 choice instead: the residual mean square \eqn{RSS / (m - L_m)} of the
 finest level whose cells hold at least two scored rows on average.  It
 counts the structure within those cells as noise too, so on average it
 is no smaller than the nugget and errs towards fewer cells; the profile warns,
 and \code{attr(, "cp_noise")} records which was used.  When no level's
-cells hold that many, \code{cp} is \code{NA} at every level.}
-\item{\code{moran_z}}{The standardised deviate of Moran's I on the
-residuals of the cell means regressed on the cell-mean predictors (an
-intercept alone when there are none): how much spatial structure the
-tessellation has left unexplained (\eqn{|z|} smaller is better).
-Calibrated and flat in \eqn{L} on a response with no structure (see
-\code{\link{determine_optimal_levels}}), so it separates levels only
-where structure remains.  \code{NA} at nine cells or fewer.}
+cells hold that many, \code{cp} is \code{NA} at every level, as it is
+for a constant response, which the profile warns about.
+\strong{In practice its minimum is often a bound}, the support
+ceiling when the nugget is a small share of the sill, and
+\code{select_resolution()} then names the bound in \code{edge}.  The
+same formula at one cell,
+with the total sum of squares as its RSS, is kept in
+\code{attr(, "one_cell")}, with the p-value at every level of the F
+test of that level's cell means against one mean.  A level has to
+beat one cell: \code{select_resolution()} returns
+\code{structured = FALSE} when \eqn{C_p} at one cell is within
+\code{tol} of the optimum, or when the cell means at the optimum
+differ from one mean by no more than chance allows, because one mean
+for the whole layer then predicts as well as the cells and the count
+is not identified (see \code{\link{select_resolution}} for the rule
+and its measured error rates).}
+\item{\code{moran_z}}{\strong{A diagnostic of the cell means, not a
+count rule.}  The standardised deviate of Moran's I on the cell
+means, or with \code{predictor_vars} on the residuals of the cell
+means regressed on the cell-mean predictors, over the 8 nearest
+neighbours of each cell.  It tests whether neighbouring cell means
+are independent.  It does not measure what the cells leave
+unexplained, and it does not say how well they represent the
+response.  On any autocorrelated response it grows as the cells get
+finer than the range, because neighbouring cells then resemble each
+other, and it has almost no
+power below about 20 cells, where the 8-neighbour graph between cells
+is close to complete and Moran's I sits near \eqn{-1/(L - 1)}
+whatever the data.  The level with the smallest \eqn{|z|} is
+therefore among the coarsest it is computed at on a structured
+response, whatever the layer and its ceiling, and arbitrary on a
+response with no structure, where
+\eqn{z} is calibrated and flat in \eqn{L}.
+\code{select_resolution()} refuses to read it as a criterion unless
+asked with \code{diagnostic = TRUE}, and neither \code{summary()} nor
+the functions that take a profile as a cell count read it by
+default.  \code{NA} at nine cells or fewer.}
 \item{\code{reliability}}{The between-cell signal's share of the spread
 in the cell means, from the fitted variogram alone via Krige's
 additivity relation (Cressie 1996), for square cells of the level's
 average area holding the level's average share of the layer's points
 with a response (larger is better).
-This is the shrinkage factor of Fay and Herriot (1979).  It has an
-interior optimum, and a broad one: validated against the empirical
-reliability of true block means on simulated fields, the analytic and
-empirical optima agreed to within a level or two where the empirical
-estimate was stable, and the band within 2 percent of the maximum
-spanned a factor of 3--6 in \eqn{L}.  Read the flat region, not the
-argmax.  The domain term is taken over the convex hull the area is
-measured on, so rotating the layer does not move it.  \code{NA}
-without a usable variogram, and when the variogram's range was
-rejected (see \code{sac}).}
+This is the shrinkage factor of Fay and Herriot (1979).  The curve
+has an interior optimum, and a broad one: validated against the
+empirical reliability of true block means on simulated fields, the
+analytic and empirical optima agreed to within a level or two where
+the empirical estimate was stable, and the band within 2 percent of
+the maximum spanned a factor of 3--6 in \eqn{L}.  \strong{That
+optimum usually lies below the range floor}: on 20 simulated fields
+of 900 points the curve read from the floor up was highest at the
+floor on 19.
+\code{select_resolution()} therefore reads it at the levels at or
+above the floor (its \code{range_floor} argument), and what it
+returns is then the floor, which is a level of every ladder the
+profile builds: the coarsest
+count the range allows, with the range choosing and not the curve.
+Read the flat region, not the argmax.  The domain term is taken over
+the convex hull the area is measured on, so rotating the layer does
+not move it.  \code{NA} without a usable variogram, and when the
+variogram's range was rejected (see \code{sac}).}
+\item{\code{loo}}{With an \code{estimate}: the leave-one-out mean
+squared error of that cell value (lower is better).  It estimates the
+squared error of predicting one further observation, at a location
+drawn the way the data's locations were, by the value of the cell it
+falls in.  That error depends on the cell value, so the column is
+computed for the estimate the profile is given and for no other.
+Each scored row of the layer is predicted by the value of its cell
+computed without it, in the cell of its nearest centre, which is the
+cell the seeds will build.  Under \code{"mean"} a row in a cell of
+two or more is predicted by the mean of the others, and a row alone
+in its cell by the mean of the cell of its nearest other scored row.
+Under \code{"pooled"} the cell's mean and its own weight are computed
+again without the row; the spread inside the cells, the spread
+between a cell and its target and the targets are held; and a cell
+left empty takes its target.  It needs no variogram.  It describes
+locations among the observations and says nothing of a location away
+from them: it is a criterion for comparing levels where data are
+near, not an estimate of the error of a map.  \code{loo_se} is the
+standard error, over rows, of that level's mean squared error.  It is
+not the standard error of a difference between two levels, whose
+errors come from the same rows.  \code{scored_per_cell} counts the
+rows \code{loo} read, every scored row of the layer, over the cells
+that hold one; \code{cell_resp_mean} counts the rows the other
+response criteria read, which are the subsample's when the cells are
+fitted to one.  \strong{In the simulation described under
+"Observations per cell", on a ladder of the seven sizes 18 to 2, its
+minimum was at the finest size on 176 of 200 layers for pooled values
+and on none for plain means}: for pooled values a size sets the count,
+and \code{select_resolution(criterion = "size")} reads it.}
 }
 \code{cp} and \code{reliability} answer different questions: how well the
 cells represent the field, and whether the cell values are distinguishable
@@ -285,23 +910,185 @@ from noise.  They can disagree, and both are shown so the choice between
 them is made knowingly.
 }
 
+\section{Conditions}{
+
+What changes the meaning of a result is raised as an R warning with a
+class, so \code{tryCatch()}, \code{withCallingHandlers()} and
+\code{options(warn = 2)} see it without matching message text; the rest
+is logged (see \code{\link{spatialkit_quiet}}).
+\describe{
+\item{\code{spatialkit_not_supported}}{\code{resolution_profile()}:
+\code{supported} is \code{FALSE}, because the range floor exceeds the
+ceiling or because fewer than two cells meet \code{min_cell_n}.}
+\item{\code{spatialkit_response_ceiling}}{\code{resolution_profile()}:
+rows that are not scored (no response, or with \code{predictor_vars}
+a predictor missing) lowered the ceiling.  The message names the
+bound in force, \code{min_cell_n} or, on a subsample, \code{sample_n};
+the condition carries \code{n}, \code{n_response}, \code{ceiling},
+\code{ceiling_from}, \code{n_sample} and \code{n_scored}.}
+\item{\code{spatialkit_constant_response}}{\code{resolution_profile()}:
+the scored variable is constant to within rounding (a response the
+predictors fit exactly leaves such residuals), so \code{cp},
+\code{moran_i} and \code{moran_z} are \code{NA} at every level.}
+\item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
+\code{\link{get_voronoi_seeds}()} and
+\code{\link{voronoi_seeds_kmeans}()} under \code{partition =
+    "density"}: a centre holds no point, so there are fewer occupied cells
+than the count.  A centre that loses its points stays where it is, and
+the start that is kept is the one with the lowest sum, whether or not
+all its centres hold points.  It happens at high counts, mostly from
+\code{init = "random"}.  On simulated layers of 800 points (in 4
+clusters, in 28, and uniform; 20 of each) no partition into 80 cells
+or fewer had such a centre.  At 400 cells, from random starts with
+the best of 10 kept, 2, 5 and 1 of the 20 layers had one; from
+k-means++ starts none of 840 partitions at 40 to 600 cells had one,
+though it can happen.  The condition carries \code{level}, the count,
+and \code{empty}.}
+\item{\code{spatialkit_not_converged}}{\code{resolution_profile()},
+\code{\link{get_voronoi_seeds}()} and
+\code{\link{voronoi_seeds_kmeans}()}, for every call except the
+plain k-means each has always run: the start that was kept was cut
+off at the iteration limit, so its centres are those of the last step
+and a longer run can still move points between cells.  The condition
+carries \code{level} (the count; for a profile every level it
+happened at), \code{iter} and \code{iter_max}.  Raise
+\code{iter_max} (\code{kmeans_iter} in
+\code{get_voronoi_seeds()}).}
+\item{\code{spatialkit_partition_unused}}{\code{\link{get_voronoi_seeds}()}
+and \code{\link{voronoi_seeds_kmeans}()}, given a profile or a
+\code{select_resolution()} result together with a \code{partition},
+an \code{init} or density settings other than those the profile was
+built with: the scored centres are returned, and what the call asked
+for is not used.  The
+condition carries \code{kind} and \code{init}, those of the centres
+returned.}
+\item{\code{spatialkit_bound_chosen}}{\code{\link{get_voronoi_seeds}()},
+\code{\link{voronoi_seeds_kmeans}()} and
+\code{\link{build_tessellation}()}, given a profile or a
+\code{select_resolution()} result whose optimum sits on a bound of
+the ladder: the bound chose the count.  The condition carries
+\code{edge}, \code{criterion} and \code{n}.}
+\item{\code{spatialkit_no_structure}}{The same functions, given a count
+whose \code{structured} is \code{FALSE}: one cell does as well, so
+the count is not identified.  A count set by a size stands, since no
+criterion chose it, and the warning then says that the cell values
+will say little that one mean for the layer does not.
+\code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
+for its own cells.}
+\item{\code{spatialkit_no_elbow}}{\code{\link{determine_optimal_levels}()}:
+the WSS curve has no elbow, or the ladder is too short to show one,
+so the count returned is the ladder's and not a finding.  The
+condition carries \code{k}, \code{sag} and \code{structured}.}
+\item{\code{spatialkit_diagnostic_ranking}}{\code{\link{determine_optimal_levels}()}
+under \code{criterion = "morans_i"} or \code{"combined"}: Moran's z
+of the cell means, a diagnostic and not a count rule, ordered the
+candidates returned.  The condition carries \code{k},
+\code{criterion}, \code{first_computable}, \code{window} and
+\code{upgraded}.}
+\item{\code{spatialkit_ladder_unused}}{\code{resolution_profile()}: a
+numeric \code{obs_per_cell} sets the ladder, and the caller also
+supplied \code{n_levels}, \code{min_cell_n}, \code{sample_n} or
+\code{range_floor = TRUE}, which are then not read.  The condition
+carries \code{unused} (the argument names) and \code{obs_per_cell}.}
+\item{\code{spatialkit_size_not_reached}}{\code{resolution_profile()}
+on a ladder of sizes: a size does not give the count it asks for.
+Either a size given as a number gives fewer than two cells while a
+finer one does not, and its level is 2 (\code{reason} is
+\code{"fewer than two cells"}); or a size asks for more cells than
+k-means can place, and its level is the most that can (\code{reason}
+is \code{"more cells than can be placed"}).  The condition carries
+\code{obs_per_cell},
+\code{wanted}, \code{used} and \code{reason}.  When the finest size
+gives fewer than two cells the warning is
+\code{spatialkit_not_supported}, with \code{obs_per_cell} among its
+fields and \code{min_cell_n} \code{NA}; and
+\code{spatialkit_response_ceiling} is not raised on such a ladder,
+since a size already counts the rows with a response.}
+\item{\code{spatialkit_repeated_locations}}{\code{resolution_profile()}
+with an \code{estimate}: scored rows share a location.  Each row is
+left out alone and the others at its location stay, so \code{loo}
+then describes a further observation at a place already observed.
+Raised once, after the levels are scored, and not when \code{loo} is
+\code{NA} at every level.  The condition carries \code{n} (the rows
+that share a location), \code{total} (the rows \code{loo} read) and
+\code{column}.}
+\item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
+with a level of more than 5,000 cells, on any ladder, when
+\pkg{FNN} or \pkg{Matrix} is not installed: \code{moran_i} and
+\code{moran_z} are \code{NA} at a level where more than 5,000 cells
+hold a scored row, and every other column is computed.  Raised once,
+before the first fit, when such a level can occur: the cells that
+hold a scored row are counted after a level's fit, so where rows
+without a response leave fewer of them the two columns are computed
+after all.  The condition carries \code{limit}, \code{levels} (the
+levels above the limit) and \code{missing}.}
+}
+Two refusals are errors with a class: \code{spatialkit_diagnostic_criterion}
+(\code{select_resolution(criterion = "moran_z")} without
+\code{diagnostic = TRUE}) and \code{spatialkit_no_default_criterion} (a
+profile passed as a cell count whose \code{cp} is \code{NA} at every
+level while another criterion is finite).  The remaining warnings of
+these functions (points dropped, a variogram that gives \code{cp} no
+nugget, a zero nugget, a variogram of another variable) are R warnings
+without a class; rows left out for a missing response, a rising WSS
+curve and a subsample too small to reach the floor are logged only.
+
+A third refusal is an error of class \code{spatialkit_work_limit}:
+\code{resolution_profile()} stops before a step whose count of
+comparisons is above a limit.  The condition carries \code{work} (the
+count), \code{limit} and \code{what} (the step).  On a ladder that
+\code{obs_per_cell} sets, the count of cells grows with the rows, so two
+costs are bounded before the variogram is estimated and before any fit.
+The fits: the points times the cells of
+the finest level times \code{nstart} may not pass
+\code{getOption("spatialkit.fit_work_max", 1e10)}
+(\code{what = "partition fit"}; the condition also carries \code{kind},
+\code{init}, \code{nstart} and \code{fnn}).  That product counts the
+step in which every point is compared with every centre, which
+\code{partition = "kmeans"} has in every pass and in a k-means++ start,
+and \code{partition = "density"} has in a k-means++ start.  Without
+\pkg{FNN} the density kind compares every point with every centre in
+every pass, and the product is multiplied by \code{iter_max}; with
+\pkg{FNN} and \code{init = "random"} it has no such step and nothing is
+counted.  The density kind's weights: without \pkg{FNN} they come from a
+search that compares every pair of distinct locations, and the square of
+their number may not pass \code{getOption("spatialkit.exact_pairs_max",
+2e9)} (\code{what = "density weights"}); \code{density_power = 0} has no
+weights and no such search.  With an \code{estimate} and without
+\pkg{FNN}, on any ladder, the same limit bounds the three exact searches
+the estimate's columns make: each scored row's nearest centre, each cell's
+nearest cells, and, under \code{"mean"}, the nearest other location of a
+row alone in its cell.  The result of every search is the same with and
+without \pkg{FNN}.
+
+The warnings of the pooled values and of the count record, which
+\code{\link{summarize_by_cell}()} raises, are listed under "Conditions" on
+its page.
+}
+
 \examples{
 if (requireNamespace("gstat", quietly = TRUE)) {
   library(sf)
   # An exponential field with range parameter 200 (true effective range
-  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough
-  # noise for Mallows' Cp to have an interior optimum rather than descend
-  # to the ceiling.
+  # 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.
   set.seed(4)
   n <- 400
   xy <- data.frame(x = 5e5 + runif(n, 0, 1000), y = 5e6 + runif(n, 0, 1000))
   D  <- as.matrix(dist(xy))
   xy$z <- as.numeric(t(chol(exp(-D / 200) + diag(0.6, n))) \%*\% rnorm(n))
   pts <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
+  # n_levels asks for the ladder of counts.
   prof <- resolution_profile(pts, response_var = "z", n_levels = 12)
   print(prof)               # one row per level; print() because only the
                             # last value of a braced block is shown
-  select_resolution(prof, criterion = "cp")
+  attr(prof, "bounds")$floor   # the range floor: reported, not applied
+  print(select_resolution(prof, criterion = "cp"))
+
+  # The default profile: one level at 4.5 rows per cell, scored for
+  # pooled values, in density-weighted cells, with no variogram.
+  prof1 <- resolution_profile(pts, response_var = "z")
+  print(prof1)
+  select_resolution(prof1)   # the count the size gives
 }
 }
 \references{
@@ -326,6 +1113,7 @@ and \code{n}.
 
 Other aggregation:
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}},
+\code{\link[=cell_values_at]{cell_values_at()}},
 \code{\link[=determine_optimal_levels]{determine_optimal_levels()}},
 \code{\link[=kriging_adequacy]{kriging_adequacy()}},
 \code{\link[=select_resolution]{select_resolution()}},

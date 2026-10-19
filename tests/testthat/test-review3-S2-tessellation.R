@@ -78,7 +78,12 @@ test_that("an empty point is indexed NA by the triangulation, not an abort", {
   bnd <- .r3s2_box(5e5, 5e5 + 1000, 5e6, 5e6 + 1000, crs = 32632)
   # Stopped with "NA/NaN/Inf in foreign function call (arg 1)".
   for (b in list(bnd, NULL)) {
-    tri <- build_tessellation(pts, b, method = "triangles", quiet = TRUE)
+    # The NA is counted and warned about, and the warning says why: the
+    # point has no location.
+    expect_warning(tri <- build_tessellation(pts, b, method = "triangles", quiet = TRUE),
+                   "1 of 21 point\\(s\\) .* They have empty geometry",
+                   class = "spatialkit_unassigned")
+    expect_identical(tri$params$n_outside, 1L)
     expect_gt(nrow(tri$cells), 0L)
     expect_length(tri$index, 21L)
     expect_true(is.na(tri$index[21]))

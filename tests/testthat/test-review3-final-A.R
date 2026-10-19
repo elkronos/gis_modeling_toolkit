@@ -47,7 +47,8 @@ test_that("area_of_applicability() takes the folds cv_*() takes when prep_model_
   pts <- .fa_pts()
   pts$z[50] <- NA
   folds <- make_folds(pts, k = 4, method = "block_kfold", seed = 1)
-  prep  <- .fa_quiet(prep_model_data(pts, "z", c("a", "b")))
+  expect_warning(prep <- .fa_quiet(prep_model_data(pts, "z", c("a", "b"))),
+                 class = "spatialkit_rows_dropped")
   expect_identical(nrow(prep), 119L)
   fit <- lm_spatial_fit(prep, "z", c("a", "b"))
   new <- pts[1:5, ]
@@ -91,8 +92,9 @@ test_that("area_of_applicability() takes the folds cv_*() takes when prep_model_
   p2 <- pts
   p2$..row_id <- 1000L + seq_len(nrow(p2))
   f2 <- make_folds(p2, k = 4, method = "block_kfold", seed = 1)
-  fit2 <- lm_spatial_fit(.fa_quiet(prep_model_data(p2, "z", c("a", "b"))),
-                         "z", c("a", "b"))
+  expect_warning(prep2 <- .fa_quiet(prep_model_data(p2, "z", c("a", "b"))),
+                 class = "spatialkit_rows_dropped")
+  fit2 <- lm_spatial_fit(prep2, "z", c("a", "b"))
   expect_equal(area_of_applicability(new, model = fit2, folds = f2)$threshold,
                ref$threshold)
 })
@@ -101,8 +103,9 @@ test_that("a fold ID naming a row the data never had is still refused", {
   pts <- .fa_pts()
   pts$z[50] <- NA
   folds <- make_folds(pts, k = 4, method = "block_kfold", seed = 1)
-  fit <- lm_spatial_fit(.fa_quiet(prep_model_data(pts, "z", c("a", "b"))),
-                        "z", c("a", "b"))
+  expect_warning(prep <- .fa_quiet(prep_model_data(pts, "z", c("a", "b"))),
+                 class = "spatialkit_rows_dropped")
+  fit <- lm_spatial_fit(prep, "z", c("a", "b"))
   folds$folds[[1]]$test <- c(folds$folds[[1]]$test, 999L)
   expect_error(area_of_applicability(pts[1:5, ], model = fit, folds = folds),
                "names 1 ..row_id value\\(s\\) that are not in the training data \\(first: 999\\)")
@@ -217,7 +220,7 @@ test_that("resolution_profile() refuses a units `sac` and a character one by nam
   # cells, with nothing said.
   expect_error(resolution_profile(pts, "z", sac = units::set_units(1.5, "km"),
                                   n_levels = 4),
-               "`sac` must be an estimate_sac_range\\(\\) result.*got 1\\.5 \\[km\\]")
+               "`sac` must be NULL, \"auto\", an estimate_sac_range\\(\\) result.*got 1\\.5 \\[km\\]")
   expect_error(resolution_profile(pts, "z", sac = "300", n_levels = 4),
                "got an object of class character")
 })

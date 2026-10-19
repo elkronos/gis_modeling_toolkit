@@ -1,7 +1,7 @@
 ---
 title: "Spatial cross-validation"
 description: >
-  The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
+  The six fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
 author: "Justin Chase"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -149,7 +149,7 @@ Neither number is the truth. The blocked one answers a harder question, and it
 is the question most maps are used for: what happens at a location with no
 observation nearby.
 
-## The five fold schemes
+## The six fold schemes
 
 ```{r methods-table, echo=FALSE, results='asis'}
 cat(
@@ -160,6 +160,7 @@ cat(
 "| `buffered_loo` | one point, and everything within `buffer` of it | n is small and you can afford n fits |\n",
 "| `leave_location_out` | every observation from one site, named by `group_var` | you have repeat visits and the site is the unit |\n",
 "| `nndm` | one point, and a distance-matched exclusion | you know where you will predict, and want the fold geometry to match it |\n",
+"| `knndm` | one of `k` folds built from clusters of the points, matched to the prediction distances | the same, with more rows than `nndm` takes (5,000) or too many for one fit per point; the match is coarser |\n",
 sep = "")
 ```
 

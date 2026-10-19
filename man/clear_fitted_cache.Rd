@@ -41,9 +41,9 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 }
 }
 \seealso{
-Other package options and caches: 
-\code{\link{clear_grid_cache}()},
-\code{\link{create_grid_polygons_cached}()},
-\code{\link{spatialkit_quiet}()}
+Other package options and caches:
+\code{\link[=clear_grid_cache]{clear_grid_cache()}},
+\code{\link[=create_grid_polygons_cached]{create_grid_polygons_cached()}},
+\code{\link[=spatialkit_quiet]{spatialkit_quiet()}}
 }
 \concept{package options and caches}

@@ -204,12 +204,15 @@ test_that("cv_spatial reports fold labels that match make_folds()", {
   holed$w[folds$folds[[2]]$test] <- NA
 
   # The vanished fold is announced with a real warning, not only a log line.
+  # So are the rows prep_model_data() dropped, with a class.
   expect_warning(
-    res <- suppressMessages(
-      cv_spatial(holed, "z", "w",
-                 fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
-                 folds = folds, seed = 1)),
-    "dropped before fitting")
+    expect_warning(
+      res <- suppressMessages(
+        cv_spatial(holed, "z", "w",
+                   fit_fn = function(tr) lm_spatial_fit(tr, "z", "w"),
+                   folds = folds, seed = 1)),
+      "dropped before fitting"),
+    class = "spatialkit_rows_dropped")
 
   expect_equal(sort(unique(res$fold_metrics$fold)), c(1L, 3L, 4L))
   expect_equal(sort(unique(res$predictions$fold)), c(1L, 3L, 4L))

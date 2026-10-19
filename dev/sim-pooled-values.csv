@@ -1,0 +1,44 @@
+"output","quantity","where","class","value","n","layer_min","layer_max"
+"a","RMSE of the pooled value over RMSE of the plain mean","among","all rows",0.962294,60000,0.918136,1.02014
+"a","RMSE of the pooled value over RMSE of the plain mean","among","1 row of the layer in the cell",0.840612,1284,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","among","2 to 4 rows of the layer in the cell",0.948905,26089,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","among","5 to 9 rows of the layer in the cell",0.980529,31460,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","among","10 rows or more of the layer in the cell",0.99473,1167,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","block","all rows",0.945755,60000,0.785164,1.11279
+"a","RMSE of the pooled value over RMSE of the plain mean","block","1 row of the layer in the cell",0.836845,3087,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","block","2 to 4 rows of the layer in the cell",0.938174,28927,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","block","5 to 9 rows of the layer in the cell",0.970385,27043,NA,NA
+"a","RMSE of the pooled value over RMSE of the plain mean","block","10 rows or more of the layer in the cell",0.989279,943,NA,NA
+"b","coverage of the 0.90 interval for one observation","among","all rows",0.896233,60000,0.836667,0.94
+"b","coverage of the 0.90 interval for one observation","block","all rows",0.7513,60000,0.52,0.906667
+"b","coverage of the 0.90 interval for one observation","among and block","dist_ratio below 1",0.915404,31089,NA,NA
+"b","coverage of the 0.90 interval for one observation","among and block","dist_ratio 1 to 2",0.8918,23355,NA,NA
+"b","coverage of the 0.90 interval for one observation","among and block","dist_ratio 2 to 4",0.839461,17080,NA,NA
+"b","coverage of the 0.90 interval for one observation","among and block","dist_ratio 4 to 8",0.778957,18286,NA,NA
+"b","coverage of the 0.90 interval for one observation","among and block","dist_ratio above 8",0.695031,30190,NA,NA
+"c","coverage of the 0.90 t interval of the plain mean, read as a range for one observation","among","rows whose cell has the interval",0.58863,58716,0.501706,0.686007
+"c","coverage of the 0.90 t interval of the plain mean, read as a range for one observation","block","rows whose cell has the interval",0.492225,56913,0.268382,0.751678
+"d","median own weight","white noise","layers",0.105451,200,0,0.279866
+"d","share of layers with tau2 = 0","white noise","layers",0.1,200,NA,NA
+"d","share of layers on which summarize_by_cell() raises spatialkit_no_structure","white noise","layers",1,200,NA,NA
+"d","share of layers on which get_voronoi_seeds() raises spatialkit_no_structure","white noise","layers",1,200,NA,NA
+"d","correlation of a cell's pooled value with the mean of its 8 nearest cells'","white noise","layers",0.7939,200,0.590014,0.889456
+"d","correlation of a cell's plain mean with the mean of its 8 nearest cells'","white noise","layers",-0.0193026,200,-0.215616,0.173319
+"e","realised squared error of the pooled value over (1 - w) tau2","among","cells with at least 10 further locations",0.979804,66502,0.765017,1.23565
+"e","realised squared error of the pooled value over (1 - w) tau2","block","cells with at least 10 further locations",6.91133,3860,0.961802,22.3327
+"f","share of layers with the lowest loo at the finest size","pooled value","obs_per_cell = 2",0.88,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 18",0,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 12",0,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 9",0,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 6",0,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 4.5",0.01,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 3",0.11,200,NA,NA
+"f","share of layers with the lowest loo at this size","pooled value","obs_per_cell = 2",0.88,200,NA,NA
+"f","share of layers with the lowest loo at the finest size","plain mean","obs_per_cell = 2",0,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 18",0.005,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 12",0.06,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 9",0.245,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 6",0.43,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 4.5",0.255,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 3",0.005,200,NA,NA
+"f","share of layers with the lowest loo at this size","plain mean","obs_per_cell = 2",0,200,NA,NA
