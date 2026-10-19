@@ -71,9 +71,15 @@
 #' is the size, \code{obs_per_cell}: how many observations a cell is to hold
 #' on average.  For pooled values the size sets the count
 #' (\code{\link{select_resolution}(criterion = "size")}); for plain means the
-#' lowest leave-one-out error can set it (\code{criterion = "loo"}).  Both
-#' are asked for by argument: a call that names neither returns what it
-#' returned before the arguments existed.
+#' lowest leave-one-out error can set it (\code{criterion = "loo"}).  Each
+#' has a default: the pooled value, and a size of 4.5, from which
+#' \code{select_resolution()}'s default criterion, \code{"auto"}, sets the
+#' count.  \code{estimate = "mean"} in the summary gives the frame it
+#' returned before the argument existed.  \code{estimate = NULL,
+#' obs_per_cell = NULL} in the profile gives the earlier ladder and its
+#' columns, and with \code{partition = "kmeans"} the earlier regions as
+#' well: the profile it returned before.  The seeding functions take
+#' \code{partition = "kmeans"} for their earlier seeds.
 #'
 #' Supporting these throughout, \code{\link{ensure_projected}()} and
 #' \code{\link{coerce_to_points}()} handle coordinate reference systems and
@@ -148,6 +154,13 @@
 #'     \code{resolution_profile(obs_per_cell = "auto")} take when none is
 #'     given: a convention, a size at which most cells hold several
 #'     observations.
+#'   \item The density kind of partition, kept from the best of 3
+#'     k-means++ starts, in \code{resolution_profile()},
+#'     \code{get_voronoi_seeds()} and \code{voronoi_seeds_kmeans()}: a
+#'     convention, a kind that puts small cells where observations are dense
+#'     and holds the counts per cell close once the cells outnumber the
+#'     dense places, from a number of starts that keeps the cost of a fit
+#'     to every row down.  \code{partition = "kmeans"} gives plain k-means.
 #'   \item The 8 nearest cells a pooled value is pulled toward in
 #'     \code{summarize_by_cell(estimate = "pooled")}: a convention, a count
 #'     large enough to give a cell a stable target.  It is not an argument.

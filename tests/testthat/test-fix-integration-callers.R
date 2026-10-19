@@ -87,15 +87,18 @@ test_that("every caller acts on the no-structure verdict, and none treats it as 
 
   # resolution_profile(): no nugget for Cp, no warning about the model, and
   # select_resolution() says the count is not identified.
-  rp <- fic_conditions(resolution_profile(s$pts, "noise", sac = no, n_levels = 4, nstart = 2))
+  rp <- fic_conditions(resolution_profile(s$pts, "noise", sac = no, n_levels = 4, nstart = 2,
+                                          estimate = NULL, obs_per_cell = NULL,
+                                          partition = "kmeans"))
   expect_identical(attr(rp$value, "cp_noise")$source, "finest-level residual mean square")
   expect_false(any(grepl("not a fitted value|optimiser|did not converge", rp$messages)))
-  sel <- suppressWarnings(select_resolution(rp$value))
+  sel <- suppressWarnings(select_resolution(rp$value, criterion = "cp"))
   expect_false(sel$structured)
   expect_true(any(grepl(.sac_reason_no_structure, sel$note, fixed = TRUE)))
 
   # summarize_by_cell(): a design effect of 1 by the variogram route.
-  sm <- fic_conditions(summarize_by_cell(s$asg, "noise", deff = "variogram", sac = no))
+  sm <- fic_conditions(summarize_by_cell(s$asg, "noise", deff = "variogram", sac = no,
+                                         estimate = "mean"))
   expect_length(sm$conds, 0L)
   expect_true(all(sm$value$deff_method == "variogram"))
   expect_true(all(attr(sm$value, "deff_applied")$deff == 1, na.rm = TRUE))
@@ -107,7 +110,8 @@ test_that("every caller acts on the no-structure verdict, and none treats it as 
   wn_cells <- create_grid_polygons(sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(wn))),
                                    target_cells = 9, type = "square")
   wn_asg <- suppressWarnings(assign_features_to_polygons(wn, wn_cells))
-  sf2 <- fic_conditions(summarize_by_cell(wn_asg, "z", deff = "variogram", sac = flat))
+  sf2 <- fic_conditions(summarize_by_cell(wn_asg, "z", deff = "variogram", sac = flat,
+                                          estimate = "mean"))
   expect_false(any(vapply(sf2$conds, inherits, logical(1), "spatialkit_deff_fallback")))
   expect_true(all(sf2$value$deff_method == "variogram"))
   # A refusal that says "no spatial structure" but carries a model with a
@@ -115,7 +119,7 @@ test_that("every caller acts on the no-structure verdict, and none treats it as 
   odd <- no
   attr(odd, "variogram_model") <- attr(estimate_sac_range(s$pts, "z"), "variogram_model")
   so <- fic_conditions(summarize_by_cell(s$asg, NULL, predictor_vars = "noise",
-                                         deff = "variogram", sac = odd))
+                                         deff = "variogram", sac = odd, estimate = "mean"))
   expect_identical(sum(vapply(so$conds, inherits, logical(1), "spatialkit_deff_fallback")), 1L)
 
   # kriging_adequacy(): the model is used, and the warning says what it is.

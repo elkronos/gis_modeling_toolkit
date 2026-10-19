@@ -249,8 +249,8 @@ afterwards.}  This function has no \code{partition} argument: the elbow is
 a reading of the sum of squares that plain k-means minimises, and the
 cells behind Moran's z are that partition's.  A count returned here says
 nothing about density-weighted regions;
-\code{\link{resolution_profile}(partition = "density")} scores a ladder of
-those.
+\code{\link{resolution_profile}()}, whose regions are of that kind by
+default, scores counts of those.
 
 \strong{The model-aware criteria rank on the standardised deviate, not on
 |Moran's I|.}  Both \eqn{E[I]} and \eqn{Var[I]} depend on the number of

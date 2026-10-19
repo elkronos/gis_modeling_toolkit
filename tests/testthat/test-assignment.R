@@ -239,7 +239,7 @@ test_that("summarize_by_cell consumes the ids assign_features_to_polygons emits"
     coords = c("x", "y"), crs = 32632
   )
   assigned <- assign_features_to_polygons(pts, .two_cells())
-  cells    <- summarize_by_cell(assigned, response_var = "val")
+  cells    <- summarize_by_cell(assigned, response_var = "val", estimate = "mean")
 
   expect_equal(sum(cells$n), nrow(assigned))
   expect_equal(sort(cells$poly_id), sort(unique(assigned$poly_id)))

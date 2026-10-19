@@ -733,9 +733,9 @@ test_that("summarize_by_cell(deff = 'variogram') corrects the response SE with t
   pts <- sf::st_as_sf(data.frame(x = x, y = y, z = z, p = p,
                                  poly_id = 1L + (x > 500) + 2L * (y > 500)),
                       coords = c("x", "y"), crs = 32632)
-  resp_only <- suppressWarnings(summarize_by_cell(pts, "z", deff = "variogram"))
+  resp_only <- suppressWarnings(summarize_by_cell(pts, "z", deff = "variogram", estimate = "mean"))
   with_pred <- suppressWarnings(summarize_by_cell(pts, "z", predictor_vars = "p",
-                                                  deff = "variogram"))
+                                                  deff = "variogram", estimate = "mean"))
   expect_equal(with_pred[["..se_resp_z"]], resp_only[["..se_resp_z"]], tolerance = 1e-10)
   expect_equal(attr(with_pred, "deff_applied")$deff, attr(resp_only, "deff_applied")$deff,
                tolerance = 1e-10)
@@ -750,12 +750,12 @@ test_that("summarize_by_cell(deff = 'variogram') corrects the response SE with t
                                                    structure_alpha = 1))
   skip_if(is.na(sac_resp) || is.na(sac_resid), "the variograms did not fit on this draw")
   explicit <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
-                                sac = sac_resp)
+                                sac = sac_resp, estimate = "mean")
   expect_equal(with_pred[["..se_resp_z"]], explicit[["..se_resp_z"]], tolerance = 1e-10)
   # Used as given, but with a warning that the response SEs are understated.
   expect_warning(
     residual <- summarize_by_cell(pts, "z", predictor_vars = "p", deff = "variogram",
-                                  sac = sac_resid),
+                                  sac = sac_resid, estimate = "mean"),
     "residuals on predictors")
   expect_false(isTRUE(all.equal(with_pred[["..se_resp_z"]], residual[["..se_resp_z"]],
                                 tolerance = 1e-6)))

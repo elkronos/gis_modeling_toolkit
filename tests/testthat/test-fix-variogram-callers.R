@@ -147,7 +147,7 @@ test_that("summarize_by_cell(deff = 'variogram') uses an accepted model and fall
   skip_if_not_installed("gstat")
   s <- fvc_setup()
   ok <- estimate_sac_range(s$pts, "z")
-  sm <- summarize_by_cell(s$asg, "z", deff = "variogram", sac = ok)
+  sm <- summarize_by_cell(s$asg, "z", deff = "variogram", sac = ok, estimate = "mean")
   da <- attr(sm, "deff_applied")
   expect_identical(da$method, "variogram")
   expect_true(all(da$deff[is.finite(da$deff)] >= 1))
@@ -159,7 +159,8 @@ test_that("summarize_by_cell(deff = 'variogram') uses an accepted model and fall
   # spatialkit_deff_fallback, and Kish's correction.)
   no <- suppressWarnings(estimate_sac_range(s$pts, "noise"))
   expect_identical(attr(no, "rejected_reason"), NO_STRUCTURE_REASON)
-  res <- fvc_warnings(summarize_by_cell(s$asg, "noise", deff = "variogram", sac = no))
+  res <- fvc_warnings(summarize_by_cell(s$asg, "noise", deff = "variogram", sac = no,
+                                        estimate = "mean"))
   expect_length(res$messages, 0L)
   da <- attr(res$value, "deff_applied")
   expect_identical(da$method, "variogram")
@@ -167,9 +168,9 @@ test_that("summarize_by_cell(deff = 'variogram') uses an accepted model and fall
   expect_true(all(res$value$deff_method == "variogram"))
   # The standard errors are the uncorrected ones, and the same when the
   # function estimates the variogram itself.
-  plain <- summarize_by_cell(s$asg, "noise")
+  plain <- summarize_by_cell(s$asg, "noise", estimate = "mean")
   expect_equal(res$value$..se_resp_noise, plain$..se_resp_noise)
-  own <- fvc_warnings(summarize_by_cell(s$asg, "noise", deff = "variogram"))
+  own <- fvc_warnings(summarize_by_cell(s$asg, "noise", deff = "variogram", estimate = "mean"))
   expect_false(any(vapply(own$classes, function(k) "spatialkit_deff_fallback" %in% k,
                           logical(1))))
   expect_equal(own$value$..se_resp_noise, plain$..se_resp_noise)
@@ -178,7 +179,7 @@ test_that("summarize_by_cell(deff = 'variogram') uses an accepted model and fall
   far <- suppressWarnings(estimate_sac_range(s$pts, "z", range_frac = 0.05))
   expect_identical(attr(far, "rejected_reason"), "fitted range exceeds the largest lag fitted")
   res2 <- fvc_warnings(summarize_by_cell(s$asg, NULL, predictor_vars = "z",
-                                         deff = "variogram", sac = far))
+                                         deff = "variogram", sac = far, estimate = "mean"))
   cls <- vapply(res2$classes, function(k) "spatialkit_deff_fallback" %in% k, logical(1))
   expect_identical(sum(cls), 1L)
   expect_match(res2$messages[cls], "fitted range exceeds the largest lag fitted", fixed = TRUE)

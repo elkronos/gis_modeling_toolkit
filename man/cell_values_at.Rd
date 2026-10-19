@@ -40,7 +40,9 @@ another column of the result (\code{value}, \code{estimate}, \code{obs_lo}, \cod
 \item{seeds}{\code{NULL}, or the seeds the cells were built on: an sf POINT
 layer with a column named as the ID column that gives each seed's cell.
 For cells from \code{tess <- build_tessellation(seeds)} that is
-\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}. Two
+\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}, after
+which a seed outside a boundary that is not convex needs its cell's ID
+(see "Seeds outside the boundary"). Two
 seeds at different locations with one ID are an error; seeds that share
 a location share its cell, as \code{index} gives them. \code{NA} marks a seed
 without a cell.}
@@ -116,9 +118,13 @@ a cell ID and finite coordinates. Their distinct locations are the
 observations every distance below is taken from.
 \item \emph{The cell of a location.} With \code{seeds}, the cell of the nearest seed.
 That is the Voronoi cell before its clip to the cover, so every
-location has one, unless its nearest seed has an \code{NA} ID
-(\code{\link[=build_tessellation]{build_tessellation()}} gives \code{NA} in \code{index} to a seed whose cell the
-clip removed). Without \code{seeds}, the polygon of \code{values} that holds the
+location has one, unless its nearest seed has an \code{NA} ID. A location
+nearest such a seed has no cell, even where the polygon that holds it
+has scored rows. \code{\link[=build_tessellation]{build_tessellation()}} gives \code{NA} in \code{index} to a
+seed that lies in no cell: one whose cell the clip removed, and one
+outside a boundary that is not convex, whose clipped cell exists
+(see "Seeds outside the boundary"). Without \code{seeds}, the polygon of
+\code{values} that holds the
 location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} with its default
 \code{tie_break} and the summary's record of the count, so a location on
 the edge between two cells the profile scored is placed as that
@@ -137,9 +143,10 @@ and \verb{..obs_hi_<prefix><response_var>} when \code{values} has them.
 \item \emph{The fill.} A location with no cell, or whose cell holds no scored row
 and has no value in \code{values}, takes the value and interval of the cell
 of its nearest scored row. \code{filled} is then \code{TRUE} and \code{filled_from} is
-that cell's ID. The ID column still holds the location's own cell, so
-the two columns together say where a location lies and where its value
-came from. A cell that holds a scored row is not filled. Where \code{values}
+that cell's ID. The ID column still holds the location's own cell, as
+step 3 finds it, so the two columns together say where a location lies
+and where its value came from. A cell that holds a scored row is not
+filled. Where \code{values}
 has no value for such a cell (the summary could not compute the pooled
 columns, or has no row for the cell), its locations have \code{value = NA}
 and \code{filled = FALSE}; a filled value is \code{NA} in the same case, when
@@ -158,6 +165,30 @@ IDs of all three are written out as text before any match, and both ID
 columns returned have the class of the ID column of \code{values} wherever
 that class can hold every ID (see Value).
 }
+\section{Seeds outside the boundary}{
+
+A k-means seed can lie outside a boundary that is not convex, in a bay or
+a bend of a coast (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}). Its cell, clipped to the
+boundary, holds ground and observations, but the seed lies in no cell, so
+\code{seeds$cell_id <- tess$index} gives it \code{NA}. The locations nearest it then
+have \code{NA} in the ID column and are filled from the cell of their nearest
+scored row, which can be another cell than the one that holds them.
+Every point of a Voronoi cell is nearer its own seed than any other, so a
+point inside each cell that no seed lies in finds that cell's seed. In a
+projected CRS:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{seeds$cell_id <- tess$index
+own  <- tess$cells[!tess$cells$cell_id \%in\% tess$index, ]
+near <- sf::st_nearest_feature(sf::st_point_on_surface(sf::st_geometry(own)),
+                               seeds)
+seeds$cell_id[near] <- own$cell_id
+}\if{html}{\out{</div>}}
+
+Each location inside the boundary then has the cell that holds it, and
+none is filled for want of a seed. A seed whose cell the clip removed
+keeps \code{NA}.
+}
+
 \section{Ties}{
 
 A location the same distance from two seeds takes the one that comes
@@ -208,7 +239,12 @@ the layer. Over the held-out observations of all layers, the interval at
 \code{obs_level = 0.90} held 91.5 percent of those with a \code{dist_ratio} below
 1, 89.2 percent from 1 to 2, 83.9 percent from 2 to 4, 77.9 percent from
 4 to 8 and 69.5 percent above 8. It held 89.6 percent of the observations
-held out at random and 75.1 percent of those in the block.
+held out at random and 75.1 percent of those in the block. A second
+simulation, on fields whose level jumps at boundaries, gave this
+function's interval to held-out observations; "Intervals: which one
+answers which question" in \code{\link[=summarize_by_cell]{summarize_by_cell()}} gives its coverage, which
+in cells of one training observation fell short of \code{obs_level} on one kind
+of field.
 }
 
 \section{Without the FNN package}{
@@ -241,16 +277,15 @@ all_pts <- st_as_sf(
 pts    <- all_pts[1:350, ]
 newpts <- all_pts[351:400, ]
 
-# The count from a size, the cells, the observations in them, the values.
-prof  <- resolution_profile(pts, "income", estimate = "pooled",
-                            obs_per_cell = 4.5, sac = "auto")
-sel   <- select_resolution(prof, criterion = "size")
+# The count from a size, the cells, the observations in them, the values,
+# all at the defaults: pooled values at 4.5 observations per cell.
+prof  <- resolution_profile(pts, "income")
+sel   <- select_resolution(prof)
 seeds <- get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts)
 tess  <- build_tessellation(seeds, method = "voronoi")
 asg   <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id")
 out   <- summarize_by_cell(asg, "income", id_col = "cell_id",
-                           cells_sf = tess$cells, estimate = "pooled",
-                           obs_level = 0.90)
+                           cells_sf = tess$cells, obs_level = 0.90)
 
 # The value at other locations, each placed in the cell of its nearest
 # seed.  `tess$index` gives the cell of each seed.

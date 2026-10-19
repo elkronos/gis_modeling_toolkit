@@ -89,17 +89,19 @@ test_that("a profile whose cp is NA is not read by another criterion in silence"
 
   # Geometry-only, given a variogram: cp is NA, reliability is finite.  It
   # used to be read by reliability and handed on as that many cells.
-  pg <- fmd_quiet(resolution_profile(pts, sac = sac, n_levels = 8, nstart = 2))
+  pg <- fmd_quiet(resolution_profile(pts, sac = sac, n_levels = 8, nstart = 2, estimate = NULL,
+                                     obs_per_cell = NULL, partition = "kmeans"))
   expect_false(any(is.finite(pg$cp)))
   expect_true(any(is.finite(pg$reliability)))
-  expect_error(select_resolution(pg), "NA at every level")
+  expect_error(select_resolution(pg, criterion = "cp"), "NA at every level")
   e <- tryCatch(resolve(pg, "n", "get_voronoi_seeds"), error = function(e) e)
   expect_s3_class(e, "spatialkit_no_default_criterion")
   expect_match(conditionMessage(e), "`cp`, the criterion a profile is read by, is NA at every level")
   expect_match(conditionMessage(e), "Finite on it: reliability")
   expect_match(conditionMessage(e), "select_resolution(<profile>, criterion = \"reliability\")",
                fixed = TRUE)
-  expect_error(get_voronoi_seeds(fmd_bnd, method = "kmeans", n = pg, sample_points = pts),
+  expect_error(get_voronoi_seeds(fmd_bnd, method = "kmeans", n = pg, sample_points = pts,
+                                 partition = "kmeans"),
                class = "spatialkit_no_default_criterion")
   expect_error(build_tessellation(pts, boundary = fmd_bnd, method = "hex",
                                   approx_n_cells = pg, quiet = TRUE),
@@ -112,7 +114,8 @@ test_that("a profile whose cp is NA is not read by another criterion in silence"
   # levels too fine for the fallback noise variance) used to be read by
   # moran_z.
   pf <- fmd_quiet(resolution_profile(pts, "z", sac = 240, levels = c(260, 300, 350),
-                                     nstart = 1))
+                                     nstart = 1, estimate = NULL, obs_per_cell = NULL,
+                                     partition = "kmeans"))
   expect_false(any(is.finite(pf$cp)))
   expect_true(any(is.finite(pf$moran_z)))
   ef <- tryCatch(resolve(pf, "n", "get_voronoi_seeds"), error = function(e) e)

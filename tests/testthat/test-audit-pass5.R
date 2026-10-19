@@ -468,7 +468,7 @@ test_that("a variable named `n` is not replaced by the row count", {
   set.seed(9)
   pts <- .p5_assigned(nc = 3, np = 5)
   pts$n <- rnorm(nrow(pts), 100, 5)
-  out <- summarize_by_cell(pts, response_var = "n")
+  out <- summarize_by_cell(pts, response_var = "n", estimate = "mean")
 
   truth <- tapply(pts$n, pts$poly_id, mean)
   expect_equal(out[["resp_mean_n"]], as.numeric(truth[as.character(out$poly_id)]),
@@ -513,13 +513,13 @@ test_that("a rejected sac cannot size a design effect", {
   trended$resp <- trended$resp + 0.05 * sf::st_coordinates(trended)[, 1]
   expect_warning(
     out <- summarize_by_cell(trended, response_var = "resp",
-                             deff = "variogram", sac = fake),
+                             deff = "variogram", sac = fake, estimate = "mean"),
     "supplied `sac` reports no usable range.*estimated from `response_var` reports no usable range",
     class = "spatialkit_deff_fallback")
   # The fallback is Kish, not the uncorrected SE (this used to assert no
   # `deff_applied` attribute and SEs equal to deff = 1): the refused model
   # sizes nothing, and the result is the deff = "kish" one, labelled.
-  kish <- summarize_by_cell(trended, response_var = "resp", deff = "kish")
+  kish <- summarize_by_cell(trended, response_var = "resp", deff = "kish", estimate = "mean")
   expect_identical(attr(out, "deff_applied")$method, "kish")
   expect_identical(attr(out, "deff_applied")$requested, "variogram")
   expect_equal(out[["..se_resp_resp"]], kish[["..se_resp_resp"]], tolerance = 1e-10)
@@ -537,7 +537,8 @@ test_that("a rejected sac cannot size a design effect", {
   # standard errors by 38 percent).
   w <- list()
   out0 <- withCallingHandlers(
-    summarize_by_cell(pts, response_var = "resp", deff = "variogram", sac = fake),
+    summarize_by_cell(pts, response_var = "resp", deff = "variogram", sac = fake,
+                      estimate = "mean"),
     warning = function(c) { w[[length(w) + 1L]] <<- c; invokeRestart("muffleWarning") })
   expect_length(w, 1L)
   expect_false(inherits(w[[1L]], "spatialkit_deff_fallback"))
@@ -545,7 +546,7 @@ test_that("a rejected sac cannot size a design effect", {
                "supplied `sac` reports no usable range.*It was set aside, and the design effect uses the variogram estimated from `response_var`")
   expect_identical(attr(out0, "deff_applied")$method, "variogram")
   expect_identical(unique(out0$deff_method), "variogram")
-  iid <- summarize_by_cell(pts, response_var = "resp", deff = 1)
+  iid <- summarize_by_cell(pts, response_var = "resp", deff = 1, estimate = "mean")
   expect_equal(out0[["..se_resp_resp"]], iid[["..se_resp_resp"]], tolerance = 1e-10)
   expect_equal(out0$cell_weight, rep(25, 4))
 })
@@ -573,7 +574,8 @@ test_that("duplicate cell IDs are reported", {
   # Renumbering cell 3 as 2 also leaves the points summarised under ID 3
   # with no cell, which is reported too.
   expect_warning(
-    expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells),
+    expect_warning(summarize_by_cell(pts, response_var = "resp", cells_sf = cells,
+                                     estimate = "mean"),
                    "duplicated value"),
     "match no `cells_sf\\$poly_id`")
 })

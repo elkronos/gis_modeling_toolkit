@@ -12,10 +12,12 @@ source(file.path(.tour_dir, "_common.R"))
 pts <- tour_points()
 bnd <- tour_boundary(pts)
 
-step("01.1", "Voronoi cells grown from k-means seeds")
+step("01.1", "Voronoi cells grown from density-weighted k-means seeds")
 # Voronoi cells grow from SEEDS, so place the seeds first and tessellate those.
 # Hand build_tessellation() the observations instead and you get one cell per
-# observation, which is section 01.5.
+# observation, which is section 01.5. The seeds are density-weighted k-means
+# from 3 starts, the default; partition = "kmeans" gives the plain k-means
+# seeds of earlier versions.
 seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 25,
                            sample_points = pts, set_seed = 1)
 vor   <- build_tessellation(seeds, boundary = bnd, method = "voronoi",
@@ -50,7 +52,10 @@ if (!skip_without("ggplot2", "the maps")) {
                           list(voronoi = vor, hex = hex, square = sqr, triangles = tri)))) {
     t_ <- list(voronoi = vor, hex = hex, square = sqr, triangles = tri)[[nm]]
     asg <- assign_features_to_polygons(pts, t_$cells)
-    cel <- summarize_by_cell(asg, "z", cells_sf = t_$cells, deff = 1)
+    # The maps show the plain mean of each cell, so the summary leaves out
+    # the pooled values it adds by default.
+    cel <- summarize_by_cell(asg, "z", cells_sf = t_$cells, deff = 1,
+                             estimate = "mean")
     look_for(sprintf("%s -- %s", nm, notes[[nm]]))
     show_plot(plot_tessellation_map(cel, boundary = bnd, features_sf = pts,
                                     fill_col = "resp_mean_z",
@@ -69,7 +74,8 @@ step("01.5", "Voronoi over the observations themselves")
 trap <- build_tessellation(pts, boundary = bnd, method = "voronoi",
                            approx_n_cells = 25, quiet = TRUE)
 asg1 <- assign_features_to_polygons(pts, trap$cells)
-cel1 <- summarize_by_cell(asg1, "z", cells_sf = trap$cells, deff = 1)
+cel1 <- summarize_by_cell(asg1, "z", cells_sf = trap$cells, deff = 1,
+                          estimate = "mean")
 cat(sprintf("  asked for 25 cells, got %d; %d hold one point or none, %d SEs are NA\n",
             nrow(cel1), sum(cel1$n <= 1, na.rm = TRUE),
             sum(is.na(cel1$..se_resp_z))))

@@ -42,7 +42,9 @@ test_that("a determine_optimal_levels() vector is read at its first candidate", 
 test_that("a select_resolution() result and a profile are read at their best level", {
   skip_if_not_installed("gstat")
   pts <- cc_points()
-  prof <- suppressWarnings(resolution_profile(pts, response_var = "z", n_levels = 8, seed = 1))
+  prof <- suppressWarnings(resolution_profile(pts, response_var = "z", n_levels = 8, seed = 1,
+                                              estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                              partition = "kmeans"))
   sel  <- select_resolution(prof, criterion = "elbow")
   r1 <- resolve(sel, "n", "get_voronoi_seeds")
   expect_equal(r1$n, as.numeric(sel$best))
@@ -55,7 +57,7 @@ test_that("a select_resolution() result and a profile are read at their best lev
   r2 <- tryCatch(suppressWarnings(resolve(prof, "n", "get_voronoi_seeds")),
                  error = function(e) e)
   if (!inherits(r2, "error")) {
-    expect_equal(r2$n, as.numeric(select_resolution(prof)$best))
+    expect_equal(r2$n, as.numeric(select_resolution(prof, criterion = "cp")$best))
     expect_match(r2$from, "resolution_profile\\(\\) read with select_resolution")
   } else {
     expect_match(conditionMessage(r2), "NA at every level")

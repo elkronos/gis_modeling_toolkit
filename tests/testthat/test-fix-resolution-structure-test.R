@@ -66,7 +66,8 @@ test_that("a Cp with no noise variance does not call white noise structured", {
   for (seed in 41:45) {
     pts <- fst_noise(400, seed)
     out <- fst_catch(resolution_profile(pts, "z", sac = fst_sac(pts, 90, nugget = 0),
-                                        n_levels = 8, nstart = 2))
+                                        n_levels = 8, nstart = 2, estimate = NULL,
+                                        obs_per_cell = NULL, partition = "kmeans"))
     expect_true(any(grepl("the variogram's nugget is 0", out$text)))
     expect_identical(attr(out$value, "cp_noise")$value, 0)
     s <- select_resolution(out$value, "cp")
@@ -79,7 +80,8 @@ test_that("a Cp with no noise variance does not call white noise structured", {
     expect_match(s$note, "the count is not identified")
   }
   # And the count reaches the tessellation functions with the classed warning.
-  seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts))
+  seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts,
+                                       partition = "kmeans"))
   expect_true("spatialkit_no_structure" %in% seeds$classes)
   expect_output(print(summary(out$value)), "one cell for the whole layer does as well")
 })
@@ -87,7 +89,8 @@ test_that("a Cp with no noise variance does not call white noise structured", {
 test_that("with no noise variance a field with structure is still called structured, and why", {
   f <- fst_field()
   p <- fst_catch(resolution_profile(f, "z", sac = fst_sac(f, 240, nugget = 0),
-                                    n_levels = 8, nstart = 2))$value
+                                    n_levels = 8, nstart = 2, estimate = NULL,
+                                    obs_per_cell = NULL, partition = "kmeans"))$value
   s <- select_resolution(p, "cp")
   expect_identical(s$structured, TRUE)
   expect_lt(s$structure_p, 1e-6)
@@ -95,7 +98,8 @@ test_that("with no noise variance a field with structure is still called structu
   # rests on.
   expect_match(s$note, "Cp's noise variance is 0")
   expect_match(s$note, "rests on the F test of the cells against one mean alone")
-  seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = f))
+  seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = f,
+                                       partition = "kmeans"))
   expect_false("spatialkit_no_structure" %in% seeds$classes)
 })
 
@@ -104,7 +108,9 @@ test_that("on small white-noise layers the flag is held to the level of its test
   # one cell is above the optimum by more than `tol` on about one in five,
   # which alone used to make `structured` TRUE (27 of 200 such layers).
   res <- t(vapply(1:40, function(i) {
-    p <- fst_catch(resolution_profile(fst_noise(60, 300 + i), "z", sac = 300, nstart = 2))$value
+    p <- fst_catch(resolution_profile(fst_noise(60, 300 + i), "z", sac = 300, nstart = 2,
+                                      estimate = NULL, obs_per_cell = NULL,
+                                      partition = "kmeans"))$value
     s <- select_resolution(p, "cp")
     c(structured = isTRUE(s$structured), tol_alone = s$one_cell > s$value * 1.02,
       p = s$structure_p, levels = sum(is.finite(p$cp)))
@@ -120,7 +126,8 @@ test_that("on small white-noise layers the flag is held to the level of its test
   # One of the layers the Cp comparison passes and the test does not.
   i <- which(res[, "tol_alone"] == 1 & res[, "structured"] == 0)[1L]
   pts <- fst_noise(60, 300 + i)
-  p <- fst_catch(resolution_profile(pts, "z", sac = 300, nstart = 2))$value
+  p <- fst_catch(resolution_profile(pts, "z", sac = 300, nstart = 2, estimate = NULL,
+                                    obs_per_cell = NULL, partition = "kmeans"))$value
   s <- select_resolution(p, "cp")
   expect_equal(s$structure_p,
                min(1, attr(p, "one_cell")$f_p[[as.character(s$best)]] * sum(is.finite(p$cp))))
@@ -128,13 +135,16 @@ test_that("on small white-noise layers the flag is held to the level of its test
   expect_match(s$note, sprintf("adjusting for the %d levels searched", sum(is.finite(p$cp))))
   expect_match(s$note, "a gap that chance produces on a layer of this size")
   expect_output(print(s), "not identified")
-  w <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts))
+  w <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts,
+                                   partition = "kmeans"))
   expect_true("spatialkit_no_structure" %in% w$classes)
 })
 
 test_that("a field with structure passes both, on a small layer too", {
   f <- fst_field(300, seed = 21)
-  p <- fst_catch(resolution_profile(f, "z", sac = 300, n_levels = 8, nstart = 2))$value
+  p <- fst_catch(resolution_profile(f, "z", sac = 300, n_levels = 8, nstart = 2,
+                                    estimate = NULL, obs_per_cell = NULL,
+                                    partition = "kmeans"))$value
   s <- select_resolution(p, "cp")
   expect_identical(s$structured, TRUE)
   expect_lt(s$structure_p, 0.05)
@@ -146,7 +156,9 @@ test_that("a field with structure passes both, on a small layer too", {
 
 test_that("without the profile's F test the flag is not asserted", {
   f <- fst_field()
-  p <- fst_catch(resolution_profile(f, "z", sac = fst_sac(f), n_levels = 8, nstart = 2))$value
+  p <- fst_catch(resolution_profile(f, "z", sac = fst_sac(f), n_levels = 8, nstart = 2,
+                                    estimate = NULL, obs_per_cell = NULL,
+                                    partition = "kmeans"))$value
   expect_identical(select_resolution(p, "cp")$structured, TRUE)
   bare <- p
   one <- attr(bare, "one_cell")
@@ -158,7 +170,9 @@ test_that("without the profile's F test the flag is not asserted", {
   expect_match(s$note, "carries no F test")
   # Where Cp at one cell is within `tol`, that alone still says FALSE.
   n <- fst_noise(600, 7)
-  pn <- fst_catch(resolution_profile(n, "z", sac = 300, n_levels = 8, nstart = 3))$value
+  pn <- fst_catch(resolution_profile(n, "z", sac = 300, n_levels = 8, nstart = 3,
+                                     estimate = NULL, obs_per_cell = NULL,
+                                     partition = "kmeans"))$value
   one <- attr(pn, "one_cell")
   one$f_p <- NULL
   attr(pn, "one_cell") <- one

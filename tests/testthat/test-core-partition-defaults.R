@@ -1,13 +1,18 @@
 # tests/testthat/test-core-partition-defaults.R
 # ---------------------------------------------------------------------------
-# The partition arguments leave every default result as it was.
+# The density kind is each function's own kind, and partition = "kmeans"
+# named gives the object a call without the partition arguments gave before
+# the switch of defaults.
 #
-# resolution_profile() has always scored the best of `nstart` k-means++
-# starts; get_voronoi_seeds(method = "kmeans") and voronoi_seeds_kmeans()
-# have always run stats::kmeans() from random starts.  Naming a function's
-# own kind and starting rule returns the object a call without the arguments
-# returns, and that object is pinned here to the computation it has always
-# been: nothing is added to it, not even a record of the kind.
+# resolution_profile(), get_voronoi_seeds(method = "kmeans") and
+# voronoi_seeds_kmeans() build density-weighted k-means cells from 3
+# k-means++ starts when the call names no kind and no number of starts, and
+# record the kind.  Naming that kind and its starting rule returns the
+# object a call without the arguments returns.  Named, the k-means kind is
+# the computation these functions made before: the profile the best of
+# `nstart` k-means++ starts (25 when no number is named), the seeding
+# functions stats::kmeans() from 10 random starts on the rows as they come,
+# with nothing added to the object, not even a record of the kind.
 # ---------------------------------------------------------------------------
 
 .pd_pts <- function(n = 240L, seed = 2L) {
@@ -56,10 +61,53 @@ test_that("resolution_profile() with its own kind named is the profile without t
   pts <- .pd_pts()
   plain <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5))
   named <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
-                                                partition = "kmeans", init = "kmeans++"))
+                                                partition = "density", init = "kmeans++"))
   expect_identical(named, plain)
   # The density arguments at their defaults change nothing either.
   expect_identical(partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
+                                                        density_power = 1, density_k = 8L)),
+                   plain)
+  # The record of the kind, and the print that names it.
+  expect_identical(attr(plain, "partition")[c("kind", "init", "density_power", "density_k")],
+                   list(kind = "density", init = "kmeans++", density_power = 1,
+                        density_k = 8L))
+  expect_identical(capture.output(print(named)), capture.output(print(plain)))
+  expect_match(capture.output(print(plain)),
+               "5 density-weighted k-means++ starts (power 1, 8 neighbours) per level",
+               fixed = TRUE, all = FALSE)
+
+  geo  <- resolution_profile(pts, n_levels = 5, nstart = 4)
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4,
+                                      partition = "density", init = "kmeans++"), geo)
+  expect_identical(attr(geo, "partition")$kind, "density")
+  # `iter_max = NULL` is the kind's own limit, 100 Lloyd steps for this one,
+  # and the record holds it.
+  expect_identical(attr(geo, "partition")$iter_max, 100L)
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, iter_max = NULL), geo)
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, iter_max = 100), geo)
+  # The default vector of `init`, passed as it is written, is the default.
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4,
+                                      init = c("kmeans++", "random")), geo)
+  # `nstart = NULL` is the kind's own number of starts: 3.
+  expect_identical(resolution_profile(pts, n_levels = 5),
+                   resolution_profile(pts, n_levels = 5, nstart = 3))
+})
+
+test_that("resolution_profile() with partition = \"kmeans\" named is the profile it always was", {
+  pts <- .pd_pts()
+  # The old defaults by name: no estimate, the automatic ladder, the
+  # variogram estimated from the response, and the k-means kind.
+  plain <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
+                                                estimate = NULL, obs_per_cell = NULL,
+                                                sac = NULL, partition = "kmeans"))
+  named <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
+                                                estimate = NULL, obs_per_cell = NULL,
+                                                sac = NULL, partition = "kmeans",
+                                                init = "kmeans++"))
+  expect_identical(named, plain)
+  expect_identical(partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
+                                                        estimate = NULL, obs_per_cell = NULL,
+                                                        sac = NULL, partition = "kmeans",
                                                         density_power = 1, density_k = 8L)),
                    plain)
   # No record of the kind: the profile is the object it always was.
@@ -68,35 +116,45 @@ test_that("resolution_profile() with its own kind named is the profile without t
   expect_match(capture.output(print(plain)), "5 k-means++ restarts per level",
                fixed = TRUE, all = FALSE)
 
-  geo  <- resolution_profile(pts, n_levels = 5, nstart = 4)
+  geo  <- resolution_profile(pts, n_levels = 5, nstart = 4, partition = "kmeans")
   expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4,
                                       partition = "kmeans", init = "kmeans++"), geo)
   expect_null(attr(geo, "partition"))
   # `iter_max = NULL` is the kind's own limit, 50 for this one; neither it
-  # nor the limit named leaves a record on the default kind.
-  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, iter_max = NULL), geo)
-  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, iter_max = 50), geo)
-  # The default vector of `init`, passed as it is written, is the default.
-  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4,
-                                      init = c("kmeans++", "random")), geo)
+  # nor the limit named leaves a record on the k-means kind.
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, partition = "kmeans",
+                                      iter_max = NULL), geo)
+  expect_identical(resolution_profile(pts, n_levels = 5, nstart = 4, partition = "kmeans",
+                                      iter_max = 50), geo)
+  # `nstart = NULL` is the kind's own number of starts: 25, as it always was.
+  expect_identical(resolution_profile(pts, n_levels = 5, partition = "kmeans"),
+                   resolution_profile(pts, n_levels = 5, partition = "kmeans", nstart = 25L))
 })
 
-test_that("the default profile's centres are those of the k-means++ run it always made", {
+test_that("the k-means profile's centres are those of the k-means++ run it always made", {
   # Geometry only, so nothing draws from the stream before the sweep, and the
   # first level's centres are the best of `nstart` k-means++ starts on the
   # rows in coordinate order under the profile's seed.
   pts <- .pd_pts(n = 150L, seed = 4L)
   xs  <- partition_sorted(partition_xy(pts))
-  prof <- resolution_profile(pts, levels = 7L, nstart = 6, seed = 19)
+  prof <- resolution_profile(pts, levels = 7L, nstart = 6, seed = 19, partition = "kmeans")
   set.seed(19); old <- .pd_old_best(xs, 7L, nstart = 6L)
   expect_identical(attr(prof, "centres")[["7"]], unname(old$centers))
   expect_identical(prof$wss, old$tot.withinss)
+  # The default profile's centres are the density kind's, from 3 k-means++
+  # starts under the same seed: other centres.
+  dflt <- resolution_profile(pts, levels = 7L, seed = 19)
+  expect_identical(dflt, resolution_profile(pts, levels = 7L, seed = 19,
+                                            partition = "density", nstart = 3))
+  expect_false(isTRUE(all.equal(attr(dflt, "centres")[["7"]], unname(old$centers))))
 })
 
-test_that("select_resolution() and the scored seeds of a default profile carry no record", {
+test_that("select_resolution() and the scored seeds of a k-means profile carry no record", {
   pts  <- .pd_pts()
-  prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5))
-  sel  <- select_resolution(prof)
+  prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5,
+                                               estimate = NULL, obs_per_cell = NULL,
+                                               sac = NULL, partition = "kmeans"))
+  sel  <- select_resolution(prof, criterion = "cp")
   expect_false("partition" %in% names(sel))
   expect_null(attr(sel$seeds, "partition"))
   s_plain <- partition_quietly(voronoi_seeds_kmeans(pts, sel))
@@ -108,24 +166,79 @@ test_that("select_resolution() and the scored seeds of a default profile carry n
                                                  partition = "kmeans", init = "kmeans++"))
   expect_identical(g_named, g_plain)
   expect_null(attr(g_plain, "partition"))
-  # Naming the kind the profile was built with is not a mismatch.
+  # Naming the kind the profile was built with is not a mismatch, and
+  # naming no kind is not one either.
   expect_no_warning(withCallingHandlers(
     get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts, partition = "kmeans"),
     spatialkit_bound_chosen = function(w) invokeRestart("muffleWarning"),
     spatialkit_no_structure = function(w) invokeRestart("muffleWarning")))
+  expect_no_warning(withCallingHandlers(
+    get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts),
+    spatialkit_bound_chosen = function(w) invokeRestart("muffleWarning"),
+    spatialkit_no_structure = function(w) invokeRestart("muffleWarning")))
+})
+
+test_that("select_resolution() and the scored seeds of a default profile carry its kind", {
+  pts  <- .pd_pts()
+  prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 5))
+  sel  <- partition_quietly(select_resolution(prof))
+  expect_identical(sel$partition$kind, "density")
+  expect_identical(attr(sel$seeds, "partition")$kind, "density")
+  s_plain <- partition_quietly(voronoi_seeds_kmeans(pts, sel))
+  s_named <- partition_quietly(voronoi_seeds_kmeans(pts, sel, partition = "density"))
+  expect_identical(s_named, s_plain)
+  expect_identical(attr(s_plain, "partition")$kind, "density")
+  g_plain <- partition_quietly(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts))
+  g_named <- partition_quietly(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts,
+                                                 partition = "density", init = "kmeans++"))
+  expect_identical(g_named, g_plain)
+  expect_identical(attr(g_plain, "partition")$kind, "density")
+  # A call that names no partition argument is told nothing about the kind.
+  w <- partition_warnings(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts))
+  expect_length(partition_of_class(w, "spatialkit_partition_unused"), 0L)
+  w <- partition_warnings(voronoi_seeds_kmeans(pts, sel))
+  expect_length(partition_of_class(w, "spatialkit_partition_unused"), 0L)
 })
 
 test_that("voronoi_seeds_kmeans() with its own kind named is the call without the arguments", {
   pts <- .pd_pts()
   plain <- voronoi_seeds_kmeans(pts, 11)
-  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans"), plain)
-  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", init = "random"), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "density"), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "density", init = "kmeans++"),
+                   plain)
   expect_identical(voronoi_seeds_kmeans(pts, 11, init = NULL, density_power = 1, density_k = 8),
                    plain)
+  # `nstart = NULL` is the kind's own number of starts: 3.
+  expect_identical(voronoi_seeds_kmeans(pts, 11, nstart = 3), plain)
+  expect_identical(attr(plain, "partition")[c("kind", "init", "density_power", "density_k",
+                                              "iter_max")],
+                   list(kind = "density", init = "kmeans++", density_power = 1,
+                        density_k = 8L, iter_max = 100L))
+  # `iter_max = NULL` is the kind's own limit, 100 Lloyd steps for this one.
+  expect_identical(voronoi_seeds_kmeans(pts, 11, iter_max = NULL), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, iter_max = 100), plain)
+  # The run: the engine's density kind from 3 k-means++ starts under seed
+  # 456, on the rows in coordinate order.
+  set.seed(456)
+  fit <- spatialkit:::.partition_centres(sf::st_coordinates(pts)[, 1:2], 11L,
+                                         partition = "density", init = "kmeans++",
+                                         nstart = 3L, iter.max = 100L, density_power = 1,
+                                         density_k = 8, sort_rows = TRUE)
+  expect_identical(partition_xy(plain), unname(fit$centers))
+})
+
+test_that("voronoi_seeds_kmeans() with partition = \"kmeans\" named is the run it always made", {
+  pts <- .pd_pts()
+  plain <- voronoi_seeds_kmeans(pts, 11, partition = "kmeans")
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", init = "random"), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", init = NULL,
+                                        density_power = 1, density_k = 8),
+                   plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", nstart = 10), plain)
   expect_null(attr(plain, "partition"))
   # `iter_max = NULL` is the kind's own limit, 50 for this one.
-  expect_identical(voronoi_seeds_kmeans(pts, 11, iter_max = NULL), plain)
-  expect_identical(voronoi_seeds_kmeans(pts, 11, iter_max = 50), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", iter_max = NULL), plain)
+  expect_identical(voronoi_seeds_kmeans(pts, 11, partition = "kmeans", iter_max = 50), plain)
   # The run it has always made: stats::kmeans() from 10 random starts under
   # seed 456, on the rows as they come.
   set.seed(456)
@@ -139,12 +252,13 @@ test_that("voronoi_seeds_kmeans() with its own kind named is the call without th
                    unname(km3$centers))
 })
 
-test_that("for the seeding functions k-means++ starts are a new run, and say so", {
-  # Their own starting rule is random, so `init = "kmeans++"` is not the
-  # default under another name: it gives other seeds and records the rule.
+test_that("for the seeding functions' k-means kind k-means++ starts are a new run, and say so", {
+  # The kind's own starting rule is random, so `init = "kmeans++"` is not
+  # that kind's run under another name: it gives other seeds and records the
+  # rule.
   pts <- .pd_pts()
-  plain <- voronoi_seeds_kmeans(pts, 11)
-  pp    <- voronoi_seeds_kmeans(pts, 11, init = "kmeans++")
+  plain <- voronoi_seeds_kmeans(pts, 11, partition = "kmeans")
+  pp    <- voronoi_seeds_kmeans(pts, 11, partition = "kmeans", init = "kmeans++")
   expect_false(isTRUE(all.equal(partition_xy(pp), partition_xy(plain))))
   # The best of `nstart` k-means++ starts on the rows in coordinate order.
   xs <- partition_sorted(sf::st_coordinates(pts)[, 1:2])
@@ -162,9 +276,44 @@ test_that("get_voronoi_seeds() with its own kind named is the call without the a
   pts <- .pd_pts()
   plain <- get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3)
   expect_identical(get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
-                                     partition = "kmeans"), plain)
+                                     partition = "density"), plain)
+  expect_identical(get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
+                                     partition = "density", init = "kmeans++"), plain)
+  # `kmeans_nstart = NULL` is the kind's own number of starts: 3.
+  expect_identical(get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
+                                     kmeans_nstart = 3), plain)
+  expect_identical(attr(plain, "partition")$kind, "density")
+  expect_named(attr(plain, "kmeans"),
+               c("cluster", "rows", "size", "withinss", "tot_withinss", "iter", "nstart",
+                 "objective", "converged"))
+  expect_identical(attr(plain, "kmeans")$nstart, 3L)
+  # The run: the engine's density kind from 3 k-means++ starts under seed 3,
+  # on the rows in coordinate order.
+  set.seed(3)
+  fit <- spatialkit:::.partition_centres(sf::st_coordinates(pts)[, 1:2], 9L,
+                                         partition = "density", init = "kmeans++",
+                                         nstart = 3L, iter.max = 100L, density_power = 1,
+                                         density_k = 8, sort_rows = TRUE)
+  expect_identical(partition_xy(plain), unname(fit$centers))
+
+  # A cloud drawn inside a boundary, and the other two methods, which read
+  # no kind: a call that names none raises nothing.
+  bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(pts)))
+  expect_identical(get_voronoi_seeds(bnd, method = "kmeans", n = 5, set_seed = 8,
+                                     partition = "density"),
+                   get_voronoi_seeds(bnd, method = "kmeans", n = 5, set_seed = 8))
+  expect_no_warning(get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 8))
+  expect_no_warning(get_voronoi_seeds(method = "provided", seeds = pts[1:4, ]))
+})
+
+test_that("get_voronoi_seeds() with partition = \"kmeans\" named is the run it always made", {
+  pts <- .pd_pts()
+  plain <- get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
+                             partition = "kmeans")
   expect_identical(get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
                                      partition = "kmeans", init = "random"), plain)
+  expect_identical(get_voronoi_seeds(method = "kmeans", n = 9, sample_points = pts, set_seed = 3,
+                                     partition = "kmeans", kmeans_nstart = 10), plain)
   expect_null(attr(plain, "partition"))
   expect_named(attr(plain, "kmeans"),
                c("cluster", "rows", "size", "withinss", "tot_withinss", "iter", "nstart"))
@@ -177,11 +326,15 @@ test_that("get_voronoi_seeds() with its own kind named is the call without the a
   expect_identical(attr(plain, "kmeans")$tot_withinss, as.numeric(km$tot.withinss))
   expect_identical(attr(plain, "kmeans")$iter, as.integer(km$iter))
 
-  # A cloud drawn inside a boundary, and the other two methods.
+  # A cloud drawn inside a boundary is clustered the same way, and the other
+  # two methods read no kind: naming the k-means kind there is the call
+  # without it.
   bnd <- sf::st_sf(geometry = sf::st_as_sfc(sf::st_bbox(pts)))
-  expect_identical(get_voronoi_seeds(bnd, method = "kmeans", n = 5, set_seed = 8,
-                                     partition = "kmeans"),
-                   get_voronoi_seeds(bnd, method = "kmeans", n = 5, set_seed = 8))
+  bk <- get_voronoi_seeds(bnd, method = "kmeans", n = 5, set_seed = 8, partition = "kmeans")
+  expect_null(attr(bk, "partition"))
+  expect_named(attr(bk, "kmeans"),
+               c("cluster", "rows", "size", "withinss", "tot_withinss", "iter", "nstart"))
+  expect_identical(attr(bk, "kmeans")$nstart, 10L)
   expect_identical(get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 8,
                                      partition = "kmeans"),
                    get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 8))
@@ -190,22 +343,37 @@ test_that("get_voronoi_seeds() with its own kind named is the call without the a
                    get_voronoi_seeds(method = "provided", seeds = pts[1:4, ]))
 })
 
-test_that("a tessellation of default seeds has the params it always had", {
+test_that("a tessellation of k-means seeds has the params it always had", {
   pts  <- .pd_pts()
-  tess <- build_tessellation(voronoi_seeds_kmeans(pts, 11), method = "voronoi", quiet = TRUE)
+  km   <- voronoi_seeds_kmeans(pts, 11, partition = "kmeans")
+  tess <- build_tessellation(km, method = "voronoi", quiet = TRUE)
   expect_named(tess$params, c("clip", "expand", "keep_duplicates", "snapped", "n_outside",
                               "boundary_source", "cover_outside"))
-  cvp <- create_voronoi_polygons(voronoi_seeds_kmeans(pts, 11), quiet = TRUE)
+  cvp <- create_voronoi_polygons(km, quiet = TRUE)
   expect_false("partition" %in% names(cvp$params))
-  # The reader of the record says plain k-means of the default seeds.  Their
+  # The reader of the record says plain k-means of these seeds.  Their
   # cells carry nothing that tells them from the Voronoi cells of any other
   # points, so of the tessellation it says nothing.
-  expect_identical(spatialkit:::.partition_record(voronoi_seeds_kmeans(pts, 11)),
+  expect_identical(spatialkit:::.partition_record(km),
                    list(kind = "kmeans", init = NA_character_,
                         density_power = NA_real_, density_k = NA_integer_))
   expect_identical(spatialkit:::.partition_record(tess),
                    list(kind = NA_character_, init = NA_character_,
                         density_power = NA_real_, density_k = NA_integer_))
+})
+
+test_that("a tessellation of default seeds carries their kind", {
+  pts  <- .pd_pts()
+  dn   <- voronoi_seeds_kmeans(pts, 11)
+  tess <- build_tessellation(dn, method = "voronoi", quiet = TRUE)
+  expect_named(tess$params, c("clip", "expand", "keep_duplicates", "snapped", "n_outside",
+                              "boundary_source", "cover_outside", "partition"))
+  expect_identical(tess$params$partition, attr(dn, "partition"))
+  cvp <- create_voronoi_polygons(dn, quiet = TRUE)
+  expect_identical(cvp$params$partition, attr(dn, "partition"))
+  dens <- list(kind = "density", init = "kmeans++", density_power = 1, density_k = 8L)
+  expect_identical(spatialkit:::.partition_record(dn), dens)
+  expect_identical(spatialkit:::.partition_record(tess), dens)
 })
 
 test_that("the reader of the record gives no kind to what k-means did not build", {
@@ -227,11 +395,19 @@ test_that("the reader of the record gives no kind to what k-means did not build"
   expect_identical(rec(list(a = 1)), none)
   # What k-means built with no record is plain k-means: seeds, a profile and
   # a selection.
-  prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2))
+  prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2,
+                                               estimate = NULL, obs_per_cell = NULL,
+                                               sac = NULL, partition = "kmeans"))
   expect_identical(rec(prof)$kind, "kmeans")
-  expect_identical(rec(select_resolution(prof))$kind, "kmeans")
+  expect_identical(rec(select_resolution(prof, criterion = "cp"))$kind, "kmeans")
   expect_identical(rec(get_voronoi_seeds(method = "kmeans", n = 5, sample_points = pts,
-                                         set_seed = 1))$kind, "kmeans")
+                                         set_seed = 1, partition = "kmeans"))$kind, "kmeans")
+  # What the defaults build carries its kind.
+  dflt <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2))
+  expect_identical(rec(dflt)$kind, "density")
+  expect_identical(rec(partition_quietly(select_resolution(dflt)))$kind, "density")
+  expect_identical(rec(get_voronoi_seeds(method = "kmeans", n = 5, sample_points = pts,
+                                         set_seed = 1))$kind, "density")
 })
 
 test_that("determine_optimal_levels() takes no partition argument and keeps plain k-means", {
@@ -273,7 +449,10 @@ test_that("the argument order of the three functions is unchanged ahead of the n
   expect_identical(names(formals(voronoi_seeds_kmeans))[1:4],
                    c("points_sf", "k", "set_seed", "nstart"))
   expect_identical(eval(formals(resolution_profile)$init), c("kmeans++", "random"))
-  expect_identical(eval(formals(resolution_profile)$partition), c("kmeans", "density"))
+  # The density kind is first, and so each function's own.
+  expect_identical(eval(formals(resolution_profile)$partition), c("density", "kmeans"))
+  expect_identical(eval(formals(get_voronoi_seeds)$partition), c("density", "kmeans"))
+  expect_identical(eval(formals(voronoi_seeds_kmeans)$partition), c("density", "kmeans"))
   expect_null(formals(voronoi_seeds_kmeans)$init)
   expect_null(formals(get_voronoi_seeds)$init)
 })

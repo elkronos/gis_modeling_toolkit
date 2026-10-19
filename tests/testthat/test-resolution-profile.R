@@ -168,7 +168,8 @@ test_that(".reliability_at has an interior optimum and the measured shape", {
 
 test_that("a geometry-only profile scores the ladder on WSS, elbow and support", {
   pts <- rp_field(300)
-  prof <- resolution_profile(pts, n_levels = 8)
+  prof <- resolution_profile(pts, n_levels = 8, estimate = NULL, obs_per_cell = NULL,
+                             sac = NULL, partition = "kmeans")
   expect_s3_class(prof, "resolution_profile")
   expect_s3_class(prof, "data.frame")
   expect_named(prof, c("levels", "wss", "wss_spread", "elbow", "cell_n_min",
@@ -411,7 +412,11 @@ test_that("summary() puts every criterion's pick in one table", {
   expect_true(all(c("criterion", "best", "flat_min", "flat_max", "n_flat",
                     "value", "at_floor", "at_ceiling") %in% names(s)))
   expect_true(nrow(s) >= 1L)
-  expect_true(all(s$criterion %in% c("cp", "reliability", "elbow", "moran_z")))
+  # The profile scores the pooled value, so its leave-one-out error is a
+  # criterion of the table beside the present four.
+  expect_identical(attr(prof, "estimate")$value, "pooled")
+  expect_true("loo" %in% s$criterion)
+  expect_true(all(s$criterion %in% c("cp", "reliability", "elbow", "moran_z", "loo")))
   expect_false(anyDuplicated(s$criterion) > 0L)
 
   # Each row has to agree with select_resolution() on the same criterion:

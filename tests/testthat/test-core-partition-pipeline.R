@@ -44,7 +44,7 @@
   expect_true(all(inside >= 1L))
   expect_lte(sum(inside > 1L), 0L)                # none on a shared edge here
 
-  summ <- summarize_by_cell(assigned, response_var = "z", id_col = "cell_id")
+  summ <- summarize_by_cell(assigned, response_var = "z", id_col = "cell_id", estimate = "mean")
   expect_identical(sum(summ$n), nrow(pts))
   expect_identical(nrow(summ), as.integer(level))
   list(seeds = seeds, tess = tess, assigned = assigned, summ = summ)
@@ -54,7 +54,8 @@
 test_that("the density kind runs from profile to summary, with the counts the profile reported", {
   pts  <- .pl_pts()
   prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 8, nstart = 4,
-                                               partition = "density"))
+                                               partition = "density", estimate = NULL,
+                                               obs_per_cell = NULL, sac = NULL))
   expect_identical(attr(prof, "partition")[1:4], .pl_record)
   expect_named(attr(prof, "partition")$objective, as.character(prof$levels))
   expect_true(all(is.finite(attr(prof, "partition")$objective)))
@@ -65,7 +66,7 @@ test_that("the density kind runs from profile to summary, with the counts the pr
   expect_output(print(prof), "4 density-weighted k-means++ starts (power 1, 8 neighbours) per level",
                 fixed = TRUE)
 
-  sel <- select_resolution(prof)
+  sel <- select_resolution(prof, criterion = "cp")
   expect_identical(sel$partition, .pl_record)
   expect_identical(attr(sel$seeds, "partition"), .pl_record)
   level <- sel$best
@@ -122,8 +123,9 @@ test_that("every level of a density ladder gives the cells it was scored on", {
 test_that("a profile passed as the count, and lon/lat points, go through the same way", {
   pts  <- .pl_pts(n_bg = 100L, n_cl = 300L, seed = 23L)
   prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 6, nstart = 3,
-                                               partition = "density"))
-  level <- select_resolution(prof)$best
+                                               partition = "density", estimate = NULL,
+                                               obs_per_cell = NULL, sac = NULL))
+  level <- select_resolution(prof, criterion = "cp")$best
   out <- .pl_run(pts, prof, prof, level)
   expect_match(attr(out$seeds, "n_from"), "resolution_profile() read with", fixed = TRUE)
 
@@ -131,8 +133,9 @@ test_that("a profile passed as the count, and lon/lat points, go through the sam
   # in degrees, and the cells still hold every observation.
   ll <- sf::st_transform(pts, 4326)
   prof_ll <- partition_quietly(resolution_profile(ll, "z", n_levels = 6, nstart = 3,
-                                                  partition = "density"))
-  sel_ll <- select_resolution(prof_ll)
+                                                  partition = "density", estimate = NULL,
+                                                  obs_per_cell = NULL, sac = NULL))
+  sel_ll <- select_resolution(prof_ll, criterion = "cp")
   seeds <- partition_quietly(get_voronoi_seeds(method = "kmeans", n = sel_ll, sample_points = ll))
   expect_true(sf::st_is_longlat(seeds))
   expect_identical(attr(seeds, "partition"), .pl_record)
@@ -153,7 +156,7 @@ test_that("fresh density seeds go through the tessellation with their record", {
   pts <- .pl_pts(seed = 24L)
   rec_rnd <- list(kind = "density", init = "random", density_power = 0.5, density_k = 5L)
   s <- voronoi_seeds_kmeans(pts, 30, partition = "density", init = "random",
-                            density_power = 0.5, density_k = 5)
+                            density_power = 0.5, density_k = 5, nstart = 10)
   # What built the seeds, and how the start that was kept ended: the steps
   # it took, the limit, and whether it stopped before the limit.
   full <- attr(s, "partition")
@@ -180,14 +183,14 @@ test_that("fresh density seeds go through the tessellation with their record", {
   # lon/lat, and seeds with no CRS whose coordinates are degrees.
   ll <- sf::st_transform(pts, 4326)
   s_ll <- voronoi_seeds_kmeans(ll, 30, partition = "density", init = "random",
-                               density_power = 0.5, density_k = 5)
+                               density_power = 0.5, density_k = 5, nstart = 10)
   expect_identical(attr(s_ll, "partition")[1:4], rec_rnd)
   expect_identical(partition_quietly(build_tessellation(s_ll, method = "voronoi",
                                                         quiet = TRUE))$params$partition,
                    attr(s_ll, "partition"))
   s_na <- partition_quietly(voronoi_seeds_kmeans(sf::st_set_crs(ll, NA), 30,
                                                  partition = "density", init = "random",
-                                                 density_power = 0.5, density_k = 5))
+                                                 density_power = 0.5, density_k = 5, nstart = 10))
   expect_true(is.na(sf::st_crs(s_na)))
   expect_identical(attr(s_na, "partition")[1:4], rec_rnd)
   expect_identical(partition_quietly(build_tessellation(s_na, method = "voronoi",
@@ -196,12 +199,13 @@ test_that("fresh density seeds go through the tessellation with their record", {
   # Read by one helper wherever it sits.
   expect_identical(spatialkit:::.partition_record(s), rec_rnd)
   expect_identical(spatialkit:::.partition_record(tess), rec_rnd)
-  prof <- resolution_profile(pts, levels = c(5L, 9L), nstart = 2, partition = "density")
+  prof <- resolution_profile(pts, levels = c(5L, 9L), nstart = 2, partition = "density",
+                             estimate = NULL, obs_per_cell = NULL, sac = NULL)
   expect_identical(spatialkit:::.partition_record(prof), .pl_record)
 
   # get_voronoi_seeds(): the record of the run describes the seeds' cells.
   g <- get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts,
-                         partition = "density", set_seed = 4)
+                         partition = "density", set_seed = 4, kmeans_nstart = 10)
   km <- attr(g, "kmeans")
   expect_named(km, c("cluster", "rows", "size", "withinss", "tot_withinss", "iter", "nstart",
                      "objective", "converged"))
@@ -220,16 +224,19 @@ test_that("fresh density seeds go through the tessellation with their record", {
 test_that("a profile fitted to a subsample still tessellates the whole layer", {
   pts  <- .pl_pts(n_bg = 400L, n_cl = 1200L, seed = 25L)
   prof <- partition_quietly(resolution_profile(pts, "z", n_levels = 5, nstart = 2,
-                                               sample_n = 500, partition = "density"))
+                                               sample_n = 500, partition = "density",
+                                               estimate = NULL, obs_per_cell = NULL,
+                                               sac = NULL))
   expect_identical(attr(prof, "bounds")$n_sample, 500L)
-  sel <- select_resolution(prof)
+  sel <- select_resolution(prof, criterion = "cp")
   seeds <- partition_quietly(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = pts))
   tess <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
   assigned <- assign_features_to_polygons(pts, tess$cells, polygon_id_col = "cell_id",
                                           quiet = TRUE)
   expect_identical(nrow(assigned), nrow(pts))
   expect_false(anyNA(assigned$cell_id))
-  expect_identical(sum(summarize_by_cell(assigned, "z", id_col = "cell_id")$n), nrow(pts))
+  expect_identical(sum(summarize_by_cell(assigned, "z", id_col = "cell_id",
+                                         estimate = "mean")$n), nrow(pts))
   expect_identical(tess$params$partition, .pl_record)
 })
 
@@ -244,9 +251,12 @@ test_that("reliability does not read the cells, and Cp counts them as it does fo
   sac <- structure(900, class = c("sac_range", "numeric"), variogram_model = vm,
                    crs = sf::st_crs(pts), detrended = FALSE)
   lv  <- c(4L, 10L, 25L, 60L)
-  p_km  <- partition_quietly(resolution_profile(pts, "z", levels = lv, nstart = 3, sac = sac))
+  p_km  <- partition_quietly(resolution_profile(pts, "z", levels = lv, nstart = 3, sac = sac,
+                                                estimate = NULL, obs_per_cell = NULL,
+                                                partition = "kmeans"))
   p_den <- partition_quietly(resolution_profile(pts, "z", levels = lv, nstart = 3, sac = sac,
-                                                partition = "density"))
+                                                partition = "density", estimate = NULL,
+                                                obs_per_cell = NULL))
   expect_true(all(is.finite(p_km$reliability)))
   expect_identical(p_den$reliability, p_km$reliability)
   expect_identical(attr(p_den, "bounds"), attr(p_km, "bounds"))
@@ -367,12 +377,13 @@ test_that("the partition arguments are validated like their neighbours", {
     # The ends of the range are allowed.
     expect_no_error(f(partition = "density", density_power = 0, density_k = 1))
     expect_no_error(f(partition = "density", density_power = 2, density_k = 500))
-    # Set where they are not read: said, and the result is the default's.
-    expect_warning(a <- f(density_power = 0.5),
+    # Set where they are not read: said, and the result is the k-means
+    # kind's without them.
+    expect_warning(a <- f(density_power = 0.5, partition = "kmeans"),
                    sprintf("%s(): `density_power` is read by partition = \"density\" only", nm),
                    fixed = TRUE)
-    expect_identical(a, f())
-    expect_warning(f(density_power = 0.5, density_k = 4),
+    expect_identical(a, f(partition = "kmeans"))
+    expect_warning(f(density_power = 0.5, density_k = 4, partition = "kmeans"),
                    "`density_power` and `density_k` are read by partition = \"density\" only",
                    fixed = TRUE)
   }
@@ -392,7 +403,8 @@ test_that("the partition arguments are validated like their neighbours", {
   expect_error(voronoi_seeds_kmeans(pts, 5, init = 1), "\"random\", or NULL; got numeric",
                fixed = TRUE)
   # As match.arg() does, a leading part of a name is the name.
-  expect_identical(voronoi_seeds_kmeans(pts, 5, init = "rand"), voronoi_seeds_kmeans(pts, 5))
+  expect_identical(voronoi_seeds_kmeans(pts, 5, init = "rand", partition = "kmeans"),
+                   voronoi_seeds_kmeans(pts, 5, partition = "kmeans"))
   expect_identical(attr(voronoi_seeds_kmeans(pts, 5, init = "kmeans"), "partition")$init,
                    "kmeans++")
 })
@@ -411,8 +423,10 @@ test_that("methods that draw no k-means say that the partition arguments are not
 
 test_that("scored centres are returned whatever kind the call names, and the call is told", {
   pts <- .pl_pts(n_bg = 100L, n_cl = 300L, seed = 29L)
-  p_km  <- resolution_profile(pts, levels = c(6L, 14L), nstart = 2)
-  p_den <- resolution_profile(pts, levels = c(6L, 14L), nstart = 2, partition = "density")
+  p_km  <- resolution_profile(pts, levels = c(6L, 14L), nstart = 2, estimate = NULL,
+                              obs_per_cell = NULL, sac = NULL, partition = "kmeans")
+  p_den <- resolution_profile(pts, levels = c(6L, 14L), nstart = 2, partition = "density",
+                              estimate = NULL, obs_per_cell = NULL, sac = NULL)
   sel_of <- function(p, L) structure(
     list(best = L, seeds = spatialkit:::.profile_seeds(p, L), criterion = "cp",
          edge = NA_character_, structured = TRUE), class = "resolution_selection")
@@ -445,7 +459,7 @@ test_that("scored centres are returned whatever kind the call names, and the cal
   expect_no_warning(voronoi_seeds_kmeans(pts, den14, partition = "density", init = "kmeans++"))
   expect_no_warning(get_voronoi_seeds(method = "kmeans", n = km14, sample_points = pts))
   # A count as a number is a fresh run of the kind asked for.
-  fresh <- voronoi_seeds_kmeans(pts, 14, partition = "density")
+  fresh <- voronoi_seeds_kmeans(pts, 14, partition = "density", nstart = 10)
   expect_false(isTRUE(all.equal(partition_xy(fresh), attr(p_km, "centres")[["14"]])))
 })
 
@@ -463,17 +477,23 @@ test_that("the partition labels read as the print method prints them", {
                             density_k = 1L), 3L),
                    "3 density-weighted k-means++ starts (power 2, 1 neighbour)")
   pts <- .pl_pts(n_bg = 40L, n_cl = 80L, seed = 28L)
-  expect_output(print(resolution_profile(pts, n_levels = 3, nstart = 2, init = "random")),
+  expect_output(print(resolution_profile(pts, n_levels = 3, nstart = 2, init = "random",
+                                         estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                         partition = "kmeans")),
                 "geometry only; 2 random starts per level", fixed = TRUE)
   # A selection names the kind of its cells when the profile recorded one,
   # and prints as it always did when it did not.
   den <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2,
-                                              partition = "density"))
-  expect_output(print(select_resolution(den)),
+                                              partition = "density", estimate = NULL,
+                                              obs_per_cell = NULL, sac = NULL))
+  expect_output(print(select_resolution(den, criterion = "cp")),
                 "  cells       : density-weighted k-means++ starts (power 1, 8 neighbours)",
                 fixed = TRUE)
-  km <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2))
-  expect_false(any(grepl("cells       :", capture.output(print(select_resolution(km))),
+  km <- partition_quietly(resolution_profile(pts, "z", n_levels = 4, nstart = 2,
+                                             estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  expect_false(any(grepl("cells       :",
+                         capture.output(print(select_resolution(km, criterion = "cp"))),
                          fixed = TRUE)))
 })
 
@@ -564,7 +584,7 @@ test_that("a real density run that leaves a centre empty is reported and still t
   expect_true(all(lengths(sf::st_intersects(pts, tess$cells)) == 1L))
   expect_identical(length(unique(assigned$cell_id)), k - w$empty)
   expect_identical(sort(as.integer(table(assigned$cell_id))), sort(sizes[sizes > 0L]))
-  summ <- summarize_by_cell(assigned, response_var = "z", id_col = "cell_id")
+  summ <- summarize_by_cell(assigned, response_var = "z", id_col = "cell_id", estimate = "mean")
   expect_identical(sum(summ$n), nrow(pts))
   expect_identical(nrow(summ), k - w$empty)
 

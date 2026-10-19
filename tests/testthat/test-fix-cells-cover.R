@@ -221,18 +221,20 @@ test_that("seeds from a resolution profile or selection hold every observation",
                       coords = c("x", "y"), crs = 32617)
   obs$z <- rnorm(400) + sin(sf::st_coordinates(obs)[, 1] / 8000)
   prof <- suppressWarnings(suppressMessages(
-    resolution_profile(obs, "z", levels = c(4, 9, 16), nstart = 5)))
+    resolution_profile(obs, "z", levels = c(4, 9, 16), nstart = 5, estimate = NULL,
+                       obs_per_cell = NULL, sac = NULL, partition = "kmeans")))
   # The profile keeps the hull of the points it was computed on.
   expect_s3_class(attr(prof, "hull"), "sfc")
-  sel <- select_resolution(prof)
+  sel <- select_resolution(prof, criterion = "cp")
 
   # The route the package's warnings prescribe: 15% of rows lost before.
-  s1 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs))
+  s1 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs,
+                                           partition = "kmeans"))
   .fc_expect_all_assigned(.fc_route(s1, obs), obs, info = "selection + sample_points")
-  s2 <- .fc_bound_chosen(voronoi_seeds_kmeans(obs, k = sel))
+  s2 <- .fc_bound_chosen(voronoi_seeds_kmeans(obs, k = sel, partition = "kmeans"))
   .fc_expect_all_assigned(.fc_route(s2, obs), obs, info = "voronoi_seeds_kmeans(k = selection)")
   # The profile alone: its own hull is the cover.
-  s3 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = prof))
+  s3 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = prof, partition = "kmeans"))
   expect_false(is.null(attr(s3, "cover")))
   .fc_expect_all_assigned(.fc_route(s3, obs), obs, info = "profile alone")
 
@@ -242,7 +244,7 @@ test_that("seeds from a resolution profile or selection hold every observation",
   # select_resolution() result carries by itself.)
   sel_h <- sel
   attr(sel_h$seeds, "cover") <- attr(prof, "hull")
-  s4 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel_h))
+  s4 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel_h, partition = "kmeans"))
   expect_false(is.null(attr(s4, "cover")))
   expect_equal(as.numeric(sf::st_area(attr(s4, "cover"))),
                as.numeric(sf::st_area(attr(prof, "hull"))))
@@ -255,7 +257,7 @@ test_that("seeds from a resolution profile or selection hold every observation",
   # assignment.
   sel_0 <- sel
   attr(sel_0$seeds, "cover") <- NULL
-  s5 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel_0))
+  s5 <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel_0, partition = "kmeans"))
   expect_null(attr(s5, "cover"))
   r5 <- .fc_route(s5, obs)
   expect_true(any(.fc_has_class(r5$built, "spatialkit_no_cover")))
@@ -276,15 +278,16 @@ test_that("a select_resolution() result alone holds every observation", {
                       coords = c("x", "y"), crs = 32617)
   obs$z <- rnorm(400) + sin(sf::st_coordinates(obs)[, 1] / 8000)
   prof <- suppressWarnings(suppressMessages(
-    resolution_profile(obs, "z", levels = c(4, 9, 16), nstart = 5)))
-  sel <- select_resolution(prof)
+    resolution_profile(obs, "z", levels = c(4, 9, 16), nstart = 5, estimate = NULL,
+                       obs_per_cell = NULL, sac = NULL, partition = "kmeans")))
+  sel <- select_resolution(prof, criterion = "cp")
   # select_resolution() builds its centres with .profile_seeds() (in
   # R/resolution-profile.R), which puts the profile's hull on them as their
   # cover.  Without it a selection given with neither points nor a boundary
   # had no cover to hand on and its cells stopped at the centres' hull (with
   # two classed warnings; previous test).
   expect_s3_class(attr(sel$seeds, "cover", exact = TRUE), "sfc")
-  s <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel))
+  s <- .fc_bound_chosen(get_voronoi_seeds(method = "kmeans", n = sel, partition = "kmeans"))
   expect_false(is.null(attr(s, "cover")))
   r <- .fc_route(s, obs)
   expect_identical(r$tess$params$boundary_source, "seeds' cover")

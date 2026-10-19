@@ -44,7 +44,8 @@ test_that("the ceiling is floor(rows with a response / min_cell_n), and says so"
   na <- pts
   na$z[miss] <- NA
 
-  out <- frc_catch(resolution_profile(na, "z", sac = sac, nstart = 3))
+  out <- frc_catch(resolution_profile(na, "z", sac = sac, nstart = 3, estimate = NULL,
+                                      obs_per_cell = NULL, partition = "kmeans"))
   p <- out$value
   b <- attr(p, "bounds")
   # 225 scored rows at min_cell_n = 9 support 25 cells; every point would
@@ -66,7 +67,9 @@ test_that("the ceiling is floor(rows with a response / min_cell_n), and says so"
   expect_match(conditionMessage(w), "25 cells, not the 100")
 
   # The same ceiling as the 225 rows passed alone.
-  alone <- frc_catch(resolution_profile(na[-miss, ], "z", sac = sac, nstart = 3))
+  alone <- frc_catch(resolution_profile(na[-miss, ], "z", sac = sac, nstart = 3,
+                                        estimate = NULL, obs_per_cell = NULL,
+                                        partition = "kmeans"))
   expect_identical(attr(alone$value, "bounds")$ceiling, 25L)
   expect_identical(attr(alone$value, "bounds")$ceiling_from, "min_cell_n")
   expect_false("spatialkit_response_ceiling" %in% alone$classes)

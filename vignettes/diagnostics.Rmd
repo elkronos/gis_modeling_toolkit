@@ -320,9 +320,9 @@ respectable number for a dishonestly chosen feature set.
 
 ## 6. Warnings about pooled cell values
 
-`summarize_by_cell(estimate = "pooled")` returns, beside each cell's mean, a
-pooled value: the mean pulled toward the mean of the cells around it. What it
-has to say about those values, and about whether the cells are the ones their
+`summarize_by_cell()` returns by default, beside each cell's mean, a pooled
+value: the mean pulled toward the mean of the cells around it. What it has to
+say about those values, and about whether the cells are the ones their
 count was chosen for, comes as R warnings with a class. Each is raised once
 per call and reason and carries its numbers as fields, so it can be caught and
 read without matching its text; a warning about the pooled columns also names
@@ -341,18 +341,19 @@ raised <- function(expr) {
 ```
 
 The cells are built for pooled values at 4.5 observations per cell, by the
-calls `vignette("resolution")` and `vignette("reporting")` walk through:
+calls `vignette("resolution")` and `vignette("reporting")` walk through. Those
+are the defaults, so nothing is named but the response; `estimate = "mean"`
+in the summary gives the plain means alone, and `vignette("resolution")` lists
+the profile's earlier defaults:
 
 ```{r pooled-cells}
-prof  <- resolution_profile(pts, "z", estimate = "pooled", obs_per_cell = 4.5,
-                            sac = "auto")
-size  <- select_resolution(prof, criterion = "size")
+prof  <- resolution_profile(pts, "z")
+size  <- select_resolution(prof)
 seeds <- get_voronoi_seeds(method = "kmeans", n = size, sample_points = pts)
 vor   <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
 asg_v <- assign_features_to_polygons(pts, vor$cells, polygon_id_col = "cell_id")
 
-raised(summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells,
-                         estimate = "pooled"))
+raised(summarize_by_cell(asg_v, "z", id_col = "cell_id", cells_sf = vor$cells))
 ```
 
 A summary of the cell value the count was chosen for, on the cells and rows
@@ -385,7 +386,7 @@ record. Here twenty rows were dropped after the assignment:
 ```{r differ}
 w <- tryCatch(
   summarize_by_cell(asg_v[-(1:20), ], "z", id_col = "cell_id",
-                    cells_sf = vor$cells, estimate = "pooled"),
+                    cells_sf = vor$cells),
   spatialkit_cells_differ = function(w) w)
 w$what
 rbind(scored = unlist(w$scored), found = unlist(w$found))
@@ -414,8 +415,8 @@ no record and are not checked.
 `b` is noise by construction:
 
 ```{r no-structure}
-noise <- summarize_by_cell(asg_v, "b", id_col = "cell_id", estimate = "pooled")
-raised(summarize_by_cell(asg_v, "b", id_col = "cell_id", estimate = "pooled"))
+noise <- summarize_by_cell(asg_v, "b", id_col = "cell_id")
+raised(summarize_by_cell(asg_v, "b", id_col = "cell_id"))
 as.data.frame(attr(noise, "pooled")$columns$resp_b[
   c("loo", "loo_one_cell", "structure_p", "own_weight", "structured")])
 ```
@@ -438,8 +439,7 @@ not vary inside any cell is one of them:
 
 ```{r degenerate}
 asg_v$flat <- 1
-w <- tryCatch(summarize_by_cell(asg_v, "flat", id_col = "cell_id",
-                                estimate = "pooled"),
+w <- tryCatch(summarize_by_cell(asg_v, "flat", id_col = "cell_id"),
               spatialkit_pool_degenerate = function(w) w)
 w$reason
 ```
@@ -460,7 +460,7 @@ outside it:
 ```{r few-cells}
 few   <- create_grid_polygons(hull, target_cells = 4, type = "square")
 asg_f <- assign_features_to_polygons(pts, few, quiet = TRUE)
-raised(four <- summarize_by_cell(asg_f, "z", estimate = "pooled"))
+raised(four <- summarize_by_cell(asg_f, "z"))
 as.data.frame(four)[, c("poly_id", "n", "resp_mean_z", "..pooled_resp_z",
                         "..pooled_w_resp_z", "..pooled_target_resp_z")]
 ```

@@ -85,8 +85,9 @@ routinely wide, the choice within it belongs to the analyst, and
 read from.
 
 A profile whose ladder is one size (\code{obs_per_cell} set to one
-number) has one level, and the size set it.  The table then has one row
-per criterion that is finite at that level, and the line under it says
+number, or the default profile) has one level, and the size set it.  The
+table then has one row per criterion that is finite at that level, and
+the line under it says
 that the count is set by the size and that no criterion chooses among
 levels.  The result carries the size as \code{attr(, "obs_per_cell")}.
 }

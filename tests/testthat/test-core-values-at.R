@@ -1240,6 +1240,61 @@ test_that("a seed with an NA ID has no cell: the locations nearest it are filled
   expect_identical(.va_cols(at[!hit, ]), .va_cols(want[!hit, ]))
 })
 
+test_that("a seed outside a boundary that is not convex has NA in `index`; the help's recipe gives it its cell", {
+  # A square with a notch cut from the top; five seeds inside it and one in
+  # the notch, whose Voronoi cell, clipped, is the inner top of both arms.
+  U <- sf::st_sf(geometry = sf::st_sfc(sf::st_polygon(list(rbind(
+    c(0, 0), c(1000, 0), c(1000, 1000), c(550, 1000), c(550, 300),
+    c(450, 300), c(450, 1000), c(0, 1000), c(0, 0)))), crs = 32617))
+  in_u <- function(x, y) !(x > 450 & x < 550 & y > 300)
+  g <- expand.grid(x = seq(25, 975, 50), y = seq(25, 975, 50))
+  g <- g[in_u(g$x, g$y), ]
+  g$z <- local({ .va_seed(7); g$x / 500 + 0.3 * sin(g$y / 70) + stats::rnorm(nrow(g), 0, 0.1) })
+  rows  <- sf::st_as_sf(g, coords = c("x", "y"), crs = 32617)
+  seeds <- sf::st_as_sf(data.frame(x = c(150, 850, 150, 850, 500, 500),
+                                   y = c(150, 150, 650, 650, 150, 800)),
+                        coords = c("x", "y"), crs = 32617)
+  tb <- .va_catch(build_tessellation(seeds, boundary = U, method = "voronoi", quiet = TRUE))
+  expect_identical(.va_classes(tb), "spatialkit_unassigned")
+  tess <- tb$value
+  expect_identical(nrow(tess$cells), 6L)
+  expect_identical(which(is.na(tess$index)), 6L)
+  # The notch seed's cell is the one cell no seed lies in, and it holds scored rows.
+  lost <- setdiff(tess$cells$cell_id, tess$index)
+  expect_length(lost, 1L)
+  asg <- assign_features_to_polygons(rows, tess$cells, polygon_id_col = "cell_id")
+  expect_gt(sum(asg$cell_id == lost), 10L)
+  out <- summarize_by_cell(asg, "z", id_col = "cell_id", cells_sf = tess$cells,
+                           estimate = "mean")
+  h <- expand.grid(x = seq(10, 990, 40), y = seq(10, 990, 40))
+  h <- h[in_u(h$x, h$y), ]
+  newp  <- sf::st_as_sf(h, coords = c("x", "y"), crs = 32617)
+  holds <- tess$cells$cell_id[vapply(sf::st_intersects(newp, tess$cells),
+                                     function(i) if (length(i)) i[1L] else NA_integer_,
+                                     integer(1))]
+  expect_false(anyNA(holds))
+  there <- holds == lost
+  expect_gt(sum(there), 10L)
+  # With `index` alone: the locations nearest the notch seed have no cell and are
+  # filled, as step 3 says, some of them from a cell that does not hold them.
+  seeds$cell_id <- tess$index
+  at <- cell_values_at(newp, out, asg, "z", id_col = "cell_id", seeds = seeds)
+  expect_true(all(is.na(at$cell_id[there])))
+  expect_identical(at$filled, there)
+  expect_identical(at$cell_id[!there], holds[!there])
+  expect_true(any(at$filled_from[there] != lost))
+  # The recipe of "Seeds outside the boundary".
+  own  <- tess$cells[!tess$cells$cell_id %in% tess$index, ]
+  near <- sf::st_nearest_feature(sf::st_point_on_surface(sf::st_geometry(own)),
+                                 seeds)
+  seeds$cell_id[near] <- own$cell_id
+  expect_identical(seeds$cell_id, c(tess$index[1:5], lost))
+  at <- cell_values_at(newp, out, asg, "z", id_col = "cell_id", seeds = seeds)
+  expect_identical(at$cell_id, holds)
+  expect_false(any(at$filled))
+  expect_identical(at$value, out$resp_mean_z[match(holds, out$cell_id)])
+})
+
 test_that("what `seeds` and `values` must be", {
   L <- .va_full()
   seeds_text <- paste0(
