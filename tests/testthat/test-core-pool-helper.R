@@ -176,7 +176,9 @@ test_that("the layouts are the thirteen of the engine's tests, and are the same 
   drawn <- stats::runif(1)
   set.seed(1)
   expect_identical(do.call(pool_layout, POOL_LAYOUTS[[3L]]), a)
-  expect_identical(RNGkind(), other_kind)
+  # R-devel reports a fourth kind (the binomial generator); the three set here
+  # are the first three on every version.
+  expect_identical(RNGkind()[seq_along(other_kind)], other_kind)
   expect_identical(stats::runif(1), drawn)
   suppressWarnings(do.call(RNGkind, as.list(old_kind)))
   # Clustered and uniform layouts differ in how even the regions are.
