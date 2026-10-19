@@ -46,6 +46,15 @@ to compare backends.
 Adjusted R-squared is suppressed: GWR's effective parameter count far
 exceeds the global predictor count, and a GP model has no simple `p`.
 
+For a `gwr_fit`, [`print()`](https://rdrr.io/r/base/print.html) on the
+result adds what the in-sample metrics are to be read against: the
+effective number of parameters and residual degrees of freedom, the
+number of local windows of deficient rank, the number of locations when
+observations share one, and the AICc and RMSE of one global
+least-squares regression on the same rows beside the fit's own AICc
+(`$info$global_ols`; see
+[`fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)).
+
 ## Percentage errors on responses with zeros
 
 `MAPE` divides by the observed value and `SMAPE` by \\\|y\| +

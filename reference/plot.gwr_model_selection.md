@@ -48,8 +48,7 @@ Other plotting:
 ## Examples
 
 ``` r
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE) &&
+if (requireNamespace("sp", quietly = TRUE) &&
     requireNamespace("ggplot2", quietly = TRUE)) {
   library(sf)
   set.seed(1)

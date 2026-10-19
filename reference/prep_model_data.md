@@ -44,7 +44,11 @@ prep_model_data(
 
 - boundary:
 
-  Optional sf/sfc for CRS alignment.
+  Optional sf/sfc whose CRS the data are projected to. It is not a clip:
+  rows that fall outside it are kept. Subset `data_sf` yourself (for
+  example with
+  [`sf::st_filter()`](https://r-spatial.github.io/sf/reference/st_join.html))
+  to restrict the rows.
 
 - pointize:
 
@@ -70,10 +74,19 @@ empty or non-finite geometry), `which` (their positions in `data_sf`),
 `row_id` (their `..row_id` values when the layer carries that column,
 else `NULL`) and `reason` (one per dropped row: `"geometry"`,
 `"missing"` or `"non_finite"`, in that order of precedence when several
-apply), plus `n_rows`, the number of rows returned, which the record was
-made for. Every fit stores `n` as `$info$n_dropped`. The record
-describes the rows this call returned and does not survive subsetting:
-`clean[i, ]`, like
+apply), `by_column` (for each modelling column, and for `"(geometry)"`,
+how many of the dropped rows it is missing or non-finite in; a row can
+count under several), `response_std_diff` (the mean response of the
+dropped rows minus that of the kept rows, in standard deviations of the
+response over both; `NA` when the response is not numeric, or is itself
+missing in every dropped row), plus `n_rows`, the number of rows
+returned, which the record was made for. The same record carries two
+marks on the rows that were kept: `constant_predictors`, the names of
+the predictors that take one value in every returned row (`character(0)`
+when none does), and `n_duplicate_locations`, the number of returned
+rows whose coordinates repeat those of an earlier row. Every fit stores
+`n` as `$info$n_dropped`. The record describes the rows this call
+returned and does not survive subsetting: `clean[i, ]`, like
 [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
 `slice()` or `arrange()` of it, is a plain layer with no `"dropped"`
 attribute, and a fit given such a subset with `.already_prepped = TRUE`
@@ -108,6 +121,46 @@ while the fit object still recorded the name you asked for: `"B5-B4"` is
 example with [`make.names()`](https://rdrr.io/r/base/make.names.html))
 before fitting.
 
+## Warnings
+
+When preparing data for a fit (`require_response = TRUE`) two conditions
+are raised as R warnings, each with a class so it can be caught by name
+with [`tryCatch()`](https://rdrr.io/r/base/conditions.html) or
+[`withCallingHandlers()`](https://rdrr.io/r/base/conditions.html):
+
+- `spatialkit_rows_dropped`:
+
+  Rows were dropped. The message gives the number and share of rows, the
+  count by reason and by column, and, for a numeric response, how far
+  the mean response of the dropped rows sits from that of the kept rows.
+  A fit on the rows that remain describes those rows only; when the
+  difference is large the rows are not missing at random and the fit is
+  biased towards the complete ones.
+
+- `spatialkit_constant_predictor`:
+
+  A predictor takes a single value in every row that remains. Its
+  coefficient cannot be told from the intercept: a GWR window is
+  rank-deficient, a Bayesian slope is its prior, and a forest ignores
+  it. The predictor is kept; drop it from `predictor_vars`.
+
+Every fitter and every `cv_*()` function prepares its data here and
+passes these on.
+[`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md),
+[`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
+and
+[`select_features_forward()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_features_forward.md)
+run several cross-validations of one layer, each of which prepares it,
+and raise a warning of either class once per distinct text for the run.
+
+With `require_response = FALSE` (how every
+[`predict()`](https://rdrr.io/r/stats/predict.html) method prepares
+`newdata`) neither is raised: the dropped rows are written to the log
+and to the record, and the prediction for each comes back `NA`, so
+nothing is lost without a trace. Repeated locations are legitimate
+(repeat visits to one site) and are counted in the record and the log,
+never warned about.
+
 ## See also
 
 Other model fitting:
@@ -133,7 +186,8 @@ dat <- st_as_sf(
              pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-clean <- prep_model_data(dat, "resp", "pred")  # drops rows 3 (NA) and 5 (Inf)
+# Drops rows 3 (NA) and 5 (Inf), and warns that it did, with the counts.
+clean <- suppressWarnings(prep_model_data(dat, "resp", "pred"))
 attr(clean, "dropped")
 #> $n
 #> [1] 2
@@ -149,6 +203,19 @@ attr(clean, "dropped")
 #> 
 #> $reason
 #> [1] "missing"    "non_finite"
+#> 
+#> $by_column
+#> resp pred 
+#>    1    1 
+#> 
+#> $response_std_diff
+#> [1] 1.460593
+#> 
+#> $constant_predictors
+#> character(0)
+#> 
+#> $n_duplicate_locations
+#> [1] 0
 #> 
 #> $n_rows
 #> [1] 3

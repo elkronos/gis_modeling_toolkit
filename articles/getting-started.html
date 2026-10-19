@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">07 October 2026</h4>
+            <h4 data-toc-skip class="date">19 October 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/getting-started.Rmd" class="external-link"><code>vignettes/getting-started.Rmd</code></a></small>
       <div class="d-none name"><code>getting-started.Rmd</code></div>
@@ -105,9 +105,9 @@ number that looks good and means little.</p>
 <span></span>
 <span><span class="co"># with the vignettes (needs pandoc)</span></span>
 <span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"elkronos/gis_modeling_toolkit"</span>, build_vignettes <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
-<p><code>sf</code>, <code>dplyr</code>, <code>logger</code> and
-<code>digest</code> install with it. Everything else is optional and is
-needed only for the feature that uses it:</p>
+<p><code>sf</code>, <code>dplyr</code>, <code>logger</code>,
+<code>digest</code> and <code>FNN</code> install with it. Everything
+else is optional and is needed only for the feature that uses it:</p>
 <table class="table">
 <colgroup>
 <col width="50%">
@@ -130,9 +130,7 @@ effects, kriging checks</td>
 </td>
 </tr>
 <tr class="odd">
-<td>
-<code>sp</code>, <code>GWmodel</code>
-</td>
+<td><code>sp</code></td>
 <td>
 <code><a href="../reference/fit_gwr_model.html">fit_gwr_model()</a></code> and <code><a href="../reference/cv_gwr.html">cv_gwr()</a></code>
 </td>
@@ -162,9 +160,7 @@ method</td>
 </td>
 </tr>
 <tr class="even">
-<td>
-<code>FNN</code>, <code>Matrix</code>
-</td>
+<td><code>Matrix</code></td>
 <td>sparse k-nearest-neighbour weights for Moran’s I on large
 layers</td>
 </tr>
@@ -286,16 +282,18 @@ seen.</p>
 you:</p>
 <ul>
 <li>A row whose response or predictor is <code>NA</code>,
-<code>NaN</code> or infinite is dropped before a fit, and the count is
-logged; <code><a href="../reference/prep_model_data.html">prep_model_data()</a></code> is the function that does it and
+<code>NaN</code> or infinite is dropped before a fit, with a warning
+that gives the counts (class <code>spatialkit_rows_dropped</code>);
+<code><a href="../reference/prep_model_data.html">prep_model_data()</a></code> is the function that does it and
 <code>attr(x, "dropped")</code> says which rows.</li>
 <li>Two observations at the same coordinates are fine for models and
 folds; a Voronoi tessellation keeps one seed per location, and every
 point at that location is indexed to its cell.</li>
 <li>A point outside the boundary you tessellate gets no cell:
 <code>tess$index</code> is <code>NA</code> for it and
-<code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> leaves it out unless you ask
-for it back with <code>keep_unassigned = TRUE</code>.</li>
+<code><a href="../reference/assign_features_to_polygons.html">assign_features_to_polygons()</a></code> leaves it out, with a warning
+that gives the count, unless you ask for it back with
+<code>keep_unassigned = TRUE</code>.</li>
 <li>A variogram, which is what sizes blocks from the data, needs about
 thirty points; below that <code><a href="../reference/estimate_sac_range.html">estimate_sac_range()</a></code> returns
 <code>NA</code> and says so.</li>
@@ -309,6 +307,18 @@ the points into regions with aggregates; the last three fit a model on
 the points, score it on folds that hold out whole regions, and say where
 its predictions can be trusted. Each is covered in depth by one of the
 other vignettes.</p>
+<p>The cell functions’ defaults are pooled values beside the plain means
+and, where the data draw the cells, 4.5 observations per cell in
+density-weighted cells (<code><a href="../articles/resolution.html">vignette("resolution")</a></code>). Each
+earlier default is one argument away:
+<code>summarize_by_cell(estimate = "mean")</code> leaves the pooled
+columns out,
+<code>resolution_profile(estimate = NULL, obs_per_cell = NULL)</code>
+scores the ladder of cell counts,
+<code>select_resolution(criterion = "cp")</code> reads Mallows’ Cp off
+it, and <code>partition = "kmeans"</code> in
+<code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> and the seeding functions gives
+k-means cells.</p>
 <div class="section level3">
 <h3 id="regions-and-aggregates">Regions and aggregates<a class="anchor" aria-label="anchor" href="#regions-and-aggregates"></a>
 </h3>
@@ -339,8 +349,11 @@ other vignettes.</p>
 <pre><code><span><span class="co">## [1] "the first of 3 ranked candidates (5, 4, 6)"</span></span></code></pre>
 <div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## [1] "poly_id"        "n"              "resp_mean_rate" "..sd_resp_rate"</span></span>
-<span><span class="co">## [5] "..se_resp_rate" "cell_weight"    "geometry"</span></span></code></pre>
+<pre><code><span><span class="co">##  [1] "poly_id"                   "n"                        </span></span>
+<span><span class="co">##  [3] "resp_mean_rate"            "..sd_resp_rate"           </span></span>
+<span><span class="co">##  [5] "..se_resp_rate"            "cell_weight"              </span></span>
+<span><span class="co">##  [7] "..pooled_resp_rate"        "..pooled_w_resp_rate"     </span></span>
+<span><span class="co">##  [9] "..pooled_target_resp_rate" "geometry"</span></span></code></pre>
 <div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"poly_id"</span>, <span class="st">"n"</span>, <span class="st">"resp_mean_rate"</span>,</span>
 <span>                                 <span class="st">"..se_resp_rate"</span><span class="op">)</span><span class="op">]</span>, <span class="fl">4</span><span class="op">)</span></span></code></pre></div>
@@ -355,6 +368,16 @@ cannot collide with a column of your own. A cell with one observation
 has a standard error of <code>NA</code>, because one number has no
 spread, and an empty cell has <code>n = NA</code>: both are kept,
 because a region with nothing in it is a fact about the map.</p>
+<p>The three <code>..pooled_</code> columns are the pooled value, the
+cell’s mean pulled toward the mean of the cells around it, then its
+weight on the cell’s own mean and the mean it is pulled toward. With
+fewer than ten cells that hold an observation, as here, a cell’s target
+is the mean of all the others, and the call warns of it (class
+<code>spatialkit_pool_few_cells</code>). It also warns that these four
+cells do not tell the rate from one mean for the state (class
+<code>spatialkit_no_structure</code>). This vignette hides warnings;
+<code><a href="../reference/summarize_by_cell.html">?summarize_by_cell</a></code> says what the pooled value estimates and
+lists the warnings.</p>
 <p>At the default <code>deff = 1</code> the standard error is the one
 for each cell’s own mean, which is what a map of the regions reports,
 and it is right when a cell’s points are spread through it.
@@ -376,8 +399,9 @@ neither is named.</p>
 inside, is coarse. A hundred county centroids spread fairly evenly have
 no elbow to find, and the call warns that <code>max_levels</code> chose
 this count rather than the data. <code><a href="../articles/resolution.html">vignette("resolution")</a></code> is
-where to argue with it: <code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> scores every
-cell count on four criteria at once.</p>
+where to argue with it: <code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> sets the count
+from a number of observations per cell, or scores every count on a
+ladder on four count criteria and a diagnostic at once.</p>
 <div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/plot_tessellation_map.html">plot_tessellation_map</a></span><span class="op">(</span><span class="va">cells</span>, boundary <span class="op">=</span> <span class="va">boundary</span>, fill_col <span class="op">=</span> <span class="st">"resp_mean_rate"</span>,</span>
 <span>                      legend_title <span class="op">=</span> <span class="st">"mean rate"</span><span class="op">)</span></span></code></pre></div>
@@ -403,9 +427,10 @@ locations, and the cells can serve as the blocks that define them
 <code class="sourceCode R"><span><span class="co"># 5. Build folds that hold out whole regions.  block_size is a distance in</span></span>
 <span><span class="co">#    the CRS's units, here metres.  Blocks have to be at least as wide as the</span></span>
 <span><span class="co">#    autocorrelation range for the folds to be honest; on these data no range</span></span>
-<span><span class="co">#    could be identified, so 100 km is set by hand.  vignette("spatial-cross-</span></span>
-<span><span class="co">#    validation") is about that choice, and make_folds(auto_range = TRUE)</span></span>
-<span><span class="co">#    makes it from the data when gstat is installed.</span></span>
+<span><span class="co">#    could be identified for what the predictor leaves unexplained, so 100 km</span></span>
+<span><span class="co">#    is set by hand.  vignette("spatial-cross-validation") is about that</span></span>
+<span><span class="co">#    choice, and make_folds(auto_range = TRUE) makes it from the data when</span></span>
+<span><span class="co">#    gstat is installed.</span></span>
 <span><span class="va">random</span>  <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">obs</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"random_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">blocked</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">obs</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, block_size <span class="op">=</span> <span class="fl">100e3</span>,</span>
 <span>                      seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
@@ -462,11 +487,12 @@ the same folds and puts them in one table.</p>
 <pre><code><span><span class="co">## Area of applicability (Meyer &amp; Pebesma 2021)</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##   predictors  : 1 (nw_share)</span></span>
-<span><span class="co">##   weighted    : no (all predictors count equally)</span></span>
+<span><span class="co">##   weighted    : no (all predictors count equally: the model has no out-of-bag skill (OOB R-squared -0.059), so its importances are noise)</span></span>
 <span><span class="co">##   training    : 100 points</span></span>
 <span><span class="co">##   reference   : nearest point outside each of 4 CV folds (block_kfold)</span></span>
 <span><span class="co">##   normaliser  : 1.1527 (mean pairwise distance)</span></span>
 <span><span class="co">##   threshold   : 0.0440 (outlier-removed max of training DI)</span></span>
+<span><span class="co">##   location    : not measured</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##   2454 of 2454 prediction points inside the AOA (100.0%)</span></span></code></pre>
 <div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
@@ -583,11 +609,22 @@ such correction when its points are spread through the cell</td>
 optimum; a set, not an interval</td>
 </tr>
 <tr class="odd">
+<td><strong>pooled value</strong></td>
+<td>a cell’s mean pulled toward the mean of the 8 cells whose
+observations are nearest, by a weight that grows with the cell’s count;
+<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> returns it beside the mean</td>
+</tr>
+<tr class="even">
+<td><strong>size</strong></td>
+<td>the number of observations a cell is to hold on average,
+<code>obs_per_cell</code>; 4.5 sets the default count</td>
+</tr>
+<tr class="odd">
 <td><strong>support ceiling, range floor</strong></td>
-<td>the most cells the point count allows (<code>n / min_cell_n</code>)
-and the fewest the autocorrelation range allows
-(<code>area / range^2</code>); a criterion whose optimum sits on either
-is being chosen for by that bound</td>
+<td>the most cells the point count allows (<code>n / min_cell_n</code>,
+counting the rows with a response) and the fewest the autocorrelation
+range allows (<code>area / range^2</code>); a criterion whose optimum
+sits on either is being chosen for by that bound</td>
 </tr>
 <tr class="even">
 <td><strong>dissimilarity index (DI)</strong></td>

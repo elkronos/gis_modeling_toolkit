@@ -117,7 +117,8 @@ is the default despite costing more.</p></dd>
 
 <dt id="arg-include-coords">include_coords<a class="anchor" aria-label="anchor" href="#arg-include-coords"></a></dt>
 <dd><p>Add the coordinates as predictors. Default
-<code>FALSE</code>; see above.</p></dd>
+<code>FALSE</code>, which leaves the forest with no spatial information; see
+<em>Coordinates as predictors</em>.</p></dd>
 
 
 <dt id="arg-replace">replace<a class="anchor" aria-label="anchor" href="#arg-replace"></a></dt>
@@ -169,7 +170,10 @@ the arguments this function already sets (<code>num.trees</code>,
 <code>importance</code>, <code>seed</code>, <code>replace</code>,
 <code>sample.fraction</code>, <code>x</code>, <code>y</code>) are rejected with a
 message naming the wrapper argument to use instead.  Passing them here
-would reach <code>ranger()</code> twice and fail the call.</p></dd>
+would reach <code>ranger()</code> twice and fail the call.
+<code>respect.unordered.factors</code> passed here overrides the
+<code>"order"</code> this function sets when a predictor is categorical; see
+<em>Categorical predictors</em>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -178,6 +182,10 @@ would reach <code>ranger()</code> twice and fail the call.</p></dd>
 <code>$info</code> carries <code>num_trees</code>, <code>mtry</code>, <code>min_node_size</code>,
 <code>importance_type</code>, <code>importance</code> (a named numeric, or
 <code>NULL</code> when <code>importance = "none"</code>), <code>include_coords</code>,
+<code>categorical_predictors</code> (the unordered factor and character
+predictors, possibly none) and <code>respect_unordered_factors</code> (how
+ranger was told to split them: <code>"order"</code> unless overridden through
+<code>...</code>, and <code>NA</code> when there is none and nothing was passed),
 <code>replace</code> and <code>sample_fraction</code> (the sampling each tree was
 grown on, with <code>sample_fraction</code> resolved to the number ranger
 used), <code>oob_rmse</code> and <code>oob_r_squared</code> (each <code>NA_real_</code> when
@@ -190,20 +198,65 @@ can be read against <code>nrow(data_sf)</code>). The raw forest is in
 <code>$engine</code>.</p>
     </div>
     <div class="section level2">
-    <h2 id="coordinates-are-not-predictors-by-default">Coordinates are not predictors by default<a class="anchor" aria-label="anchor" href="#coordinates-are-not-predictors-by-default"></a></h2>
+    <h2 id="coordinates-as-predictors">Coordinates as predictors<a class="anchor" aria-label="anchor" href="#coordinates-as-predictors"></a></h2>
 
 
-<p>Handing a random forest the x and y coordinates lets it reproduce the
-training surface almost exactly by memorising location, and then fail badly
-anywhere it has not seen. Random cross-validation will not catch this:
-nearby points leak between folds, so the memorised surface scores well.
-That is how the practice became common. Meyer et al. (2019) show the
-collapse directly. <code>include_coords</code> therefore defaults to
-<code>FALSE</code>, and setting it to <code>TRUE</code> logs a caution, once per
-session (it is a deliberate choice, so it is not raised as an R warning,
-and it is not repeated for every fold of a cross-validation). If you do use it,
-score the model with <code><a href="cv_spatial.html">cv_spatial</a></code> and blocked folds, never with
-the out-of-bag error.</p>
+<p><code>include_coords = TRUE</code> adds the x and y coordinates to the
+predictors. They are the only spatial information a forest can be given:
+without them it sees the covariates alone, and <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> says "no
+spatial information used". The default is <code>FALSE</code>.</p>
+<p>What the coordinates buy depends on where the predictions are wanted. A
+forest splits on location as on any column, so it follows the training
+surface closely between sampled points, and has nothing but the nearest
+edge of the data to go on beyond them. Between sampled points the
+coordinates can lower the error, most where the covariates carry little
+of the spatial structure themselves, and the gain fades with distance
+from the training data.
+Beyond the autocorrelation range, or in a region the data never visited,
+it can reverse: in a simulated hold-out of an unvisited strip the forest
+with coordinates was 5.2\<!-- % worse on average and 31\\% worse in the worst -->
+run. Meyer et al. (2019) report larger failures of the same kind. With
+covariates that carry the spatial structure themselves, expect less from
+the coordinates.</p>
+<p>What does not change is how such a forest has to be scored. It fits
+location closely, nearby points leak between random folds, and the
+out-of-bag error is a random hold-out too, so both overstate its
+accuracy. Score it with <code><a href="cv_rf.html">cv_rf</a></code> and
+blocked folds (<code>make_folds(method = "block_kfold")</code>) or folds
+matched to the prediction distance (<code>method = "nndm"</code>), at the
+distances the map will be used at, never with the out-of-bag error, and
+compare the two forests on the same folds. That comparison is two calls:
+build the folds once and hand them to <code><a href="cv_rf.html">cv_rf()</a></code> with and without
+the coordinates.</p><div class="sourceCode"><pre><code><span></span>
+<span><span class="va">folds</span>   <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">dat</span>, k <span class="op">=</span> <span class="fl">5</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span><span class="op">)</span></span>
+<span><span class="va">plain</span>   <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span>, folds <span class="op">=</span> <span class="va">folds</span><span class="op">)</span></span>
+<span><span class="va">with_xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cv_rf.html">cv_rf</a></span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"a"</span>, <span class="st">"b"</span><span class="op">)</span>, folds <span class="op">=</span> <span class="va">folds</span>,</span>
+<span>                 include_coords <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>plain <span class="op">=</span> <span class="va">plain</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, with_xy <span class="op">=</span> <span class="va">with_xy</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span></code></pre></div><p><code><a href="cv_rf.html">cv_rf</a></code> runs the same comparison in its example and reads it
+fold by fold. Setting
+<code>include_coords = TRUE</code> logs that advice, once per session (it is a
+deliberate choice, so it is not raised as an R warning, and it is not
+repeated for every fold of a cross-validation).</p>
+    </div>
+    <div class="section level2">
+    <h2 id="categorical-predictors">Categorical predictors<a class="anchor" aria-label="anchor" href="#categorical-predictors"></a></h2>
+
+
+<p>A predictor that is an unordered factor or a character column is split
+with <code>respect.unordered.factors = "order"</code>: ranger orders its levels
+by mean response once, before growing, and splits on that order. That is
+the handling ranger's own help recommends. ranger's default for a
+regression forest, <code>"ignore"</code>, splits on the order the levels happen
+to be stored in (alphabetical, for most data), which for a nominal
+variable is arbitrary: with a 40-level factor carrying random level
+effects, the test RMSE was 1.05 by level order against 0.57 by response
+order, lower in 10 draws of 10. Pass <code>respect.unordered.factors</code>
+through <code>...</code> to choose otherwise (<code>"ignore"</code>, or
+<code>"partition"</code> for every two-way split of the levels, which is slow
+beyond a few levels). Ordered factors are left alone and split on their
+own order, and with <code>splitrule = "extratrees"</code> ranger's own default
+for that rule, <code>"partition"</code>, is kept. The setting is recorded in
+<code>$info$respect_unordered_factors</code> and printed with the fit.</p>
     </div>
     <div class="section level2">
     <h2 id="the-out-of-bag-error-is-a-random-hold-out">The out-of-bag error is a random hold-out<a class="anchor" aria-label="anchor" href="#the-out-of-bag-error-is-a-random-hold-out"></a></h2>
@@ -253,10 +306,12 @@ solution. <em>BMC Bioinformatics</em> 8, 25. <a href="https://doi.org/10.1186/14
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="cv_rf.html">cv_rf</a></code> for a spatially blocked performance estimate,
-<code><a href="area_of_applicability.html">area_of_applicability</a></code>, which can take
-<code>weights = pmax(fit$info$importance, 0)</code> when that importance is
-finite (it is <code>NaN</code> when no row is out of bag; see "What
-fitted() returns").</p>
+<code><a href="area_of_applicability.html">area_of_applicability</a></code>, which weights the predictors by
+<code>pmax(fit$info$importance, 0)</code> by default when that importance is
+finite and the forest has out-of-bag skill (it is <code>NaN</code> when no row
+is out of bag; see "What fitted() returns"), and which needs
+<code>categorical = "indicator"</code> or <code>"drop"</code> for a forest with a
+factor predictor.</p>
 <p>Other model fitting:
 <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>,
 <code><a href="fit_gwr_model.html">fit_gwr_model()</a></code>,
@@ -286,7 +341,7 @@ fitted() returns").</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   n       : 150</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   CRS     : EPSG:32632</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   Trees   : 500 (mtry = 1, min node = 5)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   Coords as predictors: no</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Coords as predictors: no - no spatial information used; see ?fit_rf_model</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   Sampling: bootstrap, with replacement (100.0% of rows per tree)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   OOB RMSE: 0.6995   OOB R^2: 0.9093</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   Importance (permutation): a=6.886, b=1.583</span>

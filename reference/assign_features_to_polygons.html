@@ -60,7 +60,8 @@
 <span>  keep_unassigned <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  predicate <span class="op">=</span> <span class="fu">sf</span><span class="fu">::</span><span class="va"><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">st_intersects</a></span>,</span>
 <span>  largest <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  tie_break <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"smallest_area"</span>, <span class="st">"first"</span><span class="op">)</span></span>
+<span>  tie_break <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"smallest_area"</span>, <span class="st">"first"</span><span class="op">)</span>,</span>
+<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -77,13 +78,28 @@
 
 
 <dt id="arg-polygon-id-col">polygon_id_col<a class="anchor" aria-label="anchor" href="#arg-polygon-id-col"></a></dt>
-<dd><p>Name of the polygon identifier column. Default "poly_id".</p></dd>
+<dd><p>Name of the polygon identifier column: the column of
+<code>polygons_sf</code> the IDs are read from, and the name they are returned
+under. Default "poly_id". When <code>polygons_sf</code> has no column of that name,
+the IDs are read from the first of <code>"poly_id"</code>, <code>"polygon_id"</code>, <code>"id"</code>,
+<code>"cell_id"</code> and <code>"grid_id"</code> it carries, and a message names the column
+that was used; when it has none of them, the polygons are numbered
+<code>1, 2, ...</code> in row order, and a message says so. The column the IDs are
+read from must hold one distinct, non-missing value per polygon: a
+duplicated or missing ID is an error, because features in different
+polygons would come back under one ID. That includes a unit stored as
+several rows that share its ID (a region split into <code>POLYGON</code> parts):
+merge the parts into one row per ID first, for example with
+<code>dplyr::summarise(dplyr::group_by(polygons_sf, &lt;ID column&gt;))</code>, which
+keeps the unit one cell. Numbering the rows would make each part a cell
+of its own.</p></dd>
 
 
 <dt id="arg-keep-unassigned">keep_unassigned<a class="anchor" aria-label="anchor" href="#arg-keep-unassigned"></a></dt>
 <dd><p>Logical; retain features that fall inside no
 polygon, carrying <code>NA</code> in the ID column. Default FALSE, which drops
-them.</p></dd>
+them with a warning of class <code>"spatialkit_unassigned"</code> that gives
+their number.</p></dd>
 
 
 <dt id="arg-predicate">predicate<a class="anchor" aria-label="anchor" href="#arg-predicate"></a></dt>
@@ -119,7 +135,15 @@ smallest area and, among polygons of equal area (a point on the shared
 edge of two grid cells), the one whose bounding-box centre is lowest,
 then leftmost, so the choice does not depend on the order of the rows;
 <code>"first"</code> keeps the first match (original order-dependent
-behavior).</p></dd>
+behavior). On cells built from the centres a profile scored, a point on
+the edge between two of them is placed by the profile's rule whichever
+is given (see Value).</p></dd>
+
+
+<dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
+<dd><p>Logical; suppress this function's <code><a href="https://rdrr.io/r/base/message.html" class="external-link">message()</a></code>s (the one
+naming a fallback ID column). It does not silence R warnings. Default
+<code>FALSE</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -135,10 +159,24 @@ the polygons' own ID column when that is read from a fallback such as
 falls inside any polygon
 the result is empty (or all-<code>NA</code> with <code>keep_unassigned = TRUE</code>) and a
 warning is raised, since the usual cause is two layers in different
-places (a CRS that could only be stamped, not reprojected). The
+places (a CRS that could only be stamped, not reprojected).</p>
+<p>Features that fall inside no polygon are counted on the attribute
+<code>"unassigned"</code>: a list with <code>n</code>, <code>which</code> (their row positions in
+<code>features_sf</code>) and <code>n_rows</code>. With <code>keep_unassigned = FALSE</code> they are not
+in the result, and a warning of class <code>"spatialkit_unassigned"</code> gives
+their number (<code>tryCatch(spatialkit_unassigned = )</code> catches it without
+matching the message; the condition carries <code>n</code> and <code>total</code>). The usual
+causes are a polygon layer that stops short of the data (a coastline
+drawn at another scale, a tessellation of seeds built without a
+<code>boundary</code> or <code>cover</code>; see <code><a href="build_tessellation.html">build_tessellation()</a></code>) and points outside
+the study area. With <code>keep_unassigned = TRUE</code> they are kept with an
+<code>NA</code> ID and no warning is raised, unless every feature is unassigned.</p>
+<p>The
 attribute <code>"ties"</code> records how many features matched more than one
 polygon (with <code>largest</code>, overlapped several by exactly the same area)
-and had the <code>tie_break</code> rule decide for them: a list with <code>n</code>,
+and had the <code>tie_break</code> rule decide for them (on cells built from the
+centres a profile scored, the profile's rule then places the points
+among them, as the last paragraph says): a list with <code>n</code>,
 <code>which</code> (their row positions in <code>features_sf</code>), <code>rule</code> and <code>n_rows</code>
 (the number of rows returned, which the record was made for). A large
 <code>n</code> means the polygon layer overlaps, and per-cell counts built from the
@@ -148,7 +186,54 @@ returned and does not survive subsetting: <code>joined[i, ]</code>, like
 with no <code>"ties"</code> attribute, so nothing reports the parent's count
 for a different set of rows. <code><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">sf::st_drop_geometry()</a></code> keeps the record,
 since the rows are the same; see <code><a href="sub-.spatialkit_rows.html">[.spatialkit_rows</a></code> for
-what binding such data frames does.</p>
+what binding such data frames does. The <code>"unassigned"</code> record is
+stamped and removed the same way.</p>
+<p>When <code>polygons_sf</code> carries <code>attr(, "count_rule")</code>, the record of how
+its cell count was set (cells from <code><a href="build_tessellation.html">build_tessellation()</a></code> on seeds
+placed from a <code><a href="select_resolution.html">select_resolution()</a></code> result or from a profile built with
+an <code>estimate</code>), the result carries the same record.
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> reads it and checks that the rows and cells it is
+given are the ones the count was scored on. It is a plain attribute: a
+row subset keeps it and <code><a href="https://dplyr.tidyverse.org/reference/mutate.html" class="external-link">dplyr::mutate()</a></code>, <code><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">dplyr::select()</a></code> and
+<code><a href="https://dplyr.tidyverse.org/reference/arrange.html" class="external-link">dplyr::arrange()</a></code> drop it, which is why the summary also looks for it
+on its <code>cells_sf</code>. The profile scores a feature that is not a point at
+one point of it (<code>coerce_to_points(, "auto")</code>), in the cell of the
+nearest centre; this function gives a polygon feature to the cell it
+overlaps most. A feature that straddles a cell boundary can therefore
+be assigned to another cell than the one it was scored in, and the
+summary does not compare the two for such a layer. To assign the
+features as they were scored, assign their points:
+<code>assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)</code>.</p>
+<p>When that record says the cells are the ones the profile scored
+(<code>scored_cells</code> is <code>TRUE</code>: the cells <code><a href="build_tessellation.html">build_tessellation()</a></code> builds on a
+selection's seeds, or on the seeds a seeding function returns for one)
+and holds the centres it scored (<code>count_rule$scored$centres</code>), a point
+on the edge between two or more of those cells is given the cell
+<code><a href="resolution_profile.html">resolution_profile()</a></code> scored it in: that of its nearest centre,
+measured in the CRS the record names, and of centres the same distance
+away the lower-numbered one. Such points occur on gridded locations
+(raster cell centres, a regular sampling grid), where a row can lie the
+same distance from two centres and the polygons hold it in either cell
+or in both. The rows each cell holds are then the rows its count was
+scored on, and <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>'s check of them reads <code>"match"</code>.
+A point counts as on the edge when it lies within a margin of both
+cells: one part in 1e10 of the largest coordinate of the cells, 0.44 mm
+at a UTM northing of 4,400 km. <code><a href="build_tessellation.html">build_tessellation()</a></code> draws such cells
+in the CRS the record names, around the centres as the record holds
+them, whatever CRS the seeds came back in (unless its <code>crs</code> names
+another projected CRS), so their corners carry only the rounding of
+that computation, far less than the margin. A point
+farther from its nearest centre's cell keeps the polygon that holds it,
+and so do features that are not points, points without a CRS beside a
+record with one, and a join in longitude and latitude. A centre's cell
+is the one cell that holds it and no other centre; a centre outside a
+boundary that clipped its cell away from it has the cell, among those
+that hold no centre, whose inside is nearest it. Cells built from other
+seeds leave most centres without a cell, and their points to the
+polygons. Polygons without the record, such as polygons
+the caller brings, and cells whose record says <code>scored_cells</code> is
+<code>FALSE</code> or <code>NA</code> (other cells built from the count, such as a lattice
+sized by it) are placed by the polygons alone.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -171,6 +256,7 @@ polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
     <div class="dont-index"><p><code><a href="build_tessellation.html">build_tessellation()</a></code> to build the polygon layer;
 <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> for the aggregation step that consumes the result.</p>
 <p>Other aggregation:
+<code><a href="cell_values_at.html">cell_values_at()</a></code>,
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>,
 <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>,
 <code><a href="resolution_profile.html">resolution_profile()</a></code>,

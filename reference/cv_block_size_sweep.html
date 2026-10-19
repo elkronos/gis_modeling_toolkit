@@ -179,7 +179,9 @@ cross-validation: <code>block_size</code> (<code>NA</code> for the random
 reference), <code>method</code>, <code>blocks_used</code>, <code>k</code> (the folds
 actually built), <code>n_folds_succeeded</code>, <code>value</code> (the pooled
 metric), <code>fold_min</code>, <code>fold_max</code> and <code>fold_sd</code> (its spread
-across folds).  Attributes: <code>metric</code>, <code>sac_range</code> (the
+across folds), and <code>block_width</code> and <code>block_height</code> (the
+width and height of the grid cells built at that size, <code>NA</code> for
+the random reference).  Attributes: <code>metric</code>, <code>sac_range</code> (the
 effective range, or <code>NA</code>), <code>crs</code>, <code>k</code> (the folds
 requested, which <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> and <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> report),
 <code>n_fits</code>, <code>response_var</code>, and <code>results</code>, the full
@@ -215,7 +217,7 @@ grid would hold more than the 1,000,000 <code><a href="make_folds.html">make_fol
 dropped.  The count is of grid cells: on clustered data a grid
 of <code>k</code> or more cells can have fewer than <code>k</code> that hold points,
 and <code><a href="make_folds.html">make_folds()</a></code> then lowers <code>k</code> at that size, which the
-<code>k</code> column shows.  On an extent much longer than it is wide every
+<code>k</code> column shows; the sweep warns once, naming the sizes.  On an extent much longer than it is wide every
 rung can fall below the autocorrelation range while longer blocks would
 still fit <code>k</code> times along the longer side; the sweep warns when
 that happens, and <code>block_sizes</code> is then the way to reach past the
@@ -223,8 +225,28 @@ range.  Sizes are in the units of the CRS the folds are built in
 (<code><a href="make_folds.html">make_folds()</a></code>'s <code>params$crs</code>, metres for geographic input),
 and the returned table records that CRS.  Each is the <em>minimum</em> block
 edge handed to <code><a href="make_folds.html">make_folds()</a></code>, which fits a whole number of cells
-across the extent, so the cells are somewhat longer than the size on the
-axis (up to twice as long).</p>
+across each axis of the extent, so on an axis at least as long as the
+size the cells are somewhat longer than it (up to just under twice as
+long).  An axis shorter than the size is spanned by one row or column of
+cells, which are then shorter than the size there.  The
+<code>block_width</code> and <code>block_height</code> columns give the cells built
+at each size.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="warnings-raised-once-for-the-sweep">Warnings raised once for the sweep<a class="anchor" aria-label="anchor" href="#warnings-raised-once-for-the-sweep"></a></h2>
+
+
+<p>Every size is a <code><a href="cv_spatial.html">cv_spatial()</a></code> on the same layer.  The
+warnings <code><a href="prep_model_data.html">prep_model_data()</a></code> raises about that layer (class
+<code>spatialkit_rows_dropped</code>, counting the incomplete rows dropped, and
+<code>spatialkit_constant_predictor</code>) are raised once, not once per
+size.  With a GWR learner, the two warnings in
+which <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> counts held-out locations
+(<code>"spatialkit_gwr_not_estimable"</code> and
+<code>"spatialkit_gwr_extrapolation"</code>) are raised once each, under this
+function's name, with the totals over every size; the same rows are
+predicted at every size, so a location can be counted once per size (see
+<code><a href="predict.gwr_fit.html">predict.gwr_fit</a></code>).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -264,7 +286,7 @@ axis (up to twice as long).</p>
 <span class="r-in"><span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"ggplot2"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sw</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Cross-validation RMSE against block size (20 fits, k = 4, sizes in EPSG:32632)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   estimated autocorrelation range: 452.5</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   estimated autocorrelation range: 460.0</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>  block_size       method blocks_used k n_folds_succeeded  value fold_min</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>      random random_kfold          NA 4                 4 0.9639   0.8346</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>       38.73  block_kfold         172 4                 4 0.9438   0.7825</span>

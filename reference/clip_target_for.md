@@ -67,11 +67,11 @@ the input CRS; a message reports this unless `quiet = TRUE`.
 It is not the target
 [`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
 derives on its own: `method = "voronoi"` without a boundary clips to the
-convex hull of the points buffered by 2 percent of its diagonal, and
-there `expand` is always a distance. A bounding box over a
-non-rectangular point cloud includes corners with no data, so a hex or
-square grid laid over it has cells that hold no points; pass the
-study-area polygon when there is one.
+convex hull of the points (or of their `cover`, for seeds) buffered by 2
+percent of its diagonal, and there `expand` is always a distance. A
+bounding box over a non-rectangular point cloud includes corners with no
+data, so a hex or square grid laid over it has cells that hold no
+points; pass the study-area polygon when there is one.
 
 ## See also
 

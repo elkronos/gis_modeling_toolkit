@@ -2,9 +2,15 @@
 
 Shows the forest's shape (formula, n, number of trees, `mtry`, node
 size) along with the out-of-bag error and, prominently, whether the
-coordinates were used as predictors. That last line is the one to check:
-a forest fitted with `include_coords = TRUE` can memorise location and
-score well out-of-bag while failing everywhere it has not been.
+coordinates were used as predictors. That line is the one to check. A
+forest fitted without them prints "no spatial information used": it sees
+the covariates alone. One fitted with `include_coords = TRUE` fits
+location closely, so its out-of-bag error overstates its accuracy and it
+has to be scored with blocked or distance-matched folds; see
+*Coordinates as predictors* in
+[`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md).
+When a predictor is an unordered factor or a character column, a line
+says how ranger was told to split it.
 
 ## Usage
 

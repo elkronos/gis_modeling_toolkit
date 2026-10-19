@@ -130,7 +130,11 @@ session's <code>mc.cores</code>.</p></dd>
 
 
 <dt id="arg-block-size-auto-range-boundary">block_size, auto_range, boundary<a class="anchor" aria-label="anchor" href="#arg-block-size-auto-range-boundary"></a></dt>
-<dd><p>Passed to <code><a href="cv_spatial.html">cv_spatial</a></code>.</p></dd>
+<dd><p>Passed to <code><a href="cv_spatial.html">cv_spatial</a></code>.
+<code>block_size</code> and <code>auto_range = TRUE</code> size the blocks built
+when <code>folds</code> is <code>NULL</code>; beside supplied <code>folds</code> they
+have nothing to size and raise a warning of class
+<code>spatialkit_fold_args_ignored</code>.</p></dd>
 
 
 <dt id="arg-pointize">pointize<a class="anchor" aria-label="anchor" href="#arg-pointize"></a></dt>
@@ -157,6 +161,25 @@ growing every fold's forest from one fixed seed.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>The <code><a href="cv_spatial.html">cv_spatial</a></code> result.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="comparing-the-forest-with-and-without-coordinates">Comparing the forest with and without coordinates<a class="anchor" aria-label="anchor" href="#comparing-the-forest-with-and-without-coordinates"></a></h2>
+
+
+<p>Whether <code>include_coords = TRUE</code> lowers the error depends on how far
+from the training data the predictions are (see <em>Coordinates as
+predictors</em> in <code><a href="fit_rf_model.html">fit_rf_model</a></code>), so it is a comparison to make
+on your own data, at the block size the map will be used at. Score the
+two forests on the same folds: build the folds once with
+<code><a href="make_folds.html">make_folds</a></code> and pass the result as <code>folds</code> to two
+calls, one with <code>include_coords = TRUE</code> and one without. Each fold
+then holds out the same rows in both, so the two <code>overall</code> rows
+compare like with like and the two <code>fold_metrics</code> tables pair up
+fold by fold. A difference in <code>overall</code> that is small beside the
+spread of the per-fold differences is not evidence for either forest.
+The example below runs the comparison. <code><a href="compare_models_cv.html">compare_models_cv</a></code>
+takes one set of forest arguments (<code>rf_args</code>) per call, so it scores
+one of the two forests, not both.</p>
     </div>
     <div class="section level2">
     <h2 id="percentage-errors-on-responses-with-zeros">Percentage errors on responses with zeros<a class="anchor" aria-label="anchor" href="#percentage-errors-on-responses-with-zeros"></a></h2>
@@ -216,10 +239,21 @@ coverage, which are proper scoring rules and have no such failure mode.</p>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">a</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">0.3</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="fu">cv_rf</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, k <span class="op">=</span> <span class="fl">4</span><span class="op">)</span><span class="op">$</span><span class="va">overall</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span>  <span class="co"># The forest with and without the coordinates, on the same blocked</span></span></span>
+<span class="r-in"><span>  <span class="co"># folds.  (The second call logs the include_coords caution, once per</span></span></span>
+<span class="r-in"><span>  <span class="co"># session; this comparison is what it asks for.)  This response has no</span></span></span>
+<span class="r-in"><span>  <span class="co"># spatial structure, so here the coordinates can only cost accuracy.</span></span></span>
+<span class="r-in"><span>  <span class="va">folds</span>   <span class="op">&lt;-</span> <span class="fu"><a href="make_folds.html">make_folds</a></span><span class="op">(</span><span class="va">dat</span>, k <span class="op">=</span> <span class="fl">4</span>, method <span class="op">=</span> <span class="st">"block_kfold"</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">plain</span>   <span class="op">&lt;-</span> <span class="fu">cv_rf</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, folds <span class="op">=</span> <span class="va">folds</span>, num_trees <span class="op">=</span> <span class="fl">200</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">with_xy</span> <span class="op">&lt;-</span> <span class="fu">cv_rf</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"z"</span>, <span class="st">"a"</span>, folds <span class="op">=</span> <span class="va">folds</span>, num_trees <span class="op">=</span> <span class="fl">200</span>,</span></span>
+<span class="r-in"><span>                   include_coords <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>plain <span class="op">=</span> <span class="va">plain</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span>, with_xy <span class="op">=</span> <span class="va">with_xy</span><span class="op">$</span><span class="va">overall</span><span class="op">$</span><span class="va">RMSE</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># Fold by fold: positive where the coordinates lowered the error.</span></span></span>
+<span class="r-in"><span>  <span class="va">plain</span><span class="op">$</span><span class="va">fold_metrics</span><span class="op">$</span><span class="va">RMSE</span> <span class="op">-</span> <span class="va">with_xy</span><span class="op">$</span><span class="va">fold_metrics</span><span class="op">$</span><span class="va">RMSE</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=4).</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       RMSE       MAE     MAPE   SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1 0.417048 0.3264843 83.10643 42.3203 0.9587525     NA    200    200     200</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] -0.5017832 -0.2412238 -0.3906285 -0.1638759</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

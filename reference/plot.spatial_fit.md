@@ -70,12 +70,10 @@ plot(
       fitted in, which is not necessarily the fit's own CRS (lon/lat
       data are projected first). Each curve is the variogram
       [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
-      returns for its variable: all point pairs, or, when the all-pairs
-      fit was unusable, the widest of four directions, which is named
-      with its azimuth (in the title for the residuals, in the caption
-      for the response). A fit that identified no range says why in the
-      subtitle, since the overlaid model line is then not a fit to
-      believe. Requires 'gstat'.
+      returns for its variable, which is over all point pairs. A fit
+      that identified no range says why in the subtitle, since the
+      overlaid model line is then not a fit to believe. Requires
+      'gstat'.
 
   `"coefficients"`
 
@@ -85,16 +83,17 @@ plot(
       drawn hollow and grey (`mask = TRUE`): for a slope, where the
       kernel-weighted window's slope condition index (`cn_slopes`,
       predictors centred in the window) is above 30 or the window is
-      singular, or where the index with the intercept (`cn`) is above
-      1e6; for the Intercept, where `cn` is above 30 (a predictor far
-      from 0 against its local spread makes the local intercept an
-      extrapolation). They are masked because the smooth surface a naive
-      map draws over them is the picture of an unstable estimate, not of
-      a relationship; the subtitle counts them. The condition indices
-      are the fit's `info$local_collinearity`, computed for every
-      location when the model was fitted. A diverging scale centred on
-      zero is used when the coefficient changes sign, otherwise a
-      sequential one.
+      singular; a predictor far from zero is not masked, because the
+      local solve centres each window and the index with the intercept
+      (`cn`) does not enter; for the Intercept, where `cn` is above 30
+      (a predictor far from 0 against its local spread makes the local
+      intercept an extrapolation). They are masked because the smooth
+      surface a naive map draws over them is the picture of an unstable
+      estimate, not of a relationship; the subtitle counts them. The
+      condition indices are the fit's `info$local_collinearity`,
+      computed for every location when the model was fitted. A diverging
+      scale centred on zero is used when the coefficient changes sign,
+      otherwise a sequential one.
 
 - response:
 

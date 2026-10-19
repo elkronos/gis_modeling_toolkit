@@ -59,8 +59,12 @@ predict(
 ## Value
 
 Numeric vector of length `nrow(newdata)`, or a `n_draws x nrow(newdata)`
-matrix when `draws = TRUE`. If the posterior draw fails the result is
-all `NA` (a 1-row matrix for `draws = TRUE`) and the cause is logged. An
+matrix when `draws = TRUE`. Rows with a missing or non-finite predictor
+or coordinate, and rows carrying a level of a categorical predictor the
+model was not fitted with, are `NA` (an `NA` column with
+`draws = TRUE`); the other rows are unaffected. If the posterior draw
+fails the result is all `NA` (a 1-row matrix for `draws = TRUE`) with a
+warning of class `spatialkit_predict_failed` that gives the cause. An
 ordinal or categorical family is not a failed draw and is an error under
 `type = "epred"`: its expected value is a probability per response
 category, not one number per row. Use `type = "predict", draws = TRUE`
@@ -103,6 +107,21 @@ surface rather than an estimate of anything, so it is returned as `NA`
 (a column of `NA` with `draws = TRUE`) with a warning. The default
 boundary factor puts that edge well outside the training data, so only
 `newdata` reaching far past it is affected.
+
+## Levels of a categorical predictor
+
+A factor or character predictor is handed to brms with the levels the
+model was fitted with: the values that occur in the training rows
+(`object$info$predictor_levels`). brms compares the level *set* of a
+`newdata` factor with those, so without this a factor that only listed
+an extra level, or a model fitted on a subset whose factor kept an
+unused level, was refused outright. A row whose value is not among the
+fitted levels has no prediction: it is returned as `NA`, the other rows
+are predicted, and one warning of class `spatialkit_new_levels` names
+the predictor, the levels and the number of rows. A prediction therefore
+does not depend on which other rows share the call, and
+[`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
+returns the same surface at any `chunk_size`.
 
 ## See also
 

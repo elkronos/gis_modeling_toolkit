@@ -72,7 +72,7 @@ it back to <code>object$data_sf</code> to map it.  Use
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="co"># S3 method for class 'gwr_fit'</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">object</span>, se <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -83,14 +83,21 @@ it back to <code>object$data_sf</code> to map it.  Use
 <dd><p>A <code>gwr_fit</code> object.</p></dd>
 
 
+<dt id="arg-se">se<a class="anchor" aria-label="anchor" href="#arg-se"></a></dt>
+<dd><p>Logical; also return the standard errors and t values.  Default
+<code>FALSE</code>.</p></dd>
+
+
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
 <dd><p>Ignored.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A data.frame of local coefficient estimates: one row per
-observation, one column per model term.
+    <p>With <code>se = FALSE</code>, a data.frame of local coefficient
+estimates: one row per observation, one column per model term.  With
+<code>se = TRUE</code>, a list of three such data.frames: <code>estimate</code>,
+<code>se</code> and <code>t</code>.
 Never <code>NULL</code>: when the engine carries no <code>SDF</code> component this
 errors, following the <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> contract described in
 <code><a href="new_spatial_fit.html">new_spatial_fit</a></code>.</p>
@@ -100,18 +107,45 @@ errors, following the <code><a href="https://rdrr.io/r/stats/coef.html" class="e
 
 
 <p>Only the model terms: the intercept and one column per predictor.
-GWmodel's <code>SDF</code> data slot carries a good deal more alongside them
+The engine's <code>SDF</code> data slot carries a good deal more alongside them
 (standard errors, t-values, the observed response, the fitted values, the
 residuals, <code>Local_R2</code>): 15 columns for a two-predictor fit, of which 3
 are coefficients.  Returning the whole slot would have made
 <code>coef(fit)$Local_R2</code> and <code>coef(fit)$a_SE</code> read like coefficients
-and <code>ncol(coef(fit))</code> a meaningless number.  Reach for
-<code>object$engine$SDF</code> when you want the rest; it is the unmodified
-GWmodel object.</p>
-<p>If the model terms cannot be located in the <code>SDF</code> (a GWmodel that
+and <code>ncol(coef(fit))</code> a meaningless number.  Ask for the standard
+errors and t values with <code>se = TRUE</code>; reach for
+<code>object$engine$SDF</code> when you want the rest.</p>
+<p>A coefficient is <code>NA</code> at a location whose local window cannot
+estimate it: a predictor that does not vary among the observations that
+carry weight there has no slope, and the intercept is then not identified
+either unless the predictor is 0 there.  <code>object$info$nonfinite_coef</code>
+is the mask, and <code><a href="fit_gwr_model.html">fit_gwr_model</a></code> raises a warning that counts
+them.</p>
+<p>If the model terms cannot be located in the <code>SDF</code> (an engine that
 names its coefficient columns differently), the whole slot is returned with
 a warning saying so.  The call neither errors nor returns a silently short
 table.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="standard-errors">Standard errors<a class="anchor" aria-label="anchor" href="#standard-errors"></a></h2>
+
+
+<p>With <code>se = TRUE</code> the local standard errors and t values come with the
+estimates.  A standard error is
+\(\hat\sigma\sqrt{(C C^\top)_{jj}}\), with
+\(C = (X^\top W X)^{-1} X^\top W\) the weights the local regression puts
+on the responses and \(\hat\sigma^2\) the residual sum of squares over
+the fit's effective degrees of freedom: the definition
+<code><a href="https://rdrr.io/pkg/GWmodel/man/gwr.basic.html" class="external-link">GWmodel::gwr.basic()</a></code> uses, computed from the QR decomposition that
+gave the estimate.  They treat the bandwidth as known.  The t values are
+one test per term and location, tens to thousands of them and strongly
+dependent, so a map of \(|t| &gt; 2\) overstates what is significant; no
+p-value, adjusted or not, is returned.  What an adjustment for the number
+of tests needs is on the fit: the t values here, the effective number of
+parameters <code>object$info$enp</code> and the residual degrees of freedom
+<code>object$info$edf</code>.  When observations share a location the standard
+errors are too small as well (see <code><a href="fit_gwr_model.html">fit_gwr_model</a></code>,
+<strong>Observations that share a location</strong>).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

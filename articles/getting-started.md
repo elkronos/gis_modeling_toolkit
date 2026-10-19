@@ -25,19 +25,19 @@ remotes::install_github("elkronos/gis_modeling_toolkit")
 remotes::install_github("elkronos/gis_modeling_toolkit", build_vignettes = TRUE)
 ```
 
-`sf`, `dplyr`, `logger` and `digest` install with it. Everything else is
-optional and is needed only for the feature that uses it:
+`sf`, `dplyr`, `logger`, `digest` and `FNN` install with it. Everything
+else is optional and is needed only for the feature that uses it:
 
 | install | for |
 |----|----|
 | `gstat` | variogram fitting: [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md), design effects, kriging checks |
 | `ranger` | [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md) and [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md) |
-| `sp`, `GWmodel` | [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md) and [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md) |
+| `sp` | [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md) and [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md) |
 | `brms` (plus a Stan toolchain) | [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md) and [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md) |
 | `geometry` | Delaunay triangle tessellations |
 | `ggplot2` | every `plot_*()` function and every [`plot()`](https://rdrr.io/r/graphics/plot.default.html) method |
 | `patchwork` | only the stacked panels in [`vignette("spatialkit_nc_demo")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatialkit_nc_demo.md) and `example_nc_demo.R` |
-| `FNN`, `Matrix` | sparse k-nearest-neighbour weights for Moran’s I on large layers |
+| `Matrix` | sparse k-nearest-neighbour weights for Moran’s I on large layers |
 
 A missing package produces a message naming it, so nothing fails
 obscurely.
@@ -198,7 +198,8 @@ choice is made once and can be seen.
 Four more things about the data, each handled without stopping you:
 
 - A row whose response or predictor is `NA`, `NaN` or infinite is
-  dropped before a fit, and the count is logged;
+  dropped before a fit, with a warning that gives the counts (class
+  `spatialkit_rows_dropped`);
   [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
   is the function that does it and `attr(x, "dropped")` says which rows.
 - Two observations at the same coordinates are fine for models and
@@ -207,8 +208,8 @@ Four more things about the data, each handled without stopping you:
 - A point outside the boundary you tessellate gets no cell: `tess$index`
   is `NA` for it and
   [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
-  leaves it out unless you ask for it back with
-  `keep_unassigned = TRUE`.
+  leaves it out, with a warning that gives the count, unless you ask for
+  it back with `keep_unassigned = TRUE`.
 - A variogram, which is what sizes blocks from the data, needs about
   thirty points; below that
   [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
@@ -221,6 +222,18 @@ the points into regions with aggregates; the last three fit a model on
 the points, score it on folds that hold out whole regions, and say where
 its predictions can be trusted. Each is covered in depth by one of the
 other vignettes.
+
+The cell functions’ defaults are pooled values beside the plain means
+and, where the data draw the cells, 4.5 observations per cell in
+density-weighted cells
+([`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)).
+Each earlier default is one argument away:
+`summarize_by_cell(estimate = "mean")` leaves the pooled columns out,
+`resolution_profile(estimate = NULL, obs_per_cell = NULL)` scores the
+ladder of cell counts, `select_resolution(criterion = "cp")` reads
+Mallows’ Cp off it, and `partition = "kmeans"` in
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+and the seeding functions gives k-means cells.
 
 ### Regions and aggregates
 
@@ -266,8 +279,11 @@ tess$params$approx_n_cells_from
 names(cells)
 ```
 
-    ## [1] "poly_id"        "n"              "resp_mean_rate" "..sd_resp_rate"
-    ## [5] "..se_resp_rate" "cell_weight"    "geometry"
+    ##  [1] "poly_id"                   "n"                        
+    ##  [3] "resp_mean_rate"            "..sd_resp_rate"           
+    ##  [5] "..se_resp_rate"            "cell_weight"              
+    ##  [7] "..pooled_resp_rate"        "..pooled_w_resp_rate"     
+    ##  [9] "..pooled_target_resp_rate" "geometry"
 
 ``` r
 
@@ -286,6 +302,17 @@ Every aggregate comes with a count and a standard error. The `..sd_` and
 your own. A cell with one observation has a standard error of `NA`,
 because one number has no spread, and an empty cell has `n = NA`: both
 are kept, because a region with nothing in it is a fact about the map.
+
+The three `..pooled_` columns are the pooled value, the cell’s mean
+pulled toward the mean of the cells around it, then its weight on the
+cell’s own mean and the mean it is pulled toward. With fewer than ten
+cells that hold an observation, as here, a cell’s target is the mean of
+all the others, and the call warns of it (class
+`spatialkit_pool_few_cells`). It also warns that these four cells do not
+tell the rate from one mean for the state (class
+`spatialkit_no_structure`). This vignette hides warnings;
+[`?summarize_by_cell`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+says what the pooled value estimates and lists the warnings.
 
 At the default `deff = 1` the standard error is the one for each cell’s
 own mean, which is what a map of the regions reports, and it is right
@@ -314,7 +341,8 @@ rather than the data.
 [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md)
 is where to argue with it:
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
-scores every cell count on four criteria at once.
+sets the count from a number of observations per cell, or scores every
+count on a ladder on four count criteria and a diagnostic at once.
 
 ``` r
 
@@ -347,9 +375,10 @@ the cells can serve as the blocks that define them
 # 5. Build folds that hold out whole regions.  block_size is a distance in
 #    the CRS's units, here metres.  Blocks have to be at least as wide as the
 #    autocorrelation range for the folds to be honest; on these data no range
-#    could be identified, so 100 km is set by hand.  vignette("spatial-cross-
-#    validation") is about that choice, and make_folds(auto_range = TRUE)
-#    makes it from the data when gstat is installed.
+#    could be identified for what the predictor leaves unexplained, so 100 km
+#    is set by hand.  vignette("spatial-cross-validation") is about that
+#    choice, and make_folds(auto_range = TRUE) makes it from the data when
+#    gstat is installed.
 random  <- make_folds(obs, k = 4, method = "random_kfold", seed = 1)
 blocked <- make_folds(obs, k = 4, method = "block_kfold", block_size = 100e3,
                       seed = 1)
@@ -423,11 +452,12 @@ aoa
     ## Area of applicability (Meyer & Pebesma 2021)
     ## 
     ##   predictors  : 1 (nw_share)
-    ##   weighted    : no (all predictors count equally)
+    ##   weighted    : no (all predictors count equally: the model has no out-of-bag skill (OOB R-squared -0.059), so its importances are noise)
     ##   training    : 100 points
     ##   reference   : nearest point outside each of 4 CV folds (block_kfold)
     ##   normaliser  : 1.1527 (mean pairwise distance)
     ##   threshold   : 0.0440 (outlier-removed max of training DI)
+    ##   location    : not measured
     ## 
     ##   2454 of 2454 prediction points inside the AOA (100.0%)
 
@@ -493,6 +523,8 @@ source(file.path(dir, "03-folds.R"))
 | **block** | a square of the study area used to build a fold; a fold holds out whole blocks |
 | **design effect (`deff`)** | how many times larger a cell mean’s variance, as an estimate of the population mean, is than the independent-sample formula says, because the points in a cell are correlated; `n / deff` is the effective sample size for that estimate. The cell’s own mean needs no such correction when its points are spread through the cell |
 | **flat region** | the cell counts a resolution criterion cannot distinguish from its optimum; a set, not an interval |
-| **support ceiling, range floor** | the most cells the point count allows (`n / min_cell_n`) and the fewest the autocorrelation range allows (`area / range^2`); a criterion whose optimum sits on either is being chosen for by that bound |
+| **pooled value** | a cell’s mean pulled toward the mean of the 8 cells whose observations are nearest, by a weight that grows with the cell’s count; [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md) returns it beside the mean |
+| **size** | the number of observations a cell is to hold on average, `obs_per_cell`; 4.5 sets the default count |
+| **support ceiling, range floor** | the most cells the point count allows (`n / min_cell_n`, counting the rows with a response) and the fewest the autocorrelation range allows (`area / range^2`); a criterion whose optimum sits on either is being chosen for by that bound |
 | **dissimilarity index (DI)** | how far a prediction location’s predictors sit from the training data, on the scale of the training data’s own spread; the area of applicability is where DI stays below what cross-validation saw |
 | **row ID** | `..row_id`, a column the package stamps on a layer so that folds and dropped rows can be traced back to the rows you passed in |

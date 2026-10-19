@@ -13,19 +13,20 @@
 - [Choosing a
   resolution](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md):
 
-  How many cells the data support: the ladder, four criteria that
+  How many cells the data support: the ladder, the criteria that
   disagree, and how to read the flat region.
 
 - [Spatial
   cross-validation](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md):
 
-  The five fold schemes, sizing blocks from the autocorrelation range,
+  The six fold schemes, sizing blocks from the autocorrelation range,
   and reading a cross-validation result down to the last row.
 
 - [Diagnostics](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md):
 
   Residual autocorrelation, aggregation standard errors, kriging
-  adequacy, the area of applicability, and two ways a score can leak.
+  adequacy, the area of applicability, two ways a score can leak, and
+  the warnings about pooled cell values.
 
 ### End to end
 
@@ -40,4 +41,5 @@
   report](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md):
 
   What leaves the session: grouping an existing layer, membership
-  lookups, exporting the regions, and which six numbers to report.
+  lookups, exporting the regions, which six numbers to report, and how
+  to report a cell value.

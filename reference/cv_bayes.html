@@ -129,7 +129,8 @@ the folds came from other data when they were not).</p></dd>
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
-<dd><p>Number of folds. Default 5.</p></dd>
+<dd><p>Number of folds to build when <code>folds</code> is <code>NULL</code>; not
+read when <code>folds</code> is supplied.  Default 5.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -176,14 +177,18 @@ precision (<code>0.975</code> gives <code>coverage_97.5</code>).</p></dd>
 
 
 <dt id="arg-block-size">block_size<a class="anchor" aria-label="anchor" href="#arg-block-size"></a></dt>
-<dd><p>Optional minimum block edge length for spatial CV blocks
-(projected CRS units).</p></dd>
+<dd><p>Optional minimum block edge length (projected CRS
+units) for the blocks built when <code>folds</code> is <code>NULL</code>; see
+<code><a href="make_folds.html">make_folds()</a></code>.  Beside supplied <code>folds</code> it has
+nothing to size and raises a warning (class
+<code>spatialkit_fold_args_ignored</code>).</p></dd>
 
 
 <dt id="arg-auto-range">auto_range<a class="anchor" aria-label="anchor" href="#arg-auto-range"></a></dt>
 <dd><p>Logical.  If <code>TRUE</code> and <code>folds</code> is <code>NULL</code>,
 estimate the autocorrelation range and use it as the minimum block size.
-Default <code>FALSE</code>.</p></dd>
+Default <code>FALSE</code>.  <code>TRUE</code> beside supplied <code>folds</code> raises
+the same warning as <code>block_size</code>.</p></dd>
 
 
 <dt id="arg-parallel">parallel<a class="anchor" aria-label="anchor" href="#arg-parallel"></a></dt>
@@ -234,12 +239,22 @@ that give the coverage below (<code>NA</code> when
 see <code><a href="cv_spatial.html">cv_spatial</a></code>.
 <code>fold_metrics</code> carries, beyond the columns its siblings share,
 <code>gp_k</code>, <code>gp_n_basis</code>, <code>n_draws</code>, <code>CRPS</code>, the
-<code>coverage_*</code> columns and <code>convergence_ok</code>: <code>TRUE</code> or
+<code>coverage_*</code> columns, <code>convergence_ok</code> and
+<code>gp_adequacy</code>.  <code>convergence_ok</code> is <code>TRUE</code> or
 <code>FALSE</code> as <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> judged that
-fold's sampler (R-hat, effective sample size, divergences), <code>NA</code>
+fold's sampler (divergent transitions, R-hat, effective sample size and
+E-BFMI; see its <code>check_convergence</code>), <code>NA</code>
 when <code>fit_args</code> sets <code>check_convergence = FALSE</code>.  A fold that
 did not converge is scored like the others, so a run with any
-<code>FALSE</code> raises one warning naming those folds.
+<code>FALSE</code> raises one warning of class <code>spatialkit_convergence</code>
+naming those folds and the checks each failed.
+<code>gp_adequacy</code> is what that fold's posterior said about its
+Gaussian-process basis (<code>"ok"</code>, <code>"below_resolution"</code>,
+<code>"unresolved_short_range"</code>, <code>"no_signal_above_floor"</code> or
+<code>"not_checked"</code>; see "What the basis resolves" in
+<code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model</a></code>).  A fold whose basis was
+found too coarse is scored like the others too.  See <strong>Warnings
+from the folds</strong>.
 The <code>predictive_coverage</code> entries (one per
 <code>coverage_levels</code> value, plus <code>mean_CRPS</code>) are averages across
 folds <strong>weighted by each fold's <code>n_pred</code></strong>, because the per-fold
@@ -254,6 +269,25 @@ is a full MCMC run.  Use few folds, and <code>parallel = TRUE</code> if you have
 the cores.  For a cheap first pass on the same question, cross-validate a
 forest with <code><a href="cv_rf.html">cv_rf()</a></code> and come back here once the predictor set
 has settled.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="warnings-from-the-folds">Warnings from the folds<a class="anchor" aria-label="anchor" href="#warnings-from-the-folds"></a></h2>
+
+
+<p><code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> warns about a fit under four
+condition classes: <code>spatialkit_gp_basis_size</code>,
+<code>spatialkit_gp_resolution</code>, <code>spatialkit_convergence</code> and
+<code>spatialkit_gp_adequacy</code> (see its <strong>Warnings</strong>).  Each fold is
+a fit, and none of those warnings says which fold it came from, so they
+are collected as the folds run and each class is raised once after the
+last fold, under this function's name and with the same class.  Each
+warning names the folds and carries <code>folds</code> (their labels) and
+<code>fold_messages</code> (every fold's own text, named by fold) as fields of
+the condition.  The convergence warning covers the folds that were
+scored and gives the checks each failed, also as the field
+<code>failed</code>; the other three quote the first fold's own text.  Each
+fold's own line is in the log.  Warnings that Stan or <span class="pkg">brms</span> raise
+themselves are not collected and are passed on.</p>
     </div>
     <div class="section level2">
     <h2 id="percentage-errors-on-responses-with-zeros">Percentage errors on responses with zeros<a class="anchor" aria-label="anchor" href="#percentage-errors-on-responses-with-zeros"></a></h2>

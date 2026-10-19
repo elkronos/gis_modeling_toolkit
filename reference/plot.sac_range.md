@@ -34,9 +34,12 @@ A `ggplot` object.
 ## Details
 
 Nothing is recomputed: the plot reads the `variogram`,
-`variogram_model`, `crs`, `directional` and `anisotropy_used` attributes
-the estimate already carries. The distance axis is in the units of the
-CRS the variogram was actually fitted in, which
+`variogram_model`, `crs` and `rejected_reason` attributes the estimate
+already carries. The variogram is the one over all point pairs; a result
+stored by an earlier version, whose range could be that of the widest of
+four directions (`anisotropy_used` `TRUE`), is titled with its azimuth.
+The distance axis is in the units of the CRS the variogram was actually
+fitted in, which
 [`estimate_sac_range()`](https://elkronos.github.io/gis_modeling_toolkit/reference/estimate_sac_range.md)
 may have chosen itself for lon/lat input.
 

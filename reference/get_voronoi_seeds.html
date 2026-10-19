@@ -65,9 +65,13 @@ or k-means clustering of a sampling cloud.</p>
 <span>  n <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  seeds <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  sample_points <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  kmeans_nstart <span class="op">=</span> <span class="fl">10</span>,</span>
+<span>  kmeans_nstart <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  kmeans_iter <span class="op">=</span> <span class="fl">100</span>,</span>
-<span>  set_seed <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  set_seed <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  partition <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"density"</span>, <span class="st">"kmeans"</span><span class="op">)</span>,</span>
+<span>  init <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  density_power <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  density_k <span class="op">=</span> <span class="fl">8</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -98,16 +102,47 @@ assume <code>n</code>.</p>
 <p>Besides a number, <code>n</code> accepts what the level-selection step returned:
 the integer vector of ranked candidates from <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
 (its first element is used), a <code><a href="select_resolution.html">select_resolution()</a></code> result (its
-<code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code> (read with <code><a href="select_resolution.html">select_resolution()</a></code> at
-its default criterion). The result then carries <code>attr(, "n_from")</code>
-saying which.</p>
+<code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code>. A profile built without an
+<code>estimate</code> is read with <code><a href="select_resolution.html">select_resolution()</a></code> by <code>cp</code>. A profile built
+with <code>estimate</code> is read by <code>criterion = "auto"</code>, the rule that goes
+with its estimate: a size for pooled values and the lowest
+leave-one-out error for plain means. The size is the profile's own when
+it was built at one, and 4.5 rows per cell otherwise, and the count is
+the profile's level for that size, or the built level nearest to
+<code>max(2, round(n / obs_per_cell))</code> when the profile has none for it
+(with a warning of class <code>"spatialkit_size_not_reached"</code>).
+<code>select_resolution(profile)</code> with no <code>criterion</code> reads such a profile
+the same way, since its default criterion is <code>"auto"</code>. A profile built
+with <code>obs_per_cell</code> and without an <code>estimate</code> is read by <code>cp</code> like any
+profile without one; pass <code>select_resolution(profile, criterion = "size")</code> for the count its size gives. The result then
+carries <code>attr(, "n_from")</code>
+saying which. A count read off a selection or a profile comes with what
+the selection found: a warning of class <code>"spatialkit_bound_chosen"</code> when
+the optimum sits on a bound of the ladder, so the bound chose the count,
+and one of class <code>"spatialkit_no_structure"</code> when one cell for the whole
+layer scores as well. A count set by a size has no optimum, so no bound
+can choose it; its <code>"spatialkit_no_structure"</code> warning says that the
+count stands and that the cell values will say little that one mean
+does not. A profile without an estimate and with no <code>cp</code> to read is an
+error (class <code>"spatialkit_no_default_criterion"</code> when another criterion
+is finite); see <code><a href="resolution_profile.html">resolution_profile()</a></code>.</p>
 <p>With <code>method = "kmeans"</code>, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those
-are returned instead of a new k-means: a k-means partition is the
-Voronoi partition of its centres, so their cells are the cells the
-criteria judged. <code>sample_points</code>, when given, is then only assigned to
-them (for <code>attr(, "kmeans")</code>), and <code>boundary</code> only sets the CRS;
-<code>kmeans_nstart</code>, <code>kmeans_iter</code> and <code>set_seed</code> are not used. Pass the
+are returned instead of a new k-means: a k-means partition, weighted or
+not, is the Voronoi partition of its centres, so their cells are the
+cells the criteria judged. <code>sample_points</code>, when given, is then only
+assigned to them (for <code>attr(, "kmeans")</code>) and gives the cover, and
+<code>boundary</code> only
+sets the CRS and the cover (see "Details");
+<code>kmeans_nstart</code>, <code>kmeans_iter</code> and <code>set_seed</code> are not used, and neither
+are <code>partition</code>, <code>init</code> and the density settings: the centres are of
+the kind the profile was built with, and naming another here is a
+warning of class <code>"spatialkit_partition_unused"</code>. A call names what it
+supplies: a <code>partition</code> or an <code>init</code> passed in the call; with
+<code>partition = "density"</code> passed, both density settings at their values,
+defaults included; without it, a density setting other than its
+default. A call that supplies none of the four is told nothing,
+whichever kind and settings the profile was built with. Pass the
 count as a number (<code>n = sel$best</code>) for a fresh k-means instead.</p></dd>
 
 
@@ -127,18 +162,77 @@ before clustering.</p></dd>
 
 
 <dt id="arg-kmeans-nstart">kmeans_nstart<a class="anchor" aria-label="anchor" href="#arg-kmeans-nstart"></a></dt>
-<dd><p>Integer; nstart for kmeans(). Default 10. The
-partition is <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>, not the best-of-25 k-means++ run that
-<code><a href="resolution_profile.html">resolution_profile()</a></code> scored a count on, so it is not that partition;
-pass the selection or profile itself as <code>n</code> for that one (see <code>n</code>).</p></dd>
+<dd><p>The number of starts, of which the best is kept.
+<code>NULL</code> (default) is the kind's own number: 3 for <code>partition = "density"</code> and 10 for <code>partition = "kmeans"</code>, the default of earlier
+versions. <code>kmeans_nstart = 10</code> gives the density kind the starts it had
+when 10 was the default. Under <code>partition = "kmeans"</code> from random starts
+it is <code>nstart</code> of <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code>. A fresh partition is not the one
+<code><a href="resolution_profile.html">resolution_profile()</a></code> scored a count on; pass the selection or profile
+itself as <code>n</code> for that one (see <code>n</code>). Under <code>partition = "density"</code>,
+and with <code>init = "kmeans++"</code>, it has to be <code>NULL</code> or a positive whole
+number, so a number that is not whole, which <code>partition = "kmeans"</code>
+takes, stops a call that names no kind. It is not read by <code>method = "random"</code> or <code>"provided"</code>.</p></dd>
 
 
 <dt id="arg-kmeans-iter">kmeans_iter<a class="anchor" aria-label="anchor" href="#arg-kmeans-iter"></a></dt>
-<dd><p>Integer; iter.max for kmeans(). Default 100.</p></dd>
+<dd><p>Integer; iter.max for kmeans(). Default 100. Under
+<code>partition = "density"</code> it is the most steps of Lloyd's iteration a
+start takes. Under <code>partition = "density"</code>, and with <code>init = "kmeans++"</code>, it has to be a positive whole number, and a kept start that
+was cut off at it is a warning of class <code>"spatialkit_not_converged"</code>
+(<code>partition = "kmeans"</code> from random starts keeps the warning
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code> gives).</p></dd>
 
 
 <dt id="arg-set-seed">set_seed<a class="anchor" aria-label="anchor" href="#arg-set-seed"></a></dt>
 <dd><p>Optional integer RNG seed.</p></dd>
+
+
+<dt id="arg-partition">partition<a class="anchor" aria-label="anchor" href="#arg-partition"></a></dt>
+<dd><p>For <code>method = "kmeans"</code>: what the seeds minimise.
+<code>"density"</code> (default) is the sum of squared distances from the points
+of the cloud to their nearest seed, each point weighted by its local
+density to the power <code>density_power</code>: compact cells, many small ones
+where the points are dense and a few large ones where they are sparse.
+At the default power they hold about the same number of points each
+once <code>n</code> is above the number of dense places (clusters) in the cloud;
+below that the counts are about as uneven as under <code>"kmeans"</code>.
+<code>"kmeans"</code> is the same sum unweighted: compact cells, with several
+times the points in a cell of a dense place that a cell of a sparse
+place holds. It is the run of earlier versions, whose default it was:
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code> from 10 random starts on the rows as they come. The
+density kind follows the
+density of <code>sample_points</code>; a cloud this function draws inside
+<code>boundary</code> is uniform and has none to follow. Without the 'FNN' package
+the density kind finds its weights by comparing every pair of distinct
+locations, so its time grows with the square of their number; the seeds
+are the same, and nothing stops the call. See "The partition" in
+<code><a href="resolution_profile.html">resolution_profile()</a></code> for what each kind does and how.</p></dd>
+
+
+<dt id="arg-init">init<a class="anchor" aria-label="anchor" href="#arg-init"></a></dt>
+<dd><p>For <code>method = "kmeans"</code>: how each start is drawn, <code>"random"</code>
+(<code>n</code> distinct locations at random, as <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code> draws them) or
+<code>"kmeans++"</code> (the seeds one at a time, each in proportion to its squared
+distance from those already drawn, times its weight under <code>partition = "density"</code>). <code>NULL</code> (default) is each kind's own rule: <code>"random"</code> for
+<code>partition = "kmeans"</code>, the run this function has always made, and
+<code>"kmeans++"</code> for <code>partition = "density"</code>. Under <code>partition = "kmeans"</code>
+from random starts the cloud is clustered in the order its rows come
+in; with <code>init = "kmeans++"</code>, and under <code>partition = "density"</code>, the
+rows are put in coordinate order first, so the seeds do not depend on
+their order.</p></dd>
+
+
+<dt id="arg-density-power">density_power<a class="anchor" aria-label="anchor" href="#arg-density-power"></a></dt>
+<dd><p>For <code>partition = "density"</code>: the power the local
+density is raised to for a point's weight, from 0 to 2. Default 1, which
+evens out the cell counts once the cells outnumber the dense places; 0
+weights every point alike. Setting it under <code>partition = "kmeans"</code> is a
+warning.</p></dd>
+
+
+<dt id="arg-density-k">density_k<a class="anchor" aria-label="anchor" href="#arg-density-k"></a></dt>
+<dd><p>For <code>partition = "density"</code>: the number of nearest
+neighbours the local density is read from. Default 8.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -152,7 +246,66 @@ with unusable coordinates are dropped first), <code>size</code> (points per seed
 <code>iter</code> and <code>nstart</code>. For the scored centres of a selection or profile
 (see <code>n</code>) it describes <code>sample_points</code> assigned to them, each point to
 its nearest seed, with <code>iter</code> <code>NA</code> and <code>nstart</code> the profile's restarts,
-and is absent when no <code>sample_points</code> were given.</p>
+and is absent when no <code>sample_points</code> were given. Under <code>partition = "density"</code> <code>withinss</code> and <code>tot_withinss</code> count every point once, about
+its cell's mean. A run this call makes with <code>partition = "density"</code> or
+<code>init = "kmeans++"</code> also records <code>converged</code>, whether the kept start
+stopped before <code>kmeans_iter</code>, and under <code>partition = "density"</code>
+<code>objective</code>, the weighted sum the seeds minimise; scored centres have
+neither. Seeds placed with <code>partition = "density"</code> or <code>init = "kmeans++"</code>, and the scored centres of a profile of the density kind or
+from random starts, carry <code>attr(, "partition")</code>: a
+list with <code>kind</code>, <code>init</code>, <code>density_power</code> and <code>density_k</code>, and for
+seeds this call placed <code>iter</code>, <code>iter_max</code> and <code>converged</code> (the
+iterations the kept start took, the limit, and whether it stopped
+before the limit). <code><a href="build_tessellation.html">build_tessellation()</a></code> returns the list as
+<code>params$partition</code>. Seeds with no such
+record are plain k-means: from random starts when this call placed
+them, or the scored centres of a k-means profile from k-means++ starts.
+Every method also
+attaches <code>attr(, "cover")</code> when the call says what ground the seeds stand
+for (see "Details"): an sfc holding the boundary's polygons or the hull
+of the clustered points, in its own CRS.</p>
+<p>When <code>n</code> is a <code><a href="select_resolution.html">select_resolution()</a></code> result that carries <code>count_rule</code>,
+or a profile built with an <code>estimate</code>, the seeds carry that record as
+<code>attr(, "count_rule")</code>: how the count was set, for which cell value, and
+what the profile scored at it. Its <code>scored_cells</code> is <code>TRUE</code> for the
+scored centres <code>method = "kmeans"</code> hands on, and <code>FALSE</code> for seeds this
+call places itself at that count: a k-means of its own when the
+selection holds no centres at the count, and every <code>method = "random"</code>
+seeding. <code>method = "provided"</code> does not read <code>n</code> and writes no record;
+seeds that already carry one (<code>sel$seeds</code>) keep it, marked <code>FALSE</code> when
+their number is not the record's count. <code><a href="build_tessellation.html">build_tessellation()</a></code> and
+<code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> hand the record on, and
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> checks its result against it. A count given as a
+number, or read off a profile without an estimate by <code>cp</code> or <code>elbow</code>,
+has no record.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>Seeds lie inside the ground they stand for (k-means seeds inside the
+hull of the points they were fitted to, random seeds inside the
+boundary), so Voronoi cells clipped to the seeds' own hull would leave
+its edge uncovered. The result therefore
+carries that ground as <code>attr(, "cover")</code>: the <code>boundary</code> when one was
+given, otherwise the convex hull of <code>sample_points</code>, otherwise (for the
+scored centres of a <code><a href="resolution_profile.html">resolution_profile()</a></code> or a <code><a href="select_resolution.html">select_resolution()</a></code>
+result passed as <code>n</code>) the hull of the points the profile was computed on.
+<code><a href="build_tessellation.html">build_tessellation()</a></code> and
+<code><a href="create_voronoi_polygons.html">create_voronoi_polygons()</a></code> derive their default boundary from it, so
+<code>build_tessellation(seeds, method = "voronoi")</code> holds every observation
+without a <code>boundary</code>. Seeds with no cover are tessellated over their own
+hull unless a <code>boundary</code> or <code>cover</code> is passed then: <code>method = "provided"</code>
+seeds given with neither <code>boundary</code> nor <code>sample_points</code> have none, and no
+warning is raised for them, since they may be the observation sites
+themselves. The attribute survives
+<code><a href="https://r-spatial.github.io/sf/reference/st_transform.html" class="external-link">sf::st_transform()</a></code> and row subsetting; <code><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind()</a></code> drops it.</p>
+<p>A k-means seed is a mean of the points of its cluster, weighted under the
+density kind, so it can lie outside a <code>boundary</code> that is not convex, in a
+bay or a bend of a coast, even when every point lies inside. Tessellated
+within that boundary, its cell is built if any of it lies inside, but the
+seed itself lies in no cell: <code><a href="build_tessellation.html">build_tessellation()</a></code> warns that it falls
+in no cell (class <code>spatialkit_unassigned</code>) and gives it <code>NA</code> in <code>index</code>.
+<code>seeds</code> in <code><a href="cell_values_at.html">cell_values_at()</a></code> says how to give such a seed its cell's
+ID.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -185,6 +338,28 @@ and is absent when no <code>sample_points</code> were given.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 3       3 random POINT (57.28534 66.07978)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 4       4 random  POINT (90.82078 62.9114)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 5       5 random POINT (20.16819 6.178627)</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># Seeds from a cloud with one dense place: density-weighted k-means by</span></span></span>
+<span class="r-in"><span><span class="co"># default, from 3 starts; partition = "kmeans" gives the k-means run of</span></span></span>
+<span class="r-in"><span><span class="co"># earlier versions.  The points each seed's cell holds, under each kind,</span></span></span>
+<span class="r-in"><span><span class="co"># with more seeds than dense places:</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">2</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">cloud</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">150</span>, <span class="fl">30</span>, <span class="fl">5</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">50</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>                             y <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">150</span>, <span class="fl">30</span>, <span class="fl">5</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">50</span>, <span class="fl">0</span>, <span class="fl">100</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>                  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">dens</span> <span class="op">&lt;-</span> <span class="fu">get_voronoi_seeds</span><span class="op">(</span><span class="va">bnd</span>, method <span class="op">=</span> <span class="st">"kmeans"</span>, n <span class="op">=</span> <span class="fl">20</span>,</span></span>
+<span class="r-in"><span>                          sample_points <span class="op">=</span> <span class="va">cloud</span>, set_seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">km</span>   <span class="op">&lt;-</span> <span class="fu">get_voronoi_seeds</span><span class="op">(</span><span class="va">bnd</span>, method <span class="op">=</span> <span class="st">"kmeans"</span>, n <span class="op">=</span> <span class="fl">20</span>,</span></span>
+<span class="r-in"><span>                          sample_points <span class="op">=</span> <span class="va">cloud</span>, set_seed <span class="op">=</span> <span class="fl">1</span>,</span></span>
+<span class="r-in"><span>                          partition <span class="op">=</span> <span class="st">"kmeans"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span>density <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sort.html" class="external-link">sort</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">dens</span>, <span class="st">"kmeans"</span><span class="op">)</span><span class="op">$</span><span class="va">size</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>      kmeans  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sort.html" class="external-link">sort</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">km</span>, <span class="st">"kmeans"</span><span class="op">)</span><span class="op">$</span><span class="va">size</span><span class="op">)</span><span class="op">)</span>   <span class="co"># points per seed</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>         [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13]</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> density    6    8    8    8    8    9    9    9   10    10    11    11    11</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> kmeans     1    2    2    3    5    5    5    6    6     7     7     8     9</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>         [,14] [,15] [,16] [,17] [,18] [,19] [,20]</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> density    11    11    11    12    12    12    13</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> kmeans     10    10    14    18    24    26    32</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

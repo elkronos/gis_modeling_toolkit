@@ -11,9 +11,9 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Spatial cross-validation">
-<meta name="description" content="The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
+<meta name="description" content="The six fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
 ">
-<meta property="og:description" content="The five fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
+<meta property="og:description" content="The six fold schemes, sizing blocks from the autocorrelation range, and reading a cross-validation result down to the last row.
 ">
 </head>
 <body>
@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">07 October 2026</h4>
+            <h4 data-toc-skip class="date">19 October 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/spatial-cross-validation.Rmd" class="external-link"><code>vignettes/spatial-cross-validation.Rmd</code></a></small>
       <div class="d-none name"><code>spatial-cross-validation.Rmd</code></div>
@@ -180,7 +180,7 @@ question, and it is the question most maps are used for: what happens at
 a location with no observation nearby.</p>
 </div>
 <div class="section level2">
-<h2 id="the-five-fold-schemes">The five fold schemes<a class="anchor" aria-label="anchor" href="#the-five-fold-schemes"></a>
+<h2 id="the-six-fold-schemes">The six fold schemes<a class="anchor" aria-label="anchor" href="#the-six-fold-schemes"></a>
 </h2>
 <table class="table">
 <colgroup>
@@ -223,6 +223,13 @@ autocorrelated</td>
 <td>you know where you will predict, and want the fold geometry to match
 it</td>
 </tr>
+<tr class="even">
+<td><code>knndm</code></td>
+<td>one of <code>k</code> folds built from clusters of the points,
+matched to the prediction distances</td>
+<td>the same, with more rows than <code>nndm</code> takes (5,000) or too
+many for one fit per point; the match is coarser</td>
+</tr>
 </tbody>
 </table>
 <p><code><a href="../reference/plot_folds.html">plot_folds()</a></code> draws the assignment, with the blocks
@@ -244,7 +251,7 @@ natural scale.</p>
 <code class="sourceCode R"><span><span class="va">sac</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_sac_range.html">estimate_sac_range</a></span><span class="op">(</span><span class="va">pts</span>, <span class="st">"z"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>range <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span>, nugget <span class="op">=</span> <span class="fu"><a href="../reference/sac_nugget.html">sac_nugget</a></span><span class="op">(</span><span class="va">sac</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##       range      nugget </span></span>
-<span><span class="co">## 194.0858896   0.1365482</span></span></code></pre>
+<span><span class="co">## 190.8824820   0.1404058</span></span></code></pre>
 <p><code><a href="../reference/sac_nugget.html">sac_nugget()</a></code> reads the nugget off the same fitted model.
 A nugget that is most of the sill says the field has little spatial
 structure left to leak, and the blocked and random scores will be
@@ -257,7 +264,7 @@ uses it as a minimum block size:</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>block_size <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">block_size</span><span class="op">)</span>,</span>
 <span>  sac_range  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="va">fa</span><span class="op">$</span><span class="va">params</span><span class="op">$</span><span class="va">sac_range</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">## block_size  sac_range </span></span>
-<span><span class="co">##   194.0859   194.0859</span></span></code></pre>
+<span><span class="co">##   190.8825   190.8825</span></span></code></pre>
 <p><code>params$block_size</code> holds the range object itself, so
 printing it whole also prints the directional summary;
 <code><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric()</a></code> above keeps the output to the two numbers.</p>
@@ -282,7 +289,7 @@ reference.</p>
 <span>                          seed <span class="op">=</span> <span class="fl">1</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">sw</span></span></code></pre></div>
 <pre><code><span><span class="co">## Cross-validation RMSE against block size (24 fits, k = 4, sizes in EPSG:32632)</span></span>
-<span><span class="co">##   estimated autocorrelation range: 194.1</span></span>
+<span><span class="co">##   estimated autocorrelation range: 190.9</span></span>
 <span><span class="co">##  block_size       method blocks_used k n_folds_succeeded  value fold_min</span></span>
 <span><span class="co">##      random random_kfold          NA 4                 4 0.7859   0.7355</span></span>
 <span><span class="co">##       39.53  block_kfold         291 4                 4 0.7990   0.7449</span></span>

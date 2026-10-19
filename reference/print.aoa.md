@@ -4,9 +4,15 @@ Summarises where the model may be trusted: how many prediction locations
 fall inside the area of applicability and how many outside, the
 dissimilarity threshold that separated them, and the predictors the
 index was computed over (naming any dropped for having no usable
-variance). The proportion outside is the headline number. A map that
-extrapolates over much of its extent is reporting predictions its
-training data cannot support, whatever the cross-validation score said.
+variance). It also says where the weights came from (the model's
+importance, a vector the caller supplied, or equal weights and why),
+whether location was measured and how, how categorical predictors were
+handled, and how many training rows repeat another's predictor values.
+With a location index the rows outside are split into those outside on
+the predictors and those outside on location. The proportion outside is
+the headline number. A map that extrapolates over much of its extent is
+reporting predictions its training data cannot support, whatever the
+cross-validation score said.
 
 ## Usage
 

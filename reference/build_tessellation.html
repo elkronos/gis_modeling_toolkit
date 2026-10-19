@@ -87,7 +87,8 @@ does not change with <code>method</code>, so swapping <code>"voronoi"</code> for
 <span>  clip <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  keep_duplicates <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  cover <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -105,8 +106,12 @@ does not change with <code>method</code>, so swapping <code>"voronoi"</code> for
 own to lay a grid over and error without it; supply the study-area polygon,
 or build one from the points with <code><a href="clip_target_for.html">clip_target_for()</a></code>. <strong>Optional</strong> for
 <code>method = "voronoi"</code> and <code>method = "triangles"</code>, which derive their extent
-from the points themselves and use <code>boundary</code> only to clip the result when
-<code>clip = TRUE</code>. When exactly one of <code>points_sf</code> and <code>boundary</code> has a CRS,
+from the points themselves (for <code>"voronoi"</code>, from <code>cover</code> when there is
+one) and use <code>boundary</code> only to clip the result when
+<code>clip = TRUE</code>. When <code>points_sf</code> holds seeds and not the observations,
+pass the study area here or the observations as <code>cover</code>: seeds lie
+inside the data, and cells clipped to the seeds' own hull leave its edge
+uncovered. When exactly one of <code>points_sf</code> and <code>boundary</code> has a CRS,
 the other is interpreted in it, with a warning. CRS-less points, and a
 CRS-less boundary given with projected points, are read as
 <code><a href="harmonize_crs.html">harmonize_crs()</a></code> does; CRS-less points that do not look like lon/lat
@@ -130,16 +135,31 @@ unnamed planar space.</p></dd>
 one cell per input point and <code>"triangles"</code> one triangle per
 neighbouring triple, so neither has a count to set, and both warn that the
 argument was ignored.  For a Voronoi cell count, place the seeds with
-<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and tessellate those.  For hex
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and tessellate those, passing the
+study area as <code>boundary</code> or the observations as <code>cover</code>
+(seeds made from a boundary or from <code>sample_points</code> carry their
+cover with them).  For hex
 grids the target is adjusted for packing density; the actual count after
 clipping to an irregular boundary may differ noticeably.  Besides a
 number, this accepts what the level-selection step returned: the integer
 vector of ranked candidates from <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
 (its first element is used), a <code><a href="select_resolution.html">select_resolution()</a></code> result
-(its <code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code> (read with
-<code><a href="select_resolution.html">select_resolution()</a></code> at its default criterion).  The count used
+(its <code>$best</code>), or a <code><a href="resolution_profile.html">resolution_profile()</a></code>.  A profile
+built without an <code>estimate</code> is read with
+<code><a href="select_resolution.html">select_resolution()</a></code> by <code>cp</code>; one built with
+<code>estimate</code> is read by <code>criterion = "auto"</code>, the rule that
+goes with its estimate: a size for pooled values, the lowest
+leave-one-out error for plain means.  The count used
 is returned as <code>params$approx_n_cells</code> and where it came from as
 <code>params$approx_n_cells_from</code> (<code>NULL</code> for a plain number).
+A count read off a selection or a profile raises a warning of class
+<code>"spatialkit_bound_chosen"</code> when its optimum sits on a bound of the
+ladder and one of class <code>"spatialkit_no_structure"</code> when one cell
+for the whole layer scores as well (for a count set by a size: when
+cells of that size predict no better than one mean; the count stands);
+a profile without an estimate and with no <code>cp</code> to read
+is an error (class <code>"spatialkit_no_default_criterion"</code> when another
+criterion is finite).  See <code><a href="resolution_profile.html">resolution_profile()</a></code>.
 A count read off a profile or selection is a number of k-means cells:
 every one occupied, and small where the points are dense.  A lattice
 lays that many equal cells over the whole boundary, so on clustered
@@ -152,7 +172,10 @@ seed a Voronoi tessellation with
 <code>get_voronoi_seeds(method = "kmeans", n = &lt;the selection&gt;, sample_points = &lt;the points&gt;)</code>:
 given the <code><a href="select_resolution.html">select_resolution()</a></code> result or the profile itself, it
 returns the centres of the partition the profile scored, whose Voronoi
-cells are the cells the criteria judged.</p></dd>
+cells are the cells the criteria judged.  Seeds made that way carry the
+hull of <code>sample_points</code> as their cover, so the cells built on them
+hold every point; made with neither <code>sample_points</code> nor a boundary,
+they carry the hull of the points the profile was computed on.</p></dd>
 
 
 <dt id="arg-cellsize">cellsize<a class="anchor" aria-label="anchor" href="#arg-cellsize"></a></dt>
@@ -201,13 +224,46 @@ distorts areas across the boundary by more than 1 percent (Web Mercator
 over a near-global extent, say); the grid is then laid, and the points
 indexed, in the equal-area CRS <code>ensure_projected(purpose = "area")</code> picks
 for the boundary, with a logged warning, as <code><a href="create_grid_polygons.html">create_grid_polygons()</a></code>
-does, so the cells stay equal-area.</p></dd>
+does, so the cells stay equal-area. Seeds that carry the record of how
+their count was set (<code>attr(, "count_rule")</code>) were scored in the CRS the
+profile worked in, each row in the cell of its nearest centre. When the
+record says they are the centres it scored and holds them (the seeds of
+a <code><a href="select_resolution.html">select_resolution()</a></code> result, or those a seeding function returns for
+one), <code>method = "voronoi"</code> builds their cells in that CRS, with no
+<code>crs</code> or a geographic one, whatever CRS the seeds arrive in, and
+returns them there or in the geographic <code>crs</code>; see
+<code><a href="create_voronoi_polygons.html">create_voronoi_polygons()</a></code>, section "Seeds a profile scored". Voronoi
+cells built in another projected CRS, named here, are the nearest-seed
+cells of that CRS, so a row near a boundary can fall in the
+neighbouring cell, and <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> then reports that the
+cells are not the ones scored.</p></dd>
 
 
 <dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
 <dd><p>Logical; suppress this function's progress <code><a href="https://rdrr.io/r/base/message.html" class="external-link">message()</a></code>s.
 It does not silence R warnings, nor the package's console log echo
 (see <code><a href="spatialkit_quiet.html">spatialkit_quiet</a></code> for that). Default <code>FALSE</code>.</p></dd>
+
+
+<dt id="arg-cover">cover<a class="anchor" aria-label="anchor" href="#arg-cover"></a></dt>
+<dd><p>Optional sf or sfc layer the cells have to hold: the
+observations (points), or a polygon. Read by <code>method = "voronoi"</code> when
+there is no <code>boundary</code>: the boundary is then derived from the cover (the
+convex hull of its points, or its polygons, grown by 2 percent of the
+diagonal) instead of from the hull of <code>points_sf</code>. Pass it when
+<code>points_sf</code> holds seeds. When <code>NULL</code>, the cover the seeding functions
+attach to their result is used (<code>attr(points_sf, "cover")</code>: the boundary
+the seeds were drawn in, or the hull of the points they were clustered
+from), so <code>build_tessellation(voronoi_seeds_kmeans(obs, k))</code> holds every
+observation without it; <code><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind()</a></code> of seed layers drops that attribute.
+Seeds with neither a boundary nor a cover are tessellated over their own
+hull, with a warning of class <code>"spatialkit_no_cover"</code>. A cover with no
+CRS is read in the coordinates of <code>points_sf</code>; one in another CRS is
+transformed. With a <code>boundary</code> (and for the other methods) the cover
+sizes nothing: when it is a point layer, the number of its points that
+fall outside every cell is returned as <code>params$cover_outside</code>, with a
+warning of class <code>"spatialkit_unassigned"</code> when it is not 0. See
+<code><a href="create_voronoi_polygons.html">create_voronoi_polygons()</a></code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -224,7 +280,10 @@ one outside the study area. Only a point within a thousandth of the
 median cell width of a cell is snapped to it. That covers points
 sitting exactly on a shared edge, and leaves points outside the study
 area as <code>NA</code>. A summary built from <code>index</code> therefore counts only the
-points the tessellation actually covers.</p></dd>
+points the tessellation actually covers. When any point is <code>NA</code>, a
+warning of class <code>"spatialkit_unassigned"</code> gives the number
+(<code>tryCatch(spatialkit_unassigned = )</code> catches it; the condition
+carries <code>n</code> and <code>total</code>).</p></dd>
 
 <dt><code>boundary</code></dt>
 <dd><p>The boundary used (possibly derived and/or
@@ -237,9 +296,35 @@ reprojected, and for <code>"voronoi"</code> grown by <code>expand</code>).</p></
 <dd><p>The parameters the tessellation was built with, plus
 <code>snapped</code>, the record of that nearest-cell repair: a list with <code>n</code>,
 <code>which</code> (row positions in <code>points_sf</code>) and <code>distance</code> (how far
-outside every cell each sat, in CRS units). For <code>"hex"</code> and
+outside every cell each sat, in CRS units); <code>n_outside</code>, the number
+of points of <code>points_sf</code> that fall in no cell (the <code>NA</code>s of
+<code>index</code>); and <code>cover_outside</code>, the number of <code>cover</code> points in no
+cell when a point <code>cover</code> was checked against the cells (<code>NULL</code>
+otherwise). For <code>"voronoi"</code> also <code>boundary_source</code>, where the
+boundary came from: <code>"boundary"</code>, <code>"cover"</code>, <code>"seeds' cover"</code> or
+<code>"points"</code>, and, when <code>points_sf</code> is a layer of seeds that records
+the kind of partition that placed it (see <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>),
+<code>partition</code>: that record, a list with <code>kind</code>, <code>init</code>,
+<code>density_power</code> and <code>density_k</code> and, for seeds a seeding function
+placed itself, <code>iter</code>, <code>iter_max</code> and <code>converged</code>. The cells are
+the Voronoi cells of the seeds whatever kind placed them. For
+<code>"hex"</code> and
 <code>"square"</code> also <code>cells_occupied</code> and <code>cells_empty</code>, the number of
-cells that hold at least one point and that hold none.</p></dd>
+cells that hold at least one point and that hold none.
+<code>count_rule</code>, the record of how the count was set, is present on
+two paths, and the cells then carry it too as
+<code>attr(cells, "count_rule")</code>. For <code>"voronoi"</code>, when <code>points_sf</code>
+carries one (<code>attr(points_sf, "count_rule")</code>: the seeds of a
+<code><a href="select_resolution.html">select_resolution()</a></code> result, or seeds <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> or
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> placed from one): the record as the seeds
+carry it, whose <code>scored_cells</code> says whether these are the cells the
+profile scored. For <code>"hex"</code> and <code>"square"</code>, when <code>approx_n_cells</code>
+is a selection that carries a record, or a profile built with an
+<code>estimate</code>, and no <code>cellsize</code> is given: that record with
+<code>scored_cells</code> <code>FALSE</code>, since a lattice at that count is not the
+partition the profile scored. <code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code>
+copies the record to the rows it assigns, and <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code>
+checks its result against it.</p></dd>
 
 
 </dl></div>

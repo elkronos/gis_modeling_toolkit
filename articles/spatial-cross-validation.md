@@ -112,7 +112,7 @@ Neither number is the truth. The blocked one answers a harder question,
 and it is the question most maps are used for: what happens at a
 location with no observation nearby.
 
-## The five fold schemes
+## The six fold schemes
 
 | `method` | holds out | use it when |
 |----|----|----|
@@ -121,6 +121,7 @@ location with no observation nearby.
 | `buffered_loo` | one point, and everything within `buffer` of it | n is small and you can afford n fits |
 | `leave_location_out` | every observation from one site, named by `group_var` | you have repeat visits and the site is the unit |
 | `nndm` | one point, and a distance-matched exclusion | you know where you will predict, and want the fold geometry to match it |
+| `knndm` | one of `k` folds built from clusters of the points, matched to the prediction distances | the same, with more rows than `nndm` takes (5,000) or too many for one fit per point; the match is coarser |
 
 [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
 draws the assignment, with the blocks behind it when the scheme has any:
@@ -152,7 +153,7 @@ c(range = as.numeric(sac), nugget = sac_nugget(sac))
 ```
 
     ##       range      nugget 
-    ## 194.0858896   0.1365482
+    ## 190.8824820   0.1404058
 
 [`sac_nugget()`](https://elkronos.github.io/gis_modeling_toolkit/reference/sac_nugget.md)
 reads the nugget off the same fitted model. A nugget that is most of the
@@ -171,7 +172,7 @@ c(block_size = as.numeric(fa$params$block_size),
 ```
 
     ## block_size  sac_range 
-    ##   194.0859   194.0859
+    ##   190.8825   190.8825
 
 `params$block_size` holds the range object itself, so printing it whole
 also prints the directional summary;
@@ -203,7 +204,7 @@ sw
 ```
 
     ## Cross-validation RMSE against block size (24 fits, k = 4, sizes in EPSG:32632)
-    ##   estimated autocorrelation range: 194.1
+    ##   estimated autocorrelation range: 190.9
     ##  block_size       method blocks_used k n_folds_succeeded  value fold_min
     ##      random random_kfold          NA 4                 4 0.7859   0.7355
     ##       39.53  block_kfold         291 4                 4 0.7990   0.7449

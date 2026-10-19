@@ -64,7 +64,8 @@ fit_rf_model(
 
 - include_coords:
 
-  Add the coordinates as predictors. Default `FALSE`; see above.
+  Add the coordinates as predictors. Default `FALSE`, which leaves the
+  forest with no spatial information; see *Coordinates as predictors*.
 
 - replace:
 
@@ -118,37 +119,93 @@ fit_rf_model(
   `seed`, `replace`, `sample.fraction`, `x`, `y`) are rejected with a
   message naming the wrapper argument to use instead. Passing them here
   would reach `ranger()` twice and fail the call.
+  `respect.unordered.factors` passed here overrides the `"order"` this
+  function sets when a predictor is categorical; see *Categorical
+  predictors*.
 
 ## Value
 
 An `rf_fit` object (inherits from `spatial_fit`). `$info` carries
 `num_trees`, `mtry`, `min_node_size`, `importance_type`, `importance` (a
 named numeric, or `NULL` when `importance = "none"`), `include_coords`,
-`replace` and `sample_fraction` (the sampling each tree was grown on,
-with `sample_fraction` resolved to the number ranger used), `oob_rmse`
-and `oob_r_squared` (each `NA_real_` when ranger did not compute it;
-forwarding `oob.error = FALSE` through `...` is one way to get there),
-`fitted_are_oob` (always `TRUE`;
+`categorical_predictors` (the unordered factor and character predictors,
+possibly none) and `respect_unordered_factors` (how ranger was told to
+split them: `"order"` unless overridden through `...`, and `NA` when
+there is none and nothing was passed), `replace` and `sample_fraction`
+(the sampling each tree was grown on, with `sample_fraction` resolved to
+the number ranger used), `oob_rmse` and `oob_r_squared` (each `NA_real_`
+when ranger did not compute it; forwarding `oob.error = FALSE` through
+`...` is one way to get there), `fitted_are_oob` (always `TRUE`;
 [`summary()`](https://rdrr.io/r/base/summary.html) reads it to label its
 metrics), `seed` and `n_dropped` (the rows
 [`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
 removed for missing or non-finite values or a bad geometry, so `$n` can
 be read against `nrow(data_sf)`). The raw forest is in `$engine`.
 
-## Coordinates are not predictors by default
+## Coordinates as predictors
 
-Handing a random forest the x and y coordinates lets it reproduce the
-training surface almost exactly by memorising location, and then fail
-badly anywhere it has not seen. Random cross-validation will not catch
-this: nearby points leak between folds, so the memorised surface scores
-well. That is how the practice became common. Meyer et al. (2019) show
-the collapse directly. `include_coords` therefore defaults to `FALSE`,
-and setting it to `TRUE` logs a caution, once per session (it is a
-deliberate choice, so it is not raised as an R warning, and it is not
-repeated for every fold of a cross-validation). If you do use it, score
-the model with
-[`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
-and blocked folds, never with the out-of-bag error.
+`include_coords = TRUE` adds the x and y coordinates to the predictors.
+They are the only spatial information a forest can be given: without
+them it sees the covariates alone, and
+[`print()`](https://rdrr.io/r/base/print.html) says "no spatial
+information used". The default is `FALSE`.
+
+What the coordinates buy depends on where the predictions are wanted. A
+forest splits on location as on any column, so it follows the training
+surface closely between sampled points, and has nothing but the nearest
+edge of the data to go on beyond them. Between sampled points the
+coordinates can lower the error, most where the covariates carry little
+of the spatial structure themselves, and the gain fades with distance
+from the training data. Beyond the autocorrelation range, or in a region
+the data never visited, it can reverse: in a simulated hold-out of an
+unvisited strip the forest with coordinates was 5.2\\ run. Meyer et al.
+(2019) report larger failures of the same kind. With covariates that
+carry the spatial structure themselves, expect less from the
+coordinates.
+
+What does not change is how such a forest has to be scored. It fits
+location closely, nearby points leak between random folds, and the
+out-of-bag error is a random hold-out too, so both overstate its
+accuracy. Score it with
+[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+and blocked folds (`make_folds(method = "block_kfold")`) or folds
+matched to the prediction distance (`method = "nndm"`), at the distances
+the map will be used at, never with the out-of-bag error, and compare
+the two forests on the same folds. That comparison is two calls: build
+the folds once and hand them to
+[`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+with and without the coordinates.
+
+
+    folds   <- make_folds(dat, k = 5, method = "block_kfold")
+    plain   <- cv_rf(dat, "z", c("a", "b"), folds = folds)
+    with_xy <- cv_rf(dat, "z", c("a", "b"), folds = folds,
+                     include_coords = TRUE)
+    c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+
+[`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
+runs the same comparison in its example and reads it fold by fold.
+Setting `include_coords = TRUE` logs that advice, once per session (it
+is a deliberate choice, so it is not raised as an R warning, and it is
+not repeated for every fold of a cross-validation).
+
+## Categorical predictors
+
+A predictor that is an unordered factor or a character column is split
+with `respect.unordered.factors = "order"`: ranger orders its levels by
+mean response once, before growing, and splits on that order. That is
+the handling ranger's own help recommends. ranger's default for a
+regression forest, `"ignore"`, splits on the order the levels happen to
+be stored in (alphabetical, for most data), which for a nominal variable
+is arbitrary: with a 40-level factor carrying random level effects, the
+test RMSE was 1.05 by level order against 0.57 by response order, lower
+in 10 draws of 10. Pass `respect.unordered.factors` through `...` to
+choose otherwise (`"ignore"`, or `"partition"` for every two-way split
+of the levels, which is slow beyond a few levels). Ordered factors are
+left alone and split on their own order, and with
+`splitrule = "extratrees"` ranger's own default for that rule,
+`"partition"`, is kept. The setting is recorded in
+`$info$respect_unordered_factors` and printed with the fit.
 
 ## The out-of-bag error is a random hold-out
 
@@ -208,9 +265,11 @@ and a solution. *BMC Bioinformatics* 8, 25.
 [`cv_rf`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 for a spatially blocked performance estimate,
 [`area_of_applicability`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md),
-which can take `weights = pmax(fit$info$importance, 0)` when that
-importance is finite (it is `NaN` when no row is out of bag; see "What
-fitted() returns").
+which weights the predictors by `pmax(fit$info$importance, 0)` by
+default when that importance is finite and the forest has out-of-bag
+skill (it is `NaN` when no row is out of bag; see "What fitted()
+returns"), and which needs `categorical = "indicator"` or `"drop"` for a
+forest with a factor predictor.
 
 Other model fitting:
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md),
@@ -241,7 +300,7 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>   n       : 150
 #>   CRS     : EPSG:32632
 #>   Trees   : 500 (mtry = 1, min node = 5)
-#>   Coords as predictors: no
+#>   Coords as predictors: no - no spatial information used; see ?fit_rf_model
 #>   Sampling: bootstrap, with replacement (100.0% of rows per tree)
 #>   OOB RMSE: 0.6995   OOB R^2: 0.9093
 #>   Importance (permutation): a=6.886, b=1.583

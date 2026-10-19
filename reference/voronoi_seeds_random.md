@@ -42,7 +42,12 @@ voronoi_seeds_random(boundary, k, set_seed = NULL)
 
 An sf object of `k` random POINTs (fewer only in the degenerate case
 above), with `seed_id` and `method = "random"` columns matching
-[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md).
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md),
+and `attr(, "cover")`, the polygons of `boundary`:
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+clips the cells to it (grown by 2 percent of its diagonal) when no
+`boundary` is passed there, so the cells fill the area the seeds were
+drawn in and not only the seeds' own hull.
 
 ## Details
 

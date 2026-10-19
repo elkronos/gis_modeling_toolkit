@@ -80,7 +80,10 @@ reading of how closely a fit tracks its training data.</p>
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Additional arguments passed to predict().</p></dd>
+<dd><p>Additional arguments passed to predict().  The metrics are
+computed from one predicted value per row, so <code>draws = TRUE</code> (a
+Bayesian fit) and <code>se.fit = TRUE</code> (a GWR), with which
+<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> returns a matrix or a list, are refused.</p></dd>
 
 
 <dt id="arg-newdata">newdata<a class="anchor" aria-label="anchor" href="#arg-newdata"></a></dt>

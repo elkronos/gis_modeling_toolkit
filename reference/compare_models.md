@@ -40,16 +40,29 @@ warning says which. `convergence_ok` is `TRUE` or `FALSE` for a Bayesian
 fit whose convergence was checked (see
 [`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md))
 and `NA` otherwise; a fit that did not converge is ranked like the
-others, so it also raises a warning. Alongside the metrics it carries
-`resid_morans_I`, `resid_morans_z`, `resid_morans_p` and
-`resid_morans_null`, the last of which names the null
+others, so it also raises a warning. `gp_adequacy` is what the posterior
+of a Bayesian fit said about its Gaussian-process basis (`"ok"`,
+`"below_resolution"`, `"unresolved_short_range"`,
+`"no_signal_above_floor"` or `"not_checked"`; see "What the basis
+resolves" in
+[`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md))
+and `NA` for the other backends. A basis found too coarse scores like
+one that was adequate, so read the column beside the metrics. Alongside
+the metrics it carries `resid_morans_I`, `resid_morans_z`,
+`resid_morans_p`, `resid_morans_null` and `resid_morans_basis`.
+`resid_morans_null` names the null
 [`residual_morans_i`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
 scored each model against, since that choice is per-fit and governs how
-much the p-value is worth. A significant p-value is noted in the log
-(not raised as an R warning): positive autocorrelation as structure the
-model may have missed, negative (`resid_morans_z < 0`) as the
-alternating residuals of a model that tracks its data closely. Read the
-caveats in
+much the p-value is worth. `resid_morans_basis` says which residuals the
+statistic was computed on. They are always the residuals of the rows the
+model was fitted to, also when `newdata` is given, so the column reads
+`"in-sample"`, or `"out-of-bag"` for a forest, and never `"newdata"`:
+beside `metric_basis = "newdata"` the Moran columns describe the
+training residuals, not the prediction errors on `newdata`, and the two
+can differ in sign. A significant p-value is noted in the log (not
+raised as an R warning): positive autocorrelation as structure the model
+may have missed, negative (`resid_morans_z < 0`) as the alternating
+residuals of a model that tracks its data closely. Read the caveats in
 [`?residual_morans_i`](https://elkronos.github.io/gis_modeling_toolkit/reference/residual_morans_i.md)
 before treating silence as evidence of no residual structure.
 
@@ -145,7 +158,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #>   n_SMAPE metric_basis AICc LOOIC bandwidth_is_fallback convergence_ok
 #> 1      60   out-of-bag   NA    NA                    NA             NA
 #> 2      60   out-of-bag   NA    NA                    NA             NA
-#>   resid_morans_I resid_morans_z resid_morans_p resid_morans_null
-#> 1    -0.04684408     -0.5291138      0.5967265     randomisation
-#> 2    -0.06447357     -0.8456951      0.3977229     randomisation
+#>   gp_adequacy resid_morans_I resid_morans_z resid_morans_p resid_morans_null
+#> 1        <NA>    -0.04684408     -0.5291138      0.5967265     randomisation
+#> 2        <NA>    -0.06447357     -0.8456951      0.3977229     randomisation
+#>   resid_morans_basis
+#> 1         out-of-bag
+#> 2         out-of-bag
 ```

@@ -114,19 +114,24 @@ point summary.  Default FALSE.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>Numeric vector of length <code>nrow(newdata)</code>, or a
-<code>n_draws x nrow(newdata)</code> matrix when <code>draws = TRUE</code>.  If the
+<code>n_draws x nrow(newdata)</code> matrix when <code>draws = TRUE</code>.  Rows
+with a missing or non-finite predictor or coordinate, and rows carrying
+a level of a categorical predictor the model was not fitted with, are
+<code>NA</code> (an <code>NA</code> column with <code>draws = TRUE</code>); the other
+rows are unaffected.  If the
 posterior draw fails the result is all <code>NA</code> (a 1-row matrix for
-<code>draws = TRUE</code>) and the cause is logged.  An ordinal or categorical
+<code>draws = TRUE</code>) with a warning of class
+<code>spatialkit_predict_failed</code> that gives the cause.  An ordinal or categorical
 family is not a failed draw and is an error under
 <code>type = "epred"</code>: its expected value is a probability per response
 category, not one number per row.  Use <code>type = "predict",
-draws = TRUE</code> for posterior draws of the predicted category, as category
+  draws = TRUE</code> for posterior draws of the predicted category, as category
 indices; the share of draws in each category estimates its probability.
 Without <code>draws = TRUE</code>, <code>type = "predict"</code> returns the mean (or
 median) category index, an expected rank for an ordinal family and an
 error for <code><a href="https://paulbuerkner.com/brms/reference/brmsfamily.html" class="external-link">brms::categorical()</a></code>, whose categories have no order.
-With <code>newdata = NULL</code> the cached <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> values are returned only
-for the default <code>summary = "mean"</code>, <code>type = "epred"</code>,
+With <code>newdata = NULL</code> the cached <code><a href="https://rdrr.io/r/stats/fitted.values.html" class="external-link">fitted()</a></code> values are returned
+only for the default <code>summary = "mean"</code>, <code>type = "epred"</code>,
 <code>draws = FALSE</code> combination; any other combination is recomputed
 against the training data, because the cache holds epred column means and
 nothing else.</p>
@@ -157,6 +162,23 @@ than an estimate of anything, so it is returned as <code>NA</code> (a column of
 <code>NA</code> with <code>draws = TRUE</code>) with a warning.  The default boundary
 factor puts that edge well outside the training data, so only
 <code>newdata</code> reaching far past it is affected.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="levels-of-a-categorical-predictor">Levels of a categorical predictor<a class="anchor" aria-label="anchor" href="#levels-of-a-categorical-predictor"></a></h2>
+
+
+<p>A factor or character predictor is handed to brms with the levels the model
+was fitted with: the values that occur in the training rows
+(<code>object$info$predictor_levels</code>).  brms compares the level <em>set</em>
+of a <code>newdata</code> factor with those, so without this a factor that only
+listed an extra level, or a model fitted on a subset whose factor kept an
+unused level, was refused outright.  A row whose value is not among the
+fitted levels has no prediction: it is returned as <code>NA</code>, the other
+rows are predicted, and one warning of class <code>spatialkit_new_levels</code>
+names the predictor, the levels and the number of rows.  A prediction
+therefore does not depend on which other rows share the call, and
+<code><a href="predict_surface.html">predict_surface()</a></code> returns the same surface at any
+<code>chunk_size</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

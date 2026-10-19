@@ -81,6 +81,9 @@ cv_rf(
 
   Passed to
   [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
+  `block_size` and `auto_range = TRUE` size the blocks built when
+  `folds` is `NULL`; beside supplied `folds` they have nothing to size
+  and raise a warning of class `spatialkit_fold_args_ignored`.
 
 - pointize:
 
@@ -112,6 +115,26 @@ cv_rf(
 The
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
 result.
+
+## Comparing the forest with and without coordinates
+
+Whether `include_coords = TRUE` lowers the error depends on how far from
+the training data the predictions are (see *Coordinates as predictors*
+in
+[`fit_rf_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)),
+so it is a comparison to make on your own data, at the block size the
+map will be used at. Score the two forests on the same folds: build the
+folds once with
+[`make_folds`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
+and pass the result as `folds` to two calls, one with
+`include_coords = TRUE` and one without. Each fold then holds out the
+same rows in both, so the two `overall` rows compare like with like and
+the two `fold_metrics` tables pair up fold by fold. A difference in
+`overall` that is small beside the spread of the per-fold differences is
+not evidence for either forest. The example below runs the comparison.
+[`compare_models_cv`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
+takes one set of forest arguments (`rf_args`) per call, so it scores one
+of the two forests, not both.
 
 ## Percentage errors on responses with zeros
 
@@ -172,8 +195,19 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$z <- 2 * dat$a + rnorm(n, 0, 0.3)
   cv_rf(dat, "z", "a", k = 4)$overall
+
+  # The forest with and without the coordinates, on the same blocked
+  # folds.  (The second call logs the include_coords caution, once per
+  # session; this comparison is what it asks for.)  This response has no
+  # spatial structure, so here the coordinates can only cost accuracy.
+  folds   <- make_folds(dat, k = 4, method = "block_kfold", seed = 1)
+  plain   <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200)
+  with_xy <- cv_rf(dat, "z", "a", folds = folds, num_trees = 200,
+                   include_coords = TRUE)
+  c(plain = plain$overall$RMSE, with_xy = with_xy$overall$RMSE)
+  # Fold by fold: positive where the coordinates lowered the error.
+  plain$fold_metrics$RMSE - with_xy$fold_metrics$RMSE
 }
 #> cv_rf(): no folds supplied -- using spatial block k-fold CV (k=4).
-#>       RMSE       MAE     MAPE   SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
-#> 1 0.417048 0.3264843 83.10643 42.3203 0.9587525     NA    200    200     200
+#> [1] -0.5017832 -0.2412238 -0.3906285 -0.1638759
 ```

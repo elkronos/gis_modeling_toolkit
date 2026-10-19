@@ -101,7 +101,7 @@ repeated fitting.</p>
 
 <dt id="arg-models">models<a class="anchor" aria-label="anchor" href="#arg-models"></a></dt>
 <dd><p>Character vector: any subset of <code>c("GWR", "Bayesian",
-  "RF")</code>, in any order.  Each is cross-validated on the same <code>folds</code>.
+"RF")</code>, in any order.  Each is cross-validated on the same <code>folds</code>.
 Names outside that set raise a warning and are dropped; if nothing
 recognised remains, this is an error.  There is no silent fallback.
 A recognised model whose backend package is not installed is dropped with
@@ -112,7 +112,8 @@ compare and the call errors with <code>"no viable models."</code>.  Guard with
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
-<dd><p>Number of folds. Default 5.</p></dd>
+<dd><p>Number of folds to build when <code>folds</code> is <code>NULL</code>; not
+read when <code>folds</code> is supplied.  Default 5.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -174,7 +175,10 @@ It does not silence R warnings, nor the package's console log echo
 <dt id="arg-block-size">block_size<a class="anchor" aria-label="anchor" href="#arg-block-size"></a></dt>
 <dd><p>Optional minimum block edge length for the shared spatial
 CV blocks (projected CRS units), passed to <code><a href="make_folds.html">make_folds()</a></code>
-when <code>folds</code> is <code>NULL</code>.  Default <code>NULL</code>.</p></dd>
+when <code>folds</code> is <code>NULL</code>.  Default <code>NULL</code>.  Beside
+supplied <code>folds</code> it has nothing to size and raises a warning
+(class <code>spatialkit_fold_args_ignored</code>); so does
+<code>auto_range = TRUE</code>.</p></dd>
 
 
 <dt id="arg-auto-range">auto_range<a class="anchor" aria-label="anchor" href="#arg-auto-range"></a></dt>
@@ -219,6 +223,11 @@ an <code>NA</code> row.  Each model's metrics over all the rows it predicted
 stay in its <code>*_cv</code> element and in <code>attr(overall, "all_rows")</code>,
 a table of the same shape.  <code>by_fold</code> and the Bayesian coverage and
 CRPS columns are per fold and are not recomputed.
+Every model is cross-validated on the layer as passed, so the warnings
+<code><a href="prep_model_data.html">prep_model_data()</a></code> raises about that layer (class
+<code>spatialkit_rows_dropped</code>, counting the incomplete rows dropped,
+and <code>spatialkit_constant_predictor</code>) are raised once for the
+comparison, not once per model.
 Only the models that actually ran appear, so check which names are
 present; there is not always one entry per requested model, because a
 backend whose package is missing is dropped with a message.  When <strong>no</strong> requested backend
@@ -328,11 +337,10 @@ study competition among methods for analyzing large spatial data.
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">dat</span><span class="op">$</span><span class="va">price</span> <span class="op">&lt;-</span> <span class="fl">10</span> <span class="op">+</span> <span class="fl">0.01</span> <span class="op">*</span> <span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_coordinates.html" class="external-link">st_coordinates</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span><span class="op">[</span>, <span class="fl">1</span><span class="op">]</span> <span class="op">-</span> <span class="fl">5e5</span><span class="op">)</span> <span class="op">+</span></span></span>
 <span class="r-in"><span>    <span class="fl">2</span> <span class="op">*</span> <span class="va">dat</span><span class="op">$</span><span class="va">elev</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="co"># The random forest, and GWR beside it when GWmodel is installed, on the</span></span></span>
+<span class="r-in"><span>  <span class="co"># The random forest, and GWR beside it when sp is installed, on the</span></span></span>
 <span class="r-in"><span>  <span class="co"># same folds.  "Bayesian" is left out here because a Stan fit per fold</span></span></span>
 <span class="r-in"><span>  <span class="co"># takes minutes; add it to `models` for a run to report.</span></span></span>
-<span class="r-in"><span>  <span class="va">models</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RF"</span>, <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"GWmodel"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">&amp;&amp;</span></span></span>
-<span class="r-in"><span>                       <span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"sp"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="st">"GWR"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">models</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"RF"</span>, <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"sp"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="st">"GWR"</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">cmp</span> <span class="op">&lt;-</span> <span class="fu">compare_models_cv</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"price"</span>, <span class="st">"elev"</span>, models <span class="op">=</span> <span class="va">models</span>, k <span class="op">=</span> <span class="fl">3</span>,</span></span>
 <span class="r-in"><span>                           rf_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>num_trees <span class="op">=</span> <span class="fl">100</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>                           gwr_args <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>bandwidth <span class="op">=</span> <span class="fl">30</span><span class="op">)</span><span class="op">)</span></span></span>

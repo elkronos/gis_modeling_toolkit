@@ -94,12 +94,27 @@ same rows), and the warning says which.  <code>convergence_ok</code> is
 <code>TRUE</code> or <code>FALSE</code> for a Bayesian fit whose convergence was
 checked (see <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model</a></code>) and <code>NA</code>
 otherwise; a fit that did not converge is ranked like the others, so it
-also raises a warning.  Alongside the metrics it
+also raises a warning.  <code>gp_adequacy</code> is what the posterior of a
+Bayesian fit said about its Gaussian-process basis (<code>"ok"</code>,
+<code>"below_resolution"</code>, <code>"unresolved_short_range"</code>,
+<code>"no_signal_above_floor"</code> or <code>"not_checked"</code>; see "What the
+basis resolves" in <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model</a></code>) and
+<code>NA</code> for the other backends.  A basis found too coarse scores like
+one that was adequate, so read the column beside the metrics.  Alongside
+the metrics it
 carries
-<code>resid_morans_I</code>, <code>resid_morans_z</code>, <code>resid_morans_p</code> and
-<code>resid_morans_null</code>, the last of which names the null
+<code>resid_morans_I</code>, <code>resid_morans_z</code>, <code>resid_morans_p</code>,
+<code>resid_morans_null</code> and <code>resid_morans_basis</code>.
+<code>resid_morans_null</code> names the null
 <code><a href="residual_morans_i.html">residual_morans_i</a></code> scored each model against, since that
-choice is per-fit and governs how much the p-value is worth.  A
+choice is per-fit and governs how much the p-value is worth.
+<code>resid_morans_basis</code> says which residuals the statistic was
+computed on.  They are always the residuals of the rows the model was
+fitted to, also when <code>newdata</code> is given, so the column reads
+<code>"in-sample"</code>, or <code>"out-of-bag"</code> for a forest, and never
+<code>"newdata"</code>: beside <code>metric_basis = "newdata"</code> the Moran
+columns describe the training residuals, not the prediction errors on
+<code>newdata</code>, and the two can differ in sign.  A
 significant p-value is noted in the log (not raised as an R warning):
 positive autocorrelation as structure the model may have missed,
 negative (<code>resid_morans_z &lt; 0</code>) as the alternating residuals of a
@@ -195,9 +210,12 @@ coverage, which are proper scoring rules and have no such failure mode.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   n_SMAPE metric_basis AICc LOOIC bandwidth_is_fallback convergence_ok</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 1      60   out-of-bag   NA    NA                    NA             NA</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> 2      60   out-of-bag   NA    NA                    NA             NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   resid_morans_I resid_morans_z resid_morans_p resid_morans_null</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1    -0.04684408     -0.5291138      0.5967265     randomisation</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2    -0.06447357     -0.8456951      0.3977229     randomisation</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   gp_adequacy resid_morans_I resid_morans_z resid_morans_p resid_morans_null</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1        &lt;NA&gt;    -0.04684408     -0.5291138      0.5967265     randomisation</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2        &lt;NA&gt;    -0.06447357     -0.8456951      0.3977229     randomisation</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   resid_morans_basis</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1         out-of-bag</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2         out-of-bag</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -95,8 +95,11 @@ rather than refused.</p>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>Nothing is recomputed: the plot reads the <code>variogram</code>,
-<code>variogram_model</code>, <code>crs</code>, <code>directional</code> and
-<code>anisotropy_used</code> attributes the estimate already carries.  The
+<code>variogram_model</code>, <code>crs</code> and <code>rejected_reason</code>
+attributes the estimate already carries.  The variogram is the one over
+all point pairs; a result stored by an earlier version, whose range could
+be that of the widest of four directions (<code>anisotropy_used</code>
+<code>TRUE</code>), is titled with its azimuth.  The
 distance axis is in the units of the CRS the variogram was actually fitted
 in, which <code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> may have chosen itself for lon/lat
 input.</p>

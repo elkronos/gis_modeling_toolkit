@@ -8,8 +8,9 @@ from `folds$params$blocks`, so a fold can be seen to be one region or
 several and an empty block can be seen to be empty. The subtitle states
 the parameter that decides whether the scheme leaks, read from
 `folds$params`: the block size (and the estimated range when
-`auto_range` found one), the buffer, the number of location groups, or
-the median NNDM exclusion.
+`auto_range` found one), the buffer, the number of location groups, the
+median NNDM exclusion, or, for kNNDM folds, that they are matched to the
+prediction distances.
 
 ## Usage
 

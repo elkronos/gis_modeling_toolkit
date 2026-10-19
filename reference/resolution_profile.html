@@ -3,9 +3,10 @@
 into, and no single number settles it: the within-cluster sum of squares
 of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
-means has a \(z\), and the cell means have a reliability.  This function
-computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen, by
+means has a \(z\), the cell means have a reliability, and a cell value
+has a leave-one-out error.  On a ladder of counts this function computes
+all of them at every level the data bound, and returns the table, so that
+the level chosen, by
 select_resolution() or by eye, can be defended with the
 whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
@@ -14,9 +15,10 @@ display, with the other criteria alongside."><meta property="og:description" con
 into, and no single number settles it: the within-cluster sum of squares
 of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
-means has a \(z\), and the cell means have a reliability.  This function
-computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen, by
+means has a \(z\), the cell means have a reliability, and a cell value
+has a leave-one-out error.  On a ladder of counts this function computes
+all of them at every level the data bound, and returns the table, so that
+the level chosen, by
 select_resolution() or by eye, can be defended with the
 whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
@@ -74,9 +76,10 @@ display, with the other criteria alongside."></head><body>
 into, and no single number settles it: the within-cluster sum of squares
 of the coordinates has an elbow, a piecewise-constant approximation of the
 response has a Mallows \(C_p\), the residual autocorrelation of the cell
-means has a \(z\), and the cell means have a reliability.  This function
-computes all of them at every level of a ladder the data bound, and
-returns the table, so that the level chosen, by
+means has a \(z\), the cell means have a reliability, and a cell value
+has a leave-one-out error.  On a ladder of counts this function computes
+all of them at every level the data bound, and returns the table, so that
+the level chosen, by
 <code><a href="select_resolution.html">select_resolution()</a></code> or by eye, can be defended with the
 whole profile in place of one criterion's argmin.  Mallows (1973) presents
 \(C_p\) itself as a display of the bias-variance trade-off across
@@ -94,11 +97,18 @@ display, with the other criteria alongside.</p>
 <span>  n_levels <span class="op">=</span> <span class="fl">20L</span>,</span>
 <span>  min_cell_n <span class="op">=</span> <span class="fl">9L</span>,</span>
 <span>  sample_n <span class="op">=</span> <span class="fl">1500L</span>,</span>
-<span>  nstart <span class="op">=</span> <span class="fl">25L</span>,</span>
+<span>  nstart <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">123L</span>,</span>
-<span>  sac <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  sac <span class="op">=</span> <span class="st">"auto"</span>,</span>
 <span>  select_on <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"all"</span>, <span class="st">"split"</span><span class="op">)</span>,</span>
-<span>  range_floor <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span>  range_floor <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  partition <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"density"</span>, <span class="st">"kmeans"</span><span class="op">)</span>,</span>
+<span>  init <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"kmeans++"</span>, <span class="st">"random"</span><span class="op">)</span>,</span>
+<span>  density_power <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  density_k <span class="op">=</span> <span class="fl">8L</span>,</span>
+<span>  iter_max <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  estimate <span class="op">=</span> <span class="st">"auto"</span>,</span>
+<span>  obs_per_cell <span class="op">=</span> <span class="st">"auto"</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -114,11 +124,17 @@ are dropped with a warning.</p></dd>
 
 <dt id="arg-response-var">response_var<a class="anchor" aria-label="anchor" href="#arg-response-var"></a></dt>
 <dd><p>Optional response column name (numeric or logical).
-Enables <code>cp</code> and <code>moran_z</code>.  A variogram estimated from it also
-sets the floor of the ladder and <code>reliability</code>.  Rows where it, or a
-predictor, is missing or non-finite stay in the geometry and are left out
-of the OLS fit, the RSS, <code>cp</code> and <code>moran_z</code>; a logged warning
-gives their number.</p></dd>
+Enables <code>cp</code> and <code>moran_z</code>, and, when it is numeric, the
+pooled estimate the default profile scores by <code>loo</code>.  A variogram
+estimated from it also gives the range floor the bounds report and
+<code>reliability</code>; it is estimated on a ladder of counts or when
+<code>sac</code> asks for it, and not on the default ladder of one size, so
+<code>cp</code> and <code>reliability</code> are <code>NA</code> there.  Rows
+where it, or a predictor, is missing or non-finite stay in the geometry
+and are left out of the OLS fit, the RSS, <code>cp</code>, <code>moran_z</code> and
+the count the support ceiling divides by <code>min_cell_n</code>; a logged
+warning gives their number, and an R warning says so when they lower
+the ceiling.</p></dd>
 
 
 <dt id="arg-predictor-vars">predictor_vars<a class="anchor" aria-label="anchor" href="#arg-predictor-vars"></a></dt>
@@ -137,26 +153,45 @@ refuses as many centres as points).</p></dd>
 
 
 <dt id="arg-n-levels">n_levels<a class="anchor" aria-label="anchor" href="#arg-n-levels"></a></dt>
-<dd><p>Number of levels on the ladder.  Default 20.</p></dd>
+<dd><p>Number of levels on the ladder.  Default 20.  The ladder
+has fewer when rounding puts two of them on one count, and one more
+when the range floor is added as a level (see "The ladder and its
+bounds").  Supplying it, or <code>min_cell_n</code>, <code>sample_n</code>,
+<code>levels</code> or <code>range_floor</code>, gives that ladder in place of the
+ladder of sizes <code>obs_per_cell = "auto"</code> would set.</p></dd>
 
 
 <dt id="arg-min-cell-n">min_cell_n<a class="anchor" aria-label="anchor" href="#arg-min-cell-n"></a></dt>
-<dd><p>Minimum average number of points per cell that a level
-must keep; sets the ceiling.  Default 9.</p></dd>
+<dd><p>Minimum average number of rows per cell that a level
+must keep (scored rows when <code>response_var</code> is given: those with a
+response and every predictor; points otherwise); sets the ceiling.
+Default 9.  A layer that cannot give two cells that many is profiled at
+two cells, or at the <code>levels</code> asked for, with
+<code>supported = FALSE</code> and a warning.  It is floored to a whole
+number, and it is not read on a ladder <code>obs_per_cell</code> sets (see
+"The ladder and its bounds").</p></dd>
 
 
 <dt id="arg-sample-n">sample_n<a class="anchor" aria-label="anchor" href="#arg-sample-n"></a></dt>
 <dd><p>Points are subsampled to this many before the k-means
-fits, as in <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>.  Default 1500.  The
-columns read off the fitted cells (<code>wss</code>, the <code>cell_</code> columns,
-<code>rss</code>, <code>moran_i</code>, <code>moran_z</code>) describe the subsample; the
-bounds, <code>supported</code>, the variance term of <code>cp</code> and
-<code>reliability</code> describe every point of the layer, so the answer does
-not change with <code>sample_n</code> except through the fits.</p></dd>
+fits, as in <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>, on the ladder of "The
+ladder and its bounds"; on a ladder of sizes, the default, the centres
+are fitted to every row.  Default 1500.  The
+columns read off the fitted cells (<code>wss</code>, the <code>cell_</code> and
+<code>cells_</code> columns, <code>rss</code>, <code>moran_i</code>, <code>moran_z</code>)
+describe the subsample; the bounds, <code>supported</code>, the variance term
+of <code>cp</code> and <code>reliability</code> describe the whole layer, so the
+answer does not change with <code>sample_n</code> except through the fits.</p></dd>
 
 
 <dt id="arg-nstart">nstart<a class="anchor" aria-label="anchor" href="#arg-nstart"></a></dt>
-<dd><p>k-means++ restarts per level.  Default 25.</p></dd>
+<dd><p>Starts per level; the best is kept.  They are k-means++
+starts unless <code>init</code> says otherwise.  <code>NULL</code> (default) is the
+kind's own number: 3 for the kind <code>"density"</code> and 25 for the kind
+<code>"kmeans"</code>, the number earlier versions ran.  A number is run
+under either <code>partition</code>: <code>nstart = 25</code> gives the density
+kind the starts it had when 25 was the default.
+<code>attr(, "nstart")</code> holds the number that was run.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -177,16 +212,19 @@ to which the points are transformed first, so the area, the floor and
 <code>cell_diam_median</code> are then in that CRS's units.  A sac whose
 range was rejected (<code>NA</code> with a <code>rejected_reason</code>) gives
 <code>cp</code> its nugget, with a warning, and leaves <code>reliability</code>
-<code>NA</code>, since that needs the range; one whose model did not converge,
-or whose range is below the shortest lag fitted (a structure that
-cannot be told from a nugget, so the nugget is not identified either),
+<code>NA</code>, since that needs the range; one whose model did not converge
+(its fit has no minimum inside the ranges searched, so its nugget and
+sill are not fitted values), or whose range is below the shortest lag
+fitted (a structure that cannot be told from a nugget, so the nugget is
+not identified either),
 gives neither, and <code>cp</code> takes its noise variance from the finest
 level (see <code>cp</code> above).  Whether the model converged is read from
 the model (<code>attr(attr(sac, "variogram_model"), "converged")</code>, which
-<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> sets), not from the reason: the reason names
-one ground for the refusal, and a fit that did not converge is most
-often refused as past the largest lag.  The warning then names both.  A
-sac that carries no such flag (one made by hand, say) is judged by its
+<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> sets and describes), not from the
+reason: the reason names one ground for the refusal, and such a fit is
+refused as past the largest lag.  The warning then names both.  A
+sac that carries no such flag (one made by hand, or built from REML
+parameters) is judged by its
 reason.  Under <code>select_on = "split"</code> the sac must come from
 the selection half alone: run the profile once without it, fit the sac
 on <code>data_sf[attr(p, "split")$selection, ]</code> and pass it to a second
@@ -195,10 +233,27 @@ call with the same <code>seed</code>, which makes the same split.  When
 (its selection half under <code>"split"</code>) with the same
 <code>predictor_vars</code>.  A plain number is taken as the range alone, in
 the units of the CRS the profile is computed in (metres for lon/lat
-input): it sets the floor, <code>reliability</code>, which needs a fitted
-model, is <code>NA</code>, and <code>cp</code> takes its noise variance from the
-finest level.  A <code>units</code> object is refused
-rather than read as a number in whatever unit it was written in.</p></dd>
+input): it gives the range floor, <code>reliability</code>, which needs a
+fitted model, is <code>NA</code>, and <code>cp</code> takes its noise variance from
+the finest level.  A sac refused because the response shows no spatial
+structure (either of the two <code>rejected_reason</code> values of
+<code><a href="estimate_sac_range.html">estimate_sac_range()</a></code> that say so; the model it attaches
+is a pure nugget) gives <code>cp</code> no
+nugget either, and <code><a href="select_resolution.html">select_resolution()</a></code> then returns
+<code>structured = FALSE</code>.  A <code>units</code> object is refused
+rather than read as a number in whatever unit it was written in.
+The string <code>"auto"</code>, the default, is <code>NULL</code> on every ladder
+but one that <code>obs_per_cell</code> sets.  On that ladder no variogram is
+estimated or
+read: <code>cp</code> and <code>reliability</code> are <code>NA</code> at every level,
+<code>cp</code> takes no noise variance from the finest level in its place,
+<code>attr(, "cp_noise")</code> is a list whose <code>source</code> is
+<code>"none"</code> and whose <code>reason</code> says why, and the
+<code>variogram</code> and <code>sac</code> attributes are <code>NULL</code>.  The
+other columns do not read the variogram and are the numbers
+<code>sac = NULL</code> gives.  <code>sac = NULL</code>, the default of earlier
+versions, estimates the variogram on a ladder of sizes too, and gives
+<code>cp</code> and <code>reliability</code> there.</p></dd>
 
 
 <dt id="arg-select-on">select_on<a class="anchor" aria-label="anchor" href="#arg-select-on"></a></dt>
@@ -217,29 +272,159 @@ whenever <code>response_var</code> is given.</p></dd>
 
 
 <dt id="arg-range-floor">range_floor<a class="anchor" aria-label="anchor" href="#arg-range-floor"></a></dt>
-<dd><p><code>TRUE</code> (default) starts the ladder at the range
-floor when the data support it; <code>FALSE</code> starts it at 2 whatever
-the range, and the floor is only reported in the bounds and the print.
-Use <code>FALSE</code> to compare profiles whose range estimates differ (see
-"The ladder and its bounds").</p></dd>
+<dd><p><code>FALSE</code> (default) starts the ladder at 2 whatever
+the range, and the range floor is reported in the bounds and the print
+without being applied.  <code>TRUE</code> starts the ladder at the floor when
+the data support it and the floor is below the ceiling, as the default
+did up to version 2.0.0; an estimated range then sets the fewest cells
+any criterion can choose (see "The ladder and its bounds").</p></dd>
+
+
+<dt id="arg-partition">partition<a class="anchor" aria-label="anchor" href="#arg-partition"></a></dt>
+<dd><p>What the centres of the regions minimise, at every level
+of the ladder.  <code>"density"</code> (default): the sum of squared
+distances from the points to their nearest centre, each point weighted
+by its local density to the power <code>density_power</code>; compact cells
+that, at the default power, hold about the same number of points each
+once there are more cells than dense places, and counts about as uneven
+as <code>"kmeans"</code> gives below that.  <code>"kmeans"</code>: the same sum
+unweighted; compact cells whose counts are several times higher in
+dense places than in sparse ones.  <code>"kmeans"</code> was the default of
+earlier versions, and with <code>nstart = NULL</code> it runs their 25
+starts.  See "The partition".</p></dd>
+
+
+<dt id="arg-init">init<a class="anchor" aria-label="anchor" href="#arg-init"></a></dt>
+<dd><p>How each start is drawn.  <code>"kmeans++"</code> (default): the
+centres one at a time, each in proportion to its squared distance from
+those already drawn, times its weight under <code>partition =
+"density"</code>.  <code>"random"</code>: <code>k</code> distinct locations at random, as
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">kmeans()</a></code> draws them.</p></dd>
+
+
+<dt id="arg-density-power">density_power<a class="anchor" aria-label="anchor" href="#arg-density-power"></a></dt>
+<dd><p>For <code>partition = "density"</code>: the power the local
+density is raised to for a point's weight, a number from 0 to 2.
+Default 1, which evens out the cell counts once the cells outnumber the
+dense places (see "The partition").  <code>0</code> weights every
+point alike, the objective of <code>"kmeans"</code> (reached by Lloyd's
+iteration, so the centres are close to that kind's and not equal to
+them); values between give counts between the two; values above 1 give
+the cells of dense places fewer points than those of sparse places.
+Setting it under <code>partition = "kmeans"</code>, which does not read it,
+is a warning.</p></dd>
+
+
+<dt id="arg-density-k">density_k<a class="anchor" aria-label="anchor" href="#arg-density-k"></a></dt>
+<dd><p>For <code>partition = "density"</code>: the number of nearest
+neighbours the local density is read from.  Default 8.  It is held to
+one fewer than the distinct locations.  A small number follows the
+density closely and noisily; a large one smooths it.  Setting it under
+<code>partition = "kmeans"</code> is a warning.</p></dd>
+
+
+<dt id="arg-iter-max">iter_max<a class="anchor" aria-label="anchor" href="#arg-iter-max"></a></dt>
+<dd><p>The most iterations a start runs for: a single positive
+whole number, or <code>NULL</code> (default) for the kind's own limit, 50 for
+<code>partition = "kmeans"</code> from k-means++ starts and 100 for random
+starts and for <code>partition = "density"</code>.  A kept start that was cut
+off at the limit is a warning of class
+<code>"spatialkit_not_converged"</code>, except for the kind <code>"kmeans"</code>
+from k-means++ starts under <code>iter_max = NULL</code>, which reports
+nothing, as it always has.</p></dd>
+
+
+<dt id="arg-estimate">estimate<a class="anchor" aria-label="anchor" href="#arg-estimate"></a></dt>
+<dd><p>The cell value the profile scores, which is the one
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> is to report: <code>"auto"</code>
+(default; see below), <code>NULL</code> for none, <code>"mean"</code> for the
+plain mean of a cell's rows, <code>"pooled"</code> for the mean pulled toward
+the mean of the 8 nearest cells.  With an estimate the profile gains
+five columns and <code>attr(, "estimate")</code> (see "Value"), and every
+column and attribute it has without one is unchanged.  <code>loo</code> is
+the leave-one-out mean squared error of that estimate: each row predicted
+by the value of its cell computed without it.  Under <code>"mean"</code> a
+row in a cell of two or more is predicted by the mean of the others,
+and a row alone in its cell by the mean of the cell of its nearest
+other row.  Under <code>"pooled"</code> the cell's mean and its own weight
+are computed again without the row, and the spread inside the cells,
+the spread between a cell and its target, and the targets are held.
+It is computed on every row of the layer with a finite response (of the
+selection half under <code>select_on = "split"</code>), not on the subsample
+the centres were fitted to, and each row is scored in the cell of its
+nearest centre, the cell <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> hands on.
+It needs no variogram.  Rows at one location are left out one at a
+time.  <code>"auto"</code> is <code>"pooled"</code> when there is a numeric
+<code>response_var</code> with a finite value and no <code>predictor_vars</code>,
+and <code>NULL</code> otherwise.  <code>NULL</code>, the default of earlier
+versions, scores none and gives the profile without the five columns.
+<code>"mean"</code> and <code>"pooled"</code> are
+errors without a <code>response_var</code>, with <code>predictor_vars</code> (the
+profile would then score residuals, and the summary reports cell values
+of the response), with a logical response, and with a response that has
+no finite value.</p></dd>
+
+
+<dt id="arg-obs-per-cell">obs_per_cell<a class="anchor" aria-label="anchor" href="#arg-obs-per-cell"></a></dt>
+<dd><p>Rows per cell: <code>"auto"</code> (default; see below);
+<code>NULL</code> for the ladder described under "The ladder and its
+bounds", the default of earlier versions, whatever the other arguments
+are; or one number or several, each at least 1 (fractions are
+allowed), for a ladder of sizes.  The level of a size \(s\) is
+<code>max(2, round(n / s))</code> cells, with \(n\) the rows that have a
+response (and, with <code>predictor_vars</code>, every predictor), or every
+point when there is no <code>response_var</code> or no row has a response.
+Under <code>select_on = "split"</code> \(n\) counts the rows of both
+halves, since the cells are built on every point.  On a ladder of sizes
+the centres are fitted to every row, no subsample is drawn, and
+<code>n_levels</code>, <code>min_cell_n</code>, <code>sample_n</code> and
+<code>range_floor</code> are not read: supplying <code>n_levels</code>,
+<code>min_cell_n</code>, <code>sample_n</code> or <code>range_floor = TRUE</code> beside
+a numeric <code>obs_per_cell</code> is a warning of class
+<code>spatialkit_ladder_unused</code>, and <code>levels</code> beside it is an
+error.  A level is held to the most centres k-means can place (the
+distinct locations, and one short of the points).  <code>"auto"</code> is
+<code>NULL</code> when <code>levels</code> is given or the caller supplies any of
+those four arguments; otherwise 4.5 when the estimate is
+<code>"pooled"</code>, the seven sizes 18, 12, 9, 6, 4.5, 3 and 2 when it is
+<code>"mean"</code>, and <code>NULL</code> without an estimate.  The cost of a
+ladder of sizes is bounded before any fit (see "Conditions").</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A data.frame of class <code>resolution_profile</code> with one row per
-level and columns <code>levels</code>, <code>wss</code>, <code>wss_spread</code> (relative
-spread of WSS across the restarts), <code>elbow</code>, <code>cell_n_min</code>,
+level and columns <code>levels</code>, <code>wss</code> (the within-cell sum of
+squares of the coordinates, every point counted once, under either
+<code>partition</code>), <code>wss_spread</code> (relative
+spread of WSS across the restarts; under <code>partition = "density"</code>,
+of the weighted sum the starts minimise), <code>elbow</code>, <code>cell_n_min</code>,
 <code>cell_n_median</code>, <code>cell_diam_median</code> (twice the median RMS
 radius of the cells, in coordinate units: about 0.8 of the side of a
 square cell of the same area, and less for finer cells, so a size to
 compare levels by rather than a width), <code>rss</code>, <code>cp</code>,
-<code>moran_i</code>, <code>moran_z</code> and <code>reliability</code>; columns a missing
-input leaves undefined are <code>NA</code>.  Attributes: <code>bounds</code> (a list
-with <code>floor</code>, <code>ceiling</code>, <code>ceiling_from</code> (<code>"min_cell_n"</code>,
-<code>"distinct locations"</code> or <code>"sample_n"</code>, whichever bound it),
-<code>supported</code>, <code>area</code>, <code>range</code>, <code>n</code> (the points in the
-layer), <code>n_sample</code> (the points the k-means fits ran on),
-<code>n_distinct</code>, <code>min_cell_n</code>, <code>range_floor</code>),
+<code>moran_i</code>, <code>moran_z</code>, <code>reliability</code>, <code>cells_resp</code>
+(the cells that hold at least one scored row) and <code>cell_resp_mean</code>
+(the scored rows per such cell; compare it with <code>min_cell_n</code>).
+Like the other columns read off the fitted cells, the last two count
+rows of the subsample when the layer is larger than <code>sample_n</code>:
+the cells of the layer then hold about <code>n_response / n_scored</code>
+times as many scored rows as <code>cell_resp_mean</code> shows.
+Columns a missing input leaves undefined are <code>NA</code>.  Attributes:
+<code>bounds</code> (a list with <code>floor</code>, <code>ceiling</code>,
+<code>ceiling_from</code> (<code>"min_cell_n"</code>, <code>"min_cell_n (rows with a
+  response)"</code>, <code>"distinct locations"</code>, <code>"sample_n"</code>,
+<code>"fewer than two supported cells"</code> or <code>"fewer than two
+  distinct locations"</code>, whichever bound it), <code>supported</code>, <code>area</code>,
+<code>range</code>, <code>n</code> (the points in the layer), <code>n_sample</code> (the
+points the k-means fits ran on), <code>n_distinct</code>, <code>min_cell_n</code>,
+<code>range_floor</code>, <code>n_response</code> (the rows of the layer that carry
+a response and, with <code>predictor_vars</code>, every predictor, which the
+support ceiling counts; <code>NA</code> without a
+<code>response_var</code>), <code>n_scored</code> (the rows of the subsample the
+response criteria read; <code>NA</code> without a <code>response_var</code>),
+<code>levels_given</code> (whether <code>levels</code> set the ladder) and
+<code>predictors</code> (whether <code>predictor_vars</code> were given)),
 <code>variogram</code> (a list with <code>nugget</code>, <code>psill</code>, <code>range</code>
 (<code>NA</code> when rejected), <code>model</code> and <code>detrended</code> (whether
 the sac says it is a variogram of residuals; <code>NA</code> when it does not
@@ -252,58 +437,421 @@ the <code>method</code> and <code>seed</code> that made them), <code>cp_noise</c
 list with <code>source</code>, <code>"variogram nugget"</code> or
 <code>"finest-level residual mean square"</code>, <code>value</code>, the
 \(\tau^2\) used, and <code>level</code>, the level it was read at or
-<code>NA</code>; <code>NULL</code> when <code>cp</code> has neither), <code>centres</code>
+<code>NA</code>; <code>NULL</code> when <code>cp</code> has neither), <code>one_cell</code>
+(what one cell for the whole layer scores, the reference a level has to
+beat: a list with <code>n</code>, the scored rows, <code>rss</code>, their total
+sum of squares, <code>cp</code>, the same formula at one cell or <code>NA</code>
+when <code>cp</code> has no noise variance, <code>constant</code>, whether the
+scored variable is constant to within rounding, <code>cp_levels</code>, the
+<code>cp</code> column it belongs to, and <code>f_p</code>, named by level, the
+p-value of the F test of that level's cell means against one mean,
+\((TSS - RSS) / (L - 1)\) over \(RSS / (m - L)\) on the \(L\)
+cells that hold a scored row and the \(m\) scored rows; <code>NULL</code>
+without a response), <code>centres</code>
 (a list named by level of the two-column matrices of the scored
-partitions' centres) and <code>centres_crs</code> (the CRS they are in).  A
+partitions' centres), <code>centres_crs</code> (the CRS they are in) and
+<code>hull</code> (the convex hull of the points profiled, an <code>sfc</code> in
+that CRS).  A
 k-means partition is the Voronoi partition of its centres, so these
 seed the very cells each level was scored on: <code><a href="select_resolution.html">select_resolution()</a></code>
 returns the chosen level's as <code>$seeds</code>, and
 <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>
-use them when given the selection or the profile.</p>
+use them when given the selection or the profile.  The centres carry the
+hull as their <code>"cover"</code> attribute, which those two functions hand on
+so that Voronoi cells built on the seeds reach the edge of the points.
+A profile built with <code>partition = "density"</code> or <code>init =
+  "random"</code> also carries <code>partition</code>: a list with <code>kind</code>,
+<code>init</code>, <code>density_power</code> and <code>density_k</code> (both <code>NA</code>
+for <code>kind = "kmeans"</code>); for <code>kind = "density"</code>,
+<code>objective</code>, the weighted sum the centres minimise, named by
+level; <code>iter_max</code>, the iteration limit; and <code>iter</code> and
+<code>converged</code>, the iterations each level's kept start took and
+whether it stopped before the limit, named by level.  The selection
+carries the first four as <code>$partition</code>, its
+seeds and the seeds the seeding functions return as
+<code>attr(, "partition")</code>, and a Voronoi tessellation built on them as
+<code>params$partition</code>.  A profile of the kind <code>"kmeans"</code> from
+k-means++ starts has no such attribute, and neither has anything made
+from it.</p>
+<p>With an <code>estimate</code> the frame has five more columns, after
+<code>cell_resp_mean</code>: <code>scored_per_cell</code> (the rows <code>loo</code>
+read over the cells that hold one; the layer's counterpart of
+<code>cell_resp_mean</code>, which counts the subsample's rows), <code>loo</code>
+(the leave-one-out mean squared error of the estimate; lower is
+better), <code>loo_se</code> (the standard error over rows of that level's
+mean squared error; it is not the standard error of a difference
+between two levels, whose errors come from the same rows),
+<code>share_alone</code> (the share of the scored rows that are the only
+scored row of their cell) and <code>own_weight</code> (the median over cells
+of the weight a pooled value gives the cell's own mean; <code>NA</code>
+under <code>"mean"</code>).  <code>loo</code>, <code>loo_se</code> and
+<code>own_weight</code> are <code>NA</code> at a level where no cell holds two
+scored rows, and at every level when the response is constant over the
+rows <code>loo</code> reads.  It also carries <code>estimate</code>: a list with
+<code>value</code> (<code>"mean"</code> or <code>"pooled"</code>), <code>neighbours</code>
+(8, or <code>NA</code> under <code>"mean"</code>), <code>response</code> (the column),
+<code>n</code> (the rows <code>loo</code> read), <code>rows</code> (<code>"all"</code> or
+<code>"selection half"</code>), <code>features</code> (<code>"points"</code>, or
+<code>"other"</code> when the layer held features that were reduced to
+points), <code>seed</code>, <code>constant</code> (whether the response is constant
+over those rows; <code>FALSE</code> for fewer than two), <code>loo_one_cell</code>
+and <code>loo_one_cell_se</code> (the same error with one mean for all those
+rows, the reference a level has to beat), <code>loo_levels</code> (the
+<code>loo</code> column those references belong to, named by level), and,
+named by level, <code>sigma2</code> (the spread of the rows about their
+cell's mean), <code>tau2</code> (the mean squared distance between a cell's
+level and its target; <code>NA</code> under <code>"mean"</code>), <code>cells</code>
+(the cells that hold a scored row) and <code>f_p</code> (the p-value of the F
+test of those cells' means against one mean).</p>
+<p>On a ladder that <code>obs_per_cell</code> sets, <code>bounds</code> describes that
+ladder: <code>ceiling</code> is the finest level; <code>ceiling_from</code> is
+<code>"obs_per_cell"</code>, <code>"distinct locations"</code>,
+<code>"fewer than two cells of the size"</code> or
+<code>"fewer than two distinct locations"</code>;
+<code>supported</code> is <code>FALSE</code> when the finest size gives fewer than
+two cells or the range floor is above the finest level;
+<code>levels_given</code> is <code>TRUE</code>; <code>n_sample</code> is every point;
+<code>min_cell_n</code> holds the argument, which is not read; and two fields
+are added, <code>obs_per_cell</code> (the sizes, largest first) and
+<code>size_levels</code> (the level of each, named by size; <code>NA</code> for a
+size of <code>"auto"</code> that gives fewer than two cells and was left
+out).</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>Called with a numeric response and no predictors and none of
+<code>levels</code>, <code>n_levels</code>, <code>min_cell_n</code>, <code>sample_n</code> or
+<code>range_floor</code>, the profile is one level: 4.5 rows per cell
+(<code>obs_per_cell = "auto"</code>), scored for pooled values
+(<code>estimate = "auto"</code>) by the leave-one-out error <code>loo</code>, with
+no variogram fitted (<code>sac = "auto"</code>), in regions of the density
+kind (<code>partition = "density"</code>) kept from 3 k-means++ starts
+(<code>nstart = NULL</code>).  <code>cp</code> and <code>reliability</code> need the
+variogram and <code>elbow</code> needs a curve, so the three are <code>NA</code>
+there; <code>moran_z</code> is computed.  <code><a href="select_resolution.html">select_resolution()</a></code>
+reads the count off it by the size.  Any of those five ladder arguments
+gives the
+ladder of counts described below, scored for pooled values as well.
+<code>estimate = NULL, obs_per_cell = NULL, sac = NULL, partition =
+"kmeans"</code> gives the profile of earlier versions: the ladder, its columns
+and its k-means regions from 25 starts.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="the-partition">The partition<a class="anchor" aria-label="anchor" href="#the-partition"></a></h2>
+
+
+<p>The regions at every level are the Voronoi cells of a set of centres: a
+point belongs to the centre nearest to it.  <code>partition</code> says what the
+centres minimise, and every level of the ladder is built with the same
+kind.</p><dl><dt><code>"kmeans"</code></dt>
+<dd><p>The sum, over the points, of the
+squared distance to the nearest centre.  The centres follow the square
+root of the point density.  The cells are compact, smaller where the
+points are dense and larger where they are sparse, and a cell in a
+dense place holds several times the points of a cell in a sparse
+place.</p></dd>
+
+<dt><code>"density"</code> (default)</dt>
+<dd><p>The same sum with each point weighted
+by its local density to the power <code>density_power</code>.  The local
+density at a point is the number of points in the disc that reaches
+its <code>density_k</code>-th nearest neighbour, over the area of that disc.
+With <code>density_power = 1</code> the centres follow the point density
+itself.  The cells are compact: many small ones where the points are
+dense, a few large ones where they are sparse.  They hold about the
+same number of points each once there are more cells than dense
+places (clusters of points).  With fewer cells than dense places a
+cell takes in whole clusters, large and small, and the counts are
+about as uneven as under <code>"kmeans"</code>.  <code>density_power = 0</code>
+weights every point alike, which is the objective of
+<code>"kmeans"</code>; a power above 1 goes past equal counts and gives the
+cells of dense places fewer points than those of sparse places.</p></dd>
+
+
+</dl><p>Two simulations show both ends.  The measure is the coefficient of
+variation of the cell counts (their standard deviation over their mean,
+0 when every cell holds the same number), as medians over 20 layers.  On
+1,200 points, 900 of them in four clusters over a sparse background, cut
+into 60 cells, it was 1.2 under <code>"kmeans"</code>, where the fullest cell
+held 42 times the points of the smallest, and 0.29 under
+<code>"density"</code>, where it held 4 times.  On 2,000 points with 28 dense
+places (half of the points in 3 large clusters, 30 percent in 25 small
+ones, the rest spread out) it was 0.90 under <code>"kmeans"</code> and 0.97
+under <code>"density"</code> at 10 cells and 1.08 and 1.01 at 20 cells; at 60
+cells it was 0.95 and 0.31, and at 130 cells 1.05 and 0.43.  A ladder
+starts at 2 cells, so its low levels are usually below the number of
+dense places, and the counts in <code>cell_n_min</code> and
+<code>cell_n_median</code> show where the two kinds part.</p>
+<p>The density kind is the default.  The default size, 4.5 rows per cell,
+puts the count above the number of dense places on a layer whose
+clusters hold more than a few observations each, so the default kind and
+the default count go together.  A coarse ladder the caller sets (with
+<code>levels</code>, large sizes, or the low levels of the automatic ladder)
+may not, and at those levels the density kind does not even the counts.
+<code>partition = "kmeans"</code> gives the k-means regions, with 25
+k-means++ starts, as earlier versions built them.</p>
+<p><code>init</code> says how each of the <code>nstart</code> starts is drawn before it
+is refined; the best start is kept.  <code>"kmeans++"</code> draws the centres
+one at a time, each a point taken in proportion to its squared distance
+from the centres already drawn (times its weight, under
+<code>"density"</code>), which spreads the start over the points.
+<code>"random"</code> draws <code>k</code> distinct locations at random, as
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">kmeans()</a></code> does.</p>
+<p>A start of the kind <code>"kmeans"</code> is refined by
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">kmeans()</a></code> (Hartigan and Wong), for at most 50
+iterations from a k-means++ start and 100 from a random one.  A start of
+the kind <code>"density"</code> is refined by Lloyd's iteration, for at most 100
+steps: each point goes to its nearest centre, each centre moves to the
+weighted mean of its points, and a centre left without a point stays
+where it is.  <code>iter_max</code> sets another limit.  The start with the
+lowest sum is kept, and a kept start that was cut off at the limit is
+reported (see "Conditions"): its centres are those of the last step.
+Large layers can need more than 100 steps: on a simulated layer of 30,000
+points no start of six at 100 and 300 cells took more than 68, and on one
+of 60,000 points three of six took 102 to 152.</p>
+<p>The density kind depends on the points alone.  It works on the distinct
+locations in coordinate order, so the order of the rows does not matter.
+Its two tolerances are fractions of the extent of the points (the diagonal
+of their bounding box), so the unit of the coordinates does not matter:
+the neighbour distance is not taken below a millionth of the extent, and
+the iteration stops when no centre moves by \(10^{-12}\) of it.  Points
+at one location count as that many points at it and share a cell; the
+neighbour distance is measured to the <code>density_k</code>-th nearest
+<em>other</em> location, so it is not zero where locations repeat.  The
+neighbour searches use <span class="pkg">FNN</span> when it is installed.  The result is the
+same without it; the search then takes time that grows with the square of
+the number of points, about thirty times as long for 10,000 points and
+2,000 centres.</p>
+<p>The columns keep their meaning under <code>"density"</code>, because each is
+read off the cells and not off the way they were drawn.  <code>wss</code> is the
+within-cell sum of squares of the coordinates with every point counted
+once, taken about each cell's mean, so <code>wss</code> and <code>elbow</code>
+compare between kinds; the weighted sum the centres minimise is kept in
+<code>attr(, "partition")$objective</code>, and <code>wss_spread</code> is its spread
+over the starts.  <code>cp</code>, <code>moran_z</code> and the test against one cell
+need cells drawn without the response, which both kinds give.
+<code>reliability</code> is computed for square cells of the level's average
+area and count and never reads the cells, so it is the same number under
+either kind.  The <code>elbow</code> is found more readily under
+<code>"density"</code> where the points cluster: once each cluster has its
+centres, further centres go into the clusters, the sparse ground between
+them keeps its sum of squares, and the curve flattens.  On simulated
+layers of 800 points in 3 to 8 clusters over a sparse background an elbow
+was read on 24 of 30 under <code>"density"</code> and on 10 under
+<code>"kmeans"</code>; on 100 uniform layers, on none under either.</p>
+<p>A profile of the density kind, or of either kind from random starts,
+carries <code>attr(, "partition")</code>, and
+<code><a href="select_resolution.html">select_resolution()</a></code>, the seeding functions and
+<code><a href="build_tessellation.html">build_tessellation()</a></code> hand that record on with the regions
+(see "Value").  A result with no such record was built by plain k-means:
+from k-means++ starts when it comes from a profile, and from random
+starts when a seeding function fitted it.</p>
     </div>
     <div class="section level2">
     <h2 id="the-ladder-and-its-bounds">The ladder and its bounds<a class="anchor" aria-label="anchor" href="#the-ladder-and-its-bounds"></a></h2>
 
 
-<p>Cells are k-means clusters of the (projected) coordinates, fitted at each
-level as the best of <code>nstart</code> k-means++ restarts (see
-<code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code> for why).  Levels are spaced
+<p>This is the ladder of a call that sets <code>levels</code>, <code>n_levels</code>,
+<code>min_cell_n</code>, <code>sample_n</code> or <code>range_floor</code>, or passes
+<code>obs_per_cell = NULL</code>, and of a call with no estimate: one without
+a response, with <code>predictor_vars</code>, or with a logical or wholly
+missing response.  Cells are clusters of the (projected)
+coordinates of the kind <code>partition</code> names, fitted at each level as
+the best of <code>nstart</code> k-means++ starts (see
+<code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code> for why) unless <code>init</code> says
+otherwise (see "The partition").  Levels are spaced
 logarithmically, because cell diameter scales as \(L^{-1/2}\): a unit
 step wastes fits at large \(L\) and starves resolution at small.  The
-ladder runs from a floor to a ceiling the data impose.  The ceiling is
-<code>floor(n / min_cell_n)</code>, with \(n\) every point of the layer (not
-the subsample): cells with fewer than <code>min_cell_n</code> points
-on average have too little support, and Moran's z is not computable at
-nine cells or fewer in any case.  It is also held to the number of
-distinct locations, one cell on each, and to one short of the number of
-points, which <code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code> needs.  The floor is
-<code>ceiling(area / range^2)</code> when an autocorrelation range is available:
-cells wider than the range average over more than one patch of the field.
-When the floor exceeds the ceiling the data cannot support a tessellation
+ladder runs from 2 to a ceiling the data impose.  The ceiling is
+<code>floor(n / min_cell_n)</code>: cells with fewer than <code>min_cell_n</code>
+rows on average have too little support.  With a <code>response_var</code>,
+\(n\) is the number of rows of the layer (not of the subsample) that
+are scored: those with a response and, with <code>predictor_vars</code>, every
+predictor, since the cell means the criteria read are built from those
+rows alone.  <code>ceiling_from</code> is then <code>"min_cell_n (rows with a
+response)"</code> when some rows are not scored (the label is the same when it
+is a predictor they lack), and a warning of class
+<code>spatialkit_response_ceiling</code> gives both counts and names the bound
+in force.  Without a
+<code>response_var</code>, or when no row has a response, \(n\) is every
+point.  The ceiling is also held to the number of distinct locations, one
+cell on each, and to one short of the number of points, which
+<code><a href="https://rdrr.io/r/stats/kmeans.html" class="external-link">stats::kmeans()</a></code> needs.  The count \(n / L\) is the rows per cell
+only when the scored rows are spread over the whole extent.
+Where they sit in one part of it, the cells elsewhere hold none and the
+occupied cells hold more than \(n / L\), so the ceiling is lower than
+those cells need: <code>cells_resp</code> and <code>cell_resp_mean</code> give the
+cells that hold a scored row and the scored rows per such cell at each
+level (of the subsample, when the cells are fitted to one), and
+profiling the scored rows alone bounds the ladder by the area they
+cover.</p>
+<p>When fewer than two cells meet <code>min_cell_n</code>
+(<code>floor(n / min_cell_n) &lt; 2</code>), or the layer has one distinct
+location, there is no ladder: the profile scores two cells so that level
+is still visible (or the <code>levels</code> asked for, as given),
+<code>supported</code> is <code>FALSE</code>, <code>ceiling_from</code>
+is <code>"fewer than two supported cells"</code> (or <code>"fewer than two
+distinct locations"</code>) and a warning of class
+<code>spatialkit_not_supported</code> names both numbers.</p>
+<p><code>min_cell_n</code> sets the ceiling of this ladder.  It is a mean number
+of rows per cell and not a minimum: a cell of a level at the ceiling can
+hold fewer (<code>cell_n_min</code>).  It is floored to a whole number, so 4.5
+is read as 4.  With <code>levels</code> it does not choose the levels scored,
+and it still sets <code>bounds$ceiling</code>, <code>supported</code> and the
+<code>spatialkit_not_supported</code> warning.</p>
+<p>The range floor is <code>ceiling(area / range^2)</code> when an autocorrelation
+range is available: cells wider than the range average over more than one
+patch of the field.  It is reported in the bounds and the print, and by
+default it is not applied: the ladder starts at 2.  When the layer
+supports the floor and it lies between the ladder's ends, the floor is
+one of the ladder's levels all the same (so the ladder can have one more
+level than <code>n_levels</code>): <code>select_resolution(criterion =
+"reliability")</code> reads from the floor up and returns the floor itself, not
+the next level the spacing happened to put above it.  The range is an
+estimate, and a response with no spatial structure can still be given
+one: over 100 simulated white-noise layers of 900 points the variogram
+returned a range on 29, and started at the floor, 11 of those ladders
+began at 11 to 98 cells of a ceiling of 100 and \(C_p\) took the floor
+or a level beside it, where the best count was 2 to 8.
+<code>range_floor = TRUE</code> starts the ladder at the floor, as the default
+did up to version 2.0.0.  When
+the floor exceeds the ceiling the data cannot support a tessellation
 that respects their own correlation structure; that is reported as a
-finding (a logged warning, and <code>attr(x, "bounds")$supported</code> is
-<code>FALSE</code>) and the ladder runs from 2 to the ceiling anyway, so the
-profile still shows what each level costs.  On a layer larger than
-<code>sample_n</code> the ceiling is also held to half the subsample (two
-subsample points per cell, the least a fitted cell can be scored on);
-<code>ceiling_from</code> is then <code>"sample_n"</code>, a floor above that is logged
-with a request to raise <code>sample_n</code>, and it does not make
-<code>supported</code> <code>FALSE</code>.</p>
-<p>The floor moves with the range estimate, and the ceiling with \(n\), so
-two profiles of similar data (the folds of a cross-validation, say) can
-sit on either side of the point where the floor applies: one ladder then
-starts at the floor and the other at 2, and the criteria that sit near
-the bottom of the ladder (<code>reliability</code>, which routinely peaks at the
-floor, and <code>elbow</code>) can differ between them by a factor of 10 or
-more.  To compare profiles, pass the same <code>levels</code> to each, or
-<code>range_floor = FALSE</code> to start every ladder at 2 while the floor is
-still reported.</p>
+finding (a warning of class <code>spatialkit_not_supported</code>, and
+<code>attr(x, "bounds")$supported</code> is <code>FALSE</code>) and the ladder runs
+from 2 to the ceiling, so the profile still shows what each level costs.
+A floor equal to the ceiling would leave one level and nothing to compare
+it with, so that ladder starts at 2 as well.  On a layer larger than
+<code>sample_n</code> the ceiling is also held to half the subsample's scored
+rows (two per cell, the least a fitted cell can be scored on; half the
+subsample without a response); <code>ceiling_from</code> is then
+<code>"sample_n"</code>, a floor above that is logged with a request to raise
+<code>sample_n</code>, and it does not make <code>supported</code> <code>FALSE</code>.</p>
+<p>The floor moves with the range estimate, and the ceiling with \(n\).
+To compare profiles of similar data (the folds of a cross-validation,
+say), pass the same <code>levels</code> to each.  <code>reliability</code> is the one
+criterion that still reads the floor: <code><a href="select_resolution.html">select_resolution()</a></code>
+holds it to the levels at or above the floor by default, so its pick can
+differ between two such profiles by a factor of 10 or more when the floor
+is supported on one and not on the other; pass <code>range_floor = FALSE</code>
+there to read the whole ladder.</p>
+<p>A ladder that <code>obs_per_cell</code> sets is a ladder of sizes (see
+"Observations per cell").  It has one level per size \(s\),
+<code>max(2, round(n / s))</code> cells, held to the most centres k-means can
+place: the distinct locations, and one short of the points.  Its centres
+are fitted to every row.  No subsample is drawn, and <code>n_levels</code>,
+<code>min_cell_n</code>, <code>sample_n</code> and <code>range_floor</code> are not read.
+The finest size takes the part <code>min_cell_n</code> has on the ladder above:
+<code>bounds$ceiling</code> is the finest level, and <code>supported</code> is
+<code>FALSE</code> when the finest size gives fewer than two cells or the range
+floor is above the finest level.  The range floor is reported and not
+applied.</p>
+<p>A ladder of sizes under <code>sac = "auto"</code> fits no variogram, so
+<code>cp</code> and <code>reliability</code> are <code>NA</code> at every level there, and
+<code>attr(, "cp_noise")</code> says why.  <code>sac = NULL</code>, or a <code>sac</code> of
+the caller's own, gives them.  <code>sac = "auto"</code> and
+<code>obs_per_cell = "auto"</code> are the defaults, so the default profile
+has neither column.</p>
     </div>
     <div class="section level2">
-    <h2 id="the-criteria-and-how-each-behaved-when-measured">The criteria, and how each behaved when measured<a class="anchor" aria-label="anchor" href="#the-criteria-and-how-each-behaved-when-measured"></a></h2>
+    <h2 id="observations-per-cell">Observations per cell<a class="anchor" aria-label="anchor" href="#observations-per-cell"></a></h2>
 
 
-<dl><dt><code>elbow</code></dt>
+<p><code>obs_per_cell</code> sets the ladder by a size: the mean number of rows a
+cell is to hold.  The level of a size \(s\) is
+<code>max(2, round(n / s))</code> cells, with \(n\) the rows the size
+divides (see the argument).  A size says how many observations a cell
+value is to stand on, and that is the caller's choice: no criterion makes
+it.  Under a size neither the cells, which are fitted to the coordinates,
+nor their number, which is a count of rows, depend on the values of the
+response.  Under <code>select_resolution(criterion = "loo")</code> the count
+does.</p>
+<p>For pooled values the leave-one-out error tends to keep falling as the
+cells shrink, so its minimum tends to be the finest size offered, and the
+end of the ladder would then choose the count.  In a simulation
+of 200 layers, each 1,500 clustered observations of a field with
+covariance <code>exp(-d / 100)</code> plus noise on a square of side 1,000
+(<code>dev/sim-pooled-values.R</code> in the package's repository;
+<code><a href="summarize_by_cell.html">summarize_by_cell</a></code> describes it), profiled at the sizes 18,
+12, 9, 6, 4.5, 3 and 2 with <code>partition = "density"</code>, the lowest
+<code>loo</code> of the pooled value was at the size 2 on 176 layers, at 3 on
+22 and at 4.5 on 2.  That of the plain mean was at 2 on none: it was at 6
+on 86 layers, at 4.5 on 51, at 9 on 49, at 12 on 12, and at 18 and at 3
+on one each.  <code>select_resolution(criterion = "size")</code> therefore sets
+the count of pooled values from a size, 4.5 unless another is given, and
+<code>criterion = "loo"</code> reads the lowest error for plain means.  These
+figures are of those seven sizes and say nothing of another ladder.</p>
+<p>Two columns say what a size leaves a cell value to stand on.
+<code>share_alone</code> is the share of the scored rows that are the only
+scored row of their cell: the plain mean of such a cell is one
+observation, and its pooled value has the smallest own weight a cell can
+have.  <code>own_weight</code> is the median weight a pooled value gives the
+cell's own mean: at 1 the pooled values are the plain means, and at 0
+each is the mean of the cell's neighbours.</p>
+<p><code>obs_per_cell = "auto"</code>, the default, is resolved against the other
+ladder arguments, in this order.  Whether the caller supplied an argument
+is what counts, so a value a wrapper passes on counts as supplied.</p><ol><li><p>With <code>levels</code>, <code>"auto"</code> is <code>NULL</code>: the levels are
+scored as given.  A numeric <code>obs_per_cell</code> beside <code>levels</code>
+is an error, since each sets the ladder.</p></li>
+<li><p>With <code>n_levels</code>, <code>min_cell_n</code>, <code>sample_n</code> or
+<code>range_floor</code> supplied, <code>"auto"</code> is <code>NULL</code>: those
+arguments describe the ladder of "The ladder and its bounds", and the
+caller gets it, with the estimate's columns when there is an
+estimate.</p></li>
+<li><p>Otherwise <code>"auto"</code> is 4.5 when the estimate is
+<code>"pooled"</code>, the seven sizes 18, 12, 9, 6, 4.5, 3 and 2 when it
+is <code>"mean"</code>, and <code>NULL</code> without an estimate.</p></li>
+<li><p>A numeric <code>obs_per_cell</code> beside <code>n_levels</code>,
+<code>min_cell_n</code>, <code>sample_n</code> or <code>range_floor = TRUE</code> sets
+the ladder, with a warning of class <code>spatialkit_ladder_unused</code>
+that names the arguments that are not read.</p></li>
+</ol><p>On a ladder of sizes the centres are fitted to every row and the count of
+cells grows with the rows, so a step that compares every point with every
+centre grows with the square of the rows.  <code>partition = "kmeans"</code>
+has such a step in every pass and in a k-means++ start.  <code>partition
+= "density"</code> has it in a k-means++ start and, without <span class="pkg">FNN</span>, in every
+pass; with <span class="pkg">FNN</span> and <code>init = "random"</code> it has none.  The profile
+stops before any fit, with an error of class
+<code>spatialkit_work_limit</code>, when the points times the cells of the
+finest level times <code>nstart</code> (times <code>iter_max</code> for the density
+kind without <span class="pkg">FNN</span>) is above
+<code>getOption("spatialkit.fit_work_max", 1e10)</code>.  The message names the
+ways on: fewer starts, which keep the best of fewer; a coarser size;
+<code>partition = "density"</code> with <code>init = "random"</code> and <span class="pkg">FNN</span>
+installed, which leaves a cell without a point more often (see
+<code>spatialkit_empty_cells</code> under "Conditions"); or a higher limit.
+The limit counts the finest level, and a ladder of several sizes fits
+every one of its levels.  At the default size the work grows with the
+square of the rows, and the limit is set where the default call's fit
+takes about a minute: a call just below it runs that long, and prints
+nothing while it runs.</p>
+<p>Without <span class="pkg">FNN</span> the density kind also finds its weights by comparing
+every pair of distinct locations.  A profile on a ladder of sizes stops,
+with the same class, when the square of their number is above
+<code>getOption("spatialkit.exact_pairs_max", 2e9)</code>, which is about
+44,700 locations.  The result of every search is the same with and
+without the package.  <code>moran_i</code> and <code>moran_z</code> need <span class="pkg">FNN</span>
+and <span class="pkg">Matrix</span> at a level where more than 5,000 cells hold a scored
+row.  Without them a ladder of sizes has <code>NA</code> in both columns
+there, with a warning of class <code>spatialkit_moran_skipped</code>, and so
+does a ladder set any other way (see "Conditions").
+At a level of up to 5,000 such cells, when either package is missing, the
+neighbour weights of the cell means are held as a dense matrix of cells
+by cells.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="the-criteria-and-what-each-returns-in-practice">The criteria, and what each returns in practice<a class="anchor" aria-label="anchor" href="#the-criteria-and-what-each-returns-in-practice"></a></h2>
+
+
+<p>The four columns are not four interchangeable count rules.
+<code><a href="select_resolution.html">select_resolution()</a></code> reads <code>cp</code> by default on a profile
+without an estimate; on one with an estimate it reads the size (pooled
+values) or <code>loo</code> (plain means).  <code>reliability</code>
+needs a variogram range and is <code>NA</code> without one; <code>elbow</code> is
+<code>NA</code> unless the points cluster; and <code>moran_z</code> is a diagnostic
+and not a count rule.  With an <code>estimate</code> the profile has a fifth
+column, <code>loo</code>, which is the last entry.  Each entry below says what
+the column measures and what it returns in practice.</p><dl><dt><code>elbow</code></dt>
 <dd><p>How far the WSS curve sags below a power law: on
 log-log axes, \(\log\) WSS below the straight line from \(k = 1\)
 (the total sum of squares) to the last level, in natural-log units
@@ -320,15 +868,24 @@ locations repeat, is left out of the line; when the other levels have
 no elbow, that fall to zero is the elbow, and its sag is measured with
 the WSS floored at \(10^{-12}\) of the total, which puts it far
 above any other level's.  Geometry only; it knows nothing of the
-response.</p></dd>
+response.  <strong>In practice it is <code>NA</code> unless the points
+cluster</strong>, and where they do it names the number of clusters, which
+is usually the first level or two of the ladder.</p></dd>
 
 <dt><code>cp</code></dt>
 <dd><p>Mallows' \(C_p\) of the piecewise-constant
 approximation of the response (or of its OLS residuals on
 <code>predictor_vars</code>) by cell means: \(RSS(L)/n + 2 \tau^2 L / n\),
 with \(\tau^2\) the nugget of the fitted variogram (lower is better).
-It estimates the error of predicting a new observation by the mean of
-its cell.  When the cells are fitted to a subsample of \(m\) of the
+It estimates the error of re-measuring the sampled sites: each scored
+row observed again at its own location, with fresh noise of variance
+\(\tau^2\), and predicted by the mean of its cell.  For an
+observation at a new location the penalty needs the spread of the
+field inside a cell as well, which the nugget leaves out.  This
+\(\tau^2\) is the nugget, the noise of one measurement; it is not
+the <code>tau2</code> of a pooled value, which is the mean squared distance
+between a cell's level and its target.  When the
+cells are fitted to a subsample of \(m\) of the
 \(N\) points with a response, the penalty is split between the two:
 \(RSS(L)/m + \tau^2 L_m / m + \tau^2 L / N\), where the first two
 terms estimate the approximation error from the subsample (adding back
@@ -349,23 +906,53 @@ only when the nugget is a large share of the sill.  With a nugget of 0
 (under \(10^{-4}\) of the sill; usually a fit clipped at its lower
 bound) the penalty is 0 and \(C_p\) descends to the ceiling whatever
 the field; the profile warns.  When the variogram gives no nugget (none
-was fitted, its fit did not converge, its range is below the shortest
-lag, or <code>sac</code> is a range alone), \(\tau^2\) is Mallows' own
+was fitted, its fit has no minimum inside the ranges searched, its
+range is below the shortest lag, it found no spatial structure, or
+<code>sac</code> is a range alone), \(\tau^2\) is Mallows' own
 choice instead: the residual mean square \(RSS / (m - L_m)\) of the
 finest level whose cells hold at least two scored rows on average.  It
 counts the structure within those cells as noise too, so on average it
 is no smaller than the nugget and errs towards fewer cells; the profile warns,
 and <code>attr(, "cp_noise")</code> records which was used.  When no level's
-cells hold that many, <code>cp</code> is <code>NA</code> at every level.</p></dd>
+cells hold that many, <code>cp</code> is <code>NA</code> at every level, as it is
+for a constant response, which the profile warns about.
+<strong>In practice its minimum is often a bound</strong>, the support
+ceiling when the nugget is a small share of the sill, and
+<code><a href="select_resolution.html">select_resolution()</a></code> then names the bound in <code>edge</code>.  The
+same formula at one cell,
+with the total sum of squares as its RSS, is kept in
+<code>attr(, "one_cell")</code>, with the p-value at every level of the F
+test of that level's cell means against one mean.  A level has to
+beat one cell: <code><a href="select_resolution.html">select_resolution()</a></code> returns
+<code>structured = FALSE</code> when \(C_p\) at one cell is within
+<code>tol</code> of the optimum, or when the cell means at the optimum
+differ from one mean by no more than chance allows, because one mean
+for the whole layer then predicts as well as the cells and the count
+is not identified (see <code><a href="select_resolution.html">select_resolution</a></code> for the rule
+and its measured error rates).</p></dd>
 
 <dt><code>moran_z</code></dt>
-<dd><p>The standardised deviate of Moran's I on the
-residuals of the cell means regressed on the cell-mean predictors (an
-intercept alone when there are none): how much spatial structure the
-tessellation has left unexplained (\(|z|\) smaller is better).
-Calibrated and flat in \(L\) on a response with no structure (see
-<code><a href="determine_optimal_levels.html">determine_optimal_levels</a></code>), so it separates levels only
-where structure remains.  <code>NA</code> at nine cells or fewer.</p></dd>
+<dd><p><strong>A diagnostic of the cell means, not a
+count rule.</strong>  The standardised deviate of Moran's I on the cell
+means, or with <code>predictor_vars</code> on the residuals of the cell
+means regressed on the cell-mean predictors, over the 8 nearest
+neighbours of each cell.  It tests whether neighbouring cell means
+are independent.  It does not measure what the cells leave
+unexplained, and it does not say how well they represent the
+response.  On any autocorrelated response it grows as the cells get
+finer than the range, because neighbouring cells then resemble each
+other, and it has almost no
+power below about 20 cells, where the 8-neighbour graph between cells
+is close to complete and Moran's I sits near \(-1/(L - 1)\)
+whatever the data.  The level with the smallest \(|z|\) is
+therefore among the coarsest it is computed at on a structured
+response, whatever the layer and its ceiling, and arbitrary on a
+response with no structure, where
+\(z\) is calibrated and flat in \(L\).
+<code><a href="select_resolution.html">select_resolution()</a></code> refuses to read it as a criterion unless
+asked with <code>diagnostic = TRUE</code>, and neither <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> nor
+the functions that take a profile as a cell count read it by
+default.  <code>NA</code> at nine cells or fewer.</p></dd>
 
 <dt><code>reliability</code></dt>
 <dd><p>The between-cell signal's share of the spread
@@ -373,22 +960,242 @@ in the cell means, from the fitted variogram alone via Krige's
 additivity relation (Cressie 1996), for square cells of the level's
 average area holding the level's average share of the layer's points
 with a response (larger is better).
-This is the shrinkage factor of Fay and Herriot (1979).  It has an
-interior optimum, and a broad one: validated against the empirical
-reliability of true block means on simulated fields, the analytic and
-empirical optima agreed to within a level or two where the empirical
-estimate was stable, and the band within 2 percent of the maximum
-spanned a factor of 3–6 in \(L\).  Read the flat region, not the
-argmax.  The domain term is taken over the convex hull the area is
-measured on, so rotating the layer does not move it.  <code>NA</code>
-without a usable variogram, and when the variogram's range was
-rejected (see <code>sac</code>).</p></dd>
+This is the shrinkage factor of Fay and Herriot (1979).  The curve
+has an interior optimum, and a broad one: validated against the
+empirical reliability of true block means on simulated fields, the
+analytic and empirical optima agreed to within a level or two where
+the empirical estimate was stable, and the band within 2 percent of
+the maximum spanned a factor of 3–6 in \(L\).  <strong>That
+optimum usually lies below the range floor</strong>: on 20 simulated fields
+of 900 points the curve read from the floor up was highest at the
+floor on 19.
+<code><a href="select_resolution.html">select_resolution()</a></code> therefore reads it at the levels at or
+above the floor (its <code>range_floor</code> argument), and what it
+returns is then the floor, which is a level of every ladder the
+profile builds: the coarsest
+count the range allows, with the range choosing and not the curve.
+Read the flat region, not the argmax.  The domain term is taken over
+the convex hull the area is measured on, so rotating the layer does
+not move it.  <code>NA</code> without a usable variogram, and when the
+variogram's range was rejected (see <code>sac</code>).</p></dd>
+
+<dt><code>loo</code></dt>
+<dd><p>With an <code>estimate</code>: the leave-one-out mean
+squared error of that cell value (lower is better).  It estimates the
+squared error of predicting one further observation, at a location
+drawn the way the data's locations were, by the value of the cell it
+falls in.  That error depends on the cell value, so the column is
+computed for the estimate the profile is given and for no other.
+Each scored row of the layer is predicted by the value of its cell
+computed without it, in the cell of its nearest centre, which is the
+cell the seeds will build.  Under <code>"mean"</code> a row in a cell of
+two or more is predicted by the mean of the others, and a row alone
+in its cell by the mean of the cell of its nearest other scored row.
+Under <code>"pooled"</code> the cell's mean and its own weight are computed
+again without the row; the spread inside the cells, the spread
+between a cell and its target and the targets are held; and a cell
+left empty takes its target.  It needs no variogram.  It describes
+locations among the observations and says nothing of a location away
+from them: it is a criterion for comparing levels where data are
+near, not an estimate of the error of a map.  <code>loo_se</code> is the
+standard error, over rows, of that level's mean squared error.  It is
+not the standard error of a difference between two levels, whose
+errors come from the same rows.  <code>scored_per_cell</code> counts the
+rows <code>loo</code> read, every scored row of the layer, over the cells
+that hold one; <code>cell_resp_mean</code> counts the rows the other
+response criteria read, which are the subsample's when the cells are
+fitted to one.  <strong>In the simulation described under
+"Observations per cell", on a ladder of the seven sizes 18 to 2, its
+minimum was at the finest size on 176 of 200 layers for pooled values
+and on none for plain means</strong>: for pooled values a size sets the count,
+and <code>select_resolution(criterion = "size")</code> reads it.</p></dd>
 
 
 </dl><p><code>cp</code> and <code>reliability</code> answer different questions: how well the
 cells represent the field, and whether the cell values are distinguishable
 from noise.  They can disagree, and both are shown so the choice between
 them is made knowingly.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="conditions">Conditions<a class="anchor" aria-label="anchor" href="#conditions"></a></h2>
+
+
+<p>What changes the meaning of a result is raised as an R warning with a
+class, so <code><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch()</a></code>, <code><a href="https://rdrr.io/r/base/conditions.html" class="external-link">withCallingHandlers()</a></code> and
+<code>options(warn = 2)</code> see it without matching message text; the rest
+is logged (see <code><a href="spatialkit_quiet.html">spatialkit_quiet</a></code>).</p><dl><dt><code>spatialkit_not_supported</code></dt>
+<dd><p><code>resolution_profile()</code>:
+<code>supported</code> is <code>FALSE</code>, because the range floor exceeds the
+ceiling or because fewer than two cells meet <code>min_cell_n</code>.</p></dd>
+
+<dt><code>spatialkit_response_ceiling</code></dt>
+<dd><p><code>resolution_profile()</code>:
+rows that are not scored (no response, or with <code>predictor_vars</code>
+a predictor missing) lowered the ceiling.  The message names the
+bound in force, <code>min_cell_n</code> or, on a subsample, <code>sample_n</code>;
+the condition carries <code>n</code>, <code>n_response</code>, <code>ceiling</code>,
+<code>ceiling_from</code>, <code>n_sample</code> and <code>n_scored</code>.</p></dd>
+
+<dt><code>spatialkit_constant_response</code></dt>
+<dd><p><code>resolution_profile()</code>:
+the scored variable is constant to within rounding (a response the
+predictors fit exactly leaves such residuals), so <code>cp</code>,
+<code>moran_i</code> and <code>moran_z</code> are <code>NA</code> at every level.</p></dd>
+
+<dt><code>spatialkit_empty_cells</code></dt>
+<dd><p><code>resolution_profile()</code>,
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> under <code>partition =
+    "density"</code>: a centre holds no point, so there are fewer occupied cells
+than the count.  A centre that loses its points stays where it is, and
+the start that is kept is the one with the lowest sum, whether or not
+all its centres hold points.  It happens at high counts, mostly from
+<code>init = "random"</code>.  On simulated layers of 800 points (in 4
+clusters, in 28, and uniform; 20 of each) no partition into 80 cells
+or fewer had such a centre.  At 400 cells, from random starts with
+the best of 10 kept, 2, 5 and 1 of the 20 layers had one; from
+k-means++ starts none of 840 partitions at 40 to 600 cells had one,
+though it can happen.  The condition carries <code>level</code>, the count,
+and <code>empty</code>.</p></dd>
+
+<dt><code>spatialkit_not_converged</code></dt>
+<dd><p><code>resolution_profile()</code>,
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> and
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, for every call except the
+plain k-means each has always run: the start that was kept was cut
+off at the iteration limit, so its centres are those of the last step
+and a longer run can still move points between cells.  The condition
+carries <code>level</code> (the count; for a profile every level it
+happened at), <code>iter</code> and <code>iter_max</code>.  Raise
+<code>iter_max</code> (<code>kmeans_iter</code> in
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>).</p></dd>
+
+<dt><code>spatialkit_partition_unused</code></dt>
+<dd><p><code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>
+and <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code>, given a profile or a
+<code><a href="select_resolution.html">select_resolution()</a></code> result together with a <code>partition</code>,
+an <code>init</code> or density settings other than those the profile was
+built with: the scored centres are returned, and what the call asked
+for is not used.  The
+condition carries <code>kind</code> and <code>init</code>, those of the centres
+returned.</p></dd>
+
+<dt><code>spatialkit_bound_chosen</code></dt>
+<dd><p><code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>,
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> and
+<code><a href="build_tessellation.html">build_tessellation()</a></code>, given a profile or a
+<code><a href="select_resolution.html">select_resolution()</a></code> result whose optimum sits on a bound of
+the ladder: the bound chose the count.  The condition carries
+<code>edge</code>, <code>criterion</code> and <code>n</code>.</p></dd>
+
+<dt><code>spatialkit_no_structure</code></dt>
+<dd><p>The same functions, given a count
+whose <code>structured</code> is <code>FALSE</code>: one cell does as well, so
+the count is not identified.  A count set by a size stands, since no
+criterion chose it, and the warning then says that the cell values
+will say little that one mean for the layer does not.
+<code><a href="summarize_by_cell.html">summarize_by_cell</a>(estimate = "pooled")</code> raises the class
+for its own cells.</p></dd>
+
+<dt><code>spatialkit_no_elbow</code></dt>
+<dd><p><code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>:
+the WSS curve has no elbow, or the ladder is too short to show one,
+so the count returned is the ladder's and not a finding.  The
+condition carries <code>k</code>, <code>sag</code> and <code>structured</code>.</p></dd>
+
+<dt><code>spatialkit_diagnostic_ranking</code></dt>
+<dd><p><code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>
+under <code>criterion = "morans_i"</code> or <code>"combined"</code>: Moran's z
+of the cell means, a diagnostic and not a count rule, ordered the
+candidates returned.  The condition carries <code>k</code>,
+<code>criterion</code>, <code>first_computable</code>, <code>window</code> and
+<code>upgraded</code>.</p></dd>
+
+<dt><code>spatialkit_ladder_unused</code></dt>
+<dd><p><code>resolution_profile()</code>: a
+numeric <code>obs_per_cell</code> sets the ladder, and the caller also
+supplied <code>n_levels</code>, <code>min_cell_n</code>, <code>sample_n</code> or
+<code>range_floor = TRUE</code>, which are then not read.  The condition
+carries <code>unused</code> (the argument names) and <code>obs_per_cell</code>.</p></dd>
+
+<dt><code>spatialkit_size_not_reached</code></dt>
+<dd><p><code>resolution_profile()</code>
+on a ladder of sizes: a size does not give the count it asks for.
+Either a size given as a number gives fewer than two cells while a
+finer one does not, and its level is 2 (<code>reason</code> is
+<code>"fewer than two cells"</code>); or a size asks for more cells than
+k-means can place, and its level is the most that can (<code>reason</code>
+is <code>"more cells than can be placed"</code>).  The condition carries
+<code>obs_per_cell</code>,
+<code>wanted</code>, <code>used</code> and <code>reason</code>.  When the finest size
+gives fewer than two cells the warning is
+<code>spatialkit_not_supported</code>, with <code>obs_per_cell</code> among its
+fields and <code>min_cell_n</code> <code>NA</code>; and
+<code>spatialkit_response_ceiling</code> is not raised on such a ladder,
+since a size already counts the rows with a response.</p></dd>
+
+<dt><code>spatialkit_repeated_locations</code></dt>
+<dd><p><code>resolution_profile()</code>
+with an <code>estimate</code>: scored rows share a location.  Each row is
+left out alone and the others at its location stay, so <code>loo</code>
+then describes a further observation at a place already observed.
+Raised once, after the levels are scored, and not when <code>loo</code> is
+<code>NA</code> at every level.  The condition carries <code>n</code> (the rows
+that share a location), <code>total</code> (the rows <code>loo</code> read) and
+<code>column</code>.</p></dd>
+
+<dt><code>spatialkit_moran_skipped</code></dt>
+<dd><p><code>resolution_profile()</code>
+with a level of more than 5,000 cells, on any ladder, when
+<span class="pkg">FNN</span> or <span class="pkg">Matrix</span> is not installed: <code>moran_i</code> and
+<code>moran_z</code> are <code>NA</code> at a level where more than 5,000 cells
+hold a scored row, and every other column is computed.  Raised once,
+before the first fit, when such a level can occur: the cells that
+hold a scored row are counted after a level's fit, so where rows
+without a response leave fewer of them the two columns are computed
+after all.  The condition carries <code>limit</code>, <code>levels</code> (the
+levels above the limit) and <code>missing</code>.</p></dd>
+
+
+</dl><p>Two refusals are errors with a class: <code>spatialkit_diagnostic_criterion</code>
+(<code>select_resolution(criterion = "moran_z")</code> without
+<code>diagnostic = TRUE</code>) and <code>spatialkit_no_default_criterion</code> (a
+profile passed as a cell count whose <code>cp</code> is <code>NA</code> at every
+level while another criterion is finite).  The remaining warnings of
+these functions (points dropped, a variogram that gives <code>cp</code> no
+nugget, a zero nugget, a variogram of another variable) are R warnings
+without a class; rows left out for a missing response, a rising WSS
+curve and a subsample too small to reach the floor are logged only.</p>
+<p>A third refusal is an error of class <code>spatialkit_work_limit</code>:
+<code>resolution_profile()</code> stops before a step whose count of
+comparisons is above a limit.  The condition carries <code>work</code> (the
+count), <code>limit</code> and <code>what</code> (the step).  On a ladder that
+<code>obs_per_cell</code> sets, the count of cells grows with the rows, so two
+costs are bounded before the variogram is estimated and before any fit.
+The fits: the points times the cells of
+the finest level times <code>nstart</code> may not pass
+<code>getOption("spatialkit.fit_work_max", 1e10)</code>
+(<code>what = "partition fit"</code>; the condition also carries <code>kind</code>,
+<code>init</code>, <code>nstart</code> and <code>fnn</code>).  That product counts the
+step in which every point is compared with every centre, which
+<code>partition = "kmeans"</code> has in every pass and in a k-means++ start,
+and <code>partition = "density"</code> has in a k-means++ start.  Without
+<span class="pkg">FNN</span> the density kind compares every point with every centre in
+every pass, and the product is multiplied by <code>iter_max</code>; with
+<span class="pkg">FNN</span> and <code>init = "random"</code> it has no such step and nothing is
+counted.  The density kind's weights: without <span class="pkg">FNN</span> they come from a
+search that compares every pair of distinct locations, and the square of
+their number may not pass <code>getOption("spatialkit.exact_pairs_max",
+2e9)</code> (<code>what = "density weights"</code>); <code>density_power = 0</code> has no
+weights and no such search.  With an <code>estimate</code> and without
+<span class="pkg">FNN</span>, on any ladder, the same limit bounds the three exact searches
+the estimate's columns make: each scored row's nearest centre, each cell's
+nearest cells, and, under <code>"mean"</code>, the nearest other location of a
+row alone in its cell.  The result of every search is the same with and
+without <span class="pkg">FNN</span>.</p>
+<p>The warnings of the pooled values and of the count record, which
+<code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> raises, are listed under "Conditions" on
+its page.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>
@@ -411,6 +1218,7 @@ integer-vector interface; <code><a href="build_tessellation.html">build_tessella
 and <code>n</code>.</p>
 <p>Other aggregation:
 <code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code>,
+<code><a href="cell_values_at.html">cell_values_at()</a></code>,
 <code><a href="determine_optimal_levels.html">determine_optimal_levels()</a></code>,
 <code><a href="kriging_adequacy.html">kriging_adequacy()</a></code>,
 <code><a href="select_resolution.html">select_resolution()</a></code>,
@@ -423,54 +1231,102 @@ and <code>n</code>.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"gstat"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
 <span class="r-in"><span>  <span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://r-spatial.github.io/sf/" class="external-link">sf</a></span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="co"># An exponential field with range parameter 200 (true effective range</span></span></span>
-<span class="r-in"><span>  <span class="co"># 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill: enough</span></span></span>
-<span class="r-in"><span>  <span class="co"># noise for Mallows' Cp to have an interior optimum rather than descend</span></span></span>
-<span class="r-in"><span>  <span class="co"># to the ceiling.</span></span></span>
+<span class="r-in"><span>  <span class="co"># 600 m) on a 1 km square, with a nugget of 0.6 on a unit sill.</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">4</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">n</span> <span class="op">&lt;-</span> <span class="fl">400</span></span></span>
 <span class="r-in"><span>  <span class="va">xy</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>x <span class="op">=</span> <span class="fl">5e5</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span>, y <span class="op">=</span> <span class="fl">5e6</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="va">n</span>, <span class="fl">0</span>, <span class="fl">1000</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">D</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/dist.html" class="external-link">dist</a></span><span class="op">(</span><span class="va">xy</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">xy</span><span class="op">$</span><span class="va">z</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chol.html" class="external-link">chol</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">exp</a></span><span class="op">(</span><span class="op">-</span><span class="va">D</span> <span class="op">/</span> <span class="fl">200</span><span class="op">)</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/diag.html" class="external-link">diag</a></span><span class="op">(</span><span class="fl">0.6</span>, <span class="va">n</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://rdrr.io/r/base/matmult.html" class="external-link">%*%</a></span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">pts</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sf.html" class="external-link">st_as_sf</a></span><span class="op">(</span><span class="va">xy</span>, coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># n_levels asks for the ladder of counts.</span></span></span>
 <span class="r-in"><span>  <span class="va">prof</span> <span class="op">&lt;-</span> <span class="fu">resolution_profile</span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, n_levels <span class="op">=</span> <span class="fl">12</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span>               <span class="co"># one row per level; print() because only the</span></span></span>
 <span class="r-in"><span>                            <span class="co"># last value of a braced block is shown</span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="st">"cp"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">$</span><span class="va">floor</span>   <span class="co"># the range floor: reported, not applied</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu"><a href="select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="st">"cp"</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span>  <span class="co"># The default profile: one level at 4.5 rows per cell, scored for</span></span></span>
+<span class="r-in"><span>  <span class="co"># pooled values, in density-weighted cells, with no variogram.</span></span></span>
+<span class="r-in"><span>  <span class="va">prof1</span> <span class="op">&lt;-</span> <span class="fu">resolution_profile</span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">prof1</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof1</span><span class="op">)</span>   <span class="co"># the count the size gives</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Resolution profile: 12 levels on 400 points</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   ladder      : 4 to 44 cells (floor 4 from range 517, ceiling 44 from min_cell_n = 9)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   ladder      : 2 to 44 cells (floor 4 from range 517, not applied, ceiling 44 from min_cell_n = 9)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   variogram   : nugget 0.582, partial sill 0.819, range 517</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   one cell    : rss 490, cp 1.23 (one mean for the layer; a level has to beat it)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   estimate    : pooled toward the 8 nearest cells; loo on 400 rows of the layer; one cell: loo 1.23</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   elbow       : none; the WSS curve falls as it does with no cluster structure</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       4 16700000   0.000836    NA         92          97.5              409 480</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       5 13900000   0.032200    NA         56          72.0              365 445</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       6 11500000   0.055800    NA         58          65.5              348 428</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       8  8090000   0.177000    NA         33          50.5              284 433</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      10  6240000   0.130000    NA         34          37.5              246 386</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      12  5130000   0.121000    NA         19          33.5              223 373</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      15  4010000   0.119000    NA         20          27.0              196 364</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      18  3300000   0.106000    NA         14          23.5              180 343</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      23  2510000   0.099100    NA         10          18.0              156 358</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      28  2010000   0.127000    NA          8          14.0              136 329</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      35  1490000   0.172000    NA          7          11.0              120 328</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>      44  1140000   0.145000    NA          5           9.0              104 327</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     cp moran_i moran_z reliability</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  1.210      NA      NA       0.863</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  1.130      NA      NA       0.860</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  1.090      NA      NA       0.855</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  1.110      NA      NA       0.844</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.993 -0.1140 -0.0764       0.833</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.968 -0.0241  1.0700       0.821</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.954 -0.0424  0.4020       0.805</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.909 -0.0256  0.4340       0.789</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.963  0.0635  1.4600       0.765</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.904  0.0643  1.3800       0.742</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.921  0.1930  3.2500       0.714</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  0.945  0.2630  4.4500       0.681</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution by cp: 28 cells</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   flat region : 18, 28 to 35 (3 of 12 levels)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       2 41800000   0.00e+00    NA        182         200.0              646 482</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       3 25400000   6.21e-05    NA        122         134.0              473 480</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       4 16900000   2.80e-01    NA         78         105.0              410 469</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       5 14400000   4.31e-02    NA         64          78.0              359 457</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       6 11600000   8.99e-02    NA         56          68.0              348 436</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       8  8320000   1.33e-01    NA         40          49.5              297 437</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      11  5670000   1.07e-01    NA         30          34.0              229 381</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      14  4480000   1.14e-01    NA         19          29.0              211 370</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      19  3350000   3.71e-03    NA         11          20.0              175 368</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      25  2300000   1.82e-01    NA          9          16.0              153 345</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      33  1820000   1.08e-01    NA          6          12.0              133 334</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      44  1260000   2.74e-02    NA          5           9.0              110 297</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     cp moran_i moran_z reliability cells_resp cell_resp_mean scored_per_cell</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.210      NA      NA       0.839          2         200.00          200.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.210      NA      NA       0.861          3         133.00          133.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.180      NA      NA       0.863          4         100.00          100.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.160      NA      NA       0.860          5          80.00           80.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.110      NA      NA       0.855          6          66.70           66.70</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.120      NA      NA       0.844          8          50.00           50.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.984 -0.0566   0.812       0.827         11          36.40           36.40</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.965 -0.0429   0.496       0.810         14          28.60           28.60</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.974  0.0195   1.020       0.784         19          21.10           21.10</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.935  0.1240   2.240       0.756         25          16.00           16.00</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.931  0.1610   2.710       0.722         33          12.10           12.10</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.871  0.2500   4.280       0.681         44           9.09            9.09</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    loo loo_se share_alone own_weight</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.220 0.0987           0      0.930</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.220 0.0984           0      0.843</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.190 0.0972           0      0.884</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.170 0.0891           0      0.890</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.120 0.0848           0      0.917</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.130 0.0911           0      0.871</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.000 0.0716           0      0.904</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.988 0.0695           0      0.905</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  1.010 0.0706           0      0.858</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.973 0.0697           0      0.842</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.970 0.0706           0      0.790</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.905 0.0631           0      0.747</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution by cp: 44 cells</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   flat region : 44 (1 of 12 levels)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   note        : the optimum is the support ceiling (n / min_cell_n); the</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                 bound is choosing, not the criterion. Lower min_cell_n to see</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                 whether the criterion keeps going.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   note        : cp scores plain means, and this profile's estimate is the</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                 pooled value; criterion = "size" is the rule for it.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution profile: 1 levels on 400 points</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   ladder      : 89 cells (obs_per_cell = 4.5 on the 400 rows with a response; centres fitted to every row; floor 2 (no range))</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   variogram   : none fitted: a size ladder fits one only when `sac` is given (cp and reliability are NA)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   one cell    : rss 490 (one mean for the layer; a level has to beat it)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   estimate    : pooled toward the 8 nearest cells; loo on 400 rows of the layer; one cell: loo 1.23</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  levels    wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      89 519000     0.0338    NA          1             4             62.3 253</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  cp moran_i moran_z reliability cells_resp cell_resp_mean scored_per_cell   loo</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  NA   0.402    8.53          NA         89           4.49            4.49 0.896</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  loo_se share_alone own_weight</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  0.0636       0.005      0.447</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Resolution by size: 89 cells</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   size        : 4.5 rows per cell asked (obs_per_cell); 400 rows / 89 cells = 4.49</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   estimate    : pooled toward the 8 nearest cells</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   at this size: 0.5% of the rows are alone in their cell; median own weight 0.45</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   loo         : 0.896 (one cell for the layer: 1.23)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   note        : the count is set by obs_per_cell = 4.5, the caller's choice;</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                 no criterion chose it.</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

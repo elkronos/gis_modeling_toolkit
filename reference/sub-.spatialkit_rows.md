@@ -4,12 +4,12 @@
 and
 [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
 return a layer with an attribute recording what happened to its rows
-(`"dropped"` and `"ties"` respectively). Those records describe the rows
-the layer was built with, and `[` on an `sf` object copies attributes
-through unchanged, which would leave a subset reporting its parent's
-numbers for a different set of rows. Subsetting therefore returns a
-plain layer with the record removed, and so do the dplyr verbs that
-select or reorder rows
+(`"dropped"` for the first; `"ties"` and `"unassigned"` for the second).
+Those records describe the rows the layer was built with, and `[` on an
+`sf` object copies attributes through unchanged, which would leave a
+subset reporting its parent's numbers for a different set of rows.
+Subsetting therefore returns a plain layer with the record removed, and
+so do the dplyr verbs that select or reorder rows
 ([`filter()`](https://rdrr.io/r/stats/filter.html), `slice()`,
 `arrange()`, `distinct()`); read the record from the layer the function
 returned, before subsetting it. Binding such layers
@@ -55,8 +55,9 @@ keeps the first one's record and class, so the record then describes
 only the first input's rows: its `n_rows` no longer equals
 [`nrow()`](https://rdrr.io/r/base/nrow.html) of the result. The
 package's own readers ignore a record whose `n_rows` does not match;
-when reading `attr(x, "dropped")` or `attr(x, "ties")` yourself from a
-layer that has been through such steps, check it the same way.
+when reading `attr(x, "dropped")`, `attr(x, "ties")` or
+`attr(x, "unassigned")` yourself from a layer that has been through such
+steps, check it the same way.
 
 ## See also
 
@@ -74,7 +75,8 @@ dat <- st_as_sf(
              resp = c(1, 2, NA, 4, 5), pred = c(1, 2, 3, 4, Inf)),
   coords = c("x", "y"), crs = 32632
 )
-clean <- prep_model_data(dat, "resp", "pred")
+clean <- prep_model_data(dat, "resp", "pred")   # warns: 2 of 5 rows dropped
+#> Warning: prep_model_data(): dropped 2 of 5 row(s) (40.0%): 1 with a missing value, 1 with a non-finite value, 0 with an empty or non-finite geometry. Rows affected by column: resp 1, pred 1. The response 'resp' averages 5 in the dropped rows that have one and 2.333 in the kept rows, a difference of 1.46 SD. The fit uses the 3 row(s) that remain; attr(, "dropped") lists the rows removed.
 attr(clean, "dropped")$n          # 2
 #> [1] 2
 attr(clean[1:2, ], "dropped")     # NULL -- the record does not follow

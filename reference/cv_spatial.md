@@ -70,7 +70,8 @@ cv_spatial(
 
 - k:
 
-  Number of folds.
+  Number of folds to build when `folds` is `NULL`; not read when `folds`
+  is supplied.
 
 - seed:
 
@@ -114,13 +115,17 @@ cv_spatial(
 
 - block_size:
 
-  Optional minimum block edge length for spatial CV blocks (projected
-  CRS units).
+  Optional minimum block edge length (projected CRS units) for the
+  blocks built when `folds` is `NULL`; see
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
+  Beside supplied `folds` it has nothing to size and raises a warning
+  (class `spatialkit_fold_args_ignored`).
 
 - auto_range:
 
   Logical. If `TRUE` and `folds` is `NULL`, estimate the autocorrelation
-  range and use it as the minimum block size. Default `FALSE`.
+  range and use it as the minimum block size. Default `FALSE`. `TRUE`
+  beside supplied `folds` raises the same warning as `block_size`.
 
 - parallel:
 
@@ -129,11 +134,9 @@ cv_spatial(
   [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
   (macOS / Linux; falls back to sequential on Windows). If an integer \>
   1, use that many cores. Default `FALSE` (sequential). A learner that
-  runs OpenMP code (GWmodel, or an xgboost built with GNU libgomp) can
-  hang the forked workers once it has run in the session; keep such a
-  `fit_fn` sequential, as
-  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
-  does.
+  runs OpenMP code (a function of GWmodel, or an xgboost built with GNU
+  libgomp) can hang the forked workers once it has run in the session;
+  keep such a `fit_fn` sequential.
 
 - metrics:
 
@@ -260,6 +263,33 @@ vectors but is also pooled.
 [`compare_models_cv()`](https://elkronos.github.io/gis_modeling_toolkit/reference/compare_models_cv.md)
 hands one `metrics` to every backend, so the columns are comparable
 across the rows of its `overall`.
+
+## Warnings a learner raises in every fold
+
+A warning from a fold's fit or from its
+[`predict()`](https://rdrr.io/r/stats/predict.html) reaches the caller
+as it is raised, so a learner that warns in every fold warns once per
+fold. Two groups of the package's own warnings are collected over the
+folds instead and raised once per call, under this function's name and
+with the class they had:
+
+- the two in which [`predict()`](https://rdrr.io/r/stats/predict.html)
+  on a GWR counts locations (`"spatialkit_gwr_not_estimable"` and
+  `"spatialkit_gwr_extrapolation"`), with the totals over the folds that
+  had any, as
+  [`cv_gwr()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_gwr.md)
+  raises them (see
+  [`predict.gwr_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md));
+
+- the four
+  [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+  raises about a fit, naming the folds, as
+  [`cv_bayes()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_bayes.md)
+  raises them (see **Warnings from the folds** there).
+
+With `parallel` above one core a fold's warnings are raised after the
+folds have run, once per distinct text; one of the package's own classes
+keeps its class and its fields.
 
 ## Percentage errors on responses with zeros
 

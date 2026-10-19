@@ -14,11 +14,12 @@ is the reference the threshold was derived from: the threshold is the
 largest training DI inside an outlier fence, so the curve reaches it
 exactly when no training value was fenced off and runs past it, by the
 tail the fence removed, when some were. A prediction location outside on
-a predictor dropped for having no training variance has `DI = Inf`: it
-counts in the prediction curve, which then tops out below 1, and the
-caption says how many are off the axis. A location with a missing
-predictor (`DI = NA`) is neither inside nor outside; it is left out of
-the curve and the caption counts it.
+a predictor dropped for having no training variance, or under
+`categorical = "indicator"` on a level no training row has, has
+`DI = Inf`: it counts in the prediction curve, which then tops out below
+1, and the caption says how many are off the axis. A location with a
+missing predictor (`DI = NA`) is neither inside nor outside; it is left
+out of the curve and the caption counts it.
 
 ## Usage
 
@@ -47,6 +48,16 @@ plot(x, type = c("ecdf", "histogram"), ...)
 ## Value
 
 A `ggplot` object.
+
+## Details
+
+When location has an index of its own (a `gwr_fit`, a `bayesian_fit`, or
+`coords = "yes"`; see
+[`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)),
+the curves and the dashed line are the predictor index alone. The
+subtitle then counts three things: the locations beyond the predictor
+threshold, those beyond the location threshold, and those outside the
+area of applicability, which is either.
 
 ## See also
 

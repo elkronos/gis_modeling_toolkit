@@ -103,7 +103,10 @@ loop over <code><a href="https://rdrr.io/r/base/Random.html" class="external-lin
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An sf object of <code>k</code> random POINTs (fewer only in the degenerate
 case above), with <code>seed_id</code> and <code>method = "random"</code> columns matching
-<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>.</p>
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>, and <code>attr(, "cover")</code>, the polygons of <code>boundary</code>:
+<code><a href="build_tessellation.html">build_tessellation()</a></code> clips the cells to it (grown by 2 percent of its
+diagonal) when no <code>boundary</code> is passed there, so the cells fill the area
+the seeds were drawn in and not only the seeds' own hull.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

@@ -184,11 +184,14 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
     coords = c("x", "y"), crs = 32632
   )
   # Cells from the points, the response aggregated onto them, and the map
-  # shaded by the cell mean rather than by an arbitrary ID.
+  # shaded by the cell mean rather than by an arbitrary ID.  Each cell
+  # holds one point, so there is nothing to pool: estimate = "mean".
   tess  <- build_tessellation(pts, method = "voronoi", quiet = TRUE)
   cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                             response_var = "z", cells_sf = tess$cells)
+                             response_var = "z", cells_sf = tess$cells,
+                             estimate = "mean")
   plot_tessellation_map(cells, features_sf = pts, fill_col = "resp_mean_z",
                         legend_title = "mean z")
 }
+#> assign_features_to_polygons(): `polygons_sf` has no 'poly_id' column; the polygon IDs are read from its 'cell_id' column and returned as `poly_id`.
 ```

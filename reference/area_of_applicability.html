@@ -67,13 +67,15 @@ cross-validated performance estimate can be expected to hold.</p>
 <span>  model <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  train_sf <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  predictor_vars <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  weights <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  weights <span class="op">=</span> <span class="st">"auto"</span>,</span>
 <span>  folds <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  threshold <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  normalizer_max_n <span class="op">=</span> <span class="fl">5000L</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">123L</span>,</span>
 <span>  chunk_size <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  use_fnn <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"FNN"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>  use_fnn <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"FNN"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
+<span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"yes"</span>, <span class="st">"no"</span><span class="op">)</span>,</span>
+<span>  categorical <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"refuse"</span>, <span class="st">"indicator"</span>, <span class="st">"drop"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -84,16 +86,20 @@ cross-validated performance estimate can be expected to hold.</p>
 <dl><dt id="arg-newdata">newdata<a class="anchor" aria-label="anchor" href="#arg-newdata"></a></dt>
 <dd><p>Prediction locations: an <code>sf</code> object (typically from
 <code><a href="predict_surface.html">predict_surface</a></code>) or a data.frame, carrying the predictor
-columns. For a model fitted with <code>include_coords = TRUE</code> an
-<code>sf</code> object is required, non-<code>POINT</code> geometry is reduced to
-representative points, and a CRS mismatch with the training data is
-reconciled; see <em>Models fitted with the coordinates as predictors</em>.</p></dd>
+columns. When location is measured (a <code>gwr_fit</code>, a
+<code>bayesian_fit</code>, a forest fitted with <code>include_coords = TRUE</code>,
+or <code>coords = "yes"</code>) an <code>sf</code> object is required,
+non-<code>POINT</code> geometry is reduced to representative points, and a CRS
+mismatch with the training data is reconciled; see <em>Models whose
+predictions depend on location</em>.</p></dd>
 
 
 <dt id="arg-model">model<a class="anchor" aria-label="anchor" href="#arg-model"></a></dt>
 <dd><p>A fitted <code>spatial_fit</code>, supplying the training data and
-predictor names. Optional if <code>train_sf</code> and <code>predictor_vars</code> are
-given directly, which lets this be used with any model.</p></dd>
+predictor names, the importance <code>weights = "auto"</code> reads, and
+whether its predictions depend on location. Optional if <code>train_sf</code>
+and <code>predictor_vars</code> are given directly, which lets this be used
+with any model.</p></dd>
 
 
 <dt id="arg-train-sf">train_sf<a class="anchor" aria-label="anchor" href="#arg-train-sf"></a></dt>
@@ -105,7 +111,13 @@ given directly, which lets this be used with any model.</p></dd>
 
 
 <dt id="arg-weights">weights<a class="anchor" aria-label="anchor" href="#arg-weights"></a></dt>
-<dd><p>Optional named numeric vector of predictor importances. Any
+<dd><p><code>"auto"</code> (default), <code>NULL</code>, or a named numeric
+vector of predictor importances. <code>"auto"</code> uses
+<code>pmax(model$info$importance, 0)</code> when <code>model</code> carries a finite
+importance with at least one positive value, naming every predictor in
+use, from a model with out-of-bag skill; otherwise every predictor counts
+equally and a logged note says why (see <em>Weights</em>). <code>NULL</code> is
+the explicit request for equal weights. For a vector of your own, any
 positive scale works. When <code>model</code> was fitted with
 <code>include_coords = TRUE</code>, the coordinates <code>"..x"</code> and
 <code>"..y"</code> are measured as predictors too (see below), and you are not
@@ -117,10 +129,10 @@ coordinate columns. Weights must be finite and non-negative, so pass
 permutation importance as <code>pmax(importance, 0)</code>. (A forest with no
 out-of-bag rows, <code>replace = FALSE</code> with <code>sample_fraction = 1</code>,
 has <code>NaN</code> importance, which <code><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmax()</a></code> keeps and which is
-refused; refit it with out-of-bag rows or use <code>weights = NULL</code>.)
+refused when passed by hand; <code>"auto"</code> uses equal weights for it.)
 <code>pmax(importance, 0)</code> is all zero when the model found no
-predictor useful, and then the weights cannot say
-anything: with a single predictor any weight gives the same index and zero
+predictor useful, and then the weights cannot say anything: with a
+single predictor any weight gives the same index and zero
 is accepted; with several, all of them are weighted equally, as with
 <code>weights = NULL</code>, and a warning says so. The coordinate default
 above is the mean of the supplied weights, so a zero weight on the only
@@ -144,7 +156,9 @@ are the points a fit reduced them to.</p></dd>
 
 
 <dt id="arg-threshold">threshold<a class="anchor" aria-label="anchor" href="#arg-threshold"></a></dt>
-<dd><p>Optional numeric override for the DI threshold.</p></dd>
+<dd><p>Optional numeric override for the DI threshold of the
+predictor index. The location index, when there is one, always takes its
+threshold from the rule.</p></dd>
 
 
 <dt id="arg-normalizer-max-n">normalizer_max_n<a class="anchor" aria-label="anchor" href="#arg-normalizer-max-n"></a></dt>
@@ -164,46 +178,101 @@ at least 1; a fractional value is truncated to a whole number of rows.</p></dd>
 
 <dt id="arg-use-fnn">use_fnn<a class="anchor" aria-label="anchor" href="#arg-use-fnn"></a></dt>
 <dd><p>Use <span class="pkg">FNN</span> for nearest-neighbour search when available.
-Exposed so the dense fallback can be tested.</p></dd>
+Exposed so the dense fallback can be tested. The two paths return the
+same distances: the dense one searches with a fast formula and then
+recomputes the nearest distance exactly, so an exact copy of a training
+row is at distance 0 on both.</p></dd>
+
+
+<dt id="arg-coords">coords<a class="anchor" aria-label="anchor" href="#arg-coords"></a></dt>
+<dd><p>Whether location is measured: <code>"auto"</code> (default)
+measures it for a model whose predictions depend on it (a
+<code>gwr_fit</code>, a <code>bayesian_fit</code>, a forest fitted with
+<code>include_coords = TRUE</code>) and not otherwise; <code>"yes"</code> measures
+it whatever the model, and with no <code>model</code>; <code>"no"</code> never
+does, and logs a caution for a model that depends on it. See
+<em>Models whose predictions depend on location</em>.</p></dd>
+
+
+<dt id="arg-categorical">categorical<a class="anchor" aria-label="anchor" href="#arg-categorical"></a></dt>
+<dd><p>What to do with factor and character predictors:
+<code>"refuse"</code> (default) stops with a message naming them and the two
+alternatives; <code>"indicator"</code> codes each level as a 0/1 column and
+marks a prediction row on a level no training row has as outside
+(<code>DI = Inf</code>); <code>"drop"</code> computes the index on the other
+predictors and logs which were left out. See <em>Limitations</em> for the
+scaling <code>"indicator"</code> uses.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An object of class <code>aoa</code>: a list with</p><ul><li><p><code>aoa</code>: <code>newdata</code> with a numeric <code>DI</code> column
-and a logical <code>AOA</code> column added. This is the object the
-computation ran on, which for a coordinate-using model is
-<code>newdata</code> after pointizing, CRS reconciliation and the addition
-of the <code>"..x"</code> and <code>"..y"</code> columns. A row whose predictors
-are not all finite gets <code>NA</code> in both columns, and a row outside
-the training range of a predictor in <code>dropped_vars</code> gets
-<code>DI = Inf</code> and <code>AOA = FALSE</code> (see <em>Limitations</em>).</p></li>
+and a logical <code>AOA</code> column added, and between them a numeric
+<code>DI_location</code> column when location has an index of its own.
+For a forest fitted with <code>include_coords = TRUE</code> it is the
+object the computation ran on: <code>newdata</code> after pointizing, CRS
+reconciliation and the addition of the <code>"..x"</code> and <code>"..y"</code>
+columns. With a location index it is <code>newdata</code> as passed. A
+row whose predictors are not all finite gets <code>NA</code> in <code>DI</code>,
+and a row outside the training range of a predictor in
+<code>dropped_vars</code>, or on a level no training row has, gets
+<code>DI = Inf</code> and <code>AOA = FALSE</code> (see <em>Limitations</em>).
+<code>AOA</code> is <code>DI &lt;= threshold</code>, and with a location index
+also <code>DI_location &lt;= location$threshold</code>: a row outside on
+either index is <code>FALSE</code>, and a row with one index missing and
+the other inside is <code>NA</code>.</p></li>
 <li><p><code>threshold</code>: the DI cut-off used.</p></li>
 <li><p><code>train_DI</code>: the training points' own DI values.</p></li>
 <li><p><code>normalizer</code>: the mean pairwise training distance.</p></li>
 <li><p><code>weights</code>: the weight vector actually applied, named by
 <code>predictor_vars</code>.</p></li>
 <li><p><code>predictor_vars</code>: the predictors used, including
-<code>"..x"</code>/<code>"..y"</code> when the model uses coordinates and
-excluding <code>dropped_vars</code>.</p></li>
+<code>"..x"</code>/<code>"..y"</code> when a forest uses the coordinates and
+excluding <code>dropped_vars</code> and, under
+<code>categorical = "drop"</code>, <code>categorical_vars</code>.</p></li>
 <li><p><code>dropped_vars</code>: predictors dropped for negligible
 variance.</p></li>
 <li><p><code>scaling</code>: a list with <code>center</code> and <code>scale</code>,
 each named by <code>predictor_vars</code>: the training means and standard
 deviations the index is computed in, so a location's DI can be
-traced to the predictor that put it outside.</p></li>
+traced to the predictor that put it outside. A predictor coded as
+indicators has one entry per level, named
+<code>"&lt;predictor&gt;=&lt;level&gt;"</code>.</p></li>
 <li><p><code>n_outliers</code>: the number of training DI values above the
 <code>Q3 + 1.5 * IQR</code> fence, which the default threshold rule sets
 aside (the "outlier-removed" in its name); computed whether or not
 <code>threshold</code> was supplied.</p></li>
+<li><p><code>n_duplicates</code>: with <code>folds = NULL</code>, the number of
+training rows that repeat an earlier row's predictor values exactly
+and so share its reference distance; <code>NA</code> when folds were
+supplied (see <em>Training rows with identical predictor values</em>).</p></li>
+<li><p><code>location</code>: <code>NULL</code>, or for a location index a list
+with <code>threshold</code>, <code>train_DI</code>, <code>normalizer</code> (the mean
+distance between training points, in map units, so
+<code>threshold * normalizer</code> is the cut-off as a distance),
+<code>n_duplicates</code> (training rows at an earlier row's location;
+<code>NA</code> when folds were supplied) and <code>n_outside</code> (prediction
+rows beyond the location threshold).</p></li>
+<li><p><code>categorical_vars</code>: the factor and character predictors
+found, coded or left out as <code>params$categorical</code> says.</p></li>
 <li><p><code>n_train</code>, <code>n_new</code>, <code>n_inside</code>,
 <code>n_outside</code>, <code>n_na</code>: row counts. <code>n_train</code> counts the
 training rows that survived the finite-value filter; <code>n_new</code> is
 every row of <code>newdata</code>, so
-<code>n_new = n_inside + n_outside + n_na</code>.</p></li>
+<code>n_new = n_inside + n_outside + n_na</code>, with <code>n_na</code> the
+rows whose <code>AOA</code> is <code>NA</code>.
+<code>n_outside_predictors</code> counts the rows beyond the predictor
+threshold, which is <code>n_outside</code> unless there is a location
+index.</p></li>
 <li><p><code>params</code> records the call: <code>folds_supplied</code>,
 <code>n_folds</code>, <code>folds_method</code>, <code>threshold_supplied</code>,
 <code>normalizer_max_n</code>, <code>normalizer_n_used</code>,
-<code>normalizer_subsampled</code>, <code>weights_supplied</code> and
+<code>normalizer_subsampled</code>, <code>weights_supplied</code> (the caller
+passed a vector), <code>weights_source</code> (<code>"model importance"</code>,
+<code>"supplied"</code> or <code>"equal"</code>), <code>weights_note</code> (the kind
+of importance, or why the weights are equal), <code>coords</code>
+(<code>"location index"</code>, <code>"predictors"</code> or <code>"none"</code>),
+<code>categorical</code> and
 <code>seed</code>.  <code>folds_method</code> is the <code>method</code> of a
 <code><a href="make_folds.html">make_folds()</a></code> result (<code>"block_kfold"</code>,
 <code>"random_kfold"</code>, ...), <code>"labels"</code> for a vector of fold
@@ -231,14 +300,17 @@ AOA marks where the score applies.</p>
 
 
 <p>Predictors are centred and scaled using the training data's own means and
-standard deviations, then optionally weighted by variable importance. For a
+standard deviations, then weighted by variable importance when the model
+carries one (see <em>Weights</em>). For a
 prediction point \(p\), the DI is the distance to its nearest training
 point in that space, divided by the mean pairwise distance among training
 points. The same quantity is computed for the training data itself, using
 each point's nearest neighbour <em>among the training rows of the fold
 that holds it out</em>. That means everything outside its own fold for random
 and block folds, and the smaller training set that buffered and NNDM folds
-actually leave (see the next section). The threshold is then the largest
+actually leave (see <em>The fold scheme changes the answer</em>); without
+folds it is the nearest training row with different predictor values. The
+threshold is then the largest
 training DI that is not an upper outlier, i.e. not above the fence
 <code>Q3 + 1.5 * IQR</code> of the training DI, with the quartiles of
 <code><a href="https://rdrr.io/r/stats/quantile.html" class="external-link">stats::quantile()</a></code>'s default type 7. Prediction points at or below
@@ -257,14 +329,35 @@ max(res$train_DI))</code> for an earlier result <code>res</code>.</p>
 <p>The DI is invariant to the overall scale of <code>weights</code>: the numerator
 and the normaliser carry the same factor. Importance values can be passed
 as-is.</p>
-<p>Each training point's reference is its nearest <em>other</em> training row, so
-an exact duplicate in predictor space (repeat visits to a site with static
-covariates, or covariates read off a raster coarser than the sampling) has a
-training DI of 0. Once about three quarters of the rows have a twin among
-their reference rows the threshold is 0, and only exact copies of a
-training row count as inside. That is logged as a caution; folds that keep
-the duplicates together (<code>make_folds(method = "leave_location_out",
-group_var = ...)</code>), or removing them, give the threshold its meaning back.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="training-rows-with-identical-predictor-values">Training rows with identical predictor values<a class="anchor" aria-label="anchor" href="#training-rows-with-identical-predictor-values"></a></h2>
+
+
+<p>Repeat visits to a site with static covariates, or covariates read off a
+raster coarser than the sampling, give training rows that are exact copies
+of each other in predictor space. A copy is the same point of that space,
+not a neighbour. Counted as a neighbour it gives a training DI of 0, and
+once about three quarters of the rows have one the threshold is 0 and only
+exact copies of a training row count as inside (60 sites visited 4 times
+put 30 of 200 new points inside; the same sites counted once put 188).</p>
+<p>With <code>folds = NULL</code> each training row's reference is therefore its
+nearest row with <em>different</em> values: the search runs on the distinct
+rows and every row takes its point's distance. <code>n_duplicates</code> counts
+the rows that repeat an earlier one, and a layer with none is computed
+exactly as before. The normaliser stays the mean pairwise distance over
+all the training rows, so a prediction point's DI is the same with and
+without folds.</p>
+<p>With <code>folds</code> supplied the definition is applied as it stands: a
+held-out row whose copy is on the training side of its fold has a DI of 0,
+because that hold-out did have an identical row to learn from. If the
+threshold comes out 0 that way, a warning of class
+<code>spatialkit_aoa_zero_threshold</code> gives the count, so a script or a
+cross-validation loop can catch it with
+<code>tryCatch(..., spatialkit_aoa_zero_threshold = )</code>. Folds that keep
+the copies together (<code>make_folds(method = "leave_location_out",
+group_var = ...)</code>) give the threshold its meaning back. The same applies
+to the location index when training rows share a location.</p>
     </div>
     <div class="section level2">
     <h2 id="the-fold-scheme-changes-the-answer-and-should">The fold scheme changes the answer, and should<a class="anchor" aria-label="anchor" href="#the-fold-scheme-changes-the-answer-and-should"></a></h2>
@@ -281,11 +374,54 @@ to <code><a href="cv_spatial.html">cv_spatial</a></code>. Buffered and NNDM fold
 they actually left available, not merely "everything outside the fold".</p>
     </div>
     <div class="section level2">
+    <h2 id="weights">Weights<a class="anchor" aria-label="anchor" href="#weights"></a></h2>
+
+
+<p>Meyer and Pebesma weight the predictors by the model's variable
+importance, and with the default <code>weights = "auto"</code> so does this
+function whenever <code>model</code> carries an importance that means
+something: <code>pmax(model$info$importance, 0)</code>, which a forest from
+<code><a href="fit_rf_model.html">fit_rf_model</a></code> has. Equal weights are used, with a logged
+note, when it does not: no <code>model</code>; a model with no importance
+(<code>importance = "none"</code>, a GWR, a Bayesian fit); an importance that is
+not finite (<code>NaN</code> for a forest with no out-of-bag rows); one that
+names fewer predictors than are in use; no positive value; or a forest
+with no out-of-bag skill (<code>oob_r_squared</code> missing or at most 0),
+whose positive importances are noise. <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> says which it was.
+<code>weights = NULL</code> asks for equal weights whatever the model carries.</p>
+<p>What the weights buy: with 2 predictors the forest uses and 8 it does not,
+equal weights put about 70\<!-- % of rows shifted 3 SD along a used predictor -->
+(4 times the in-sample RMSE) inside the AOA and importance weights about
+26\<!-- %; of rows shifted 4 SD along an unused predictor (error unchanged), -->
+43\<!-- % against 93\\%. What they cost: a weight multiplies the scaled column, -->
+so its square enters the distance, and a weak but real predictor is
+down-weighted by the square of its relative importance. A shift along one
+can then go unseen (94\<!-- % inside at 1.9 times the in-sample RMSE in one -->
+test, against 19\<!-- % with equal weights). -->
+<code>weights = sqrt(pmax(importance, 0))</code> is the gentler alternative: it
+kept most of the gain on used predictors and put 46\<!-- % of that weak-predictor -->
+shift inside, at the cost of 77\<!-- % in place of 93\\% inside for harmless -->
+shifts.</p>
+    </div>
+    <div class="section level2">
     <h2 id="limitations">Limitations<a class="anchor" aria-label="anchor" href="#limitations"></a></h2>
 
 
-<p>Predictors must be numeric; categorical variables are refused and never
-silently dummy-coded. Predictors whose variance is negligible <em>relative
+<p>Categorical predictors (factor or character columns) have no distance of
+their own, and by default they are refused and never silently
+dummy-coded. <code>categorical = "indicator"</code> codes each level that
+occurs in the training rows as a 0/1 column. The columns of one predictor
+share one scale, <code>sqrt(1 - sum(p^2))</code> with <code>p</code> the levels'
+shares of the training rows, so two rows on different levels are the same
+distance apart whichever levels they are, two on the same level are 0
+apart, and the predictor adds as much to the mean squared distance between
+training rows as one standardised numeric predictor. That scaling is a
+choice, not a result, which is why it is not the default. A prediction row
+on a level no training row has gets <code>DI = Inf</code>, is outside the AOA,
+and a warning gives the count. <code>categorical = "drop"</code> leaves the
+categorical predictors out and computes the index on the others; a level
+the training data never has then goes unseen.</p>
+<p>Predictors whose variance is negligible <em>relative
 to their own magnitude</em> (the test is
 <code>sd &lt; sqrt(.Machine$double.eps) * max(abs(x))</code>, so the same variable in
 metres and in gigametres is treated identically) are dropped from the
@@ -294,21 +430,64 @@ range (with the same relative tolerance) is extrapolation along a direction
 the training data never varied in: its scaled distance along it is
 infinite, so it gets <code>DI = Inf</code>, is outside the AOA, and a warning
 gives the count. A point missing that value is judged on the other
-predictors. Without <code>weights</code> every predictor counts equally, which
-overstates dissimilarity along directions the model barely uses.</p>
+predictors. With equal weights every predictor counts the same, which
+overstates dissimilarity along directions the model barely uses; see
+<em>Weights</em>.</p>
     </div>
     <div class="section level2">
-    <h2 id="models-fitted-with-the-coordinates-as-predictors">Models fitted with the coordinates as predictors<a class="anchor" aria-label="anchor" href="#models-fitted-with-the-coordinates-as-predictors"></a></h2>
+    <h2 id="models-whose-predictions-depend-on-location">Models whose predictions depend on location<a class="anchor" aria-label="anchor" href="#models-whose-predictions-depend-on-location"></a></h2>
 
 
-<p>When <code>model</code> was fitted with <code>include_coords = TRUE</code> the model
-splits on location, so the dissimilarity index has to measure location too:
-the coordinates are added to both sides as the predictors <code>"..x"</code> and
-<code>"..y"</code> and are then centred, scaled and weighted like any other
-column. Without this a prediction point far outside the training extent but
-with ordinary covariate values reads as <em>inside</em> the area of
-applicability. That is exactly the extrapolation this index exists to catch.</p>
-<p>This path needs geometry on both sides, so <code>train_sf</code> and
+<p>For three kinds of model the prediction is a function of where the point
+is, not only of its covariates, so the index has to measure location too.
+Without that a prediction point far outside the training extent but with
+ordinary covariate values reads as <em>inside</em> the area of
+applicability, which is exactly the extrapolation this index exists to
+catch. <code>coords = "auto"</code> (the default) measures location for all
+three; <code>coords = "no"</code> turns it off, with a logged caution;
+<code>coords = "yes"</code> measures it for any model, or for none.</p>
+<p><strong>A geographically weighted regression</strong> (<code>gwr_fit</code>) has
+coefficients that vary over the map, and <strong>a Bayesian spatial model</strong>
+(<code>bayesian_fit</code>) has a Gaussian-process term in the coordinates. For
+these, and under <code>coords = "yes"</code>, location gets an index of its own,
+built like the predictor index but in map space: <code>DI_location</code> is the
+distance to the nearest training point over the mean distance between
+training points; the training points' own values use the same folds; and
+the threshold is the same outlier-removed maximum. A prediction point is
+inside the AOA only if it is inside on both indices, and both DI columns
+are returned so the cause can be read off. Location is kept apart from the
+covariates because, as two more equally weighted columns, it is diluted as
+covariates are added: with 12 of them, 89\<!-- % of points 200 to 500 units -->
+beyond a 1000-unit training extent still read as inside, against none with
+the separate index. In a test with a GWR whose slope rises eastward, points
+one half to one and a half extents beyond the data had 13 times the
+in-extent RMSE; 84\<!-- % of them were inside on the covariates alone and none -->
+with location measured.</p>
+<p>Inside the extent the index marks an unsampled gap only where the gap is
+wider than the distance its threshold allows, and that distance depends
+on <code>folds</code>. With <code>folds = NULL</code> it is the spacing of the
+training points (the outlier-removed largest nearest-neighbour distance).
+With blocked folds it is the largest distance from a held-out point to
+the nearest row its fold trained on, outliers removed, which grows with
+the block size; a gap narrower than about twice that distance has no
+cell beyond it and reads as inside. In a test with 400 training points
+in two strips 400 units apart, the cut-off without folds was 46 to 54
+units and no grid cell in the middle half of the gap, 100 units or more
+from either strip, was inside. That held although the prediction grid
+took its covariates from the nearest observation, so that every cell's
+covariate DI was 0. With five block folds the cut-off was 199 to 251
+units and 76 to 100\<!-- % of the same cells were inside (87\\% on average over -->
+three draws). This follows from the definition and is not a fault of the
+index: the cross-validated error it is paired with was earned on
+hold-outs that far from their training rows. It does mean that with
+blocked folds the location index says nothing about a gap narrower than
+about twice the cut-off; <code>location$threshold * location$normalizer</code>
+is the cut-off in map units, and <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> shows it.</p>
+<p><strong>A forest fitted with <code>include_coords = TRUE</code></strong> splits on the
+coordinates like on any other column, so there they join the predictor
+index as <code>"..x"</code> and <code>"..y"</code> and are centred, scaled and weighted
+with the rest.</p>
+<p>Either way geometry is needed on both sides, so <code>train_sf</code> and
 <code>newdata</code> must both be <code>sf</code> objects; a data.frame is refused
 rather than quietly measured without location. Non-<code>POINT</code>
 <code>newdata</code> (grid polygons, say) is reduced to representative points
@@ -316,7 +495,8 @@ first, as <code><a href="coerce_to_points.html">coerce_to_points</a></code> woul
 a CRS the other is brought into it: reprojected when its coordinates look
 like longitude/latitude, stamped otherwise, with a warning either way. This
 is done because degrees fed into a metre-space index silently understate the
-distances.</p>
+distances. The location index is a map distance and refuses training data
+in a geographic CRS.</p>
     </div>
     <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>
@@ -370,11 +550,12 @@ Ecology and Evolution</em> 12(9), 1620–1633. <a href="https://doi.org/10.1111/
 <span class="r-out co"><span class="r-pr">#&gt;</span> Area of applicability (Meyer &amp; Pebesma 2021)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   predictors  : 2 (a, b)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   weighted    : no (all predictors count equally)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   weighted    : no (all predictors count equally: no model was given)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   training    : 120 points</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   reference   : nearest other training point (no folds supplied)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   normaliser  : 1.7777 (mean pairwise distance)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   threshold   : 0.2899 (outlier-removed max of training DI)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   location    : not measured</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   39 of 50 prediction points inside the AOA (78.0%)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>

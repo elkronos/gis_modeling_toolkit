@@ -59,7 +59,8 @@ compare_models_cv(
 
 - k:
 
-  Number of folds. Default 5.
+  Number of folds to build when `folds` is `NULL`; not read when `folds`
+  is supplied. Default 5.
 
 - seed:
 
@@ -135,7 +136,9 @@ compare_models_cv(
   Optional minimum block edge length for the shared spatial CV blocks
   (projected CRS units), passed to
   [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-  when `folds` is `NULL`. Default `NULL`.
+  when `folds` is `NULL`. Default `NULL`. Beside supplied `folds` it has
+  nothing to size and raises a warning (class
+  `spatialkit_fold_args_ignored`); so does `auto_range = TRUE`.
 
 - auto_range:
 
@@ -179,12 +182,17 @@ predicted nothing stays an `NA` row. Each model's metrics over all the
 rows it predicted stay in its `*_cv` element and in
 `attr(overall, "all_rows")`, a table of the same shape. `by_fold` and
 the Bayesian coverage and CRPS columns are per fold and are not
-recomputed. Only the models that actually ran appear, so check which
-names are present; there is not always one entry per requested model,
-because a backend whose package is missing is dropped with a message.
-When **no** requested backend is available there is nothing to return
-and the function errors with `"no viable models."` instead of returning
-an empty comparison.
+recomputed. Every model is cross-validated on the layer as passed, so
+the warnings
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+raises about that layer (class `spatialkit_rows_dropped`, counting the
+incomplete rows dropped, and `spatialkit_constant_predictor`) are raised
+once for the comparison, not once per model. Only the models that
+actually ran appear, so check which names are present; there is not
+always one entry per requested model, because a backend whose package is
+missing is dropped with a message. When **no** requested backend is
+available there is nothing to return and the function errors with
+`"no viable models."` instead of returning an empty comparison.
 
 ## Coverage and CRPS in the overall table
 
@@ -292,11 +300,10 @@ if (requireNamespace("ranger", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
-  # The random forest, and GWR beside it when GWmodel is installed, on the
+  # The random forest, and GWR beside it when sp is installed, on the
   # same folds.  "Bayesian" is left out here because a Stan fit per fold
   # takes minutes; add it to `models` for a run to report.
-  models <- c("RF", if (requireNamespace("GWmodel", quietly = TRUE) &&
-                       requireNamespace("sp", quietly = TRUE)) "GWR")
+  models <- c("RF", if (requireNamespace("sp", quietly = TRUE)) "GWR")
   cmp <- compare_models_cv(dat, "price", "elev", models = models, k = 3,
                            rf_args = list(num_trees = 100),
                            gwr_args = list(bandwidth = 30))

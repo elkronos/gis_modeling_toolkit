@@ -104,7 +104,10 @@ one; the GWR and random-forest backends do not and reject it themselves).</p></d
 
 
 <dt id="arg-boundary">boundary<a class="anchor" aria-label="anchor" href="#arg-boundary"></a></dt>
-<dd><p>Optional sf/sfc for CRS alignment.</p></dd>
+<dd><p>Optional sf/sfc whose CRS the data are projected to.  It
+is not a clip: rows that fall outside it are kept.  Subset
+<code>data_sf</code> yourself (for example with <code><a href="https://r-spatial.github.io/sf/reference/st_join.html" class="external-link">sf::st_filter()</a></code>) to
+restrict the rows.</p></dd>
 
 
 <dt id="arg-pointize">pointize<a class="anchor" aria-label="anchor" href="#arg-pointize"></a></dt>
@@ -133,14 +136,25 @@ empty or non-finite geometry), <code>which</code> (their positions in
 layer carries that column, else <code>NULL</code>) and <code>reason</code> (one per
 dropped row: <code>"geometry"</code>, <code>"missing"</code> or
 <code>"non_finite"</code>, in that order of precedence when several apply),
+<code>by_column</code> (for each modelling column, and for
+<code>"(geometry)"</code>, how many of the dropped rows it is missing or
+non-finite in; a row can count under several),
+<code>response_std_diff</code> (the mean response of the dropped rows minus
+that of the kept rows, in standard deviations of the response over both;
+<code>NA</code> when the response is not numeric, or is itself missing in
+every dropped row),
 plus <code>n_rows</code>, the number of rows returned, which the record was
-made for.
+made for.  The same record carries two marks on the rows that were
+kept: <code>constant_predictors</code>, the names of the predictors that take
+one value in every returned row (<code>character(0)</code> when none does),
+and <code>n_duplicate_locations</code>, the number of returned rows whose
+coordinates repeat those of an earlier row.
 Every fit stores <code>n</code> as <code>$info$n_dropped</code>.  The record
 describes the rows this call returned and does not survive subsetting:
 <code>clean[i, ]</code>, like <code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">dplyr::filter()</a></code>, <code>slice()</code> or
 <code>arrange()</code> of it, is a plain layer with no <code>"dropped"</code>
 attribute, and a fit given such a subset with <code>.already_prepped =
-TRUE</code> reports <code>n_dropped = 0</code> even when the parent layer dropped
+  TRUE</code> reports <code>n_dropped = 0</code> even when the parent layer dropped
 rows.  <code><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">sf::st_drop_geometry()</a></code> keeps the record, since the rows are
 the same; see <code><a href="sub-.spatialkit_rows.html">[.spatialkit_rows</a></code> for what binding such data
 frames does.  The CRS is
@@ -168,6 +182,42 @@ fit object still recorded the name you asked for: <code>"B5-B4"</code> is
 (for example with <code><a href="https://rdrr.io/r/base/make.names.html" class="external-link">make.names()</a></code>) before fitting.</p>
     </div>
     <div class="section level2">
+    <h2 id="warnings">Warnings<a class="anchor" aria-label="anchor" href="#warnings"></a></h2>
+
+
+<p>When preparing data for a fit (<code>require_response = TRUE</code>) two
+conditions are raised as R warnings, each with a class so it can be caught
+by name with <code><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch()</a></code> or <code><a href="https://rdrr.io/r/base/conditions.html" class="external-link">withCallingHandlers()</a></code>:</p><dl><dt><code>spatialkit_rows_dropped</code></dt>
+<dd><p>Rows were dropped.  The message
+gives the number and share of rows, the count by reason and by
+column, and, for a numeric response, how far the mean response of
+the dropped rows sits from that of the kept rows.  A fit on the rows
+that remain describes those rows only; when the difference is large
+the rows are not missing at random and the fit is biased towards the
+complete ones.</p></dd>
+
+<dt><code>spatialkit_constant_predictor</code></dt>
+<dd><p>A predictor takes a single
+value in every row that remains.  Its coefficient cannot be told from
+the intercept: a GWR window is rank-deficient, a Bayesian slope is
+its prior, and a forest ignores it.  The predictor is kept; drop it
+from <code>predictor_vars</code>.</p></dd>
+
+
+</dl><p>Every fitter and every <code>cv_*()</code> function prepares its data here and
+passes these on.  <code><a href="compare_models_cv.html">compare_models_cv()</a></code>,
+<code><a href="cv_block_size_sweep.html">cv_block_size_sweep()</a></code> and
+<code><a href="select_features_forward.html">select_features_forward()</a></code> run several cross-validations
+of one layer, each of which prepares it, and raise a warning of either
+class once per distinct text for the run.</p>
+<p>With <code>require_response = FALSE</code> (how every <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> method
+prepares <code>newdata</code>) neither is raised: the dropped rows are written
+to the log and to the record, and the prediction for each comes back
+<code>NA</code>, so nothing is lost without a trace.  Repeated locations are
+legitimate (repeat visits to one site) and are counted in the record and
+the log, never warned about.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p>Other model fitting:
 <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>,
@@ -191,7 +241,8 @@ fit object still recorded the name you asked for: <code>"B5-B4"</code> is
 <span class="r-in"><span>             pred <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">3</span>, <span class="fl">4</span>, <span class="cn">Inf</span><span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="va">clean</span> <span class="op">&lt;-</span> <span class="fu">prep_model_data</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"resp"</span>, <span class="st">"pred"</span><span class="op">)</span>  <span class="co"># drops rows 3 (NA) and 5 (Inf)</span></span></span>
+<span class="r-in"><span><span class="co"># Drops rows 3 (NA) and 5 (Inf), and warns that it did, with the counts.</span></span></span>
+<span class="r-in"><span><span class="va">clean</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/warning.html" class="external-link">suppressWarnings</a></span><span class="op">(</span><span class="fu">prep_model_data</span><span class="op">(</span><span class="va">dat</span>, <span class="st">"resp"</span>, <span class="st">"pred"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">clean</span>, <span class="st">"dropped"</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $n</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
@@ -207,6 +258,19 @@ fit object still recorded the name you asked for: <code>"B5-B4"</code> is
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $reason</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] "missing"    "non_finite"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> $by_column</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> resp pred </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    1    1 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> $response_std_diff</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 1.460593</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> $constant_predictors</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> character(0)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> $n_duplicate_locations</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> $n_rows</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 3</span>

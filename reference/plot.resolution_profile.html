@@ -94,10 +94,17 @@ level is left out with a log line rather than drawn empty.</p>
 
 <dt id="arg-criteria">criteria<a class="anchor" aria-label="anchor" href="#arg-criteria"></a></dt>
 <dd><p>Character vector of criteria to draw, any of
-<code>"cp"</code>, <code>"reliability"</code>, <code>"elbow"</code>, <code>"moran_z"</code>,
-<code>"wss"</code>.  Default: every one of the four selectable criteria that
-is finite at some level.  <code>"wss"</code> is the raw curve behind
-<code>"elbow"</code> and has no selected point.</p></dd>
+<code>"cp"</code>, <code>"reliability"</code>, <code>"elbow"</code>, <code>"loo"</code>,
+<code>"moran_z"</code>, <code>"wss"</code>.  Default: the first five, each where it
+is finite at some level.  <code>"cp"</code>, <code>"reliability"</code>,
+<code>"elbow"</code> and <code>"loo"</code> (the leave-one-out error of the
+estimate the profile was built for; a profile built without
+<code>estimate</code> has no such column, and a column of that name added
+to one is drawn only when named here) are count criteria and get a
+selected level and a shaded band.  <code>"moran_z"</code>
+is a diagnostic of the cell means and not a count rule (see
+<code><a href="select_resolution.html">select_resolution()</a></code>), and <code>"wss"</code> is the raw curve
+behind <code>"elbow"</code>: both are drawn as curves with no selected point.</p></dd>
 
 
 <dt id="arg-tol">tol<a class="anchor" aria-label="anchor" href="#arg-tol"></a></dt>
@@ -111,6 +118,14 @@ is finite at some level.  <code>"wss"</code> is the raw curve behind
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A <code>ggplot</code> object.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>A profile whose ladder is one size (<code>obs_per_cell</code> set to one
+number, or the default profile) has one level, set by the size.  Each
+criterion that is finite there is drawn as one point in its panel, with
+no selected level and no band, and the caption says that the size set
+the count.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

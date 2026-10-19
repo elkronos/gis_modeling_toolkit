@@ -1,8 +1,8 @@
 # Create spatial cross-validation folds
 
 Builds train/test splits by random k-fold, spatial block k-fold,
-leave-location-out, buffered leave-one-out or nearest-neighbour distance
-matching (NNDM) leave-one-out.
+leave-location-out, buffered leave-one-out, nearest-neighbour distance
+matching (NNDM) leave-one-out or its k-fold version (kNNDM).
 
 ## Usage
 
@@ -10,7 +10,8 @@ matching (NNDM) leave-one-out.
 make_folds(
   points_sf,
   k,
-  method = c("random_kfold", "block_kfold", "buffered_loo", "leave_location_out", "nndm"),
+  method = c("random_kfold", "block_kfold", "buffered_loo", "leave_location_out", "nndm",
+    "knndm"),
   seed = NULL,
   block_nx = NULL,
   block_ny = NULL,
@@ -28,7 +29,8 @@ make_folds(
   phi = NULL,
   drop_empty_blocks = TRUE,
   blocks = NULL,
-  balance_tol = 3
+  balance_tol = 3,
+  max_test = NULL
 )
 ```
 
@@ -52,27 +54,37 @@ make_folds(
   a vector is an error, because a non-integer used to truncate silently
   and leave the last rows in no test set at all. Not every method
   honours it. `"buffered_loo"` and `"nndm"` are leave-one-out schemes
-  and always return `k = n` regardless of what was asked for;
-  `"block_kfold"` lowers it when the grid yields fewer than `k`
-  non-empty blocks, and `"leave_location_out"` lowers it when there are
-  fewer than `k` distinct groups. `k = 1` is raised to 2 by
-  `"random_kfold"`, `"block_kfold"` and `"leave_location_out"`, since
-  one fold has no training set. Read the `k` element of the returned
-  list, and do not assume the requested value. A reduction is written to
-  the package log and raises no R warning, so `tryCatch(warning = )`
-  will not see it and
-  [`suppressWarnings()`](https://rdrr.io/r/base/warning.html) will not
-  hide it.
+  and always return one fold per held-out point (`k = n`, or `max_test`
+  when that is given) regardless of what was asked for; `"block_kfold"`
+  lowers it when the grid yields fewer than `k` non-empty blocks, and
+  `"leave_location_out"` lowers it when there are fewer than `k`
+  distinct groups. `"random_kfold"` and `"knndm"` lower it only when the
+  layer has fewer than `k` rows. `k = 1` is raised to 2 by
+  `"random_kfold"`, `"block_kfold"`, `"leave_location_out"` and
+  `"knndm"`, since one fold has no training set. Read the `k` element of
+  the returned list, and do not assume the requested value;
+  `params$k_requested` keeps the value asked for. Returning fewer folds
+  than asked raises a warning of class `"spatialkit_k_reduced"`, whose
+  message gives both counts, the reason and a setting that works; the
+  condition carries them as `k_requested` and `k`, so
+  `tryCatch(spatialkit_k_reduced = )` or
+  [`withCallingHandlers()`](https://rdrr.io/r/base/conditions.html) can
+  act on it without reading the text. (Before this version a reduction
+  was a log line only.)
 
 - method:
 
   One of `"random_kfold"`, `"block_kfold"`, `"buffered_loo"`,
-  `"leave_location_out"` or `"nndm"`. See **Details** for what each one
-  does and when it is appropriate.
+  `"leave_location_out"`, `"nndm"` or `"knndm"`. See **Details** for
+  what each one does and when it is appropriate.
 
 - seed:
 
-  Optional integer RNG seed.
+  Optional integer RNG seed. `"nndm"` is deterministic and reads it only
+  to draw the `max_test` subset; `"buffered_loo"` likewise. `"knndm"`
+  uses it for the random partition among its candidates, for ties in the
+  packing, and above 4,000 points for the k-means starts, so its folds
+  are reproducible only with a seed.
 
 - block_nx, block_ny:
 
@@ -100,9 +112,20 @@ make_folds(
 - block_size:
 
   Optional positive numeric minimum block edge length, **in the units of
-  the CRS the folds are built in**. When supplied, grid dimensions are
-  clamped so that every block is at least this wide and tall. Takes
-  precedence over `block_nx`/`block_ny` and `block_multiplier`.
+  the CRS the folds are built in**. Takes precedence over
+  `block_nx`/`block_ny` and `block_multiplier`. When supplied, a whole
+  number of blocks is fitted across each axis of the extent: as many as
+  leave every block at least this long on that axis. On an axis at least
+  as long as `block_size` the blocks built are therefore from one to
+  just under two times this size. An axis shorter than `block_size`
+  cannot hold a block that long: a single row or column spans it, and
+  its blocks are as long as the extent on that axis, which is less than
+  the size asked (a 39.8 km by 5 km extent with `block_size = 10000`
+  gets three blocks 13.3 km wide and 5 km tall). `params$block_width`
+  and `params$block_height` record what was built. A size that leaves
+  fewer than `k` blocks holding points returns that many folds, with a
+  warning (see `k`); one that leaves a single block is an error. Both
+  name the largest size that still gives `k` folds.
 
   Which CRS that is depends on the input. Projected input is used as it
   stands, so `block_size` is in your own CRS's units. Geographic
@@ -138,11 +161,17 @@ make_folds(
   returns (three times that parameter for an exponential fit), so its
   blocks are larger than blockCV's from the same variogram. When no
   range is identified, the geometric grid is used instead, with a
-  warning that gives the reason. An identified range above half the
-  extent in both directions leaves room for a single block, and
-  `make_folds()` then stops with an error naming the size, rather than
-  return one fold with an empty training set: pass a smaller
-  `block_size`, or use `method = "nndm"`.
+  warning that gives the reason. Range-sized blocks do not fit every
+  layout. On a square extent at `k = 5` a range up to a third of the
+  side gives five folds; up to half, a 2 x 2 grid and four folds,
+  returned with the `"spatialkit_k_reduced"` warning; and above half the
+  extent in both directions there is room for a single block, and
+  `make_folds()` stops with an error naming the size, rather than return
+  one fold with an empty training set. The warning and the error name
+  the largest block size that still gives `k` folds on this layout and
+  how far below the range it is; `method = "nndm"` is the design that
+  does not depend on a block size. The message printed when the range is
+  used states the grid and the block size built.
 
 - range_frac:
 
@@ -175,7 +204,8 @@ make_folds(
 - prediction_points:
 
   Optional `sf` layer of the locations you actually intend to predict
-  onto. Required for `method = "nndm"`. The grid from
+  onto. Required for `method = "nndm"` and `method = "knndm"`. The grid
+  from
   [`predict_surface()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict_surface.md)
   is the natural choice; a non-POINT layer (grid cells, polygons) is
   reduced to representative points first, so the target distances are
@@ -215,7 +245,12 @@ make_folds(
   For `method = "nndm"`: the smallest fraction of the data any fold's
   training set may be reduced to by neighbour exclusion. Default `0.5`,
   as in `CAST::nndm()`. Where it binds, the distance matching stops
-  short and the cross-validation stays optimistic; see **Details**.
+  short and the cross-validation stays optimistic; see **Details**. For
+  `method = "knndm"`: the smallest fraction of the data a fold may leave
+  for training, so a candidate whose largest fold holds more than
+  `1 - min_train` of the rows is set aside (the `maxp = 0.5` of
+  `CAST::knndm()` is `min_train = 0.5`). Equal folds leave `1 - 1/k` of
+  the data, so a value above that is an error.
 
 - phi:
 
@@ -262,7 +297,29 @@ make_folds(
   logged) that names both counts. `Inf` disables the check. The value is
   the tolerance of a check, not a target the packing aims for: see
   **Fold balance** below for what the packing can and cannot do.
-  `params$balance_ratio` carries the ratio achieved.
+  `params$balance_ratio` carries the ratio achieved. For `"knndm"` it is
+  a limit and not a check: a candidate whose largest fold holds more
+  than `balance_tol` times the points of its smallest is set aside, so
+  the folds returned are always within it.
+
+- max_test:
+
+  For `"buffered_loo"` and `"nndm"`: optional whole number of at
+  least 2. Folds are built for a random subset of that many held-out
+  points (drawn under `seed`), and every row stays available for
+  training, so each fold returned is the fold the full design has for
+  that point. The model is then refitted `max_test` times and not `n`
+  times, and the folds hold `4 * n * max_test` bytes of row indices in
+  place of `4 * n^2`, which lets `"buffered_loo"` run on layers its
+  storage limit otherwise refuses. It does not lift the 5,000-row limit
+  of `"nndm"`, whose cost is the matching itself; for that there is
+  `"knndm"`. Rows that are not held out have `NA` in `assignment$fold`.
+  For `"nndm"` the matching still runs over all `n` points and `params`
+  describes all of them.
+  [`area_of_applicability()`](https://elkronos.github.io/gis_modeling_toolkit/reference/area_of_applicability.md)
+  needs every training row in a test fold and refuses a subset. Default
+  `NULL`: every point is held out once. An error for the k-fold methods,
+  whose number of folds is `k`.
 
 ## Value
 
@@ -303,11 +360,38 @@ does so).
 
 For `"block_kfold"`, `params` carries a `params$blocks_supplied` that
 says whether the blocks came from `blocks` or from a grid built here,
-and `params$boundary_supplied` whether a `boundary` was given. Every
-method's `params` carries `params$row_probe`, a small sample of row IDs
-and coordinates that every `cv_*()` compares against the data it is
-handed, so folds built from a different layer of the same size are
+and `params$boundary_supplied` whether a `boundary` was given.
+`params$block_width` and `params$block_height` are the width and height
+of the grid cells built, before any clipping to a `boundary` (`NA` for
+supplied `blocks`); they are what `block_size` turned into: at least
+that size on an axis long enough to hold it, and the whole extent on an
+axis that is not (see `block_size`). Every method's `params` carries
+`params$k_requested`, the `k` that was asked for (`NA` when none was
+given), beside the `k` returned, and `params$row_probe`, a small sample
+of row IDs and coordinates that every `cv_*()` compares against the data
+it is handed, so folds built from a different layer of the same size are
 refused, never applied silently.
+
+For `"knndm"`, `params` carries `chosen` (`"random"` or `"clusters"`),
+`n_clusters` (the number of clusters packed into the folds; `NA` for the
+random partition), `clustering` (`"ward"` or `"kmeans+ward"`; `NA` when
+no cluster count was tried), `candidates` (a data frame with one row per
+candidate, the random partition first: `candidate`, `n_clusters`,
+`largest_fold`, `balance_ratio`, `admissible` and `W`, which is `NA` for
+a candidate set aside), `wasserstein`, `wasserstein_random` and
+`wasserstein_loo` (the Wasserstein distance to the target of the folds
+returned, of the random partition among the candidates and of plain
+leave-one-out, in distance units), `fold_sizes`, `balance_ratio`,
+`target_distances` and `realised_distances` (one per prediction point,
+and one per row: its distance to the nearest point of another fold) with
+their medians and means, and the diagnostics `"nndm"` reports under the
+same names: `max_ecdf_excess`, `max_ecdf_deficit`, `loo_ecdf_deficit`,
+`ecdf_deficit_tol`, `target_separated` and `target_out_of_reach`, with
+`short_of_target` for the opposite case (see **Details**).
+
+With `max_test`, `"buffered_loo"` and `"nndm"` return that many folds,
+`assignment$fold` is `NA` for the rows not held out, and
+`params$max_test` records the value.
 
 For the methods that work in projected space, `params` also carries a
 `crs` element naming the CRS the folds were built in (an `"EPSG:code"`
@@ -330,7 +414,13 @@ smaller than the autocorrelation range, spatially correlated
 observations leak across folds and CV metrics become optimistic. Use
 `block_size` to set a minimum block edge length (in CRS units), or set
 `auto_range = TRUE` to estimate the range from an empirical variogram
-and enforce it automatically.
+and enforce it automatically. When a response is given and the blocks
+come out smaller than the estimated range, the warning says what
+range-sized blocks would yield on this layout before recommending them:
+the setting and the grid it builds when that gives `k` folds, and
+otherwise how many folds it gives (or that it leaves a single block),
+the largest block size that still gives `k` folds, and `method = "nndm"`
+as the design that needs no block size.
 
 **Fold methods.** `"random_kfold"` ignores geography entirely and will
 overstate performance on autocorrelated data. `"block_kfold"` separates
@@ -372,19 +462,161 @@ pessimistic side. And ties in \\G_j^\*\\ are broken by the points'
 coordinates, not by their row index as in CAST, so the folds do not
 depend on the order of the rows.
 
-Where neither limit binds, the realised distribution is then never *more
-optimistic* than the target: \\G_j^\*(r) \le G\_{ij}(r)\\ up to the
-granularity of the neighbour distances, which is the property the method
-exists to deliver. Beyond `phi` no matching is attempted, by design.
-`min_train` is different: when the prediction locations lie further from
-the samples than a fold can be made to hold out (clustered samples and a
-prediction domain well beyond them, the layout NNDM is meant for), it
-stops the matching early and the realised distances stay optimistic.
-`params$n_at_min_train` counts the folds that were held at the floor
-while still closer than the target allows, and `make_folds()` warns when
-that leaves more than one point's worth of excess at or below `phi`.
-Lower `min_train` to match further, or read the cross-validated score as
-an upper bound on performance at the prediction locations.
+Where neither limit binds, the realised distribution of
+*nearest-neighbour distances* is then never shorter than the target:
+\\G_j^\*(r) \le G\_{ij}(r)\\ up to the granularity of the neighbour
+distances, which is the property the method exists to deliver. It is a
+statement about the distance to the one nearest training point. A
+learner that draws on several neighbours (a forest, a
+k-nearest-neighbour mean, a kriging neighbourhood) also depends on how
+far the second and later neighbours are, which NNDM does not match, so
+on clustered samples its cross-validated error can still read low with
+the nearest-neighbour distances matched exactly. Beyond `phi` no
+matching is attempted, by design. `min_train` is different: when the
+prediction locations lie further from the samples than a fold can be
+made to hold out (clustered samples and a prediction domain well beyond
+them, the layout NNDM is meant for), it stops the matching early and the
+realised distances stay too short. `params$n_at_min_train` counts the
+folds that were held at the floor while still closer than the target
+allows, and `make_folds()` warns when that leaves more than one point's
+worth of excess at or below `phi`. Lower `min_train` to match further,
+or read the cross-validated score as an upper bound on performance at
+the prediction locations.
+
+The match has a second side. `params$max_ecdf_deficit` is the largest
+amount by which the target distribution runs above the realised one, the
+mirror of `params$max_ecdf_excess`: the share of prediction points
+within some distance of the data that the folds do not reproduce. Part
+of it is the granularity of the matching. Excluding a neighbour moves a
+held-out point out to its next remaining neighbour, and on clustered
+samples that can be the next cluster, well past the prediction
+distances.
+
+The other part no setting reaches. Excluding neighbours can only
+lengthen a held-out distance, so when the prediction points sit *nearer*
+to the data than the samples sit to each other (prediction points among
+the samples, or a regular sample predicted between its nodes) the folds
+returned are plain leave-one-out and are still farther from their
+training data than the prediction points are. The cross-validated error
+is then pessimistic for those locations: an upper bound on the error
+there. `params$loo_ecdf_deficit` is the largest amount by which the
+target distribution runs above that of plain leave-one-out. When it
+exceeds `params$ecdf_deficit_tol`, three times \\\sqrt{1/n + 1/m}\\ for
+\\n\\ folds and \\m\\ prediction points (about three times the chance
+difference between two samples of one distribution), `make_folds()`
+raises a warning of class `"spatialkit_nndm_out_of_reach"` and sets
+`params$target_out_of_reach` to `TRUE`.
+
+On small samples no deficit can exceed that tolerance. A deficit is a
+difference of two shares, so it is at most 1, and the tolerance is 1 or
+more whenever \\nm/(n+m) \le 9\\: for nine folds or fewer whatever the
+number of prediction points, and for up to eighteen folds with as many
+prediction points. There the same warning is raised in one case only,
+complete separation: every prediction point nearer to the data than any
+sample is to its nearest other sample (a deficit of exactly 1), provided
+the two sets are large enough for that ordering to mean something, which
+is taken as `choose(n + m, n) >= 1000` ways of interleaving them (17
+prediction points for 3 folds, 7 for 6 folds, 4 for 12 folds).
+`params$target_separated` records the ordering whether or not it was
+enough to warn, and the warning's condition carries it as `separated`.
+With very few samples it can hold for a grid over the samples' own
+extent, because a few points hug the box they span; the folds are then
+farther than the grid all the same. A partial shortfall on such a sample
+(most prediction points nearer than leave-one-out reaches, not all) is
+not warned about: the tolerance is 1 or more at these sizes, which no
+difference of shares exceeds, so only complete separation can be
+reported. Compare `params$target_median` with `params$realised_median`.
+
+`params$wasserstein` is the Wasserstein distance between the target and
+realised distributions, in distance units, and `params$wasserstein_loo`
+the same for plain leave-one-out: equal when nothing was excluded,
+smaller when the matching helped.
+
+**kNNDM.** `"knndm"` is the k-fold version of that idea (Linnenbrink et
+al. 2024): `k` folds, and so `k` model fits, whose held-out distances
+are as close to the same target as a set of candidates allows. It has no
+row limit, and is the method to use above the 5,000 rows `"nndm"` takes
+or when a model is too costly to refit once per point. It is not an
+equal of NNDM below that: a fold design has far fewer degrees of freedom
+than one exclusion set per point, so the match is coarser.
+
+The candidates are a random k-fold partition (the one `"random_kfold"`
+builds with the same `seed`) and, for each of up to 50 cluster counts
+spaced evenly on the log scale from `k` to one fewer than the number of
+distinct locations, the samples clustered on their coordinates and the
+clusters merged into `k` folds. Few large clusters give folds that are
+whole regions, far from their training data; many small ones approach
+the random partition. Up to 4,000 points the clustering is Ward's
+(`stats::hclust(method = "ward.D2")`), cut at each count. Above that,
+where the n by n distance matrix it needs is no longer affordable,
+k-means first reduces the samples to 4,000 groups (Lloyd's algorithm
+from random sample locations, at most ten passes) and Ward's method is
+continued from those groups; a count above 4,000 is a k-means run of its
+own. `params$clustering` says which (`"ward"` or `"kmeans+ward"`).
+Clusters are merged by the packing `"block_kfold"` uses for its blocks,
+largest first and each to the fold with the fewest points so far (see
+**Fold balance**). `CAST::knndm()` merges clusters by a rule of its own,
+which this was *not* checked against, so the folds are not expected to
+equal CAST's.
+
+Each candidate is scored by the Wasserstein distance \\W\\ between its
+held-out distances (each point's distance to the nearest point of
+another fold) and the target distances, and the smallest \\W\\ is
+returned. A candidate is set aside without being scored when its largest
+fold leaves less than `min_train` of the rows for training or holds more
+than `balance_tol` times the points of its smallest; the random
+partition is always kept. So `params$wasserstein` is never above
+`params$wasserstein_random`, the \\W\\ of that random partition, and
+`params$candidates` lists every candidate with its cluster count, fold
+sizes and \\W\\. `params$chosen` is `"random"` when no clustering came
+closer, which is the right answer for samples spread evenly over the
+prediction area.
+
+Read \\W\\ against the mean target distance. On 400 points in 12
+clusters predicted onto a grid over their extent (12 draws, 5 and 10
+folds) the folds returned had \\W\\ at 0.32 of the mean target distance,
+against 0.70 to 0.72 for a random partition and 0.01 for `"nndm"`. A
+5-nearest-neighbour learner scored 9 to 11 percent high on them, where
+random folds scored 23 to 25 percent low and `"nndm"` 6 percent low. On
+2,000 points in 40 clusters of unequal size the ratio was 0.07 to 0.10,
+against 0.56 to 0.59 for a random partition and 0.003 to 0.006 for
+`"nndm"`; on 30,000 points of that layout it was 0.11 to 0.15, and on
+100,000 points 0.27. So the method removes most of the mismatch of a
+random partition and leaves more of it than NNDM does, in either
+direction: \\W\\ has no sign. On 400 evenly spread points the random
+partition or one close to it came back and the two scored alike (3.3 and
+3.5 percent high). With few folds a random partition is itself farther
+than the target, since each fold trains on `1 - 1/k` of the points: at
+`k = 2` on evenly spread points the mean held-out distance was 9 to 53
+percent above the target mean (60 draws of 100 to 1,000 points), and no
+candidate is nearer.
+
+Construction took 2 s at 8,000 points and 10 s at 30,000 with ten folds
+(37 s at 100,000) with FNN installed, and three to four times that
+without it; it grows with the number of folds.
+
+Two cases are warned about, each with a condition class. When the
+prediction points sit nearer to the data than a sample is to its nearest
+other sample, no fold design reaches them, since a held-out point is
+never nearer to its training data than that; the test is the one
+`"nndm"` applies, the warning has the same class,
+`"spatialkit_nndm_out_of_reach"`, and what comes back is the random
+partition or a candidate as fine as one. In the other direction, the
+closest candidate can still be short of the target: prediction points
+well beyond the samples lie farther from the data than `k` folds of
+those samples can be held apart. When the mean held-out distance of the
+folds returned is below the mean target distance by more than a quarter
+of it and by at least half of \\W\\ (the test
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+words as `"closer"`), `make_folds()` raises a warning of class
+`"spatialkit_knndm_short_of_target"` and sets `params$short_of_target`:
+the cross-validated error then tends to read low for those locations.
+Fewer folds hold out larger regions. Short of either warning the folds
+can still differ from the target at some distances;
+`params$max_ecdf_excess` and `params$max_ecdf_deficit` give the largest
+difference each way, and
+[`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
+reads the folds against the same prediction points fold by fold.
 
 An earlier version of this package drew one random radius per point from
 \\G\_{ij}\\ and excluded up to the order statistic *closest* to it,
@@ -430,24 +662,29 @@ seeds, which adapt to the density of the points.
 
 ## Fold balance
 
-Only `"block_kfold"` balances the number of points per fold, and it does
-so by packing: blocks are taken largest first and each goes to the fold
-with the fewest points so far, ties broken at random. This is the
-longest-processing-time rule for multiway partitioning. Measured against
-the optimum by enumeration (two folds, up to ten blocks, heavy-tailed
-block sizes) it is optimal in 72 percent of cases and within two points
-of optimal on average; a local search with 30 random restarts moved the
-largest-to-smallest ratio by 0.004 on average and never brought a
-packing above the 3:1 tolerance below it. An imbalance past the
-tolerance is therefore in the points per block, which no assignment of
-blocks to folds can even out, and this function offers no search over
-packings. The remedy is the block design: smaller blocks, or blocks that
-adapt to the density of the points passed through `blocks`. On clustered
-layouts where the geometric grid exceeded 3:1 in 22 percent of cases
-(median ratio 1.8, worst 6.3), Voronoi cells around 15 k-means seeds
-never exceeded 1.3 (median 1.09). Density-adaptive blocks are smaller
-where points are dense, so check `params$block_scale` against the
-autocorrelation range as you would a grid.
+`"block_kfold"` and `"knndm"` balance the number of points per fold, and
+they do so by packing: blocks (for `"knndm"`, clusters of the samples)
+are taken largest first and each goes to the fold with the fewest points
+so far, ties broken at random. This is the longest-processing-time rule
+for multiway partitioning. Measured against the optimum by enumeration
+(two folds, up to ten blocks, heavy-tailed block sizes) it is optimal in
+72 percent of cases and within two points of optimal on average; a local
+search with 30 random restarts moved the largest-to-smallest ratio by
+0.004 on average and never brought a packing above the 3:1 tolerance
+below it. An imbalance past the tolerance is therefore in the points per
+block, which no assignment of blocks to folds can even out, and this
+function offers no search over packings. The remedy is the block design:
+smaller blocks, or blocks that adapt to the density of the points passed
+through `blocks`. On clustered layouts where the geometric grid exceeded
+3:1 in 22 percent of cases (median ratio 1.8, worst 6.3), Voronoi cells
+around 15 k-means seeds never exceeded 1.3 (median 1.09).
+Density-adaptive blocks are smaller where points are dense, so check
+`params$block_scale` against the autocorrelation range as you would a
+grid.
+
+`"knndm"` chooses its clusters, so for it `balance_tol` is a limit: a
+clustering whose packing exceeds it is not a candidate, and the folds
+returned are within it (`params$fold_sizes`, `params$balance_ratio`).
 
 The other methods do not balance point counts. `"random_kfold"` is
 balanced by construction (fold sizes differ by at most one);
@@ -456,6 +693,12 @@ balanced by construction (fold sizes differ by at most one);
 (to within one), so folds differ by as much as the locations' sizes do.
 
 ## References
+
+Linnenbrink, J., Mila, C., Ludwig, M. and Meyer, H. (2024). kNNDM CV:
+k-fold nearest-neighbour distance matching cross-validation for map
+accuracy estimation. *Geoscientific Model Development* **17**,
+5897-5912.
+[doi:10.5194/gmd-17-5897-2024](https://doi.org/10.5194/gmd-17-5897-2024)
 
 Mila, C., Mateu, J., Pebesma, E. and Meyer, H. (2022). Nearest neighbour
 distance matching Leave-One-Out Cross-Validation for map validation.
@@ -523,4 +766,22 @@ folds$params$block_sizes  # points per block; params$fold_blocks packs them
 
 # Buffered leave-one-out: neighbours within 100 units excluded from training
 loo <- make_folds(pts, k = 1, method = "buffered_loo", buffer = 100)
+
+# Three folds matched to the distances from a prediction grid to the data
+grid <- st_make_grid(pts, n = c(10, 10), what = "centers")
+km <- make_folds(pts, k = 3, method = "knndm", prediction_points = grid,
+                 seed = 42)
+km$params[c("chosen", "n_clusters", "wasserstein", "wasserstein_random")]
+#> $chosen
+#> [1] "random"
+#> 
+#> $n_clusters
+#> [1] NA
+#> 
+#> $wasserstein
+#> [1] 20.95776
+#> 
+#> $wasserstein_random
+#> [1] 20.95776
+#> 
 ```

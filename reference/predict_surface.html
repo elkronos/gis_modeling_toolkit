@@ -133,7 +133,11 @@ CRS.</p></dd>
 <dd><p>Rows per prediction call. Default 5000.  A pure
 performance knob: rows do not interact, and for a <code>bayesian_fit</code> the
 GP boundary is held at its fitted value whatever the chunk holds; see
-<code><a href="predict.bayesian_fit.html">predict.bayesian_fit</a></code>.</p></dd>
+<code><a href="predict.bayesian_fit.html">predict.bayesian_fit</a></code>.  The two warnings in which
+<code><a href="predict.gwr_fit.html">predict.gwr_fit()</a></code> counts locations (classes
+<code>"spatialkit_gwr_extrapolation"</code> and
+<code>"spatialkit_gwr_not_estimable"</code>) are raised once for the grid,
+with its totals, whatever the number of chunks.</p></dd>
 
 
 <dt id="arg-se">se<a class="anchor" aria-label="anchor" href="#arg-se"></a></dt>
@@ -227,11 +231,12 @@ grid long before the fit itself would.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Area of applicability (Meyer &amp; Pebesma 2021)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   predictors  : 1 (elev)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   weighted    : no (all predictors count equally)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   weighted    : yes, by the model's permutation importance, floored at 0</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   training    : 120 points</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   reference   : nearest other training point (no folds supplied)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   normaliser  : 1.1283 (mean pairwise distance)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   threshold   : 0.0480 (outlier-removed max of training DI)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   location    : not measured</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   529 of 529 prediction points inside the AOA (100.0%)</span>
 </code></pre></div>

@@ -113,6 +113,14 @@ at the final step and named in the caption.</p>
     <p>A <code>ggplot</code> object.</p>
     </div>
     <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>With a learner that cannot fit an empty predictor set the first variable
+is added without a test and can be dropped at the end
+(<code>baseline$first$dropped</code>).  The path drawn is then the one the sweep
+walked, with that variable hollow and labelled "dropped at the end", and
+the red mark is the selected set, scored without it.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p>Other plotting:
 <code><a href="plot.aoa.html">plot.aoa()</a></code>,

@@ -66,7 +66,8 @@ cv_bayes(
 
 - k:
 
-  Number of folds. Default 5.
+  Number of folds to build when `folds` is `NULL`; not read when `folds`
+  is supplied. Default 5.
 
 - seed:
 
@@ -113,13 +114,17 @@ cv_bayes(
 
 - block_size:
 
-  Optional minimum block edge length for spatial CV blocks (projected
-  CRS units).
+  Optional minimum block edge length (projected CRS units) for the
+  blocks built when `folds` is `NULL`; see
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
+  Beside supplied `folds` it has nothing to size and raises a warning
+  (class `spatialkit_fold_args_ignored`).
 
 - auto_range:
 
   Logical. If `TRUE` and `folds` is `NULL`, estimate the autocorrelation
-  range and use it as the minimum block size. Default `FALSE`.
+  range and use it as the minimum block size. Default `FALSE`. `TRUE`
+  beside supplied `folds` raises the same warning as `block_size`.
 
 - parallel:
 
@@ -167,13 +172,22 @@ or the draws failed for that fold). `overall$Adj_R2` is always `NA`, as
 for every `cv_*()`: see
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md).
 `fold_metrics` carries, beyond the columns its siblings share, `gp_k`,
-`gp_n_basis`, `n_draws`, `CRPS`, the `coverage_*` columns and
-`convergence_ok`: `TRUE` or `FALSE` as
+`gp_n_basis`, `n_draws`, `CRPS`, the `coverage_*` columns,
+`convergence_ok` and `gp_adequacy`. `convergence_ok` is `TRUE` or
+`FALSE` as
 [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
-judged that fold's sampler (R-hat, effective sample size, divergences),
-`NA` when `fit_args` sets `check_convergence = FALSE`. A fold that did
-not converge is scored like the others, so a run with any `FALSE` raises
-one warning naming those folds. The `predictive_coverage` entries (one
+judged that fold's sampler (divergent transitions, R-hat, effective
+sample size and E-BFMI; see its `check_convergence`), `NA` when
+`fit_args` sets `check_convergence = FALSE`. A fold that did not
+converge is scored like the others, so a run with any `FALSE` raises one
+warning of class `spatialkit_convergence` naming those folds and the
+checks each failed. `gp_adequacy` is what that fold's posterior said
+about its Gaussian-process basis (`"ok"`, `"below_resolution"`,
+`"unresolved_short_range"`, `"no_signal_above_floor"` or
+`"not_checked"`; see "What the basis resolves" in
+[`fit_bayesian_spatial_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)).
+A fold whose basis was found too coarse is scored like the others too.
+See **Warnings from the folds**. The `predictive_coverage` entries (one
 per `coverage_levels` value, plus `mean_CRPS`) are averages across folds
 **weighted by each fold's `n_pred`**, because the per-fold values in
 `fold_metrics` are themselves means over that fold's test rows; an
@@ -188,6 +202,23 @@ have the cores. For a cheap first pass on the same question,
 cross-validate a forest with
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 and come back here once the predictor set has settled.
+
+## Warnings from the folds
+
+[`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
+warns about a fit under four condition classes:
+`spatialkit_gp_basis_size`, `spatialkit_gp_resolution`,
+`spatialkit_convergence` and `spatialkit_gp_adequacy` (see its
+**Warnings**). Each fold is a fit, and none of those warnings says which
+fold it came from, so they are collected as the folds run and each class
+is raised once after the last fold, under this function's name and with
+the same class. Each warning names the folds and carries `folds` (their
+labels) and `fold_messages` (every fold's own text, named by fold) as
+fields of the condition. The convergence warning covers the folds that
+were scored and gives the checks each failed, also as the field
+`failed`; the other three quote the first fold's own text. Each fold's
+own line is in the log. Warnings that Stan or brms raise themselves are
+not collected and are passed on.
 
 ## Percentage errors on responses with zeros
 

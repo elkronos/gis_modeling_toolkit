@@ -38,6 +38,14 @@ plot(x, ...)
 
 A `ggplot` object.
 
+## Details
+
+With a learner that cannot fit an empty predictor set the first variable
+is added without a test and can be dropped at the end
+(`baseline$first$dropped`). The path drawn is then the one the sweep
+walked, with that variable hollow and labelled "dropped at the end", and
+the red mark is the selected set, scored without it.
+
 ## See also
 
 Other plotting:

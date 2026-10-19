@@ -132,7 +132,8 @@ not the input CRS; a message reports this unless <code>quiet = TRUE</code>.</p>
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>It is not the target <code><a href="build_tessellation.html">build_tessellation()</a></code> derives on its own:
 <code>method = "voronoi"</code> without a boundary clips to the convex hull of the
-points buffered by 2 percent of its diagonal, and there <code>expand</code> is always
+points (or of their <code>cover</code>, for seeds) buffered by 2 percent of its
+diagonal, and there <code>expand</code> is always
 a distance. A bounding box over a non-rectangular point cloud includes
 corners with no data, so a hex or square grid laid over it has cells that
 hold no points; pass the study-area polygon when there is one.</p>

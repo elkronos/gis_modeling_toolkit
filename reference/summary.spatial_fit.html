@@ -99,6 +99,13 @@ one it is holding, driven by <code>$info$fitted_are_oob</code>.  Use
 <code><a href="compare_models_cv.html">compare_models_cv</a></code> to compare backends.</p>
 <p>Adjusted R-squared is suppressed: GWR's effective parameter count far
 exceeds the global predictor count, and a GP model has no simple <code>p</code>.</p>
+<p>For a <code>gwr_fit</code>, <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> on the result adds what the
+in-sample metrics are to be read against: the effective number of
+parameters and residual degrees of freedom, the number of local windows
+of deficient rank, the number of locations when observations share one,
+and the AICc and RMSE of one global least-squares
+regression on the same rows beside the fit's own AICc
+(<code>$info$global_ols</code>; see <code><a href="fit_gwr_model.html">fit_gwr_model</a></code>).</p>
     </div>
     <div class="section level2">
     <h2 id="percentage-errors-on-responses-with-zeros">Percentage errors on responses with zeros<a class="anchor" aria-label="anchor" href="#percentage-errors-on-responses-with-zeros"></a></h2>

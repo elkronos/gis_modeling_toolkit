@@ -30,9 +30,17 @@ plot(x, criteria = NULL, tol = 0.02, ...)
 - criteria:
 
   Character vector of criteria to draw, any of `"cp"`, `"reliability"`,
-  `"elbow"`, `"moran_z"`, `"wss"`. Default: every one of the four
-  selectable criteria that is finite at some level. `"wss"` is the raw
-  curve behind `"elbow"` and has no selected point.
+  `"elbow"`, `"loo"`, `"moran_z"`, `"wss"`. Default: the first five,
+  each where it is finite at some level. `"cp"`, `"reliability"`,
+  `"elbow"` and `"loo"` (the leave-one-out error of the estimate the
+  profile was built for; a profile built without `estimate` has no such
+  column, and a column of that name added to one is drawn only when
+  named here) are count criteria and get a selected level and a shaded
+  band. `"moran_z"` is a diagnostic of the cell means and not a count
+  rule (see
+  [`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)),
+  and `"wss"` is the raw curve behind `"elbow"`: both are drawn as
+  curves with no selected point.
 
 - tol:
 
@@ -47,6 +55,13 @@ plot(x, criteria = NULL, tol = 0.02, ...)
 ## Value
 
 A `ggplot` object.
+
+## Details
+
+A profile whose ladder is one size (`obs_per_cell` set to one number, or
+the default profile) has one level, set by the size. Each criterion that
+is finite there is drawn as one point in its panel, with no selected
+level and no band, and the caption says that the size set the count.
 
 ## See also
 

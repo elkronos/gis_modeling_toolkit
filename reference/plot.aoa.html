@@ -13,7 +13,8 @@ derived from: the threshold is the largest training DI inside an outlier
 fence, so the curve reaches it exactly when no training value was fenced
 off and runs past it, by the tail the fence removed, when some were.
 A prediction location outside on a predictor dropped for having no
-training variance has DI = Inf: it counts in the prediction curve,
+training variance, or under categorical = &quot;indicator&quot; on a level no
+training row has, has DI = Inf: it counts in the prediction curve,
 which then tops out below 1, and the caption says how many are off the
 axis.  A location with a missing predictor (DI = NA) is neither
 inside nor outside; it is left out of the curve and the caption counts it."><meta property="og:description" content="n_outside says how many prediction locations fall outside the area
@@ -30,7 +31,8 @@ derived from: the threshold is the largest training DI inside an outlier
 fence, so the curve reaches it exactly when no training value was fenced
 off and runs past it, by the tail the fence removed, when some were.
 A prediction location outside on a predictor dropped for having no
-training variance has DI = Inf: it counts in the prediction curve,
+training variance, or under categorical = &quot;indicator&quot; on a level no
+training row has, has DI = Inf: it counts in the prediction curve,
 which then tops out below 1, and the caption says how many are off the
 axis.  A location with a missing predictor (DI = NA) is neither
 inside nor outside; it is left out of the curve and the caption counts it."></head><body>
@@ -96,7 +98,8 @@ derived from: the threshold is the largest training DI inside an outlier
 fence, so the curve reaches it exactly when no training value was fenced
 off and runs past it, by the tail the fence removed, when some were.
 A prediction location outside on a predictor dropped for having no
-training variance has <code>DI = Inf</code>: it counts in the prediction curve,
+training variance, or under <code>categorical = "indicator"</code> on a level no
+training row has, has <code>DI = Inf</code>: it counts in the prediction curve,
 which then tops out below 1, and the caption says how many are off the
 axis.  A location with a missing predictor (<code>DI = NA</code>) is neither
 inside nor outside; it is left out of the curve and the caption counts it.</p>
@@ -129,6 +132,15 @@ with the training DI as an outline.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A <code>ggplot</code> object.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>When location has an index of its own (a <code>gwr_fit</code>, a
+<code>bayesian_fit</code>, or <code>coords = "yes"</code>; see
+<code><a href="area_of_applicability.html">area_of_applicability()</a></code>), the curves and the dashed line are
+the predictor index alone.  The subtitle then counts three things: the
+locations beyond the predictor threshold, those beyond the location
+threshold, and those outside the area of applicability, which is either.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

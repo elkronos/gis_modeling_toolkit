@@ -81,7 +81,8 @@ the data happen to be.</p>
 <span>  clip <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  keep_duplicates <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  quiet <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  cover <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -132,16 +133,37 @@ one cell and all of them are indexed to it.</p></dd>
 <dd><p>Optional target CRS: anything <code><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">sf::st_crs()</a></code> accepts, including
 an sf or sfc layer, whose CRS is used. A projected CRS is the working
 CRS. A geographic one (EPSG:4326, say) is the CRS the result is returned
-in:
-the cells are built in the local projected CRS <code><a href="ensure_projected.html">ensure_projected()</a></code>
+in: the cells are built in the local projected CRS <code><a href="ensure_projected.html">ensure_projected()</a></code>
 picks for the points, so they are nearest-point cells on the ground, and
-are then transformed, with long edges densified.</p></dd>
+are then transformed, with long edges densified. Seeds that are the
+centres a profile scored are built in the CRS the profile worked in
+instead (see "Seeds a profile scored").</p></dd>
 
 
 <dt id="arg-quiet">quiet<a class="anchor" aria-label="anchor" href="#arg-quiet"></a></dt>
 <dd><p>Logical; suppress this function's progress <code><a href="https://rdrr.io/r/base/message.html" class="external-link">message()</a></code>s.
 It does not silence R warnings, nor the package's console log echo
 (see <code><a href="spatialkit_quiet.html">spatialkit_quiet</a></code> for that). Default <code>FALSE</code>.</p></dd>
+
+
+<dt id="arg-cover">cover<a class="anchor" aria-label="anchor" href="#arg-cover"></a></dt>
+<dd><p>Optional sf or sfc layer the cells have to hold, read when
+there is no <code>boundary</code>: the observations (points), or a polygon. The
+boundary is then derived from it instead of from <code>points_sf</code>: the convex
+hull of the cover's points, or its polygons, grown by 2 percent of the
+diagonal. This is what seeds need, because seeds lie inside the data they
+stand for and their own hull stops short of it (see "Details").
+When <code>NULL</code>, the cover the seeding functions attach is used
+(<code>attr(points_sf, "cover")</code>, set by <code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>,
+<code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> and <code><a href="voronoi_seeds_random.html">voronoi_seeds_random()</a></code>). A cover with no
+CRS is read in the coordinates of <code>points_sf</code>, and one in another CRS is
+transformed. A generator outside the cover keeps its ground (the hull of
+the generators is added); a cover that holds none of the generators is
+set aside with a warning. With a <code>boundary</code>, the boundary sets the cells
+and <code>cover</code> is only checked against them: the number of its points that
+fall outside every cell is returned as <code>params$cover_outside</code>, with a
+warning of class <code>"spatialkit_unassigned"</code> when it is not 0 (a polygon
+cover is not checked).</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -151,9 +173,30 @@ It does not silence R warnings, nor the package's console log echo
 per row of <code>points_sf</code>, and <code>NA</code> for a point that falls outside
 every cell, which means outside the study area (grown by <code>expand</code>
 when it is positive), so a summary built from it counts only the points
-the tessellation actually covers.  <code>boundary</code> is the boundary the
-cells were built in: the one supplied or derived, grown by
-<code>expand</code>.</p>
+the tessellation actually covers.  Such points are counted in
+<code>params$n_outside</code>, and a warning of class
+<code>"spatialkit_unassigned"</code> gives their number.  <code>boundary</code> is
+the boundary the cells were built in: the one supplied or derived, grown
+by <code>expand</code>.  <code>params$boundary_source</code> says where it came
+from: <code>"boundary"</code> (the argument), <code>"cover"</code> (the
+<code>cover</code> argument), <code>"seeds' cover"</code> (the cover attached to
+<code>points_sf</code>) or <code>"points"</code> (the hull of <code>points_sf</code>
+itself).  <code>params$cover_outside</code> is the number of <code>cover</code>
+points outside every cell when a point <code>cover</code> was given with a
+<code>boundary</code>, and <code>NULL</code> otherwise.  <code>params$partition</code> is
+present when <code>points_sf</code> is a layer of seeds that records the kind
+of partition that placed it (<code>attr(points_sf, "partition")</code>, see
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code>): the same list, so the cells say what
+built them.  Seeds of plain k-means record nothing, and <code>params</code>
+then has no such element; neither has it for points that are not seeds.
+<code>params$count_rule</code> is present when <code>points_sf</code> carries the
+record of how its count was set (<code>attr(points_sf, "count_rule")</code>:
+the seeds of a <code><a href="select_resolution.html">select_resolution()</a></code> result, or seeds a
+seeding function placed from one): the same list, which the cells carry
+too as <code>attr(cells, "count_rule")</code>.
+<code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> copies it to the rows it
+assigns, and <code><a href="summarize_by_cell.html">summarize_by_cell()</a></code> checks its result
+against it.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -169,6 +212,38 @@ others are referenced by no feature. Other functions in the package
 (<code><a href="prep_model_data.html">prep_model_data()</a></code>, <code><a href="make_folds.html">make_folds()</a></code>) reduce such a feature to its
 centroid instead, so cast to POINT, or take centroids, first if one cell
 per feature is what you want.</p>
+<p>With no <code>boundary</code> the cells are clipped to a boundary derived from the
+data. For observations that is their own convex hull grown by 2 percent of
+its diagonal, so every observation has a cell. Seeds are different: k-means
+centres, random points in a study area and the centres a resolution
+profile scored all lie inside the ground they stand for, and cells clipped
+to the hull of the seeds leave the edge of that ground uncovered (on 3,000
+uniform points, 72 percent of them at 4 seeds, 25 percent at 25 and 4
+percent at 100). The boundary is therefore derived from the <code>cover</code> when
+there is one: the argument, or the cover the seeding functions attach to
+their result. A layer that looks like seeds and has neither a boundary nor
+a cover (seeds bound with <code><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind()</a></code>, which drops the attribute, or built
+by hand) gets the seeds' own hull and a warning of class
+<code>"spatialkit_no_cover"</code>.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="seeds-a-profile-scored">Seeds a profile scored<a class="anchor" aria-label="anchor" href="#seeds-a-profile-scored"></a></h2>
+
+
+<p>The seeds of a <code><a href="select_resolution.html">select_resolution()</a></code> result, and the seeds
+<code><a href="get_voronoi_seeds.html">get_voronoi_seeds()</a></code> or <code><a href="voronoi_seeds_kmeans.html">voronoi_seeds_kmeans()</a></code> return for one, are the
+centres <code><a href="resolution_profile.html">resolution_profile()</a></code> scored, and their record of the count
+(<code>attr(, "count_rule")</code>) says so (<code>scored_cells = TRUE</code>) and holds the
+centres in the CRS the profile worked in. Unless a projected <code>crs</code> is
+given, their cells are built in that CRS, whatever CRS the seeds arrive
+in (degrees, or the CRS of a boundary they were placed in), and returned
+in it, or in a geographic <code>crs</code> when one is given. When the seeds are
+those centres (as many, each at a different centre, within a thousandth
+of its distance from the next nearest), each is first put at its centre
+as the record holds it, so rounding the seeds took on in another CRS
+does not move an edge. The cells are then the cells each row was scored
+in, and <code><a href="assign_features_to_polygons.html">assign_features_to_polygons()</a></code> gives a point on an edge between
+two of them the cell the profile scored it in.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

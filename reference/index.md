@@ -82,13 +82,16 @@ Build the regions, with reproducible cell identifiers.
 ## Assign and aggregate
 
 One row per cell, with a count and a standard error for every aggregate,
-the record of which rows were dropped or tied on the way, and whether a
-block-kriging estimate would have beaten the plain cell mean.
+the record of which rows were dropped or tied on the way, the value of a
+cell at other locations, and whether a block-kriging estimate would have
+beaten the plain cell mean.
 
 - [`assign_features_to_polygons()`](https://elkronos.github.io/gis_modeling_toolkit/reference/assign_features_to_polygons.md)
   : Assign features to polygons and attach a polygon ID
 - [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
   : Summarize features by polygon/cell ID
+- [`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
+  : Cell values at other locations
 - [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md)
   : Block-kriging adequacy diagnostics for a set of cells
 - [`` `[`( ``*`<spatialkit_rows>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
@@ -104,7 +107,7 @@ far the held-out points ended up from the training data.
 - [`plot_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot_folds.md)
   : Map a cross-validation fold scheme
 - [`fold_separation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fold_separation.md)
-  : How far the held-out points actually sit from the training data
+  : How far the held-out points sit from the training data
 - [`cv_block_size_sweep()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_block_size_sweep.md)
   : Cross-validate at a ladder of block sizes
 - [`plot(`*`<block_size_sweep>`*`)`](https://elkronos.github.io/gis_modeling_toolkit/reference/plot.block_size_sweep.md)
@@ -120,7 +123,7 @@ backend of your own.
 - [`fit_rf_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_rf_model.md)
   : Fit a random forest via ranger
 - [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
-  : Fit a Geographically Weighted Regression (GWR) via GWmodel
+  : Fit a Geographically Weighted Regression (GWR)
 - [`fit_bayesian_spatial_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_bayesian_spatial_model.md)
   : Fit a Bayesian spatial regression with a 2D Gaussian Process (via
   brms)

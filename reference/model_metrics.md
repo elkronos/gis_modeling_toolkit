@@ -23,7 +23,11 @@ model_metrics(object, newdata = NULL, ...)
 
 - ...:
 
-  Additional arguments passed to predict().
+  Additional arguments passed to predict(). The metrics are computed
+  from one predicted value per row, so `draws = TRUE` (a Bayesian fit)
+  and `se.fit = TRUE` (a GWR), with which
+  [`predict()`](https://rdrr.io/r/stats/predict.html) returns a matrix
+  or a list, are refused.
 
 - newdata:
 

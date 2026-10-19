@@ -112,9 +112,11 @@ A data.frame of class `"block_size_sweep"` with one row per
 cross-validation: `block_size` (`NA` for the random reference),
 `method`, `blocks_used`, `k` (the folds actually built),
 `n_folds_succeeded`, `value` (the pooled metric), `fold_min`, `fold_max`
-and `fold_sd` (its spread across folds). Attributes: `metric`,
-`sac_range` (the effective range, or `NA`), `crs`, `k` (the folds
-requested, which [`print()`](https://rdrr.io/r/base/print.html) and
+and `fold_sd` (its spread across folds), and `block_width` and
+`block_height` (the width and height of the grid cells built at that
+size, `NA` for the random reference). Attributes: `metric`, `sac_range`
+(the effective range, or `NA`), `crs`, `k` (the folds requested, which
+[`print()`](https://rdrr.io/r/base/print.html) and
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) report),
 `n_fits`, `response_var`, and `results`, the full
 [`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
@@ -147,18 +149,38 @@ of the side. Any size at which the grid would hold more than the
 will build is dropped. The count is of grid cells: on clustered data a
 grid of `k` or more cells can have fewer than `k` that hold points, and
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)
-then lowers `k` at that size, which the `k` column shows. On an extent
-much longer than it is wide every rung can fall below the
-autocorrelation range while longer blocks would still fit `k` times
-along the longer side; the sweep warns when that happens, and
-`block_sizes` is then the way to reach past the range. Sizes are in the
-units of the CRS the folds are built in
+then lowers `k` at that size, which the `k` column shows; the sweep
+warns once, naming the sizes. On an extent much longer than it is wide
+every rung can fall below the autocorrelation range while longer blocks
+would still fit `k` times along the longer side; the sweep warns when
+that happens, and `block_sizes` is then the way to reach past the range.
+Sizes are in the units of the CRS the folds are built in
 ([`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md)'s
 `params$crs`, metres for geographic input), and the returned table
 records that CRS. Each is the *minimum* block edge handed to
 [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md),
-which fits a whole number of cells across the extent, so the cells are
-somewhat longer than the size on the axis (up to twice as long).
+which fits a whole number of cells across each axis of the extent, so on
+an axis at least as long as the size the cells are somewhat longer than
+it (up to just under twice as long). An axis shorter than the size is
+spanned by one row or column of cells, which are then shorter than the
+size there. The `block_width` and `block_height` columns give the cells
+built at each size.
+
+## Warnings raised once for the sweep
+
+Every size is a
+[`cv_spatial()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)
+on the same layer. The warnings
+[`prep_model_data()`](https://elkronos.github.io/gis_modeling_toolkit/reference/prep_model_data.md)
+raises about that layer (class `spatialkit_rows_dropped`, counting the
+incomplete rows dropped, and `spatialkit_constant_predictor`) are raised
+once, not once per size. With a GWR learner, the two warnings in which
+[`predict()`](https://rdrr.io/r/stats/predict.html) counts held-out
+locations (`"spatialkit_gwr_not_estimable"` and
+`"spatialkit_gwr_extrapolation"`) are raised once each, under this
+function's name, with the totals over every size; the same rows are
+predicted at every size, so a location can be counted once per size (see
+[`predict.gwr_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md)).
 
 ## See also
 
@@ -199,7 +221,7 @@ if (requireNamespace("ranger", quietly = TRUE) &&
   if (requireNamespace("ggplot2", quietly = TRUE)) plot(sw)
 }
 #> Cross-validation RMSE against block size (20 fits, k = 4, sizes in EPSG:32632)
-#>   estimated autocorrelation range: 452.5
+#>   estimated autocorrelation range: 460.0
 #>  block_size       method blocks_used k n_folds_succeeded  value fold_min
 #>      random random_kfold          NA 4                 4 0.9639   0.8346
 #>       38.73  block_kfold         172 4                 4 0.9438   0.7825

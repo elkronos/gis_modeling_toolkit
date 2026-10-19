@@ -13,12 +13,20 @@ and walks through the `spatialkit` workflow end to end:
     and map the cell means
 5.  Estimate the autocorrelation range, build spatial CV folds, and
     score a model under **blocked** versus **random** folds
-6.  Fit the models to keep: a random forest, GWR when it is installed,
+6.  Fit the models to keep: a random forest, GWR when `sp` is installed,
     and the two compared on identical folds
 7.  Predict onto a surface and mark where that surface is extrapolation
 
 Everything is self-contained — the boundary comes from the `nc.shp` demo
 shapefile bundled with `sf`, so no external files are needed.
+
+The cell functions run at their defaults: density-weighted seeds
+(`partition = "density"`, from 3 starts) and a pooled value beside each
+cell mean (`estimate = "pooled"`). `partition = "kmeans"` in
+[`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
+and `estimate = "mean"` in
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+give the k-means seeds and the plain frame of earlier versions.
 
 Optional backends are checked at the top and every section that needs
 one is guarded, so this document renders with whatever you happen to
@@ -26,13 +34,13 @@ have installed. This table always runs, even when the gate below it is
 shut – it is what says which backend is missing when the code stops
 producing output:
 
-    ##        package available                          used_for
-    ## 1      ggplot2      TRUE                         all plots
-    ## 2    patchwork      TRUE     the stacked comparison panels
-    ## 3     geometry      TRUE       true Delaunay triangulation
-    ## 4       ranger      TRUE             random forest backend
-    ## 5        gstat      TRUE variogram / autocorrelation range
-    ## 6 GWmodel + sp      TRUE                       GWR backend
+    ##     package available                          used_for
+    ## 1   ggplot2      TRUE                         all plots
+    ## 2 patchwork      TRUE     the stacked comparison panels
+    ## 3  geometry      TRUE       true Delaunay triangulation
+    ## 4    ranger      TRUE             random forest backend
+    ## 5     gstat      TRUE variogram / autocorrelation range
+    ## 6        sp      TRUE                       GWR backend
 
 ------------------------------------------------------------------------
 
@@ -132,7 +140,7 @@ coast.](spatialkit_nc_demo_files/figure-html/quick-peek-1.png)
 
 ## 3. Four tessellations
 
-### 3a. Voronoi from ~40 k-means seeds
+### 3a. Voronoi from ~40 density-weighted k-means seeds
 
 Voronoi cells are built around *seed* points, not the observations
 themselves. Seeding one cell per observation would give 300 cells each
@@ -140,7 +148,8 @@ containing a single point — a nearest-neighbour interpolation rather
 than an aggregation, with no within-cell variation to compute a standard
 error from.
 [`get_voronoi_seeds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/get_voronoi_seeds.md)
-clusters the observations first, so cell size follows sampling density.
+clusters the observations first, each weighted by its local density, so
+cells are small where the observations are dense.
 
 ``` r
 
@@ -155,7 +164,23 @@ tess_voronoi <- build_tessellation(
   seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
+sum(is.na(tess_voronoi$index))   # seeds that lie in no cell
 ```
+
+    ## [1] 1
+
+A k-means centre is a mean of observations, and it can lie outside a
+boundary that is not convex. Here one density-weighted centre lies just
+outside the state outline, over a sound that coastal observations
+surround, and
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+warns (class `spatialkit_unassigned`) that one point falls in no cell;
+this vignette does not print warnings. The points are the seeds, not the
+observations: the seed’s cell is built inside the outline, every
+observation falls in a cell, and the seed has `NA` in
+`tess_voronoi$index`.
+[`?cell_values_at`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md)
+shows how to give such a seed its cell’s ID.
 
 ### 3b and 3c. Hex and square grids (~50 cells)
 
@@ -232,8 +257,9 @@ cat(sprintf(
 joins points to cells;
 [`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
 does the aggregation — means, standard deviations and standard errors
-for the response and every predictor, plus `n` and `cell_weight`. There
-is no need to write the
+for the response and every predictor, plus `n` and `cell_weight`, and
+beside each mean a pooled value, the mean pulled toward the cells around
+it. There is no need to write the
 [`group_by()`](https://dplyr.tidyverse.org/reference/group_by.html)/[`summarise()`](https://dplyr.tidyverse.org/reference/summarise.html)
 by hand, and doing so loses the design-effect machinery below.
 
@@ -285,7 +311,7 @@ cat(sprintf("method = %s | ICC(response) = %.3f | median design effect = %.2f\n"
             deff$method, deff$icc_resp, stats::median(deff$deff, na.rm = TRUE)))
 ```
 
-    ## method = kish | ICC(response) = 0.742 | median design effect = 5.45
+    ## method = kish | ICC(response) = 0.737 | median design effect = 5.42
 
 ``` r
 
@@ -294,7 +320,7 @@ summary(cell_kish$`..se_resp_y` / cell_stats$`..se_resp_y`)
 ```
 
     ##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-    ##   3.535   4.271   4.595   4.705   5.183   6.193
+    ##   3.067   4.220   4.540   4.624   5.120   6.973
 
 ### Choropleths
 
@@ -434,11 +460,9 @@ largest-over-smallest ratio in `anisotropy`), but only as a diagnostic:
 each direction sees about a quarter of the point pairs, the maximum of
 four such fits is biased upward, and the windows are fixed to the
 coordinate axes, so nothing built from them is invariant to rotating the
-layer. The all-pairs fit is the estimate whenever it is usable; the
-directional maximum stands in for it only when the all-pairs fit fails,
-and the `anisotropy_used` attribute is `TRUE` in that case alone. If you
-*know* the field is anisotropic, size blocks from the longest
-directional range explicitly:
+layer. The all-pairs fit is the estimate or there is none: the largest
+directional range never stands in for it. If you *know* the field is
+anisotropic, size blocks from the longest directional range explicitly:
 `max(attr(sac, "directional_fitted"), na.rm = TRUE)`, after checking
 `attr(sac, "directional_status")`, since `directional` is `NA` for a
 direction that ran past the fitted lags, which on such a field is often
@@ -454,7 +478,7 @@ sac
 ```
 
     ## NA 
-    ##   directional: 0 deg = 22475325 (past the fitted lags), 45 deg = 1243020, 90 deg = 1591410 (past the fitted lags), 135 deg = 3346918 (past the fitted lags)
+    ##   directional: 0 deg = 5145134 (past the fitted lags), 45 deg = 1618292 (past the fitted lags), 90 deg = 1760918 (past the fitted lags), 135 deg = 5145134 (past the fitted lags)
     ##   in US survey feet of EPSG:2264; variogram of the residuals on predictor_vars (ols)
 
 ``` r
@@ -462,9 +486,8 @@ sac
 if (is.na(sac)) {
   cat("no identified range:", attr(sac, "rejected_reason"), "\n")
 } else {
-  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f; used %s\n",
-              as.numeric(sac), attr(sac, "anisotropy"),
-              attr(sac, "anisotropy_used")))
+  cat(sprintf("range = %.0f ft; anisotropy ratio %.2f\n",
+              as.numeric(sac), attr(sac, "anisotropy")))
 }
 ```
 
@@ -524,10 +547,9 @@ corner.](spatialkit_nc_demo_files/figure-html/plot-folds-1.png)
 and
 [`cv_rf()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_rf.md)
 need `ranger`. `include_coords = TRUE` hands the forest the coordinates,
-which lets it memorise the training surface — the failure mode the
-default (`FALSE`) exists to prevent, and the one random folds cannot
-see. Scoring the same model on both fold schemes shows the size of the
-gap:
+which lets it fit the training surface by location. A random hold-out
+then overstates its accuracy, which random folds cannot show. Scoring
+the same model on both fold schemes shows the size of the gap:
 
 ``` r
 
@@ -571,7 +593,7 @@ rf_fit
     ##   n       : 300
     ##   CRS     : EPSG:2264
     ##   Trees   : 500 (mtry = 1, min node = 5)
-    ##   Coords as predictors: no
+    ##   Coords as predictors: no - no spatial information used; see ?fit_rf_model
     ##   Sampling: bootstrap, with replacement (100.0% of rows per tree)
     ##   OOB RMSE: 9.7284   OOB R^2: 0.4733
     ##   Importance (permutation): elevation=105.4, pop_density=83.25
@@ -655,7 +677,7 @@ cat(sprintf("Moran's I = %.4f (z = %.2f, p = %.3g)\n",
 
     ## Moran's I = 0.5443 (z = 20.12, p = 4.58e-90)
 
-### GWR, if `GWmodel` is installed
+### GWR, if `sp` is installed
 
 ``` r
 
@@ -674,7 +696,7 @@ cat(sprintf("Bandwidth: %.0f neighbours | in-sample R2: %.3f | RMSE: %.3f\n",
             gwr_fit$info$bandwidth, gwr_met$R2, gwr_met$RMSE))
 ```
 
-    ## Bandwidth: 42 neighbours | in-sample R2: 0.879 | RMSE: 4.664
+    ## Bandwidth: 44 neighbours | in-sample R2: 0.877 | RMSE: 4.701
 
 The fit raises no collinearity warning, but its survey of the local
 designs (`gwr_fit$info$local_collinearity`, see “Collinearity
@@ -683,7 +705,7 @@ diagnostics” in
 is worth a look: in 25 of the 300 windows the condition index that
 includes the intercept (`cn`) is above 30. The cause is `elevation`: it
 averages about 3,000 but has a standard deviation of only about 400
-inside a 42-neighbour window, so locally it is nearly collinear with the
+inside a 44-neighbour window, so locally it is nearly collinear with the
 intercept. What that leaves poorly determined is the local intercepts,
 not the slopes: the slope index (`cn_slopes`), which centres the
 predictors in each window, stays below 30 everywhere, so no slope is
@@ -711,12 +733,12 @@ cmp <- compare_models_cv(
 cmp$overall
 ```
 
-    ##        RMSE       MAE      MAPE     SMAPE        R2 Adj_R2 n_pred n_MAPE
-    ## 1  8.682092  7.014756  7.734986  7.716894 0.6564891     NA    300    300
-    ## 2 12.428033 10.235923 11.280144 11.178625 0.2961234     NA    300    300
-    ##   n_SMAPE model
-    ## 1     300   GWR
-    ## 2     300    RF
+    ##        RMSE       MAE      MAPE    SMAPE        R2 Adj_R2 n_pred n_MAPE n_SMAPE
+    ## 1  8.647533  6.974994  7.685077  7.66426 0.6592183     NA    300    300     300
+    ## 2 12.428033 10.235923 11.280144 11.17863 0.2961234     NA    300    300     300
+    ##   model
+    ## 1   GWR
+    ## 2    RF
 
 The RF row is the forest *without* the coordinates, and on the same
 blocked folds it scores worse than the coordinate forest in 5c did. That
@@ -769,7 +791,7 @@ cat(sprintf("inside: %d | outside: %d | undetermined: %d | DI threshold %.3f\n",
             aoa$n_inside, aoa$n_outside, aoa$n_na, aoa$threshold))
 ```
 
-    ## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.184
+    ## inside: 1645 | outside: 0 | undetermined: 0 | DI threshold 0.170
 
 ``` r
 
@@ -818,8 +840,8 @@ area_of_applicability(extreme, model = rf_fit, folds = folds_blocked)$aoa[, c("D
     ## Bounding box:  xmin: 2604137 ymin: 653637.4 xmax: 2827401 ymax: 964007.8
     ## Projected CRS: NAD83 / North Carolina (ftUS)
     ##            DI   AOA                 geometry
-    ## 1  0.04321651  TRUE POINT (2827401 653637.4)
-    ## 2 15.00736636 FALSE POINT (2604137 964007.8)
+    ## 1  0.04806484  TRUE POINT (2827401 653637.4)
+    ## 2 15.68668080 FALSE POINT (2604137 964007.8)
 
 ------------------------------------------------------------------------
 
@@ -846,8 +868,8 @@ argues about it:
 | for | read |
 |:---|:---|
 | getting your own data in, and what the coordinates are in | [`vignette("getting-started")`](https://elkronos.github.io/gis_modeling_toolkit/articles/getting-started.md) |
-| how many cells, and the four criteria that disagree | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) |
-| the five fold schemes, and sizing a block by measurement | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
+| how many cells, and the criteria that disagree | [`vignette("resolution")`](https://elkronos.github.io/gis_modeling_toolkit/articles/resolution.md) |
+| the six fold schemes, and sizing a block by measurement | [`vignette("spatial-cross-validation")`](https://elkronos.github.io/gis_modeling_toolkit/articles/spatial-cross-validation.md) |
 | residual autocorrelation, aggregation standard errors, and two ways to leak | [`vignette("diagnostics")`](https://elkronos.github.io/gis_modeling_toolkit/articles/diagnostics.md) |
 | handing the regions to someone else, and what to report | [`vignette("reporting")`](https://elkronos.github.io/gis_modeling_toolkit/articles/reporting.md) |
 
@@ -880,34 +902,20 @@ figure before drawing it.
     ## [4] sf_1.1-3              spatialkit_2.0.0.9000
     ## 
     ## loaded via a namespace (and not attached):
-    ##  [1] GWmodel_2.4-1         tidyselect_1.2.1      viridisLite_0.4.3    
-    ##  [4] farver_2.1.2          S7_0.2.2              fastmap_1.2.0        
-    ##  [7] TH.data_1.1-5         digest_0.6.39         lifecycle_1.0.5      
-    ## [10] LearnBayes_2.15.2     survival_3.8-6        magrittr_2.0.5       
-    ## [13] compiler_4.6.1        rlang_1.3.0           sass_0.4.10          
-    ## [16] tools_4.6.1           yaml_2.3.12           geometry_0.5.2       
-    ## [19] data.table_1.18.6.1   knitr_1.52            FNN_1.1.4.1          
-    ## [22] labeling_0.4.3        htmlwidgets_1.6.4     sp_2.2-3             
-    ## [25] classInt_0.4-11       RColorBrewer_1.1-3    abind_1.4-8          
-    ## [28] multcomp_1.4-32       KernSmooth_2.23-26    withr_3.0.3          
-    ## [31] desc_1.4.3            grid_4.6.1            xts_0.14.3           
-    ## [34] e1071_1.7-17          scales_1.4.0          MASS_7.3-65          
-    ## [37] cli_3.6.6             mvtnorm_1.4-2         rmarkdown_2.32       
-    ## [40] intervals_0.15.5      ragg_1.5.2            generics_0.1.4       
-    ## [43] otel_0.2.0            robustbase_0.99-7     magic_1.6-1-1        
-    ## [46] spdep_1.4-2           DBI_1.3.0             cachem_1.1.0         
-    ## [49] proxy_0.4-29          splines_4.6.1         spatialreg_1.4-3     
-    ## [52] parallel_4.6.1        s2_1.1.13             marginaleffects_1.0.0
-    ## [55] vctrs_0.7.3           boot_1.3-32           Matrix_1.7-5         
-    ## [58] sandwich_3.1-3        jsonlite_2.0.0        spData_2.3.5         
-    ## [61] systemfonts_1.3.2     jquerylib_0.1.4       units_1.0-1          
-    ## [64] glue_1.8.1            pkgdown_2.2.1         DEoptimR_1.2-2       
-    ## [67] codetools_0.2-20      gstat_2.1-6           gtable_0.3.6         
-    ## [70] deldir_2.0-4          tibble_3.3.1          logger_0.4.3         
-    ## [73] pillar_1.11.1         htmltools_0.5.9       R6_2.6.1             
-    ## [76] wk_0.9.5              textshaping_1.0.5     evaluate_1.0.5       
-    ## [79] lattice_0.22-9        backports_1.5.1       bslib_0.12.0         
-    ## [82] class_7.3-23          Rcpp_1.1.2            coda_0.19-4.1        
-    ## [85] nlme_3.1-169          spacetime_1.3-4       ranger_0.18.0        
-    ## [88] xfun_0.61             fs_2.1.0              zoo_1.9-1            
-    ## [91] pkgconfig_2.0.3
+    ##  [1] s2_1.1.13          magic_1.6-1-1      sass_0.4.10        generics_0.1.4    
+    ##  [5] class_7.3-23       KernSmooth_2.23-26 lattice_0.22-9     digest_0.6.39     
+    ##  [9] magrittr_2.0.5     evaluate_1.0.5     grid_4.6.1         RColorBrewer_1.1-3
+    ## [13] fastmap_1.2.0      jsonlite_2.0.0     Matrix_1.7-5       e1071_1.7-17      
+    ## [17] DBI_1.3.0          viridisLite_0.4.3  scales_1.4.0       textshaping_1.0.5 
+    ## [21] jquerylib_0.1.4    abind_1.4-8        cli_3.6.6          rlang_1.3.0       
+    ## [25] units_1.0-1        intervals_0.15.5   withr_3.0.3        cachem_1.1.0      
+    ## [29] yaml_2.3.12        otel_0.2.0         FNN_1.1.4.1        geometry_0.5.2    
+    ## [33] tools_4.6.1        ranger_0.18.0      spacetime_1.3-4    logger_0.4.3      
+    ## [37] vctrs_0.7.3        R6_2.6.1           proxy_0.4-29       classInt_0.4-11   
+    ## [41] zoo_1.9-1          lifecycle_1.0.5    fs_2.1.0           htmlwidgets_1.6.4 
+    ## [45] ragg_1.5.2         pkgconfig_2.0.3    desc_1.4.3         pkgdown_2.2.1     
+    ## [49] pillar_1.11.1      bslib_0.12.0       gtable_0.3.6       glue_1.8.1        
+    ## [53] Rcpp_1.1.2         gstat_2.1-6        systemfonts_1.3.2  xfun_0.62         
+    ## [57] tibble_3.3.1       tidyselect_1.2.1   knitr_1.52         farver_2.1.2      
+    ## [61] htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32     xts_0.14.3        
+    ## [65] wk_0.9.5           compiler_4.6.1     S7_0.2.2           sp_2.2-4

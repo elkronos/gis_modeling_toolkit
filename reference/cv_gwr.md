@@ -66,7 +66,8 @@ cv_gwr(
 
 - k:
 
-  Number of folds. Default 5.
+  Number of folds to build when `folds` is `NULL`; not read when `folds`
+  is supplied. Default 5.
 
 - seed:
 
@@ -82,10 +83,12 @@ cv_gwr(
   integer number of neighbours; for `adaptive = FALSE` a distance in the
   units of the **projected** CRS the folds are fitted in (geographic
   input is projected first, so a value in degrees is read as metres).
-  `NULL` (default) selects a bandwidth per fold with
-  [`GWmodel::bw.gwr()`](https://rdrr.io/pkg/GWmodel/man/bw.gwr.html),
-  which is reported in `fold_metrics$bandwidth`. See
-  [`fit_gwr_model`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md).
+  `NULL` (default) selects a bandwidth per fold from that fold's
+  training rows, by the search
+  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md)
+  runs (its section Bandwidth selection: AICc, or the
+  leave-one-location-out sum of squares when observations share a
+  location), and reports it in `fold_metrics$bandwidth`.
 
 - kernel:
 
@@ -101,26 +104,27 @@ cv_gwr(
 
 - block_size:
 
-  Optional minimum block edge length for spatial CV blocks (projected
-  CRS units). Blocks are then at least as large as the spatial
-  autocorrelation range.
+  Optional minimum block edge length (projected CRS units) for the
+  blocks built when `folds` is `NULL`; see
+  [`make_folds()`](https://elkronos.github.io/gis_modeling_toolkit/reference/make_folds.md).
+  It is a size you choose and is not compared with the autocorrelation
+  range unless one can be estimated, in which case a smaller size is
+  warned about. Beside supplied `folds` it has nothing to size and
+  raises a warning (class `spatialkit_fold_args_ignored`).
 
 - auto_range:
 
   Logical. If `TRUE` and `folds` is `NULL`, estimate the autocorrelation
-  range and use it as the minimum block size. Default `FALSE`.
+  range and use it as the minimum block size. Default `FALSE`. `TRUE`
+  beside supplied `folds` raises the same warning as `block_size`.
 
 - parallel:
 
   Accepted so that every `cv_*()` function takes the same arguments, but
-  the GWR folds always run one after another in this R process. GWmodel
-  is built with OpenMP, and OpenMP (GNU libgomp) deadlocks
-  [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)'s
-  forked workers once a GWR has been fitted in the session, for example
-  by
-  [`fit_gwr_model()`](https://elkronos.github.io/gis_modeling_toolkit/reference/fit_gwr_model.md),
-  so forking would hang the call. A value asking for more than one core
-  raises a warning saying so. Default `FALSE`.
+  the GWR folds always run one after another in this R process, where
+  the warnings [`predict()`](https://rdrr.io/r/stats/predict.html)
+  raises for each fold are collected into one. A value asking for more
+  than one core raises a warning saying so. Default `FALSE`.
 
 - metrics:
 
@@ -146,6 +150,12 @@ for the five statuses and for `orphan_rows`. `Adj_R2` is `NA` in both
 parameter count, and a GWR's effective parameter count is not its
 predictor count (see
 [`cv_spatial`](https://elkronos.github.io/gis_modeling_toolkit/reference/cv_spatial.md)).
+A held-out location whose local regression cannot be estimated has
+`yhat` `NA`, and one beyond the reach of its fold's fit is predicted and
+scored; each case raises one warning for the whole run (classes
+`"spatialkit_gwr_not_estimable"` and `"spatialkit_gwr_extrapolation"`),
+with the totals over the folds that had any. See
+[`predict.gwr_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md).
 
 ## Details
 
@@ -209,8 +219,7 @@ Other cross-validation:
 ## Examples
 
 ``` r
-if (requireNamespace("GWmodel", quietly = TRUE) &&
-    requireNamespace("sp", quietly = TRUE)) {
+if (requireNamespace("sp", quietly = TRUE)) {
   library(sf)
   set.seed(1)
   n <- 60

@@ -237,13 +237,16 @@ Default TRUE.</p></dd>
 <span class="r-in"><span>    coords <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x"</span>, <span class="st">"y"</span><span class="op">)</span>, crs <span class="op">=</span> <span class="fl">32632</span></span></span>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="co"># Cells from the points, the response aggregated onto them, and the map</span></span></span>
-<span class="r-in"><span>  <span class="co"># shaded by the cell mean rather than by an arbitrary ID.</span></span></span>
+<span class="r-in"><span>  <span class="co"># shaded by the cell mean rather than by an arbitrary ID.  Each cell</span></span></span>
+<span class="r-in"><span>  <span class="co"># holds one point, so there is nothing to pool: estimate = "mean".</span></span></span>
 <span class="r-in"><span>  <span class="va">tess</span>  <span class="op">&lt;-</span> <span class="fu"><a href="build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">pts</span>, method <span class="op">=</span> <span class="st">"voronoi"</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="summarize_by_cell.html">summarize_by_cell</a></span><span class="op">(</span><span class="fu"><a href="assign_features_to_polygons.html">assign_features_to_polygons</a></span><span class="op">(</span><span class="va">pts</span>, <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span>,</span></span>
-<span class="r-in"><span>                             response_var <span class="op">=</span> <span class="st">"z"</span>, cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></span>
+<span class="r-in"><span>                             response_var <span class="op">=</span> <span class="st">"z"</span>, cells_sf <span class="op">=</span> <span class="va">tess</span><span class="op">$</span><span class="va">cells</span>,</span></span>
+<span class="r-in"><span>                             estimate <span class="op">=</span> <span class="st">"mean"</span><span class="op">)</span></span></span>
 <span class="r-in"><span>  <span class="fu">plot_tessellation_map</span><span class="op">(</span><span class="va">cells</span>, features_sf <span class="op">=</span> <span class="va">pts</span>, fill_col <span class="op">=</span> <span class="st">"resp_mean_z"</span>,</span></span>
 <span class="r-in"><span>                        legend_title <span class="op">=</span> <span class="st">"mean z"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> assign_features_to_polygons(): `polygons_sf` has no 'poly_id' column; the polygon IDs are read from its 'cell_id' column and returned as `poly_id`.</span>
 <span class="r-plt img"><img src="plot_tessellation_map-1.png" alt="" width="576" height="403"></span>
 </code></pre></div>
     </div>

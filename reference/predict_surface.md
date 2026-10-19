@@ -85,6 +85,11 @@ predict_surface(
   do not interact, and for a `bayesian_fit` the GP boundary is held at
   its fitted value whatever the chunk holds; see
   [`predict.bayesian_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.bayesian_fit.md).
+  The two warnings in which
+  [`predict.gwr_fit()`](https://elkronos.github.io/gis_modeling_toolkit/reference/predict.gwr_fit.md)
+  counts locations (classes `"spatialkit_gwr_extrapolation"` and
+  `"spatialkit_gwr_not_estimable"`) are raised once for the grid, with
+  its totals, whatever the number of chunks.
 
 - se:
 
@@ -179,11 +184,12 @@ if (requireNamespace("ranger", quietly = TRUE)) {
 #> Area of applicability (Meyer & Pebesma 2021)
 #> 
 #>   predictors  : 1 (elev)
-#>   weighted    : no (all predictors count equally)
+#>   weighted    : yes, by the model's permutation importance, floored at 0
 #>   training    : 120 points
 #>   reference   : nearest other training point (no folds supplied)
 #>   normaliser  : 1.1283 (mean pairwise distance)
 #>   threshold   : 0.0480 (outlier-removed max of training DI)
+#>   location    : not measured
 #> 
 #>   529 of 529 prediction points inside the AOA (100.0%)
 ```

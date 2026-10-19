@@ -1,11 +1,14 @@
 # Print a GWR model selection result
 
 Shows the forward-selection trail: the response, the candidate
-predictors, and the top-ranked models with their criterion values, so
-you can see both which model won and by how much. A shallow gap between
-the first few rows means the ranking is not well identified and the
-choice of predictors should not be treated as settled. Check the gap
-before reporting one model as the selected one.
+predictors, and the top-ranked models with their criterion values and,
+in the `delta` column, how far each is from the best. Below the table it
+lists the models within 2 of the best, which a difference in AICc does
+not separate (Burnham and Anderson 2002), and names the smallest of
+them. When several models are that close the ranking is not well
+identified and the choice of predictors should not be treated as
+settled; when the model without predictors (`<none>`) is among them, no
+candidate has been shown to help.
 
 ## Usage
 
@@ -31,6 +34,12 @@ print(x, n = 10L, ...)
 ## Value
 
 `x`, invisibly.
+
+## References
+
+Burnham, K. P. and Anderson, D. R. (2002). *Model Selection and
+Multimodel Inference: A Practical Information-Theoretic Approach*, 2nd
+edition. Springer.
 
 ## See also
 

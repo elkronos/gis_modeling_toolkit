@@ -12,7 +12,8 @@ assign_features_to_polygons(
   keep_unassigned = FALSE,
   predicate = sf::st_intersects,
   largest = TRUE,
-  tie_break = c("smallest_area", "first")
+  tie_break = c("smallest_area", "first"),
+  quiet = FALSE
 )
 ```
 
@@ -28,12 +29,27 @@ assign_features_to_polygons(
 
 - polygon_id_col:
 
-  Name of the polygon identifier column. Default "poly_id".
+  Name of the polygon identifier column: the column of `polygons_sf` the
+  IDs are read from, and the name they are returned under. Default
+  "poly_id". When `polygons_sf` has no column of that name, the IDs are
+  read from the first of `"poly_id"`, `"polygon_id"`, `"id"`,
+  `"cell_id"` and `"grid_id"` it carries, and a message names the column
+  that was used; when it has none of them, the polygons are numbered
+  `1, 2, ...` in row order, and a message says so. The column the IDs
+  are read from must hold one distinct, non-missing value per polygon: a
+  duplicated or missing ID is an error, because features in different
+  polygons would come back under one ID. That includes a unit stored as
+  several rows that share its ID (a region split into `POLYGON` parts):
+  merge the parts into one row per ID first, for example with
+  `dplyr::summarise(dplyr::group_by(polygons_sf, <ID column>))`, which
+  keeps the unit one cell. Numbering the rows would make each part a
+  cell of its own.
 
 - keep_unassigned:
 
   Logical; retain features that fall inside no polygon, carrying `NA` in
-  the ID column. Default FALSE, which drops them.
+  the ID column. Default FALSE, which drops them with a warning of class
+  `"spatialkit_unassigned"` that gives their number.
 
 - predicate:
 
@@ -69,7 +85,15 @@ assign_features_to_polygons(
   of equal area (a point on the shared edge of two grid cells), the one
   whose bounding-box centre is lowest, then leftmost, so the choice does
   not depend on the order of the rows; `"first"` keeps the first match
-  (original order-dependent behavior).
+  (original order-dependent behavior). On cells built from the centres a
+  profile scored, a point on the edge between two of them is placed by
+  the profile's rule whichever is given (see Value).
+
+- quiet:
+
+  Logical; suppress this function's
+  [`message()`](https://rdrr.io/r/base/message.html)s (the one naming a
+  fallback ID column). It does not silence R warnings. Default `FALSE`.
 
 ## Value
 
@@ -84,14 +108,31 @@ own ID column when that is read from a fallback such as `"id"` (a site
 polygon the result is empty (or all-`NA` with `keep_unassigned = TRUE`)
 and a warning is raised, since the usual cause is two layers in
 different places (a CRS that could only be stamped, not reprojected).
+
+Features that fall inside no polygon are counted on the attribute
+`"unassigned"`: a list with `n`, `which` (their row positions in
+`features_sf`) and `n_rows`. With `keep_unassigned = FALSE` they are not
+in the result, and a warning of class `"spatialkit_unassigned"` gives
+their number (`tryCatch(spatialkit_unassigned = )` catches it without
+matching the message; the condition carries `n` and `total`). The usual
+causes are a polygon layer that stops short of the data (a coastline
+drawn at another scale, a tessellation of seeds built without a
+`boundary` or `cover`; see
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md))
+and points outside the study area. With `keep_unassigned = TRUE` they
+are kept with an `NA` ID and no warning is raised, unless every feature
+is unassigned.
+
 The attribute `"ties"` records how many features matched more than one
 polygon (with `largest`, overlapped several by exactly the same area)
-and had the `tie_break` rule decide for them: a list with `n`, `which`
-(their row positions in `features_sf`), `rule` and `n_rows` (the number
-of rows returned, which the record was made for). A large `n` means the
-polygon layer overlaps, and per-cell counts built from the result depend
-on the rule. The record describes the rows this call returned and does
-not survive subsetting: `joined[i, ]`, like
+and had the `tie_break` rule decide for them (on cells built from the
+centres a profile scored, the profile's rule then places the points
+among them, as the last paragraph says): a list with `n`, `which` (their
+row positions in `features_sf`), `rule` and `n_rows` (the number of rows
+returned, which the record was made for). A large `n` means the polygon
+layer overlaps, and per-cell counts built from the result depend on the
+rule. The record describes the rows this call returned and does not
+survive subsetting: `joined[i, ]`, like
 [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
 `slice()` or `arrange()` of it, is a plain layer with no `"ties"`
 attribute, so nothing reports the parent's count for a different set of
@@ -99,7 +140,67 @@ rows.
 [`sf::st_drop_geometry()`](https://r-spatial.github.io/sf/reference/st_geometry.html)
 keeps the record, since the rows are the same; see
 [`[.spatialkit_rows`](https://elkronos.github.io/gis_modeling_toolkit/reference/sub-.spatialkit_rows.md)
-for what binding such data frames does.
+for what binding such data frames does. The `"unassigned"` record is
+stamped and removed the same way.
+
+When `polygons_sf` carries `attr(, "count_rule")`, the record of how its
+cell count was set (cells from
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+on seeds placed from a
+[`select_resolution()`](https://elkronos.github.io/gis_modeling_toolkit/reference/select_resolution.md)
+result or from a profile built with an `estimate`), the result carries
+the same record.
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)
+reads it and checks that the rows and cells it is given are the ones the
+count was scored on. It is a plain attribute: a row subset keeps it and
+[`dplyr::mutate()`](https://dplyr.tidyverse.org/reference/mutate.html),
+[`dplyr::select()`](https://dplyr.tidyverse.org/reference/select.html)
+and
+[`dplyr::arrange()`](https://dplyr.tidyverse.org/reference/arrange.html)
+drop it, which is why the summary also looks for it on its `cells_sf`.
+The profile scores a feature that is not a point at one point of it
+(`coerce_to_points(, "auto")`), in the cell of the nearest centre; this
+function gives a polygon feature to the cell it overlaps most. A feature
+that straddles a cell boundary can therefore be assigned to another cell
+than the one it was scored in, and the summary does not compare the two
+for such a layer. To assign the features as they were scored, assign
+their points:
+`assign_features_to_polygons(coerce_to_points(features_sf, "auto"), polygons_sf)`.
+
+When that record says the cells are the ones the profile scored
+(`scored_cells` is `TRUE`: the cells
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+builds on a selection's seeds, or on the seeds a seeding function
+returns for one) and holds the centres it scored
+(`count_rule$scored$centres`), a point on the edge between two or more
+of those cells is given the cell
+[`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md)
+scored it in: that of its nearest centre, measured in the CRS the record
+names, and of centres the same distance away the lower-numbered one.
+Such points occur on gridded locations (raster cell centres, a regular
+sampling grid), where a row can lie the same distance from two centres
+and the polygons hold it in either cell or in both. The rows each cell
+holds are then the rows its count was scored on, and
+[`summarize_by_cell()`](https://elkronos.github.io/gis_modeling_toolkit/reference/summarize_by_cell.md)'s
+check of them reads `"match"`. A point counts as on the edge when it
+lies within a margin of both cells: one part in 1e10 of the largest
+coordinate of the cells, 0.44 mm at a UTM northing of 4,400 km.
+[`build_tessellation()`](https://elkronos.github.io/gis_modeling_toolkit/reference/build_tessellation.md)
+draws such cells in the CRS the record names, around the centres as the
+record holds them, whatever CRS the seeds came back in (unless its `crs`
+names another projected CRS), so their corners carry only the rounding
+of that computation, far less than the margin. A point farther from its
+nearest centre's cell keeps the polygon that holds it, and so do
+features that are not points, points without a CRS beside a record with
+one, and a join in longitude and latitude. A centre's cell is the one
+cell that holds it and no other centre; a centre outside a boundary that
+clipped its cell away from it has the cell, among those that hold no
+centre, whose inside is nearest it. Cells built from other seeds leave
+most centres without a cell, and their points to the polygons. Polygons
+without the record, such as polygons the caller brings, and cells whose
+record says `scored_cells` is `FALSE` or `NA` (other cells built from
+the count, such as a lattice sized by it) are placed by the polygons
+alone.
 
 ## Details
 
@@ -128,6 +229,7 @@ to build the polygon layer;
 for the aggregation step that consumes the result.
 
 Other aggregation:
+[`cell_values_at()`](https://elkronos.github.io/gis_modeling_toolkit/reference/cell_values_at.md),
 [`determine_optimal_levels()`](https://elkronos.github.io/gis_modeling_toolkit/reference/determine_optimal_levels.md),
 [`kriging_adequacy()`](https://elkronos.github.io/gis_modeling_toolkit/reference/kriging_adequacy.md),
 [`resolution_profile()`](https://elkronos.github.io/gis_modeling_toolkit/reference/resolution_profile.md),

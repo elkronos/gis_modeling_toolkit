@@ -11,9 +11,9 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Choosing a resolution">
-<meta name="description" content="How many cells the data support: the ladder, four criteria that disagree, and how to read the flat region.
+<meta name="description" content="How many cells the data support: the ladder, the criteria that disagree, and how to read the flat region.
 ">
-<meta property="og:description" content="How many cells the data support: the ladder, four criteria that disagree, and how to read the flat region.
+<meta property="og:description" content="How many cells the data support: the ladder, the criteria that disagree, and how to read the flat region.
 ">
 </head>
 <body>
@@ -74,7 +74,7 @@
                         <h4 data-toc-skip class="author">Justin
 Chase</h4>
             
-            <h4 data-toc-skip class="date">07 October 2026</h4>
+            <h4 data-toc-skip class="date">19 October 2026</h4>
       
       <small class="dont-index">Source: <a href="https://github.com/elkronos/gis_modeling_toolkit/blob/main/vignettes/resolution.Rmd" class="external-link"><code>vignettes/resolution.Rmd</code></a></small>
       <div class="d-none name"><code>resolution.Rmd</code></div>
@@ -104,19 +104,35 @@ they tell you. <code><a href="../reference/determine_optimal_levels.html">determ
 off the coordinates alone and runs on the hard dependencies; it is the
 quick answer and the one <code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> accepts
 directly. <code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> scores every cell count on a
-ladder against four criteria at once and needs gstat for two of them.
-<code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads one criterion off that profile,
-and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads all four side by side.
-If the cells will feed a model, the profile is the one to use. If you
-need a count now and the data are all you have, the elbow is defensible
-when the points cluster, and this article says where it falls short. On
-points spread evenly there is no elbow to read, and both functions say
-so: the profile leaves its <code>elbow</code> column empty, and
+ladder in five columns at once, four count criteria and one diagnostic,
+and needs gstat for two of them. <code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads
+one criterion off that profile, and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the
+profile reads the count criteria side by side. If the cells will feed a
+model, the profile is the one to use. If you need a count now and the
+data are all you have, the elbow is defensible when the points cluster,
+and this article says where it falls short. On points spread evenly
+there is no elbow to read, and both functions say so: the profile leaves
+its <code>elbow</code> column empty, and
 <code><a href="../reference/determine_optimal_levels.html">determine_optimal_levels()</a></code> warns that the count it still
 returns was chosen by the ends of its ladder, not by the data.</p>
+<p>Called with the response and nothing else,
+<code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> takes its defaults: one level at 4.5
+observations per cell, scored for the pooled value that
+<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> reports by default, in density-weighted
+cells, with no variogram fitted. <code><a href="../reference/select_resolution.html">select_resolution()</a></code> then
+reads the count off that size (“Setting a size” below). A ladder
+argument such as <code>n_levels</code> gives the ladder this article
+reads first. Each earlier default is one argument away:
+<code>estimate = NULL, obs_per_cell = NULL</code> in the profile for the
+ladder without the pooled value’s columns, <code>sac = NULL</code> for a
+variogram on a ladder of sizes, <code>partition = "kmeans"</code> for
+k-means cells from 25 starts, <code>criterion = "cp"</code> in
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code>, and <code>estimate = "mean"</code> in
+<code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code>.</p>
 <p>The argument that says “how many” is spelled differently by the
 function it belongs to: <code>max_levels</code> bounds the elbow’s
-ladder, <code>n_levels</code> sets the profile’s,
+ladder, <code>n_levels</code> sets the profile’s and
+<code>obs_per_cell</code> sets it in observations per cell,
 <code>approx_n_cells</code> and <code>target_cells</code> are what the
 grid builders take, and <code>n</code> is what
 <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> takes. Each of the last three accepts
@@ -165,65 +181,92 @@ you place the seeds rather than when you tessellate them. The last
 section shows the two calls in order.</p>
 <p>Two things to know about this function before you rely on it. Its
 <code>criterion = "morans_i"</code> and
-<code>criterion = "combined"</code> settings need both
-<code>response_var</code> and <code>predictor_vars</code>; give it only
-a response and it warns and falls back to <code>"geometric"</code>. And
-its ladder runs from 1 to <code>max_levels</code> with no lower bound
-from the spatial correlation of the data, so it can prefer cells wider
-than the field’s own correlation range. The profile below does impose
-that bound, which is why the two can disagree.</p>
+<code>criterion = "combined"</code> settings rank the counts around the
+elbow by Moran’s z of the cell means, which is a diagnostic and not a
+count rule; the call returns the ranking with a warning of class
+<code>spatialkit_diagnostic_ranking</code> that says so. They need a
+<code>response_var</code>; without one the call warns and falls back to
+<code>"geometric"</code>. And its ladder runs from 1 to
+<code>max_levels</code> with no lower bound from the spatial correlation
+of the data, so it can prefer cells wider than the field’s own
+correlation range. The profile below reports that bound, and
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads <code>reliability</code> from it
+up, which is why the two can disagree.</p>
 </div>
 <div class="section level2">
 <h2 id="the-profile">The profile<a class="anchor" aria-label="anchor" href="#the-profile"></a>
 </h2>
 <p><code><a href="../reference/resolution_profile.html">resolution_profile()</a></code> fits every level on a ladder and
 reports what each one costs, so you can see the shape of the trade-off
-before picking a point on it. Levels are spaced logarithmically, because
-cell diameter falls as
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>L</mi><mrow><mi>−</mi><mn>1</mn><mi>/</mi><mn>2</mn></mrow></msup><annotation encoding="application/x-tex">L^{-1/2}</annotation></semantics></math>.</p>
+before picking a point on it. <code>n_levels</code> asks for that
+ladder. Levels are spaced logarithmically, because cell diameter falls
+as
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>L</mi><mrow><mi>−</mi><mn>1</mn><mi>/</mi><mn>2</mn></mrow></msup><annotation encoding="application/x-tex">L^{-1/2}</annotation></semantics></math>.
+At its defaults the profile also scores the leave-one-out error of the
+pooled value, <code>loo</code>, at every level, and draws the cells by
+density-weighted k-means.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">prof</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, n_levels <span class="op">=</span> <span class="fl">16</span><span class="op">)</span></span>
 <span><span class="va">prof</span></span></code></pre></div>
 <pre><code><span><span class="co">## Resolution profile: 16 levels on 500 points</span></span>
-<span><span class="co">##   ladder      : 10 to 55 cells (floor 10 from range 314, ceiling 55 from min_cell_n = 9)</span></span>
-<span><span class="co">##   variogram   : nugget 0.877, partial sill 1.29, range 314</span></span>
-<span><span class="co">##   scored on   : response; 25 k-means++ restarts per level; WSS rises at 0 step(s)</span></span>
+<span><span class="co">##   ladder      : 2 to 55 cells (floor 17 from range 243, not applied, ceiling 55 from min_cell_n = 9)</span></span>
+<span><span class="co">##   variogram   : nugget 0.702, partial sill 1.42, range 243</span></span>
+<span><span class="co">##   scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 neighbours) per level; WSS rises at 0 step(s)</span></span>
+<span><span class="co">##   one cell    : rss 1040, cp 2.08 (one mean for the layer; a level has to beat it)</span></span>
+<span><span class="co">##   estimate    : pooled toward the 8 nearest cells; loo on 500 rows of the layer; one cell: loo 2.08</span></span>
 <span><span class="co">##   elbow       : none; the WSS curve falls as it does with no cluster structure</span></span>
 <span><span class="co">## </span></span>
-<span><span class="co">##  levels     wss wss_spread elbow cell_n_min cell_n_median cell_diam_median rss</span></span>
-<span><span class="co">##      10 7850000     0.1510    NA         38          48.0            248.0 914</span></span>
-<span><span class="co">##      11 6960000     0.0965    NA         31          45.0            233.0 900</span></span>
-<span><span class="co">##      13 5850000     0.0578    NA         27          40.0            214.0 865</span></span>
-<span><span class="co">##      14 5500000     0.0810    NA         26          33.0            209.0 862</span></span>
-<span><span class="co">##      16 4750000     0.0864    NA         24          29.5            194.0 850</span></span>
-<span><span class="co">##      18 4220000     0.0694    NA         19          27.5            179.0 862</span></span>
-<span><span class="co">##      20 3750000     0.0666    NA         15          25.0            174.0 793</span></span>
-<span><span class="co">##      22 3310000     0.1100    NA         15          22.5            163.0 812</span></span>
-<span><span class="co">##      25 2780000     0.1210    NA         12          20.0            148.0 798</span></span>
-<span><span class="co">##      28 2390000     0.1380    NA         12          17.0            139.0 778</span></span>
-<span><span class="co">##      31 2180000     0.1060    NA          9          16.0            130.0 722</span></span>
-<span><span class="co">##      35 1870000     0.1670    NA          7          14.0            121.0 695</span></span>
-<span><span class="co">##      39 1650000     0.1310    NA          6          13.0            115.0 686</span></span>
-<span><span class="co">##      44 1440000     0.0832    NA          6          11.0            107.0 648</span></span>
-<span><span class="co">##      49 1260000     0.0984    NA          6          10.0            100.0 633</span></span>
-<span><span class="co">##      55 1110000     0.1280    NA          4           9.0             91.8 638</span></span>
-<span><span class="co">##    cp  moran_i moran_z reliability</span></span>
-<span><span class="co">##  1.86 -0.10600  0.1250       0.811</span></span>
-<span><span class="co">##  1.84 -0.03160  1.3000       0.806</span></span>
-<span><span class="co">##  1.78 -0.03700  0.7000       0.798</span></span>
-<span><span class="co">##  1.77 -0.05140  0.3770       0.793</span></span>
-<span><span class="co">##  1.76 -0.00625  0.8350       0.785</span></span>
-<span><span class="co">##  1.79 -0.02540  0.4610       0.777</span></span>
-<span><span class="co">##  1.66 -0.05660 -0.0528       0.769</span></span>
-<span><span class="co">##  1.70  0.01360  0.8210       0.761</span></span>
-<span><span class="co">##  1.68  0.01050  0.7030       0.750</span></span>
-<span><span class="co">##  1.65  0.00177  0.5310       0.739</span></span>
-<span><span class="co">##  1.55  0.03950  1.0200       0.729</span></span>
-<span><span class="co">##  1.51  0.07480  1.5100       0.716</span></span>
-<span><span class="co">##  1.51  0.02900  0.8280       0.704</span></span>
-<span><span class="co">##  1.45  0.07390  1.5300       0.689</span></span>
-<span><span class="co">##  1.44  0.12300  2.3500       0.675</span></span>
-<span><span class="co">##  1.47  0.18600  3.4400       0.660</span></span></code></pre>
+<span><span class="co">##  levels      wss wss_spread elbow cell_n_min cell_n_median cell_diam_median</span></span>
+<span><span class="co">##       2 52800000   0.036100    NA        228         250.0            649.0</span></span>
+<span><span class="co">##       3 32100000   0.002020    NA        150         164.0            485.0</span></span>
+<span><span class="co">##       4 21500000   0.000877    NA        110         128.0            410.0</span></span>
+<span><span class="co">##       5 17900000   0.036300    NA         71         103.0            365.0</span></span>
+<span><span class="co">##       6 14700000   0.032500    NA         71          82.0            342.0</span></span>
+<span><span class="co">##       8 10400000   0.005010    NA         54          59.5            289.0</span></span>
+<span><span class="co">##       9  8820000   0.006290    NA         42          56.0            273.0</span></span>
+<span><span class="co">##      12  6430000   0.048700    NA         31          40.5            222.0</span></span>
+<span><span class="co">##      15  5140000   0.113000    NA         24          33.0            194.0</span></span>
+<span><span class="co">##      17  4750000   0.068800    NA         20          28.0            186.0</span></span>
+<span><span class="co">##      18  4480000   0.120000    NA         15          28.0            187.0</span></span>
+<span><span class="co">##      23  3250000   0.018900    NA         15          21.0            158.0</span></span>
+<span><span class="co">##      28  2590000   0.074300    NA          9          17.0            138.0</span></span>
+<span><span class="co">##      35  2010000   0.044900    NA          9          14.0            123.0</span></span>
+<span><span class="co">##      44  1580000   0.042700    NA          4          11.0            108.0</span></span>
+<span><span class="co">##      55  1210000   0.074100    NA          4           9.0             94.4</span></span>
+<span><span class="co">##   rss   cp   moran_i moran_z reliability cells_resp cell_resp_mean</span></span>
+<span><span class="co">##  1020 2.05        NA      NA       0.760          2         250.00</span></span>
+<span><span class="co">##  1000 2.01        NA      NA       0.800          3         167.00</span></span>
+<span><span class="co">##  1010 2.03        NA      NA       0.811          4         125.00</span></span>
+<span><span class="co">##   945 1.90        NA      NA       0.814          5         100.00</span></span>
+<span><span class="co">##   929 1.88        NA      NA       0.814          6          83.30</span></span>
+<span><span class="co">##   945 1.91        NA      NA       0.811          8          62.50</span></span>
+<span><span class="co">##   911 1.85        NA      NA       0.808          9          55.60</span></span>
+<span><span class="co">##   912 1.86 -0.030200  0.9710       0.799         12          41.70</span></span>
+<span><span class="co">##   823 1.69 -0.062700  0.1200       0.790         15          33.30</span></span>
+<span><span class="co">##   824 1.69  0.000359  0.8910       0.783         17          29.40</span></span>
+<span><span class="co">##   772 1.59 -0.064300 -0.0754       0.780         18          27.80</span></span>
+<span><span class="co">##   742 1.55 -0.031700  0.1830       0.765         23          21.70</span></span>
+<span><span class="co">##   773 1.62  0.042400  1.0900       0.750         28          17.90</span></span>
+<span><span class="co">##   682 1.46  0.088000  1.7200       0.732         35          14.30</span></span>
+<span><span class="co">##   663 1.45  0.104000  2.0000       0.710         44          11.40</span></span>
+<span><span class="co">##   655 1.46  0.210000  3.8800       0.686         55           9.09</span></span>
+<span><span class="co">##  scored_per_cell  loo loo_se share_alone own_weight</span></span>
+<span><span class="co">##           250.00 2.07 0.1230           0      0.914</span></span>
+<span><span class="co">##           167.00 2.03 0.1220           0      0.921</span></span>
+<span><span class="co">##           125.00 2.05 0.1220           0      0.844</span></span>
+<span><span class="co">##           100.00 1.93 0.1160           0      0.929</span></span>
+<span><span class="co">##            83.30 1.90 0.1130           0      0.926</span></span>
+<span><span class="co">##            62.50 1.95 0.1160           0      0.863</span></span>
+<span><span class="co">##            55.60 1.89 0.1110           0      0.894</span></span>
+<span><span class="co">##            41.70 1.91 0.1140           0      0.833</span></span>
+<span><span class="co">##            33.30 1.74 0.1090           0      0.901</span></span>
+<span><span class="co">##            29.40 1.76 0.1080           0      0.879</span></span>
+<span><span class="co">##            27.80 1.65 0.0993           0      0.909</span></span>
+<span><span class="co">##            21.70 1.62 0.0975           0      0.889</span></span>
+<span><span class="co">##            17.90 1.72 0.1060           0      0.825</span></span>
+<span><span class="co">##            14.30 1.56 0.0969           0      0.831</span></span>
+<span><span class="co">##            11.40 1.57 0.0953           0      0.819</span></span>
+<span><span class="co">##             9.09 1.60 0.1000           0      0.722</span></span></code></pre>
 <p>One row per level. <code>cell_n_median</code> and
 <code>cell_diam_median</code> are usually the first two columns worth
 reading: how many points a typical cell holds, and how big it is in CRS
@@ -233,7 +276,7 @@ of the side of a square cell of the same area, so compare it against
 something you already know about your own data, such as the spacing of a
 sampling grid or the size of a field, with that factor in mind.</p>
 <div class="section level3">
-<h3 id="the-four-criteria">The four criteria<a class="anchor" aria-label="anchor" href="#the-four-criteria"></a>
+<h3 id="four-criteria-and-a-diagnostic">Four criteria and a diagnostic<a class="anchor" aria-label="anchor" href="#four-criteria-and-a-diagnostic"></a>
 </h3>
 <table class="table">
 <colgroup>
@@ -269,9 +312,11 @@ means</td>
 </tr>
 <tr class="odd">
 <td><code>moran_z</code></td>
-<td>spatial structure surviving in the residuals of the cell means</td>
+<td>Moran’s z of the cell means (of their regression residuals when
+predictors are given): whether neighbouring cells resemble each
+other</td>
 <td>a response</td>
-<td>nearer zero</td>
+<td>a diagnostic, not a count rule</td>
 </tr>
 <tr class="even">
 <td><code>reliability</code></td>
@@ -280,31 +325,51 @@ sampling noise</td>
 <td>a variogram</td>
 <td>larger</td>
 </tr>
+<tr class="odd">
+<td><code>loo</code></td>
+<td>the leave-one-out error of the cell value the profile scores, the
+pooled value by default (“Setting a size”)</td>
+<td>a response</td>
+<td>smaller</td>
+</tr>
 </tbody>
 </table>
 <p><code>elbow</code> sees the coordinates and knows nothing about what
 you measured. <code>cp</code> and <code>reliability</code> split the
 practical question in half: how well the cells represent the field, and
-whether the cell values can be told apart from noise.
-<code>moran_z</code> is the diagnostic, and a large deviate says the
-cells are still leaving spatial pattern on the table.</p>
+whether the cell values can be told apart from noise. What
+<code>cp</code> estimates is the error of re-measuring the sampled
+sites, each predicted by the mean of its cell, with the variogram’s
+nugget as the noise of one measurement. For a new location the penalty
+would also need the spread of the field inside a cell, which the nugget
+leaves out. <code>moran_z</code> is a diagnostic of the cell means and
+not a count rule. It grows as the cells get finer than the range,
+because neighbouring cells then resemble each other, and it is near zero
+at the coarsest counts it is computed at whatever the data. It does not
+say how well the cells represent the response, so
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code> refuses it unless asked with
+<code>diagnostic = TRUE</code>, and <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> leaves it out
+unless it is named.</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
-<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Three stacked panels, one per criterion the profile could score, against the number of cells on a shared axis; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls from 10 to 49 cells and turns up at 55, reliability declines steadily from 10 cells on, and the absolute Moran's z is lowest at 20 cells and climbs past 30. A red dot and dotted line mark each criterion's choice, and shaded bands the levels within tolerance of it. The bands are one to three levels wide, none has a gap, and no level sits inside all three." width="100%" style="display: block; margin: auto;"></p>
+<p><img src="resolution_files/figure-html/plot-profile-1.png" class="r-plt" alt="Four stacked panels against the number of cells on a shared axis, from 2 to 55; there is no elbow panel because these uniform points have no elbow. Mallows' Cp falls across the ladder and is lowest at 44 cells. Reliability rises to a peak near 5 cells and declines after it. The leave-one-out error of the pooled value falls as Cp does and is lowest at 35 cells. The absolute Moran's z of the cell means is drawn from 12 cells on, stays near 1 or below up to 23 cells and climbs past 3 at 55. A red dot and dotted line mark the level selected for Cp, at 44 cells, for reliability, at 17 cells, and for the leave-one-out error, at 35 cells, with a shaded band over the levels within tolerance of each; the Moran panel has no selected level." width="100%" style="display: block; margin: auto;"></p>
 <p>Two behaviours are worth knowing before reading the numbers.</p>
 <p><strong><code>cp</code> needs a nugget to have an interior
 optimum.</strong> On a smooth field the piecewise-constant approximation
 keeps improving as cells shrink, the penalty is too small to stop it,
 and the minimum lands wherever <code>min_cell_n</code> stops the ladder.
 The support ceiling is then doing the choosing, and
-<code><a href="../reference/select_resolution.html">select_resolution()</a></code> flags it. This fixture has a fitted
-nugget of 0.88 against a partial sill of 1.29, which is why
-<code>cp</code> turns around inside the ladder here.</p>
-<p><strong><code>reliability</code> rises as cells get larger</strong>,
-because bigger cells hold more points and average away more noise. Its
-optimum can therefore sit on the coarse end of whatever the ladder
-allows, which makes the answer a bound on the analysis. The next section
-is about spotting that.</p>
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code> flags it.</p>
+<p>This fixture has a fitted nugget of 0.7 against a partial sill of
+1.42, which is why <code>cp</code> turns around inside the ladder
+here.</p>
+<p><strong><code>reliability</code> is highest at a coarse
+count</strong>, because bigger cells hold more points and average away
+more noise. Its maximum usually lies below the range floor, where cells
+are wider than the range. <code><a href="../reference/select_resolution.html">select_resolution()</a></code> therefore
+reads it from the floor up, and what it returns is then the floor: a
+bound on the analysis, with the range choosing and not the curve. The
+next section is about spotting that.</p>
 </div>
 </div>
 <div class="section level2">
@@ -315,8 +380,9 @@ and reports the band around it.</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sel</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof</span>, criterion <span class="op">=</span> <span class="st">"reliability"</span><span class="op">)</span></span>
 <span><span class="va">sel</span></span></code></pre></div>
-<pre><code><span><span class="co">## Resolution by reliability: 10 cells</span></span>
-<span><span class="co">##   flat region : 10 to 13 (3 of 16 levels)</span></span>
+<pre><code><span><span class="co">## Resolution by reliability: 17 cells</span></span>
+<span><span class="co">##   flat region : 17 to 18 (2 of 16 levels)</span></span>
+<span><span class="co">##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
 <span><span class="co">##   note        : the optimum is the range floor (area / range^2); the bound is</span></span>
 <span><span class="co">##                 choosing, not the criterion. Fewer cells would be wider than</span></span>
 <span><span class="co">##                 the range and average over more than one patch of the field.</span></span></code></pre>
@@ -338,27 +404,29 @@ bound on the analysis, not as an optimum. The floor is a fact about the
 data, so the fix is a different question, not a different
 <code>tol</code>.</p>
 <p>Criteria can prefer different levels while agreeing on a region.
-<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads all four at once, and closes
-with the levels that every band contains:</p>
+<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> on the profile reads the count criteria at once,
+and closes with the levels that every band contains:</p>
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">prof</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Resolution picks: 3 criteria over 16 levels (10 to 55 cells)</span></span>
+<pre><code><span><span class="co">## Resolution picks: 3 criteria over 16 levels (2 to 55 cells)</span></span>
+<span><span class="co">## </span></span>
+<span><span class="co">##   cells: density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##    criterion best flat region levels in band</span></span>
-<span><span class="co">##           cp   49    44 to 49              2</span></span>
-<span><span class="co">##  reliability   10    10 to 13              3</span></span>
-<span><span class="co">##      moran_z   20          20              1</span></span>
+<span><span class="co">##           cp   44    35 to 55              3</span></span>
+<span><span class="co">##  reliability   17    17 to 18              2</span></span>
+<span><span class="co">##          loo   35    35 to 44              2</span></span>
 <span><span class="co">## </span></span>
 <span><span class="co">##   reliability: the optimum is the range floor (area / range^2).</span></span>
 <span><span class="co">##   There the bound is choosing, not the criterion.</span></span>
 <span><span class="co">## </span></span>
-<span><span class="co">##   picks span 10 to 49 cells (4.9x)</span></span>
+<span><span class="co">##   picks span 17 to 44 cells (2.6x)</span></span>
 <span><span class="co">##   no level is in every flat region: the criteria disagree over the</span></span>
 <span><span class="co">##   whole ladder. plot() draws the curves they were read from.</span></span></code></pre>
 <p>A band is a set of levels, not an interval, because the criterion
 curves are not monotone: a band that skips a rung prints as a
-comma-separated list, while a solid run of 2 rungs prints as a range, as
-<code>cp</code> does with <code>44 to 49</code>. Where the bands overlap
+comma-separated list, while a solid run of 3 rungs prints as a range, as
+<code>cp</code> does with <code>35 to 55</code>. Where the bands overlap
 you have a defensible set of levels, and the last line names it;
 <code>attr(summary(prof), "common")</code> returns the same levels for
 use in code, and <code>attr(summary(prof), "bands")</code> each
@@ -367,9 +435,9 @@ answering different questions and you have to say which one your
 analysis needs. An empty intersection is a result: it says this field
 has no single resolution that satisfies every way of asking.</p>
 <p>The table is not a decision procedure, and nothing in the package
-will pick for you. Cross-validating a model at each suggested level is
-affordable, but it does not settle the question either: on a simulated
-field the level that won on cross-validated
+picks among its criteria for you. Cross-validating a model at each
+suggested level is affordable, but it does not settle the question
+either: on a simulated field the level that won on cross-validated
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>R</mi><mn>2</mn></msup><annotation encoding="application/x-tex">R^2</annotation></semantics></math>
 moved with the fold seed, and the coarsest grid won most often because
 its score had the widest spread, not because it was better.</p>
@@ -377,30 +445,40 @@ its score had the widest spread, not because it was better.</p>
 <div class="section level2">
 <h2 id="what-the-ladder-can-support">What the ladder can support<a class="anchor" aria-label="anchor" href="#what-the-ladder-can-support"></a>
 </h2>
-<p>The ladder runs between two bounds the data impose, both recorded on
-the profile.</p>
+<p>The ladder runs from 2 cells to a ceiling the data impose. The
+profile records that ceiling and, beside it, a floor from the
+autocorrelation range.</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## List of 11</span></span>
-<span><span class="co">##  $ floor       : int 10</span></span>
+<pre><code><span><span class="co">## List of 15</span></span>
+<span><span class="co">##  $ floor       : int 17</span></span>
 <span><span class="co">##  $ ceiling     : int 55</span></span>
 <span><span class="co">##  $ ceiling_from: chr "min_cell_n"</span></span>
 <span><span class="co">##  $ supported   : logi TRUE</span></span>
 <span><span class="co">##  $ area        : num 976371</span></span>
-<span><span class="co">##  $ range       : num 314</span></span>
+<span><span class="co">##  $ range       : num 243</span></span>
 <span><span class="co">##  $ n           : int 500</span></span>
 <span><span class="co">##  $ n_sample    : int 500</span></span>
 <span><span class="co">##  $ n_distinct  : int 500</span></span>
 <span><span class="co">##  $ min_cell_n  : int 9</span></span>
-<span><span class="co">##  $ range_floor : logi TRUE</span></span></code></pre>
-<p>The ceiling is <code>floor(n / min_cell_n)</code>, or the number of
-distinct locations when that is smaller (one short of it when no
-location repeats); <code>ceiling_from</code> says which. Past it the
+<span><span class="co">##  $ range_floor : logi FALSE</span></span>
+<span><span class="co">##  $ n_response  : int 500</span></span>
+<span><span class="co">##  $ n_scored    : int 500</span></span>
+<span><span class="co">##  $ levels_given: logi FALSE</span></span>
+<span><span class="co">##  $ predictors  : logi FALSE</span></span></code></pre>
+<p>The ceiling is <code>floor(n / min_cell_n)</code>, with
+<code>n</code> the rows that carry a response when one is given, or the
+number of distinct locations when that is smaller (one short of it when
+no location repeats); <code>ceiling_from</code> says which. Past it the
 average cell holds too few points to estimate anything from, or k-means
 has more centres to place than distinct points. The floor is
 <code>ceiling(area / range^2)</code>, from the fitted autocorrelation
 range: cells wider than the range average over more than one patch of
-the field, mixing values the field itself keeps apart.</p>
+the field, mixing values the field itself keeps apart. The range is an
+estimate, so by default the floor is reported and not applied: it is a
+level of the ladder,
+<code>select_resolution(criterion = "reliability")</code> reads from it
+up, and <code>range_floor = TRUE</code> starts the ladder there.</p>
 <p>When the floor exceeds the ceiling, the data cannot support a
 tessellation that respects their own correlation structure.
 <code>supported</code> is <code>FALSE</code>, a warning says so, and the
@@ -409,13 +487,185 @@ visible. The usual causes are too few points for the extent, or a
 correlation range shorter than the spacing between observations.</p>
 </div>
 <div class="section level2">
+<h2 id="setting-a-size">Setting a size<a class="anchor" aria-label="anchor" href="#setting-a-size"></a>
+</h2>
+<p>Of the criteria above, all but <code>loo</code> score the plain mean
+of a cell. <code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code> reports beside it, by
+default, a <em>pooled</em> value: the cell’s mean pulled toward the mean
+of the 8 cells around it, by a weight that grows with the number of
+observations the cell holds (<code>estimate = "pooled"</code>;
+<code><a href="../articles/reporting.html">vignette("reporting")</a></code> shows how to read and report one).
+For that value no criterion sets the count. A <em>size</em> does: the
+number of observations a cell is to hold on average,
+<code>obs_per_cell</code>. A size <code>s</code> on <code>n</code>
+observations is <code>max(2, round(n / s))</code> cells.</p>
+<p>The default profile is one size, 4.5, scored for the pooled value,
+and <code><a href="../reference/select_resolution.html">select_resolution()</a></code> reads the count off it by that
+size. This is the call with nothing named but the response:</p>
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">prof_default</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof_default</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">## Resolution by size: 111 cells</span></span>
+<span><span class="co">##   size        : 4.5 rows per cell asked (obs_per_cell); 500 rows / 111 cells = 4.50</span></span>
+<span><span class="co">##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
+<span><span class="co">##   estimate    : pooled toward the 8 nearest cells</span></span>
+<span><span class="co">##   at this size: 0.4% of the rows are alone in their cell; median own weight 0.54</span></span>
+<span><span class="co">##   loo         : 1.54 (one cell for the layer: 2.08)</span></span>
+<span><span class="co">##   note        : the count is set by obs_per_cell = 4.5, the caller's choice;</span></span>
+<span><span class="co">##                 no criterion chose it.</span></span></code></pre>
+<p><code>obs_per_cell</code> puts the profile’s ladder in those terms,
+one level per size, with the centres fitted to every row.
+<code>estimate</code> names the cell value the profile scores, the
+pooled value unless it says otherwise:</p>
+<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">prof_size</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>,</span>
+<span>                                obs_per_cell <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">12</span>, <span class="fl">9</span>, <span class="fl">6</span>, <span class="fl">4.5</span>, <span class="fl">3</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">prof_size</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"levels"</span>, <span class="st">"scored_per_cell"</span>, <span class="st">"loo"</span>,</span>
+<span>                             <span class="st">"share_alone"</span>, <span class="st">"own_weight"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
+<pre><code><span><span class="co">##   levels scored_per_cell      loo share_alone own_weight</span></span>
+<span><span class="co">## 1     42       11.904762 1.566779       0.000  0.8143550</span></span>
+<span><span class="co">## 2     56        8.928571 1.525325       0.000  0.7413916</span></span>
+<span><span class="co">## 3     83        6.024096 1.461817       0.002  0.7197274</span></span>
+<span><span class="co">## 4    111        4.504505 1.423166       0.010  0.6473814</span></span>
+<span><span class="co">## 5    167        2.994012 1.429188       0.048  0.5621471</span></span></code></pre>
+<p>Three of the columns say what a size leaves a cell value to stand
+on.</p>
+<ul>
+<li>
+<code>loo</code> is the leave-one-out error of the pooled value:
+each observation is predicted by the value of its cell computed without
+it, and the squared errors are averaged. It needs no variogram.
+<code>sac = "auto"</code>, the default, fits none on a ladder of sizes,
+so <code>cp</code> and <code>reliability</code> are <code>NA</code> in
+this profile.</li>
+<li>
+<code>share_alone</code> is the share of the observations that are
+the only one in their cell.</li>
+<li>
+<code>own_weight</code> is the median weight a pooled value gives
+its cell’s own mean. At 1 the pooled values are the plain means; at 0
+each is the mean of the cell’s neighbours.</li>
+</ul>
+<p>At the size of the default profile this ladder has other centres, and
+so another <code>loo</code>, than that profile had: a profile draws the
+starts of its levels in turn from one random stream under
+<code>seed</code>, so a level’s centres depend on the other levels of
+the ladder.</p>
+<p><code>select_resolution(criterion = "size")</code> returns the level
+of a size. It searches for no optimum, so the result has no flat region
+and sits on no bound:</p>
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sel_size</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof_size</span>, criterion <span class="op">=</span> <span class="st">"size"</span>,</span>
+<span>                              obs_per_cell <span class="op">=</span> <span class="fl">4.5</span><span class="op">)</span></span>
+<span><span class="va">sel_size</span></span></code></pre></div>
+<pre><code><span><span class="co">## Resolution by size: 111 cells</span></span>
+<span><span class="co">##   size        : 4.5 rows per cell asked (obs_per_cell); 500 rows / 111 cells = 4.50</span></span>
+<span><span class="co">##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
+<span><span class="co">##   estimate    : pooled toward the 8 nearest cells</span></span>
+<span><span class="co">##   at this size: 1.0% of the rows are alone in their cell; median own weight 0.65</span></span>
+<span><span class="co">##   loo         : 1.42 (one cell for the layer: 2.08)</span></span>
+<span><span class="co">##   note        : the count is set by obs_per_cell = 4.5, the caller's choice;</span></span>
+<span><span class="co">##                 no criterion chose it.</span></span></code></pre>
+<p><code>loo</code> is in the table to compare sizes by, not to choose
+one. For pooled values it tends to keep falling as the cells shrink, so
+its minimum tends to be the finest size offered, and the end of the
+ladder would then be choosing. On 200 simulated layers of 1,500
+clustered observations of a field plus noise, profiled at seven sizes
+from 18 to 2, the lowest <code>loo</code> of the pooled value was at the
+size 2 on 176 (<code>dev/sim-pooled-values.R</code> in the package’s
+repository; <code><a href="../reference/resolution_profile.html">?resolution_profile</a></code> gives the settings).</p>
+<p>In the table above the lowest <code>loo</code> is at 111 cells, which
+is not the finest size offered: a tendency, not a rule.</p>
+<p>The size is therefore the caller’s choice, made on other grounds: how
+many observations a cell value should stand on, which
+<code>share_alone</code> and <code>own_weight</code> describe. Under a
+size neither the cells, which are fitted to the coordinates, nor their
+number, which is a count of rows, depend on the response, so the count
+is not fitted to the values it will summarise.</p>
+<p>A size does not ask whether the response has spatial structure the
+cells can use, so the selection asks it separately.
+<code>structured</code> is <code>FALSE</code> when one mean for the
+whole layer predicts a left-out observation as well as the cells do. The
+count stands either way, since the caller set it, and the functions that
+take the selection as a count then warn (class
+<code>spatialkit_no_structure</code>) that the cell values will say
+little that one mean does not.</p>
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>structured <span class="op">=</span> <span class="va">sel_size</span><span class="op">$</span><span class="va">structured</span>, loo <span class="op">=</span> <span class="va">sel_size</span><span class="op">$</span><span class="va">loo</span>,</span>
+<span>           one_mean <span class="op">=</span> <span class="va">sel_size</span><span class="op">$</span><span class="va">loo_one_cell</span><span class="op">)</span></span></code></pre></div>
+<pre><code><span><span class="co">##   structured      loo one_mean</span></span>
+<span><span class="co">## 1       TRUE 1.423166 2.081281</span></span></code></pre>
+<p>The selection goes to <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code>, as in “Next”
+below. It carries a record of how the count was set,
+<code>sel_size$count_rule</code>, which the seeds, the cells and the
+assigned layer hand on to <code><a href="../reference/summarize_by_cell.html">summarize_by_cell()</a></code>. The summary
+then checks that it reports the cell value the count was chosen for, on
+the cells and rows that were scored.</p>
+</div>
+<div class="section level2">
+<h2 id="leave-one-out-for-plain-means">Leave-one-out for plain means<a class="anchor" aria-label="anchor" href="#leave-one-out-for-plain-means"></a>
+</h2>
+<p>With plain means the leave-one-out error does choose a count. Each
+observation is predicted by the mean of the other observations of its
+cell, or, when it is alone in its cell, by the mean of the cell of its
+nearest other observation. <code>estimate = "mean"</code> scores that
+error in the profile, and the default <code>obs_per_cell = "auto"</code>
+then offers the seven sizes 18, 12, 9, 6, 4.5, 3 and 2:</p>
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">prof_loo</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, estimate <span class="op">=</span> <span class="st">"mean"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">prof_loo</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"levels"</span>, <span class="st">"scored_per_cell"</span>, <span class="st">"loo"</span>, <span class="st">"loo_se"</span>,</span>
+<span>                            <span class="st">"share_alone"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
+<pre><code><span><span class="co">##   levels scored_per_cell      loo    loo_se share_alone</span></span>
+<span><span class="co">## 1     28       17.857143 1.640425 0.1004998       0.000</span></span>
+<span><span class="co">## 2     42       11.904762 1.601586 0.1024429       0.000</span></span>
+<span><span class="co">## 3     56        8.928571 1.632183 0.1013714       0.000</span></span>
+<span><span class="co">## 4     83        6.024096 1.645847 0.1004743       0.000</span></span>
+<span><span class="co">## 5    111        4.504505 1.664467 0.1014937       0.004</span></span>
+<span><span class="co">## 6    167        2.994012 1.600161 0.1032003       0.050</span></span>
+<span><span class="co">## 7    250        2.000000 2.008358 0.1222162       0.174</span></span></code></pre>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">sel_loo</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/select_resolution.html">select_resolution</a></span><span class="op">(</span><span class="va">prof_loo</span>, criterion <span class="op">=</span> <span class="st">"loo"</span><span class="op">)</span></span>
+<span><span class="va">sel_loo</span></span></code></pre></div>
+<pre><code><span><span class="co">## Resolution by loo: 167 cells</span></span>
+<span><span class="co">##   flat region : 42, 167 (2 of 7 levels)</span></span>
+<span><span class="co">##   cells       : density-weighted k-means++ starts (power 1, 8 neighbours)</span></span>
+<span><span class="co">##   estimate    : plain means</span></span>
+<span><span class="co">##   at this size: 5.0% of the rows are alone in their cell</span></span>
+<span><span class="co">##   loo         : 1.6 (one cell for the layer: 2.08)</span></span></code></pre>
+<p>The lowest error is at 167 cells, inside the sizes offered, so the
+criterion chose it.</p>
+<p><code>sel_loo$flat</code> is every level whose error is within
+<code>tol</code> of the lowest, and it is the answer to quote, as for
+any criterion. <code>loo_se</code> is the standard error of one level’s
+mean squared error. It is not the standard error of the difference
+between two levels: their errors come from the same observations.</p>
+<p>Three things to know before relying on this criterion. The count now
+depends on the values of the response, so the next section applies, and
+<code>select_on = "split"</code> reads <code>loo</code> on one half of
+the layer. The error describes locations among the observations: it
+compares counts where data are near, and says nothing about the error of
+a map away from them. And it sets the count of plain means only; for
+pooled values a size does, as above. In the simulation of that section
+the lowest <code>loo</code> of the plain mean was at the finest size on
+none of the 200 layers: it was at 6 observations per cell on 86 of them,
+at 4.5 on 51 and at 9 on 49.</p>
+<p><code>criterion = "auto"</code> is the rule that goes with the
+profile’s estimate: <code>"size"</code> for pooled values and
+<code>"loo"</code> for plain means. It is
+<code><a href="../reference/select_resolution.html">select_resolution()</a></code>‘s default, and a profile built with
+<code>estimate</code> and passed straight to
+<code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code> as <code>n</code> is read the same way.
+<code>criterion = "cp"</code> reads Mallows’ Cp, which neither profile
+of these two sections has, since neither fitted a variogram.</p>
+</div>
+<div class="section level2">
 <h2 id="choosing-on-one-half-estimating-on-the-other">Choosing on one half, estimating on the other<a class="anchor" aria-label="anchor" href="#choosing-on-one-half-estimating-on-the-other"></a>
 </h2>
 <p>Picking the level from the same response you then aggregate is a form
 of double-dipping: the cell count was chosen to suit one realisation of
 the field. <code>select_on = "split"</code> profiles part of the layer
 and hands back the row positions of both parts.</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">prof_split</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolution_profile.html">resolution_profile</a></span><span class="op">(</span><span class="va">pts</span>, response_var <span class="op">=</span> <span class="st">"z"</span>, n_levels <span class="op">=</span> <span class="fl">16</span>,</span>
 <span>                                 select_on <span class="op">=</span> <span class="st">"split"</span><span class="op">)</span></span>
 <span><span class="va">sp</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof_split</span>, <span class="st">"split"</span><span class="op">)</span></span>
@@ -434,17 +684,18 @@ as independence.</p>
 <code>sp$estimation</code>. The cells on the ladder are still drawn on
 every point, so the count it picks is a count for the whole layer, and
 the ladder is as long as the full profile’s. Only the steps that read
-the response (the variogram, <code>cp</code>, <code>moran_z</code>) use
-the selection half. The cost is power: those criteria see half the data,
-so the profile is noisier and the band wider. The estimation rows also
-fill only their own half of the layer: a cell inside the selection half
-gets none of them, and a cell across the border between the halves is
-estimated from the part of it on the estimation side. Read standard
-errors only off cells whose points are all estimation rows.</p>
-<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
+the response (the variogram, <code>cp</code>, <code>moran_z</code>,
+<code>loo</code>) use the selection half. The cost is power: those
+criteria see half the data, so the profile is noisier and the band
+wider. The estimation rows also fill only their own half of the layer: a
+cell inside the selection half gets none of them, and a cell across the
+border between the halves is estimated from the part of it on the
+estimation side. Read standard errors only off cells whose points are
+all estimation rows.</p>
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">prof_split</span>, <span class="st">"bounds"</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"floor"</span>, <span class="st">"ceiling"</span>, <span class="st">"n"</span>, <span class="st">"supported"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></code></pre></div>
 <pre><code><span><span class="co">##     floor   ceiling         n supported </span></span>
-<span><span class="co">##        16        55       500         1</span></span></code></pre>
+<span><span class="co">##        21        55       500         1</span></span></code></pre>
 <p>The floor can differ from the full profile’s, because it comes from
 the range estimated on the selection half.</p>
 </div>
@@ -454,26 +705,29 @@ the range estimated on the selection half.</p>
 <p>Hand the selection to whichever call decides the cell count. For a
 Voronoi tessellation that is <code><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds()</a></code>. Given the
 <code><a href="../reference/select_resolution.html">select_resolution()</a></code> result itself, it returns the centres
-of the partition the profile scored, and a k-means partition is the
-Voronoi partition of its centres, so the cells built on those seeds are
-the cells the criteria judged; the bare count <code>sel$best</code>
-would run a new k-means, whose cells are not.
-<code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> then works on the seeds:</p>
-<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+of the partition the profile scored, and a k-means partition, weighted
+or not, is the Voronoi partition of its centres, so the cells built on
+those seeds are the cells the criteria judged; the bare count
+<code>sel$best</code> would run a new k-means, whose cells are not. This
+selection sits on the range floor, so the call warns that a bound chose
+the count (class <code>spatialkit_bound_chosen</code>; warnings are not
+shown in this article). <code><a href="../reference/build_tessellation.html">build_tessellation()</a></code> then works on
+the seeds:</p>
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">bnd</span>   <span class="op">&lt;-</span> <span class="fu"><a href="../reference/clip_target_for.html">clip_target_for</a></span><span class="op">(</span><span class="va">pts</span>, expand <span class="op">=</span> <span class="fl">0.02</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">seeds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/get_voronoi_seeds.html">get_voronoi_seeds</a></span><span class="op">(</span>boundary <span class="op">=</span> <span class="va">bnd</span>, method <span class="op">=</span> <span class="st">"kmeans"</span>, n <span class="op">=</span> <span class="va">sel</span>,</span>
 <span>                           sample_points <span class="op">=</span> <span class="va">pts</span><span class="op">)</span></span>
 <span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">seeds</span>, boundary <span class="op">=</span> <span class="va">bnd</span>, method <span class="op">=</span> <span class="st">"voronoi"</span>,</span>
 <span>                            quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">cells</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## [1] 10</span></span></code></pre>
+<pre><code><span><span class="co">## [1] 17</span></span></code></pre>
 <p>For a lattice the count goes to <code><a href="../reference/build_tessellation.html">build_tessellation()</a></code>
 itself, and the points go in directly:</p>
-<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">hex</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/build_tessellation.html">build_tessellation</a></span><span class="op">(</span><span class="va">pts</span>, boundary <span class="op">=</span> <span class="va">bnd</span>, method <span class="op">=</span> <span class="st">"hex"</span>,</span>
 <span>                          approx_n_cells <span class="op">=</span> <span class="va">sel</span><span class="op">$</span><span class="va">best</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">hex</span><span class="op">$</span><span class="va">cells</span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## [1] 18</span></span></code></pre>
+<pre><code><span><span class="co">## [1] 27</span></span></code></pre>
 <p>The hex count overshoots the request: the target is adjusted for
 packing density and then clipped to an irregular boundary, so
 <code>approx_n_cells</code> is approximate in both directions. The

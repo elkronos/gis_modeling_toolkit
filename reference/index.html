@@ -268,7 +268,7 @@
       </dl></div><div class="section level2">
       <h2 id="assign-and-aggregate">Assign and aggregate<a class="anchor" aria-label="anchor" href="#assign-and-aggregate"></a></h2>
 
-      <div class="section-desc"><p>One row per cell, with a count and a standard error for every aggregate, the record of which rows were dropped or tied on the way, and whether a block-kriging estimate would have beaten the plain cell mean.</p></div>
+      <div class="section-desc"><p>One row per cell, with a count and a standard error for every aggregate, the record of which rows were dropped or tied on the way, the value of a cell at other locations, and whether a block-kriging estimate would have beaten the plain cell mean.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -288,6 +288,13 @@
 
         </dt>
         <dd>Summarize features by polygon/cell ID</dd>
+
+        <dt>
+
+          <code><a href="cell_values_at.html">cell_values_at()</a></code>
+
+        </dt>
+        <dd>Cell values at other locations</dd>
 
         <dt>
 
@@ -331,7 +338,7 @@
           <code><a href="fold_separation.html">fold_separation()</a></code>
 
         </dt>
-        <dd>How far the held-out points actually sit from the training data</dd>
+        <dd>How far the held-out points sit from the training data</dd>
 
         <dt>
 
@@ -375,7 +382,7 @@
           <code><a href="fit_gwr_model.html">fit_gwr_model()</a></code>
 
         </dt>
-        <dd>Fit a Geographically Weighted Regression (GWR) via GWmodel</dd>
+        <dd>Fit a Geographically Weighted Regression (GWR)</dd>
 
         <dt>
 

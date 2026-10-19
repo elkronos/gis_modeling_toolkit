@@ -122,7 +122,8 @@ Built via <code>block_kfold</code> when <code>NULL</code>.</p></dd>
 
 
 <dt id="arg-k">k<a class="anchor" aria-label="anchor" href="#arg-k"></a></dt>
-<dd><p>Number of folds.</p></dd>
+<dd><p>Number of folds to build when <code>folds</code> is <code>NULL</code>; not
+read when <code>folds</code> is supplied.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -168,14 +169,18 @@ with spatially varying coefficients (e.g. GWR).</p></dd>
 
 
 <dt id="arg-block-size">block_size<a class="anchor" aria-label="anchor" href="#arg-block-size"></a></dt>
-<dd><p>Optional minimum block edge length for spatial CV blocks
-(projected CRS units).</p></dd>
+<dd><p>Optional minimum block edge length (projected CRS
+units) for the blocks built when <code>folds</code> is <code>NULL</code>; see
+<code><a href="make_folds.html">make_folds()</a></code>.  Beside supplied <code>folds</code> it has
+nothing to size and raises a warning (class
+<code>spatialkit_fold_args_ignored</code>).</p></dd>
 
 
 <dt id="arg-auto-range">auto_range<a class="anchor" aria-label="anchor" href="#arg-auto-range"></a></dt>
 <dd><p>Logical.  If <code>TRUE</code> and <code>folds</code> is <code>NULL</code>,
 estimate the autocorrelation range and use it as the minimum block size.
-Default <code>FALSE</code>.</p></dd>
+Default <code>FALSE</code>.  <code>TRUE</code> beside supplied <code>folds</code> raises
+the same warning as <code>block_size</code>.</p></dd>
 
 
 <dt id="arg-parallel">parallel<a class="anchor" aria-label="anchor" href="#arg-parallel"></a></dt>
@@ -183,10 +188,10 @@ Default <code>FALSE</code>.</p></dd>
 auto-detect the number of cores and fit folds in parallel via
 <code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code> (macOS / Linux; falls back to sequential
 on Windows).  If an integer &gt; 1, use that many cores.  Default
-<code>FALSE</code> (sequential).  A learner that runs OpenMP code (GWmodel,
-or an xgboost built with GNU libgomp) can hang the forked workers once
-it has run in the session; keep such a <code>fit_fn</code> sequential, as
-<code><a href="cv_gwr.html">cv_gwr()</a></code> does.</p></dd>
+<code>FALSE</code> (sequential).  A learner that runs OpenMP code (a
+function of GWmodel, or an xgboost built with GNU libgomp) can hang the
+forked workers once it has run in the session; keep such a
+<code>fit_fn</code> sequential.</p></dd>
 
 
 <dt id="arg-metrics">metrics<a class="anchor" aria-label="anchor" href="#arg-metrics"></a></dt>
@@ -316,6 +321,26 @@ access to the fitted object and the held-out layer; <code>metrics</code> sees
 only the two vectors but is also pooled.  <code><a href="compare_models_cv.html">compare_models_cv()</a></code>
 hands one <code>metrics</code> to every backend, so the columns are comparable
 across the rows of its <code>overall</code>.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="warnings-a-learner-raises-in-every-fold">Warnings a learner raises in every fold<a class="anchor" aria-label="anchor" href="#warnings-a-learner-raises-in-every-fold"></a></h2>
+
+
+<p>A warning from a fold's fit or from its <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> reaches the
+caller as it is raised, so a learner that warns in every fold warns once
+per fold.  Two groups of the package's own warnings are collected over the
+folds instead and raised once per call, under this function's name and
+with the class they had:</p><ul><li><p>the two in which <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> on a GWR counts locations
+(<code>"spatialkit_gwr_not_estimable"</code> and
+<code>"spatialkit_gwr_extrapolation"</code>), with the totals over the folds
+that had any, as <code><a href="cv_gwr.html">cv_gwr()</a></code> raises them (see
+<code><a href="predict.gwr_fit.html">predict.gwr_fit</a></code>);</p></li>
+<li><p>the four <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code> raises about
+a fit, naming the folds, as <code><a href="cv_bayes.html">cv_bayes()</a></code> raises them (see
+<strong>Warnings from the folds</strong> there).</p></li>
+</ul><p>With <code>parallel</code> above one core a fold's warnings are raised after
+the folds have run, once per distinct text; one of the package's own
+classes keeps its class and its fields.</p>
     </div>
     <div class="section level2">
     <h2 id="percentage-errors-on-responses-with-zeros">Percentage errors on responses with zeros<a class="anchor" aria-label="anchor" href="#percentage-errors-on-responses-with-zeros"></a></h2>

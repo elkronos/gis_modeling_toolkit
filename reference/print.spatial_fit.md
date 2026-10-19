@@ -2,8 +2,11 @@
 
 Shows the one-screen summary of a `gwr_fit`, a `bayesian_fit` or a
 custom subclass: backend, formula, number of observations, CRS, and the
-few backend-specific numbers worth seeing immediately (GWR bandwidth, GP
-basis size). An `rf_fit` has its own method (see
+few backend-specific numbers worth seeing immediately (GWR bandwidth;
+for a `bayesian_fit` the GP basis size, the smallest effective range
+that basis resolves in map units, the slope prior, and a flagged line
+when the sampler's diagnostics or the basis-adequacy check failed). An
+`rf_fit` has its own method (see
 [`print.rf_fit`](https://elkronos.github.io/gis_modeling_toolkit/reference/print.rf_fit.md)),
 which shows the same header plus the forest settings. It is what you get
 by typing the object's name, and the quickest way to confirm a fit used
@@ -32,6 +35,12 @@ print(x, ...)
 ## Value
 
 `x`, invisibly (called for its side effect).
+
+## Details
+
+For a `gwr_fit` the bandwidth and AICc are followed by the effective
+number of parameters and, when any local window is of deficient rank, by
+the number of such windows.
 
 ## See also
 

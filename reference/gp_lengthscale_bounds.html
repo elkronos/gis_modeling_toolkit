@@ -106,11 +106,22 @@ or no positive distances remain.</p>
 <p>These are the bounds a length-scale <em>prior</em> is calibrated over, not
 the scales a fitted model can resolve: that depends on the basis size
 (<code>gp_k</code> in <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>, which reports
-it as <code>$info$gp_ell_min</code>).  Both bounds are fixed fractions of the
+it as <code>$info$gp_ell_min</code>, and in map units as
+<code>$info$gp_resolution</code>).  Both bounds are fixed fractions of the
 spread of pairwise distances, so they do not shrink as points are added to
-the same area.  A surface whose range sits below what the basis resolves
-needs a larger <code>gp_k</code>: more points help the data identify a short
-range, but they make neither these bounds nor the derived basis finer.</p>
+the same area: more points help the data identify a short range, but they
+make neither these bounds nor the derived basis finer.</p>
+<p>The lower bound is the 25th percentile of the pairwise distances, as an
+effective range.  On real layouts that is 14 to 33 percent of the extent
+along each axis (about 32 km on a uniform 100 km square), and the prior
+built on it puts 1 percent of its mass below it.  A surface whose range
+is shorter needs two things, not one: a basis fine enough to represent it
+and a prior that allows it.  A larger <code>gp_k</code> under the prior
+calibrated here changes almost nothing, because the prior still holds the
+length-scale above this bound.  <code><a href="fit_bayesian_spatial_model.html">fit_bayesian_spatial_model()</a></code>
+therefore moves the prior's lower tail down to the length-scale the basis
+resolves whenever <code>gp_resolution</code> or an explicit <code>gp_k</code> asks
+for a finer basis than the one derived from these bounds.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
