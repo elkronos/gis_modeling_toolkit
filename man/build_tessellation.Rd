@@ -182,14 +182,24 @@ area as \code{NA}. A summary built from \code{index} therefore counts only the
 points the tessellation actually covers. When any point is \code{NA}, a
 warning of class \code{"spatialkit_unassigned"} gives the number
 (\code{tryCatch(spatialkit_unassigned = )} catches it; the condition
-carries \code{n} and \code{total}).}
+carries \code{n} and \code{total}). For \code{"voronoi"} and seeds (a layer a
+seeding function returned, the seeds of a \code{\link[=select_resolution]{select_resolution()}}
+result, or points given with a \code{cover}), \code{index} holds the cell each
+seed generates, whether the seed lies inside the boundary or not: a
+k-means seed outside a boundary that is not convex has its cell,
+the part of the study area nearer it than any other seed. Only a
+seed whose cell the clip removed whole, or whose geometry is empty,
+is \code{NA}, and the warning then names seeds. See
+\code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}.}
 \item{\code{boundary}}{The boundary used (possibly derived and/or
 reprojected, and for \code{"voronoi"} grown by \code{expand}).}
 \item{\code{method}}{The method actually used.}
 \item{\code{params}}{The parameters the tessellation was built with, plus
 \code{snapped}, the record of that nearest-cell repair: a list with \code{n},
 \code{which} (row positions in \code{points_sf}) and \code{distance} (how far
-outside every cell each sat, in CRS units); \code{n_outside}, the number
+outside every cell each sat, in CRS units), which for seeds lists
+only those whose \code{index} entry is the cell they were snapped to;
+\code{n_outside}, the number
 of points of \code{points_sf} that fall in no cell (the \code{NA}s of
 \code{index}); and \code{cover_outside}, the number of \code{cover} points in no
 cell when a point \code{cover} was checked against the cells (\code{NULL}

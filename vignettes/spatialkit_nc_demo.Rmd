@@ -192,17 +192,18 @@ tess_voronoi <- build_tessellation(
   seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
-sum(is.na(tess_voronoi$index))   # seeds that lie in no cell
+outside <- lengths(st_intersects(seeds, nc_boundary)) == 0
+sum(outside)                   # seeds that lie outside the state outline
+tess_voronoi$index[outside]    # the cell each of them generates
 ```
 
 A k-means centre is a mean of observations, and it can lie outside a boundary
 that is not convex. Here one density-weighted centre lies just outside the
-state outline, over a sound that coastal observations surround, and
-`build_tessellation()` warns (class `spatialkit_unassigned`) that one point
-falls in no cell; this vignette does not print warnings. The points are the
-seeds, not the observations: the seed's cell is built inside the outline, every
-observation falls in a cell, and the seed has `NA` in `tess_voronoi$index`.
-`?cell_values_at` shows how to give such a seed its cell's ID.
+state outline, over a sound that coastal observations surround. Its cell, the
+part of the state nearer it than any other seed, is built inside the outline,
+and `tess_voronoi$index` gives the seed that cell, as it gives every seed the
+cell it generates. `seeds$cell_id <- tess_voronoi$index` is then what
+`cell_values_at()` reads to place other locations.
 
 ### 3b and 3c. Hex and square grids (~50 cells)
 

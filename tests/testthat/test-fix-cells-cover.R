@@ -390,10 +390,12 @@ test_that("a boundary smaller than the data: the build and the assignment both w
   expect_true(any(grepl("`cover` point", built$warnings[hit])))
   expect_identical(built$value$params$cover_outside, n_out)
   expect_identical(built$value$params$boundary_source, "boundary")
-  # The seeds outside the boundary are NA in `index`, counted and warned about.
+  # The seeds whose cells lie wholly outside the boundary are NA in `index`,
+  # counted and warned about, as seeds.
   expect_identical(built$value$params$n_outside, sum(is.na(built$value$index)))
   expect_gt(built$value$params$n_outside, 0L)
   expect_true(any(grepl("NA in `index`", built$warnings[hit])))
+  expect_true(any(grepl("seed(s)", built$warnings[hit], fixed = TRUE)))
 
   # assign_features_to_polygons(): an R warning with a class, not a log line.
   asg <- .fc_conditions(assign_features_to_polygons(obs, built$value$cells,

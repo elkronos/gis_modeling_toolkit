@@ -590,7 +590,8 @@ test_that("a centre outside the boundary that clipped its cell gives that cell t
                                         coords = c("x", "y"), crs = 32617), .gt_record(cen))
   tess <- suppressWarnings(build_tessellation(seeds, boundary = bnd, method = "voronoi",
                                               quiet = TRUE))
-  expect_identical(tess$index, c(NA, 1L, 2L, NA))
+  # B, outside the boundary, has the cell it generates, the strip; D has none.
+  expect_identical(tess$index, c(3L, 1L, 2L, NA))
   expect_equal(as.numeric(sf::st_area(tess$cells)), c(100, 100, 420))
   # (10, 5) and (10, 2) are as near B as A: B's cell, the strip.  (11, 5) is
   # in the strip.  The polygons alone give the first two the smaller square.

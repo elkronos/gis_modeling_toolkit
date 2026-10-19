@@ -40,12 +40,16 @@ another column of the result (\code{value}, \code{estimate}, \code{obs_lo}, \cod
 \item{seeds}{\code{NULL}, or the seeds the cells were built on: an sf POINT
 layer with a column named as the ID column that gives each seed's cell.
 For cells from \code{tess <- build_tessellation(seeds)} that is
-\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}, after
-which a seed outside a boundary that is not convex needs its cell's ID
-(see "Seeds outside the boundary"). Two
-seeds at different locations with one ID are an error; seeds that share
-a location share its cell, as \code{index} gives them. \code{NA} marks a seed
-without a cell.}
+\code{seeds$cell_id <- tess$index} when the ID column is \code{"cell_id"}. For
+seeds a seeding function returned and the seeds of a
+\code{\link[=select_resolution]{select_resolution()}} result, \code{index} gives each seed the cell it
+generates. Other points are indexed by the cell that holds them, and
+one outside the boundary is \code{NA}; with the cell polygons in \code{values}
+such a seed is given its cell (step 3), and without them the locations
+nearest it have none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
+are seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). Two seeds at different
+locations with one ID are an error; seeds that share a location share
+its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.}
 }
 \value{
 A data frame with one row per row of \code{newdata}, in its order:
@@ -118,21 +122,28 @@ a cell ID and finite coordinates. Their distinct locations are the
 observations every distance below is taken from.
 \item \emph{The cell of a location.} With \code{seeds}, the cell of the nearest seed.
 That is the Voronoi cell before its clip to the cover, so every
-location has one, unless its nearest seed has an \code{NA} ID. A location
-nearest such a seed has no cell, even where the polygon that holds it
-has scored rows. \code{\link[=build_tessellation]{build_tessellation()}} gives \code{NA} in \code{index} to a
-seed that lies in no cell: one whose cell the clip removed, and one
-outside a boundary that is not convex, whose clipped cell exists
-(see "Seeds outside the boundary"). Without \code{seeds}, the polygon of
-\code{values} that holds the
-location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} with its default
-\code{tie_break} and the summary's record of the count, so a location on
-the edge between two cells the profile scored is placed as that
-function places such a row (see "Ties"); a location in no polygon has
-no cell. Polygons without a
-CRS are read as that function read them for the rows of \code{points}: the
-locations are handed to it in the CRS of \code{points}, whatever CRS
-\code{newdata} arrived in.
+location has one, unless its nearest seed has an \code{NA} ID: a location
+nearest such a seed has no cell. \code{\link[=build_tessellation]{build_tessellation()}} gives each
+seed of a layer it takes for seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}})
+the cell it generates, a seed outside a boundary that is not convex (a
+k-means centre over a bay) included, and \code{NA} only to a seed whose
+cell the clip removed whole. Other points, such as points placed by
+hand, are indexed by the cell that holds them, so one outside a
+boundary that is not convex is \code{NA} although its cell is built. When
+\code{values} carries the cell polygons, such a seed is given its cell
+here: a seed with an \code{NA} ID that lies in no polygon of \code{values} takes
+the ID of the polygon, among those no seed names, that a point inside
+it finds as its nearest seed. That is the cell the seed generates,
+since every point of a Voronoi cell is nearer its own seed than any
+other. A seed with an \code{NA} ID inside a polygon keeps it, and so does
+one whose cell \code{values} does not hold. Without \code{seeds}, the polygon of
+\code{values} that holds the location, by \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}
+with its default \code{tie_break} and the summary's record of the count, so
+a location on the edge between two cells the profile scored is placed
+as that function places such a row (see "Ties"); a location in no
+polygon has no cell. Polygons without a CRS are read as that function
+read them for the rows of \code{points}: the locations are handed to it in
+the CRS of \code{points}, whatever CRS \code{newdata} arrived in.
 \item \emph{The value.} The cell's pooled value of \code{response_var},
 \verb{..pooled_<prefix><response_var>} with the prefix \code{resp_} or \code{pred_},
 when \code{values} has that column; otherwise its mean,
@@ -165,30 +176,6 @@ IDs of all three are written out as text before any match, and both ID
 columns returned have the class of the ID column of \code{values} wherever
 that class can hold every ID (see Value).
 }
-\section{Seeds outside the boundary}{
-
-A k-means seed can lie outside a boundary that is not convex, in a bay or
-a bend of a coast (see \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}). Its cell, clipped to the
-boundary, holds ground and observations, but the seed lies in no cell, so
-\code{seeds$cell_id <- tess$index} gives it \code{NA}. The locations nearest it then
-have \code{NA} in the ID column and are filled from the cell of their nearest
-scored row, which can be another cell than the one that holds them.
-Every point of a Voronoi cell is nearer its own seed than any other, so a
-point inside each cell that no seed lies in finds that cell's seed. In a
-projected CRS:
-
-\if{html}{\out{<div class="sourceCode">}}\preformatted{seeds$cell_id <- tess$index
-own  <- tess$cells[!tess$cells$cell_id \%in\% tess$index, ]
-near <- sf::st_nearest_feature(sf::st_point_on_surface(sf::st_geometry(own)),
-                               seeds)
-seeds$cell_id[near] <- own$cell_id
-}\if{html}{\out{</div>}}
-
-Each location inside the boundary then has the cell that holds it, and
-none is filled for want of a seed. A seed whose cell the clip removed
-keeps \code{NA}.
-}
-
 \section{Ties}{
 
 A location the same distance from two seeds takes the one that comes
@@ -250,8 +237,10 @@ of field.
 \section{Without the FNN package}{
 
 The function makes three nearest-neighbour searches: each location's
-nearest scored location, each location's nearest seed, and each scored
-location's nearest other one (for the spacing). With \pkg{FNN} each uses
+nearest scored location, each location's nearest seed (and that of a
+point inside each cell no seed names, when a seed with an \code{NA} ID lies
+outside every cell; see step 3), and each scored location's nearest
+other one (for the spacing). With \pkg{FNN} each uses
 a kd-tree. Without it each compares every pair, and a search that would
 compare more than \code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs
 stops the call first, with an error of class \code{spatialkit_work_limit}

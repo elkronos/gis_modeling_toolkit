@@ -226,11 +226,13 @@ themselves. The attribute survives
 A k-means seed is a mean of the points of its cluster, weighted under the
 density kind, so it can lie outside a \code{boundary} that is not convex, in a
 bay or a bend of a coast, even when every point lies inside. Tessellated
-within that boundary, its cell is built if any of it lies inside, but the
-seed itself lies in no cell: \code{\link[=build_tessellation]{build_tessellation()}} warns that it falls
-in no cell (class \code{spatialkit_unassigned}) and gives it \code{NA} in \code{index}.
-\code{seeds} in \code{\link[=cell_values_at]{cell_values_at()}} says how to give such a seed its cell's
-ID.
+within that boundary, its cell is built if any of it lies inside: the part
+of the study area nearer the seed than any other seed.
+\code{\link[=build_tessellation]{build_tessellation()}} gives the seed that cell in \code{index}, as it gives
+every seed the cell it generates, so \code{seeds$cell_id <- tess$index} holds
+each seed's cell for \code{\link[=cell_values_at]{cell_values_at()}}. A seed with every part of the
+study area nearer another seed has no cell, \code{NA} in \code{index}, and a
+warning of class \code{spatialkit_unassigned} gives the number.
 }
 \examples{
 library(sf)

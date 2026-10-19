@@ -456,11 +456,6 @@ old behaviour where there is a way.
 
 * New `cell_values_at()`: the value and interval of the cell at other
   locations, with each location's distance from the nearest observation.
-  A seed outside a boundary that is not convex, in a bay or a bend of a
-  coast, gets `NA` in `build_tessellation()`'s `index` although its cell is
-  built, and the locations nearest it then have no cell and are filled from
-  the cell of their nearest scored row; `?cell_values_at` gives the lines
-  that hand such a seed its cell's ID.
 
 * Each warning of the pooled path of `summarize_by_cell()` is raised once
   per call and reason and names the columns it applies to, in its text and in
@@ -1785,6 +1780,52 @@ old behaviour where there is a way.
   boundary's 10 square units.  Each collection is now reduced to its
   polygonal part, one row per cell still; a piece with no area is dropped
   as before.
+
+* **`build_tessellation()` gave `NA` in `index` to a seed outside a boundary
+  that is not convex, although its cell was built.**  A k-means centre is a
+  mean of observations and can lie over a bay or a bend of a coast; its
+  cell, the part of the study area nearer it than any other seed, holds
+  ground and observations.  `index` gave each point the cell it lies in, and
+  such a seed lies in none, so it was `NA` and the warning told the user to
+  pass a boundary that holds it.  With `seeds$cell_id <- tess$index`,
+  `cell_values_at(seeds = )` then put every location nearest that seed in
+  no cell and filled it from the cell of its nearest scored row, which is
+  not always the cell that holds it: on a notched square with one seed in
+  the notch, 89 of 591 locations were filled, 6 of them from another cell.
+  `build_tessellation(method = "voronoi")` and `create_voronoi_polygons()`
+  now carry each cell's generator through the clip, and for seeds `index`
+  holds the cell each one generates, so on that square no location is
+  filled for want of a seed.  Seeds are a layer a seeding function returned
+  (`rbind()` of such layers included), the seeds of a `select_resolution()`
+  result, points that carry a record of the count and are its seeds (a
+  `seed_id` column, or the record's centres), and points given with a
+  `cover`.  Other points are indexed by the cell that holds them, as
+  before, so an observation outside the boundary is still `NA`, also one
+  that carries a selection's record as `assign_features_to_polygons()`
+  returns it.  A seed is `NA` only when the clip removed its cell whole or
+  its geometry is empty, and the warning then says that the points are
+  seeds and why they have no cell.  The cells are unchanged.  The cell that
+  holds each seed, which `index` gave before, is
+  `assign_features_to_polygons(seeds, tess$cells, polygon_id_col =
+  "cell_id", keep_unassigned = TRUE)$cell_id`.
+
+* **`cell_values_at(seeds = )` filled the locations nearest a point placed
+  by hand outside a boundary that is not convex.**  Points that are not
+  seeds are indexed by the cell that holds them, so such a point used as a
+  seed had `NA` in `index`, and the locations nearest it had no cell and
+  were filled: the same 89 of 591 locations for the six points of the
+  notched square.  A selection's seeds bound with `rbind()`, which drops the
+  attributes that make them seeds, did the same.  When `values` carries the
+  cell polygons, a seed with an `NA` ID that lies in none of them now takes
+  the ID of the cell it generates, the polygon no seed names that a point
+  inside it finds as its nearest seed, so with `index` alone every location
+  of the notched square takes the cell that holds it and none is filled
+  for want of a seed.  A seed with an `NA` ID inside a polygon keeps it, as
+  does one whose cell the clip removed.  Without the polygons in `values`
+  the locations nearest such a seed still have no cell;
+  `get_voronoi_seeds(method = "provided", seeds = )` before the
+  tessellation makes the points seeds, and `index` then gives each its
+  cell.
 
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not

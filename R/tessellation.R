@@ -166,6 +166,26 @@
 }
 
 
+#' Which centre of a record each point is
+#'
+#' @param pts Points, in the working CRS.
+#' @param rec Their record of the count, or \code{NULL}.
+#' @return For each centre the row of \code{pts} that is it, when the record
+#'   sits beside the centres a profile scored (\code{.scored_centres()}),
+#'   \code{pts} are in the record's CRS (or both have none), and the points
+#'   are those centres (\code{.seeds_as_centres()}); \code{NULL} otherwise.
+#' @keywords internal
+#' @noRd
+.centres_of_seeds <- function(pts, rec) {
+  cen <- .scored_centres(rec)
+  if (is.null(cen) || nrow(pts) != nrow(cen)) return(NULL)
+  crs <- sf::st_crs(pts)
+  if (is.na(crs) != is.na(rec$crs) || (!is.na(crs) && !isTRUE(crs == rec$crs))) return(NULL)
+  if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT")) return(NULL)
+  .seeds_as_centres(unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE]), cen)
+}
+
+
 #' Seeds moved onto the centres they stand for
 #'
 #' Seeds whose record sits beside the centres a profile scored
@@ -185,14 +205,11 @@
 #' @keywords internal
 #' @noRd
 .seeds_at_centres <- function(pts, rec) {
-  cen <- .scored_centres(rec)
-  if (is.null(cen) || nrow(pts) != nrow(cen)) return(pts)
-  crs <- sf::st_crs(pts)
-  if (is.na(crs) != is.na(rec$crs) || (!is.na(crs) && !isTRUE(crs == rec$crs))) return(pts)
-  if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT")) return(pts)
-  xy <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
-  of <- .seeds_as_centres(xy, cen)
+  of <- .centres_of_seeds(pts, rec)
   if (is.null(of)) return(pts)
+  cen <- .scored_centres(rec)
+  crs <- sf::st_crs(pts)
+  xy  <- unname(sf::st_coordinates(pts)[, 1:2, drop = FALSE])
   at <- integer(nrow(cen))
   at[of] <- seq_len(nrow(cen))
   if (identical(xy, cen[at, , drop = FALSE])) return(pts)
@@ -421,6 +438,43 @@
   if (!inherits(x, "sf") || !all(c("seed_id", "method") %in% names(x))) return(FALSE)
   m <- x[["method"]]
   is.character(m) && length(m) > 0L && all(m %in% c("kmeans", "random"))
+}
+
+
+#' Is this layer seeds, each of which stands for the cell it generates?
+#'
+#' The question \code{create_voronoi_polygons()} asks before it fills
+#' \code{index}.  A seed stands for its cell: a k-means seed outside a
+#' boundary that is not convex (a mean of observations around a bay) still
+#' has a cell, the part of the study area nearer it than any other seed, and
+#' \code{index} gives it that cell.  An observation outside the boundary
+#' lies outside the study area, and \code{index} gives it \code{NA}.  The
+#' points are seeds when a seeding function returned them (columns
+#' \code{seed_id} and \code{method}, all \code{"kmeans"}, \code{"random"}
+#' or \code{"provided"}, or one of the attributes the seeding functions set:
+#' \code{"kmeans"}, \code{"n_from"} or \code{"cover"}), when they carry the
+#' record of a count and are its seeds (a \code{seed_id} column, or the
+#' centres the record holds), or when a \code{cover} is passed with them,
+#' which is given for seeds.  The record alone does not make seeds:
+#' \code{assign_features_to_polygons()} puts the cells' record on the
+#' observations it returns.
+#'
+#' @param x The points, as they arrived.
+#' @param cover The \code{cover} argument, or \code{NULL}.
+#' @param pts The points in the working CRS, where they are compared with
+#'   the centres of their record.
+#' @keywords internal
+#' @noRd
+.seed_layer <- function(x, cover = NULL, pts = x) {
+  if (!is.null(cover) || .looks_like_seeds(x)) return(TRUE)
+  if (inherits(attr(x, "cover", exact = TRUE), c("sf", "sfc"))) return(TRUE)
+  rec <- .count_rule_get(x)
+  if (!is.null(rec) && (inherits(x, "sf") && "seed_id" %in% names(x) ||
+                        !is.null(.centres_of_seeds(pts, rec))))
+    return(TRUE)
+  if (!inherits(x, "sf") || !all(c("seed_id", "method") %in% names(x))) return(FALSE)
+  m <- x[["method"]]
+  is.character(m) && length(m) > 0L && all(m %in% c("kmeans", "random", "provided"))
 }
 
 
@@ -840,6 +894,26 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #' by hand) gets the seeds' own hull and a warning of class
 #' `"spatialkit_no_cover"`.
 #'
+#' A seed stands for its cell, so `index` gives each seed the cell it
+#' generates. A k-means seed is a mean of observations and can lie outside a
+#' `boundary` that is not convex, in a bay or a bend of a coast (see
+#' [get_voronoi_seeds()]). Its cell, the part of the study area nearer it
+#' than any other seed, is built, and its `index` entry is that cell's
+#' `cell_id`, although the seed lies in no cell. A seed is `NA` only when
+#' every part of the study area is nearer another seed, so the clip removed
+#' its cell whole, or when its geometry is empty. The points are seeds when
+#' a seeding function returned them ([get_voronoi_seeds()],
+#' [voronoi_seeds_kmeans()], [voronoi_seeds_random()], `rbind()` of such
+#' layers included), when they are the seeds of a [select_resolution()]
+#' result, and when a `cover` is passed with them. A selection's seeds are
+#' seeds by the attributes they carry, which `rbind()` and a write to a file
+#' drop. Any other points are indexed by the cell that holds them, so a
+#' point outside the study area is `NA`; that includes observations that
+#' carry a selection's record of the count, as
+#' [assign_features_to_polygons()] returns them. Seeds placed by hand, and
+#' a selection's seeds that lost their attributes, are seeds once they pass
+#' through `get_voronoi_seeds(method = "provided", seeds = )`.
+#'
 #' @param points_sf An sf object with POINT/MULTIPOINT geometries. Points with
 #'   no CRS whose coordinates look like lon/lat (the heuristic
 #'   [ensure_projected()] applies, with its warning) are taken as EPSG:4326
@@ -914,7 +988,13 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   when it is positive), so a summary built from it counts only the points
 #'   the tessellation actually covers.  Such points are counted in
 #'   \code{params$n_outside}, and a warning of class
-#'   \code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+#'   \code{"spatialkit_unassigned"} gives their number.  For seeds (see
+#'   "Details") \code{index} holds the cell each seed generates, whether the
+#'   seed lies inside the boundary or not, and \code{NA} only for a seed whose
+#'   cell the clip removed whole or whose geometry is empty;
+#'   \code{params$n_outside} counts those, the warning names them as seeds,
+#'   and \code{params$snapped} lists only the seeds whose entry is the cell
+#'   they were snapped to.  \code{boundary} is
 #'   the boundary the cells were built in: the one supplied or derived, grown
 #'   by \code{expand}.  \code{params$boundary_source} says where it came
 #'   from: \code{"boundary"} (the argument), \code{"cover"} (the
@@ -1044,6 +1124,10 @@ create_voronoi_polygons <- function(
   # holds them, so the edges between their cells are where the profile drew
   # them, whatever rounding a trip through another CRS left on the seeds.
   pts <- .seeds_at_centres(pts, seed_rule)
+  # Seeds stand for the cells they generate, and `index` gives each one its
+  # own cell even when the seed lies outside the boundary (see .seed_layer()).
+  # Asked here, where the points can be compared with their record's centres.
+  seed_layer <- .seed_layer(points_sf, cover, pts)
 
   boundary_source <- "boundary"
   if (is.null(boundary) && !is.null(cover_geom)) {
@@ -1127,6 +1211,19 @@ create_voronoi_polygons <- function(
   cells_sfc <- sf::st_sfc(cells, crs = sf::st_crs(pts))
   cells <- sf::st_sf(geometry = cells_sfc)
   cells <- .safe_make_valid(cells)
+  # Each seed's own cell, carried through the clip.  A generator lies inside
+  # its own Voronoi cell and in no other, so before the clip the cell a seed
+  # touches is the cell it generates.  After the clip a seed outside a
+  # boundary that is not convex (a k-means centre over a bay) lies in no
+  # cell, although its cell is there: the part of the study area nearer it
+  # than any other seed.  The row each clipped cell came from rides through
+  # the clip in a column, which is dropped once the cells have their IDs.
+  tagged <- seed_layer && nrow(cells) > 0L
+  if (seed_layer) {
+    generates <- sf::st_intersects(pts, cells)
+    made <- rep(NA_integer_, nrow(cells))
+  }
+  if (tagged) cells$..generated <- seq_len(nrow(cells))
 
   if (clip) {
     clip_to <- if (expand > 0) boundary_expanded else boundary
@@ -1143,17 +1240,78 @@ create_voronoi_polygons <- function(
     cells <- .keep_polygonal(cells)
   }
 
+  # The column comes off before the cells get their IDs.  Passed with it,
+  # ensure_stable_poly_id() returns other row names and attributes, and on
+  # a layer with a degenerate cell sf::st_centroid() stops where it does not
+  # for the geometry alone, so the cells were not the cells the same points
+  # get when they are not seeds.
+  if (tagged) {
+    from    <- cells$..generated
+    cells   <- sf::st_sf(geometry = sf::st_geometry(cells))
+    clipped <- sf::st_geometry(cells)
+  }
   if (nrow(cells) > 0) {
     cells <- ensure_stable_poly_id(cells, id_col = "cell_id")
   } else {
     cells$cell_id <- integer(0)
   }
+  if (tagged && nrow(cells) > 0L) {
+    # ensure_stable_poly_id() repairs the cells with st_make_valid() and puts
+    # them in order, so each cell it returns is the repaired copy of one
+    # clipped cell, which says which cell before the clip it is.  `made`
+    # then holds the cell_id of each cell before the clip, and NA where the
+    # clip left nothing of it.
+    key  <- function(g) sf::st_as_binary(g, hex = TRUE)
+    rows <- match(key(sf::st_geometry(cells)), key(.safe_make_valid(clipped)))
+    hit  <- !is.na(rows)
+    made[from[rows[hit]]] <- cells$cell_id[hit]
+  }
 
   # Build point → cell index using cell_id values.  The snapping record rides
   # on `params`, not on `index`, so `index` stays a plain integer vector.
-  index   <- .build_point_cell_index(pts, cells)
+  # Seeds raise their own warning below.
+  index   <- .build_point_cell_index(pts, cells, warn = !seed_layer)
   snapped <- attr(index, "snapped")
   attr(index, "snapped") <- NULL
+  if (seed_layer) {
+    # Each seed's index is the cell it generates; a MULTIPOINT seed's is the
+    # smallest cell_id among the cells its vertices generate, as it is among
+    # the cells it lies in.  A seed whose cell is not known (an empty
+    # geometry, a cell the clip removed, or one whose copy was not found
+    # above) keeps what the search gave it, which is its own cell wherever
+    # the seed lies in one.
+    own <- vapply(generates, function(r) {
+      ids <- made[as.integer(r)]
+      ids <- ids[!is.na(ids)]
+      if (length(ids)) min(ids) else NA_integer_
+    }, integer(1))
+    found <- index
+    took  <- !is.na(own)
+    index[took] <- own[took]
+    # The record of the nearest-cell repair keeps the seeds whose index it
+    # still gave.
+    kept <- !is.na(index) & !is.na(found) & index == found
+    keep <- snapped$which %in% which(kept)
+    snapped <- list(n = sum(keep), which = snapped$which[keep],
+                    distance = snapped$distance[keep])
+    n_out <- sum(is.na(index))
+    if (n_out > 0L) {
+      n_empty <- sum(is.na(index) & sf::st_is_empty(sf::st_geometry(pts)))
+      .warn_classed("spatialkit_unassigned", paste0(
+        "build_tessellation(): %d of %d seed(s) (%.1f%%) have no cell and are NA ",
+        "in `index`; `params$n_outside` holds the count. %s"),
+        n_out, length(index), 100 * n_out / length(index),
+        if (n_empty == n_out)
+          "They have empty geometry, so there is no location to index."
+        else paste0(
+          if (n_empty > 0L) sprintf("%d of them have empty geometry; the rest lie ", n_empty)
+          else "They lie ",
+          "outside the boundary (grown by `expand`), and every part of the study ",
+          "area is nearer another seed, so the clip left nothing of their cells. ",
+          "A seed outside the boundary whose cell reaches into it keeps that cell."),
+        data = list(n = n_out, total = length(index)))
+    }
+  }
   # With a boundary given, a point `cover` is checked against the cells.
   cover_outside <- if (identical(boundary_source, "boundary"))
     .cover_points_outside(cover, cells, pts_in, pts, "create_voronoi_polygons",
@@ -1716,14 +1874,24 @@ create_grid_polygons <- function(
 #'       points the tessellation actually covers. When any point is `NA`, a
 #'       warning of class `"spatialkit_unassigned"` gives the number
 #'       (`tryCatch(spatialkit_unassigned = )` catches it; the condition
-#'       carries `n` and `total`).}
+#'       carries `n` and `total`). For `"voronoi"` and seeds (a layer a
+#'       seeding function returned, the seeds of a [select_resolution()]
+#'       result, or points given with a `cover`), `index` holds the cell each
+#'       seed generates, whether the seed lies inside the boundary or not: a
+#'       k-means seed outside a boundary that is not convex has its cell,
+#'       the part of the study area nearer it than any other seed. Only a
+#'       seed whose cell the clip removed whole, or whose geometry is empty,
+#'       is `NA`, and the warning then names seeds. See
+#'       [create_voronoi_polygons()].}
 #'     \item{`boundary`}{The boundary used (possibly derived and/or
 #'       reprojected, and for `"voronoi"` grown by `expand`).}
 #'     \item{`method`}{The method actually used.}
 #'     \item{`params`}{The parameters the tessellation was built with, plus
 #'       `snapped`, the record of that nearest-cell repair: a list with `n`,
 #'       `which` (row positions in `points_sf`) and `distance` (how far
-#'       outside every cell each sat, in CRS units); `n_outside`, the number
+#'       outside every cell each sat, in CRS units), which for seeds lists
+#'       only those whose `index` entry is the cell they were snapped to;
+#'       `n_outside`, the number
 #'       of points of `points_sf` that fall in no cell (the `NA`s of
 #'       `index`); and `cover_outside`, the number of `cover` points in no
 #'       cell when a point `cover` was checked against the cells (`NULL`

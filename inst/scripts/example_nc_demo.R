@@ -146,9 +146,9 @@ cat("\n--- Building tessellations ---\n")
 # observation is a nearest-neighbour interpolation rather than an
 # aggregation, and leaves no within-cell variation to compute a standard
 # error from.  A density-weighted centre can lie just outside the state
-# outline, over a sound that coastal observations surround; build_tessellation()
-# then warns that one seed falls in no cell.  Its cell is still built inside
-# the outline, and every observation falls in a cell.
+# outline, over a sound that coastal observations surround.  Its cell is
+# built inside the outline, and `index` gives the seed that cell, as it
+# gives every seed the cell it generates.
 seeds <- get_voronoi_seeds(
   boundary      = nc_boundary,
   sample_points = points_sf,
@@ -160,12 +160,11 @@ tess_voronoi <- build_tessellation(
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 cat(sprintf("  Voronoi: %d cells\n", nrow(tess_voronoi$cells)))
-n_out <- sum(is.na(tess_voronoi$index))
+n_out <- sum(lengths(st_intersects(seeds, nc_boundary)) == 0)
 if (n_out > 0)
-  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline, so the ",
-                     "warning above says\n  they fall in no cell; their cells are ",
-                     "built inside the outline, and every\n  observation falls in ",
-                     "a cell.\n"), n_out, nrow(seeds)))
+  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline; their ",
+                     "cells are built\n  inside the outline, and `index` gives ",
+                     "each of them its cell.\n"), n_out, nrow(seeds)))
 
 # 3b / 3c. Hex and square grids (~50 cells).  Both keep `cell_id`.
 tess_hex <- build_tessellation(

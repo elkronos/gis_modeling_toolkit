@@ -191,10 +191,12 @@ Four more things about the data, each handled without stopping you:
 - Two observations at the same coordinates are fine for models and folds;
   a Voronoi tessellation keeps one seed per location, and every point at
   that location is indexed to its cell.
-- A point outside the boundary you tessellate gets no cell: `tess$index`
-  is `NA` for it and `assign_features_to_polygons()` leaves it out, with a
-  warning that gives the count, unless you ask for it back with
-  `keep_unassigned = TRUE`.
+- An observation outside the boundary you tessellate gets no cell:
+  `tess$index` is `NA` for it and `assign_features_to_polygons()` leaves it
+  out, with a warning that gives the count, unless you ask for it back with
+  `keep_unassigned = TRUE`. A seed from a seeding function outside the
+  boundary whose cell reaches into it keeps that cell
+  (`?create_voronoi_polygons`).
 - A variogram, which is what sizes blocks from the data, needs about thirty
   points; below that `estimate_sac_range()` returns `NA` and says so.
 

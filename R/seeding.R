@@ -25,11 +25,13 @@
 #' A k-means seed is a mean of the points of its cluster, weighted under the
 #' density kind, so it can lie outside a `boundary` that is not convex, in a
 #' bay or a bend of a coast, even when every point lies inside. Tessellated
-#' within that boundary, its cell is built if any of it lies inside, but the
-#' seed itself lies in no cell: [build_tessellation()] warns that it falls
-#' in no cell (class `spatialkit_unassigned`) and gives it `NA` in `index`.
-#' `seeds` in [cell_values_at()] says how to give such a seed its cell's
-#' ID.
+#' within that boundary, its cell is built if any of it lies inside: the part
+#' of the study area nearer the seed than any other seed.
+#' [build_tessellation()] gives the seed that cell in `index`, as it gives
+#' every seed the cell it generates, so `seeds$cell_id <- tess$index` holds
+#' each seed's cell for [cell_values_at()]. A seed with every part of the
+#' study area nearer another seed has no cell, `NA` in `index`, and a
+#' warning of class `spatialkit_unassigned` gives the number.
 #'
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #' @param method One of "kmeans", "random", "provided".

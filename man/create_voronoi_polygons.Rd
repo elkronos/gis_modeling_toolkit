@@ -84,7 +84,13 @@ every cell, which means outside the study area (grown by \code{expand}
 when it is positive), so a summary built from it counts only the points
 the tessellation actually covers.  Such points are counted in
 \code{params$n_outside}, and a warning of class
-\code{"spatialkit_unassigned"} gives their number.  \code{boundary} is
+\code{"spatialkit_unassigned"} gives their number.  For seeds (see
+"Details") \code{index} holds the cell each seed generates, whether the
+seed lies inside the boundary or not, and \code{NA} only for a seed whose
+cell the clip removed whole or whose geometry is empty;
+\code{params$n_outside} counts those, the warning names them as seeds,
+and \code{params$snapped} lists only the seeds whose entry is the cell
+they were snapped to.  \code{boundary} is
 the boundary the cells were built in: the one supplied or derived, grown
 by \code{expand}.  \code{params$boundary_source} says where it came
 from: \code{"boundary"} (the argument), \code{"cover"} (the
@@ -145,6 +151,26 @@ their result. A layer that looks like seeds and has neither a boundary nor
 a cover (seeds bound with \code{rbind()}, which drops the attribute, or built
 by hand) gets the seeds' own hull and a warning of class
 \code{"spatialkit_no_cover"}.
+
+A seed stands for its cell, so \code{index} gives each seed the cell it
+generates. A k-means seed is a mean of observations and can lie outside a
+\code{boundary} that is not convex, in a bay or a bend of a coast (see
+\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}). Its cell, the part of the study area nearer it
+than any other seed, is built, and its \code{index} entry is that cell's
+\code{cell_id}, although the seed lies in no cell. A seed is \code{NA} only when
+every part of the study area is nearer another seed, so the clip removed
+its cell whole, or when its geometry is empty. The points are seeds when
+a seeding function returned them (\code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}},
+\code{\link[=voronoi_seeds_kmeans]{voronoi_seeds_kmeans()}}, \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}}, \code{rbind()} of such
+layers included), when they are the seeds of a \code{\link[=select_resolution]{select_resolution()}}
+result, and when a \code{cover} is passed with them. A selection's seeds are
+seeds by the attributes they carry, which \code{rbind()} and a write to a file
+drop. Any other points are indexed by the cell that holds them, so a
+point outside the study area is \code{NA}; that includes observations that
+carry a selection's record of the count, as
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} returns them. Seeds placed by hand, and
+a selection's seeds that lost their attributes, are seeds once they pass
+through \code{get_voronoi_seeds(method = "provided", seeds = )}.
 }
 \section{Seeds a profile scored}{
 
