@@ -189,7 +189,7 @@ test_that("a profile of today, read by cp, by \"auto\" or as a count, gives the 
   same_platform <- core_frozen_same_platform(core_frozen_platform(), base$info)
   for (nm in names(against)) {
     want <- base$records[[against[[nm]]]]
-    d <- core_frozen_differences(got[[nm]], want)
+    d <- core_frozen_check(got[[nm]], want, same_platform)
     expect(length(d) == 0L,
            paste(c(sprintf("`%s` is not the baseline's `%s`.", nm, against[[nm]]), d),
                  collapse = "\n"))
