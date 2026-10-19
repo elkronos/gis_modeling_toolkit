@@ -52,10 +52,10 @@ test_that("a layer whose variogram range is refused returns Kish standard errors
   # The supplied fit is refused and so is the internal estimate.
   local_mocked_bindings(estimate_sac_range = function(...) .fv_rejected())
   res <- .fv_run(summarize_by_cell(pts, "z", deff = "variogram",
-                                   sac = .fv_rejected(), conf_level = 0.95))
+                                   sac = .fv_rejected(), conf_level = 0.95, estimate = "mean"))
   out  <- res$value
-  kish <- summarize_by_cell(pts, "z", deff = "kish", conf_level = 0.95)
-  iid  <- summarize_by_cell(pts, "z", conf_level = 0.95)
+  kish <- summarize_by_cell(pts, "z", deff = "kish", conf_level = 0.95, estimate = "mean")
+  iid  <- summarize_by_cell(pts, "z", conf_level = 0.95, estimate = "mean")
 
   # Kish's numbers, not the uncorrected ones.
   for (col in c("..se_resp_z", "..neff_resp_z", "..df_resp_z", "..ci_lo_resp_z",
@@ -93,12 +93,12 @@ test_that("a model family the variogram route cannot read falls back to Kish too
   pts <- .fv_field()
   mat <- .fv_sac(data.frame(model = c("Nug", "Mat"), psill = c(0.2, 0.8),
                             range = c(0, 40)))
-  res <- .fv_run(summarize_by_cell(pts, "z", "w", deff = "variogram", sac = mat))
+  res <- .fv_run(summarize_by_cell(pts, "z", "w", deff = "variogram", sac = mat, estimate = "mean"))
   expect_length(res$warnings, 1L)
   expect_true("spatialkit_deff_fallback" %in% res$classes[[1L]])
   expect_match(res$warnings, "the supplied model uses 'Mat'")
   expect_match(res$warnings, "Falling back to deff = \"kish\"")
-  kish <- summarize_by_cell(pts, "z", "w", deff = "kish")
+  kish <- summarize_by_cell(pts, "z", "w", deff = "kish", estimate = "mean")
   expect_equal(res$value[["..se_resp_z"]], kish[["..se_resp_z"]], tolerance = 1e-12)
   expect_equal(res$value[["..se_pred_w"]], kish[["..se_pred_w"]], tolerance = 1e-12)
   expect_identical(unique(res$value$deff_method), "kish (variogram fallback)")
@@ -112,12 +112,13 @@ test_that("when Kish's ICC is 0 as well, the uncorrected SE is returned and labe
                                   z = rep(c(-1, 1), length.out = n) + rnorm(n, 0, 0.01),
                                   poly_id = rep(1:6, each = 25)),
                        coords = c("x", "y"), crs = 32632)
-  res <- .fv_run(summarize_by_cell(flat, predictor_vars = "z", deff = "variogram"))
+  res <- .fv_run(summarize_by_cell(flat, predictor_vars = "z", deff = "variogram",
+                                   estimate = "mean"))
   expect_length(res$warnings, 1L)
   expect_true("spatialkit_deff_fallback" %in% res$classes[[1L]])
   expect_match(res$warnings, "whose ICC is 0 \\(predictor 'z' 0\\.000\\), so the standard errors are the uncorrected ones")
   expect_identical(res$conditions[[1L]]$used, "none")
-  iid <- summarize_by_cell(flat, predictor_vars = "z")
+  iid <- summarize_by_cell(flat, predictor_vars = "z", estimate = "mean")
   expect_equal(res$value[["..se_pred_z"]], iid[["..se_pred_z"]], tolerance = 1e-12)
   expect_identical(res$value$deff_applied, rep(FALSE, 6))
   expect_identical(res$value$deff_method, rep("none (variogram fallback)", 6))
@@ -128,12 +129,15 @@ test_that("when Kish's ICC is 0 as well, the uncorrected SE is returned and labe
 test_that("deff_method names the correction on every path", {
   pts <- .fv_field()
   # No request: no label, the frame is as it always was.
-  expect_false("deff_method" %in% names(summarize_by_cell(pts, "z")))
+  expect_false("deff_method" %in% names(summarize_by_cell(pts, "z", estimate = "mean")))
   expect_identical(unique(summarize_by_cell(pts, "z", deff = "variogram",
-                                            sac = .fv_sac())$deff_method), "variogram")
-  expect_identical(unique(summarize_by_cell(pts, "z", deff = "kish")$deff_method), "kish")
-  expect_identical(unique(summarize_by_cell(pts, "z", deff = 2)$deff_method), "fixed")
-  refused <- suppressWarnings(summarize_by_cell(pts, "z", deff = 0.5))
+                                            sac = .fv_sac(), estimate = "mean")$deff_method),
+                                            "variogram")
+  expect_identical(unique(summarize_by_cell(pts, "z", deff = "kish",
+                                            estimate = "mean")$deff_method), "kish")
+  expect_identical(unique(summarize_by_cell(pts, "z", deff = 2, estimate = "mean")$deff_method),
+                   "fixed")
+  refused <- suppressWarnings(summarize_by_cell(pts, "z", deff = 0.5, estimate = "mean"))
   expect_identical(unique(refused$deff_method), "none")
   expect_identical(unique(refused$deff_applied), FALSE)
   # Joined to cells, a cell no point fell in has no label, as it has no flag.
@@ -141,6 +145,6 @@ test_that("deff_method names the correction on every path", {
                                                c(x0, 60), c(x0, 0))))
   cells <- sf::st_sf(poly_id = 1:7, geometry = sf::st_sfc(lapply(100 * 0:6, sq),
                                                           crs = 32632))
-  joined <- summarize_by_cell(pts, "z", deff = "kish", cells_sf = cells)
+  joined <- summarize_by_cell(pts, "z", deff = "kish", cells_sf = cells, estimate = "mean")
   expect_identical(joined$deff_method, c(rep("kish", 6), NA))
 })

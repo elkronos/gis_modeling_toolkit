@@ -140,10 +140,15 @@ predictor_vars <- c("elevation", "pop_density")
 
 cat("\n--- Building tessellations ---\n")
 
-# 3a. Voronoi from ~40 k-means seeds.  Cells are built around the SEEDS, not
-# the observations: one cell per observation is a nearest-neighbour
-# interpolation rather than an aggregation, and leaves no within-cell
-# variation to compute a standard error from.
+# 3a. Voronoi from ~40 density-weighted k-means seeds, the default
+# (partition = "kmeans" gives the plain k-means seeds of earlier versions).
+# Cells are built around the SEEDS, not the observations: one cell per
+# observation is a nearest-neighbour interpolation rather than an
+# aggregation, and leaves no within-cell variation to compute a standard
+# error from.  A density-weighted centre can lie just outside the state
+# outline, over a sound that coastal observations surround; build_tessellation()
+# then warns that one seed falls in no cell.  Its cell is still built inside
+# the outline, and every observation falls in a cell.
 seeds <- get_voronoi_seeds(
   boundary      = nc_boundary,
   sample_points = points_sf,
@@ -155,6 +160,12 @@ tess_voronoi <- build_tessellation(
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
 cat(sprintf("  Voronoi: %d cells\n", nrow(tess_voronoi$cells)))
+n_out <- sum(is.na(tess_voronoi$index))
+if (n_out > 0)
+  cat(sprintf(paste0("  %d of %d seeds lie just outside the state outline, so the ",
+                     "warning above says\n  they fall in no cell; their cells are ",
+                     "built inside the outline, and every\n  observation falls in ",
+                     "a cell.\n"), n_out, nrow(seeds)))
 
 # 3b / 3c. Hex and square grids (~50 cells).  Both keep `cell_id`.
 tess_hex <- build_tessellation(
@@ -187,9 +198,10 @@ if (has_geom) {
 # 4. CELL-LEVEL AGGREGATION AND CHOROPLETHS
 # =============================================================================
 # summarize_by_cell() does the aggregation: mean, sd and se for the response
-# and every predictor, plus n and cell_weight.  There is no need to write the
-# group_by()/summarise() by hand, and doing so loses the design-effect
-# machinery shown below.
+# and every predictor, plus n and cell_weight, and by default a pooled value
+# beside each mean (estimate = "mean" leaves it out).  There is no need to
+# write the group_by()/summarise() by hand, and doing so loses the
+# design-effect machinery shown below.
 
 make_choropleth <- function(tess, boundary, points, title = NULL,
                             fill_col = "resp_mean_y",

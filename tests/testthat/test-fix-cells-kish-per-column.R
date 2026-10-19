@@ -37,9 +37,11 @@
 test_that("each predictor's standard error, effective n and interval use its own ICC", {
   pts <- .fk_points()
   both   <- summarize_by_cell(pts, "resp", c("noise", "clust"), deff = "kish",
-                              conf_level = 0.95)
-  aloneN <- summarize_by_cell(pts, "resp", "noise", deff = "kish", conf_level = 0.95)
-  aloneC <- summarize_by_cell(pts, "resp", "clust", deff = "kish", conf_level = 0.95)
+                              conf_level = 0.95, estimate = "mean")
+  aloneN <- summarize_by_cell(pts, "resp", "noise", deff = "kish", conf_level = 0.95,
+                              estimate = "mean")
+  aloneC <- summarize_by_cell(pts, "resp", "clust", deff = "kish", conf_level = 0.95,
+                              estimate = "mean")
 
   # Adding or removing a predictor leaves the other's columns as they were.
   for (stat in c("..se_", "..neff_", "..df_", "..ci_lo_", "..ci_hi_")) {
@@ -50,17 +52,17 @@ test_that("each predictor's standard error, effective n and interval use its own
   }
   # In either order.
   flipped <- summarize_by_cell(pts, "resp", c("clust", "noise"), deff = "kish",
-                               conf_level = 0.95)
+                               conf_level = 0.95, estimate = "mean")
   expect_equal(flipped[["..se_pred_noise"]], both[["..se_pred_noise"]], tolerance = 1e-12)
   expect_equal(flipped[["..se_pred_clust"]], both[["..se_pred_clust"]], tolerance = 1e-12)
   # The response is untouched by any of it.
-  only <- summarize_by_cell(pts, "resp", deff = "kish", conf_level = 0.95)
+  only <- summarize_by_cell(pts, "resp", deff = "kish", conf_level = 0.95, estimate = "mean")
   expect_equal(both[["..se_resp_resp"]], only[["..se_resp_resp"]], tolerance = 1e-12)
   expect_equal(both$cell_weight, only$cell_weight, tolerance = 1e-12)
 
   # The numbers: the unclustered predictor's SE is the naive one, the
   # clustered one's is about nine times it.  Pooled, both were 3.13 times.
-  naive <- summarize_by_cell(pts, "resp", c("noise", "clust"))
+  naive <- summarize_by_cell(pts, "resp", c("noise", "clust"), estimate = "mean")
   expect_equal(both[["..se_pred_noise"]], naive[["..se_pred_noise"]], tolerance = 1e-12)
   ratio_c <- stats::median(both[["..se_pred_clust"]] / naive[["..se_pred_clust"]])
   expect_gt(ratio_c, 7)
@@ -70,7 +72,7 @@ test_that("each predictor's standard error, effective n and interval use its own
 test_that("the ICCs are recorded per predictor column, by name", {
   pts <- .fk_points()
   d <- sf::st_drop_geometry(pts)
-  both <- summarize_by_cell(pts, "resp", c("noise", "clust"), deff = "kish")
+  both <- summarize_by_cell(pts, "resp", c("noise", "clust"), deff = "kish", estimate = "mean")
   icc <- attr(both, "icc")
   expect_named(icc$pred, c("noise", "clust"))
   expect_equal(icc$pred[["noise"]], .fk_icc(d$noise, d$poly_id), tolerance = 1e-10)
@@ -83,10 +85,11 @@ test_that("the ICCs are recorded per predictor column, by name", {
   expect_identical(da$icc_pred, icc$pred)
   expect_identical(da$method, "kish")
   # One predictor: still named.
-  one <- summarize_by_cell(pts, "resp", "clust", deff = "kish")
+  one <- summarize_by_cell(pts, "resp", "clust", deff = "kish", estimate = "mean")
   expect_named(attr(one, "icc")$pred, "clust")
   # No predictor, no response column of that type: NA, as before.
-  expect_identical(attr(summarize_by_cell(pts, "resp", deff = "kish"), "icc")$pred,
+  expect_identical(attr(summarize_by_cell(pts, "resp", deff = "kish", estimate = "mean"),
+                        "icc")$pred,
                    NA_real_)
 })
 
@@ -94,8 +97,9 @@ test_that("with no response, cell_weight uses the first predictor's own ICC", {
   pts <- .fk_points()
   # Primary variable `noise` (ICC 0): its weight is its count, whatever else
   # is listed.  It fell from 12 to 2.12 when `clust` was listed after it.
-  nb <- summarize_by_cell(pts, predictor_vars = c("noise", "clust"), deff = "kish")
-  n1 <- summarize_by_cell(pts, predictor_vars = "noise", deff = "kish")
+  nb <- summarize_by_cell(pts, predictor_vars = c("noise", "clust"), deff = "kish",
+                          estimate = "mean")
+  n1 <- summarize_by_cell(pts, predictor_vars = "noise", deff = "kish", estimate = "mean")
   expect_equal(nb$cell_weight, n1$cell_weight, tolerance = 1e-12)
   expect_equal(nb$cell_weight, rep(12, 60))
   # The clustered predictor is still corrected, and the rows say a
@@ -103,8 +107,9 @@ test_that("with no response, cell_weight uses the first predictor's own ICC", {
   expect_true(all(nb$deff_applied))
   expect_identical(unique(nb$deff_method), "kish")
   # Primary variable `clust`: its own, strong, ICC sets the weight.
-  cb <- summarize_by_cell(pts, predictor_vars = c("clust", "noise"), deff = "kish")
-  c1 <- summarize_by_cell(pts, predictor_vars = "clust", deff = "kish")
+  cb <- summarize_by_cell(pts, predictor_vars = c("clust", "noise"), deff = "kish",
+                          estimate = "mean")
+  c1 <- summarize_by_cell(pts, predictor_vars = "clust", deff = "kish", estimate = "mean")
   expect_equal(cb$cell_weight, c1$cell_weight, tolerance = 1e-12)
   expect_true(all(cb$cell_weight < 2))
 })
@@ -113,8 +118,9 @@ test_that("a column with missing values keeps its own ICC and count", {
   pts <- .fk_points()
   pts$clust[c(1, 2, 14, 30)] <- NA
   both  <- summarize_by_cell(pts, "resp", c("noise", "clust"), deff = "kish",
-                             conf_level = 0.9)
-  alone <- summarize_by_cell(pts, "resp", "clust", deff = "kish", conf_level = 0.9)
+                             conf_level = 0.9, estimate = "mean")
+  alone <- summarize_by_cell(pts, "resp", "clust", deff = "kish", conf_level = 0.9,
+                             estimate = "mean")
   expect_equal(both[["..se_pred_clust"]], alone[["..se_pred_clust"]], tolerance = 1e-12)
   expect_equal(both[["..neff_pred_clust"]], alone[["..neff_pred_clust"]], tolerance = 1e-12)
 })

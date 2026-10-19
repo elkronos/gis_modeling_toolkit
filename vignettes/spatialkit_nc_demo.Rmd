@@ -60,6 +60,12 @@ walks through the `spatialkit` workflow end to end:
 Everything is self-contained — the boundary comes from the `nc.shp` demo
 shapefile bundled with `sf`, so no external files are needed.
 
+The cell functions run at their defaults: density-weighted seeds
+(`partition = "density"`, from 3 starts) and a pooled value beside each cell
+mean (`estimate = "pooled"`). `partition = "kmeans"` in `get_voronoi_seeds()`
+and `estimate = "mean"` in `summarize_by_cell()` give the k-means seeds and
+the plain frame of earlier versions.
+
 Optional backends are checked at the top and every section that needs one is
 guarded, so this document renders with whatever you happen to have installed.
 This table always runs, even when the gate below it is shut -- it is what says
@@ -165,13 +171,14 @@ ggplot() +
 
 ## 3. Four tessellations
 
-### 3a. Voronoi from ~40 k-means seeds
+### 3a. Voronoi from ~40 density-weighted k-means seeds
 
 Voronoi cells are built around *seed* points, not the observations themselves.
 Seeding one cell per observation would give 300 cells each containing a single
 point — a nearest-neighbour interpolation rather than an aggregation, with no
 within-cell variation to compute a standard error from. `get_voronoi_seeds()`
-clusters the observations first, so cell size follows sampling density.
+clusters the observations first, each weighted by its local density, so cells
+are small where the observations are dense.
 
 ```{r tess-voronoi}
 seeds <- get_voronoi_seeds(
@@ -185,7 +192,17 @@ tess_voronoi <- build_tessellation(
   seeds, boundary = nc_boundary,
   method = "voronoi", clip = TRUE, quiet = TRUE
 )
+sum(is.na(tess_voronoi$index))   # seeds that lie in no cell
 ```
+
+A k-means centre is a mean of observations, and it can lie outside a boundary
+that is not convex. Here one density-weighted centre lies just outside the
+state outline, over a sound that coastal observations surround, and
+`build_tessellation()` warns (class `spatialkit_unassigned`) that one point
+falls in no cell; this vignette does not print warnings. The points are the
+seeds, not the observations: the seed's cell is built inside the outline, every
+observation falls in a cell, and the seed has `NA` in `tess_voronoi$index`.
+`?cell_values_at` shows how to give such a seed its cell's ID.
 
 ### 3b and 3c. Hex and square grids (~50 cells)
 
@@ -243,7 +260,8 @@ cat(sprintf(
 
 `assign_features_to_polygons()` joins points to cells; `summarize_by_cell()`
 does the aggregation — means, standard deviations and standard errors for the
-response and every predictor, plus `n` and `cell_weight`. There is no need to
+response and every predictor, plus `n` and `cell_weight`, and beside each mean
+a pooled value, the mean pulled toward the cells around it. There is no need to
 write the `group_by()`/`summarise()` by hand, and doing so loses the
 design-effect machinery below.
 

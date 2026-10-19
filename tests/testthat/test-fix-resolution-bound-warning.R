@@ -31,14 +31,17 @@ fbw_bound <- function(out)
 
 test_that("an optimum at the support ceiling is a classed warning in every function that takes the count", {
   d <- fbw_pts()
-  p <- fbw_catch(resolution_profile(d, "z", sac = 400, n_levels = 6, nstart = 5))$value
+  p <- fbw_catch(resolution_profile(d, "z", sac = 400, n_levels = 6, nstart = 5,
+                                    estimate = NULL, obs_per_cell = NULL,
+                                    partition = "kmeans"))$value
   sel <- select_resolution(p, "cp")
   expect_true(sel$at_ceiling)
   expect_identical(sel$edge, "the support ceiling (n / min_cell_n)")
 
   calls <- list(
-    function(x) get_voronoi_seeds(method = "kmeans", n = x, sample_points = d),
-    function(x) voronoi_seeds_kmeans(d, k = x),
+    function(x) get_voronoi_seeds(method = "kmeans", n = x, sample_points = d,
+                                  partition = "kmeans"),
+    function(x) voronoi_seeds_kmeans(d, k = x, partition = "kmeans"),
     function(x) build_tessellation(d, boundary = fbw_bnd, method = "hex",
                                    approx_n_cells = x, quiet = TRUE))
   for (f in calls) for (x in list(sel, p)) {
@@ -55,10 +58,10 @@ test_that("an optimum at the support ceiling is a classed warning in every funct
     expect_match(conditionMessage(w[[1L]]), "Lower min_cell_n")
   }
   # Caught by class, and an error under warn = 2 semantics.
-  expect_identical(tryCatch(voronoi_seeds_kmeans(d, k = sel),
+  expect_identical(tryCatch(voronoi_seeds_kmeans(d, k = sel, partition = "kmeans"),
                             spatialkit_bound_chosen = function(w) "caught"), "caught")
   expect_error(withCallingHandlers(
-    get_voronoi_seeds(method = "kmeans", n = sel, sample_points = d),
+    get_voronoi_seeds(method = "kmeans", n = sel, sample_points = d, partition = "kmeans"),
     warning = function(w) stop("escalated: ", class(w)[1L])),
     "escalated: spatialkit_bound_chosen")
   # What chose the count rides on the resolved value as fields, too.

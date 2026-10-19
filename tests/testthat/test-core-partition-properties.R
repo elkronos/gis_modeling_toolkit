@@ -109,15 +109,16 @@ test_that("the public functions show both ends on that layout", {
   # Measured: 0.82 at 10 cells under the density kind, as under k-means from
   # either start; 0.31 at 60 cells, against 0.88 for k-means from k-means++
   # starts.
-  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 10, partition = "density")), 0.7)
-  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 10, init = "kmeans++")), 0.7)
-  expect_lt(count_cv(voronoi_seeds_kmeans(pts, 60, partition = "density")), 0.5)
-  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 60, init = "kmeans++")), 0.7)
+  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 10, partition = "density", nstart = 10)), 0.7)
+  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 10, init = "kmeans++", partition = "kmeans")), 0.7)
+  expect_lt(count_cv(voronoi_seeds_kmeans(pts, 60, partition = "density", nstart = 10)), 0.5)
+  expect_gt(count_cv(voronoi_seeds_kmeans(pts, 60, init = "kmeans++", partition = "kmeans")), 0.7)
   # In a profile the median cell over the mean cell (1 for equal counts) was
   # 0.42 and 0.42 at 10 and 20 cells under the density kind, where k-means
   # gave 0.51 and 0.42, and 0.81 and 0.72 at 60 and 130 cells.
   lv <- c(10L, 20L, 60L, 130L)
-  p_den <- resolution_profile(pts, levels = lv, nstart = 4, partition = "density")
+  p_den <- resolution_profile(pts, levels = lv, nstart = 4, partition = "density",
+                              estimate = NULL, obs_per_cell = NULL, sac = NULL)
   share <- p_den$cell_n_median / (nrow(pts) / lv)
   expect_true(all(share[1:2] < 0.55))
   expect_true(all(share[3:4] > 0.65))
@@ -129,28 +130,32 @@ test_that("the public functions give those counts", {
   k <- 60L
   count_cv <- function(seeds) partition_count_cv(
     tabulate(partition_nearest(xy, partition_xy(seeds)), nbins = nrow(seeds)))
-  # Measured on this layer: 0.74 for the function's own random starts, 1.12
+  # Measured on this layer: 0.74 for the k-means kind's own random starts, 1.12
   # for k-means++ starts (the lower sum of squares, and the less even
   # counts), 0.32 for the density kind and 0.34 for it from random starts.
-  cv_default <- count_cv(voronoi_seeds_kmeans(pts, k))
-  cv_pp      <- count_cv(voronoi_seeds_kmeans(pts, k, init = "kmeans++"))
-  cv_den     <- count_cv(voronoi_seeds_kmeans(pts, k, partition = "density"))
-  cv_den_rnd <- count_cv(voronoi_seeds_kmeans(pts, k, partition = "density", init = "random"))
+  cv_default <- count_cv(voronoi_seeds_kmeans(pts, k, partition = "kmeans"))
+  cv_pp      <- count_cv(voronoi_seeds_kmeans(pts, k, init = "kmeans++", partition = "kmeans"))
+  cv_den     <- count_cv(voronoi_seeds_kmeans(pts, k, partition = "density", nstart = 10))
+  cv_den_rnd <- count_cv(voronoi_seeds_kmeans(pts, k, partition = "density", init = "random",
+                                              nstart = 10))
   expect_gt(cv_default, 0.6)
   expect_gt(cv_pp, 0.9)
   expect_lt(cv_den, 0.5)
   expect_lt(cv_den_rnd, 0.5)
   expect_lt(cv_den, cv_default / 2)
   expect_lt(count_cv(get_voronoi_seeds(method = "kmeans", n = k, sample_points = pts,
-                                       partition = "density", set_seed = 2)), 0.5)
+                                       partition = "density", set_seed = 2,
+                                       kmeans_nstart = 10)), 0.5)
   # In a profile.  With equal counts the median cell holds the mean count,
   # n / L; under k-means a few large cells of sparse ground hold most of the
   # points and the median cell holds far fewer.  Measured: 0.91 and 0.95 of
   # the mean under the density kind at 20 and 60 cells, 0.34 and 0.40 under
   # k-means; smallest cells of 35 and 8 points against 10 and 2.
   lv <- c(20L, 60L)
-  p_km  <- resolution_profile(pts, levels = lv, nstart = 4)
-  p_den <- resolution_profile(pts, levels = lv, nstart = 4, partition = "density")
+  p_km  <- resolution_profile(pts, levels = lv, nstart = 4, estimate = NULL,
+                              obs_per_cell = NULL, sac = NULL, partition = "kmeans")
+  p_den <- resolution_profile(pts, levels = lv, nstart = 4, partition = "density",
+                              estimate = NULL, obs_per_cell = NULL, sac = NULL)
   expect_true(all(p_den$cell_n_median / (nrow(pts) / lv) > 0.8))
   expect_true(all(p_km$cell_n_median / (nrow(pts) / lv) < 0.5))
   expect_true(all(p_den$cell_n_min >= 2L * p_km$cell_n_min))

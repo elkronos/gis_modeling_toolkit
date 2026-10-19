@@ -10,10 +10,10 @@ get_voronoi_seeds(
   n = NULL,
   seeds = NULL,
   sample_points = NULL,
-  kmeans_nstart = 10,
+  kmeans_nstart = NULL,
   kmeans_iter = 100,
   set_seed = NULL,
-  partition = c("kmeans", "density"),
+  partition = c("density", "kmeans"),
   init = NULL,
   density_power = 1,
   density_k = 8
@@ -49,10 +49,9 @@ it was built at one, and 4.5 rows per cell otherwise, and the count is
 the profile's level for that size, or the built level nearest to
 \code{max(2, round(n / obs_per_cell))} when the profile has none for it
 (with a warning of class \code{"spatialkit_size_not_reached"}).
-\code{select_resolution(profile)} with
-no \code{criterion} still reads such a profile by \code{cp}, so pass the profile
-itself, or a selection that names its criterion. A profile built with
-\code{obs_per_cell} and without an \code{estimate} is read by \code{cp} like any
+\code{select_resolution(profile)} with no \code{criterion} reads such a profile
+the same way, since its default criterion is \code{"auto"}. A profile built
+with \code{obs_per_cell} and without an \code{estimate} is read by \code{cp} like any
 profile without one; pass \code{select_resolution(profile, criterion = "size")} for the count its size gives. The result then
 carries \code{attr(, "n_from")}
 saying which. A count read off a selection or a profile comes with what
@@ -68,10 +67,11 @@ is finite); see \code{\link[=resolution_profile]{resolution_profile()}}.
 
 With \code{method = "kmeans"}, a selection or profile also carries the
 centres of the partition the profile scored at that count, and those
-are returned instead of a new k-means: a k-means partition is the
-Voronoi partition of its centres, so their cells are the cells the
-criteria judged. \code{sample_points}, when given, is then only assigned to
-them (for \code{attr(, "kmeans")}) and gives the cover, and \code{boundary} only
+are returned instead of a new k-means: a k-means partition, weighted or
+not, is the Voronoi partition of its centres, so their cells are the
+cells the criteria judged. \code{sample_points}, when given, is then only
+assigned to them (for \code{attr(, "kmeans")}) and gives the cover, and
+\code{boundary} only
 sets the CRS and the cover (see "Details");
 \code{kmeans_nstart}, \code{kmeans_iter} and \code{set_seed} are not used, and neither
 are \code{partition}, \code{init} and the density settings: the centres are of
@@ -95,35 +95,39 @@ cloud, or one with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
 before clustering.}
 
-\item{kmeans_nstart}{Integer; nstart for kmeans(). Default 10. \code{NULL} is
-the kind's own number of starts: 10 for \code{partition = "kmeans"} and 3
-for \code{partition = "density"}. The
-partition is \code{\link[stats:kmeans]{stats::kmeans()}}, not the best-of-25 k-means++ run that
-\code{\link[=resolution_profile]{resolution_profile()}} scored a count on, so it is not that partition;
-pass the selection or profile itself as \code{n} for that one (see \code{n}).
-Under \code{partition = "density"}, and with \code{init = "kmeans++"}, it is the
-number of starts, of which the best is kept, and has to be \code{NULL} or a
-positive whole number. It is not read by \code{method = "random"} or
-\code{"provided"}.}
+\item{kmeans_nstart}{The number of starts, of which the best is kept.
+\code{NULL} (default) is the kind's own number: 3 for \code{partition = "density"} and 10 for \code{partition = "kmeans"}, the default of earlier
+versions. \code{kmeans_nstart = 10} gives the density kind the starts it had
+when 10 was the default. Under \code{partition = "kmeans"} from random starts
+it is \code{nstart} of \code{\link[stats:kmeans]{stats::kmeans()}}. A fresh partition is not the one
+\code{\link[=resolution_profile]{resolution_profile()}} scored a count on; pass the selection or profile
+itself as \code{n} for that one (see \code{n}). Under \code{partition = "density"},
+and with \code{init = "kmeans++"}, it has to be \code{NULL} or a positive whole
+number, so a number that is not whole, which \code{partition = "kmeans"}
+takes, stops a call that names no kind. It is not read by \code{method = "random"} or \code{"provided"}.}
 
 \item{kmeans_iter}{Integer; iter.max for kmeans(). Default 100. Under
 \code{partition = "density"} it is the most steps of Lloyd's iteration a
 start takes. Under \code{partition = "density"}, and with \code{init = "kmeans++"}, it has to be a positive whole number, and a kept start that
 was cut off at it is a warning of class \code{"spatialkit_not_converged"}
-(the default run keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives).}
+(\code{partition = "kmeans"} from random starts keeps the warning
+\code{\link[stats:kmeans]{stats::kmeans()}} gives).}
 
 \item{set_seed}{Optional integer RNG seed.}
 
 \item{partition}{For \code{method = "kmeans"}: what the seeds minimise.
-\code{"kmeans"} (default) is the sum of squared distances from the points of
-the cloud to their nearest seed: compact cells, with several times the
-points in a cell of a dense place that a cell of a sparse place holds.
-\code{"density"} weights each point by its local density to the power
-\code{density_power}: compact cells, many small ones where the points are
-dense and a few large ones where they are sparse. At the default power
-they hold about the same number of points each once \code{n} is above the
-number of dense places (clusters) in the cloud; below that the counts
-are about as uneven as under \code{"kmeans"}. It follows the
+\code{"density"} (default) is the sum of squared distances from the points
+of the cloud to their nearest seed, each point weighted by its local
+density to the power \code{density_power}: compact cells, many small ones
+where the points are dense and a few large ones where they are sparse.
+At the default power they hold about the same number of points each
+once \code{n} is above the number of dense places (clusters) in the cloud;
+below that the counts are about as uneven as under \code{"kmeans"}.
+\code{"kmeans"} is the same sum unweighted: compact cells, with several
+times the points in a cell of a dense place that a cell of a sparse
+place holds. It is the run of earlier versions, whose default it was:
+\code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the rows as they come. The
+density kind follows the
 density of \code{sample_points}; a cloud this function draws inside
 \code{boundary} is uniform and has none to follow. Without the 'FNN' package
 the density kind finds its weights by comparing every pair of distinct
@@ -136,10 +140,11 @@ are the same, and nothing stops the call. See "The partition" in
 \code{"kmeans++"} (the seeds one at a time, each in proportion to its squared
 distance from those already drawn, times its weight under \code{partition = "density"}). \code{NULL} (default) is each kind's own rule: \code{"random"} for
 \code{partition = "kmeans"}, the run this function has always made, and
-\code{"kmeans++"} for \code{partition = "density"}. With the default the cloud is
-clustered in the order its rows come in; with \code{init = "kmeans++"}, and
-under \code{partition = "density"}, the rows are put in coordinate order
-first, so the seeds do not depend on their order.}
+\code{"kmeans++"} for \code{partition = "density"}. Under \code{partition = "kmeans"}
+from random starts the cloud is clustered in the order its rows come
+in; with \code{init = "kmeans++"}, and under \code{partition = "density"}, the
+rows are put in coordinate order first, so the seeds do not depend on
+their order.}
 
 \item{density_power}{For \code{partition = "density"}: the power the local
 density is raised to for a point's weight, from 0 to 2. Default 1, which
@@ -165,14 +170,16 @@ its cell's mean. A run this call makes with \code{partition = "density"} or
 \code{init = "kmeans++"} also records \code{converged}, whether the kept start
 stopped before \code{kmeans_iter}, and under \code{partition = "density"}
 \code{objective}, the weighted sum the seeds minimise; scored centres have
-neither. Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and the scored centres of a profile built with a kind or
-starting rule other than its default, carry \code{attr(, "partition")}: a
+neither. Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and the scored centres of a profile of the density kind or
+from random starts, carry \code{attr(, "partition")}: a
 list with \code{kind}, \code{init}, \code{density_power} and \code{density_k}, and for
 seeds this call placed \code{iter}, \code{iter_max} and \code{converged} (the
 iterations the kept start took, the limit, and whether it stopped
 before the limit). \code{\link[=build_tessellation]{build_tessellation()}} returns the list as
 \code{params$partition}. Seeds with no such
-record are plain k-means. Every method also
+record are plain k-means: from random starts when this call placed
+them, or the scored centres of a k-means profile from k-means++ starts.
+Every method also
 attaches \code{attr(, "cover")} when the call says what ground the seeds stand
 for (see "Details"): an sfc holding the boundary's polygons or the hull
 of the clustered points, in its own CRS.
@@ -198,8 +205,10 @@ supported: user-provided points, uniform random sampling within a boundary,
 or k-means clustering of a sampling cloud.
 }
 \details{
-Seeds lie inside the ground they stand for, so Voronoi cells clipped to the
-seeds' own hull would leave its edge uncovered. The result therefore
+Seeds lie inside the ground they stand for (k-means seeds inside the
+hull of the points they were fitted to, random seeds inside the
+boundary), so Voronoi cells clipped to the seeds' own hull would leave
+its edge uncovered. The result therefore
 carries that ground as \code{attr(, "cover")}: the \code{boundary} when one was
 given, otherwise the convex hull of \code{sample_points}, otherwise (for the
 scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a \code{\link[=select_resolution]{select_resolution()}}
@@ -213,6 +222,15 @@ seeds given with neither \code{boundary} nor \code{sample_points} have none, and
 warning is raised for them, since they may be the observation sites
 themselves. The attribute survives
 \code{sf::st_transform()} and row subsetting; \code{rbind()} drops it.
+
+A k-means seed is a mean of the points of its cluster, weighted under the
+density kind, so it can lie outside a \code{boundary} that is not convex, in a
+bay or a bend of a coast, even when every point lies inside. Tessellated
+within that boundary, its cell is built if any of it lies inside, but the
+seed itself lies in no cell: \code{\link[=build_tessellation]{build_tessellation()}} warns that it falls
+in no cell (class \code{spatialkit_unassigned}) and gives it \code{NA} in \code{index}.
+\code{seeds} in \code{\link[=cell_values_at]{cell_values_at()}} says how to give such a seed its cell's
+ID.
 }
 \examples{
 library(sf)
@@ -220,6 +238,22 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 ))), crs = 32632))
 get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
+
+# Seeds from a cloud with one dense place: density-weighted k-means by
+# default, from 3 starts; partition = "kmeans" gives the k-means run of
+# earlier versions.  The points each seed's cell holds, under each kind,
+# with more seeds than dense places:
+set.seed(2)
+cloud <- st_as_sf(data.frame(x = c(rnorm(150, 30, 5), runif(50, 0, 100)),
+                             y = c(rnorm(150, 30, 5), runif(50, 0, 100))),
+                  coords = c("x", "y"), crs = 32632)
+dens <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
+                          sample_points = cloud, set_seed = 1)
+km   <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
+                          sample_points = cloud, set_seed = 1,
+                          partition = "kmeans")
+rbind(density = sort(attr(dens, "kmeans")$size),
+      kmeans  = sort(attr(km, "kmeans")$size))   # points per seed
 }
 \seealso{
 Other tessellation:

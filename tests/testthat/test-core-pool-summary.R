@@ -143,7 +143,7 @@
 
 # ---- The argument omitted, and the columns the two estimates share -----------
 
-test_that("estimate = \"mean\" named is the call without the argument", {
+test_that("estimate = \"pooled\" named is the call without the argument", {
   L <- .ps_layer()
   calls <- list(
     function(...) summarize_by_cell(L$asg, "z", id_col = "cell_id", ...),
@@ -155,8 +155,15 @@ test_that("estimate = \"mean\" named is the call without the argument", {
     function(...) summarize_by_cell(sf::st_drop_geometry(L$asg), "z", "p1",
                                     id_col = "cell_id", ...))
   for (f in calls) {
-    expect_identical(f(estimate = "mean"), f())
-    expect_identical(f(estimate = "mean", obs_level = NULL), f())
+    # The default is the pooled value beside the plain mean, with the same
+    # warnings as when it is named (a layer with no geometry has none to
+    # pool by).
+    plain <- .ps_catch(f())
+    named <- .ps_catch(f(estimate = "pooled"))
+    expect_identical(named$value, plain$value)
+    expect_identical(.ps_classes(named), .ps_classes(plain))
+    expect_identical(.ps_catch(f(estimate = "pooled", obs_level = NULL))$value, plain$value)
+    expect_false(is.null(attr(plain$value, "pooled")))
     # No attribute of the pooled path on the frame of plain means.
     expect_null(attr(f(estimate = "mean"), "pooled"))
     expect_null(attr(f(estimate = "mean"), "intervals"))
@@ -165,9 +172,9 @@ test_that("estimate = \"mean\" named is the call without the argument", {
   # The two new arguments come last, so a call by position is as it was.
   expect_identical(utils::tail(names(formals(summarize_by_cell)), 2L),
                    c("estimate", "obs_level"))
-  # Which of the two `estimate` defaults to is not held here: the test above
-  # (the argument named against the argument omitted) is the one expectation
-  # of this file that reads the default.
+  # Which of the two `estimate` defaults to is held in test-core-defaults.R;
+  # the test above (the argument named against the argument omitted) is the
+  # one expectation of this file that reads the default.
   expect_setequal(eval(formals(summarize_by_cell)$estimate), c("mean", "pooled"))
   expect_null(formals(summarize_by_cell)$obs_level)
   expect_identical(

@@ -17,7 +17,7 @@ summarize_by_cell(
   quiet = TRUE,
   conf_level = NULL,
   area = FALSE,
-  estimate = c("mean", "pooled"),
+  estimate = c("pooled", "mean"),
   obs_level = NULL
 )
 }
@@ -160,8 +160,7 @@ unlike the tessellation functions, whose default is \code{FALSE}.}
 \item{conf_level}{Optional confidence level in (0, 1), such as \code{0.95}.
 When given, every numeric response and predictor column also gets
 \verb{..neff_*}, \verb{..df_*}, \verb{..ci_lo_*} and \verb{..ci_hi_*} (see "Confidence
-intervals"). Default \code{NULL}: no interval columns, and the frame is
-exactly what it was before this argument existed.}
+intervals"). Default \code{NULL}: no such columns.}
 
 \item{area}{Logical, default \code{FALSE}.  With \code{TRUE}, and \code{cells_sf}
 supplied, the result gains \code{cell_area} (each cell's planar area in the
@@ -184,9 +183,10 @@ distortion check passes by construction; with s2 switched off, sf needs
 the lwgeom package for that area and the request is refused without
 it.  The measured spread is attached as \code{attr(, "area_error")}.}
 
-\item{estimate}{Which value of a cell the frame reports: \code{"mean"}
-(default) or \code{"pooled"}. With \code{"mean"} the frame is the one described
-above. With \code{"pooled"} every numeric response and predictor column also
+\item{estimate}{Which value of a cell the frame reports: \code{"pooled"}
+(default) or \code{"mean"}. With \code{"mean"} the frame is the one described
+above, the frame of earlier versions, whose default this was. With
+\code{"pooled"} every numeric response and predictor column also
 gets a pooled value, \code{w * m + (1 - w) * t}: the cell's own mean \code{m} and a
 target \code{t}, the mean of the rows of the 8 cells whose observations'
 centroids are nearest (all the other cells when there are fewer than 10;
@@ -207,7 +207,7 @@ own CRS. When the input carries the record of its cells' count (see
 "Value") and that record names a projected CRS, the one the profile
 worked in, the distances are measured in it, whatever CRS the layer is
 in. The value is matched as \code{\link[=match.arg]{match.arg()}} matches a choice, so an
-abbreviation (\code{"p"}) is accepted and \code{NULL} is the default. See "Pooled
+abbreviation (\code{"m"}) is accepted and \code{NULL} is the default. See "Pooled
 values" for what the pooled value estimates and what its numbers rest
 on, "Value" for the columns and the attributes, and "Conditions" for
 the warnings.}
@@ -391,9 +391,10 @@ assigned layer and on \code{cells_sf} removes it.
 }
 \description{
 Aggregates an sf point dataset into one row per cell. By default computes
-counts and means, but the aggregation function is configurable. It can
-also return a pooled value for each cell, its mean pulled toward the mean
-of the cells around it, and a range for one further observation.
+counts and means, but the aggregation function is configurable. It also
+returns a pooled value for each cell, its mean pulled toward the mean of
+the cells around it (\code{estimate = "pooled"}, the default; \code{estimate = "mean"} leaves it out), and can return a range for one further
+observation.
 }
 \details{
 This is the third step of the package's pipeline, taking the labelled layer
@@ -603,6 +604,8 @@ cells, moves the coverage with it.
 
 \section{Pooled values}{
 With \code{estimate = "pooled"} every numeric column also gets a pooled value.
+That is the default; \code{estimate = "mean"} leaves the pooled columns out
+and returns the frame of earlier versions.
 A cell's value, plain or pooled, estimates the cell's \emph{level}: the
 expected value of one further observation located in the cell the way its
 observations were. It is not the average of a surface over the cell's
@@ -658,7 +661,8 @@ on the far side of the overall mean from its plain mean, and two cells can
 change order. When few cells hold two rows, \code{sigma2} is estimated from few
 values and every weight rests on it: \code{df} in \code{attr(, "pooled")} is the
 number of values beyond one per cell. And when \code{tau2} comes out at 0,
-every own weight is 0 and each pooled value is its target.
+every own weight is 0 and each pooled value is its target; with two
+cells that is the other cell's mean, so the two values change places.
 
 A tie between two candidate neighbours goes to the centroid with the
 lower x, then the lower y, and the centroids are summed with the rows in
@@ -711,6 +715,28 @@ cell's level taken as the mean of the noise-free field over further
 locations drawn in it like the data's, the squared error of the pooled
 value was 0.98 of \code{(1 - w) * tau2} among the observations and 6.9 times
 it in the held-out block: away from the observations it is too small.
+
+Beside a sharp boundary the pooled value can be further from a cell's
+level than the plain mean, because its target takes in cells across the
+boundary. A second simulation measured this on fields whose level jumps
+at county boundaries: one level for each county, alone and with a smooth
+field added, on two layouts of real locations (892 and 2,634 points, each
+in a county), with noise of 5, 20 or 50 percent of an observation's
+variance, 200 layers of each, five random folds, and on each fold the
+cells the package's defaults build from the training observations. A
+held-out observation is a boundary row when every training observation
+of its cell lies in its own county and more than half of those of the
+cell's neighbours lie in other counties. Boundary rows were 21.75 to
+28.04 percent of the held-out observations. Over them the root mean
+squared error of the pooled value against the noise-free field, as a
+geometric mean over the layers of its ratio to the plain mean's, was
+from 9.16 percent lower to 56.36 percent higher. On county levels alone
+it was 43.21 and 56.36 percent higher with 5 percent noise, 11.23 and
+20.58 percent higher with 20 percent, and from 3.79 percent lower to 1.47
+percent higher with 50 percent; with the smooth field added it was from
+9.16 percent lower to 1.59 percent higher. Over all held-out observations
+the pooled value's error was the lower of the two in every setting, by
+1.75 to 18.73 percent.
 }
 
 \section{Intervals: which one answers which question}{
@@ -745,7 +771,9 @@ and \code{sigma2}, \code{tau2} and the targets are held. With
 \itemize{
 \item It is a statement about observations on average: of further
 observations located like the data, about \code{obs_level} of them fall
-inside the interval of their cell. It does not hold cell by cell.
+inside the interval of their cell. It does not hold cell by cell (the
+second simulation below gives the coverage in cells of one
+observation).
 \item The two offsets are the same in every cell. The interval's centre
 varies over the map and its width does not. It does not narrow where a
 cell holds more rows: the offsets are quantiles of the errors of
@@ -771,6 +799,19 @@ read as a range for one observation, held 58.9 and 49.2 percent of them,
 over the held-out observations whose cell has that interval.
 \code{\link[=cell_values_at]{cell_values_at()}} returns each location's distance from the nearest
 observation, and its help gives the coverage by that distance.
+
+The second simulation described under "Pooled values" read the
+interval at \code{obs_level = 0.90} on smooth fields of two ranges and on
+county levels with a smooth field, with 20 or 50 percent noise, on both
+layouts: twelve settings. Setting by setting it held 89.38 to 89.79
+percent of the held-out observations. Counted by the training
+observations in an observation's cell (1, 2 to 4, 5 to 9, 10 or more), it
+held at least 85.65 percent in every class but one: on county levels with
+a smooth field, on the layout of 892 points with 20 percent noise, it
+held 83.74 percent of the 4,878 observations whose cell held one training
+observation. On fields of that kind it is not a 90 percent interval in
+such cells: there it held 83.74 to 87.83 percent with 20 or 50 percent
+noise, and 82.64 and 82.94 percent with 5 percent.
 
 Away from the observations no interval here is calibrated.
 }
@@ -852,12 +893,16 @@ bnd <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 grid <- create_grid_polygons(bnd, target_cells = 9, type = "square")
 assigned <- assign_features_to_polygons(pts, grid)
 
+# Nine cells are too few for pooled values (each would be pulled toward
+# all the other cells), so these summaries report plain means alone:
+# estimate = "mean".
 # IID standard errors (default) vs Kish design-effect adjustment.  The
 # correction is large here, and meant to be: about 22 points per cell that
 # all share the cell's part of the trend carry far fewer than 22
 # independent pieces of information about the cell mean.
-naive <- summarize_by_cell(assigned, response_var = "val")
-kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish")
+naive <- summarize_by_cell(assigned, response_var = "val", estimate = "mean")
+kish  <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
+                           estimate = "mean")
 data.frame(n = naive$n,
            se_naive = naive$..se_resp_val,
            se_kish  = kish$..se_resp_val)
@@ -866,7 +911,7 @@ attr(kish, "deff_applied")   # method, icc_resp, icc_pred, per-cell deff
 # A 95\% interval for each cell mean as an estimate of the grand mean, on
 # the Kish-corrected standard error and n - 1 degrees of freedom.
 ci <- summarize_by_cell(assigned, response_var = "val", deff = "kish",
-                        conf_level = 0.95)
+                        conf_level = 0.95, estimate = "mean")
 ci[, c("poly_id", "n", "resp_mean_val", "..neff_resp_val", "..df_resp_val",
        "..ci_lo_resp_val", "..ci_hi_resp_val")]
 
@@ -887,8 +932,8 @@ bnd2 <- st_sf(geometry = st_sfc(st_polygon(list(rbind(
 ))), crs = 32632))
 grid2 <- create_grid_polygons(bnd2, target_cells = 64, type = "square")
 assigned2 <- assign_features_to_polygons(pts2, grid2)
-pooled <- summarize_by_cell(assigned2, response_var = "val",
-                            estimate = "pooled", obs_level = 0.90)
+# estimate = "pooled" is the default.
+pooled <- summarize_by_cell(assigned2, response_var = "val", obs_level = 0.90)
 # The plain mean, the pooled value and the weight on the cell's own mean.
 head(pooled[, c("poly_id", "n", "resp_mean_val", "..pooled_resp_val",
                 "..pooled_w_resp_val")])

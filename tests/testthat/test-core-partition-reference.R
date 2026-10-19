@@ -239,11 +239,14 @@ test_that("get_voronoi_seeds() and a random-start profile return rnd_centres()'s
   # The seeding function clusters the rows as they come, as rnd_centres() does.
   ref <- matrix(as.numeric(rnd_centres(xy, k, 4L)), ncol = 2L)
   s <- get_voronoi_seeds(method = "kmeans", n = k, sample_points = pts,
-                         kmeans_nstart = RND_NSTART, kmeans_iter = RND_ITER, set_seed = 4L)
+                         kmeans_nstart = RND_NSTART, kmeans_iter = RND_ITER, set_seed = 4L,
+                         partition = "kmeans")
   expect_identical(partition_xy(s), ref)
   # The profile puts the rows in coordinate order first.
   ref_sorted <- matrix(as.numeric(rnd_centres(partition_sorted(xy), k, 4L)), ncol = 2L)
-  prof <- resolution_profile(pts, levels = k, nstart = RND_NSTART, seed = 4, init = "random")
+  prof <- resolution_profile(pts, levels = k, nstart = RND_NSTART, seed = 4, init = "random",
+                             estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                             partition = "kmeans")
   expect_identical(attr(prof, "centres")[[as.character(k)]], ref_sorted)
   expect_identical(attr(prof, "partition")[c("kind", "init")],
                    list(kind = "kmeans", init = "random"))

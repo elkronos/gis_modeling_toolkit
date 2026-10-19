@@ -93,6 +93,7 @@ step("05.6", "Is aggregating to cells even worth it?")
 # 'should I report cell means or a surface'.
 if (!skip_without("gstat", "the adequacy check")) {
   bnd   <- tour_boundary(pts)
+  # Twenty density-weighted k-means cells, the default kind of seeds.
   seeds <- get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 20,
                              sample_points = pts, set_seed = 1)
   tess  <- build_tessellation(seeds, boundary = bnd, method = "voronoi", quiet = TRUE)

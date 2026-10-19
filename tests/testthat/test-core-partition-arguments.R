@@ -175,7 +175,9 @@ test_that("resolution_profile() hands density_power, density_k and init to the e
   sel_of <- function(p, L) structure(
     list(best = L, seeds = spatialkit:::.profile_seeds(p, L), criterion = "cp",
          edge = NA_character_, structured = TRUE), class = "resolution_selection")
-  p_km  <- partition_quietly(resolution_profile(pts, "z", levels = c(6L, 14L), nstart = 2))
+  p_km  <- partition_quietly(resolution_profile(pts, "z", levels = c(6L, 14L), nstart = 2,
+                                                estimate = NULL, obs_per_cell = NULL,
+                                                sac = NULL, partition = "kmeans"))
   p_den <- partition_quietly(resolution_profile(pts, "z", levels = c(6L, 14L), nstart = 2,
                                                 partition = "density", density_power = 0.5))
   list(pts = pts, p_km = p_km, p_den = p_den, km = sel_of(p_km, 14L), den = sel_of(p_den, 14L))
@@ -215,21 +217,23 @@ test_that("a density setting named beside scored density centres is not called i
 test_that("a density setting named beside k-means centres, scored or fresh, is said to be ignored", {
   sc <- .pa_scored()
   text <- "`density_power` is read by partition = \"density\" only, and partition = \"kmeans\" ignores it"
-  r <- partition_warnings(voronoi_seeds_kmeans(sc$pts, sc$km, density_power = 0.7))
+  r <- partition_warnings(voronoi_seeds_kmeans(sc$pts, sc$km, density_power = 0.7,
+                                               partition = "kmeans"))
   expect_length(r$warnings, 1L)
   expect_match(conditionMessage(r$warnings[[1L]]), paste0("voronoi_seeds_kmeans(): ", text),
                fixed = TRUE)
   expect_null(attr(r$value, "partition"))
   r <- partition_warnings(get_voronoi_seeds(method = "kmeans", n = sc$km, sample_points = sc$pts,
-                                            density_power = 0.7))
+                                            density_power = 0.7, partition = "kmeans"))
   expect_length(r$warnings, 1L)
   expect_match(conditionMessage(r$warnings[[1L]]), paste0("get_voronoi_seeds(): ", text),
                fixed = TRUE)
-  # A fresh run: once, and the seeds are the default's.
-  r <- partition_warnings(voronoi_seeds_kmeans(sc$pts, 9, density_power = 0.7))
+  # A fresh run: once, and the seeds are the k-means kind's without the setting.
+  r <- partition_warnings(voronoi_seeds_kmeans(sc$pts, 9, density_power = 0.7,
+                                               partition = "kmeans"))
   expect_length(r$warnings, 1L)
   expect_match(conditionMessage(r$warnings[[1L]]), text, fixed = TRUE)
-  expect_identical(r$value, voronoi_seeds_kmeans(sc$pts, 9))
+  expect_identical(r$value, voronoi_seeds_kmeans(sc$pts, 9, partition = "kmeans"))
 })
 
 test_that("get_voronoi_seeds() checks its two counts before a new kind reads them", {
@@ -257,7 +261,7 @@ test_that("get_voronoi_seeds() checks its two counts before a new kind reads the
   set.seed(1)
   km <- stats::kmeans(x = partition_xy(pts), centers = 5, iter.max = 100, nstart = 2.5)
   g <- get_voronoi_seeds(method = "kmeans", n = 5, sample_points = pts, set_seed = 1,
-                         kmeans_nstart = 2.5)
+                         kmeans_nstart = 2.5, partition = "kmeans")
   expect_identical(partition_xy(g), unname(km$centers))
   expect_identical(attr(g, "kmeans")$nstart, 2L)
 })

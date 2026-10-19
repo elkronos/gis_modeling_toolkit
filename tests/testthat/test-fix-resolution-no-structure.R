@@ -56,7 +56,9 @@ test_that("the profile keeps what one cell scores, the level every other has to 
 test_that("select_resolution() flags a Cp optimum that one cell matches", {
   # White noise: no level predicts better than one mean for the layer.
   pts <- fns_noise()
-  p <- fns_catch(resolution_profile(pts, "z", sac = 300, n_levels = 8, nstart = 3))$value
+  p <- fns_catch(resolution_profile(pts, "z", sac = 300, n_levels = 8, nstart = 3,
+                                    estimate = NULL, obs_per_cell = NULL,
+                                    partition = "kmeans"))$value
   s <- select_resolution(p, "cp")
   expect_identical(s$structured, FALSE)
   expect_equal(s$one_cell, attr(p, "one_cell")$cp)
@@ -71,7 +73,9 @@ test_that("select_resolution() flags a Cp optimum that one cell matches", {
   # A field with structure: the best level beats one cell by far more than
   # the tolerance.
   f <- fns_field()
-  pf <- fns_catch(resolution_profile(f, "z", sac = fns_sac(f), n_levels = 8, nstart = 3))$value
+  pf <- fns_catch(resolution_profile(f, "z", sac = fns_sac(f), n_levels = 8, nstart = 3,
+                                     estimate = NULL, obs_per_cell = NULL,
+                                     partition = "kmeans"))$value
   sf_ <- select_resolution(pf, "cp")
   expect_identical(sf_$structured, TRUE)
   expect_gt(sf_$one_cell, sf_$value * 1.02)
@@ -88,9 +92,12 @@ test_that("select_resolution() flags a Cp optimum that one cell matches", {
 
 test_that("a count with no structure behind it is a classed warning where it becomes cells", {
   pts <- fns_noise()
-  p <- fns_catch(resolution_profile(pts, "z", sac = 300, n_levels = 8, nstart = 3))$value
+  p <- fns_catch(resolution_profile(pts, "z", sac = 300, n_levels = 8, nstart = 3,
+                                    estimate = NULL, obs_per_cell = NULL,
+                                    partition = "kmeans"))$value
   for (x in list(p, select_resolution(p, "cp"))) {
-    out <- fns_catch(get_voronoi_seeds(method = "kmeans", n = x, sample_points = pts))
+    out <- fns_catch(get_voronoi_seeds(method = "kmeans", n = x, sample_points = pts,
+                                       partition = "kmeans"))
     expect_true("spatialkit_no_structure" %in% out$classes)
     w <- out$warnings[[which(vapply(out$warnings, inherits, logical(1),
                                     "spatialkit_no_structure"))[1L]]]
@@ -99,12 +106,15 @@ test_that("a count with no structure behind it is a classed warning where it bec
     expect_match(conditionMessage(w), "the count is not identified")
     expect_identical(nrow(out$value), as.integer(w$n))
   }
-  expect_identical(tryCatch(voronoi_seeds_kmeans(pts, k = p),
+  expect_identical(tryCatch(voronoi_seeds_kmeans(pts, k = p, partition = "kmeans"),
                             spatialkit_no_structure = function(w) "caught"), "caught")
   # A structured field raises none.
   f <- fns_field()
-  pf <- fns_catch(resolution_profile(f, "z", sac = fns_sac(f), n_levels = 8, nstart = 3))$value
-  out <- fns_catch(get_voronoi_seeds(method = "kmeans", n = pf, sample_points = f))
+  pf <- fns_catch(resolution_profile(f, "z", sac = fns_sac(f), n_levels = 8, nstart = 3,
+                                     estimate = NULL, obs_per_cell = NULL,
+                                     partition = "kmeans"))$value
+  out <- fns_catch(get_voronoi_seeds(method = "kmeans", n = pf, sample_points = f,
+                                     partition = "kmeans"))
   expect_false("spatialkit_no_structure" %in% out$classes)
 })
 

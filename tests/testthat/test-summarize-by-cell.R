@@ -24,7 +24,7 @@
 
 test_that("summarize_by_cell default deff=1 gives classic SE", {
   pts <- .make_test_points(rho = 0)
-  out <- summarize_by_cell(pts, response_var = "y")
+  out <- summarize_by_cell(pts, response_var = "y", estimate = "mean")
   # SE should equal sd / sqrt(n) for each cell
   for (i in seq_len(nrow(out))) {
     expected_se <- out[["..sd_resp_y"]][i] / sqrt(out$n[i])
@@ -44,8 +44,8 @@ test_that("a numeric deff inflates every SE by exactly sqrt(deff)", {
   # cell's SE instead of multiplying it by sqrt(2), and return NA for every
   # cell with n <= deff.
   pts <- .make_test_points(rho = 0)
-  out_1 <- summarize_by_cell(pts, response_var = "y", deff = 1)
-  out_2 <- summarize_by_cell(pts, response_var = "y", deff = 2)
+  out_1 <- summarize_by_cell(pts, response_var = "y", deff = 1, estimate = "mean")
+  out_2 <- summarize_by_cell(pts, response_var = "y", deff = 2, estimate = "mean")
   ratio <- out_2[["..se_resp_y"]] / out_1[["..se_resp_y"]]
   expect_equal(ratio, rep(sqrt(2), length(ratio)), tolerance = 1e-12)
   expect_false(anyNA(out_2[["..se_resp_y"]]))
@@ -59,8 +59,8 @@ test_that("a numeric deff inflates every SE by exactly sqrt(deff)", {
   # Small cells: n = 3 with deff = 3 used to come back NA, and n = 3 with
   # deff = 2 used to be doubled.  Both are now sqrt(deff) like every other cell.
   small <- .make_test_points(n_cells = 3, pts_per_cell = 3, rho = 0)
-  s1 <- summarize_by_cell(small, response_var = "y", deff = 1)
-  s3 <- summarize_by_cell(small, response_var = "y", deff = 3)
+  s1 <- summarize_by_cell(small, response_var = "y", deff = 1, estimate = "mean")
+  s3 <- summarize_by_cell(small, response_var = "y", deff = 3, estimate = "mean")
   expect_false(anyNA(s3[["..se_resp_y"]]))
   expect_equal(s3[["..se_resp_y"]] / s1[["..se_resp_y"]],
                rep(sqrt(3), nrow(s1)), tolerance = 1e-12)
@@ -79,8 +79,8 @@ test_that("an ESTIMATED design effect also corrects the biased sample variance",
   # the sqrt((n-1)/(n-deff)) rescale, 0.952 / 0.952 / 0.953 against a nominal
   # 0.95.  This is what distinguishes the estimated paths from a constant.
   pts   <- .make_test_points(n_cells = 8, pts_per_cell = 20, rho = 0.6)
-  o_iid <- summarize_by_cell(pts, response_var = "y", deff = 1)
-  o_k   <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+  o_iid <- summarize_by_cell(pts, response_var = "y", deff = 1, estimate = "mean")
+  o_k   <- summarize_by_cell(pts, response_var = "y", deff = "kish", estimate = "mean")
   da    <- attr(o_k, "deff_applied")
   skip_if(is.null(da) || !is.numeric(da$deff),
           "the ICC came out non-positive on this draw")
@@ -134,7 +134,7 @@ test_that("summarize_by_cell deff='kish' applies Kish's exact 1 + (n-1) rho", {
                           crs = 32632)
   )
 
-  out <- summarize_by_cell(pts, response_var = "y", deff = "kish")
+  out <- summarize_by_cell(pts, response_var = "y", deff = "kish", estimate = "mean")
 
   # The ICC itself, from an INDEPENDENT one-way random-effects ANOVA with
   # Donner's (1986) n0 for unbalanced cells -- what ?summarize_by_cell
@@ -239,7 +239,7 @@ test_that("summarize_by_cell reports NA spread for a one-observation cell", {
 
   for (dv in list(1, "kish")) {
     out  <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
-                              deff = dv)
+                              deff = dv, estimate = "mean")
     lone <- out$n == 1L
     multi <- !lone
     expect_equal(sum(lone), 2L)
@@ -279,7 +279,7 @@ test_that("summarize_by_cell deff='kish' estimates separate ICC for response and
     )
   )
   out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "x",
-                           deff = "kish")
+                           deff = "kish", estimate = "mean")
   da <- attr(out, "deff_applied")
   expect_equal(da$method, "kish")
   # Response ICC should be much larger than predictor ICC
@@ -291,8 +291,8 @@ test_that("summarize_by_cell deff='kish' estimates separate ICC for response and
   # shrank ..se_resp_y by a factor of 20 the moment predictor_vars was added
   # -- passed every test (mutation testing, pass 6).  The same coupling was
   # once a real bug for cell_weight (see the source), so pin all three.
-  only      <- summarize_by_cell(pts, response_var = "y", deff = "kish")
-  pred_only <- summarize_by_cell(pts, response_var = "x", deff = "kish")
+  only      <- summarize_by_cell(pts, response_var = "y", deff = "kish", estimate = "mean")
+  pred_only <- summarize_by_cell(pts, response_var = "x", deff = "kish", estimate = "mean")
   expect_equal(out[["..se_resp_y"]], only[["..se_resp_y"]], tolerance = 1e-12)
   expect_equal(out[["..se_pred_x"]], pred_only[["..se_resp_x"]], tolerance = 1e-12)
   expect_equal(out$cell_weight, only$cell_weight, tolerance = 1e-12)
@@ -339,13 +339,13 @@ test_that("summarize_by_cell gives each predictor its own ICC, whatever its scal
   # ICCs with both predictors listed: one per column
   out_both <- summarize_by_cell(pts, response_var = "y",
                                 predictor_vars = c("x_small", "x_big"),
-                                deff = "kish")
+                                deff = "kish", estimate = "mean")
   da_both <- attr(out_both, "deff_applied")
 
   # ICC with only the small-scale predictor
   out_small <- summarize_by_cell(pts, response_var = "y",
                                  predictor_vars = "x_small",
-                                 deff = "kish")
+                                 deff = "kish", estimate = "mean")
   da_small <- attr(out_small, "deff_applied")
 
   # --- Unit invariance, per column -------------------------------------------
@@ -357,7 +357,7 @@ test_that("summarize_by_cell gives each predictor its own ICC, whatever its scal
     p$x_big   <- p$x_big   * big_mult
     attr(summarize_by_cell(p, response_var = "y",
                            predictor_vars = c("x_small", "x_big"),
-                           deff = "kish"), "deff_applied")$icc_pred
+                           deff = "kish", estimate = "mean"), "deff_applied")$icc_pred
   }
   expect_equal(.rescaled(1, 1e6), da_both$icc_pred, tolerance = 1e-10)
   expect_equal(.rescaled(1e6, 1), da_both$icc_pred, tolerance = 1e-10)
@@ -368,7 +368,7 @@ test_that("summarize_by_cell gives each predictor its own ICC, whatever its scal
   # clustered column keeps its own, and the unclustered one is not pulled up
   # to a pooled value (which was their mean, 0.46, for both).
   out_big <- summarize_by_cell(pts, response_var = "y",
-                               predictor_vars = "x_big", deff = "kish")
+                               predictor_vars = "x_big", deff = "kish", estimate = "mean")
   expect_equal(da_both$icc_pred[["x_small"]], da_small$icc_pred[["x_small"]],
                tolerance = 1e-12)
   expect_equal(da_both$icc_pred[["x_big"]], attr(out_big, "icc")$pred[["x_big"]],
@@ -392,7 +392,7 @@ test_that("summarize_by_cell invalid deff falls back to 1, with a real warning",
   # records that (no deff_applied is attached at deff = 1).  So this has to be
   # a real R condition, not only a log line: assert the condition itself.
   expect_warning(
-    out <- summarize_by_cell(pts, response_var = "y", deff = -1),
+    out <- summarize_by_cell(pts, response_var = "y", deff = -1, estimate = "mean"),
     "must be a single number >= 1"
   )
 
@@ -406,7 +406,7 @@ test_that("summarize_by_cell invalid deff falls back to 1, with a real warning",
   # A design effect BELOW 1 would shrink the standard errors, so it takes the
   # same branch rather than being honoured.
   expect_warning(
-    out_half <- summarize_by_cell(pts, response_var = "y", deff = 0.5),
+    out_half <- summarize_by_cell(pts, response_var = "y", deff = 0.5, estimate = "mean"),
     "must be a single number >= 1"
   )
   expect_equal(out_half[["..se_resp_y"]], out[["..se_resp_y"]],
@@ -414,14 +414,14 @@ test_that("summarize_by_cell invalid deff falls back to 1, with a real warning",
 
   # A non-numeric, non-keyword value takes the same branch.
   expect_warning(
-    out2 <- summarize_by_cell(pts, response_var = "y", deff = "nonsense"),
+    out2 <- summarize_by_cell(pts, response_var = "y", deff = "nonsense", estimate = "mean"),
     "must be a single number >= 1"
   )
   expect_null(attr(out2, "deff_applied"))
 
   # A vector is not a single number either.
   expect_warning(
-    summarize_by_cell(pts, response_var = "y", deff = c(2, 3)),
+    summarize_by_cell(pts, response_var = "y", deff = c(2, 3), estimate = "mean"),
     "must be a single number >= 1"
   )
 })
@@ -443,7 +443,7 @@ test_that("summarize_by_cell joins cells_sf even when ID types differ", {
     )
   )
 
-  out <- summarize_by_cell(pts, response_var = "y", cells_sf = cells)
+  out <- summarize_by_cell(pts, response_var = "y", cells_sf = cells, estimate = "mean")
   # Result should be an sf object (geometry joined from cells_sf)
   expect_s3_class(out, "sf")
   # All 3 cells should be present with no NA from a failed join
@@ -501,7 +501,7 @@ test_that("summarize_by_cell(deff = 'variogram') applies sum(R)/n per cell", {
   expect_false(is.null(attr(sac, "variogram_model")))
 
   out <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                           sac = sac)
+                           sac = sac, estimate = "mean")
   da  <- attr(out, "deff_applied")
 
   expect_equal(da$method, "variogram")
@@ -517,7 +517,7 @@ test_that("summarize_by_cell(deff = 'variogram') applies sum(R)/n per cell", {
   # .se_with_deff() applies on the Kish path -- sqrt(deff) for the mean's
   # inflated variance AND sqrt((n-1)/(n-deff)) for the downward bias in s^2 --
   # so the two paths cannot drift apart.
-  iid  <- summarize_by_cell(pts, response_var = "z", deff = 1)
+  iid  <- summarize_by_cell(pts, response_var = "z", deff = 1, estimate = "mean")
   infl <- sqrt(da$deff) * sqrt((out$n - 1) / (out$n - da$deff))
   expect_equal(out[["..se_resp_z"]], iid[["..se_resp_z"]] * infl,
                tolerance = 1e-10)
@@ -539,9 +539,9 @@ test_that("summarize_by_cell passes deff_max_n through to the subsampler", {
   sac <- suppressWarnings(estimate_sac_range(pts, "z"))
 
   full    <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                               sac = sac)
+                               sac = sac, estimate = "mean")
   capped  <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                               sac = sac, deff_max_n = 10L)
+                               sac = sac, deff_max_n = 10L, estimate = "mean")
   da_cap  <- attr(capped, "deff_applied")
 
   expect_equal(da_cap$max_n, 10L)
@@ -562,7 +562,7 @@ test_that("summarize_by_cell passes deff_max_n through to the subsampler", {
   # attribute was checked: building the closure's deff from the SUBSAMPLE size
   # understated the SE of a 25-point cell by 2.5x with the attribute unchanged
   # (mutation testing, pass 6).  Same identity as the uncapped test above.
-  iid <- summarize_by_cell(pts, response_var = "z", deff = 1)
+  iid <- summarize_by_cell(pts, response_var = "z", deff = 1, estimate = "mean")
   expect_equal(capped[["..se_resp_z"]],
                iid[["..se_resp_z"]] * sqrt(da_cap$deff) *
                  sqrt((capped$n - 1) / (capped$n - da_cap$deff)),
@@ -571,7 +571,7 @@ test_that("summarize_by_cell passes deff_max_n through to the subsampler", {
   expect_equal(capped$cell_weight, capped$n / da_cap$deff, tolerance = 1e-10)
   # A cap larger than every cell changes nothing at all.
   wide <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                            sac = sac, deff_max_n = 5000L)
+                            sac = sac, deff_max_n = 5000L, estimate = "mean")
   expect_equal(attr(wide, "deff_applied")$deff,
                attr(full, "deff_applied")$deff)
 })
@@ -601,7 +601,7 @@ test_that(".se_with_deff returns NA, not Inf, at the bound deff == n", {
   sac <- structure(300, class = c("sac_range", "numeric"),
                    variogram_model = data.frame(model = "Exp", psill = 1, range = 100),
                    crs = sf::st_crs(32632))
-  out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac)
+  out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac, estimate = "mean")
   expect_equal(attr(out, "deff_applied")$deff[1], 5)
   expect_identical(out[["..se_resp_z"]][1], NA_real_)
   expect_true(is.finite(out[["..se_resp_z"]][2]))
@@ -620,7 +620,7 @@ test_that("summarize_by_cell falls back to Kish with no fitted variogram", {
   # A real R warning, classed, as well as the log line.
   lines <- capture_spatialkit_log(
     expect_warning(
-      out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram"),
+      out <- summarize_by_cell(pts, predictor_vars = "z", deff = "variogram", estimate = "mean"),
       "requires a fitted variogram model", class = "spatialkit_deff_fallback")
   )
   expect_true(log_has(lines, "requires a fitted variogram model"))
@@ -631,10 +631,10 @@ test_that("summarize_by_cell falls back to Kish with no fitted variogram", {
   expect_true(all(out$deff_applied))
   expect_identical(unique(out$deff_method), "kish (variogram fallback)")
 
-  kish <- summarize_by_cell(pts, predictor_vars = "z", deff = "kish")
+  kish <- summarize_by_cell(pts, predictor_vars = "z", deff = "kish", estimate = "mean")
   expect_equal(out[["..se_pred_z"]], kish[["..se_pred_z"]])
   expect_equal(out$cell_weight, kish$cell_weight)
-  iid <- summarize_by_cell(pts, predictor_vars = "z", deff = 1)
+  iid <- summarize_by_cell(pts, predictor_vars = "z", deff = 1, estimate = "mean")
   expect_true(all(out[["..se_pred_z"]] > iid[["..se_pred_z"]]))
 
   # Same when the estimation attempt itself fails (a broken or absent gstat).
@@ -642,7 +642,7 @@ test_that("summarize_by_cell falls back to Kish with no fitted variogram", {
     local_mocked_bindings(
       estimate_sac_range = function(...) stop("gstat unavailable"))
     expect_warning(
-      out2 <- summarize_by_cell(pts, response_var = "z", deff = "variogram"),
+      out2 <- summarize_by_cell(pts, response_var = "z", deff = "variogram", estimate = "mean"),
       "estimate_sac_range\\(\\) failed: gstat unavailable",
       class = "spatialkit_deff_fallback")
   })
@@ -676,9 +676,9 @@ test_that("summarize_by_cell(deff = 'variogram') coerces non-POINT geometry firs
 
   sac <- suppressWarnings(estimate_sac_range(pts, "z"))
   point_out <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                                 sac = sac)
+                                 sac = sac, estimate = "mean")
   multi_out <- summarize_by_cell(multi, response_var = "z", deff = "variogram",
-                                 sac = sac)
+                                 sac = sac, estimate = "mean")
 
   expect_equal(attr(multi_out, "deff_applied")$deff,
                attr(point_out, "deff_applied")$deff, tolerance = 1e-8)
@@ -694,7 +694,7 @@ test_that("the variogram deff survives the cells_sf join, realigned per cell", {
   sac <- suppressWarnings(estimate_sac_range(pts, "z"))
 
   plain <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                             sac = sac)
+                             sac = sac, estimate = "mean")
 
   # Cell polygons, including one with NO observations, in a different order
   # from the summarised rows.
@@ -708,7 +708,7 @@ test_that("the variogram deff survives the cells_sf join, realigned per cell", {
                      geometry = sf::st_sfc(lapply(1:5, mk), crs = 32632))
 
   joined <- summarize_by_cell(pts, response_var = "z", deff = "variogram",
-                              sac = sac, cells_sf = cells)
+                              sac = sac, cells_sf = cells, estimate = "mean")
   da <- attr(joined, "deff_applied")
 
   # dplyr::left_join() rebuilds attributes from its `x` template, which used to
@@ -757,15 +757,15 @@ test_that("NA-response rows do not move the variogram design effect or SE", {
   skip_if_not_installed("gstat")
   fx <- .vgm_na_fixture()
   a  <- suppressMessages(summarize_by_cell(fx$pts, response_var = "val",
-                                           deff = "variogram", sac = fx$sac))
+                                           deff = "variogram", sac = fx$sac, estimate = "mean"))
   # Blank out 8 of the 10 responses in cell 1 -- the locations stay.
   p2 <- fx$pts; p2$val[p2$poly_id == 1][3:10] <- NA
   b  <- suppressMessages(summarize_by_cell(p2, response_var = "val",
-                                           deff = "variogram", sac = fx$sac))
+                                           deff = "variogram", sac = fx$sac, estimate = "mean"))
   # Reference: the same 2 observed rows as their own 2-point cell.
   p3 <- fx$pts[!(fx$pts$poly_id == 1 & seq_len(40) %in% 3:10), ]
   cc <- suppressMessages(summarize_by_cell(p3, response_var = "val",
-                                           deff = "variogram", sac = fx$sac))
+                                           deff = "variogram", sac = fx$sac, estimate = "mean"))
   i_b <- which(b$poly_id == 1); i_c <- which(cc$poly_id == 1)
   expect_equal(b[["..se_resp_val"]][i_b], cc[["..se_resp_val"]][i_c], tolerance = 1e-10)
   expect_equal(b$cell_weight[i_b],        cc$cell_weight[i_c],        tolerance = 1e-10)
@@ -784,7 +784,7 @@ test_that("cell_weight is the effective count of the response, not of rows", {
                   x = runif(30, 0, 100), y = runif(30, 0, 100))
   d$val[d$poly_id == 1][1:7] <- NA           # 3 finite responses in cell 1
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
-  out <- summarize_by_cell(pts, response_var = "val", deff = 2)
+  out <- summarize_by_cell(pts, response_var = "val", deff = 2, estimate = "mean")
   i <- which(out$poly_id == 1)
   expect_equal(out$n[i], 10L)
   expect_equal(out$cell_weight[i], 3 / 2)     # was 10 / 2 = 5
@@ -801,9 +801,9 @@ test_that("the variogram design effect is evaluated in the variogram's CRS", {
   utm <- fx$pts
   geo <- sf::st_transform(utm, 4326)
   a <- suppressMessages(summarize_by_cell(utm, response_var = "val",
-                                          deff = "variogram", sac = fx$sac))
+                                          deff = "variogram", sac = fx$sac, estimate = "mean"))
   b <- suppressMessages(summarize_by_cell(geo, response_var = "val",
-                                          deff = "variogram", sac = fx$sac))
+                                          deff = "variogram", sac = fx$sac, estimate = "mean"))
   expect_equal(b[["..se_resp_val"]], a[["..se_resp_val"]], tolerance = 1e-6)
   expect_equal(attr(b, "deff_applied")$deff, attr(a, "deff_applied")$deff,
                tolerance = 1e-6)
@@ -819,7 +819,7 @@ test_that("deff = 'kish' tolerates rows with no cell id", {
                   x = runif(26, 0, 100), y = runif(26, 0, 100))
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   expect_no_error(out <- suppressMessages(
-    summarize_by_cell(pts, response_var = "val", deff = "kish")))
+    summarize_by_cell(pts, response_var = "val", deff = "kish", estimate = "mean")))
   expect_true(all(is.finite(out[["..se_resp_val"]][!is.na(out$poly_id)])))
 })
 
@@ -838,7 +838,7 @@ test_that("four predictors at a common ICC each get an estimate near it", {
   pts <- sf::st_as_sf(d, coords = c("x", "y0"), crs = 32632)
   out <- suppressMessages(summarize_by_cell(pts, response_var = "y",
                                             predictor_vars = c("p1", "p2", "p3", "p4"),
-                                            deff = "kish"))
+                                            deff = "kish", estimate = "mean"))
   icc <- attr(out, "deff_applied")$icc_pred
   expect_named(icc, c("p1", "p2", "p3", "p4"))
   expect_gt(mean(icc), 0.35)                  # rho/4 = 0.125 would fail this
@@ -847,7 +847,7 @@ test_that("four predictors at a common ICC each get an estimate near it", {
   # Each is the estimate the column gets on its own.
   for (v in names(icc)) {
     one <- suppressMessages(summarize_by_cell(pts, response_var = "y",
-                                              predictor_vars = v, deff = "kish"))
+                                              predictor_vars = v, deff = "kish", estimate = "mean"))
     expect_equal(icc[[v]], attr(one, "icc")$pred[[v]], tolerance = 1e-12)
   }
 })
@@ -868,7 +868,7 @@ test_that("conf_level = NULL leaves the frame exactly as it was", {
   pts$e <- rnorm(nrow(pts))
   for (dv in list(1, "kish", 2)) {
     out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
-                             deff = dv)
+                             deff = dv, estimate = "mean")
     expect_length(.interval_cols(out), 0L)
     # A requested design effect adds its per-row `deff_applied` flag and the
     # `deff_method` label (added with the Kish fallback for "variogram"), with
@@ -891,7 +891,7 @@ test_that("with conf_level the interval columns follow each variable's sd and se
   pts <- .make_test_points(rho = 0.3)
   pts$e <- rnorm(nrow(pts))
   out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
-                           conf_level = 0.95)
+                           conf_level = 0.95, estimate = "mean")
   expect_named(out, c("poly_id", "n",
                       "resp_mean_y", "..sd_resp_y", "..se_resp_y",
                       "..neff_resp_y", "..df_resp_y",
@@ -901,13 +901,13 @@ test_that("with conf_level the interval columns follow each variable's sd and se
                       "..ci_lo_pred_e", "..ci_hi_pred_e",
                       "cell_weight"))
   # Asking for an interval moves none of the existing numbers.
-  base <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e")
+  base <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e", estimate = "mean")
   for (col in names(base)) expect_identical(out[[col]], base[[col]], info = col)
 })
 
 test_that("at deff = 1 the interval is the classic t interval on n - 1 df", {
   pts <- .make_test_points(rho = 0)
-  out <- summarize_by_cell(pts, response_var = "y", conf_level = 0.90)
+  out <- summarize_by_cell(pts, response_var = "y", conf_level = 0.90, estimate = "mean")
   expect_equal(out[["..neff_resp_y"]], out$n)
   expect_equal(out[["..df_resp_y"]], out$n - 1)
   half <- stats::qt(0.95, out$n - 1) * out[["..sd_resp_y"]] / sqrt(out$n)
@@ -915,7 +915,8 @@ test_that("at deff = 1 the interval is the classic t interval on n - 1 df", {
   expect_equal(out[["..ci_hi_resp_y"]], out$resp_mean_y + half, tolerance = 1e-12)
   # The centre is the mean of the column, whatever agg_funs computes.
   med <- summarize_by_cell(pts, response_var = "y", conf_level = 0.90,
-                           agg_funs = list(median = function(x) median(x, na.rm = TRUE)))
+                           agg_funs = list(median = function(x) median(x, na.rm = TRUE)),
+                           estimate = "mean")
   expect_false("resp_mean_y" %in% names(med))
   expect_equal((med[["..ci_lo_resp_y"]] + med[["..ci_hi_resp_y"]]) / 2,
                out$resp_mean_y, tolerance = 1e-12)
@@ -929,7 +930,7 @@ test_that("on the Kish path the df stay at n - 1 while neff drops with the desig
   # (see the coverage test below for the property itself).
   pts <- .make_test_points(n_cells = 6, pts_per_cell = 12, rho = 0.5)
   out <- summarize_by_cell(pts, response_var = "y", deff = "kish",
-                           conf_level = 0.95)
+                           conf_level = 0.95, estimate = "mean")
   rho <- attr(out, "deff_applied")$icc_resp
   expect_gt(rho, 0)
   deff <- pmax(1, 1 + (out$n - 1) * rho)
@@ -941,7 +942,7 @@ test_that("on the Kish path the df stay at n - 1 while neff drops with the desig
   expect_equal(out[["..ci_lo_resp_y"]], out$resp_mean_y - half, tolerance = 1e-12)
   expect_equal(out[["..ci_hi_resp_y"]], out$resp_mean_y + half, tolerance = 1e-12)
   # ... and wider than the naive interval, by the same factor as the SE.
-  naive <- summarize_by_cell(pts, response_var = "y", conf_level = 0.95)
+  naive <- summarize_by_cell(pts, response_var = "y", conf_level = 0.95, estimate = "mean")
   ratio_ci <- (out[["..ci_hi_resp_y"]] - out[["..ci_lo_resp_y"]]) /
     (naive[["..ci_hi_resp_y"]] - naive[["..ci_lo_resp_y"]])
   expect_equal(ratio_ci, out[["..se_resp_y"]] / naive[["..se_resp_y"]],
@@ -950,7 +951,7 @@ test_that("on the Kish path the df stay at n - 1 while neff drops with the desig
 
 test_that("a numeric deff keeps n - 1 df and divides neff by deff", {
   pts <- .make_test_points(rho = 0)
-  out <- summarize_by_cell(pts, response_var = "y", deff = 2, conf_level = 0.95)
+  out <- summarize_by_cell(pts, response_var = "y", deff = 2, conf_level = 0.95, estimate = "mean")
   expect_equal(out[["..neff_resp_y"]], out$n / 2)
   expect_equal(out[["..df_resp_y"]], out$n - 1)
   half <- stats::qt(0.975, out$n - 1) * out[["..se_resp_y"]]
@@ -962,7 +963,7 @@ test_that("each column's neff and interval use that column's own non-missing row
   pts$e <- pts$y + rnorm(nrow(pts), sd = 0.1)
   pts$e[pts$poly_id == 2][1:6] <- NA          # cell 2 keeps 4 of 10 for e
   out <- summarize_by_cell(pts, response_var = "y", predictor_vars = "e",
-                           deff = "kish", conf_level = 0.95)
+                           deff = "kish", conf_level = 0.95, estimate = "mean")
   rho_e <- attr(out, "deff_applied")$icc_pred
   n_e   <- c(10, 4, 10, 10)
   expect_equal(out[["..neff_pred_e"]], n_e / pmax(1, 1 + (n_e - 1) * rho_e),
@@ -985,7 +986,8 @@ test_that("the interval is NA exactly where the standard error is", {
                                                   function(i) sf::st_point(c(i, ids[i]))),
                                            crs = 32632))
   for (dv in list(1, "kish", 2)) {
-    out  <- summarize_by_cell(pts, response_var = "y", deff = dv, conf_level = 0.95)
+    out  <- summarize_by_cell(pts, response_var = "y", deff = dv, conf_level = 0.95,
+                              estimate = "mean")
     lone <- out$n == 1L
     for (col in c("..neff_resp_y", "..df_resp_y", "..ci_lo_resp_y", "..ci_hi_resp_y")) {
       expect_true(all(is.na(out[[col]][lone])), info = paste(col, "deff =", dv))
@@ -1001,7 +1003,7 @@ test_that("the interval columns survive the cells_sf join", {
                      geometry = sf::st_sfc(lapply(1:4, function(i)
                        sf::st_buffer(sf::st_point(c(i, i)), 0.5)), crs = 32632))
   out <- summarize_by_cell(pts, response_var = "y", cells_sf = cells,
-                           conf_level = 0.95)
+                           conf_level = 0.95, estimate = "mean")
   expect_s3_class(out, "sf")
   expect_true(all(c("..ci_lo_resp_y", "..ci_hi_resp_y", "..df_resp_y") %in% names(out)))
   expect_true(is.na(out[["..ci_lo_resp_y"]][out$poly_id == 4L]))

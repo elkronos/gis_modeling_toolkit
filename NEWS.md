@@ -5,6 +5,115 @@
 Defaults and results that differ from 2.0.0.  Each entry says how to get the
 old behaviour where there is a way.
 
+* `resolution_profile()` scores pooled values by default (`estimate =
+  "auto"`) at 4.5 observations per cell (`obs_per_cell = "auto"`), with the
+  centres fitted to every row.  A call with a numeric response, no
+  predictors and none of `levels`, `n_levels`, `min_cell_n`, `sample_n` and
+  `range_floor` returns one level where it returned a ladder of about 20,
+  and its count is larger: on 3,000 rows, 667 cells where the ladder stopped
+  at 333.  `elbow` is `NA` on one level.  The profile gains
+  `scored_per_cell`, `loo`, `loo_se`, `share_alone` and `own_weight`,
+  `attr(, "estimate")` and a print line, and a layer whose scored rows share
+  locations raises `spatialkit_repeated_locations`.  A call that sets one of
+  those five arguments keeps the ladder they describe and gains the same
+  columns, and since it now carries the pooled estimate,
+  `select_resolution()` with no criterion reads it by the size: it returns
+  the level nearest `round(n / 4.5)`, on the automatic ladder its top level,
+  with `spatialkit_size_not_reached`, where 2.0.0 returned Cp's pick.
+  `criterion = "cp"`, or `estimate = NULL` in the profile, gives Cp's count.
+  On the default ladder no variogram is fitted (`sac = "auto"`): `cp` and
+  `reliability` are `NA`, `attr(, "cp_noise")` says why, and nothing is said
+  about a variogram; on any other ladder it is estimated as before.  The
+  default ladder's fits are bounded: from the 3 starts of the density kind
+  the call stops above about 122,000 rows with an error of class
+  `spatialkit_work_limit` that names the ways on (the limit is set where the
+  fit takes about a minute, so a call just below it runs that long and
+  prints nothing while it runs), and without the Matrix package `moran_i`
+  and `moran_z` are `NA` above 22,500 rows, with `spatialkit_moran_skipped`.
+  A profile passed straight as a count (`get_voronoi_seeds(n = prof)`,
+  `voronoi_seeds_kmeans(k = prof)`, `build_tessellation(approx_n_cells =
+  prof)`) is read by the size and no longer by `cp`.  `estimate = NULL,
+  obs_per_cell = NULL` gives the previous ladder and columns; `sac = NULL`
+  estimates the variogram on a ladder of sizes too.
+
+* `resolution_profile()`, `get_voronoi_seeds()` and `voronoi_seeds_kmeans()`
+  build density-weighted regions by default (`partition = "density"`), kept
+  from the best of 3 k-means++ starts (`nstart = NULL`, `kmeans_nstart =
+  NULL`).  Their cells are small where observations are dense, and hold
+  about the same number of observations each once there are more cells than
+  dense places.  Every default call of the three functions returns other
+  centres and other cells.  The profile, its selections and its seeds carry
+  the partition record (`attr(, "partition")`, `sel$partition`), and the
+  prints name the kind.  In the profile `wss` stays the unweighted sum,
+  `wss_spread` is the spread of the weighted one, and a start runs for at
+  most 100 steps of Lloyd's iteration.  The seeding functions put the rows
+  in coordinate order first, so their seeds no longer depend on the order
+  of the rows, and `get_voronoi_seeds()`'s `attr(, "kmeans")` gains
+  `converged` and `objective`.  `density_power` and `density_k` are read,
+  and a default call can raise `spatialkit_empty_cells` and
+  `spatialkit_not_converged`.  A cloud `get_voronoi_seeds()` draws inside a
+  `boundary` is uniform, so the kind has no density to follow there.
+  `method = "random"` and `"provided"` are unchanged, and a selection or a
+  profile passed as the count returns the centres it scored, as before.
+  `partition = "kmeans"` gives the previous regions with their previous
+  starts: the profile's best of 25 k-means++ starts, the seeding functions'
+  `stats::kmeans()` from 10 random starts on the rows as they come.  A call
+  that named `partition = "density"` and no number of starts runs 3 starts
+  where it ran 25 (the profile) or 10 (the seeding functions); `nstart =
+  25`, `kmeans_nstart = 10` or `nstart = 10` restores that.
+
+* `get_voronoi_seeds()` given a number of starts that is not whole, such as
+  `kmeans_nstart = 2.5`, and no `partition` now stops: the density kind
+  refuses it, with "`kmeans_nstart` must be NULL or a single positive whole
+  number of starts; got 2.5."  With `partition = "kmeans"` the call returns
+  as before.
+
+* `select_resolution()` reads a profile by `criterion = "auto"`: the size
+  for pooled values, the leave-one-out minimum for plain means, `cp` for a
+  profile built with `estimate = NULL`.  On a profile with an estimate the
+  count is the level nearest `round(n / 4.5)`, not Cp's minimum: on the
+  default profile that count itself, and on a ladder of counts the nearest
+  level, with `spatialkit_size_not_reached` when it is not the count.  A
+  response with no structure is still reported, by another test: `structured
+  = FALSE`, and `spatialkit_no_structure` where the count becomes cells,
+  from the leave-one-out error against one mean.  The count is then the
+  size's where Cp's was 2 cells or the like, since a size does not shrink
+  for want of structure, and `spatialkit_bound_chosen` is not raised for a
+  size.  On a profile without an estimate nothing changes.  `criterion =
+  "cp"` reads `cp` as before on a profile that has it.  The default profile,
+  one level with no variogram, has none, and `criterion = "cp"` or
+  `"reliability"` on it is an error that says what to pass.  For the count
+  Cp gave before, build the profile with `estimate = NULL, obs_per_cell =
+  NULL` (and `partition = "kmeans"` for the same regions).
+
+* `summarize_by_cell()` adds the pooled columns by default (`estimate =
+  "pooled"`): `..pooled_*`, `..pooled_w_*` and `..pooled_target_*` for
+  every numeric response and predictor, and the attributes `"pooled"` and
+  `"intervals"`.  Every existing column is unchanged.  The default call can
+  now raise the warnings of the pooled values, each once per call:
+  `spatialkit_pool_unavailable` (a layer with no geometry, which the call
+  accepts; no row with a value, a cell and a location; no two rows in any
+  cell), `spatialkit_pool_degenerate` (one cell, no spread inside any cell,
+  or no signal between cells), `spatialkit_pool_few_cells` (2 to 9 cells),
+  `spatialkit_pool_few_df`, `spatialkit_no_structure` (a response the cells
+  do not help with), `spatialkit_pool_rows_skipped`, and, on cells that
+  carry a count record, `spatialkit_estimate_mismatch` and
+  `spatialkit_cells_differ`.  Small layers and layers without spatial
+  structure raise several.  `estimate = "mean"` returns the previous frame.
+
+* `resolution_profile()` no longer stops when a ladder set with `levels`
+  has a level of more than 5,000 cells and the Matrix package is not
+  installed: `moran_i` and `moran_z` are `NA` at such a level, with a
+  warning of class `spatialkit_moran_skipped`, and every other column is
+  computed.  Installing Matrix gives the two columns.
+
+* The FNN package moves from Suggests to Imports and installs with
+  spatialkit.  The nearest-neighbour searches use it, among them the one
+  behind the weights of the density kind, now the default partition.  The
+  package's own searches, which compare every pair of locations and give
+  the same results in a time that grows with the square of their number,
+  remain for a session in which FNN cannot be loaded.
+
 * `estimate_sac_range()` fits its variogram model without iteration, so the
   same layer gives the same verdict, range and nugget whatever the unit of
   the response or of the coordinates and whatever the order of its rows.
@@ -76,12 +185,14 @@ old behaviour where there is a way.
   class `spatialkit_diagnostic_ranking` when it does.
 
 * `get_voronoi_seeds()`, `voronoi_seeds_kmeans()` and `build_tessellation()`
-  read a `resolution_profile()` by `cp` or not at all.  A profile whose `cp`
-  is `NA` was read by the next finite criterion with a log line; it is now
-  an error (class `spatialkit_no_default_criterion` when another criterion
-  is finite).  A geometry-only profile whose only finite criterion is
-  `elbow` is still read by it.  Pass `select_resolution(profile, criterion =
-  )` to choose another criterion.
+  read a `resolution_profile()` built without an estimate by `cp` or not at
+  all (one built with an estimate, the default, is read by
+  `criterion = "auto"`).  A profile whose `cp` is `NA` was read by the next
+  finite criterion with a log line; it is now an error (class
+  `spatialkit_no_default_criterion` when another criterion is finite).  A
+  geometry-only profile whose only finite criterion is `elbow` is still read
+  by it.  Pass `select_resolution(profile, criterion = )` to choose another
+  criterion.
 
 * `select_features_forward()` accepts a candidate by a new default rule,
   `rule = "se"`: its pooled gain has to exceed `tol` and the mean of its
@@ -200,13 +311,14 @@ old behaviour where there is a way.
 ## New features
 
 * `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and
-  `voronoi_seeds_kmeans()` gain `partition = c("kmeans", "density")`.
-  `"kmeans"`, the default, is what each function did: centres that minimise
-  the sum of squared distances from the points.  `"density"` weights each
-  point by its local density (the points in the disc that reaches its
-  `density_k`-th nearest neighbour, default 8, over the disc's area) to the
-  power `density_power` (0 to 2, default 1).  The cells are compact, and at
-  power 1 they hold about the same number of points each once there are more
+  `voronoi_seeds_kmeans()` gain `partition = c("density", "kmeans")`.
+  `"kmeans"` is what each function did: centres that minimise the sum of
+  squared distances from the points.  `"density"`, the default (see
+  Breaking changes), weights each point by its local density (the points in
+  the disc that reaches its `density_k`-th nearest neighbour, default 8,
+  over the disc's area) to the power `density_power` (0 to 2, default 1).
+  The cells are compact, and at power 1 they hold about the same number of
+  points each once there are more
   cells than dense places; with fewer cells the counts are about as uneven
   as under `"kmeans"`.  On 2,000 simulated points with 28 dense places the
   coefficient of variation of the cell counts was 0.90 under `"kmeans"` and
@@ -229,17 +341,19 @@ old behaviour where there is a way.
   for `partition = "density"`.  A kept start that was cut off at the limit,
   or at `kmeans_iter` in `get_voronoi_seeds()`, is a warning of class
   `spatialkit_not_converged` that carries `level`, `iter` and `iter_max`.
-  The default calls report as before.
+  The k-means kind from its own starts reports as before.
 
-* A result built with a `partition` or an `init` other than the default says
-  so: `attr(, "partition")` on a profile and on seeds, `$partition` on a
-  `select_resolution()` result, `params$partition` on a tessellation from
+* A result built with `partition = "density"`, or with an `init` other
+  than the k-means kind's own, says so: `attr(, "partition")` on a profile
+  and on seeds, `$partition` on a `select_resolution()` result,
+  `params$partition` on a tessellation from
   `build_tessellation()` or `create_voronoi_polygons()`.  The record holds
   `kind`, `init`, `density_power` and `density_k`, and for a profile and for
   seeds a seeding function placed, the iterations the kept start took and
   whether it converged.  A selection or profile passed as the count gives
   the centres it scored, so the regions built are the regions scored.
-  Default results carry no record and are unchanged.
+  Results of the k-means kind from its own starts carry no record and are
+  unchanged.
 
 * Under `partition = "density"` the profile's `wss` is the within-cell sum
   of squares with every point counted once, so `wss` and `elbow` compare
@@ -262,9 +376,10 @@ old behaviour where there is a way.
   mean.  The weight grows with the cell's count and with how much the cells
   differ from their neighbours.  A cell with one observation gets a value; a
   cell with none gets `NA`.  It works on any polygons.  Every present column
-  is unchanged, and the default, `estimate = "mean"`, returns the frame it
-  always did.  `attr(, "pooled")` records the fit, and whether the cells
-  predict a left-out observation better than one mean for all rows.  On 200
+  is unchanged, and `estimate = "mean"` returns the frame it always did;
+  `"pooled"` is the default (see Breaking changes).  `attr(, "pooled")`
+  records the fit, and whether the cells predict a left-out observation
+  better than one mean for all rows.  On 200
   simulated layers of 1,500 clustered observations in cells of 4.5 on
   average, the root mean squared error of the pooled value at held-out
   observations among the others was 0.96 of the plain mean's
@@ -295,16 +410,17 @@ old behaviour where there is a way.
 * `resolution_profile()`'s `sac` accepts `"auto"`: the variogram is
   estimated as before unless `obs_per_cell` sets the ladder, where none is
   fitted, `cp` and `reliability` are `NA`, and `attr(, "cp_noise")` says
-  why.  The default, `sac = NULL`, is unchanged.
+  why.  `"auto"` is the default (see Breaking changes).
 
 * `resolution_profile()`'s `nstart`, `get_voronoi_seeds()`'s `kmeans_nstart`
   and `voronoi_seeds_kmeans()`'s `nstart` accept `NULL`, the kind's own
-  number of starts: the present default for `partition = "kmeans"` and 3 for
-  `partition = "density"`.  The defaults are unchanged.  On a ladder set by
-  `obs_per_cell` a fit whose cost grows with the square of the rows is
-  stopped above a limit, with an error of class `spatialkit_work_limit` that
-  names the ways on; so is the search behind the weights of `partition =
-  "density"` when the FNN package is not installed.
+  number of starts: the earlier default for `partition = "kmeans"` and 3
+  for `partition = "density"`.  `NULL` is the default (see Breaking
+  changes).  On a ladder set by `obs_per_cell` a fit whose cost grows with
+  the square of the rows is stopped above a limit, with an error of class
+  `spatialkit_work_limit` that names the ways on; so is the search behind
+  the weights of `partition = "density"` when the FNN package is not
+  installed.
 
 * `select_resolution()` gains `criterion = "size"` (the level at
   `obs_per_cell` observations per cell, 4.5 unless given), `"loo"` (the
@@ -312,7 +428,8 @@ old behaviour where there is a way.
   leave-one-out for plain means).  A size does not test the response, so
   `structured` is computed for it from the leave-one-out error against one
   mean for the layer.  A profile built with `estimate`, passed straight to a
-  seeding function as the count, is read by `"auto"`.
+  seeding function as the count, is read by `"auto"`, which is the default
+  (see Breaking changes).
 
 * A selection made by these rules carries `count_rule`, and the seeds, the
   tessellation, the assigned layer and the summary carry it on.
@@ -339,6 +456,11 @@ old behaviour where there is a way.
 
 * New `cell_values_at()`: the value and interval of the cell at other
   locations, with each location's distance from the nearest observation.
+  A seed outside a boundary that is not convex, in a bay or a bend of a
+  coast, gets `NA` in `build_tessellation()`'s `index` although its cell is
+  built, and the locations nearest it then have no cell and are filled from
+  the cell of their nearest scored row; `?cell_values_at` gives the lines
+  that hand such a seed its cell's ID.
 
 * Each warning of the pooled path of `summarize_by_cell()` is raised once
   per call and reason and names the columns it applies to, in its text and in
@@ -643,7 +765,8 @@ old behaviour where there is a way.
   (a Kish fallback included; `deff_method` names the correction) and `FALSE`
   when the standard errors are the uncorrected ones; unlike
   the `"deff_applied"` attribute it survives `rbind()` and
-  `dplyr::bind_rows()` of many results.  The default frame is unchanged.
+  `dplyr::bind_rows()` of many results.  At the default `deff = 1` the
+  column is not added.
   `assign_features_to_polygons()` reports the features that matched more
   than one polygon and had the `tie_break` rule decide for them, as
   `attr(, "ties")` and a log line; a tie-break firing on a third of the
@@ -717,8 +840,8 @@ old behaviour where there is a way.
   version of `cell_weight`); `..df_*`, the degrees of freedom the interval
   uses; and `..ci_lo_*` / `..ci_hi_*`, a t interval for the cell mean as an
   estimate of the grand mean, built on the design-effect-corrected standard
-  error.  The default `conf_level = NULL` returns exactly the frame it always
-  did.  The degrees of freedom are `n - 1` at `deff = 1`, for a numeric
+  error.  The default `conf_level = NULL` adds none of these columns.  The
+  degrees of freedom are `n - 1` at `deff = 1`, for a numeric
   `deff` and for `deff = "kish"`, because the interval's spread is estimated
   from the within-cell variance, whose `n - 1` df survive exchangeable
   correlation whatever the design effect (measured 95% coverage on the Kish
@@ -842,13 +965,15 @@ old behaviour where there is a way.
   the classed, inspectable shape too.
 
 * `resolution_profile()` and `select_resolution()`: the number of cells,
-  scored on every criterion at once.  `resolution_profile()` runs a
-  log-spaced ladder of level counts from 2 to a ceiling the support implies
+  scored on every criterion at once.  Given a ladder argument (`n_levels`,
+  for one; at the defaults it scores one size, see Breaking changes),
+  `resolution_profile()` runs a log-spaced ladder of level counts from 2 to
+  a ceiling the support implies
   (`floor(n / min_cell_n)`, where `n` is the rows of the layer that carry a
   response, not the `sample_n` subsample the k-means runs on), reports the
   floor the autocorrelation range implies (`ceiling(area / range^2)`),
-  fits each level as the best of
-  25 k-means++ restarts, and returns a data.frame with the WSS elbow
+  fits each level as the best of its partition's k-means++ starts (25 for
+  `partition = "kmeans"`), and returns a data.frame with the WSS elbow
   statistic (read on log-log axes, and `NA` when the points have no cluster
   structure to bend the curve), Mallows'
   C_p of the piecewise-constant approximation of the response (or of
@@ -1343,8 +1468,8 @@ old behaviour where there is a way.
   metric columns by position is unaffected; code pinning the exact column set
   needs the two names added.
 
-* `voronoi_seeds_kmeans()` gains `nstart`, the number of `stats::kmeans()`
-  starts (default 10, as before).
+* `voronoi_seeds_kmeans()` gains `nstart`, the number of starts (10 for
+  `partition = "kmeans"`, as before).
 
 * `cv_bayes()` and `compare_models()` say when a Bayesian fit did not
   converge.  Both scored such a fit like any other, and only the fit's WARN
@@ -3410,6 +3535,14 @@ old behaviour where there is a way.
   "'length = 2' in coercion to 'logical(1)'".
 
 ## Documentation
+
+* The README, the vignettes, the help's examples, the scripts in
+  `inst/scripts/` and the README's figures follow the new defaults, and each
+  document says, where it brings in the pipeline, how to get the earlier
+  behaviour.  `?summarize_by_cell` gives two results of a second
+  simulation, on fields whose level jumps at boundaries: the error of the
+  pooled value at observations beside such a boundary, and the coverage of
+  the interval for one observation in cells of one observation.
 
 * `?resolution_profile` describes `cp` as the error of re-measuring the
   sampled sites.  It no longer says `cp` estimates the error of predicting a

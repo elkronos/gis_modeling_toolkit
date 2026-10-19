@@ -107,17 +107,21 @@ test_that("repeat visits let the ladder reach one cell per location", {
   # (A range of 300 needs 12 cells and five stations allow 5: an R warning
   # with a class now, where it was a log line.)
   expect_warning(
-    prof <- resolution_profile(pp, "z", levels = 2:5, nstart = 3, sac = r2_sac(300)),
+    prof <- resolution_profile(pp, "z", levels = 2:5, nstart = 3, sac = r2_sac(300),
+                               estimate = NULL, obs_per_cell = NULL, partition = "kmeans"),
     class = "spatialkit_not_supported")
   expect_identical(prof$levels, 2:5)
   expect_identical(prof$wss[4], 0)
   expect_true(is.finite(prof$cp[4]))
-  b <- attr(resolution_profile(pp, min_cell_n = 1, n_levels = 4, nstart = 3), "bounds")
+  b <- attr(resolution_profile(pp, min_cell_n = 1, n_levels = 4, nstart = 3, estimate = NULL,
+                               obs_per_cell = NULL, sac = NULL, partition = "kmeans"), "bounds")
   expect_identical(b$ceiling, 5L)
   expect_identical(b$ceiling_from, "distinct locations")
   # Without repeats the cap stays one short of the points, which
   # stats::kmeans() needs.
-  expect_identical(resolution_profile(r2_pts(20), levels = 2:20, nstart = 2)$levels, 2:19)
+  expect_identical(resolution_profile(r2_pts(20), levels = 2:20, nstart = 2, estimate = NULL,
+                                      obs_per_cell = NULL, sac = NULL,
+                                      partition = "kmeans")$levels, 2:19)
   # determine_optimal_levels() reaches k = 5 as well, and reads the fall of
   # the WSS to zero there as the elbow: one cell per station, where it used
   # to warn that the stations had no cluster structure.

@@ -17,6 +17,21 @@
 # changes, the calls written for the old value have to name it.  The fixture
 # stores the text of every call and the test compares it with this list, so
 # a call cannot be edited without the fixture saying so.
+#
+# The defaults of five functions were switched together after the baseline
+# was taken, and each call of them names the default it was recorded under:
+# estimate = NULL, obs_per_cell = NULL, sac = NULL and partition = "kmeans"
+# in resolution_profile(); criterion = "cp" in select_resolution();
+# partition = "kmeans" in get_voronoi_seeds() and voronoi_seeds_kmeans();
+# estimate = "mean" in summarize_by_cell().  A call that names the density
+# kind names its old number of starts instead (nstart = 25L in the profile,
+# 10 in a fresh seeding fit).  A call that names `sac` or a criterion keeps
+# its own.  Four calls name no partition: each passes a selection or a
+# profile of the density kind as the count, where partition = "kmeans" named
+# raises spatialkit_partition_unused and nothing named returns the scored
+# centres, as on the baseline (seeds_density_selection,
+# seeds_density_profile, kmeans_density_selection, kmeans_density_profile).
+# The text the records were taken with is the fixture's `calls_recorded`.
 # ---------------------------------------------------------------------------
 
 # The layers the calls read, from the data frames the fixture stores.  The
@@ -76,25 +91,44 @@ core_frozen_calls <- function() {
   }
 
   # ---- resolution_profile() ------------------------------------------------
-  q("profile_default",    resolution_profile(pts, "z"))
-  q("profile_geometry",   resolution_profile(clus))
-  q("profile_levels",     resolution_profile(pts, "z", levels = c(4, 8, 16, 32)))
-  q("profile_split",      resolution_profile(pts, "z", select_on = "split"))
-  q("profile_missing",    resolution_profile(pts, "z_na"))
-  q("profile_min_cell_n", resolution_profile(pts, "z", min_cell_n = 5))
-  q("profile_n_levels",   resolution_profile(pts, "z", n_levels = 16))
-  q("profile_density",    resolution_profile(pts, "z", partition = "density"))
-  q("profile_sampled",    resolution_profile(big, "z"))
-  q("profile_logical",    resolution_profile(pts, "flag"))
-  q("profile_no_value",   resolution_profile(pts, "none"))
-  q("profile_predictors", resolution_profile(pts, "z", predictor_vars = c("x1", "x2")))
-  q("profile_noise",      resolution_profile(pts, "noise"))
+  q("profile_default",    resolution_profile(pts, "z", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_geometry",   resolution_profile(clus, estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_levels",     resolution_profile(pts, "z", levels = c(4, 8, 16, 32),
+                                             estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  q("profile_split",      resolution_profile(pts, "z", select_on = "split", estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  q("profile_missing",    resolution_profile(pts, "z_na", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_min_cell_n", resolution_profile(pts, "z", min_cell_n = 5, estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  q("profile_n_levels",   resolution_profile(pts, "z", n_levels = 16, estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  q("profile_density",    resolution_profile(pts, "z", partition = "density", estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL, nstart = 25L))
+  q("profile_sampled",    resolution_profile(big, "z", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_logical",    resolution_profile(pts, "flag", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_no_value",   resolution_profile(pts, "none", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
+  q("profile_predictors", resolution_profile(pts, "z", predictor_vars = c("x1", "x2"),
+                                             estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
+  q("profile_noise",      resolution_profile(pts, "noise", estimate = NULL, obs_per_cell = NULL,
+                                             sac = NULL, partition = "kmeans"))
   q("profile_density_clustered",
-    resolution_profile(clus, "w", partition = "density"))
+    resolution_profile(clus, "w", partition = "density", estimate = NULL, obs_per_cell = NULL,
+                       sac = NULL, nstart = 25L))
 
   # ---- select_resolution() and summary(), on every profile -----------------
   for (p in names(calls)) readings(p)
-  q("select_default_unnamed", select_resolution(profile_default))
+  q("select_default_unnamed", select_resolution(profile_default, criterion = "cp"))
   q("select_column_subset",
     select_resolution(profile_default[, c("levels", "wss", "cp")], criterion = "cp"))
   q("select_column_subset_without",
@@ -102,32 +136,40 @@ core_frozen_calls <- function() {
   q("select_row_subset", select_resolution(profile_default[3:9, ], criterion = "cp"))
 
   # ---- get_voronoi_seeds() ---------------------------------------------------
-  q("seeds_number",    get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts))
+  q("seeds_number",    get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts,
+                                         partition = "kmeans"))
   q("seeds_number_seeded",
-    get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts, set_seed = 11))
+    get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts, set_seed = 11,
+                      partition = "kmeans"))
   q("seeds_selection",
-    get_voronoi_seeds(method = "kmeans", n = select_default_cp, sample_points = pts))
+    get_voronoi_seeds(method = "kmeans", n = select_default_cp, sample_points = pts,
+                      partition = "kmeans"))
   q("seeds_profile",
-    get_voronoi_seeds(method = "kmeans", n = profile_default, sample_points = pts))
+    get_voronoi_seeds(method = "kmeans", n = profile_default, sample_points = pts,
+                      partition = "kmeans"))
   q("seeds_density",
     get_voronoi_seeds(method = "kmeans", n = 30, sample_points = clus,
-                      partition = "density"))
+                      partition = "density", kmeans_nstart = 10))
   q("seeds_density_selection",
     get_voronoi_seeds(method = "kmeans", n = select_density_cp, sample_points = pts))
   q("seeds_density_profile",
     get_voronoi_seeds(method = "kmeans", n = profile_density_clustered,
                       sample_points = clus))
   q("seeds_noise_selection",
-    get_voronoi_seeds(method = "kmeans", n = select_noise_cp, sample_points = pts))
-  q("seeds_boundary",  get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 20))
-  q("seeds_random",    get_voronoi_seeds(boundary = bnd, method = "random", n = 25))
-  q("seeds_provided",  get_voronoi_seeds(method = "provided", seeds = pts[1:20, ]))
+    get_voronoi_seeds(method = "kmeans", n = select_noise_cp, sample_points = pts,
+                      partition = "kmeans"))
+  q("seeds_boundary",  get_voronoi_seeds(boundary = bnd, method = "kmeans", n = 20,
+                                         partition = "kmeans"))
+  q("seeds_random",    get_voronoi_seeds(boundary = bnd, method = "random", n = 25,
+                                         partition = "kmeans"))
+  q("seeds_provided",  get_voronoi_seeds(method = "provided", seeds = pts[1:20, ],
+                                         partition = "kmeans"))
 
   # ---- voronoi_seeds_kmeans() ------------------------------------------------
-  q("kmeans_number",    voronoi_seeds_kmeans(pts, 30))
-  q("kmeans_selection", voronoi_seeds_kmeans(pts, select_default_cp))
-  q("kmeans_profile",   voronoi_seeds_kmeans(pts, profile_default))
-  q("kmeans_density",   voronoi_seeds_kmeans(clus, 30, partition = "density"))
+  q("kmeans_number",    voronoi_seeds_kmeans(pts, 30, partition = "kmeans"))
+  q("kmeans_selection", voronoi_seeds_kmeans(pts, select_default_cp, partition = "kmeans"))
+  q("kmeans_profile",   voronoi_seeds_kmeans(pts, profile_default, partition = "kmeans"))
+  q("kmeans_density",   voronoi_seeds_kmeans(clus, 30, partition = "density", nstart = 10))
   q("kmeans_density_selection", voronoi_seeds_kmeans(pts, select_density_cp))
   q("kmeans_density_profile",
     voronoi_seeds_kmeans(clus, profile_density_clustered))
@@ -170,46 +212,55 @@ core_frozen_calls <- function() {
   })
 
   # ---- summarize_by_cell() ---------------------------------------------------
-  q("values_default",   summarize_by_cell(assigned_number, "z", id_col = "cell_id"))
-  q("values_no_response", summarize_by_cell(assigned_number, id_col = "cell_id"))
+  q("values_default",   summarize_by_cell(assigned_number, "z", id_col = "cell_id",
+                                          estimate = "mean"))
+  q("values_no_response", summarize_by_cell(assigned_number, id_col = "cell_id",
+                                            estimate = "mean"))
   q("values_kish",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "kish"))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "kish",
+                      estimate = "mean"))
   q("sac_z", estimate_sac_range(pts, "z"))
   q("values_sac",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram",
-                      sac = sac_z))
+                      sac = sac_z, estimate = "mean"))
   q("values_variogram",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram"))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram",
+                      estimate = "mean"))
   q("values_deff_2",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = 2))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = 2, estimate = "mean"))
   q("values_conf_level",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", conf_level = 0.90))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", conf_level = 0.90,
+                      estimate = "mean"))
   q("values_cells_sf",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells))
+                      cells_sf = cells_number$cells, estimate = "mean"))
   q("values_area",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells, area = TRUE))
+                      cells_sf = cells_number$cells, area = TRUE, estimate = "mean"))
   q("values_median",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", agg_funs = median))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", agg_funs = median,
+                      estimate = "mean"))
   q("values_predictors",
     summarize_by_cell(assigned_number, "z", predictor_vars = c("x1", "x2"),
-                      id_col = "cell_id", conf_level = 0.95))
+                      id_col = "cell_id", conf_level = 0.95, estimate = "mean"))
   q("values_nonfinite",
-    summarize_by_cell(assigned_number, "z_bad", id_col = "cell_id", conf_level = 0.95))
+    summarize_by_cell(assigned_number, "z_bad", id_col = "cell_id", conf_level = 0.95,
+                      estimate = "mean"))
   q("values_sparse",
     summarize_by_cell(assigned_sparse, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells, conf_level = 0.95))
-  q("values_unassigned", summarize_by_cell(assigned_kept, "z", id_col = "cell_id"))
+                      cells_sf = cells_number$cells, conf_level = 0.95, estimate = "mean"))
+  q("values_unassigned", summarize_by_cell(assigned_kept, "z", id_col = "cell_id",
+                                           estimate = "mean"))
   q("values_data_frame",
-    summarize_by_cell(sf::st_drop_geometry(assigned_number), "z", id_col = "cell_id"))
+    summarize_by_cell(sf::st_drop_geometry(assigned_number), "z", id_col = "cell_id",
+                      estimate = "mean"))
   q("values_selection",
     summarize_by_cell(assigned_selection, "z", id_col = "cell_id",
                       cells_sf = cells_selection$cells, deff = "kish",
-                      conf_level = 0.95))
+                      conf_level = 0.95, estimate = "mean"))
   q("values_density",
     summarize_by_cell(assigned_density, "w", id_col = "cell_id",
-                      cells_sf = cells_density$cells))
+                      cells_sf = cells_density$cells, estimate = "mean"))
 
   # ===========================================================================
   # Added after the first list.  Present calls on the paths the later work
@@ -218,34 +269,63 @@ core_frozen_calls <- function() {
 
   # ---- more profiles: other present arguments, other inputs ------------------
   first <- names(calls)
-  q("profile_geometry_sac",   resolution_profile(clus, sac = sac_z))
-  q("profile_sac",            resolution_profile(pts, "z", sac = sac_z))
-  q("profile_range_floor",    resolution_profile(pts, "z", range_floor = TRUE))
+  q("profile_geometry_sac",   resolution_profile(clus, sac = sac_z, estimate = NULL,
+                                                 obs_per_cell = NULL, partition = "kmeans"))
+  q("profile_sac",            resolution_profile(pts, "z", sac = sac_z, estimate = NULL,
+                                                 obs_per_cell = NULL, partition = "kmeans"))
+  q("profile_range_floor",    resolution_profile(pts, "z", range_floor = TRUE, estimate = NULL,
+                                                 obs_per_cell = NULL, sac = NULL,
+                                                 partition = "kmeans"))
   q("profile_arguments",
     resolution_profile(pts, "z", sample_n = 200, nstart = 5, seed = 9, init = "random",
-                       iter_max = 30))
+                       iter_max = 30, estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                       partition = "kmeans"))
   q("profile_density_arguments",
     resolution_profile(pts, "z", partition = "density", density_power = 0.5,
-                       density_k = 4, nstart = 3))
-  q("profile_lonlat",          resolution_profile(ll, "z"))
-  q("profile_lonlat_density",  resolution_profile(ll, "z", partition = "density"))
-  q("profile_twice",           resolution_profile(twice, "z"))
-  q("profile_twice_density",   resolution_profile(twice, "z", partition = "density"))
-  q("profile_lattice",         resolution_profile(lattice, "z"))
-  q("profile_lattice_density", resolution_profile(lattice, "z", partition = "density"))
-  q("profile_constant",        resolution_profile(lattice, "const"))
-  q("profile_integer",         resolution_profile(lattice, "count"))
+                       density_k = 4, nstart = 3, estimate = NULL, obs_per_cell = NULL,
+                       sac = NULL))
+  q("profile_lonlat",          resolution_profile(ll, "z", estimate = NULL, obs_per_cell = NULL,
+                                                  sac = NULL, partition = "kmeans"))
+  q("profile_lonlat_density",  resolution_profile(ll, "z", partition = "density",
+                                                  estimate = NULL, obs_per_cell = NULL,
+                                                  sac = NULL, nstart = 25L))
+  q("profile_twice",           resolution_profile(twice, "z", estimate = NULL,
+                                                  obs_per_cell = NULL, sac = NULL,
+                                                  partition = "kmeans"))
+  q("profile_twice_density",   resolution_profile(twice, "z", partition = "density",
+                                                  estimate = NULL, obs_per_cell = NULL,
+                                                  sac = NULL, nstart = 25L))
+  q("profile_lattice",         resolution_profile(lattice, "z", estimate = NULL,
+                                                  obs_per_cell = NULL, sac = NULL,
+                                                  partition = "kmeans"))
+  q("profile_lattice_density", resolution_profile(lattice, "z", partition = "density",
+                                                  estimate = NULL, obs_per_cell = NULL,
+                                                  sac = NULL, nstart = 25L))
+  q("profile_constant",        resolution_profile(lattice, "const", estimate = NULL,
+                                                  obs_per_cell = NULL, sac = NULL,
+                                                  partition = "kmeans"))
+  q("profile_integer",         resolution_profile(lattice, "count", estimate = NULL,
+                                                  obs_per_cell = NULL, sac = NULL,
+                                                  partition = "kmeans"))
   for (p in setdiff(names(calls), first)) readings(p)
   # Layers too small for a ladder, and what is not a layer.
-  q("small_five_rows",  resolution_profile(pts[1:5, ], "z"))
-  q("small_five_rows_selected", select_resolution(small_five_rows))
+  q("small_five_rows",  resolution_profile(pts[1:5, ], "z", estimate = NULL,
+                                           obs_per_cell = NULL, sac = NULL,
+                                           partition = "kmeans"))
+  q("small_five_rows_selected", select_resolution(small_five_rows, criterion = "cp"))
   q("small_five_rows_count",
-    get_voronoi_seeds(method = "kmeans", n = small_five_rows, sample_points = pts[1:5, ]))
-  q("small_one_row",    resolution_profile(pts[1L, ], "z"))
-  q("small_no_rows",    resolution_profile(pts[0L, ], "z"))
-  q("small_data_frame", resolution_profile(sf::st_drop_geometry(pts), "z"))
+    get_voronoi_seeds(method = "kmeans", n = small_five_rows, sample_points = pts[1:5, ],
+                      partition = "kmeans"))
+  q("small_one_row",    resolution_profile(pts[1L, ], "z", estimate = NULL, obs_per_cell = NULL,
+                                           sac = NULL, partition = "kmeans"))
+  q("small_no_rows",    resolution_profile(pts[0L, ], "z", estimate = NULL, obs_per_cell = NULL,
+                                           sac = NULL, partition = "kmeans"))
+  q("small_data_frame", resolution_profile(sf::st_drop_geometry(pts), "z", estimate = NULL,
+                                           obs_per_cell = NULL, sac = NULL,
+                                           partition = "kmeans"))
   # Other present arguments of the readers.
-  q("select_default_tol", select_resolution(profile_default, tol = 0.1, range_floor = FALSE))
+  q("select_default_tol", select_resolution(profile_default, tol = 0.1, range_floor = FALSE,
+                                            criterion = "cp"))
   q("select_column_subset_cp",
     select_resolution(profile_default[, c("levels", "cp")], criterion = "cp"))
   q("summary_default_criteria",
@@ -262,43 +342,51 @@ core_frozen_calls <- function() {
 
   # ---- a count read off a profile, a selection or a vector --------------------
   q("count_seeds_no_value",
-    get_voronoi_seeds(method = "kmeans", n = profile_no_value, sample_points = pts))
-  q("count_kmeans_no_value", voronoi_seeds_kmeans(pts, profile_no_value))
+    get_voronoi_seeds(method = "kmeans", n = profile_no_value, sample_points = pts,
+                      partition = "kmeans"))
+  q("count_kmeans_no_value", voronoi_seeds_kmeans(pts, profile_no_value, partition = "kmeans"))
   q("count_hex_no_value",
     build_tessellation(pts, boundary = bnd, method = "hex",
                        approx_n_cells = profile_no_value))
   q("count_seeds_geometry",
-    get_voronoi_seeds(method = "kmeans", n = profile_geometry, sample_points = clus))
-  q("count_kmeans_geometry", voronoi_seeds_kmeans(clus, profile_geometry))
+    get_voronoi_seeds(method = "kmeans", n = profile_geometry, sample_points = clus,
+                      partition = "kmeans"))
+  q("count_kmeans_geometry", voronoi_seeds_kmeans(clus, profile_geometry, partition = "kmeans"))
   q("count_hex_geometry",
     build_tessellation(clus, boundary = bnd, method = "hex",
                        approx_n_cells = profile_geometry))
   q("count_seeds_no_cp",
-    get_voronoi_seeds(method = "kmeans", n = profile_geometry_sac, sample_points = clus))
-  q("count_kmeans_no_cp", voronoi_seeds_kmeans(clus, profile_geometry_sac))
+    get_voronoi_seeds(method = "kmeans", n = profile_geometry_sac, sample_points = clus,
+                      partition = "kmeans"))
+  q("count_kmeans_no_cp", voronoi_seeds_kmeans(clus, profile_geometry_sac,
+                                               partition = "kmeans"))
   q("count_hex_no_cp",
     build_tessellation(clus, boundary = bnd, method = "hex",
                        approx_n_cells = profile_geometry_sac))
   q("count_seeds_noise",
-    get_voronoi_seeds(method = "kmeans", n = profile_noise, sample_points = pts))
-  q("count_kmeans_noise", voronoi_seeds_kmeans(pts, profile_noise))
+    get_voronoi_seeds(method = "kmeans", n = profile_noise, sample_points = pts,
+                      partition = "kmeans"))
+  q("count_kmeans_noise", voronoi_seeds_kmeans(pts, profile_noise, partition = "kmeans"))
   q("count_hex_noise",
     build_tessellation(pts, boundary = bnd, method = "hex", approx_n_cells = profile_noise))
   q("count_seeds_levels",
-    get_voronoi_seeds(method = "kmeans", n = profile_levels, sample_points = pts))
-  q("count_kmeans_levels_selection", voronoi_seeds_kmeans(pts, select_levels_cp))
+    get_voronoi_seeds(method = "kmeans", n = profile_levels, sample_points = pts,
+                      partition = "kmeans"))
+  q("count_kmeans_levels_selection", voronoi_seeds_kmeans(pts, select_levels_cp,
+                                                          partition = "kmeans"))
   q("count_hex_selection",
     build_tessellation(pts, boundary = bnd, method = "hex",
                        approx_n_cells = select_default_cp))
   q("count_seeds_vector",
     get_voronoi_seeds(method = "kmeans", n = c(12, 20, 8), sample_points = pts,
-                      set_seed = 3))
-  q("count_kmeans_vector", voronoi_seeds_kmeans(pts, c(12, 20)))
+                      set_seed = 3, partition = "kmeans"))
+  q("count_kmeans_vector", voronoi_seeds_kmeans(pts, c(12, 20), partition = "kmeans"))
   q("count_seeds_candidates",
     get_voronoi_seeds(method = "kmeans", n = levels_default, sample_points = pts,
-                      set_seed = 3))
+                      set_seed = 3, partition = "kmeans"))
   q("count_seeds_other_layer",
-    get_voronoi_seeds(method = "kmeans", n = select_default_cp, sample_points = clus))
+    get_voronoi_seeds(method = "kmeans", n = select_default_cp, sample_points = clus,
+                      partition = "kmeans"))
   q("count_seeds_selection_density_named",
     get_voronoi_seeds(method = "kmeans", n = select_default_cp, sample_points = pts,
                       partition = "density"))
@@ -308,52 +396,64 @@ core_frozen_calls <- function() {
   # ---- seeds: other present arguments, other inputs ---------------------------
   q("seeds_arguments",
     get_voronoi_seeds(method = "kmeans", n = 25, sample_points = pts, set_seed = 3,
-                      kmeans_nstart = 2, kmeans_iter = 5, init = "kmeans++"))
-  q("seeds_one", get_voronoi_seeds(method = "kmeans", n = 1, sample_points = pts, set_seed = 3))
+                      kmeans_nstart = 2, kmeans_iter = 5, init = "kmeans++",
+                      partition = "kmeans"))
+  q("seeds_one", get_voronoi_seeds(method = "kmeans", n = 1, sample_points = pts, set_seed = 3,
+                                   partition = "kmeans"))
   q("seeds_lonlat",
-    get_voronoi_seeds(method = "kmeans", n = 25, sample_points = ll, set_seed = 3))
+    get_voronoi_seeds(method = "kmeans", n = 25, sample_points = ll, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_lonlat_density",
     get_voronoi_seeds(method = "kmeans", n = 25, sample_points = ll, set_seed = 3,
-                      partition = "density"))
+                      partition = "density", kmeans_nstart = 10))
   q("seeds_lonlat_selection",
-    get_voronoi_seeds(method = "kmeans", n = select_lonlat_cp, sample_points = ll))
+    get_voronoi_seeds(method = "kmeans", n = select_lonlat_cp, sample_points = ll,
+                      partition = "kmeans"))
   q("seeds_boundary_lonlat",
-    get_voronoi_seeds(boundary = bnd_ll, method = "kmeans", n = 15, set_seed = 3))
+    get_voronoi_seeds(boundary = bnd_ll, method = "kmeans", n = 15, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_random_lonlat",
-    get_voronoi_seeds(boundary = bnd_ll, method = "random", n = 15, set_seed = 3))
+    get_voronoi_seeds(boundary = bnd_ll, method = "random", n = 15, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_twice",
-    get_voronoi_seeds(method = "kmeans", n = 20, sample_points = twice, set_seed = 3))
+    get_voronoi_seeds(method = "kmeans", n = 20, sample_points = twice, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_twice_density",
     get_voronoi_seeds(method = "kmeans", n = 20, sample_points = twice, set_seed = 3,
-                      partition = "density"))
+                      partition = "density", kmeans_nstart = 10))
   q("seeds_more_than_locations",
-    get_voronoi_seeds(method = "kmeans", n = 400, sample_points = twice, set_seed = 3))
+    get_voronoi_seeds(method = "kmeans", n = 400, sample_points = twice, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_lattice",
-    get_voronoi_seeds(method = "kmeans", n = 16, sample_points = lattice, set_seed = 3))
+    get_voronoi_seeds(method = "kmeans", n = 16, sample_points = lattice, set_seed = 3,
+                      partition = "kmeans"))
   q("seeds_lattice_density",
     get_voronoi_seeds(method = "kmeans", n = 16, sample_points = lattice, set_seed = 3,
-                      partition = "density"))
+                      partition = "density", kmeans_nstart = 10))
   q("seeds_random_density_named",
     get_voronoi_seeds(boundary = bnd, method = "random", n = 5, set_seed = 3,
                       partition = "density"))
   q("seeds_random_init_named",
     get_voronoi_seeds(boundary = bnd, method = "random", n = 5, set_seed = 3,
-                      init = "kmeans++"))
+                      init = "kmeans++", partition = "kmeans"))
   q("seeds_random_power_named",
     get_voronoi_seeds(boundary = bnd, method = "random", n = 5, set_seed = 3,
-                      density_power = 0.5))
+                      density_power = 0.5, partition = "kmeans"))
   q("seeds_provided_density_named",
     get_voronoi_seeds(method = "provided", seeds = pts[1:20, ], partition = "density"))
   q("seeds_kmeans_power_named",
     get_voronoi_seeds(method = "kmeans", n = 30, sample_points = pts, set_seed = 3,
-                      density_power = 0.5))
+                      density_power = 0.5, partition = "kmeans"))
   q("kmeans_arguments",
-    voronoi_seeds_kmeans(pts, 25, set_seed = 1, nstart = 2, init = "kmeans++", iter_max = 8))
-  q("kmeans_unseeded",       voronoi_seeds_kmeans(pts, 30, set_seed = NULL))
-  q("kmeans_lonlat",         voronoi_seeds_kmeans(ll, 25))
-  q("kmeans_lonlat_density", voronoi_seeds_kmeans(ll, 25, partition = "density"))
-  q("kmeans_more_than_locations", voronoi_seeds_kmeans(twice, 200))
-  q("kmeans_lattice_density", voronoi_seeds_kmeans(lattice, 16, partition = "density"))
+    voronoi_seeds_kmeans(pts, 25, set_seed = 1, nstart = 2, init = "kmeans++", iter_max = 8,
+                         partition = "kmeans"))
+  q("kmeans_unseeded",       voronoi_seeds_kmeans(pts, 30, set_seed = NULL,
+                                                  partition = "kmeans"))
+  q("kmeans_lonlat",         voronoi_seeds_kmeans(ll, 25, partition = "kmeans"))
+  q("kmeans_lonlat_density", voronoi_seeds_kmeans(ll, 25, partition = "density", nstart = 10))
+  q("kmeans_more_than_locations", voronoi_seeds_kmeans(twice, 200, partition = "kmeans"))
+  q("kmeans_lattice_density", voronoi_seeds_kmeans(lattice, 16, partition = "density",
+                                                   nstart = 10))
   q("random_number", voronoi_seeds_random(bnd, 12))
   q("random_seeded", voronoi_seeds_random(bnd, 12, set_seed = 5))
 
@@ -400,95 +500,104 @@ core_frozen_calls <- function() {
   q("assigned_no_rows",          assigned_number[0L, ])
 
   # ---- summaries: other present arguments --------------------------------------
-  q("values_id_found",     summarize_by_cell(assigned_number, "z"))
+  q("values_id_found",     summarize_by_cell(assigned_number, "z", estimate = "mean"))
   q("values_not_quiet",
-    summarize_by_cell(assigned_number, "z", id_col = "cell_id", quiet = FALSE))
+    summarize_by_cell(assigned_number, "z", id_col = "cell_id", quiet = FALSE,
+                      estimate = "mean"))
   q("values_not_quiet_variogram",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram",
-                      quiet = FALSE))
+                      quiet = FALSE, estimate = "mean"))
   q("values_other_cells",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells[1:20, ]))
+                      cells_sf = cells_number$cells[1:20, ], estimate = "mean"))
   q("values_area_missing",
     summarize_by_cell(assigned_number, "z_na", id_col = "cell_id",
-                      cells_sf = cells_number$cells, area = TRUE))
+                      cells_sf = cells_number$cells, area = TRUE, estimate = "mean"))
   q("values_variogram_cells_reversed",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram",
-                      sac = sac_z, cells_sf = cells_number$cells[30:1, ]))
+                      sac = sac_z, cells_sf = cells_number$cells[30:1, ], estimate = "mean"))
   q("values_variogram_max_n",
     summarize_by_cell(assigned_number, "z", id_col = "cell_id", deff = "variogram",
-                      sac = sac_z, cells_sf = cells_number$cells, deff_max_n = 5))
+                      sac = sac_z, cells_sf = cells_number$cells, deff_max_n = 5,
+                      estimate = "mean"))
   q("values_kish_predictors_area",
     summarize_by_cell(assigned_number, "z_na", c("x1", "x2"), id_col = "cell_id",
                       deff = "kish", cells_sf = cells_number$cells, conf_level = 0.95,
-                      area = TRUE))
+                      area = TRUE, estimate = "mean"))
   q("values_predictors_only",
-    summarize_by_cell(assigned_number, predictor_vars = c("x1", "x2"), id_col = "cell_id"))
-  q("values_logical", summarize_by_cell(assigned_number, "flag", id_col = "cell_id"))
+    summarize_by_cell(assigned_number, predictor_vars = c("x1", "x2"), id_col = "cell_id",
+                      estimate = "mean"))
+  q("values_logical", summarize_by_cell(assigned_number, "flag", id_col = "cell_id",
+                                        estimate = "mean"))
   q("values_functions",
     summarize_by_cell(assigned_number, "z_na", id_col = "cell_id",
                       agg_funs = list(mean = function(x) mean(x, na.rm = TRUE),
-                                      top = function(x) max(x, na.rm = TRUE))))
+                                      top = function(x) max(x, na.rm = TRUE)),
+                                      estimate = "mean"))
   q("values_function_names",
     summarize_by_cell(assigned_number, "z_na", id_col = "cell_id",
-                      agg_funs = c("median", "max")))
+                      agg_funs = c("median", "max"), estimate = "mean"))
   q("values_data_frame_variogram",
     summarize_by_cell(sf::st_drop_geometry(assigned_number), "z", id_col = "cell_id",
-                      deff = "variogram"))
+                      deff = "variogram", estimate = "mean"))
   # The cells carry the ID as text and the rows as a number.
   q("values_id_number_text", {
     rows  <- assigned_number
     rows$cell_dbl <- rows$cell_id * 1e5
     cells <- cells_number$cells
     cells$cell_dbl <- sprintf("%.0f", cells$cell_id * 1e5)
-    summarize_by_cell(rows, "z", id_col = "cell_dbl", cells_sf = cells)
+    summarize_by_cell(rows, "z", id_col = "cell_dbl", cells_sf = cells, estimate = "mean")
   })
 
   # ---- summaries: other inputs --------------------------------------------------
   q("values_lonlat",
     summarize_by_cell(assigned_lonlat, "z", id_col = "cell_id",
-                      cells_sf = cells_lonlat$cells))
+                      cells_sf = cells_lonlat$cells, estimate = "mean"))
   q("values_lonlat_variogram",
     summarize_by_cell(assigned_lonlat, "z", id_col = "cell_id",
-                      cells_sf = cells_lonlat$cells, deff = "variogram"))
+                      cells_sf = cells_lonlat$cells, deff = "variogram", estimate = "mean"))
   q("values_lonlat_area",
     summarize_by_cell(assigned_lonlat, "z", id_col = "cell_id",
-                      cells_sf = cells_lonlat$cells, area = TRUE))
+                      cells_sf = cells_lonlat$cells, area = TRUE, estimate = "mean"))
   q("values_twice",
     summarize_by_cell(assigned_twice, "z", id_col = "cell_id", deff = "variogram",
-                      conf_level = 0.90))
+                      conf_level = 0.90, estimate = "mean"))
   q("values_lattice",
     summarize_by_cell(assigned_lattice, "z", id_col = "cell_id",
-                      cells_sf = cells_lattice$cells, conf_level = 0.90))
+                      cells_sf = cells_lattice$cells, conf_level = 0.90, estimate = "mean"))
   q("values_constant",
     summarize_by_cell(assigned_lattice, "const", id_col = "cell_id", deff = "kish",
-                      conf_level = 0.90))
-  q("values_integer", summarize_by_cell(assigned_lattice, "count", id_col = "cell_id"))
+                      conf_level = 0.90, estimate = "mean"))
+  q("values_integer", summarize_by_cell(assigned_lattice, "count", id_col = "cell_id",
+                                        estimate = "mean"))
   q("values_units_character",
-    summarize_by_cell(assigned_units_character, "z", id_col = "GEOID", cells_sf = units))
+    summarize_by_cell(assigned_units_character, "z", id_col = "GEOID", cells_sf = units,
+                      estimate = "mean"))
   q("values_units_integer",
     summarize_by_cell(assigned_units_integer, "z", id_col = "id_int", cells_sf = units,
-                      area = TRUE))
+                      area = TRUE, estimate = "mean"))
   q("values_units_double",
-    summarize_by_cell(assigned_units_double, "z", id_col = "id_dbl", cells_sf = units))
+    summarize_by_cell(assigned_units_double, "z", id_col = "id_dbl", cells_sf = units,
+                      estimate = "mean"))
   q("values_units_factor",
     summarize_by_cell(assigned_units_factor, "z", id_col = "id_fac", cells_sf = units,
-                      deff = "kish"))
+                      deff = "kish", estimate = "mean"))
   q("values_units_lonlat",
     summarize_by_cell(assigned_units_lonlat, "z", id_col = "GEOID", cells_sf = units,
-                      conf_level = 0.90))
+                      conf_level = 0.90, estimate = "mean"))
   q("values_one_region",
     summarize_by_cell(assigned_one_region, "z", id_col = "cell_id", deff = "kish",
-                      conf_level = 0.90))
+                      conf_level = 0.90, estimate = "mean"))
   q("values_one_row_regions",
     summarize_by_cell(assigned_one_row_regions, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells, deff = "kish", conf_level = 0.90))
+                      cells_sf = cells_number$cells, deff = "kish", conf_level = 0.90,
+                      estimate = "mean"))
   q("values_one_row",
     summarize_by_cell(assigned_one_row, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells))
+                      cells_sf = cells_number$cells, estimate = "mean"))
   q("values_no_rows",
     summarize_by_cell(assigned_no_rows, "z", id_col = "cell_id",
-                      cells_sf = cells_number$cells))
+                      cells_sf = cells_number$cells, estimate = "mean"))
   calls
 }
 

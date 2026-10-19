@@ -6,7 +6,7 @@
 \usage{
 select_resolution(
   profile,
-  criterion = c("cp", "reliability", "elbow", "moran_z", "loo", "size", "auto"),
+  criterion = c("auto", "cp", "reliability", "elbow", "moran_z", "loo", "size"),
   tol = 0.02,
   range_floor = TRUE,
   diagnostic = FALSE,
@@ -23,7 +23,9 @@ the profile's estimate, minimised), \code{"size"} (the count
 \code{obs_per_cell} gives), \code{"auto"} (\code{"size"} for a profile
 of pooled values, \code{"loo"} for one of plain means, \code{"cp"} for
 a profile without an estimate) or, with \code{diagnostic = TRUE},
-\code{"moran_z"} (\eqn{|z|} minimised).  Default \code{"cp"}.}
+\code{"moran_z"} (\eqn{|z|} minimised).  Default \code{"auto"}.
+\code{"cp"} was the default of earlier versions; name it to read
+\eqn{C_p} on a profile that has it.}
 
 \item{tol}{Width of the flat region.  For \code{cp}, \code{reliability}
 and \code{loo} it is relative to the optimum's value (\code{0.02} keeps
@@ -166,7 +168,11 @@ the leave-one-out error of one mean and \code{range_floor} is
 }
 \description{
 Picks the level a criterion prefers, together with the \emph{flat region}:
-every level whose criterion value is within \code{tol} of the optimum.  On
+every level whose criterion value is within \code{tol} of the optimum.
+On the default profile, one size scored for pooled values, the default
+criterion is that size: it returns the count the size gives, with no
+optimum and no flat region (see "A profile built with an estimate"); what
+follows is about the criteria read on a ladder of counts.  On
 the criteria this package computes the flat region is routinely wide: the
 reliability curve is flat to within 2 percent over a factor of 3--6 in the
 number of cells, and \eqn{C_p} on a smooth field descends to the support
@@ -206,9 +212,10 @@ response shows no spatial structure the cells can use and the count
 is not identified.  \code{structured} is also \code{FALSE} when the
 profile's variogram was refused for showing no spatial structure.
 \code{best} is still the argmin.
-\strong{Measured on white noise} (uniform points, the default
-ladder), \code{structured} was \code{TRUE} on 3 of 200 layers of 60
-points, 7 of 200 of 120, 5 of 150 of 300 and none of 80 of 600 or of
+\strong{Measured on white noise} (uniform points, the automatic
+ladder of \code{obs_per_cell = NULL}), \code{structured} was
+\code{TRUE} on 3 of 200 layers of 60 points, 7 of 200 of 120, 5 of
+150 of 300 and none of 80 of 600 or of
 40 of 1,500 with the noise variance taken from the finest level; and
 with the package's own variogram, whose nugget was 0 on 27 of the
 180 layers, on none of 120 layers of 120 points and 3 of 60 of 300.
@@ -308,14 +315,19 @@ the record of its estimate and is read by \code{"cp"}.
 
 \section{A profile built with an estimate}{
 
-This function's default criterion is \code{"cp"}, whatever the profile.
-A profile built with \code{estimate} that is passed straight to
+This function's default criterion is \code{"auto"}: \code{"size"} for a
+profile of pooled values, \code{"loo"} for one of plain means and
+\code{"cp"} for a profile without an estimate.  A profile built with
+\code{estimate} that is passed straight to
 \code{\link{get_voronoi_seeds}()}, \code{\link{voronoi_seeds_kmeans}()} or
-\code{\link{build_tessellation}()} as the count is read by
-\code{criterion = "auto"}.  So \code{select_resolution(profile)} and the
-profile itself can give two counts: name \code{criterion = "auto"},
-\code{"size"} or \code{"loo"} here for the rule that goes with the
-estimate.  \code{cp} is computed on such a profile as on any other and
+\code{\link{build_tessellation}()} as the count is read the same way, so
+\code{select_resolution(profile)} and the profile itself give the same
+count.  A profile of pooled values built with a ladder argument
+(\code{n_levels} and the others) is read by the size as well: the
+default returns the level nearest the count the size gives, on the
+automatic ladder its top level, with \code{spatialkit_size_not_reached}.
+The default was \code{"cp"} in earlier versions, whatever the profile;
+\code{criterion = "cp"} reads it as before on a profile that has it.  \code{cp} is computed on such a profile as on any other and
 scores plain means; when the profile's estimate is the pooled value the
 result's note says so.
 
@@ -324,14 +336,19 @@ ladder \code{obs_per_cell} set under \code{sac = "auto"}.  Such a profile
 fits no variogram, both columns are \code{NA} at every level, and the
 call is an error that names the ways to get them: build the profile with
 \code{sac = NULL}, with a \code{sac} of your own, or with
-\code{obs_per_cell = NULL}.  On a ladder of one size that has a variogram
-either criterion returns the one level, with \code{edge} \code{"the only
-level scored"}.
+\code{obs_per_cell = NULL}.  The default profile is such a profile.  For
+the count \code{"cp"} gave in earlier versions, build the profile with
+\code{estimate = NULL, obs_per_cell = NULL}, and with \code{partition =
+"kmeans"} for the same regions.  On a ladder of one size that has a
+variogram either criterion returns the one level, with \code{edge}
+\code{"the only level scored"}.
 
 For a ladder of one size, \code{summary()} of the profile lists each
 criterion that is finite at the level and says that the size set the
 count, and \code{plot()} draws each as one point, with no selected level
-and no band.
+and no band.  When none is finite, as on a constant response, where
+\code{loo} is \code{NA} too, \code{summary()} stops with an error that
+says so.
 }
 
 \examples{
@@ -351,14 +368,18 @@ if (requireNamespace("gstat", quietly = TRUE)) {
   print(sel)               # the level, and the flat region around it
   print(sel$flat)          # every level within `tol` of the optimum
   print(sel$edge)          # the bound the optimum sits on; NA when interior
-  sel$structured           # FALSE when one cell for the layer does as well
+  print(sel$structured)    # FALSE when one cell for the layer does as well
 
   # Reliability prefers coarse cells: it is read at or above the floor the
   # autocorrelation range sets, and the result says in words that the
   # floor is choosing.
   rel <- select_resolution(prof, criterion = "reliability")
   print(rel)
-  c(at_floor = rel$at_floor, edge = rel$edge)
+  print(c(at_floor = rel$at_floor, edge = rel$edge))
+
+  # The default profile is one size scored for pooled values, and the
+  # default criterion, "auto", reads it by that size.
+  select_resolution(resolution_profile(pts, response_var = "z"))
 }
 }
 \seealso{

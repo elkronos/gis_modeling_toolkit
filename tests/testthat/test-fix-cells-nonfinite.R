@@ -50,7 +50,7 @@ test_that("one Inf in a cell of 30 is left out of every statistic, with one warn
   ptsI <- pts0;  ptsI$y[5] <- Inf
   ptsN <- pts0;  ptsN$y[5] <- NA
 
-  res <- .fn_run(summarize_by_cell(ptsI, response_var = "y", conf_level = 0.95))
+  res <- .fn_run(summarize_by_cell(ptsI, response_var = "y", conf_level = 0.95, estimate = "mean"))
   out <- res$value
   expect_equal(out$resp_mean_y[1], mean(pts0$y[1:30][-5]), tolerance = 1e-12)
   expect_identical(out$n[1], 30L)
@@ -65,7 +65,7 @@ test_that("one Inf in a cell of 30 is left out of every statistic, with one warn
   expect_identical(res$conditions[[1L]]$n, 1L)
   expect_identical(res$conditions[[1L]]$columns, "y")
   # The result is the one with that row set to NA.
-  .fn_same(out, summarize_by_cell(ptsN, response_var = "y", conf_level = 0.95))
+  .fn_same(out, summarize_by_cell(ptsN, response_var = "y", conf_level = 0.95, estimate = "mean"))
 })
 
 test_that("an Inf row gives the row-as-NA result under every design effect", {
@@ -75,8 +75,9 @@ test_that("an Inf row gives the row-as-NA result under every design effect", {
 
   # "kish": the ICC is the clean one, so every cell is corrected.  It was 0,
   # with deff_applied FALSE and uncorrected SEs on all three cells.
-  kI <- suppressWarnings(summarize_by_cell(ptsI, "y", deff = "kish", conf_level = 0.95))
-  kN <- summarize_by_cell(ptsN, "y", deff = "kish", conf_level = 0.95)
+  kI <- suppressWarnings(summarize_by_cell(ptsI, "y", deff = "kish", conf_level = 0.95,
+                                           estimate = "mean"))
+  kN <- summarize_by_cell(ptsN, "y", deff = "kish", conf_level = 0.95, estimate = "mean")
   .fn_same(kI, kN)
   expect_gt(attr(kI, "icc")$resp, 0.5)
   expect_true(all(kI$deff_applied))
@@ -84,15 +85,16 @@ test_that("an Inf row gives the row-as-NA result under every design effect", {
 
   # "variogram" with a supplied sac: cell_weight equals ..neff_.
   vI <- suppressWarnings(summarize_by_cell(ptsI, "y", deff = "variogram",
-                                           sac = .fn_sac(), conf_level = 0.95))
+                                           sac = .fn_sac(), conf_level = 0.95, estimate = "mean"))
   vN <- summarize_by_cell(ptsN, "y", deff = "variogram", sac = .fn_sac(),
-                          conf_level = 0.95)
+                          conf_level = 0.95, estimate = "mean")
   .fn_same(vI, vN)
   expect_equal(vI$cell_weight, vI[["..neff_resp_y"]], tolerance = 1e-12)
 
   # A fixed number.
-  .fn_same(suppressWarnings(summarize_by_cell(ptsI, "y", deff = 2, conf_level = 0.95)),
-           summarize_by_cell(ptsN, "y", deff = 2, conf_level = 0.95))
+  .fn_same(suppressWarnings(summarize_by_cell(ptsI, "y", deff = 2, conf_level = 0.95,
+                                              estimate = "mean")),
+           summarize_by_cell(ptsN, "y", deff = 2, conf_level = 0.95, estimate = "mean"))
 })
 
 test_that("user aggregation functions see the same rows as the built-in statistics", {
@@ -117,7 +119,7 @@ test_that("Inf and -Inf in one cell, an Inf in a predictor, and several columns"
   pts0 <- .fn_points()
   # Both signs in one cell used to give a mean of NaN.
   ptsB <- pts0; ptsB$y[5] <- Inf; ptsB$y[6] <- -Inf
-  rB <- .fn_run(summarize_by_cell(ptsB, "y"))
+  rB <- .fn_run(summarize_by_cell(ptsB, "y", estimate = "mean"))
   expect_equal(rB$value$resp_mean_y[1], mean(pts0$y[1:30][-(5:6)]), tolerance = 1e-12)
   expect_match(rB$warnings, "2 infinite value\\(s\\).*response 'y' 2 row\\(s\\) in 1 cell\\(s\\)")
   expect_equal(rB$value$cell_weight[1], 28)
@@ -125,17 +127,17 @@ test_that("Inf and -Inf in one cell, an Inf in a predictor, and several columns"
   # A predictor column behaves the same way, and the response is untouched.
   set.seed(2)
   ptsD <- pts0; ptsD$p <- rnorm(90); p_clean <- ptsD$p; ptsD$p[70] <- Inf
-  rD <- .fn_run(summarize_by_cell(ptsD, "y", "p", conf_level = 0.9))
+  rD <- .fn_run(summarize_by_cell(ptsD, "y", "p", conf_level = 0.9, estimate = "mean"))
   expect_equal(rD$value$pred_mean_p[3], mean(p_clean[61:90][-10]), tolerance = 1e-12)
   expect_equal(rD$value[["..neff_pred_p"]][3], 29)
   expect_true(is.finite(rD$value[["..se_pred_p"]][3]))
   expect_match(rD$warnings, "predictor 'p' 1 row\\(s\\) in 1 cell\\(s\\)")
-  expect_equal(rD$value$resp_mean_y, summarize_by_cell(pts0, "y")$resp_mean_y)
+  expect_equal(rD$value$resp_mean_y, summarize_by_cell(pts0, "y", estimate = "mean")$resp_mean_y)
   expect_equal(rD$value$cell_weight, rep(30, 3))
 
   # Two columns, three cells: still one warning, naming both.
   ptsE <- ptsD; ptsE$y[c(5, 40)] <- c(Inf, -Inf)
-  rE <- .fn_run(summarize_by_cell(ptsE, "y", "p"))
+  rE <- .fn_run(summarize_by_cell(ptsE, "y", "p", estimate = "mean"))
   expect_length(rE$warnings, 1L)
   expect_match(rE$warnings, "3 infinite value\\(s\\) are treated as missing: response 'y' 2 row\\(s\\) in 2 cell\\(s\\); predictor 'p' 1 row\\(s\\) in 1 cell\\(s\\)")
   expect_identical(rE$conditions[[1L]]$columns, c("y", "p"))
@@ -146,10 +148,10 @@ test_that("data with no infinite value raise nothing and give the same frame", {
   pts0 <- .fn_points()
   ptsN <- pts0; ptsN$y[c(5, 40)] <- c(NA, NaN)       # missing already, as before
   for (p in list(pts0, ptsN)) {
-    res <- .fn_run(summarize_by_cell(p, "y", deff = "kish", conf_level = 0.95))
+    res <- .fn_run(summarize_by_cell(p, "y", deff = "kish", conf_level = 0.95, estimate = "mean"))
     expect_length(res$warnings, 0L)
   }
-  out <- summarize_by_cell(pts0, "y", conf_level = 0.95)
+  out <- summarize_by_cell(pts0, "y", conf_level = 0.95, estimate = "mean")
   d <- sf::st_drop_geometry(pts0)
   expect_equal(out$resp_mean_y, as.numeric(tapply(d$y, d$poly_id, mean)), tolerance = 1e-12)
   expect_equal(out[["..se_resp_y"]],

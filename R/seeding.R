@@ -4,8 +4,10 @@
 #' supported: user-provided points, uniform random sampling within a boundary,
 #' or k-means clustering of a sampling cloud.
 #'
-#' Seeds lie inside the ground they stand for, so Voronoi cells clipped to the
-#' seeds' own hull would leave its edge uncovered. The result therefore
+#' Seeds lie inside the ground they stand for (k-means seeds inside the
+#' hull of the points they were fitted to, random seeds inside the
+#' boundary), so Voronoi cells clipped to the seeds' own hull would leave
+#' its edge uncovered. The result therefore
 #' carries that ground as `attr(, "cover")`: the `boundary` when one was
 #' given, otherwise the convex hull of `sample_points`, otherwise (for the
 #' scored centres of a [resolution_profile()] or a [select_resolution()]
@@ -19,6 +21,15 @@
 #' warning is raised for them, since they may be the observation sites
 #' themselves. The attribute survives
 #' `sf::st_transform()` and row subsetting; `rbind()` drops it.
+#'
+#' A k-means seed is a mean of the points of its cluster, weighted under the
+#' density kind, so it can lie outside a `boundary` that is not convex, in a
+#' bay or a bend of a coast, even when every point lies inside. Tessellated
+#' within that boundary, its cell is built if any of it lies inside, but the
+#' seed itself lies in no cell: [build_tessellation()] warns that it falls
+#' in no cell (class `spatialkit_unassigned`) and gives it `NA` in `index`.
+#' `seeds` in [cell_values_at()] says how to give such a seed its cell's
+#' ID.
 #'
 #' @param boundary Optional polygonal sf object defining the sampling area.
 #' @param method One of "kmeans", "random", "provided".
@@ -47,10 +58,9 @@
 #'   the profile's level for that size, or the built level nearest to
 #'   `max(2, round(n / obs_per_cell))` when the profile has none for it
 #'   (with a warning of class `"spatialkit_size_not_reached"`).
-#'   `select_resolution(profile)` with
-#'   no `criterion` still reads such a profile by `cp`, so pass the profile
-#'   itself, or a selection that names its criterion. A profile built with
-#'   `obs_per_cell` and without an `estimate` is read by `cp` like any
+#'   `select_resolution(profile)` with no `criterion` reads such a profile
+#'   the same way, since its default criterion is `"auto"`. A profile built
+#'   with `obs_per_cell` and without an `estimate` is read by `cp` like any
 #'   profile without one; pass `select_resolution(profile, criterion =
 #'   "size")` for the count its size gives. The result then
 #'   carries `attr(, "n_from")`
@@ -67,10 +77,11 @@
 #'
 #'   With `method = "kmeans"`, a selection or profile also carries the
 #'   centres of the partition the profile scored at that count, and those
-#'   are returned instead of a new k-means: a k-means partition is the
-#'   Voronoi partition of its centres, so their cells are the cells the
-#'   criteria judged. `sample_points`, when given, is then only assigned to
-#'   them (for `attr(, "kmeans")`) and gives the cover, and `boundary` only
+#'   are returned instead of a new k-means: a k-means partition, weighted or
+#'   not, is the Voronoi partition of its centres, so their cells are the
+#'   cells the criteria judged. `sample_points`, when given, is then only
+#'   assigned to them (for `attr(, "kmeans")`) and gives the cover, and
+#'   `boundary` only
 #'   sets the CRS and the cover (see "Details");
 #'   `kmeans_nstart`, `kmeans_iter` and `set_seed` are not used, and neither
 #'   are `partition`, `init` and the density settings: the centres are of
@@ -91,33 +102,39 @@
 #'   cloud, or one with no CRS whose coordinates look like lon/lat (the
 #'   heuristic [ensure_projected()] applies, with its warning), is projected
 #'   before clustering.
-#' @param kmeans_nstart Integer; nstart for kmeans(). Default 10. `NULL` is
-#'   the kind's own number of starts: 10 for `partition = "kmeans"` and 3
-#'   for `partition = "density"`. The
-#'   partition is [stats::kmeans()], not the best-of-25 k-means++ run that
-#'   [resolution_profile()] scored a count on, so it is not that partition;
-#'   pass the selection or profile itself as `n` for that one (see `n`).
-#'   Under `partition = "density"`, and with `init = "kmeans++"`, it is the
-#'   number of starts, of which the best is kept, and has to be `NULL` or a
-#'   positive whole number. It is not read by `method = "random"` or
-#'   `"provided"`.
+#' @param kmeans_nstart The number of starts, of which the best is kept.
+#'   `NULL` (default) is the kind's own number: 3 for `partition =
+#'   "density"` and 10 for `partition = "kmeans"`, the default of earlier
+#'   versions. `kmeans_nstart = 10` gives the density kind the starts it had
+#'   when 10 was the default. Under `partition = "kmeans"` from random starts
+#'   it is `nstart` of [stats::kmeans()]. A fresh partition is not the one
+#'   [resolution_profile()] scored a count on; pass the selection or profile
+#'   itself as `n` for that one (see `n`). Under `partition = "density"`,
+#'   and with `init = "kmeans++"`, it has to be `NULL` or a positive whole
+#'   number, so a number that is not whole, which `partition = "kmeans"`
+#'   takes, stops a call that names no kind. It is not read by `method =
+#'   "random"` or `"provided"`.
 #' @param kmeans_iter Integer; iter.max for kmeans(). Default 100. Under
 #'   `partition = "density"` it is the most steps of Lloyd's iteration a
 #'   start takes. Under `partition = "density"`, and with `init =
 #'   "kmeans++"`, it has to be a positive whole number, and a kept start that
 #'   was cut off at it is a warning of class `"spatialkit_not_converged"`
-#'   (the default run keeps the warning [stats::kmeans()] gives).
+#'   (`partition = "kmeans"` from random starts keeps the warning
+#'   [stats::kmeans()] gives).
 #' @param set_seed Optional integer RNG seed.
 #' @param partition For `method = "kmeans"`: what the seeds minimise.
-#'   `"kmeans"` (default) is the sum of squared distances from the points of
-#'   the cloud to their nearest seed: compact cells, with several times the
-#'   points in a cell of a dense place that a cell of a sparse place holds.
-#'   `"density"` weights each point by its local density to the power
-#'   `density_power`: compact cells, many small ones where the points are
-#'   dense and a few large ones where they are sparse. At the default power
-#'   they hold about the same number of points each once `n` is above the
-#'   number of dense places (clusters) in the cloud; below that the counts
-#'   are about as uneven as under `"kmeans"`. It follows the
+#'   `"density"` (default) is the sum of squared distances from the points
+#'   of the cloud to their nearest seed, each point weighted by its local
+#'   density to the power `density_power`: compact cells, many small ones
+#'   where the points are dense and a few large ones where they are sparse.
+#'   At the default power they hold about the same number of points each
+#'   once `n` is above the number of dense places (clusters) in the cloud;
+#'   below that the counts are about as uneven as under `"kmeans"`.
+#'   `"kmeans"` is the same sum unweighted: compact cells, with several
+#'   times the points in a cell of a dense place that a cell of a sparse
+#'   place holds. It is the run of earlier versions, whose default it was:
+#'   [stats::kmeans()] from 10 random starts on the rows as they come. The
+#'   density kind follows the
 #'   density of `sample_points`; a cloud this function draws inside
 #'   `boundary` is uniform and has none to follow. Without the 'FNN' package
 #'   the density kind finds its weights by comparing every pair of distinct
@@ -130,10 +147,11 @@
 #'   distance from those already drawn, times its weight under `partition =
 #'   "density"`). `NULL` (default) is each kind's own rule: `"random"` for
 #'   `partition = "kmeans"`, the run this function has always made, and
-#'   `"kmeans++"` for `partition = "density"`. With the default the cloud is
-#'   clustered in the order its rows come in; with `init = "kmeans++"`, and
-#'   under `partition = "density"`, the rows are put in coordinate order
-#'   first, so the seeds do not depend on their order.
+#'   `"kmeans++"` for `partition = "density"`. Under `partition = "kmeans"`
+#'   from random starts the cloud is clustered in the order its rows come
+#'   in; with `init = "kmeans++"`, and under `partition = "density"`, the
+#'   rows are put in coordinate order first, so the seeds do not depend on
+#'   their order.
 #' @param density_power For `partition = "density"`: the power the local
 #'   density is raised to for a point's weight, from 0 to 2. Default 1, which
 #'   evens out the cell counts once the cells outnumber the dense places; 0
@@ -157,14 +175,16 @@
 #'   stopped before `kmeans_iter`, and under `partition = "density"`
 #'   `objective`, the weighted sum the seeds minimise; scored centres have
 #'   neither. Seeds placed with `partition = "density"` or `init =
-#'   "kmeans++"`, and the scored centres of a profile built with a kind or
-#'   starting rule other than its default, carry `attr(, "partition")`: a
+#'   "kmeans++"`, and the scored centres of a profile of the density kind or
+#'   from random starts, carry `attr(, "partition")`: a
 #'   list with `kind`, `init`, `density_power` and `density_k`, and for
 #'   seeds this call placed `iter`, `iter_max` and `converged` (the
 #'   iterations the kept start took, the limit, and whether it stopped
 #'   before the limit). [build_tessellation()] returns the list as
 #'   `params$partition`. Seeds with no such
-#'   record are plain k-means. Every method also
+#'   record are plain k-means: from random starts when this call placed
+#'   them, or the scored centres of a k-means profile from k-means++ starts.
+#'   Every method also
 #'   attaches `attr(, "cover")` when the call says what ground the seeds stand
 #'   for (see "Details"): an sfc holding the boundary's polygons or the hull
 #'   of the clustered points, in its own CRS.
@@ -190,16 +210,32 @@
 #'   c(0, 0), c(100, 0), c(100, 100), c(0, 100), c(0, 0)
 #' ))), crs = 32632))
 #' get_voronoi_seeds(bnd, method = "random", n = 5, set_seed = 1)
+#'
+#' # Seeds from a cloud with one dense place: density-weighted k-means by
+#' # default, from 3 starts; partition = "kmeans" gives the k-means run of
+#' # earlier versions.  The points each seed's cell holds, under each kind,
+#' # with more seeds than dense places:
+#' set.seed(2)
+#' cloud <- st_as_sf(data.frame(x = c(rnorm(150, 30, 5), runif(50, 0, 100)),
+#'                              y = c(rnorm(150, 30, 5), runif(50, 0, 100))),
+#'                   coords = c("x", "y"), crs = 32632)
+#' dens <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
+#'                           sample_points = cloud, set_seed = 1)
+#' km   <- get_voronoi_seeds(bnd, method = "kmeans", n = 20,
+#'                           sample_points = cloud, set_seed = 1,
+#'                           partition = "kmeans")
+#' rbind(density = sort(attr(dens, "kmeans")$size),
+#'       kmeans  = sort(attr(km, "kmeans")$size))   # points per seed
 #' @export
 get_voronoi_seeds <- function(boundary = NULL,
                               method = c("kmeans", "random", "provided"),
                               n = NULL,
                               seeds = NULL,
                               sample_points = NULL,
-                              kmeans_nstart = 10,
+                              kmeans_nstart = NULL,
                               kmeans_iter = 100,
                               set_seed = NULL,
-                              partition = c("kmeans", "density"),
+                              partition = c("density", "kmeans"),
                               init = NULL,
                               density_power = 1,
                               density_k = 8) {
@@ -578,10 +614,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' sampling density: clusters of observations attract seeds, empty ground gets
 #' none. Reach for this when you want cells that follow the data, so that
 #' counts per cell vary far less than on a fixed grid over clustered points
-#' (k-means does not equalise them, it minimises the spread of points around
-#' each centre; `partition = "density"` evens them out once there are more
-#' cells than clusters of points), which is what
-#' keeps per-cell aggregates in
+#' (the density kind, the default, evens them out once there are more cells
+#' than clusters of points; plain k-means, `partition = "kmeans"`, minimises
+#' the spread of points around each centre and does not equalise them),
+#' which is what keeps per-cell aggregates in
 #' [summarize_by_cell()] from resting on one or two observations. Use
 #' [voronoi_seeds_random()] instead when you want coverage of the study area
 #' rather than of the data, and [get_voronoi_seeds()] to pick between them by
@@ -594,26 +630,27 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' coordinates are dropped with a warning, and `k` is clamped to the number of
 #' distinct positions.
 #'
-#' The partition is [stats::kmeans()] (Hartigan-Wong) with `nstart` random
-#' starts. [resolution_profile()] and [determine_optimal_levels()] score each
-#' count on a different run, by default the best of 25 k-means++ restarts,
-#' which usually reaches a lower within-cluster sum of squares; the seeds for
-#' a count passed as a number are therefore not the partition that count was
-#' scored on. Raising `nstart` narrows the gap but does not close it. Pass
-#' the [select_resolution()] result or the profile itself as `k` to close
-#' it: the centres of the scored partition are then returned (in the CRS of
-#' `points_sf`, with `attr(, "n_from")`), and no k-means is run.
+#' A count given as a number gets a fresh partition, which is not the
+#' partition [resolution_profile()] or [determine_optimal_levels()] scored
+#' that count on: those fit their own run, the profile to every row or to a
+#' subsample, and keep the best of their own starts. Pass the
+#' [select_resolution()] result or the profile itself as `k` to get the
+#' scored one: the centres of the scored partition are then returned (in
+#' the CRS of `points_sf`, with `attr(, "n_from")`), and no k-means is run.
 #'
-#' `partition` says what the seeds minimise. `"kmeans"`, the default, is the
-#' sum of squared distances from the points to their nearest seed. The seeds
+#' `partition` says what the seeds minimise. `"kmeans"` is the sum of
+#' squared distances from the points to their nearest seed, from `nstart`
+#' random starts by [stats::kmeans()] (Hartigan-Wong) unless `init` says
+#' otherwise; it was the default of earlier versions. The seeds
 #' follow the square root of the point density, so the cells are compact,
 #' smaller where the points are dense, and a cell in a dense place still
 #' holds several times the points of a cell in a sparse place. `"density"`
 #' weights each point by its local density (the number of points in the disc
 #' that reaches its `density_k`-th nearest neighbour, over the disc's area)
-#' to the power `density_power`. At the default power of 1 the seeds follow
-#' the point density itself, and the cells are compact: many small cells
-#' where the points are dense, a few large ones where they are sparse. They
+#' to the power `density_power`, and is the default. At the default power
+#' of 1 the seeds follow the point density itself, and the cells are
+#' compact: many small cells where the points are dense, a few large ones
+#' where they are sparse. They
 #' hold about the same number of points each once `k` is above the number
 #' of dense places (clusters of points). With fewer cells than that a cell
 #' takes in whole clusters, large and small, and the counts are about as
@@ -659,18 +696,21 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   outer [set.seed()] does not change them, and the caller's random-number
 #'   stream is left as it was. Pass `NULL` to draw the k-means starts from
 #'   the session's stream instead (the default of [get_voronoi_seeds()]).
-#' @param nstart Number of random starts for [stats::kmeans()]; the best is
-#'   kept. Default 10. The same number of starts is run under `partition =
-#'   "density"` and with `init = "kmeans++"`. `NULL` is the kind's own
-#'   number: 10 for `partition = "kmeans"` and 3 for `partition = "density"`.
-#' @param partition What the seeds minimise. `"kmeans"` (default): the sum of
-#'   squared distances from the points to their nearest seed; compact cells
-#'   whose counts are several times higher in dense places than in sparse
-#'   ones. `"density"`: the same sum with each point weighted by its local
-#'   density to the power `density_power`; compact cells that, at the
-#'   default power, hold about the same number of points each once `k` is
-#'   above the number of dense places, and counts about as uneven as
-#'   `"kmeans"` gives below that. Without the 'FNN' package the density kind
+#' @param nstart The number of starts, of which the best is kept. `NULL`
+#'   (default) is the kind's own number: 3 for `partition = "density"` and
+#'   10 for `partition = "kmeans"`, the default of earlier versions. A number
+#'   is run under either kind and either `init`: `nstart = 10` gives the
+#'   density kind the starts it had when 10 was the default.
+#' @param partition What the seeds minimise. `"density"` (default): the sum
+#'   of squared distances from the points to their nearest seed, each point
+#'   weighted by its local density to the power `density_power`; compact
+#'   cells that, at the default power, hold about the same number of points
+#'   each once `k` is above the number of dense places, and counts about as
+#'   uneven as `"kmeans"` gives below that. `"kmeans"`: the same sum
+#'   unweighted; compact cells whose counts are several times higher in
+#'   dense places than in sparse ones. It is the run of earlier versions,
+#'   whose default it was: [stats::kmeans()] from 10 random starts on the
+#'   rows as they come. Without the 'FNN' package the density kind
 #'   finds its weights by comparing every pair of distinct locations, so its
 #'   time grows with the square of their number; the seeds are the same, and
 #'   nothing stops the call. See "Details".
@@ -680,10 +720,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   already drawn, times its weight under `partition = "density"`). `NULL`
 #'   (default) is each kind's own rule: `"random"` for `partition =
 #'   "kmeans"`, the run this function has always made, and `"kmeans++"` for
-#'   `partition = "density"`. With the default the points are clustered in
-#'   the order their rows come in; with `init = "kmeans++"`, and under
-#'   `partition = "density"`, the rows are put in coordinate order first, so
-#'   the seeds do not depend on their order.
+#'   `partition = "density"`. Under `partition = "kmeans"` from random
+#'   starts the points are clustered in the order their rows come in; with
+#'   `init = "kmeans++"`, and under `partition = "density"`, the rows are put
+#'   in coordinate order first, so the seeds do not depend on their order.
 #' @param density_power For `partition = "density"`: the power the local
 #'   density is raised to for a point's weight, from 0 to 2. Default 1, which
 #'   evens out the cell counts once the cells outnumber the dense places; 0
@@ -697,20 +737,22 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   `partition = "kmeans"` and 100 steps of Lloyd's iteration for
 #'   `partition = "density"`. Under `partition = "density"`, and with `init =
 #'   "kmeans++"`, a kept start that was cut off at the limit is a warning of
-#'   class `"spatialkit_not_converged"`; the default run keeps the warning
-#'   [stats::kmeans()] gives.
+#'   class `"spatialkit_not_converged"`; `partition = "kmeans"` from random
+#'   starts keeps the warning [stats::kmeans()] gives.
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()], and
 #'   `attr(, "cover")`, the convex hull of `points_sf` (an sfc in its CRS).
 #'   Seeds placed with `partition = "density"` or `init = "kmeans++"`, and
-#'   the scored centres of a profile built with a kind or starting rule
-#'   other than its default, also carry `attr(, "partition")`: a list with
+#'   the scored centres of a profile of the density kind or from random
+#'   starts, also carry `attr(, "partition")`: a list with
 #'   `kind`, `init`, `density_power` and `density_k`, and for seeds this
 #'   call placed `iter`, `iter_max` and `converged` (the iterations the kept
 #'   start took, the limit, and whether it stopped before the limit).
 #'   [build_tessellation()] returns the list as `params$partition`. Seeds
-#'   with no such record are plain k-means. When `k` is a
+#'   with no such record are plain k-means: from random starts when this call
+#'   placed them, or the scored centres of a k-means profile from k-means++
+#'   starts. When `k` is a
 #'   [select_resolution()] result that carries `count_rule`, or a profile
 #'   built with an `estimate`, the seeds carry that record as
 #'   `attr(, "count_rule")`, with `scored_cells` `TRUE` for the scored
@@ -724,12 +766,14 @@ get_voronoi_seeds <- function(boundary = NULL,
 #'   data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000)),
 #'   coords = c("x", "y"), crs = 32632
 #' )
-#' seeds <- voronoi_seeds_kmeans(pts, k = 8)
+#' seeds <- voronoi_seeds_kmeans(pts, k = 8)   # density-weighted, 3 starts
 #' nrow(seeds)   # at most 8: one seed per non-empty cluster
 #' seeds         # the cluster centres, as an sf POINT layer in the points' CRS
+#' # The k-means seeds of earlier versions: 10 random starts.
+#' voronoi_seeds_kmeans(pts, k = 8, partition = "kmeans")
 #' @export
-voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = 10,
-                                 partition = c("kmeans", "density"), init = NULL,
+voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
+                                 partition = c("density", "kmeans"), init = NULL,
                                  density_power = 1, density_k = 8, iter_max = NULL) {
   .assert_sf(points_sf, "POINT", "points_sf")
   partition_given <- !missing(partition)

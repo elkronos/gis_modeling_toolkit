@@ -667,9 +667,10 @@ plot_calibration <- function(cv, ...) {
 #' level is left out with a log line rather than drawn empty.
 #'
 #' A profile whose ladder is one size (\code{obs_per_cell} set to one
-#' number) has one level, set by the size.  Each criterion that is finite
-#' there is drawn as one point in its panel, with no selected level and no
-#' band, and the caption says that the size set the count.
+#' number, or the default profile) has one level, set by the size.  Each
+#' criterion that is finite there is drawn as one point in its panel, with
+#' no selected level and no band, and the caption says that the size set
+#' the count.
 #'
 #' @param x A \code{resolution_profile}.
 #' @param criteria Character vector of criteria to draw, any of

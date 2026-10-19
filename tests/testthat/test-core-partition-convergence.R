@@ -218,7 +218,7 @@ test_that("the k-means kind from a starting rule that is not the function's own 
   pts <- partition_points_sf(xy)
   # A seeding function from k-means++ starts.
   r <- partition_warnings(voronoi_seeds_kmeans(pts, 40, init = "kmeans++", nstart = 2,
-                                               iter_max = 1))
+                                               iter_max = 1, partition = "kmeans"))
   expect_length(r$warnings, 1L)
   w <- r$warnings[[1L]]
   expect_s3_class(w, "spatialkit_not_converged")
@@ -230,21 +230,26 @@ test_that("the k-means kind from a starting rule that is not the function's own 
                    list(iter = 1L, iter_max = 1L, converged = FALSE))
   r <- partition_warnings(get_voronoi_seeds(method = "kmeans", n = 40, sample_points = pts,
                                             init = "kmeans++", kmeans_nstart = 2,
-                                            kmeans_iter = 1, set_seed = 2))
+                                            kmeans_iter = 1, set_seed = 2, partition = "kmeans"))
   expect_length(partition_of_class(r, "spatialkit_not_converged"), 1L)
   expect_false(attr(r$value, "kmeans")$converged)
   # A profile from random starts.
   r <- partition_warnings(resolution_profile(pts, levels = c(10L, 40L), nstart = 2,
-                                             init = "random", iter_max = 1))
+                                             init = "random", iter_max = 1, estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
   w <- partition_of_class(r, "spatialkit_not_converged")
   expect_length(w, 1L)
   expect_identical(w[[1L]]$level, c(10L, 40L))
   expect_identical(attr(r$value, "partition")$converged, c("10" = FALSE, "40" = FALSE))
   expect_identical(attr(r$value, "partition")$iter_max, 1L)
   # Left to their own limits these converge and say nothing.
-  expect_length(partition_warnings(voronoi_seeds_kmeans(pts, 40, init = "kmeans++"))$warnings, 0L)
+  expect_length(partition_warnings(voronoi_seeds_kmeans(pts, 40, init = "kmeans++",
+                                                        partition = "kmeans"))$warnings, 0L)
   r <- partition_warnings(resolution_profile(pts, levels = c(10L, 40L), nstart = 2,
-                                             init = "random"))
+                                             init = "random", estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
   expect_length(partition_of_class(r, "spatialkit_not_converged"), 0L)
   expect_identical(attr(r$value, "partition")$iter_max, 100L)
 })
@@ -252,9 +257,10 @@ test_that("the k-means kind from a starting rule that is not the function's own 
 test_that("the runs the functions have always made report as they always did", {
   xy  <- partition_clustered_xy(n_bg = 150L, n_cl = 350L, seed = 7L)
   pts <- partition_points_sf(xy)
-  # The seeding functions' own run is one stats::kmeans() call, and a limit
+  # The seeding functions' k-means run is one stats::kmeans() call, and a limit
   # that cuts it off gets that function's warning and no record.
-  r <- partition_warnings(voronoi_seeds_kmeans(pts, 40, nstart = 2, iter_max = 1))
+  r <- partition_warnings(voronoi_seeds_kmeans(pts, 40, nstart = 2, iter_max = 1,
+                                               partition = "kmeans"))
   expect_gt(length(r$warnings), 0L)
   expect_true(all(vapply(r$warnings, function(w)
     grepl("did not converge in 1 iteration", conditionMessage(w), fixed = TRUE), logical(1))))
@@ -264,7 +270,8 @@ test_that("the runs the functions have always made report as they always did", {
   km <- suppressWarnings(stats::kmeans(partition_xy(pts), centers = 40, iter.max = 1, nstart = 2L))
   expect_identical(partition_xy(r$value), unname(km$centers))
   r <- partition_warnings(get_voronoi_seeds(method = "kmeans", n = 40, sample_points = pts,
-                                            kmeans_nstart = 2, kmeans_iter = 1, set_seed = 2))
+                                            kmeans_nstart = 2, kmeans_iter = 1, set_seed = 2,
+                                            partition = "kmeans"))
   expect_gt(length(r$warnings), 0L)
   expect_length(partition_of_class(r, "spatialkit_not_converged"), 0L)
   expect_named(attr(r$value, "kmeans"),
@@ -280,10 +287,15 @@ test_that("the runs the functions have always made report as they always did", {
     fit$converged <- FALSE
     fit
   })
-  r <- partition_warnings(resolution_profile(pts, levels = c(5L, 12L), nstart = 2))
+  r <- partition_warnings(resolution_profile(pts, levels = c(5L, 12L), nstart = 2,
+                                             estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
   expect_length(partition_of_class(r, "spatialkit_not_converged"), 0L)
   expect_null(attr(r$value, "partition"))
-  r <- partition_warnings(resolution_profile(pts, levels = c(5L, 12L), nstart = 2, iter_max = 50))
+  r <- partition_warnings(resolution_profile(pts, levels = c(5L, 12L), nstart = 2,
+                                             iter_max = 50, estimate = NULL,
+                                             obs_per_cell = NULL, sac = NULL,
+                                             partition = "kmeans"))
   w <- partition_of_class(r, "spatialkit_not_converged")
   expect_length(w, 1L)
   expect_identical(w[[1L]]$level, c(5L, 12L))

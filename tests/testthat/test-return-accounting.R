@@ -507,20 +507,22 @@ test_that("summarize_by_cell() records the ICCs a Kish request estimated, applie
   pts$val <- 0.05 * sf::st_coordinates(pts)[, 1] + rnorm(200, sd = 0.5)   # structured
   grid <- create_grid_polygons(ra_bnd, target_cells = 16, type = "square")
   asg <- assign_features_to_polygons(pts, grid)
-  sm <- summarize_by_cell(asg, response_var = "val", predictor_vars = "z", deff = "kish")
+  sm <- summarize_by_cell(asg, response_var = "val", predictor_vars = "z", deff = "kish",
+                          estimate = "mean")
   icc <- attr(sm, "icc")
   expect_named(icc, c("resp", "pred"))
   expect_equal(icc$resp, attr(sm, "deff_applied")$icc_resp)
   expect_true(is.finite(icc$pred))
   # Nothing applied (white-noise response, ICC clamped to 0): no deff_applied,
   # but the ICC is still on the result.
-  sm0 <- summarize_by_cell(asg, response_var = "z", deff = "kish")
+  sm0 <- summarize_by_cell(asg, response_var = "z", deff = "kish", estimate = "mean")
   expect_null(attr(sm0, "deff_applied"))
   expect_identical(attr(sm0, "icc"), list(resp = 0, pred = NA_real_))
   # Survives the cells_sf join; absent without a Kish request.
-  smc <- summarize_by_cell(asg, response_var = "z", deff = "kish", cells_sf = grid)
+  smc <- summarize_by_cell(asg, response_var = "z", deff = "kish", cells_sf = grid,
+                           estimate = "mean")
   expect_identical(attr(smc, "icc"), list(resp = 0, pred = NA_real_))
-  expect_null(attr(summarize_by_cell(asg, response_var = "z"), "icc"))
+  expect_null(attr(summarize_by_cell(asg, response_var = "z", estimate = "mean"), "icc"))
 })
 
 test_that("the variogram design effect at the cell row count is kept beside the applied one", {
@@ -535,7 +537,7 @@ test_that("the variogram design effect at the cell row count is kept beside the 
   asg <- assign_features_to_polygons(pts, grid)
   sac <- estimate_sac_range(pts, "z")
   skip_if(is.na(sac), "no identified range on this draw")
-  sm <- summarize_by_cell(asg, response_var = "z", deff = "variogram", sac = sac)
+  sm <- summarize_by_cell(asg, response_var = "z", deff = "variogram", sac = sac, estimate = "mean")
   da <- attr(sm, "deff_applied")
   expect_identical(da$method, "variogram")
   expect_length(da$deff_rows, nrow(sm))
@@ -545,7 +547,8 @@ test_that("the variogram design effect at the cell row count is kept beside the 
   # join to cells_sf realigns both alike (an empty cell gets NA in each).
   asg2 <- asg; asg2$z[asg2$poly_id == asg2$poly_id[1]][1:2] <- NA
   smc <- summarize_by_cell(asg2[asg2$poly_id != asg2$poly_id[nrow(asg2)], ],
-                           response_var = "z", deff = "variogram", sac = sac, cells_sf = grid)
+                           response_var = "z", deff = "variogram", sac = sac, cells_sf = grid,
+                           estimate = "mean")
   dac <- attr(smc, "deff_applied")
   expect_length(dac$deff_rows, nrow(smc)); expect_length(dac$deff, nrow(smc))
   expect_identical(is.na(dac$deff_rows), is.na(dac$deff))
@@ -774,7 +777,8 @@ test_that("area_of_applicability() returns the scaling and the fence's outlier c
 
 test_that("get_voronoi_seeds(kmeans) returns the clustering behind the seeds", {
   pts <- ra_points(n = 120)
-  seeds <- get_voronoi_seeds(ra_bnd, method = "kmeans", n = 6, sample_points = pts, set_seed = 1)
+  seeds <- get_voronoi_seeds(ra_bnd, method = "kmeans", n = 6, sample_points = pts,
+                             set_seed = 1, partition = "kmeans")
   km <- attr(seeds, "kmeans")
   expect_named(km, c("cluster", "rows", "size", "withinss", "tot_withinss", "iter", "nstart"))
   expect_length(km$cluster, 120L)
@@ -791,9 +795,11 @@ test_that("get_voronoi_seeds(kmeans) returns the clustering behind the seeds", {
   # A dropped (empty) point is absent from `rows`.
   bad <- pts; sf::st_geometry(bad)[5] <- sf::st_sfc(sf::st_point(), crs = 32632)
   seeds2 <- suppressWarnings(get_voronoi_seeds(ra_bnd, method = "kmeans", n = 6,
-                                               sample_points = bad, set_seed = 1))
+                                               sample_points = bad, set_seed = 1,
+                                               partition = "kmeans"))
   expect_identical(attr(seeds2, "kmeans")$rows, setdiff(1:120, 5L))
-  expect_null(attr(get_voronoi_seeds(ra_bnd, method = "random", n = 5, set_seed = 1), "kmeans"))
+  expect_null(attr(get_voronoi_seeds(ra_bnd, method = "random", n = 5, set_seed = 1,
+                                     partition = "kmeans"), "kmeans"))
 })
 
 test_that("gwr_model_selection() says how its criterion column was found", {

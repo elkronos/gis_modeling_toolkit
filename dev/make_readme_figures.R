@@ -53,11 +53,13 @@ pts$val  <- 10 - 6 * xs +
   rnorm(nrow(pts), sd = 0.3)
 pts$west <- xs   # predictor used by the model-aware resolution selection
 
-# Aggregate the point values per cell with the package's own workflow.
+# Aggregate the point values per cell with the package's own workflow.  The
+# panels show the plain mean of each cell, so the summary leaves out the
+# pooled values it adds by default (estimate = "mean").
 cell_means <- function(cells, label) {
   assigned <- assign_features_to_polygons(pts, cells)
   summ     <- summarize_by_cell(assigned, response_var = "val",
-                                cells_sf = cells)
+                                cells_sf = cells, estimate = "mean")
   st_sf(method   = label,
         mean_val = summ$resp_mean_val,
         geometry = st_geometry(summ))
@@ -89,17 +91,18 @@ panel_plot <- function(cells_sf, lvls) {
 }
 
 # --- Figure 1: raw field + three tessellations (2 x 2) ----------------------
+# The seeds are the default kind: density-weighted k-means from 3 starts.
 seeds <- voronoi_seeds_kmeans(pts, k = 30)
 vor   <- create_voronoi_polygons(seeds, boundary = state, quiet = TRUE)
 hexg  <- create_grid_polygons(state, target_cells = 30, type = "hex")
 sqg   <- create_grid_polygons(state, target_cells = 30, type = "square")
 
 tess_cells <- rbind(
-  cell_means(vor$cells, "Voronoi (k-means seeds)"),
+  cell_means(vor$cells, "Voronoi (density-weighted seeds)"),
   cell_means(hexg,      "Hex grid"),
   cell_means(sqg,       "Square grid")
 )
-lvls1 <- c("Raw observations", "Voronoi (k-means seeds)",
+lvls1 <- c("Raw observations", "Voronoi (density-weighted seeds)",
            "Hex grid", "Square grid")
 
 ggsave("man/figures/readme-tessellations.png",
@@ -148,10 +151,18 @@ ggsave("man/figures/readme-spatial-cv.png", p2,
 # field is wide (within 2 percent of the optimum from 2 to 15 cells), and the
 # README says so rather than presenting the count as the answer.  The
 # profile's warning about a zero nugget concerns Cp, which is not read here.
+# With a predictor the profile scores no cell value, so n_levels gives the
+# ladder of counts whatever obs_per_cell would; its cells, and the seeds
+# below, are the default kind, density-weighted k-means, and reliability
+# does not read the cells.  The band printed below is the one the README
+# quotes.
 prof_res <- suppressWarnings(resolution_profile(pts, response_var = "val",
                                                 predictor_vars = "west",
                                                 n_levels = 12))
-k_sel <- select_resolution(prof_res, criterion = "reliability")$best
+sel_res <- select_resolution(prof_res, criterion = "reliability")
+k_sel   <- sel_res$best
+cat(sprintf("reliability: %d cells; within %s of its best at %s cells\n", k_sel,
+            "2 percent", paste(range(sel_res$flat), collapse = " to ")))
 
 ks <- sort(unique(c(max(2, k_sel - 3), k_sel, 60)))
 if (length(ks) < 3) ks <- sort(unique(c(ks, 12)))

@@ -32,7 +32,7 @@ test_that("labels = TRUE labels the package's own cells without naming a column"
   expect_equal(sort(as.numeric(txt$label)), sort(tess$cells$cell_id))
 
   cells <- summarize_by_cell(assign_features_to_polygons(pts, tess$cells),
-                             response_var = "z", cells_sf = tess$cells)
+                             response_var = "z", cells_sf = tess$cells, estimate = "mean")
   expect_false("cell_id" %in% names(cells))
   p2 <- plot_tessellation_map(cells, labels = TRUE)
   txt2 <- ggplot2::layer_data(p2, which(layer_geoms_r2(p2) == "GeomText"))

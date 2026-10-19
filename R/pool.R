@@ -1015,13 +1015,13 @@
 #' Whether Moran's z is left out, on every ladder, where it cannot be computed
 #'
 #' Above \code{.KNN_DENSE_MAX} cells the neighbour weights of the cell means
-#' need \pkg{FNN} and \pkg{Matrix}.  A profile whose ladder is set by
-#' \code{obs_per_cell} leaves \code{moran_i} and \code{moran_z} \code{NA}
-#' at such a level when either is missing, with a warning.  Every other
-#' ladder stops there with the error of \code{.build_knn_weights()}, as it
-#' always has, while this returns \code{FALSE}.
+#' need \pkg{FNN} and \pkg{Matrix}.  When either is missing a profile
+#' leaves \code{moran_i} and \code{moran_z} \code{NA} at such a level, with
+#' a warning, whatever its ladder.  Were this \code{FALSE}, only a ladder
+#' set by \code{obs_per_cell} would do so, and every other ladder would stop
+#' there with the error of \code{.build_knn_weights()}.
 #'
-#' @return \code{FALSE}.
+#' @return \code{TRUE}.
 #' @keywords internal
 #' @noRd
-.moran_skip_any_ladder <- function() FALSE
+.moran_skip_any_ladder <- function() TRUE

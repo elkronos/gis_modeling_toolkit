@@ -234,10 +234,10 @@ test_that("a variogram family the function does not implement is refused, not re
   sac <- structure(300, class = c("sac_range", "numeric"),
                    variogram_model = vm, crs = sf::st_crs(pts))
   expect_warning(
-    out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac),
+    out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac, estimate = "mean"),
     "supports exponential, spherical and Gaussian variogram models.*'Mat'")
   expect_null(attr(out, "deff_applied"))
-  naive <- summarize_by_cell(pts, "z", deff = 1)
+  naive <- summarize_by_cell(pts, "z", deff = 1, estimate = "mean")
   expect_equal(out[["..se_resp_z"]], naive[["..se_resp_z"]])
 })
 
@@ -296,7 +296,7 @@ test_that("summarize_by_cell(conf_level) on the variogram path uses the reduced 
   sac <- structure(360, class = c("sac_range", "numeric"),
                    variogram_model = vm, crs = sf::st_crs(pts))
   out <- summarize_by_cell(pts, "z", deff = "variogram", sac = sac,
-                           conf_level = 0.95)
+                           conf_level = 0.95, estimate = "mean")
   expect_true(all(out[["..df_resp_z"]] > 0))
   expect_true(all(out[["..df_resp_z"]] < out$n - 1))
   # Reproducible from the same correlation function on the same points.

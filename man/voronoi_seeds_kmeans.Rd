@@ -8,8 +8,8 @@ voronoi_seeds_kmeans(
   points_sf,
   k,
   set_seed = 456,
-  nstart = 10,
-  partition = c("kmeans", "density"),
+  nstart = NULL,
+  partition = c("density", "kmeans"),
   init = NULL,
   density_power = 1,
   density_k = 8,
@@ -44,18 +44,22 @@ outer \code{\link[=set.seed]{set.seed()}} does not change them, and the caller's
 stream is left as it was. Pass \code{NULL} to draw the k-means starts from
 the session's stream instead (the default of \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}).}
 
-\item{nstart}{Number of random starts for \code{\link[stats:kmeans]{stats::kmeans()}}; the best is
-kept. Default 10. The same number of starts is run under \code{partition = "density"} and with \code{init = "kmeans++"}. \code{NULL} is the kind's own
-number: 10 for \code{partition = "kmeans"} and 3 for \code{partition = "density"}.}
+\item{nstart}{The number of starts, of which the best is kept. \code{NULL}
+(default) is the kind's own number: 3 for \code{partition = "density"} and
+10 for \code{partition = "kmeans"}, the default of earlier versions. A number
+is run under either kind and either \code{init}: \code{nstart = 10} gives the
+density kind the starts it had when 10 was the default.}
 
-\item{partition}{What the seeds minimise. \code{"kmeans"} (default): the sum of
-squared distances from the points to their nearest seed; compact cells
-whose counts are several times higher in dense places than in sparse
-ones. \code{"density"}: the same sum with each point weighted by its local
-density to the power \code{density_power}; compact cells that, at the
-default power, hold about the same number of points each once \code{k} is
-above the number of dense places, and counts about as uneven as
-\code{"kmeans"} gives below that. Without the 'FNN' package the density kind
+\item{partition}{What the seeds minimise. \code{"density"} (default): the sum
+of squared distances from the points to their nearest seed, each point
+weighted by its local density to the power \code{density_power}; compact
+cells that, at the default power, hold about the same number of points
+each once \code{k} is above the number of dense places, and counts about as
+uneven as \code{"kmeans"} gives below that. \code{"kmeans"}: the same sum
+unweighted; compact cells whose counts are several times higher in
+dense places than in sparse ones. It is the run of earlier versions,
+whose default it was: \code{\link[stats:kmeans]{stats::kmeans()}} from 10 random starts on the
+rows as they come. Without the 'FNN' package the density kind
 finds its weights by comparing every pair of distinct locations, so its
 time grows with the square of their number; the seeds are the same, and
 nothing stops the call. See "Details".}
@@ -65,10 +69,10 @@ at random, as \code{\link[stats:kmeans]{stats::kmeans()}} draws them) or \code{"
 one at a time, each in proportion to its squared distance from those
 already drawn, times its weight under \code{partition = "density"}). \code{NULL}
 (default) is each kind's own rule: \code{"random"} for \code{partition = "kmeans"}, the run this function has always made, and \code{"kmeans++"} for
-\code{partition = "density"}. With the default the points are clustered in
-the order their rows come in; with \code{init = "kmeans++"}, and under
-\code{partition = "density"}, the rows are put in coordinate order first, so
-the seeds do not depend on their order.}
+\code{partition = "density"}. Under \code{partition = "kmeans"} from random
+starts the points are clustered in the order their rows come in; with
+\code{init = "kmeans++"}, and under \code{partition = "density"}, the rows are put
+in coordinate order first, so the seeds do not depend on their order.}
 
 \item{density_power}{For \code{partition = "density"}: the power the local
 density is raised to for a point's weight, from 0 to 2. Default 1, which
@@ -84,8 +88,8 @@ neighbours the local density is read from. Default 8.}
 whole number, or \code{NULL} (default) for the kind's own limit, 50 for
 \code{partition = "kmeans"} and 100 steps of Lloyd's iteration for
 \code{partition = "density"}. Under \code{partition = "density"}, and with \code{init = "kmeans++"}, a kept start that was cut off at the limit is a warning of
-class \code{"spatialkit_not_converged"}; the default run keeps the warning
-\code{\link[stats:kmeans]{stats::kmeans()}} gives.}
+class \code{"spatialkit_not_converged"}; \code{partition = "kmeans"} from random
+starts keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives.}
 }
 \value{
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
@@ -93,13 +97,15 @@ An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
 \code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and
 \code{attr(, "cover")}, the convex hull of \code{points_sf} (an sfc in its CRS).
 Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and
-the scored centres of a profile built with a kind or starting rule
-other than its default, also carry \code{attr(, "partition")}: a list with
+the scored centres of a profile of the density kind or from random
+starts, also carry \code{attr(, "partition")}: a list with
 \code{kind}, \code{init}, \code{density_power} and \code{density_k}, and for seeds this
 call placed \code{iter}, \code{iter_max} and \code{converged} (the iterations the kept
 start took, the limit, and whether it stopped before the limit).
 \code{\link[=build_tessellation]{build_tessellation()}} returns the list as \code{params$partition}. Seeds
-with no such record are plain k-means. When \code{k} is a
+with no such record are plain k-means: from random starts when this call
+placed them, or the scored centres of a k-means profile from k-means++
+starts. When \code{k} is a
 \code{\link[=select_resolution]{select_resolution()}} result that carries \code{count_rule}, or a profile
 built with an \code{estimate}, the seeds carry that record as
 \code{attr(, "count_rule")}, with \code{scored_cells} \code{TRUE} for the scored
@@ -112,10 +118,10 @@ coordinates, so seeds (and the Voronoi cells built from them) follow the
 sampling density: clusters of observations attract seeds, empty ground gets
 none. Reach for this when you want cells that follow the data, so that
 counts per cell vary far less than on a fixed grid over clustered points
-(k-means does not equalise them, it minimises the spread of points around
-each centre; \code{partition = "density"} evens them out once there are more
-cells than clusters of points), which is what
-keeps per-cell aggregates in
+(the density kind, the default, evens them out once there are more cells
+than clusters of points; plain k-means, \code{partition = "kmeans"}, minimises
+the spread of points around each centre and does not equalise them),
+which is what keeps per-cell aggregates in
 \code{\link[=summarize_by_cell]{summarize_by_cell()}} from resting on one or two observations. Use
 \code{\link[=voronoi_seeds_random]{voronoi_seeds_random()}} instead when you want coverage of the study area
 rather than of the data, and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}} to pick between them by
@@ -129,26 +135,27 @@ come back in the input's own coordinates. Rows with empty or non-finite
 coordinates are dropped with a warning, and \code{k} is clamped to the number of
 distinct positions.
 
-The partition is \code{\link[stats:kmeans]{stats::kmeans()}} (Hartigan-Wong) with \code{nstart} random
-starts. \code{\link[=resolution_profile]{resolution_profile()}} and \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} score each
-count on a different run, by default the best of 25 k-means++ restarts,
-which usually reaches a lower within-cluster sum of squares; the seeds for
-a count passed as a number are therefore not the partition that count was
-scored on. Raising \code{nstart} narrows the gap but does not close it. Pass
-the \code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to close
-it: the centres of the scored partition are then returned (in the CRS of
-\code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
+A count given as a number gets a fresh partition, which is not the
+partition \code{\link[=resolution_profile]{resolution_profile()}} or \code{\link[=determine_optimal_levels]{determine_optimal_levels()}} scored
+that count on: those fit their own run, the profile to every row or to a
+subsample, and keep the best of their own starts. Pass the
+\code{\link[=select_resolution]{select_resolution()}} result or the profile itself as \code{k} to get the
+scored one: the centres of the scored partition are then returned (in
+the CRS of \code{points_sf}, with \code{attr(, "n_from")}), and no k-means is run.
 
-\code{partition} says what the seeds minimise. \code{"kmeans"}, the default, is the
-sum of squared distances from the points to their nearest seed. The seeds
+\code{partition} says what the seeds minimise. \code{"kmeans"} is the sum of
+squared distances from the points to their nearest seed, from \code{nstart}
+random starts by \code{\link[stats:kmeans]{stats::kmeans()}} (Hartigan-Wong) unless \code{init} says
+otherwise; it was the default of earlier versions. The seeds
 follow the square root of the point density, so the cells are compact,
 smaller where the points are dense, and a cell in a dense place still
 holds several times the points of a cell in a sparse place. \code{"density"}
 weights each point by its local density (the number of points in the disc
 that reaches its \code{density_k}-th nearest neighbour, over the disc's area)
-to the power \code{density_power}. At the default power of 1 the seeds follow
-the point density itself, and the cells are compact: many small cells
-where the points are dense, a few large ones where they are sparse. They
+to the power \code{density_power}, and is the default. At the default power
+of 1 the seeds follow the point density itself, and the cells are
+compact: many small cells where the points are dense, a few large ones
+where they are sparse. They
 hold about the same number of points each once \code{k} is above the number
 of dense places (clusters of points). With fewer cells than that a cell
 takes in whole clusters, large and small, and the counts are about as
@@ -177,9 +184,11 @@ pts <- st_as_sf(
   data.frame(x = 5e5 + runif(100, 0, 1000), y = 5e6 + runif(100, 0, 1000)),
   coords = c("x", "y"), crs = 32632
 )
-seeds <- voronoi_seeds_kmeans(pts, k = 8)
+seeds <- voronoi_seeds_kmeans(pts, k = 8)   # density-weighted, 3 starts
 nrow(seeds)   # at most 8: one seed per non-empty cluster
 seeds         # the cluster centres, as an sf POINT layer in the points' CRS
+# The k-means seeds of earlier versions: 10 random starts.
+voronoi_seeds_kmeans(pts, k = 8, partition = "kmeans")
 }
 \seealso{
 Other tessellation:

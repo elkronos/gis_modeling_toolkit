@@ -24,7 +24,8 @@ fsl_pts <- function(n, seed = 1) {
 
 test_that("fewer than two cells at min_cell_n is supported = FALSE, with a classed warning", {
   for (n in c(3L, 10L, 17L)) {
-    out <- fsl_catch(resolution_profile(fsl_pts(n), "z", nstart = 2))
+    out <- fsl_catch(resolution_profile(fsl_pts(n), "z", nstart = 2, estimate = NULL,
+                                        obs_per_cell = NULL, sac = NULL, partition = "kmeans"))
     b <- attr(out$value, "bounds")
     expect_false(b$supported)
     expect_identical(b$ceiling_from, "fewer than two supported cells")
@@ -40,7 +41,8 @@ test_that("fewer than two cells at min_cell_n is supported = FALSE, with a class
     expect_output(print(out$value), "no ladder: not supported")
   }
   # Eighteen points are two cells of nine: a ladder of one level, supported.
-  ok <- fsl_catch(resolution_profile(fsl_pts(18L), "z", nstart = 2))
+  ok <- fsl_catch(resolution_profile(fsl_pts(18L), "z", nstart = 2, estimate = NULL,
+                                     obs_per_cell = NULL, sac = NULL, partition = "kmeans"))
   expect_true(attr(ok$value, "bounds")$supported)
   expect_identical(attr(ok$value, "bounds")$ceiling_from, "min_cell_n")
   expect_false("spatialkit_not_supported" %in% ok$classes)
@@ -49,7 +51,9 @@ test_that("fewer than two cells at min_cell_n is supported = FALSE, with a class
 test_that("a min_cell_n above half the points is the same case, with or without a response", {
   pts <- fsl_pts(200L)
   for (resp in list(NULL, "z")) {
-    out <- fsl_catch(resolution_profile(pts, resp, min_cell_n = 150, nstart = 2))
+    out <- fsl_catch(resolution_profile(pts, resp, min_cell_n = 150, nstart = 2,
+                                        estimate = NULL, obs_per_cell = NULL, sac = NULL,
+                                        partition = "kmeans"))
     b <- attr(out$value, "bounds")
     expect_false(b$supported)
     expect_identical(b$ceiling_from, "fewer than two supported cells")
@@ -61,7 +65,8 @@ test_that("a min_cell_n above half the points is the same case, with or without 
   # The rows with a response are what is counted: 200 points, 12 scored.
   few <- pts
   few$z[13:200] <- NA
-  out <- fsl_catch(resolution_profile(few, "z", nstart = 2))
+  out <- fsl_catch(resolution_profile(few, "z", nstart = 2, estimate = NULL,
+                                      obs_per_cell = NULL, sac = NULL, partition = "kmeans"))
   expect_false(attr(out$value, "bounds")$supported)
   expect_true(any(grepl("12 rows with a response at min_cell_n = 9 support 1 cell", out$text)))
 })
