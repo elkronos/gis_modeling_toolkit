@@ -944,6 +944,43 @@ core_frozen_compare <- function(got, want, root = "value") {
   out
 }
 
+# The differences between two records that hold on any platform, as lines of
+# text; none when they agree.  On another platform than the fixture's the
+# numbers do not carry over: stats::kmeans() can stop at other centres
+# (on a structureless layer at another solution), and the distortion PROJ
+# measures moves with its version, so the counts of a profile, the warnings
+# a fit raises and the printed numbers can all differ.  What carries over
+# is compared: whether the call stopped, and the class, names and
+# attribute names of what it returned.
+core_frozen_portable_differences <- function(got, want) {
+  stopped <- function(r) any(vapply(r$conditions, function(c) identical(c$kind, "error"),
+                                    logical(1)))
+  out <- character(0)
+  if (!identical(stopped(got), stopped(want)))
+    return(sprintf("the call %s; on the baseline it %s",
+                   if (stopped(got)) "stops" else "returns",
+                   if (stopped(want)) "stopped" else "returned"))
+  a <- got$value; b <- want$value
+  if (!identical(class(a), class(b)))
+    out <- c(out, sprintf("class: now %s; on the baseline %s",
+                          paste(class(a), collapse = "/"), paste(class(b), collapse = "/")))
+  if (!identical(names(a), names(b)))
+    out <- c(out, "the names of the value differ")
+  keep <- function(x) setdiff(sort(names(attributes(x))), c("row.names", "names"))
+  if (!identical(keep(a), keep(b)))
+    out <- c(out, sprintf("attributes: now %s; on the baseline %s",
+                          paste(keep(a), collapse = ", "), paste(keep(b), collapse = ", ")))
+  out
+}
+
+# The comparison a test applies: on the fixture's platform every part by the
+# rule above (core_frozen_differences(), beside which the tests also ask for
+# identical()), elsewhere what holds on any platform.
+core_frozen_check <- function(got, want, same_platform) {
+  if (isTRUE(same_platform)) core_frozen_differences(got, want)
+  else core_frozen_portable_differences(got, want)
+}
+
 # Text with what a platform can move taken out: every number is `#`, NaN is
 # NA (R does not say which of the two a computation on missing values
 # returns), and runs of blanks are one.  A changed word, a line more or a

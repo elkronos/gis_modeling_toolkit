@@ -190,10 +190,11 @@ test_that("a count given as a number is density cells from 3 k-means++ starts", 
 # A record against the baseline's: by the rule for any platform, and on the
 # baseline's own platform identical in every part.
 .sw_expect_baseline <- function(got, want, nm) {
-  d <- core_frozen_differences(got, want)
+  same <- core_frozen_same_platform(core_frozen_platform(), .sw_fixture()$info)
+  d <- core_frozen_check(got, want, same)
   expect(length(d) == 0L,
          paste(c(sprintf("`%s` is not what it was on the baseline.", nm), d), collapse = "\n"))
-  if (core_frozen_same_platform(core_frozen_platform(), .sw_fixture()$info))
+  if (same)
     for (part in c("value", "conditions", "output", "printed", "log", "rng"))
       expect_identical(got[[part]], want[[part]], label = sprintf("the %s of `%s`", part, nm),
                        expected.label = "the baseline's")

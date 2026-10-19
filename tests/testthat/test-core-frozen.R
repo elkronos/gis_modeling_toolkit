@@ -99,8 +99,9 @@
 
 .cf_expect_no_differences <- function(now, baseline) {
   expect_identical(names(now), names(baseline))
+  same <- !nzchar(.cf_platform_differs())
   for (nm in names(baseline)) {
-    d <- core_frozen_differences(now[[nm]], baseline[[nm]])
+    d <- core_frozen_check(now[[nm]], baseline[[nm]], same)
     expect(length(d) == 0L,
            paste(c(sprintf("`%s` is not what it was on the baseline.", nm), d),
                  collapse = "\n"))
@@ -147,6 +148,8 @@ test_that("the fixture names its baseline, its platform and the calls of the hel
     expect_false(identical(base$without$records[[nm]], base$records[[nm]]), info = nm)
 })
 
+# On the fixture's platform every call is compared in full; elsewhere by what
+# holds on any platform (core_frozen_portable_differences()).
 test_that("every call returns the baseline's names, classes, numbers, geometries and texts", {
   skip_on_cran()
   gone <- .cf_packages_missing()
