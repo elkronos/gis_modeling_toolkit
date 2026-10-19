@@ -2896,7 +2896,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # What a row carries to be counted: with predictors, a predictor missing
   # leaves it out as much as a response missing does.
   carry <- if (isTRUE(b$predictors)) "with a response and every predictor" else "with a response"
-  cat("Resolution profile:", nrow(x), "levels on", b$n,
+  cat("Resolution profile:", nrow(x), if (nrow(x) == 1L) "level on" else "levels on", b$n,
       if (isTRUE(n_fit < b$n) && some_missing)
         sprintf("points (%d %s; k-means fitted to a subsample of %d)\n", n_rsp, carry, n_fit)
       else if (isTRUE(n_fit < b$n)) sprintf("points (k-means fitted to a subsample of %d)\n", n_fit)
@@ -2984,11 +2984,26 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # The kind that built the cells: unrecorded for k-means from k-means++
   # starts, whose line is the one it always was.
   part <- attr(x, "partition", exact = TRUE)
-  cat(sprintf("  scored on   : %s; %s per level; WSS rises at %d step(s)\n",
+  # The steps the WSS curve rises at are counted between levels, so on a
+  # profile with fewer than two levels that have a WSS (the default ladder of
+  # one size among them) there is no step to count and no clause.  They are
+  # counted over the levels printed: a subset of the rows keeps the whole
+  # ladder's count in its attributes, and on a whole profile the two agree.
+  if ("wss" %in% names(x)) {
+    wss <- if ("levels" %in% names(x)) x$wss[order(x$levels)] else x$wss
+    wss <- wss[is.finite(wss)]
+    n_wss <- length(wss)
+    bumps <- .wss_bumps(wss)
+  } else {
+    n_wss <- nrow(x)
+    bumps <- attr(x, "wss_bumps")
+  }
+  cat(sprintf("  scored on   : %s; %s per level%s\n",
               if (is.na(attr(x, "variable"))) "geometry only" else attr(x, "variable"),
               if (is.list(part) && !is.null(part$kind)) .partition_label(part, attr(x, "nstart"))
               else sprintf("%d k-means++ restarts", attr(x, "nstart")),
-              attr(x, "wss_bumps")))
+              if (n_wss >= 2L) sprintf("; WSS rises at %d step(s)", bumps)
+              else ""))
   # What one cell for the whole layer scores: the ladder starts at 2, so the
   # level every other has to beat is not a row of the table.
   one <- attr(x, "one_cell", exact = TRUE)
@@ -3229,9 +3244,9 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #'     of one mean for all scored rows is within \code{tol} of the error at
 #'     the level, or below it, or when the F test of the cells at the level
 #'     against one mean has \eqn{p \ge 0.05}.  The count stands either way,
-#'     since the caller set it: \code{structured = FALSE} says that the cell
-#'     values will say little that one mean for the layer does not.  The
-#'     functions that take the selection as a count then raise
+#'     since a size set it and no criterion: \code{structured = FALSE} says
+#'     that the cell values will say little that one mean for the layer does
+#'     not.  The functions that take the selection as a count then raise
 #'     \code{spatialkit_no_structure}.  On a profile without an estimate
 #'     \code{structured} is \code{NA}.}
 #'   \item{\code{auto}}{The rule that goes with the profile's estimate:
@@ -4006,14 +4021,18 @@ select_resolution <- function(profile,
                               reason = "not a level"))
   }
   best <- as.integer(best)
-  note <- c(size = sprintf(paste0("the count is set by obs_per_cell = %s, the caller's ",
-                                  "choice; no criterion chose it."), format(size)))
+  # The default size is called that whoever named it; any other size is one
+  # the caller gave, here or to the profile.
+  note <- c(size = sprintf("the count is set by obs_per_cell = %s, %s; no criterion chose it.",
+                           format(size),
+                           if (size == .OBS_PER_CELL_DEFAULT) "the default"
+                           else "the caller's choice"))
   if (held)
     note <- c(note, held = sprintf(
       paste0("the profile holds this size to %d cells, the most k-means can place on ",
              "this layer; obs_per_cell = %s asks for %d."), best, format(size), k_star))
   # Whether cells of this size beat one mean for the whole layer.  The count
-  # stands either way: the caller set it.
+  # stands either way: a size set it and no criterion.
   st <- .estimate_structure(profile, best, tol, n_searched = 1L)
   if (isFALSE(st$structured))
     note <- c(note, structure = paste0(

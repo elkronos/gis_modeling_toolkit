@@ -1670,16 +1670,17 @@ test_that("a ladder of sizes prints its sizes, the rows they divide and no ceili
   pts <- .cl_600()
   one <- .cl_profile(pts, obs_per_cell = 4.5)
   out <- utils::capture.output(print(one))
-  expect_identical(out[1L], "Resolution profile: 1 levels on 600 points")
+  expect_identical(out[1L], "Resolution profile: 1 level on 600 points")
   expect_identical(out[2L],
                    paste0("  ladder      : 133 cells (obs_per_cell = 4.5 on the 600 rows with a ",
                           "response; centres fitted to every row; floor 2 (no range))"))
   expect_identical(out[3L],
                    paste0("  variogram   : none fitted: a size ladder fits one only when `sac` is ",
                           "given (cp and reliability are NA)"))
+  # One level has no step between levels for the WSS to rise at.
   expect_identical(out[4L],
                    paste0("  scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 ",
-                          "neighbours) per level; WSS rises at 0 step(s)"))
+                          "neighbours) per level"))
   expect_match(out[5L], "^  one cell    : rss ")
   expect_identical(out[6L],
                    sprintf(paste0("  estimate    : pooled toward the 8 nearest cells; loo on 600 rows ",
@@ -1711,7 +1712,7 @@ test_that("a ladder of sizes prints its sizes, the rows they divide and no ceili
   part <- pts
   part$z[1:150] <- NA
   out <- utils::capture.output(print(suppressWarnings(.cl_profile(part, obs_per_cell = 9, sac = 20000))))
-  expect_identical(out[1L], "Resolution profile: 1 levels on 600 points (450 with a response)")
+  expect_identical(out[1L], "Resolution profile: 1 level on 600 points (450 with a response)")
   expect_match(out[2L], paste0("^  ladder      : 50 cells \\(obs_per_cell = 9 on the 450 rows with a ",
                                "response; centres fitted to every row; floor [0-9]+ from range 20000, ",
                                "not applied\\)$"))
@@ -1729,6 +1730,59 @@ test_that("a ladder of sizes prints its sizes, the rows they divide and no ceili
   out <- utils::capture.output(print(suppressWarnings(.cl_profile(.cl_3000(), obs_per_cell = 4.5,
                                                                    sac = 2000))))
   expect_match(out[2L], "not applied\\)  -- floor above the finest level: not supported$")
+})
+
+test_that("a profile of one level prints \"1 level\" and no count of steps the WSS rises at", {
+  pts <- .cl_600()
+  # The default profile: nothing named.
+  out <- utils::capture.output(print(resolution_profile(pts, "z")))
+  expect_identical(out[1L], "Resolution profile: 1 level on 600 points")
+  expect_identical(out[4L],
+                   paste0("  scored on   : response; 3 density-weighted k-means++ starts (power 1, 8 ",
+                          "neighbours) per level"))
+  expect_false(any(grepl("WSS rises", out, fixed = TRUE)))
+  # Two levels: the plural, and the steps between them.
+  two <- .cl_profile(pts, obs_per_cell = c(9, 4.5))
+  out <- utils::capture.output(print(two))
+  expect_identical(out[1L], "Resolution profile: 2 levels on 600 points")
+  expect_identical(out[4L],
+                   sprintf(paste0("  scored on   : response; 3 density-weighted k-means++ starts ",
+                                  "(power 1, 8 neighbours) per level; WSS rises at %d step(s)"),
+                           attr(two, "wss_bumps")))
+  # A row subset of one level prints as one level.
+  out <- utils::capture.output(print(two[1L, ]))
+  expect_identical(out[1L], "Resolution profile: 1 level on 600 points")
+  expect_false(any(grepl("WSS rises", out, fixed = TRUE)))
+  # Two levels of which one has no WSS have no step to count either.
+  gap <- two
+  gap$wss[2L] <- NA
+  out <- utils::capture.output(print(gap))
+  expect_identical(out[1L], "Resolution profile: 2 levels on 600 points")
+  expect_false(any(grepl("WSS rises", out, fixed = TRUE)))
+})
+
+test_that("a subset of a profile's rows counts the steps the WSS rises at over its own levels", {
+  # Close levels from one start each: the WSS curve rises at some steps and
+  # falls at others.
+  p <- suppressWarnings(.cl_profile(.cl_600(), levels = 40:46, nstart = 1, sac = 3e4,
+                                    estimate = NULL, obs_per_cell = NULL))
+  up <- diff(p$wss) > 0
+  expect_true(any(up) && !all(up))
+  clause <- function(x) {
+    line <- utils::capture.output(print(x))[4L]
+    regmatches(line, regexpr("WSS rises at [0-9]+ step\\(s\\)$", line))
+  }
+  # The whole profile: the count its attribute holds.
+  expect_identical(attr(p, "wss_bumps"), sum(up))
+  expect_identical(clause(p), sprintf("WSS rises at %d step(s)", sum(up)))
+  # Two levels across a step where the curve falls: no rise, whatever the
+  # rest of the ladder does.
+  down <- which(!up)[1L]
+  expect_identical(clause(p[c(down, down + 1L), ]), "WSS rises at 0 step(s)")
+  # Two levels across a rise, in either order of the rows: one.
+  rise <- which(up)[1L]
+  expect_identical(clause(p[c(rise, rise + 1L), ]), "WSS rises at 1 step(s)")
+  expect_identical(clause(p[c(rise + 1L, rise), ]), "WSS rises at 1 step(s)")
 })
 
 test_that("a profile without an estimate and without a size prints no new line", {

@@ -298,9 +298,9 @@ an \code{estimate}.  It is \code{FALSE} when the leave-one-out error
 of one mean for all scored rows is within \code{tol} of the error at
 the level, or below it, or when the F test of the cells at the level
 against one mean has \eqn{p \ge 0.05}.  The count stands either way,
-since the caller set it: \code{structured = FALSE} says that the cell
-values will say little that one mean for the layer does not.  The
-functions that take the selection as a count then raise
+since a size set it and no criterion: \code{structured = FALSE} says
+that the cell values will say little that one mean for the layer does
+not.  The functions that take the selection as a count then raise
 \code{spatialkit_no_structure}.  On a profile without an estimate
 \code{structured} is \code{NA}.}
 \item{\code{auto}}{The rule that goes with the profile's estimate:

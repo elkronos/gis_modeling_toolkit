@@ -797,8 +797,9 @@ plot.resolution_profile <- function(x, criteria = NULL, tol = 0.02, ...) {
               paste(skipped, collapse = ", "))
   df <- do.call(rbind, rows)
   subtitle <- if (is.list(bounds))
-    sprintf("%d levels from %d to %d cells (floor %s, ceiling %s)%s",
-            nrow(x), min(lv), max(lv),
+    sprintf("%s (floor %s, ceiling %s)%s",
+            if (nrow(x) == 1L) sprintf("1 level of %d cells", lv)
+            else sprintf("%d levels from %d to %d cells", nrow(x), min(lv), max(lv)),
             if (is.finite(bounds$floor %||% NA)) format(bounds$floor) else "none",
             if (is.finite(bounds$ceiling %||% NA)) format(bounds$ceiling) else "none",
             # Why a profile is not supported, as its bounds record it: "the

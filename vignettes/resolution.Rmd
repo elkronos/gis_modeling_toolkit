@@ -424,8 +424,8 @@ response, so the count is not fitted to the values it will summarise.
 A size does not ask whether the response has spatial structure the cells can
 use, so the selection asks it separately. `structured` is `FALSE` when one
 mean for the whole layer predicts a left-out observation as well as the cells
-do. The count stands either way, since the caller set it, and the functions
-that take the selection as a count then warn (class
+do. The count stands either way, since a size set it and no criterion, and
+the functions that take the selection as a count then warn (class
 `spatialkit_no_structure`) that the cell values will say little that one mean
 does not.
 

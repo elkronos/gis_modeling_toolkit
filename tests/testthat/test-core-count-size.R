@@ -517,8 +517,9 @@ test_that("\"size\" returns the count of the size when the profile has that leve
   expect_identical(s$one_cell, attr(p, "estimate")$loo_one_cell)
   expect_identical(s$share_alone, p$share_alone[2L])
   expect_identical(s$own_weight, p$own_weight[2L])
+  # 4.5 is the default size, and the note says so whoever named it.
   expect_identical(s$note, c(size = paste0("the count is set by obs_per_cell = 4.5, the ",
-                                           "caller's choice; no criterion chose it.")))
+                                           "default; no criterion chose it.")))
   expect_identical(nrow(s$seeds), 133L)
   expect_identical(names(s), c(.cs_present, .cs_added, "partition"))
   # Without a size of its own the profile is read at the default size.
@@ -1876,8 +1877,8 @@ test_that("a selection by size prints its size, the estimate, the level's number
     sprintf("  loo         : %s (one cell for the layer: %s)", format(signif(p$loo, 3)),
             format(signif(attr(p, "estimate")$loo_one_cell, 3)))))
   expect_identical(out[7:8], c(
-    "  note        : the count is set by obs_per_cell = 4.5, the caller's choice;",
-    "                no criterion chose it."))
+    "  note        : the count is set by obs_per_cell = 4.5, the default; no",
+    "                criterion chose it."))
   expect_length(out, 8L)
   expect_false(any(grepl("flat region", out, fixed = TRUE)))
   expect_false(any(grepl("the bound is choosing", out, fixed = TRUE)))
@@ -1897,6 +1898,51 @@ test_that("a selection by size prints its size, the estimate, the level's number
     "Resolution by size: 100 cells",
     "  size        : 6 rows per cell asked (obs_per_cell); 600 rows / 100 cells = 6.00",
     "  note        : the count is set by obs_per_cell = 6, the caller's choice; no",
+    "                criterion chose it."))
+})
+
+test_that("on the default path the note calls the size the default, not the caller's choice", {
+  # A profile and a selection that name nothing.
+  p <- resolution_profile(.cs_600(), "z")
+  expect_identical(attr(p, "bounds")$obs_per_cell, .OBS_PER_CELL_DEFAULT)
+  s <- select_resolution(p)
+  expect_identical(s$criterion, "size")
+  expect_identical(s$obs_per_cell_asked, 4.5)
+  default <- "the count is set by obs_per_cell = 4.5, the default; no criterion chose it."
+  expect_identical(s$note, c(size = default))
+  out <- .cs_print(s)
+  expect_false(any(grepl("caller", out, fixed = TRUE)))
+  expect_identical(out[1:2], c(
+    "Resolution by size: 133 cells",
+    "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51"))
+  expect_identical(out[7:8], c(
+    "  note        : the count is set by obs_per_cell = 4.5, the default; no",
+    "                criterion chose it."))
+  expect_length(out, 8L)
+  # A profile of several sizes read with none named is read at the default.
+  expect_identical(select_resolution(.cs_pooled7(), criterion = "size")$note[["size"]], default)
+  # A size the caller gives, to the selection or to the profile, is the
+  # caller's choice.
+  r <- .cs_catch(select_resolution(p, obs_per_cell = 6))
+  expect_identical(.cs_classes(r), "spatialkit_size_not_reached")
+  expect_identical(r$value$note[["size"]],
+                   "the count is set by obs_per_cell = 6, the caller's choice; no criterion chose it.")
+  nine <- .cs_profile(.cs_600(), obs_per_cell = 9)
+  expect_identical(select_resolution(nine)$note[["size"]],
+                   "the count is set by obs_per_cell = 9, the caller's choice; no criterion chose it.")
+  expect_identical(.cs_print(select_resolution(nine))[7:8], c(
+    "  note        : the count is set by obs_per_cell = 9, the caller's choice; no",
+    "                criterion chose it."))
+  # So is a size below the default, to the selection or to the profile.
+  r <- .cs_catch(select_resolution(p, obs_per_cell = 3))
+  expect_identical(.cs_classes(r), "spatialkit_size_not_reached")
+  expect_identical(r$value$note[["size"]],
+                   "the count is set by obs_per_cell = 3, the caller's choice; no criterion chose it.")
+  three <- .cs_profile(.cs_600(), obs_per_cell = 3)
+  expect_identical(select_resolution(three)$note[["size"]],
+                   "the count is set by obs_per_cell = 3, the caller's choice; no criterion chose it.")
+  expect_identical(.cs_print(select_resolution(three))[7:8], c(
+    "  note        : the count is set by obs_per_cell = 3, the caller's choice; no",
     "                criterion chose it."))
 })
 
@@ -2135,6 +2181,12 @@ test_that("plot() draws loo like a count criterion, and a ladder of one size as 
   marked <- g$layers[[which(geoms(g) == "GeomVline")]]$data
   expect_identical(marked$x, select_resolution(l, criterion = "loo")$best)
   expect_match(g$labels$caption, "^Red: the level each criterion selects")
+  # The subtitle gives the number of levels and their range, from two levels
+  # up.
+  expect_identical(g$labels$subtitle, "3 levels from 50 to 300 cells (floor 11, ceiling 66)")
+  two <- .cs_profile(.cs_600(), obs_per_cell = c(9, 4.5))
+  expect_identical(plot(two, criteria = "loo")$labels$subtitle,
+                   "2 levels from 67 to 133 cells (floor 2, ceiling 133)")
   # Drawn by default where the column is finite, after the other count criteria.
   panels <- as.character(unique(points_of(plot(l))$panel))
   expect_true(label %in% panels)
@@ -2166,13 +2218,13 @@ test_that("plot() draws loo like a count criterion, and a ladder of one size as 
   g <- plot(p, criteria = "loo")
   expect_identical(points_of(g)$y, p$loo)
   expect_false("GeomVline" %in% geoms(g))
-  expect_identical(g$labels$subtitle, "1 levels from 133 to 133 cells (floor 2, ceiling 133)")
+  expect_identical(g$labels$subtitle, "1 level of 133 cells (floor 2, ceiling 133)")
   # A size too coarse for the layer: the subtitle says why the profile is not
   # supported.  Six rows at 4.5 a cell.
   few <- suppressWarnings(.cs_profile(.cs_600()[1:6, ]))
   expect_false(attr(few, "bounds")$supported)
   expect_identical(plot(few, criteria = "wss")$labels$subtitle,
-                   paste0("1 levels from 2 to 2 cells (floor 2, ceiling 2); fewer than two ",
+                   paste0("1 level of 2 cells (floor 2, ceiling 2); fewer than two ",
                           "cells of the size asked for"))
 })
 

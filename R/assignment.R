@@ -3647,7 +3647,12 @@ print.spatialkit_pooled <- function(x, ...) {
     r <- x$columns[[nm]]
     cat(sprintf("Cell values: %s, %s in %s\n", r$column, count(r$n, "row"),
                 count(r$cells, "cell")))
-    if (!identical(r$status, "ok")) {
+    # A column with tau2 = 0 is fitted, and each of its values is its target.
+    # Its block is printed in full, with a line that says so in place of the
+    # status: its cells can still predict a left-out row better than one
+    # mean, and the loo line says whether they do.
+    no_tau2 <- identical(r$status, "no signal between cells")
+    if (!identical(r$status, "ok") && !no_tau2) {
       cat(label("status"), r$status, "\n", sep = "")
       next
     }
@@ -3660,6 +3665,13 @@ print.spatialkit_pooled <- function(x, ...) {
         "between a cell and its target ", sci(r$tau2), "\n", sep = "")
     cat(label("own weight"), sprintf("median %.2f (..pooled_w_%s)\n", r$own_weight, nm),
         sep = "")
+    if (no_tau2)
+      cat(label("note"),
+          paste(strwrap(paste0("tau2 is 0: every own weight is 0, and each value is its ",
+                               "neighbours' mean, with none of the cell's own rows in it"),
+                        width = 62),
+                collapse = paste0("\n", indent)),
+          "\n", sep = "")
     cat(label("alone"), sprintf("%.1f%% of the rows are the only one in their cell\n",
                                 100 * r$share_alone), sep = "")
     cat(label("loo"), sci(r$loo),

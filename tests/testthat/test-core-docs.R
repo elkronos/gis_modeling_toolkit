@@ -1006,6 +1006,21 @@ test_that("the help says of a level above the limit of Moran's z what the code d
                    if (.moran_skip_any_ladder()) 0L else 1L)
 })
 
+test_that("the help and the vignette say that a size set the count of a selection by size, not the caller", {
+  # On the default path no one names a size, and select_resolution()'s note
+  # calls it the default; the count stands because a size set it and no
+  # criterion, as the warning spatialkit_no_structure says.
+  said <- "The count stands either way, since a size set it and no criterion"
+  size <- .docs_parts()[["?select_resolution: What each criterion returns, size"]]
+  expect_identical(.docs_count(size, said), 1L)
+  expect_identical(.docs_count(size, "since the caller set it"), 0L)
+  prose <- .docs_vignette_texts(code = FALSE)
+  if (is.null(prose)) skip("the vignettes' sources are not installed")
+  setting <- prose[["vignette resolution: Setting a size"]]
+  expect_identical(.docs_count(setting, said), 1L)
+  expect_identical(.docs_count(setting, "since the caller set it"), 0L)
+})
+
 
 # ---- NEWS -----------------------------------------------------------------------------
 

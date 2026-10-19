@@ -1827,6 +1827,37 @@ old behaviour where there is a way.
   tessellation makes the points seeds, and `index` then gives each its
   cell.
 
+* **A selection by size called the default size the caller's choice.**  On
+  a default call, where nothing names a size, `select_resolution()`'s note
+  read "the count is set by obs_per_cell = 4.5, the caller's choice; no
+  criterion chose it."  It now reads "obs_per_cell = 4.5, the default"
+  whenever the size is 4.5, and "the caller's choice" for any other size,
+  which only a caller gives, to the selection or to the profile.
+  `?select_resolution` and `vignette("resolution")` said that the count of
+  a selection by size stands "since the caller set it"; they now say that it
+  stands since a size set it and no criterion.
+
+* **The print of `attr(, "pooled")` hid the fit of a column whose `tau2` is
+  0.**  `summarize_by_cell()` fits such a column, and every pooled value is
+  then its neighbours' mean, but the print showed only "status : no signal
+  between cells", also for a response whose cells predict a left-out row
+  better than one mean, and listed the column's interval under "Also in the
+  frame" as if it belonged to nothing above.  The block is now printed in
+  full (value, variances, own weight, the leave-one-out errors and the
+  interval), with a line that `tau2` is 0, every own weight is 0 and each
+  value is its neighbours' mean.  Whether the cells do better than one mean
+  is said on the `loo` line, as for any other column.  The status in the
+  record, and the warning, are unchanged.
+
+* **The print of a profile of one level read "1 levels" and "WSS rises at 0
+  step(s)".**  Every default profile has one level.  The print now reads "1
+  level", and leaves out the count of steps the WSS curve rises at when
+  fewer than two levels have a WSS, since there is no step between levels
+  to count.  A subset of a profile's rows printed the count of the whole
+  ladder; it now counts the steps between its own levels.  `plot()` of a
+  profile of one level has the subtitle "1 level of 133 cells" where it had
+  "1 levels from 133 to 133 cells".
+
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
   zero parts, and `st_line_sample()` on it segfaulted and took the session

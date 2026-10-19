@@ -1188,7 +1188,11 @@ test_that("what the t interval covers follows the design effect", {
   expect_identical(k0$..ci_lo_resp_u, ci("u", deff = 1)$..ci_lo_resp_u)
   expect_identical(unlist(attr(k0, "intervals")[c("covers", "method")]),
                    c(covers = own, method = "t, deff = 1"))
-  expect_match(utils::capture.output(print(attr(k0, "pooled")))[4L],
+  # `u` has tau2 = 0, so its block is printed in full (ten lines) before the
+  # interval it does not show.
+  shown <- utils::capture.output(print(attr(k0, "pooled")))
+  expect_identical(shown[11L], "Also in the frame")
+  expect_match(shown[12L],
                "95% for THE CELL'S MEAN (t, deff = 1), centred on the plain mean;", fixed = TRUE)
   # Beside columns Kish does correct, the row is Kish's and says which column
   # it left as it was.
@@ -1375,6 +1379,48 @@ test_that("the print says when cells do no better, when all the others are the t
   expect_identical(utils::capture.output(print(attr(r$value, "pooled"))),
                    c("Cell values: income, 1 row in 1 cell", "  status      : one cell",
                      "Away from the observations no interval here is calibrated."))
+})
+
+test_that("with tau2 = 0 on a structured response the print shows the fit and says each value is its neighbours' mean", {
+  # A trend across the layer under noise, on a 10 x 10 grid of squares: the
+  # cells predict a left-out row better than one mean, and no cell mean is
+  # further from its neighbours' than the noise inside the cells explains.
+  d <- local({
+    .ps_seed(3003)
+    x <- stats::runif(900, 0, 1e5); y <- stats::runif(900, 0, 1e5)
+    data.frame(x = x, y = y, z = x / 5e4 + stats::rnorm(900))
+  })
+  d$cell_id <- as.integer(10 * floor(d$x / 1e4) + floor(d$y / 1e4) + 1)
+  trend <- .ps_points(d$x, d$y, d[c("z", "cell_id")])
+  r <- .ps_catch(summarize_by_cell(trend, "z", id_col = "cell_id", estimate = "pooled",
+                                   obs_level = 0.9))
+  expect_identical(.ps_classes(r), "spatialkit_pool_degenerate")
+  rec <- attr(r$value, "pooled")$columns$resp_z
+  expect_identical(rec$status, "no signal between cells")
+  expect_identical(rec$tau2, 0)
+  expect_true(rec$structured)
+  expect_lt(rec$loo, rec$loo_one_cell / 1.2)
+  expect_lt(rec$structure_p, 1e-10)
+  out <- r$value
+  expect_identical(out$..pooled_resp_z, out$..pooled_target_resp_z)
+  txt <- utils::capture.output(print(attr(r$value, "pooled")))
+  expect_identical(txt, c(
+    "Cell values: z, 900 rows in 100 cells",
+    "  value       : ..pooled_resp_z, pooled toward the 8 nearest cells (centroids of the rows)",
+    sprintf("  variances   : inside cells %.2e (from 800 values beyond one per cell);", rec$sigma2),
+    "                between a cell and its target 0.00e+00",
+    "  own weight  : median 0.00 (..pooled_w_resp_z)",
+    "  note        : tau2 is 0: every own weight is 0, and each value is its",
+    "                neighbours' mean, with none of the cell's own rows in it",
+    sprintf("  alone       : %.1f%% of the rows are the only one in their cell",
+            100 * rec$share_alone),
+    sprintf("  loo         : %.2e (leave-one-out mean squared error of the pooled value);", rec$loo),
+    sprintf("                one mean for all rows: %.2e", rec$loo_one_cell),
+    "  interval    : 90% for ONE OBSERVATION (..obs_lo_resp_z, ..obs_hi_resp_z):",
+    sprintf("                value - %s to value + %s, quantiles of 900 leave-one-out residuals",
+            format(signif(-rec$offsets[1L], 3)), format(signif(rec$offsets[2L], 3))),
+    "Away from the observations no interval here is calibrated."))
+  expect_false(any(grepl("status|no signal|Also in the frame", txt)))
 })
 
 

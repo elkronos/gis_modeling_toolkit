@@ -52,6 +52,21 @@
 # again from this list: the baseline code does not know the arguments the
 # rewritten calls name.
 #
+# A fix that changes on purpose what a call returns, raises, prints or logs
+# cannot have its record from the baseline code.  Such records alone are
+# taken again from the package in the working tree:
+#   Rscript --vanilla dev/baseline-core-frozen.R --retake <call>[,<call>...] "<why>" [<fixture file>]
+# That mode runs only on the fixture's platform and on the fixture's list of
+# calls.  It runs the whole list on the working tree twice, with FNN and
+# Matrix and without them, and refuses unless the working tree gives every
+# record it does not name exactly as the fixture holds it.  It prints the
+# parts of each named record that changed (and the printed lines that
+# differ), replaces those records, and lists each in the fixture's `retaken`
+# with the reason, the parts, the date and the git tree of R/ it was taken
+# from.  A later run of the full mode takes every record from the baseline
+# code again, the retaken ones included, and says which to take again with
+# --retake.
+#
 # `dev/` is in .Rbuildignore, so nothing here ships.
 # ---------------------------------------------------------------------------
 
@@ -63,6 +78,15 @@ BASELINE_CODE <- c(R           = "2df204570e3e0378e1919c6bd1f9a1c5be24d8ca",   #
 args     <- commandArgs(trailingOnly = TRUE)
 calls_only <- length(args) >= 1L && identical(args[[1L]], "--calls-only")
 if (calls_only) args <- c(".", args[-1L])
+retake <- length(args) >= 1L && identical(args[[1L]], "--retake")
+if (retake) {
+  if (length(args) < 3L || !nzchar(args[[2L]]) || !nzchar(args[[3L]]))
+    stop("--retake needs the calls, comma-separated, and the reason: ",
+         "--retake <call>[,<call>...] \"<why>\" [<fixture file>]")
+  retake_names  <- unique(strsplit(args[[2L]], ",", fixed = TRUE)[[1L]])
+  retake_reason <- args[[3L]]
+  args <- c(".", args[-(1:3)])
+}
 base_dir <- if (length(args) >= 1L) args[[1L]] else "."
 fixture  <- if (length(args) >= 2L) args[[2L]] else
   file.path("tests", "testthat", "fixtures", "core-frozen.rds")
@@ -117,6 +141,75 @@ git_tree <- function(dir) {
   digest::digest(c(charToRaw(sprintf("tree %d", length(body))), as.raw(0L), body),
                  algo = "sha1", serialize = FALSE)
 }
+
+# ---- Records taken again from the working tree (--retake) ----------------------
+
+if (retake) {
+  suppressPackageStartupMessages(library(sf))
+  pkgload::load_all(".", quiet = TRUE)
+  source(helper, local = FALSE)
+  if (!file.exists(fixture)) stop("No fixture at '", fixture, "'.")
+  baseline <- readRDS(fixture)
+  if (!core_frozen_same_platform(core_frozen_platform(), baseline$info))
+    stop("Not the platform the fixture was recorded on. A record is taken again only where ",
+         "every other record can be held to identical().")
+  if (!identical(core_frozen_call_text(), baseline$calls))
+    stop("The helper's calls are not the fixture's. A record is taken again only for the ",
+         "list the fixture holds.")
+  unknown <- setdiff(retake_names, names(baseline$records))
+  if (length(unknown))
+    stop("No call of that name in the fixture: ", paste(unknown, collapse = ", "), ".")
+  calls <- core_frozen_calls()
+  pkgs  <- baseline$without$packages
+  now   <- core_frozen_run(baseline$data, calls)
+  again <- core_frozen_run(baseline$data, calls)
+  bare  <- core_frozen_run(baseline$data, calls, without = pkgs)
+  bare_again <- core_frozen_run(baseline$data, calls, without = pkgs)
+  moved <- names(now)[!mapply(identical, now, again) | !mapply(identical, bare, bare_again)]
+  if (length(moved))
+    stop("These calls do not return the same record twice: ", paste(moved, collapse = ", "))
+  # What the fixture holds without FNN and Matrix.
+  held_bare <- baseline$records
+  held_bare[names(baseline$without$records)] <- baseline$without$records
+  other <- setdiff(names(now), retake_names)
+  off <- other[!mapply(identical, now[other], baseline$records[other]) |
+                 !mapply(identical, bare[other], held_bare[other])]
+  if (length(off))
+    stop("The working tree gives these records otherwise than the fixture, and they are not ",
+         "named: ", paste(off, collapse = ", "), ". Nothing was written.")
+  parts <- c("value", "conditions", "output", "printed", "log", "rng")
+  differ <- function(a, b) parts[!vapply(parts, function(p) identical(a[[p]], b[[p]]), NA)]
+  for (nm in retake_names) {
+    changed      <- differ(now[[nm]], baseline$records[[nm]])
+    changed_bare <- differ(bare[[nm]], held_bare[[nm]])
+    if (!length(changed) && !length(changed_bare))
+      stop("`", nm, "` is what the fixture holds: there is nothing to take again. ",
+           "Nothing was written.")
+    cat(sprintf("%s: %s changed; without %s: %s\n", nm,
+                if (length(changed)) paste(changed, collapse = ", ") else "nothing",
+                paste(pkgs, collapse = " and "),
+                if (length(changed_bare)) paste(changed_bare, collapse = ", ") else "nothing"))
+    if ("printed" %in% changed) {
+      was <- baseline$records[[nm]]$printed
+      is  <- now[[nm]]$printed
+      at  <- seq_len(max(length(was), length(is)))
+      for (i in at[!mapply(identical, was[at], is[at])])
+        cat(sprintf("  printed line %d\n    was: %s\n    now: %s\n", i, was[i], is[i]))
+    }
+    baseline$records[[nm]] <- now[[nm]]
+    if (identical(bare[[nm]], now[[nm]])) baseline$without$records[[nm]] <- NULL
+    else baseline$without$records[[nm]] <- bare[[nm]]
+    baseline$retaken[[nm]] <- list(reason = retake_reason, parts = changed,
+                                   parts_without = changed_bare, date = format(Sys.Date()),
+                                   code = git_tree("R"))
+  }
+  saveRDS(baseline, fixture, compress = "xz")
+  cat(sprintf("\n%d record%s taken again from the working tree (R/ tree %s); the other %d as they were.\n",
+              length(retake_names), if (length(retake_names) == 1L) "" else "s",
+              git_tree("R"), length(other)))
+  quit(save = "no", status = 0L)
+}
+
 found <- c(R           = git_tree(file.path(base_dir, "R")),
            DESCRIPTION = git_blob(file.path(base_dir, "DESCRIPTION")),
            NAMESPACE   = git_blob(file.path(base_dir, "NAMESPACE")))
@@ -253,6 +346,15 @@ if (file.exists(fixture)) {
   message(sprintf("%s held %d records: %d are also in this list, %d of them with another value, condition, output, print or log%s",
                   fixture, length(had), length(both), length(off),
                   if (length(off)) paste0(" (", paste(off, collapse = ", "), ")") else ""))
+  # Records a fix changed on purpose are now the baseline's again.
+  retaken <- readRDS(fixture)$retaken
+  if (length(retaken))
+    message(sprintf(paste0("%s held records taken again from later code (%s); this run takes ",
+                           "them from the baseline. Take them again with --retake, for the ",
+                           "reasons the old fixture gives: %s"),
+                    fixture, paste(names(retaken), collapse = ", "),
+                    paste(sprintf("%s: %s", names(retaken),
+                                  vapply(retaken, `[[`, "", "reason")), collapse = "; ")))
 }
 
 baseline <- list(

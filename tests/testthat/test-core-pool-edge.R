@@ -753,6 +753,21 @@ test_that("no signal between cells: every weight is 0 and each value is its targ
                tolerance = 1e-10)
   expect_equal(rec$loo, mean(e^2), tolerance = 1e-12)
   expect_false(anyNA(out$..obs_lo_resp_w))
+  # The print shows the fit, with the line that each value is its neighbours'
+  # mean, and the loo line says the cells do no better than one mean: that is
+  # said by the two tests of structure, not by tau2.
+  txt <- utils::capture.output(print(attr(out, "pooled")))
+  expect_identical(txt[5:7], c(
+    "  own weight  : median 0.00 (..pooled_w_resp_w)",
+    "  note        : tau2 is 0: every own weight is 0, and each value is its",
+    "                neighbours' mean, with none of the cell's own rows in it"))
+  expect_identical(txt[10L], sprintf(paste0("                one mean for all rows: %.2e: these ",
+                                            "cells do no better than one mean"),
+                                     rec$loo_one_cell))
+  expect_identical(txt[11L],
+                   "  interval    : 90% for ONE OBSERVATION (..obs_lo_resp_w, ..obs_hi_resp_w):")
+  expect_length(txt, 13L)
+  expect_false(any(grepl("status|no signal|Also in the frame", txt)))
 })
 
 test_that("a response without structure: the values and the interval are returned, with a warning", {
