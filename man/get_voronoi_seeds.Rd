@@ -39,7 +39,8 @@ assume \code{n}.
 
 Besides a number, \code{n} accepts what the level-selection step returned:
 the integer vector of ranked candidates from \code{\link[=determine_optimal_levels]{determine_optimal_levels()}}
-(its first element is used), a \code{\link[=select_resolution]{select_resolution()}} result (its
+(its first element is used; its \code{NA} is refused with a note on where it
+came from), a \code{\link[=select_resolution]{select_resolution()}} result (its
 \verb{$best}), or a \code{\link[=resolution_profile]{resolution_profile()}}. A profile built without an
 \code{estimate} is read with \code{select_resolution()} by \code{cp}. A profile built
 with \code{estimate} is read by \code{criterion = "auto"}, the rule that goes

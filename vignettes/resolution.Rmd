@@ -62,18 +62,18 @@ design effect, and the size of the blocks a spatial cross-validation holds out.
 
 Three functions answer the question, in increasing order of how much they tell
 you. `determine_optimal_levels()` reads an elbow off the coordinates alone and
-runs on the hard dependencies; it is the quick answer and the one
-`build_tessellation()` accepts directly. `resolution_profile()` scores every
-cell count on a ladder in five columns at once, four count criteria and one
-diagnostic, and needs gstat for two of them. `select_resolution()` reads one
-criterion off that profile, and `summary()` on the profile reads the count
-criteria side by side. If the cells will feed
+runs on the hard dependencies; when the points give it an elbow it is the quick
+answer, and the one `build_tessellation()` accepts directly.
+`resolution_profile()` scores every cell count on a ladder in five columns at
+once, four count criteria and one diagnostic, and needs gstat for two of them.
+`select_resolution()` reads one criterion off that profile, and `summary()` on
+the profile reads the count criteria side by side. If the cells will feed
 a model, the profile is the one to use. If you need a count now and the data
 are all you have, the elbow is defensible when the points cluster, and this
 article says where it falls short. On points spread evenly there is no elbow
 to read, and both functions say so: the profile leaves its `elbow` column
-empty, and `determine_optimal_levels()` warns that the count it still returns
-was chosen by the ends of its ladder, not by the data.
+empty, and `determine_optimal_levels()` returns `NA`, since the count it would
+have returned was chosen by the ends of its ladder, not by the data.
 
 Called with the response and nothing else, `resolution_profile()` takes its
 defaults: one level at 4.5 observations per cell, scored for the pooled value
@@ -115,7 +115,9 @@ pts  <- st_as_sf(xy, coords = c("x", "y"), crs = 32632)
 
 ## The short answer
 
-`determine_optimal_levels()` returns a few candidate cell counts, best first.
+`determine_optimal_levels()` returns a few candidate cell counts, best first,
+when the WSS curve of a k-means clustering of the points has an elbow, and `NA`
+when it has none.
 
 ```{r doi}
 lv <- determine_optimal_levels(pts, max_levels = 40)
@@ -123,16 +125,22 @@ lv
 ```
 
 This fixture's points are uniform, so their within-cluster sum of squares falls
-like `c / k` all the way down and bends nowhere of its own. The call warns that
-it found no elbow and that `max_levels` chose `lv`: a larger `max_levels` would
-give a larger answer. Read an elbow only off points that cluster; here the
-profile below is the better guide.
+like `c / k` all the way down and bends nowhere of its own. The call finds no
+elbow and returns `NA`, with `structured = FALSE` and the largest sag of the
+curve as attributes, and a warning of class `spatialkit_no_elbow` that says why.
+`on_no_elbow = "warn"` returns the count the rule lands on instead, with the
+same warning, which says that `max_levels` chose it: a larger `max_levels` would
+give a larger answer. Read an elbow only off points that
+cluster; here the profile below is the better guide.
 
-`lv[1]` is what `get_voronoi_seeds()` takes as `n`, and what
-`build_tessellation()` takes as `approx_n_cells` for its `"hex"` and `"square"`
-methods. Voronoi has no cell count to set: it grows one cell per point you hand
-it, which is why the count is set when you place the seeds rather than when you
-tessellate them. The last section shows the two calls in order.
+When there is an elbow, `lv` is what `get_voronoi_seeds()` takes as `n`, and
+what `build_tessellation()` takes as `approx_n_cells` for its `"hex"` and
+`"square"` methods; both use its first element. Given `lv` itself, both stop on
+the `NA` and say where it came from; `lv[1]` drops the attributes that tell
+them, and they then say only that `NA` is not a number of cells. Voronoi
+has no cell count to set: it grows one cell per point you hand it, which is why
+the count is set when you place the seeds rather than when you tessellate them.
+The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
 `criterion = "morans_i"` and `criterion = "combined"` settings rank the counts

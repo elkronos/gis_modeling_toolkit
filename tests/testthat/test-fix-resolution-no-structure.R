@@ -140,7 +140,8 @@ test_that("determine_optimal_levels() says a count is not a finding with a class
   set.seed(5)
   uni <- sf::st_as_sf(data.frame(x = runif(400, 0, 1000), y = runif(400, 0, 1000)),
                       coords = c("x", "y"), crs = 32632)
-  out <- fns_catch(determine_optimal_levels(uni))
+  # "warn": the count, with a warning that has a class and the numbers.
+  out <- fns_catch(determine_optimal_levels(uni, on_no_elbow = "warn"))
   expect_true("spatialkit_no_elbow" %in% out$classes)
   w <- out$warnings[[1L]]
   expect_s3_class(w, "spatialkit_no_elbow")
@@ -151,16 +152,25 @@ test_that("determine_optimal_levels() says a count is not a finding with a class
   # The count itself, and its shape, are what they were.
   expect_type(out$value, "integer")
   expect_null(attributes(out$value))
-  expect_identical(tryCatch(determine_optimal_levels(uni),
+  expect_identical(tryCatch(determine_optimal_levels(uni, on_no_elbow = "warn"),
                             spatialkit_no_elbow = function(w) "caught"), "caught")
 
-  # "na": no count where there is no finding, with the flag and the sag.
+  # "na", the default: no count where there is no finding, with the flag and
+  # the sag, and the same classed warning, which says NA is returned.
   na <- fns_catch(determine_optimal_levels(uni, on_no_elbow = "na"))
-  expect_length(na$warnings, 0L)
+  expect_length(na$warnings, 1L)
+  expect_s3_class(na$warnings[[1L]], "spatialkit_no_elbow")
+  expect_identical(na$warnings[[1L]]$k, w$k)
+  expect_identical(na$warnings[[1L]]$structured, FALSE)
+  expect_equal(na$warnings[[1L]]$sag, w$sag)
+  expect_identical(conditionMessage(na$warnings[[1L]]),
+                   paste(conditionMessage(w), "Returning NA (on_no_elbow = \"na\")."))
   expect_true(is.na(na$value))
   expect_type(na$value, "integer")
   expect_identical(attr(na$value, "structured"), FALSE)
   expect_equal(attr(na$value, "sag"), w$sag)
+  expect_identical(fns_catch(determine_optimal_levels(uni))[c("value", "warnings")],
+                   na[c("value", "warnings")])
   # "error": a classed error.
   e <- tryCatch(determine_optimal_levels(uni, on_no_elbow = "error"), error = function(e) e)
   expect_s3_class(e, "spatialkit_no_elbow")
@@ -177,16 +187,18 @@ test_that("determine_optimal_levels() says a count is not a finding with a class
   g <- rep(1:8, each = 50)
   cl <- sf::st_as_sf(data.frame(x = ctr[g, 1] + rnorm(400, 0, 8), y = ctr[g, 2] + rnorm(400, 0, 8)),
                      coords = c("x", "y"), crs = 32632)
-  ok <- fns_catch(determine_optimal_levels(cl, max_levels = 14))
+  ok <- fns_catch(determine_optimal_levels(cl, max_levels = 14, on_no_elbow = "warn"))
   expect_length(ok$warnings, 0L)
   expect_identical(ok$value[1L], 8L)
   expect_null(attributes(ok$value))
   expect_identical(determine_optimal_levels(cl, max_levels = 14, on_no_elbow = "error"), ok$value)
-  # Under "na" the count carries the flag too, so one test reads both outcomes.
+  # Under "na", the default, the count carries the flag too, so one test
+  # reads both outcomes.
   k8 <- determine_optimal_levels(cl, max_levels = 14, on_no_elbow = "na")
   expect_identical(as.integer(k8), ok$value)
   expect_identical(attr(k8, "structured"), TRUE)
   expect_gte(attr(k8, "sag"), log(1.25))
+  expect_identical(determine_optimal_levels(cl, max_levels = 14), k8)
 })
 
 test_that("the model-aware diagnostics carry the flag and the sag", {
@@ -196,16 +208,28 @@ test_that("the model-aware diagnostics carry the flag and the sag", {
                                  z = rnorm(n), w = rnorm(n)),
                       coords = c("x", "y"), crs = 32632)
   out <- fns_catch(determine_optimal_levels(uni, max_levels = 40, response_var = "z",
-                                            predictor_vars = "w", criterion = "morans_i"))
+                                            predictor_vars = "w", criterion = "morans_i",
+                                            on_no_elbow = "warn"))
   d <- attr(out$value, "diagnostics")
   expect_false(is.null(d))
   expect_identical(d$structured, FALSE)
   expect_lt(d$sag, log(1.25))
   expect_true("spatialkit_no_elbow" %in% out$classes)
-  # Under "na" the window the ladder placed is not scored at all.
-  na <- determine_optimal_levels(uni, max_levels = 40, response_var = "z",
-                                 predictor_vars = "w", criterion = "morans_i",
-                                 on_no_elbow = "na")
-  expect_true(is.na(na))
-  expect_identical(attr(na, "structured"), FALSE)
+  # Under "na" the window the ladder placed is not scored at all: NA, with
+  # the classed warning, and the diagnostics of the same sweep with no count
+  # scored.
+  na <- fns_catch(determine_optimal_levels(uni, max_levels = 40, response_var = "z",
+                                           predictor_vars = "w", criterion = "morans_i",
+                                           on_no_elbow = "na"))
+  expect_true(is.na(na$value))
+  expect_identical(attr(na$value, "structured"), FALSE)
+  expect_true("spatialkit_no_elbow" %in% na$classes)
+  expect_false("spatialkit_diagnostic_ranking" %in% na$classes)
+  dn <- attr(na$value, "diagnostics")
+  same <- c("wss", "wss_spread", "wss_bumps", "nstart", "knee_k", "failed_k",
+            "structured", "sag")
+  expect_identical(dn[same], d[same])
+  expect_identical(dn$eval_ks, integer(0))
+  expect_length(dn$moran_z, length(d$moran_z))
+  expect_true(all(is.na(dn$moran_i)) && all(is.na(dn$moran_z)))
 })

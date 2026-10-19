@@ -50,7 +50,8 @@
 #'
 #'   Besides a number, `n` accepts what the level-selection step returned:
 #'   the integer vector of ranked candidates from [determine_optimal_levels()]
-#'   (its first element is used), a [select_resolution()] result (its
+#'   (its first element is used; its `NA` is refused with a note on where it
+#'   came from), a [select_resolution()] result (its
 #'   `$best`), or a [resolution_profile()]. A profile built without an
 #'   `estimate` is read with `select_resolution()` by `cp`. A profile built
 #'   with `estimate` is read by `criterion = "auto"`, the rule that goes

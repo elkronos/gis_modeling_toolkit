@@ -109,11 +109,12 @@ test_that("the no-elbow warnings name the bound that ended the ladder", {
                y = 5e6 + c(runif(25, 0, 10), runif(25, 90, 100))),
     coords = c("x", "y"), crs = 32632)
   # A two-level ladder has no line to test: it used to be told it fell in a
-  # straight line "as it does for points with no cluster structure".
-  out <- r3_warnings(determine_optimal_levels(two, max_levels = 2))
+  # straight line "as it does for points with no cluster structure".  The
+  # warnings are those of on_no_elbow = "warn"; the default returns NA.
+  out <- r3_warnings(determine_optimal_levels(two, max_levels = 2, on_no_elbow = "warn"))
   expect_true(any(grepl("too short to read an elbow.*raise max_levels", out$warnings)))
   expect_false(any(grepl("no cluster structure", out$warnings)))
-  out <- r3_warnings(determine_optimal_levels(two, max_levels = 1))
+  out <- r3_warnings(determine_optimal_levels(two, max_levels = 1, on_no_elbow = "warn"))
   expect_true(any(grepl("max_levels = 1, raised to 2", out$warnings)))
   # With three levels the elbow is there.
   expect_length(r3_warnings(determine_optimal_levels(two, max_levels = 3))$warnings, 0L)
@@ -121,7 +122,7 @@ test_that("the no-elbow warnings name the bound that ended the ladder", {
   set.seed(5)
   few <- sf::st_as_sf(data.frame(x = 5e5 + runif(12, 0, 1000), y = 5e6 + runif(12, 0, 1000)),
                       coords = c("x", "y"), crs = 32632)
-  out <- r3_warnings(determine_optimal_levels(few, max_levels = 40))
+  out <- r3_warnings(determine_optimal_levels(few, max_levels = 40, on_no_elbow = "warn"))
   expect_true(any(grepl("k = 1 to 11, one short of the 12 points", out$warnings)))
   expect_false(any(grepl("max_levels\\)", out$warnings)))
 })
@@ -190,8 +191,10 @@ test_that("combined on points with no elbow is ordered by Moran's z alone", {
   d <- data.frame(x = 5e5 + runif(n, 0, 1e4), y = 5e6 + runif(n, 0, 1e4), p = rnorm(n))
   d$z <- d$p + rnorm(n)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
+  # With no elbow the window is scored under on_no_elbow = "warn" only.
   k  <- suppressWarnings(determine_optimal_levels(pts, max_levels = 40,
-                                                  response_var = "z", predictor_vars = "p"))
+                                                  response_var = "z", predictor_vars = "p",
+                                                  on_no_elbow = "warn"))
   dg <- attr(k, "diagnostics")
   cr <- dg$combined_rank
   ks <- as.integer(names(cr))

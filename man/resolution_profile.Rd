@@ -976,9 +976,12 @@ will say little that one mean for the layer does not.
 \code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
 for its own cells.}
 \item{\code{spatialkit_no_elbow}}{\code{\link{determine_optimal_levels}()}:
-the WSS curve has no elbow, or the ladder is too short to show one,
-so the count returned is the ladder's and not a finding.  The
-condition carries \code{k}, \code{sag} and \code{structured}.}
+the WSS curve has no elbow, or the ladder is too short to show one, so
+the count is the ladder's and not a finding.  A warning beside the
+\code{NA} the function returns at the default, \code{on_no_elbow =
+    "na"}, and beside the count under \code{"warn"}; an error under
+\code{"error"}.  The condition carries \code{k} (the ladder's count),
+\code{sag} and \code{structured}.}
 \item{\code{spatialkit_diagnostic_ranking}}{\code{\link{determine_optimal_levels}()}
 under \code{criterion = "morans_i"} or \code{"combined"}: Moran's z
 of the cell means, a diagnostic and not a count rule, ordered the

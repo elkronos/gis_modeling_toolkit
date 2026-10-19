@@ -31,6 +31,9 @@
 # raises spatialkit_partition_unused and nothing named returns the scored
 # centres, as on the baseline (seeds_density_selection,
 # seeds_density_profile, kmeans_density_selection, kmeans_density_profile).
+# Later, determine_optimal_levels(on_no_elbow = ) went from "warn" to "na",
+# and its four calls (levels_default, levels_clustered, levels_morans,
+# levels_combined) name "warn".
 # The text the records were taken with is the fixture's `calls_recorded`.
 # ---------------------------------------------------------------------------
 
@@ -331,14 +334,14 @@ core_frozen_calls <- function() {
   q("summary_default_criteria",
     summary(profile_default, criteria = c("cp", "elbow"), tol = 0.1))
   q("print_default_digits", utils::capture.output(print(profile_default, digits = 5)))
-  q("levels_default", determine_optimal_levels(pts, max_levels = 8L))
-  q("levels_clustered", determine_optimal_levels(clus, max_levels = 8L))
+  q("levels_default", determine_optimal_levels(pts, max_levels = 8L, on_no_elbow = "warn"))
+  q("levels_clustered", determine_optimal_levels(clus, max_levels = 8L, on_no_elbow = "warn"))
   q("levels_morans",
     determine_optimal_levels(pts, max_levels = 8L, response_var = "z",
-                             criterion = "morans_i"))
+                             criterion = "morans_i", on_no_elbow = "warn"))
   q("levels_combined",
     determine_optimal_levels(pts, max_levels = 8L, response_var = "z",
-                             criterion = "combined"))
+                             criterion = "combined", on_no_elbow = "warn"))
 
   # ---- a count read off a profile, a selection or a vector --------------------
   q("count_seeds_no_value",

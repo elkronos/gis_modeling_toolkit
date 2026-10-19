@@ -31,18 +31,22 @@ step("02.2", "Candidate cell counts, cheapest first")
 # determine_optimal_levels() only looks at geometry: it clusters the points and
 # reads the elbow of the within-cluster spread on log-log axes. Seconds, not
 # minutes. These points are spread evenly, so there is no elbow to read, and
-# the call warns that the count it still returns was set by max_levels rather
-# than by the data. That warning is the finding: here the count has to come
-# from the profile in 02.3.
+# the call returns NA, with a warning that the count the rule lands on was set
+# by max_levels rather than by the data. That NA is the finding: here the
+# count has to come from the profile in 02.3. on_no_elbow = "warn" returns
+# that count all the same, with the same warning.
 lv <- determine_optimal_levels(pts, max_levels = 40)
 cat("  geometric candidates:", paste(lv, collapse = ", "), "\n")
 
 # With a response it can also rank the counts around the elbow by Moran's z of
 # the cell means (of their residuals on the predictors when those are given).
 # That statistic is a diagnostic and not a count rule, and the call says so in
-# a warning of class "spatialkit_diagnostic_ranking".
+# a warning of class "spatialkit_diagnostic_ranking". With no elbow the ladder
+# places the counts it ranks, and on_no_elbow = "warn" has them ranked anyway
+# (by default the call returns NA here too).
 lv2 <- determine_optimal_levels(pts, max_levels = 40, criterion = "combined",
-                                response_var = "z", predictor_vars = "elev")
+                                response_var = "z", predictor_vars = "elev",
+                                on_no_elbow = "warn")
 cat("  combined candidates:", paste(lv2, collapse = ", "), "\n")
 
 step("02.3", "The full ladder")

@@ -55,9 +55,11 @@ test_that(".spatial_half_split makes two disjoint, exhaustive, spatially blocked
 
 test_that("determine_optimal_levels(select_on = 'split') reads one half's response and returns both", {
   pts <- so_field(300)
-  # The fixture's locations are uniform, so every call warns that the WSS
-  # curve has no elbow; that is not what this test is about.
-  dol <- function(...) suppressWarnings(determine_optimal_levels(...))
+  # The fixture's locations are uniform, so the WSS curve has no elbow and
+  # the default returns NA.  The counts compared here are the ones
+  # on_no_elbow = "warn" gives, and its warning is not what this test is
+  # about.
+  dol <- function(...) suppressWarnings(determine_optimal_levels(..., on_no_elbow = "warn"))
   out <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w",
              select_on = "split")
   sp <- attr(out, "split")
@@ -68,6 +70,7 @@ test_that("determine_optimal_levels(select_on = 'split') reads one half's respon
   # With max_levels = 8 no candidate clears the nine-cell floor, the call
   # falls back to the geometric elbow, and that is the whole layer's elbow.
   # (It used to be the selection half's, chosen for half the extent.)
+  expect_true(all(is.finite(out)))
   expect_identical(as.integer(out), as.integer(dol(pts, max_levels = 8)))
   # The default path is unchanged and carries no split.
   all_pts <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w")
@@ -76,6 +79,7 @@ test_that("determine_optimal_levels(select_on = 'split') reads one half's respon
   # same integer vector as without, plus the attribute.
   geo <- dol(pts, max_levels = 6, select_on = "split")
   expect_type(geo, "integer")
+  expect_true(all(is.finite(geo)))
   expect_s3_class(attr(geo, "split"), "spatialkit_split")
   expect_identical(as.integer(geo), as.integer(dol(pts, max_levels = 6)))
   expect_error(determine_optimal_levels(pts, select_on = "half"), "'arg' should be one of")

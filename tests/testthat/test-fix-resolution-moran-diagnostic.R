@@ -141,9 +141,13 @@ test_that("a geometry-only profile with an elbow is still read by the elbow", {
 })
 
 test_that("determine_optimal_levels() says, with a class, when Moran's z ranked its counts", {
+  # The field's points are uniform, so the WSS curve has no elbow: the ladder
+  # places the window, which is scored under on_no_elbow = "warn".  At the
+  # default, "na", nothing is scored (test-fix-levels-no-elbow.R).
   fmd_dol <- function(...) {
     ws <- list()
-    value <- withCallingHandlers(determine_optimal_levels(...), warning = function(w) {
+    value <- withCallingHandlers(determine_optimal_levels(..., on_no_elbow = "warn"),
+                                 warning = function(w) {
       ws[[length(ws) + 1L]] <<- w
       invokeRestart("muffleWarning")
     })
@@ -176,7 +180,7 @@ test_that("determine_optimal_levels() says, with a class, when Moran's z ranked 
   expect_identical(
     withCallingHandlers(
       tryCatch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
-                                        criterion = "morans_i"),
+                                        criterion = "morans_i", on_no_elbow = "warn"),
                spatialkit_diagnostic_ranking = function(w) "caught"),
       spatialkit_no_elbow = function(w) invokeRestart("muffleWarning")),
     "caught")

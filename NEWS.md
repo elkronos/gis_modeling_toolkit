@@ -308,6 +308,26 @@ old behaviour where there is a way.
   (`spatialkit_not_supported`).  `?resolution_profile` lists the classes of
   the resolution functions.
 
+* `determine_optimal_levels()` returns `NA` where its WSS curve has no
+  elbow (`on_no_elbow = "na"`, the default).  The count it returned there
+  is where the chord rule lands on a curve with no bend, about the square
+  root of `max_levels` whatever the points, so the ladder chose it and not
+  the data.  A ladder too short to show an elbow gives `NA` too, and so
+  does a layer of one or two points or of one location, where it gave 1.
+  The `NA` comes with a warning of class `spatialkit_no_elbow` that says
+  why and carries the count as `k`, and with `attr(, "structured")`,
+  `FALSE`, and `attr(, "sag")`, the largest log-log sag of the curve.
+  Every result at the default carries the two attributes, `structured`
+  being `TRUE` when the WSS curve has an elbow, and the counts themselves
+  are unchanged.  Under the model-aware criteria a curve with no elbow
+  leaves no window to score: the call returns `NA` without ranking counts
+  by Moran's z, its `NA` carries the `"diagnostics"` of the sweep (every
+  Moran's I `NA`, `eval_ks` empty), and its log lines no longer say the
+  window is scored or the call falls back to the geometric ranking.
+  `build_tessellation()` and `get_voronoi_seeds()` stop on the `NA` and say
+  where it came from.  `on_no_elbow = "warn"` returns the count, with the
+  same warning and without the `structured` and `sag` attributes.
+
 ## New features
 
 * `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and
@@ -530,14 +550,17 @@ old behaviour where there is a way.
   `spatialkit_no_structure`.  `resolution_profile()` keeps what one cell
   scores in `attr(, "one_cell")`.
 
-* `determine_optimal_levels()` gains `on_no_elbow = c("warn", "na",
-  "error")`.  The no-elbow warning has class `spatialkit_no_elbow` and
-  carries the count and `structured = FALSE`; `"na"` returns `NA_integer_`
-  in place of the chord rule's answer and `"error"` stops.
+* `determine_optimal_levels()` gains `on_no_elbow = c("na", "warn",
+  "error")`; its default is in Breaking changes.  `"na"` returns
+  `NA_integer_` in place of the chord rule's answer and `"warn"` returns
+  that answer, each with a warning of class `spatialkit_no_elbow` that
+  carries the count and `structured = FALSE`; `"error"` stops with an error
+  of that class.
   `criterion = "morans_i"` and `"combined"` run with a response and no
   predictors, where they fell back to the geometric ranking.  A layer of one
-  or two points, or with every point on one location, returns 1 under the
-  same rule; it returned 1 with nothing said.
+  or two points, or with every point on one location, is read by the same
+  rule (`NA` at the default, 1 under `"warn"`); it returned 1 with nothing
+  said.
 
 * A GWR fit gives its standard errors.  `coef(fit, se = TRUE)` returns the
   local estimates with their standard errors and t values, and
@@ -1926,10 +1949,11 @@ old behaviour where there is a way.
   below it.  Two, three, four, five, eight and ten well-separated clusters are
   now recovered at the default on every seed tried (six came back as five on
   one seed in five).  With
-  no elbow the function still returns its linear-axis answer, but warns that
-  the ladder chose it; `build_tessellation()` and `get_voronoi_seeds()` refuse
-  a geometry-only `resolution_profile()` with no elbow instead of drawing a
-  count from it.  A ladder of two levels (`max_levels` of 1 or 2, or three
+  no elbow the function returns `NA` (see Breaking changes), and under
+  `on_no_elbow = "warn"` its linear-axis answer, each with a warning that
+  the ladder chose that answer; `build_tessellation()` and
+  `get_voronoi_seeds()` refuse a geometry-only `resolution_profile()` with
+  no elbow instead of drawing a count from it.  A ladder of two levels (`max_levels` of 1 or 2, or three
   points) has no line to test.  The warning now says the ladder is too short
   to read an elbow from and names what ended it.  It used to say the curve
   fell in a straight line "as it does for points with no cluster structure",
@@ -3235,9 +3259,10 @@ old behaviour where there is a way.
   ranking, logs why, and records it in the diagnostics (`criterion =
   "geometric"`, `fallback`).  The same layers now give `8 7 9`, `8 7 9`,
   `7 6 8` and `8 7 9`, the geometric answer, and 800 uniform points, which
-  have no elbow and are ordered by Moran's z, `10 11 7` where they gave
-  `5 4 10`.  Supplying both `response_var` and `predictor_vars` selects
-  this criterion by default.
+  have no elbow and are ordered by Moran's z under `on_no_elbow = "warn"`,
+  `10 11 7` where they gave `5 4 10` (at the default they give `NA`).
+  Supplying both `response_var` and `predictor_vars` selects this criterion
+  by default.
 
 * **`build_tessellation(method = "hex")` or `"square"` laid its lattice over
   a near-global lon/lat boundary in Web Mercator.**  The points' CRS is
@@ -3908,8 +3933,7 @@ old behaviour where there is a way.
 
 * The resolution vignette's criteria table describes the elbow as the
   log-log sag it is, `NA` on points with no cluster structure, and its
-  introduction says `determine_optimal_levels()` still returns a count
-  there, with a warning.
+  introduction says `determine_optimal_levels()` returns `NA` there.
 
 * `?coerce_to_points` (`tmp_project`) states the rule a CRS-less layer is
   read by: the lon/lat heuristic of `ensure_projected()`, not merely lying

@@ -45,9 +45,9 @@ of observations each once there are more cells than dense places.
 per cell gives, 4.5 by default, by the leave-one-out error of the cell
 values, and `select_resolution()` sets it; given a ladder of counts the
 profile scores every one against the spatial structure of the
-observations, and `determine_optimal_levels()` reads one off their
-clustering when they have any. `build_tessellation()` produces Voronoi,
-hex, square or Delaunay cells clipped to your study area, with IDs that
+observations, and `determine_optimal_levels()` reads one off the elbow
+of their clustering when there is one. `build_tessellation()` produces
+Voronoi, hex, square or Delaunay cells clipped to your study area, with IDs that
 stay stable when the input row order changes. `summarize_by_cell()`
 aggregates onto them with a count and a standard error for every cell
 mean, and beside each mean a pooled value, the mean pulled toward the
@@ -293,7 +293,7 @@ approximate.
 | get my data into a projected CRS                                        | `ensure_projected()`, `coerce_to_points()`, `harmonize_crs()`                                               |
 | cut my study area into cells                                            | `build_tessellation()` (`"voronoi"`, `"hex"`, `"square"`, `"triangles"`)                                    |
 | place the seeds a Voronoi grows from                                    | `get_voronoi_seeds()`                                                                                       |
-| choose how many cells, quickly (coordinates only, no optional packages) | `determine_optimal_levels()`                                                                                |
+| read a cell count off the elbow of the clustering of my points (coordinates only; `NA` when there is none) | `determine_optimal_levels()`                                                                                |
 | set the cell count from a number of observations per cell              | `resolution_profile()`, then `select_resolution()` (by default 4.5 per cell, for pooled values)             |
 | see what every cell count costs                                         | `resolution_profile(n_levels = )`, then `summary()` on it for every criterion’s pick, or `select_resolution(criterion = )` for one criterion’s pick |
 | read a cell’s value and interval at other locations                     | `cell_values_at()`                                                                                          |
@@ -501,8 +501,10 @@ you to decide about the block size.
 around the elbow sat at nine cells or fewer, where Moran’s I is
 arithmetically degenerate, so the call fell back to the geometric
 ranking. On points with no cluster structure that is the usual outcome
-below about `max_levels = 40`; `resolution_profile()` scores Moran’s z
-at every level of its ladder. See `vignette("resolution")`.
+below about `max_levels = 40` under `on_no_elbow = "warn"` (at the
+default such points return `NA` before any window is placed);
+`resolution_profile()` scores Moran’s z at every level of its ladder.
+See `vignette("resolution")`.
 
 **`determine_optimal_levels(): Moran's I could not be computed at any k from ... to ... in the elbow's neighbourhood`**
 The candidates did pass nine cells, but too few of the cells hold a row

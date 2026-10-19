@@ -26,7 +26,8 @@ because the package is a cross-validation package.
 \enumerate{
 \item \strong{Choose a resolution.} \code{\link{determine_optimal_levels}()}
 reads a cell count out of the spatial structure of the observations, so
-you do not have to guess one.
+you do not have to guess one, and returns \code{NA} when the WSS
+curve of their k-means clustering has no elbow to read one from.
 \item \strong{Tessellate.} \code{\link{build_tessellation}()} turns the
 point pattern into analysis regions (Voronoi, Delaunay triangles, or a
 hex/square grid) with reproducible cell identifiers.

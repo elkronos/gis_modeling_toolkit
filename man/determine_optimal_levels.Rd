@@ -14,7 +14,7 @@ determine_optimal_levels(
   predictor_vars = NULL,
   criterion = c("geometric", "morans_i", "combined"),
   select_on = c("all", "split"),
-  on_no_elbow = c("warn", "na", "error")
+  on_no_elbow = c("na", "warn", "error")
 )
 }
 \arguments{
@@ -87,37 +87,43 @@ post-selection.  The count is still chosen for the whole layer.  See
 
 \item{on_no_elbow}{What to do when the count is not a finding about the
 data: the WSS curve has no elbow, the ladder is too short to show one,
-or there are too few points or locations for a ladder at all.
-\code{"warn"} (default) returns the count the chord rule or the ladder
-gives, with a warning of class \code{spatialkit_no_elbow} whose
-condition carries \code{k} (that count), \code{sag} (the largest
-log-log sag of the curve; an elbow needs \eqn{\log 1.25}) and
-\code{structured = FALSE}, so a caller can catch it without matching
-the message.  \code{"na"} returns \code{NA_integer_} there and logs the
-reason, and every result under \code{"na"} carries the attributes
-\code{structured} (\code{FALSE} with the \code{NA}, \code{TRUE} with a
-count the elbow chose) and \code{sag}, so one test of
-\code{attr(k, "structured")} covers both outcomes;
-\code{"error"} stops with an error of that class.  Under the
-model-aware criteria the candidates are scored around the elbow, so
-with no elbow the ladder places that window and the same applies.}
+or there are too few points or locations for a ladder at all.  Each
+choice raises a condition of class \code{spatialkit_no_elbow} there,
+which carries \code{k} (the count the chord rule or the ladder gives),
+\code{sag} (the largest log-log sag of the curve; an elbow needs
+\eqn{\log 1.25}) and \code{structured = FALSE}, so a caller can catch
+it without matching the message.
+\code{"na"} (default) returns \code{NA_integer_} there, with a warning
+of that class, and every result under \code{"na"} carries the
+attributes \code{structured} (\code{TRUE} when the WSS curve has an
+elbow, \code{FALSE} with the \code{NA}) and \code{sag}, so one test of
+\code{attr(k, "structured")} covers both outcomes.  \code{"warn"}
+returns the counts the chord rule or the ladder gives (see Value), with
+the same warning; its results carry neither attribute.  \code{"error"}
+stops with an error of that class.  Under the model-aware criteria the
+candidates are scored around the elbow: with no elbow, \code{"na"} and
+\code{"error"} score none, and under \code{"warn"} the ladder places
+that window.}
 }
 \value{
 An integer vector of candidate level counts, \strong{best first}:
 under the geometric criterion the elbow, then its lower and upper
-neighbours (with a warning of class \code{spatialkit_no_elbow} when the
-WSS curve has no elbow and the first is the ladder's choice, or
-\code{NA_integer_} under \code{on_no_elbow = "na"}, where the result
-also carries the attributes \code{structured} and \code{sag}; see
-Details); under the model-aware
+neighbours; under the model-aware
 criteria the candidates in rank order, with a warning of class
 \code{spatialkit_diagnostic_ranking} when Moran's z took part in the
-ranking.  A layer with no points is an
-error, and one with fewer than three points, or with every point on
-one location, has no ladder: it returns 1 under the same
-\code{on_no_elbow} rule.
-\code{k[1]} is therefore the top-ranked count on every path, and
-\code{top_n = 1} returns it alone. When
+ranking.  When the WSS curve has no elbow it is \code{NA_integer_},
+with a warning of class \code{spatialkit_no_elbow} (under
+\code{on_no_elbow = "warn"} the ladder's choice and its neighbours, with
+the same warning; see Details), and so it is when the ladder is too
+short to show an elbow (\code{max_levels} of 1 or 2).  At the default
+\code{on_no_elbow = "na"} every result carries the attributes
+\code{structured} (\code{TRUE} when the WSS curve has an elbow,
+\code{FALSE} with the \code{NA}) and \code{sag}.  A layer with no
+points is an error, and one with fewer than three points, or with every
+point on one location, has no ladder: it returns \code{NA} under the
+same rule, and 1 under \code{"warn"}.
+\code{k[1]} is therefore the top-ranked count, or \code{NA}, on every
+path, and \code{top_n = 1} returns it alone. When
 \code{criterion != "geometric"}, an attribute \code{"diagnostics"} is
 attached with per-k Moran's I values (\code{moran_i}) and their
 standardised deviates (\code{moran_z}), the WSS curve (\code{wss}) with
@@ -136,12 +142,22 @@ that ordered them (\code{combined_rank}, named by \code{k}) and
 \code{criterion = "combined"}; when \code{"combined"} returned the
 geometric ranking because the elbow is below ten cells, it carries
 \code{criterion = "geometric"} and \code{fallback} (the reason) in
-place of \code{combined_rank}.  When the model-aware
+place of \code{combined_rank}.  The \code{NA} the default returns on
+a model-aware call whose WSS curve has no elbow (or a ladder too short
+to show one) carries the attribute too, with what the sweep measured:
+\code{moran_i} and \code{moran_z} all \code{NA} and \code{eval_ks}
+empty, since no count was scored, \code{knee_k} the count the chord
+rule lands on, and \code{structured = FALSE}.  When the model-aware
 path itself falls back to the geometric result (no viable k in the elbow
 neighbourhood, or Moran's I could not be computed for any candidate), no
 diagnostics are available and the attribute is absent. Both fallbacks are
-logged as warnings.  The geometric path returns a plain
-integer vector; a rising WSS curve is still logged there.  With
+logged as warnings.  It is absent too on the \code{NA} of a layer with
+no ladder (fewer than three points, one location, or k-means failing at
+every \code{k} from 2).  The geometric
+path returns an integer vector with
+no attribute but \code{structured} and \code{sag} (none under
+\code{"warn"} or \code{"error"}); a rising WSS curve is still logged
+there.  With
 \code{select_on = "split"} every path adds a \code{"split"} attribute:
 a list with \code{selection} and \code{estimation} (integer row
 positions in \code{data_sf}), \code{method} and \code{seed}.  For a full
@@ -169,14 +185,15 @@ points with ladders to 3--40, uniform layouts over squares, discs,
 triangles, an L-shape, density gradients and jittered lattices sagged at
 most 0.16, and two to ten separated clusters at least 0.6 once
 \code{max_levels} passed the cluster count.  With no elbow the function
-warns (a warning of class \code{spatialkit_no_elbow}, which carries the
-count as \code{k} and the largest sag as \code{sag}) and returns the
-linear-axis answer, which the ladder chose, not the data: about
+returns \code{NA}, so that a count which is not a finding is not passed on
+as one: the result carries \code{structured = FALSE} and the largest sag
+as \code{sag}, and a warning of class \code{spatialkit_no_elbow} says
+why.  The linear-axis answer there is the ladder's, not the data's: about
 \eqn{\sqrt{K_{max}}}, 3 or 4 cells at the default, close to one mean for
-the whole layer.  \code{on_no_elbow = "na"} returns \code{NA} there and
-\code{"error"} stops, so that a count which is not a finding is not
-passed on as one.  An elongated extent also bends, at about its aspect
-ratio, because
+the whole layer, and the warning carries it as \code{k} and the largest
+sag as \code{sag}.  \code{on_no_elbow = "warn"} returns that count all
+the same, with the same warning, and \code{"error"} stops.  An elongated
+extent also bends, at about its aspect ratio, because
 the first cuts go across its long axis (0.2--0.45 for a 4:1 rectangle);
 past the threshold that bend is reported as an elbow, and it describes
 the extent's shape rather than clusters in it.  When locations repeat
@@ -211,7 +228,9 @@ counts scored.  Measured on 500 points with a response alone and
 \code{criterion = "morans_i"}: the first-ranked count was 10 to 13 on 16
 of 16 white-noise layers and on 16 of 16 exponential fields
 (\code{max_levels} 40 and 80), and 10 was the first count the statistic
-could be computed at on all 32.  \code{\link{select_resolution}()}
+could be computed at on all 32.  Those layers have no elbow, so their
+counts are ranked under \code{on_no_elbow = "warn"} only; at the default
+they return \code{NA}.  \code{\link{select_resolution}()}
 refuses the same statistic unless asked with \code{diagnostic = TRUE};
 here the criterion is asked for by name, or taken when both model
 variables are supplied, so the count is returned and the warning carries
@@ -293,9 +312,10 @@ logs a warning that says so.  That is the usual outcome well past
 \code{max_levels = 10}: the neighbourhood is the elbow plus or minus
 \code{max(4, top_n)}, and on points with no cluster structure the elbow
 sits near \eqn{\sqrt{K_{max}}}, so the neighbourhood reaches ten cells only
-from about \code{max_levels = 40}.  Measured on 1000 uniform points,
-\code{max_levels} of 12, 20 and 30 all fell back, and 40 scored
-\code{k} = 10 and 11 alone.  On such a layer
+from about \code{max_levels = 40}.  Measured on 1000 uniform points
+under \code{on_no_elbow = "warn"} (at the default they return \code{NA}
+before any window is placed), \code{max_levels} of 12, 20 and 30 all fell
+back, and 40 scored \code{k} = 10 and 11 alone.  On such a layer
 \code{\link{resolution_profile}()}, which scores Moran's z at every level of
 its ladder, is the model-aware view.  Under \code{criterion = "combined"},
 an elbow below ten cells is a count Moran's I cannot score, so it cannot
@@ -306,8 +326,9 @@ the response did.)  Otherwise the candidates below the floor that sit
 alongside candidates above it all take the last place on the Moran's I
 axis, after every candidate it scored, while still competing on the
 geometric axis.  That axis is the elbow's own log-log sag at each
-candidate; when the WSS curve has no elbow it is flat, every candidate
-tied, and Moran's I alone orders them.
+candidate; when the WSS curve has no elbow (under
+\code{on_no_elbow = "warn"}) it is flat, every candidate tied, and
+Moran's I alone orders them.
 
 \code{"combined"} is not an estimate of the number of clusters.  Where the
 elbow is at ten cells or more, Moran's I can move the pick away from it
@@ -381,6 +402,13 @@ pts <- st_as_sf(
   coords = c("x", "y"), crs = 32632
 )
 determine_optimal_levels(pts, max_levels = 6)   # 2 1 3: the elbow first
+
+# Points spread evenly have no elbow: NA, with structured = FALSE and a
+# warning of class spatialkit_no_elbow that says why
+even <- st_as_sf(data.frame(x = 5e5 + runif(200, 0, 100),
+                            y = 5e6 + runif(200, 0, 100)),
+                 coords = c("x", "y"), crs = 32632)
+determine_optimal_levels(even, max_levels = 6)
 }
 \references{
 Arthur, D. and Vassilvitskii, S. (2007). k-means++: the advantages of
@@ -418,7 +446,8 @@ Research}, 25(57), 1--35. \url{https://jmlr.org/papers/v25/23-0446.html}
 \seealso{
 \code{\link[=build_tessellation]{build_tessellation()}} and \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, which accept
 this function's result directly as \code{approx_n_cells} and \code{n} (the first
-candidate is used, and the output records that it came from here);
+candidate is used, and the output records that it came from here; an
+\code{NA} from it stops them with a note on where it came from);
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} and \code{\link[=summarize_by_cell]{summarize_by_cell()}} for the steps
 that follow.
 

@@ -417,9 +417,12 @@ test_that("determine_optimal_levels() takes no partition argument and keeps plai
   # other under its seed, on the rows in coordinate order: the WSS curve it
   # reports is that computation.
   pts <- .pd_pts(n = 300L, seed = 6L)
+  # These points have no elbow, so the diagnostics come under
+  # on_no_elbow = "warn" only.
   out <- partition_quietly(determine_optimal_levels(pts, max_levels = 40L, set_seed = 5,
                                                     response_var = "z",
-                                                    criterion = "morans_i"))
+                                                    criterion = "morans_i",
+                                                    on_no_elbow = "warn"))
   diag <- attr(out, "diagnostics")
   expect_false(is.null(diag))
   xy <- partition_xy(pts)

@@ -47,8 +47,9 @@ test_that("a constant response is called constant, by the profile and by select_
 
 test_that("determine_optimal_levels() scores a response without predictors", {
   pts <- fus_pts(400, seed = 5)
+  # These points have no elbow: the window is scored under on_no_elbow = "warn".
   out <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
-                                            criterion = "morans_i"))
+                                            criterion = "morans_i", on_no_elbow = "warn"))
   # It fell back to the geometric ranking with "needs both response_var and
   # predictor_vars", though the statistic runs on an intercept alone.
   expect_false(any(grepl("falling back to geometric", out$text)))
@@ -59,11 +60,21 @@ test_that("determine_optimal_levels() scores a response without predictors", {
   expect_false(is.null(d))
   expect_true(any(is.finite(d$moran_z)))
   expect_true(all(out$value %in% d$eval_ks[is.finite(d$moran_z[d$eval_ks])]))
-  # A response alone does not change the default criterion.
-  geo <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z"))
+  # A response alone does not change the default criterion (compared under
+  # "warn", where these points have counts to compare).
+  geo <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z",
+                                            on_no_elbow = "warn"))
   expect_null(attr(geo$value, "diagnostics"))
+  expect_false("spatialkit_diagnostic_ranking" %in% geo$classes)
+  expect_true(all(is.finite(geo$value)))
   expect_identical(as.integer(geo$value),
-                   as.integer(fus_catch(determine_optimal_levels(pts, max_levels = 40))$value))
+                   as.integer(fus_catch(determine_optimal_levels(pts, max_levels = 40,
+                                                                 on_no_elbow = "warn"))$value))
+  # At the default the NA has no diagnostics either: the criterion stayed
+  # geometric.
+  geo_na <- fus_catch(determine_optimal_levels(pts, max_levels = 40, response_var = "z"))
+  expect_true(is.na(geo_na$value))
+  expect_null(attr(geo_na$value, "diagnostics"))
   # Without a response there is still nothing to score, and that is said.
   none <- fus_catch(determine_optimal_levels(pts, max_levels = 40, criterion = "morans_i"))
   expect_true(any(grepl("criterion = 'morans_i' needs a response_var, and none was given",

@@ -59,7 +59,8 @@ grids the target is adjusted for packing density; the actual count after
 clipping to an irregular boundary may differ noticeably.  Besides a
 number, this accepts what the level-selection step returned: the integer
 vector of ranked candidates from \code{\link{determine_optimal_levels}()}
-(its first element is used), a \code{\link{select_resolution}()} result
+(its first element is used; its \code{NA} is refused with a note on
+where it came from), a \code{\link{select_resolution}()} result
 (its \code{$best}), or a \code{\link{resolution_profile}()}.  A profile
 built without an \code{estimate} is read with
 \code{select_resolution()} by \code{cp}; one built with
@@ -250,8 +251,9 @@ decision you make, and the data does not make it for you; hexagons avoid the
 axis-aligned artefacts of squares and have uniform neighbour distances.
 \code{"triangles"} returns the Delaunay triangulation, useful for
 interpolation and adjacency work; it is not meant as an aggregation unit.
-\code{\link{determine_optimal_levels}()} will suggest a cell count from the
-spatial structure of the data.
+\code{\link{determine_optimal_levels}()} suggests a cell count from the
+elbow of the WSS curve of the points' k-means clustering, and returns
+\code{NA}, which \code{approx_n_cells} refuses, when the curve has none.
 
 \code{"voronoi"} and \code{"triangles"} are built on the points' vertices:
 a MULTIPOINT feature with several vertices gets one cell (or triangle

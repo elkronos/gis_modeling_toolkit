@@ -728,8 +728,12 @@ test_that("determine_optimal_levels() reports the elbow and the failed k in its 
   expect_true(d$knee_k %in% seq_along(d$wss))
   expect_true(all(d$eval_ks >= d$knee_k - max(4L, 3L) & d$eval_ks <= d$knee_k + max(4L, 3L)))
   expect_identical(d$failed_k, integer(0))
-  # The geometric path stays a plain integer vector, as 5.1 settled.
-  expect_null(attributes(determine_optimal_levels(pts, max_levels = 30)))
+  # The geometric path is an integer vector with the elbow's flag and sag at
+  # the default, on_no_elbow = "na", and a plain one under "warn", as 5.1
+  # settled.
+  expect_named(attributes(determine_optimal_levels(pts, max_levels = 30)),
+               c("structured", "sag"))
+  expect_null(attributes(determine_optimal_levels(pts, max_levels = 30, on_no_elbow = "warn")))
 })
 
 test_that("build_tessellation() records the points it snapped to a nearest cell", {
