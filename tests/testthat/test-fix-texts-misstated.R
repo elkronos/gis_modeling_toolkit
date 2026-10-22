@@ -551,14 +551,17 @@ test_that("the reason for no variogram model names the lag bins, not singular fi
 test_that("the REML detrending on fewer than 30 locations is said not to be fitted", {
   skip_if_not_installed("gstat")
   skip_if_not_installed("nlme")
+  # Fewer than 30 locations get no range at all (BUG-20): the early NA, with
+  # no REML fit tried and so no warning about one.
   d <- .tm_pts()[rep(1:20, 2), ]
   d$z <- d$z + withr::with_seed(2, stats::rnorm(40, 0, 0.01))
   r <- .tm_catch(estimate_sac_range(d, "z", predictor_vars = "noise", detrend = "reml"))
-  said <- grep("REML detrending", r$text, value = TRUE, fixed = TRUE)
-  expect_length(said, 1L)
-  expect_match(said, paste0("the REML detrending on noise was not fitted: the 40 rows lie at 20 ",
-                            "locations, fewer than the 30 it needs; falling back to OLS"),
-               fixed = TRUE)
+  expect_length(grep("REML detrending", r$text, value = TRUE, fixed = TRUE), 0L)
+  expect_true(is.na(r$value))
+  expect_false(inherits(r$value, "sac_range"))
+  expect_identical(attr(r$value, "rejected_reason"),
+                   paste0("20 distinct location(s) among the 40 point(s) with a finite value ",
+                          "to model, fewer than the 30 a variogram range is estimated from"))
   # A fit that returns nothing on enough locations did not converge.
   r <- testthat::with_mocked_bindings(
     .tm_catch(estimate_sac_range(.tm_pts(), "z", predictor_vars = "noise", detrend = "reml")),

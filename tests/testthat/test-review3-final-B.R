@@ -135,8 +135,12 @@ test_that("estimate_sac_range()'s early NA returns carry a rejected_reason and n
   expect_identical(reason_of(estimate_sac_range(pf, "z")),
                    paste0("20 point(s) with a finite value to model, fewer than ",
                           "the 30 a variogram range is estimated from"))
+  # 40 rows at one location: the floor counts distinct locations (BUG-20),
+  # so this is one location of the 30 needed, and not a layer with no extent.
   ps <- r2_pts(rep(5e5, 40), rep(5e6, 40), z = rnorm(40))
-  expect_match(reason_of(estimate_sac_range(ps, "z")), "^the points have no extent")
+  expect_identical(reason_of(estimate_sac_range(ps, "z")),
+                   paste0("1 distinct location(s) among the 40 point(s) with a finite value ",
+                          "to model, fewer than the 30 a variogram range is estimated from"))
 
   # make_folds(auto_range = TRUE) names it in its warning.
   res <- rfb_collect_warnings(r2_quiet(make_folds(

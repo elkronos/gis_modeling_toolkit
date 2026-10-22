@@ -696,6 +696,20 @@
     grepl("no spatial structure", why[1L], fixed = TRUE)
 }
 
+# estimate_sac_range()'s floor of 30 counts distinct locations as well as
+# rows: rows that share a location are one place to the variogram and to its
+# test for spatial structure.  This is the reason of the NA it returns below
+# that floor.  It starts with the count that fell short, as the floor on rows
+# does, and is not a verdict on structure (it does not say "no spatial
+# structure", so .sac_no_structure() is FALSE for it).  `subsampled` is TRUE
+# when the layer has 30 or more locations and the n_max subsample kept fewer.
+.sac_reason_few_locations <- function(n_locations, n_points, subsampled = FALSE)
+  sprintf(paste0("%d distinct location(s) among the %d point(s) %s, fewer than ",
+                 "the 30 a variogram range is estimated from"),
+          as.integer(n_locations), as.integer(n_points),
+          if (isTRUE(subsampled)) "of the n_max subsample"
+          else "with a finite value to model")
+
 
 # Two functions hand back a layer with a record of what happened to its rows:
 # prep_model_data() records the rows it dropped, assign_features_to_polygons()

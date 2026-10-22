@@ -44,12 +44,14 @@ once the covariates have done their work.  How the trend is removed is
 set by \code{detrend}, and it matters: see "Detrending and the
 residual-variogram bias".  Rows whose response or predictor is missing
 or infinite are left out of that fit, and so of the variogram, with a
-logged count.  When that leaves fewer than 30 rows the result is the
-unclassed \code{NA} that says how many were left (see Value).  One
+logged count.  When that leaves fewer than 30 rows, or fewer than 30
+distinct locations, the result is the unclassed \code{NA} that says
+how many were left (see Value).  One
 case differs, as it always has: when no row at all has every predictor
 (one is missing on every row) no trend can be fitted, and the variogram
 is of the raw response, with an R warning and \code{detrended} set to
-\code{FALSE}.}
+\code{FALSE}.  On fewer than 30 distinct locations nothing is fitted
+then either: the result is the \code{NA}, and there is no such warning.}
 
 \item{n_max}{Maximum number of points the variogram is computed on, at
 least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
@@ -58,7 +60,14 @@ is cut to a seeded random subsample of this size, drawn after rows with
 nothing to model have been left out and with the rows in a fixed order,
 so the subsample does not depend on how the layer is sorted.  The
 counts are returned as the attributes \code{n_used}, \code{n_missing}
-and \code{n_subsampled}.}
+and \code{n_subsampled}.  The floor of 30 distinct locations applies
+to the rows the variogram is computed on, and a subsample of a layer
+with many rows a location can hold fewer locations than the layer.
+When the layer itself has 30 locations or more and the subsample holds
+fewer, the reason of the \code{NA} says
+\code{"of the n_max subsample"}, and a larger \code{n_max} keeps more
+of them; when the layer has fewer than 30, the reason gives the layer's
+counts.}
 
 \item{cutoff}{Fraction of the maximum inter-point distance to use as the
 variogram lag cutoff, above 0 and at most 1.  That distance is the
@@ -93,7 +102,10 @@ identical input and silently advance the caller's RNG.  Pass \code{NULL}
 for an unseeded subsample, or a
 different number to check how sensitive the estimate is to the subsample.
 Ignored when no more than \code{n_max} rows carry a value, where nothing
-is sampled.  The \code{reml_max_n} subsample uses the same seed, and so
+is sampled.  On a layer whose rows crowd onto few locations the
+subsample can also decide whether 30 distinct locations remain, and so
+whether a range is estimated at all (see \code{n_max}).  The
+\code{reml_max_n} subsample uses the same seed, and so
 does the draw of one row a location that \code{detrend = "reml"} makes
 on a layer with repeat visits.}
 
@@ -106,10 +118,11 @@ covariance together by residual maximum likelihood with
 \code{nlme::gls()}, returns the REML range, and attaches the empirical
 variogram of the REML residuals for inspection.  It needs \pkg{nlme},
 costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-it takes one row a location and needs 30 locations.  When it is not
-fitted (no \pkg{nlme}, or fewer than 30 locations) or does not
-converge, the \code{"ols"} path runs instead with an R warning that
-says which.  The start of the fit is chosen from the profile
+it takes one row a location and needs 30 locations, which every layer
+needs anyway (a layer with fewer gets the unclassed \code{NA}, see
+Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}) or
+does not converge, the \code{"ols"} path runs instead with an R
+warning that says which.  The start of the fit is chosen from the profile
 REML likelihood on a grid of ranges and nugget proportions, and when
 more than one start is fitted the fit with the largest log-likelihood
 is kept.}
@@ -291,6 +304,13 @@ says why: \code{"package 'gstat', which the variogram needs, is not
       is estimated from"}, \code{"<n> point(s) with a finite value to
       model, fewer than the 30 a variogram range is estimated from"}
 (the count is of the whole layer's rows with a value),
+\code{"<k> distinct location(s) among the <n> point(s) with a
+      finite value to model, fewer than the 30 a variogram range is
+      estimated from"} (rows that share a location count once; when the
+layer has 30 or more locations and the \code{n_max} subsample kept
+fewer, the counts are the subsample's and
+\code{"of the n_max subsample"} stands in place of \code{"with a
+      finite value to model"}),
 \code{"the response is constant"}, \code{"the residuals on
       predictor_vars are constant: the predictors explain the response
       exactly"} or \code{"the points have no extent (the largest distance
@@ -363,6 +383,15 @@ and not each other's neighbours, so on such a layer the test is made on
 the means of the locations: what it asks is whether locations near each
 other are alike, which a location's own effect, however large, does not
 answer.  With very unequal numbers of visits the p-value is approximate.
+For the same reason a layer needs 30 distinct locations, not only 30
+rows: below that the result is the unclassed \code{NA} whose reason gives
+the count (see Value), and nothing is fitted.  Five locations visited 20
+times give ten pairs of locations and five means, from which neither a
+range nor a verdict on structure can be read.  Two rows are at one
+location when both their coordinates are equal to the last bit after the
+projection, so repeat visits recorded with slightly different
+coordinates count as separate locations; round the coordinates first to
+pool them.
 
 \strong{The lags.}  With \code{lags = "adaptive"} (the default) the first
 bin runs from zero to the distance within which the closest

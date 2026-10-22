@@ -475,6 +475,16 @@ old behaviour where there is a way.
   in that case.  A script that compared the reason with the old text can
   compare its start, "no variogram model could be fitted", which both share.
 
+* `estimate_sac_range()` needs 30 distinct locations as well as 30 rows
+  (Bug fixes has the details).  A layer of 30 or more rows at 2 to 29
+  distinct locations, to which 2.0.0 fitted a variogram, gets the unclassed
+  `NA` whose `rejected_reason` begins with the count of its distinct
+  locations.  So on such layers a range that came back is `NA`,
+  `summarize_by_cell(deff = "variogram")` returns Kish standard errors with
+  `spatialkit_deff_fallback`, and `make_folds(auto_range = TRUE)` builds
+  geometric blocks.  No argument gives the earlier result back: a range
+  read off fewer than 30 locations is not identified.
+
 * `new_spatial_fit()` stops on a fit its methods cannot use, with an error
   that names the argument and what it got: `data_sf` must be an sf object,
   `formula` a formula, `response_var` the name of one attribute column of
@@ -709,7 +719,8 @@ old behaviour where there is a way.
   visits, is returned as `zero_lag_semivariance`.  When the rows outnumber
   the locations by 30 or more, the nugget fitted to the variogram is not let
   under it (`nugget_floor`).  With `detrend = "reml"` the fit takes one row
-  a location, drawn under `seed`, and takes no such floor.
+  a location, drawn under `seed`, and takes no such floor.  A layer needs
+  30 distinct locations, not only 30 rows.
 
 * `select_resolution(criterion = "cp")` says when the count is not
   identified.  `structured` is `FALSE` when one cell for the whole layer
@@ -1704,6 +1715,32 @@ old behaviour where there is a way.
   or infinite response or predictor are now dropped first, and the subsample
   no longer depends on the order of the rows.
 
+* **`estimate_sac_range()` counted rows, not locations, against its floor of
+  30.**  Rows that share a location are one place to the variogram and to
+  its test for spatial structure, yet five locations visited 20 times passed
+  the floor, got a variogram of ten pairs of locations, and were judged by a
+  test of five location means, which called most such layers unstructured
+  even where the range was three times the extent.  The floor now counts
+  distinct locations as well, among the rows the variogram is computed on.
+  Below 30 the result is the unclassed `NA` whose `rejected_reason` gives
+  the count ("5 distinct location(s) among the 100 point(s) with a finite
+  value to model, fewer than the 30 a variogram range is estimated from"),
+  and nothing is fitted.  When the layer has 30 or more locations and the
+  `n_max` subsample keeps fewer, the reason gives the subsample's counts
+  and says "of the n_max subsample".  The functions that estimate a
+  variogram read it as they read the other early refusals:
+  `make_folds(auto_range = TRUE)` builds geometric blocks and names it in
+  its warning, `summarize_by_cell(deff = "variogram")` falls back to Kish
+  with `spatialkit_deff_fallback` where the verdict of no structure had
+  given a design effect of 1 in every cell, `kriging_adequacy()` stops with
+  it, and the Bayesian fit's check before fitting reports the range as not
+  estimated.  With `detrend = "reml"` such a layer got a warning that the
+  REML fit did not converge when nothing had been fitted; it gets the same
+  `NA` and no warning.  Where a predictor is missing on every row of such a
+  layer, there is no warning that the variogram is fitted to the raw
+  response, since none is fitted.  A layer whose rows all lie at one
+  location gets this reason in place of "the points have no extent".
+
 * **`estimate_sac_range(detrend = "reml")` kept the first fit to converge,
   not the best.**  When the true range is short against the extent the
   starts of `nlme::gls()` lay in a valley of the likelihood: a layer with a
@@ -2270,12 +2307,13 @@ old behaviour where there is a way.
   `model_metrics(se.fit = TRUE)` on a fit that is not Bayesian pointed to
   `cv_bayes()`.  The `rejected_reason` of a variogram with fewer than three
   lag bins holding pairs said "(singular fits)" (Breaking changes has the
-  new text).  `detrend = "reml"` on fewer than 30 locations, or without
-  nlme, said that the fit did not converge; it says that it was not fitted,
-  and why.  `kriging_adequacy()`'s print gave a pure nugget a gain with no
-  word on it; it says that there the gain is that of averaging the locations
-  a cell is kriged from (`kr_n_used`), its own among them, over averaging
-  its own alone.
+  new text).  `detrend = "reml"` without nlme said that the fit did not
+  converge; it says that it was not fitted, and why (on fewer than 30
+  locations no fit is tried: see the entry on the floor of 30 locations).
+  `kriging_adequacy()`'s print gave a pure nugget a gain with no word on it;
+  it says that there the gain is that of averaging the locations a cell is
+  kriged from (`kr_n_used`), its own among them, over averaging its own
+  alone.
 
 * **Cp took a nugget at the fit's lower bound as its noise variance, and one
   that the closest pairs of points contradict.**  `resolution_profile()`

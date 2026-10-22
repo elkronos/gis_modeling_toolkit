@@ -2643,6 +2643,15 @@ sac_nugget <- function(x) {
 #' the means of the locations: what it asks is whether locations near each
 #' other are alike, which a location's own effect, however large, does not
 #' answer.  With very unequal numbers of visits the p-value is approximate.
+#' For the same reason a layer needs 30 distinct locations, not only 30
+#' rows: below that the result is the unclassed \code{NA} whose reason gives
+#' the count (see Value), and nothing is fitted.  Five locations visited 20
+#' times give ten pairs of locations and five means, from which neither a
+#' range nor a verdict on structure can be read.  Two rows are at one
+#' location when both their coordinates are equal to the last bit after the
+#' projection, so repeat visits recorded with slightly different
+#' coordinates count as separate locations; round the coordinates first to
+#' pool them.
 #'
 #' \strong{The lags.}  With \code{lags = "adaptive"} (the default) the first
 #' bin runs from zero to the distance within which the closest
@@ -2776,12 +2785,14 @@ sac_nugget <- function(x) {
 #'   set by \code{detrend}, and it matters: see "Detrending and the
 #'   residual-variogram bias".  Rows whose response or predictor is missing
 #'   or infinite are left out of that fit, and so of the variogram, with a
-#'   logged count.  When that leaves fewer than 30 rows the result is the
-#'   unclassed \code{NA} that says how many were left (see Value).  One
+#'   logged count.  When that leaves fewer than 30 rows, or fewer than 30
+#'   distinct locations, the result is the unclassed \code{NA} that says
+#'   how many were left (see Value).  One
 #'   case differs, as it always has: when no row at all has every predictor
 #'   (one is missing on every row) no trend can be fitted, and the variogram
 #'   is of the raw response, with an R warning and \code{detrended} set to
-#'   \code{FALSE}.
+#'   \code{FALSE}.  On fewer than 30 distinct locations nothing is fitted
+#'   then either: the result is the \code{NA}, and there is no such warning.
 #' @param n_max Maximum number of points the variogram is computed on, at
 #'   least 30; \code{Inf} for no limit.  Variogram estimation is O(n²) so
 #'   this keeps runtime bounded.  A layer with more rows that carry a value
@@ -2789,7 +2800,14 @@ sac_nugget <- function(x) {
 #'   nothing to model have been left out and with the rows in a fixed order,
 #'   so the subsample does not depend on how the layer is sorted.  The
 #'   counts are returned as the attributes \code{n_used}, \code{n_missing}
-#'   and \code{n_subsampled}.
+#'   and \code{n_subsampled}.  The floor of 30 distinct locations applies
+#'   to the rows the variogram is computed on, and a subsample of a layer
+#'   with many rows a location can hold fewer locations than the layer.
+#'   When the layer itself has 30 locations or more and the subsample holds
+#'   fewer, the reason of the \code{NA} says
+#'   \code{"of the n_max subsample"}, and a larger \code{n_max} keeps more
+#'   of them; when the layer has fewer than 30, the reason gives the layer's
+#'   counts.
 #' @param cutoff Fraction of the maximum inter-point distance to use as the
 #'   variogram lag cutoff, above 0 and at most 1.  That distance is the
 #'   farthest pair, found on the convex hull, and not the bounding-box
@@ -2821,7 +2839,10 @@ sac_nugget <- function(x) {
 #'   for an unseeded subsample, or a
 #'   different number to check how sensitive the estimate is to the subsample.
 #'   Ignored when no more than \code{n_max} rows carry a value, where nothing
-#'   is sampled.  The \code{reml_max_n} subsample uses the same seed, and so
+#'   is sampled.  On a layer whose rows crowd onto few locations the
+#'   subsample can also decide whether 30 distinct locations remain, and so
+#'   whether a range is estimated at all (see \code{n_max}).  The
+#'   \code{reml_max_n} subsample uses the same seed, and so
 #'   does the draw of one row a location that \code{detrend = "reml"} makes
 #'   on a layer with repeat visits.
 #' @param detrend How the trend on \code{predictor_vars} is removed;
@@ -2833,10 +2854,11 @@ sac_nugget <- function(x) {
 #'   \code{nlme::gls()}, returns the REML range, and attaches the empirical
 #'   variogram of the REML residuals for inspection.  It needs \pkg{nlme},
 #'   costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-#'   it takes one row a location and needs 30 locations.  When it is not
-#'   fitted (no \pkg{nlme}, or fewer than 30 locations) or does not
-#'   converge, the \code{"ols"} path runs instead with an R warning that
-#'   says which.  The start of the fit is chosen from the profile
+#'   it takes one row a location and needs 30 locations, which every layer
+#'   needs anyway (a layer with fewer gets the unclassed \code{NA}, see
+#'   Value, and no fit is tried).  When it is not fitted (no \pkg{nlme}) or
+#'   does not converge, the \code{"ols"} path runs instead with an R
+#'   warning that says which.  The start of the fit is chosen from the profile
 #'   REML likelihood on a grid of ranges and nugget proportions, and when
 #'   more than one start is fitted the fit with the largest log-likelihood
 #'   is kept.
@@ -3055,6 +3077,13 @@ sac_nugget <- function(x) {
 #'       is estimated from"}, \code{"<n> point(s) with a finite value to
 #'       model, fewer than the 30 a variogram range is estimated from"}
 #'       (the count is of the whole layer's rows with a value),
+#'       \code{"<k> distinct location(s) among the <n> point(s) with a
+#'       finite value to model, fewer than the 30 a variogram range is
+#'       estimated from"} (rows that share a location count once; when the
+#'       layer has 30 or more locations and the \code{n_max} subsample kept
+#'       fewer, the counts are the subsample's and
+#'       \code{"of the n_max subsample"} stands in place of \code{"with a
+#'       finite value to model"}),
 #'       \code{"the response is constant"}, \code{"the residuals on
 #'       predictor_vars are constant: the predictors explain the response
 #'       exactly"} or \code{"the points have no extent (the largest distance
@@ -3266,6 +3295,7 @@ estimate_sac_range <- function(points_sf, response_var,
   # na.exclude drops NA but not Inf, so the rows are chosen here: a finite
   # response and every predictor present and, if numeric, finite.
   fin <- is.finite(y_all)
+  raw_fallback <- NULL
   if (has_pred) {
     fin_pred <- Reduce(`&`, lapply(predictor_vars, function(v) {
       x <- df_all[[v]]
@@ -3277,14 +3307,17 @@ estimate_sac_range <- function(points_sf, response_var,
       # here, and the raw response is modelled.  That is a different
       # estimand, so it is an R warning, not a log line.  When some rows are
       # complete but fewer than 30, there is a trend to fit and too little
-      # to fit a variogram to: that is the NA below, with their count.
-      .warn_and_log(paste0("estimate_sac_range(): the %s detrending on %s ",
-                           "failed (none of the %d row(s) with a response has ",
-                           "every predictor present and finite); the ",
-                           "variogram is fitted to the RAW response instead, ",
-                           "which includes the trend."),
-                    if (identical(detrend, "reml")) "REML" else "OLS",
-                    paste(predictor_vars, collapse = " + "), sum(fin))
+      # to fit a variogram to: that is the NA below, with their count.  The
+      # warning is raised once the floor on locations has passed: below 30
+      # locations nothing is fitted, the raw response included, and the NA's
+      # reason is the whole answer.
+      raw_fallback <- sprintf(paste0("estimate_sac_range(): the %s detrending on %s ",
+                                     "failed (none of the %d row(s) with a response has ",
+                                     "every predictor present and finite); the ",
+                                     "variogram is fitted to the RAW response instead, ",
+                                     "which includes the trend."),
+                              if (identical(detrend, "reml")) "REML" else "OLS",
+                              paste(predictor_vars, collapse = " + "), sum(fin))
       has_pred <- FALSE
     } else {
       fin <- fin & fin_pred
@@ -3339,7 +3372,9 @@ estimate_sac_range <- function(points_sf, response_var,
   # between runs on identical input or advance the caller's RNG stream.
   n <- nrow(pts)
   n_subsampled <- 0L
+  xy_layer <- NULL
   if (n > n_max) {
+    xy_layer <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)
     idx <- sort(sample.int(n, n_max))
@@ -3350,10 +3385,48 @@ estimate_sac_range <- function(points_sf, response_var,
               n, n + n_subsampled)
   }
 
+  # The floor of 30 counts distinct locations as well as rows.  Rows that
+  # share a location are one place: a pair of them is at no lag, and the test
+  # for spatial structure is made on the location means.  Five locations
+  # visited 20 times passed the floor on rows and got a variogram of ten
+  # pairs of locations and a test on five means, with only the 2 nearest
+  # neighbours to look at, which called most such layers unstructured even
+  # where the range was three times the extent; the callers then acted on
+  # that verdict.  Below 30 locations neither a range nor a verdict on
+  # structure can be read, so the result is the early NA.  The count is of
+  # the rows the variogram is computed on, so it comes after the
+  # subsample, which can keep fewer locations than the layer has, and before
+  # the detrending, so that no REML trend is fitted to one row at each of
+  # fewer than 30 locations.  Locations are what .sac_locations() calls one:
+  # coordinates equal to the last bit, after the projection.
+  refuse_few_locations <- function(n_loc, n_rows, subsampled) {
+    .log_warn(paste0("estimate_sac_range(): the %d point(s) %s lie at %d distinct ",
+                     "location(s), fewer than 30; rows that share a location are ",
+                     "one place to a variogram.%s Returning NA."),
+              n_rows, if (subsampled) "of the n_max subsample" else "with a value to model",
+              n_loc,
+              if (subsampled) " A larger n_max keeps more of the layer's locations." else "")
+    structure(NA_real_,
+              rejected_reason = .sac_reason_few_locations(n_loc, n_rows, subsampled))
+  }
+  xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
+  n_loc_used <- length(.sac_locations(xy)$first)
+  if (n_loc_used < 30L) {
+    # Short of locations in the subsample alone, or in the layer itself?  A
+    # larger n_max helps only in the first case, so the reason says which.
+    n_loc_layer <- if (is.null(xy_layer)) n_loc_used
+                   else length(.sac_locations(xy_layer)$first)
+    if (n_loc_layer < 30L)
+      return(refuse_few_locations(n_loc_layer, n + n_subsampled, FALSE))
+    return(refuse_few_locations(n_loc_used, n, TRUE))
+  }
+  xy_layer <- NULL
+  # The raw response is modelled from here on, so the fallback is said now.
+  if (!is.null(raw_fallback)) .warn_and_log("%s", raw_fallback)
+
   pts_df <- sf::st_drop_geometry(pts)
   y_raw  <- as.numeric(pts_df[[response_var]])
   y <- y_raw
-  xy <- sf::st_coordinates(pts)[, 1:2, drop = FALSE]
   detrended <- FALSE
   detrend_method <- NA_character_
   reml_fit <- NULL
@@ -3376,7 +3449,11 @@ estimate_sac_range <- function(points_sf, response_var,
         # Why there is no fit.  .reml_trend() fits one row a location and
         # needs 30 of them (`reml_max_n` is at least 30, so its subsample
         # never takes them below that); without nlme, or below 30, nothing
-        # was fitted, and only otherwise did a fit fail to converge.
+        # was fitted, and only otherwise did a fit fail to converge.  The
+        # floor on locations above returns first for fewer than 30 locations
+        # among these same rows, counted the same way (coordinates equal to
+        # the last bit), so the second case is not reached from here; it
+        # stays as a guard on .reml_trend()'s own floor.
         n_loc <- sum(!duplicated(mf[, c(".sac_x", ".sac_y"), drop = FALSE]))
         why <- if (!.has_backend("nlme"))
           "was not fitted (package 'nlme' is not installed)"
@@ -3448,6 +3525,10 @@ estimate_sac_range <- function(points_sf, response_var,
     pts <- pts[ok_y, , drop = FALSE]; xy <- xy[ok_y, , drop = FALSE]
     y <- y[ok_y]; y_raw <- y_raw[ok_y]; X_design <- X_design[ok_y, , drop = FALSE]
     n <- length(y)
+    # The floor on locations again, as the floor on rows just above.
+    n_loc_used <- length(.sac_locations(xy)$first)
+    if (n_loc_used < 30L)
+      return(refuse_few_locations(n_loc_used, n, n_subsampled > 0L))
   }
   # A variable with no variance has no autocorrelation structure to estimate:
   # every semivariance is 0.  There is no range; say so.  "No variance" is
@@ -4304,8 +4385,9 @@ print.sac_range <- function(x, ...) {
 #' fire.  The range returned here sizes nothing.
 #'
 #' Skips the estimate (returning \code{NA}) when \code{gstat} is not
-#' installed or there are fewer than 30 points (the estimator's own floor),
-#' logging why at INFO level.  Otherwise runs \code{estimate_sac_range()} with
+#' installed or there are fewer than 30 points (the estimator's floor on
+#' rows; it refuses fewer than 30 distinct locations itself), logging why at
+#' INFO level.  Otherwise runs \code{estimate_sac_range()} with
 #' its console echo silenced and any R warning it raises muffled, because the
 #' caller did not ask for a range and an unidentified one only means the
 #' diagnostic cannot be given.  A failure of any other kind also yields
@@ -5418,9 +5500,9 @@ make_folds <- function(points_sf, k,
             sprintf("%d points, fewer than the 30 a variogram range is estimated from",
                     nrow(pts))
           else paste0("estimate_sac_range() returned NA before fitting: fewer ",
-                      "than 30 finite values to model, a variable with no ",
-                      "variance, or points with no extent; its log line says ",
-                      "which")
+                      "than 30 finite values to model or 30 distinct locations, ",
+                      "a variable with no variance, or points with no extent; ",
+                      "its log line says which")
         .warn_and_log(paste0("make_folds(block_kfold): auto_range = TRUE, but ",
                              "no autocorrelation range was identified (%s); ",
                              "falling back to geometric blocks, which are not ",
