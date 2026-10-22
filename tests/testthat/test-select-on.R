@@ -61,7 +61,7 @@ test_that("determine_optimal_levels(select_on = 'split') reads one half's respon
   # about.
   dol <- function(...) suppressWarnings(determine_optimal_levels(..., on_no_elbow = "warn"))
   out <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w",
-             select_on = "split")
+             criterion = "combined", select_on = "split")
   sp <- attr(out, "split")
   expect_s3_class(sp, "spatialkit_split")
   expect_setequal(c(sp$selection, sp$estimation), seq_len(300))
@@ -73,7 +73,8 @@ test_that("determine_optimal_levels(select_on = 'split') reads one half's respon
   expect_true(all(is.finite(out)))
   expect_identical(as.integer(out), as.integer(dol(pts, max_levels = 8)))
   # The default path is unchanged and carries no split.
-  all_pts <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w")
+  all_pts <- dol(pts, max_levels = 8, response_var = "z", predictor_vars = "w",
+                 criterion = "combined")
   expect_null(attr(all_pts, "split"))
   # The geometric path with a split reads no response and sees every point:
   # same integer vector as without, plus the attribute.

@@ -192,8 +192,9 @@ old behaviour where there is a way.
   `spatialkit_diagnostic_criterion` unless `diagnostic = TRUE`; `summary()`
   leaves it out unless it is named in `criteria`; `plot()` draws its curve
   with no selected level.  `determine_optimal_levels()` still ranks by it
-  under `criterion = "morans_i"` and `"combined"`, and raises a warning of
-  class `spatialkit_diagnostic_ranking` when it does.
+  under `criterion = "morans_i"`, and raises a warning of class
+  `spatialkit_diagnostic_ranking` when it does; under `"combined"` it is
+  reported and no longer ranks (below).
 
 * `get_voronoi_seeds()`, `voronoi_seeds_kmeans()` and `build_tessellation()`
   read a `resolution_profile()` built without an estimate by `cp` or not at
@@ -338,6 +339,52 @@ old behaviour where there is a way.
   `build_tessellation()` and `get_voronoi_seeds()` stop on the `NA` and say
   where it came from.  `on_no_elbow = "warn"` returns the count, with the
   same warning and without the `structured` and `sag` attributes.
+
+* `determine_optimal_levels()` keeps the criterion it is given.  Supplying
+  both `response_var` and `predictor_vars` switched `criterion =
+  "geometric"`, the default, to `"combined"`, also when `"geometric"` was
+  named, so the count read the response unasked.  Such a call now returns
+  what the call without the two variables returns, with no `"diagnostics"`
+  attribute and no `spatialkit_diagnostic_ranking` warning, and a line
+  logged at the INFO level says that `criterion = "combined"` reports
+  Moran's I of the cell means.  The columns must still exist; a factor or
+  character response is refused only under a criterion that reads it.
+  Name `criterion = "combined"` for the path the switch took, whose ranking
+  the next entry changes.
+
+* `determine_optimal_levels(criterion = "combined")` ranks the counts
+  around the elbow by the WSS curve's log-log sag alone.  Moran's z of the
+  cell means is dropped from the ranking, not replaced by another
+  statistic: averaged with the sag, it put first ten, the lowest count it
+  can be computed at, or the count after it.  On a curve with no elbow the
+  sag is flat and the counts below ten, which Moran's z cannot score, took
+  the last place on its axis; with an elbow its |z| is near 0 at the
+  coarsest counts it scores whatever the response.  On 600 uniform points
+  with a smooth field, under `on_no_elbow = "warn"`, the call returned
+  `10 6 5` where `"geometric"` returns `6 5 7`, and it now returns `6 5 7`;
+  on eleven clusters with a smooth field it returned `10 11 12` and now
+  returns `11 12 10`, the elbow, 11, first.  The sag is that of the sweep's
+  WSS curve, the one the elbow is read from, so with an elbow the elbow
+  comes first and the counts after it follow by sag; they can differ from
+  the two neighbours `"geometric"` returns.  With no elbow the order is
+  `"geometric"`'s.  The k-means re-run behind Moran's I no longer ranks:
+  where it landed in a worse optimum at the elbow than the sweep did,
+  another count went first, and on eighteen loose clusters the elbow, 15,
+  was not among the counts returned.  Its WSS stays in `attr(,
+  "diagnostics")` as `wss_eval`, beside `moran_i` and `moran_z`, and
+  `combined_rank` is the rank of the sweep's sag.  Where Moran's I can be
+  computed at no count of a window that reaches ten cells (a constant
+  response, too few cells holding a row with one, or too few in the half
+  `select_on = "split"` reads), `"combined"` returned the geometric ranking
+  without diagnostics; it now ranks as it does otherwise, with `moran_i`
+  and `moran_z` `NA` and a logged warning, so neither the response nor the
+  split changes the counts it returns.  `"morans_i"` still falls back
+  there.  `"combined"` no longer raises `spatialkit_diagnostic_ranking`.
+  `criterion = "morans_i"`, which still ranks by Moran's z, does; the
+  condition no longer carries `upgraded`, and its message names
+  `resolution_profile()` and `select_resolution()`, which run on the
+  default profile, where it named `select_resolution(criterion = "cp")`,
+  an error there.  No argument gives the earlier ranking.
 
 * Cp's noise variance in `resolution_profile()` is no longer a nugget at
   the variogram fit's lower bound (0, or at most 1e-4 of the sill), and it
@@ -1120,8 +1167,8 @@ old behaviour where there is a way.
 
 * `select_on = c("all", "split")` on `determine_optimal_levels()`,
   `resolution_profile()` and `select_features_forward()`.  Whenever a
-  selection reads the response --- a level count chosen with
-  `response_var` and `predictor_vars`, or a predictor set chosen by a
+  selection reads the response --- a level count chosen under
+  `criterion = "morans_i"`, or a predictor set chosen by a
   forward sweep --- what is estimated afterwards on the result is
   post-selection, and its standard errors are descriptive rather than at
   nominal coverage (Gao, Bien and Witten 2022).  `select_on = "split"` is
@@ -1151,10 +1198,9 @@ old behaviour where there is a way.
   points estimate, and a contiguous spatial half is less efficient than an
   exchangeable one (García Rasines and Young 2023).  Data thinning (Neufeld
   et al. 2024) and data fission (Leiner et al. 2023) keep the whole sample
-  and are noted on the help page, not implemented.  The help page also now
-  says plainly that supplying both `response_var` and `predictor_vars`
-  upgrades the level-selection criterion to `"combined"`, so the selection
-  depends on the response without that having been asked for.
+  and are noted on the help page, not implemented.  Under
+  `criterion = "combined"`, which no longer ranks by the response (see
+  Breaking changes), the split changes only the rows its diagnostics read.
 
 * `make_folds()` gains `blocks`: a polygon layer (`sf` or `sfc`) to use as
   the blocks of `method = "block_kfold"` in place of the grid it would
@@ -2435,8 +2481,8 @@ old behaviour where there is a way.
 * **A misspelt `response_var` or `predictor_vars` in
   `determine_optimal_levels()` silently changed the criterion.**  A column
   that was not there counted as "no model variables": with the default
-  criterion a typo kept `"geometric"` where supplying both variables
-  upgrades to `"combined"` (on one 400-point layer `7 6 8` instead of
+  criterion a typo kept `"geometric"` where supplying both variables then
+  upgraded to `"combined"` (on one 400-point layer `7 6 8` instead of
   `11 10 7`, with no warning and no diagnostics), and under `"morans_i"` or
   `"combined"` the one log line said the variables were required although
   both had been supplied.  A named column that is not in the layer is now
@@ -3382,9 +3428,7 @@ old behaviour where there is a way.
   candidates below the nine-cell floor, which Moran's I cannot score, shared
   an average rank that shrank as more of them went unscored (6 of 9 for
   seven of them), although the help page said they ranked last.  The
-  geometric axis is now the log-log sag the elbow is read from, and it is
-  flat when the curve has no elbow, so Moran's z alone orders the window.
-  Every unscored candidate takes the last place on the Moran axis, and exact
+  geometric axis is now the log-log sag the elbow is read from, and exact
   ties go to the `k` nearest the elbow.  And an elbow below ten cells, a
   count Moran's I cannot score, is no longer ranked against the counts it
   can: ranking it put ten, the smallest count Moran's I scores, first
@@ -3392,11 +3436,9 @@ old behaviour where there is a way.
   cluster gave the same answer).  There `"combined"` returns the geometric
   ranking, logs why, and records it in the diagnostics (`criterion =
   "geometric"`, `fallback`).  The same layers now give `8 7 9`, `8 7 9`,
-  `7 6 8` and `8 7 9`, the geometric answer, and 800 uniform points, which
-  have no elbow and are ordered by Moran's z under `on_no_elbow = "warn"`,
-  `10 11 7` where they gave `5 4 10` (at the default they give `NA`).
-  Supplying both `response_var` and `predictor_vars` selects this criterion
-  by default.
+  `7 6 8` and `8 7 9`, the geometric answer.  Moran's z no longer takes
+  part in this ranking at all, and supplying both `response_var` and
+  `predictor_vars` no longer selects this criterion (see Breaking changes).
 
 * **`build_tessellation(method = "hex")` or `"square"` laid its lattice over
   a near-global lon/lat boundary in Web Mercator.**  The points' CRS is

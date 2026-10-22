@@ -1015,11 +1015,10 @@ the count is the ladder's and not a finding.  A warning beside the
 \code{"error"}.  The condition carries \code{k} (the ladder's count),
 \code{sag} and \code{structured}.}
 \item{\code{spatialkit_diagnostic_ranking}}{\code{\link{determine_optimal_levels}()}
-under \code{criterion = "morans_i"} or \code{"combined"}: Moran's z
-of the cell means, a diagnostic and not a count rule, ordered the
-candidates returned.  The condition carries \code{k},
-\code{criterion}, \code{first_computable}, \code{window} and
-\code{upgraded}.}
+under \code{criterion = "morans_i"}: Moran's z of the cell means, a
+diagnostic and not a count rule, ordered the candidates returned.  The
+condition carries \code{k}, \code{criterion}, \code{first_computable}
+and \code{window}.}
 \item{\code{spatialkit_ladder_unused}}{\code{resolution_profile()}: a
 numeric \code{obs_per_cell} sets the ladder, and the caller also
 supplied \code{n_levels}, \code{min_cell_n}, \code{sample_n} or

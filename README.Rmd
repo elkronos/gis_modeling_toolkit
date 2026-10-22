@@ -493,7 +493,9 @@ Moran's z at every level of its ladder. See `vignette("resolution")`.
 The candidates did pass nine cells, but too few of the cells hold a row with a
 response and every predictor, or the regression of the cell means on the
 predictors is singular (a predictor constant or collinear across cells). Check
-for missing values first.
+for missing values first. Under `criterion = "morans_i"` the call then falls
+back to the geometric ranking; under `"combined"` it ranks the counts as usual,
+with `moran_i` and `moran_z` `NA` in the diagnostics.
 
 **Distances, bandwidths or block sizes look absurd.** Check the working CRS
 first: `st_crs(x)$units_gdal`. A block size that made sense in metres is

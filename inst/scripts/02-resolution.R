@@ -38,12 +38,14 @@ step("02.2", "Candidate cell counts, cheapest first")
 lv <- determine_optimal_levels(pts, max_levels = 40)
 cat("  geometric candidates:", paste(lv, collapse = ", "), "\n")
 
-# With a response it can also rank the counts around the elbow by Moran's z of
-# the cell means (of their residuals on the predictors when those are given).
-# That statistic is a diagnostic and not a count rule, and the call says so in
-# a warning of class "spatialkit_diagnostic_ranking". With no elbow the ladder
-# places the counts it ranks, and on_no_elbow = "warn" has them ranked anyway
-# (by default the call returns NA here too).
+# With a response, criterion = "combined" keeps the elbow's ranking of the
+# counts around it and reports Moran's z of the cell means (of their residuals
+# on the predictors when those are given) at each in attr(, "diagnostics").
+# criterion = "morans_i" ranks the counts by that statistic, which is a
+# diagnostic and not a count rule, and the call says so in a warning of class
+# "spatialkit_diagnostic_ranking". With no elbow the ladder places the counts,
+# and on_no_elbow = "warn" has them returned anyway (by default the call
+# returns NA here too).
 lv2 <- determine_optimal_levels(pts, max_levels = 40, criterion = "combined",
                                 response_var = "z", predictor_vars = "elev",
                                 on_no_elbow = "warn")

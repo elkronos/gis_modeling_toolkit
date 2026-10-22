@@ -160,7 +160,7 @@ test_that("a clustered layer returns the same count at the default as before, wi
 test_that("with no elbow the model-aware criteria score nothing at the default, and the NA carries the sweep's diagnostics", {
   uni <- fne_uniform(400L, seed = 5L, response = TRUE)
   for (args in list(list(criterion = "morans_i", response_var = "z"),
-                    list(response_var = "z", predictor_vars = "w"))) {
+                    list(criterion = "combined", response_var = "z", predictor_vars = "w"))) {
     call <- function(...) do.call(determine_optimal_levels,
                                   c(list(uni, max_levels = 40), args, list(...)))
     lines <- capture_spatialkit_log(out <- fne_catch(call()))
@@ -173,10 +173,14 @@ test_that("with no elbow the model-aware criteria score nothing at the default, 
     expect_match(msg, "the model-aware criteria have no window to score", fixed = TRUE)
     expect_false(grepl("evaluated around it", msg, fixed = TRUE))
     expect_false(log_has(lines, "evaluated around it"))
-    # Under "warn" the ladder places the window and Moran's z ranks it.
+    # Under "warn" the ladder places the window; Moran's z ranks it under
+    # "morans_i", with the classed warning, and "combined" ranks it by the
+    # sag, with none.
     w <- fne_catch(call(on_no_elbow = "warn"))
     expect_true(all(is.finite(w$value)))
-    expect_true(all(c("spatialkit_no_elbow", "spatialkit_diagnostic_ranking") %in% w$classes))
+    expect_true("spatialkit_no_elbow" %in% w$classes)
+    expect_identical("spatialkit_diagnostic_ranking" %in% w$classes,
+                     identical(args$criterion, "morans_i"))
     expect_match(conditionMessage(w$warnings[[1L]]),
                  "the model-aware criteria are evaluated around it", fixed = TRUE)
     dw <- attr(w$value, "diagnostics")
@@ -201,7 +205,8 @@ test_that("the line before the sweep promises the fallback only where there is a
   uni <- fne_uniform(400L, seed = 5L, response = TRUE)
   line <- function(lines) grep("max_levels leaves k_max = 8", lines, value = TRUE)
   lines <- capture_spatialkit_log(out <- fne_catch(
-    determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w")))
+    determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
+                             criterion = "combined")))
   expect_true(is.na(out$value))
   expect_length(line(lines), 1L)
   expect_match(line(lines), paste0("criterion = 'combined' will fall back to the geometric ",
@@ -209,14 +214,15 @@ test_that("the line before the sweep promises the fallback only where there is a
                                    "returns NA). Raise max_levels"), fixed = TRUE)
   lines <- capture_spatialkit_log(e <- tryCatch(
     determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
-                             on_no_elbow = "error"), error = function(e) e))
+                             criterion = "combined", on_no_elbow = "error"),
+    error = function(e) e))
   expect_s3_class(e, "spatialkit_no_elbow")
   expect_match(line(lines), "if the WSS curve has an elbow (with none the call stops). Raise",
                fixed = TRUE)
   # Under "warn" the call does fall back, and the line says so as it did.
   lines <- capture_spatialkit_log(out <- fne_catch(
     determine_optimal_levels(uni, max_levels = 8, response_var = "z", predictor_vars = "w",
-                             on_no_elbow = "warn")))
+                             criterion = "combined", on_no_elbow = "warn")))
   expect_true(all(is.finite(out$value)))
   expect_match(line(lines), "will fall back to the geometric ranking. Raise max_levels",
                fixed = TRUE)
@@ -233,7 +239,7 @@ test_that("the line before the sweep promises the fallback only where there is a
 test_that("a model-aware count at the default carries the flag and the sag beside the diagnostics", {
   c24 <- fne_clusters24()
   for (args in list(list(criterion = "morans_i", response_var = "z"),
-                    list(response_var = "z", predictor_vars = "w"))) {
+                    list(criterion = "combined", response_var = "z", predictor_vars = "w"))) {
     call <- function(...) suppressWarnings(do.call(determine_optimal_levels,
                                                    c(list(c24, max_levels = 40), args, list(...))))
     k <- call()

@@ -120,8 +120,9 @@ test_that("determine_optimal_levels reports the restart budget and bumps in its 
   pts <- sf::st_as_sf(data.frame(x = xy[, 1], y = xy[, 2], w = rnorm(640)),
                       coords = c("x", "y"), crs = 32632)
   pts$z <- pts$w + rnorm(640)
-  # Moran's z takes part in this ranking, and the call says so with a class.
-  expect_warning(
+  # Moran's z does not take part in the ranking of "combined" (the sag
+  # orders it), so the call raises no warning that it did.
+  expect_no_warning(
     out <- determine_optimal_levels(pts, max_levels = 30, response_var = "z",
                                     predictor_vars = "w", criterion = "combined"),
     class = "spatialkit_diagnostic_ranking")

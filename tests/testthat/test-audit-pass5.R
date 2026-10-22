@@ -1067,8 +1067,11 @@ test_that("determine_optimal_levels refuses a factor response", {
                                a = rnorm(n)), coords = c("x", "y"), crs = 32632)
   d$z  <- 2 * d$a + rnorm(n)
   d$zf <- cut(d$z, 3, labels = c("low", "mid", "high"))
+  # Under a criterion that reads it.  "geometric", the default, does not
+  # read the response, also with both variables given.
   expect_error(determine_optimal_levels(d, response_var = "zf",
-                                        predictor_vars = "a", max_levels = 8),
+                                        predictor_vars = "a", max_levels = 8,
+                                        criterion = "combined"),
                "must be numeric or logical")
 })
 

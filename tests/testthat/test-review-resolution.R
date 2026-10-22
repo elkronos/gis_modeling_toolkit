@@ -111,10 +111,11 @@ test_that("select_on = 'split' chooses a count for the layer it is applied to", 
   d$z <- d$a + rnorm(240)
   pts <- sf::st_as_sf(d, coords = c("x", "y"), crs = 32632)
   all <- suppressWarnings(determine_optimal_levels(
-    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"), set_seed = 1))
+    pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"),
+    criterion = "combined", set_seed = 1))
   spl <- suppressWarnings(determine_optimal_levels(
     pts, max_levels = 12, response_var = "z", predictor_vars = c("a", "b"),
-    select_on = "split", set_seed = 1))
+    criterion = "combined", select_on = "split", set_seed = 1))
   expect_identical(as.integer(all[1]), 4L)
   expect_identical(as.integer(spl[1]), 4L)
 })

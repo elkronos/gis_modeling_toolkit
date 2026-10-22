@@ -143,14 +143,16 @@ the count is set when you place the seeds rather than when you tessellate them.
 The last section shows the two calls in order.
 
 Two things to know about this function before you rely on it. Its
-`criterion = "morans_i"` and `criterion = "combined"` settings rank the counts
-around the elbow by Moran's z of the cell means, which is a diagnostic and not
-a count rule; the call returns the ranking with a warning of class
-`spatialkit_diagnostic_ranking` that says so. They need a `response_var`;
-without one the call warns and falls back to `"geometric"`. And its ladder
-runs from 1 to `max_levels` with no lower bound from the spatial correlation
-of the data, so it can prefer cells wider than the field's own correlation
-range. The profile below reports that bound, and `select_resolution()` reads
+`criterion = "morans_i"` setting ranks the counts around the elbow by Moran's z
+of the cell means, which is a diagnostic and not a count rule; the call returns
+the ranking with a warning of class `spatialkit_diagnostic_ranking` that says
+so. `criterion = "combined"` keeps the elbow's ranking of those counts and
+reports Moran's I beside it in `attr(, "diagnostics")`. Both need a
+`response_var`; without one the call warns and falls back to `"geometric"`,
+and under `"geometric"`, the default, a `response_var` is not read. And its
+ladder runs from 1 to `max_levels` with no lower bound from the spatial
+correlation of the data, so it can prefer cells wider than the field's own
+correlation range. The profile below reports that bound, and `select_resolution()` reads
 `reliability` from it up, which is why the two can disagree.
 
 ## The profile
