@@ -49,10 +49,12 @@ equally and a logged note says why (see \emph{Weights}). \code{NULL} is
 the explicit request for equal weights. For a vector of your own, any
 positive scale works. When \code{model} was fitted with
 \code{include_coords = TRUE}, the coordinates \code{"..x"} and
-\code{"..y"} are measured as predictors too (see below), and you are not
-expected to supply importances for them: any you leave out default to the
-mean of the weights you did supply, so location counts about as much as a
-typical predictor. Naming them explicitly overrides that. An unnamed
+\code{"..y"} are measured as predictors too, besides the location index,
+which no weight changes (see \emph{Models whose predictions depend on
+location}). You are not expected to supply importances for them: any
+you leave out default to the mean of the weights you did supply, so in
+the predictor index the coordinates count about as much as a typical
+predictor. Naming them explicitly overrides that. An unnamed
 vector may have one value per predictor either with or without the two
 coordinate columns. Weights must be finite and non-negative, so pass
 permutation importance as \code{pmax(importance, 0)}. (A forest with no
@@ -105,7 +107,9 @@ measures it for a model whose predictions depend on it (a
 \code{gwr_fit}, a \code{bayesian_fit}, a forest fitted with
 \code{include_coords = TRUE}) and not otherwise; \code{"yes"} measures
 it whatever the model, and with no \code{model}; \code{"no"} never
-does, and logs a caution for a model that depends on it. See
+does, and logs a caution for a model that depends on it (for a forest
+it also leaves \code{"..x"} and \code{"..y"} out of the predictor
+index). See
 \emph{Models whose predictions depend on location}.}
 
 \item{categorical}{What to do with factor and character predictors:
@@ -122,13 +126,15 @@ An object of class \code{aoa}: a list with
 \item \code{aoa}: \code{newdata} with a numeric \code{DI} column
 and a logical \code{AOA} column added, and between them a numeric
 \code{DI_location} column when location has an index of its own.
-For a forest fitted with \code{include_coords = TRUE} it is the
+For a forest fitted with \code{include_coords = TRUE}, unless
+\code{coords = "no"}, it is the
 object the computation ran on: \code{newdata} after pointizing, CRS
 reconciliation and the addition of the \code{"..x"} and \code{"..y"}
-columns. With a location index it is \code{newdata} as passed. A
-row whose predictors are not all finite gets \code{NA} in \code{DI},
-and a row outside the training range of a predictor in
-\code{dropped_vars}, or on a level no training row has, gets
+columns. In every other case it is \code{newdata} as passed, also
+when location has an index of its own. A row whose predictors are
+not all finite gets \code{NA} in \code{DI}, and a row outside the
+training range of a predictor in \code{dropped_vars}, or on a level
+no training row has, gets
 \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 \code{AOA} is \code{DI <= threshold}, and with a location index
 also \code{DI_location <= location$threshold}: a row outside on
@@ -184,7 +190,9 @@ index.
 passed a vector), \code{weights_source} (\code{"model importance"},
 \code{"supplied"} or \code{"equal"}), \code{weights_note} (the kind
 of importance, or why the weights are equal), \code{coords}
-(\code{"location index"}, \code{"predictors"} or \code{"none"}),
+(\code{"location index"}; \code{"location index and predictors"}
+for a forest fitted with \code{include_coords = TRUE}, whose
+coordinates are also among the predictors; or \code{"none"}),
 \code{categorical} and
 \code{seed}.  \code{folds_method} is the \code{method} of a
 \code{\link{make_folds}()} result (\code{"block_kfold"},
@@ -366,10 +374,12 @@ three; \code{coords = "no"} turns it off, with a logged caution;
 \code{coords = "yes"} measures it for any model, or for none.
 
 \strong{A geographically weighted regression} (\code{gwr_fit}) has
-coefficients that vary over the map, and \strong{a Bayesian spatial model}
-(\code{bayesian_fit}) has a Gaussian-process term in the coordinates. For
-these, and under \code{coords = "yes"}, location gets an index of its own,
-built like the predictor index but in map space: \code{DI_location} is the
+coefficients that vary over the map, \strong{a Bayesian spatial model}
+(\code{bayesian_fit}) has a Gaussian-process term in the coordinates, and
+\strong{a forest fitted with \code{include_coords = TRUE}} splits on the
+coordinates. For these, and under \code{coords = "yes"}, location gets an
+index of its own, built like the predictor index but in map space:
+\code{DI_location} is the
 distance to the nearest training point over the mean distance between
 training points; the training points' own values use the same folds; and
 the threshold is the same outlier-removed maximum. A prediction point is
@@ -404,12 +414,17 @@ blocked folds the location index says nothing about a gap narrower than
 about twice the cut-off; \code{location$threshold * location$normalizer}
 is the cut-off in map units, and \code{print()} shows it.
 
-\strong{A forest fitted with \code{include_coords = TRUE}} splits on the
-coordinates like on any other column, so there they join the predictor
-index as \code{"..x"} and \code{"..y"} and are centred, scaled and weighted
-with the rest.
+A forest splits on the coordinates like on any other column, so for a
+forest they also stay in the predictor index as \code{"..x"} and
+\code{"..y"}, centred, scaled and weighted with the rest. Under
+\code{weights = "auto"} that weight is the forest's importance, which is
+small for a forest that barely splits on its coordinates: in a test where
+half of 50 prediction points lay one half to one and a half extents beyond
+the data, 41 read as inside on the predictor index, 16 of them beyond the
+extent. The location index counts location whatever weight the
+coordinates get, and put none of the 25 inside.
 
-Either way geometry is needed on both sides, so \code{train_sf} and
+Geometry is needed on both sides, so \code{train_sf} and
 \code{newdata} must both be \code{sf} objects; a data.frame is refused
 rather than quietly measured without location. Non-\code{POINT}
 \code{newdata} (grid polygons, say) is reduced to representative points

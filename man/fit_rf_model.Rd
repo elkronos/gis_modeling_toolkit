@@ -250,7 +250,8 @@ solution. \emph{BMC Bioinformatics} 8, 25. \doi{10.1186/1471-2105-8-25}
 finite and the forest has out-of-bag skill (it is \code{NaN} when no row
 is out of bag; see "What fitted() returns"), and which needs
 \code{categorical = "indicator"} or \code{"drop"} for a forest with a
-factor predictor.
+factor predictor. For a forest fitted with \code{include_coords = TRUE}
+it also measures location on an index of its own.
 
 Other model fitting:
 \code{\link[=fit_bayesian_spatial_model]{fit_bayesian_spatial_model()}},

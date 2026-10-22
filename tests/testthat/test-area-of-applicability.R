@@ -662,9 +662,12 @@ test_that("a coordinate-using model reprojects newdata before measuring it", {
   nd_ll <- sf::st_transform(nd_proj, 4326)
 
   # Degrees compared against metres would put both points absurdly far out.
-  expect_equal(area_of_applicability(nd_ll, model = fit)$aoa$DI,
-               area_of_applicability(nd_proj, model = fit)$aoa$DI,
-               tolerance = 1e-6)
+  a_ll   <- area_of_applicability(nd_ll, model = fit)
+  a_proj <- area_of_applicability(nd_proj, model = fit)
+  expect_equal(a_ll$aoa$DI, a_proj$aoa$DI, tolerance = 1e-6)
+  # The location index reads the reprojected points too.
+  expect_false(is.null(a_proj$aoa$DI_location))
+  expect_equal(a_ll$aoa$DI_location, a_proj$aoa$DI_location, tolerance = 1e-6)
 })
 
 

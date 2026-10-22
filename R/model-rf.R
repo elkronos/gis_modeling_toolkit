@@ -349,7 +349,8 @@
 #'   finite and the forest has out-of-bag skill (it is \code{NaN} when no row
 #'   is out of bag; see "What fitted() returns"), and which needs
 #'   \code{categorical = "indicator"} or \code{"drop"} for a forest with a
-#'   factor predictor.
+#'   factor predictor. For a forest fitted with \code{include_coords = TRUE}
+#'   it also measures location on an index of its own.
 #' @family model fitting
 #' @examples
 #' if (requireNamespace("ranger", quietly = TRUE)) {

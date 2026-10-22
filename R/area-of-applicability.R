@@ -1226,10 +1226,12 @@
 #' \code{coords = "yes"} measures it for any model, or for none.
 #'
 #' \strong{A geographically weighted regression} (\code{gwr_fit}) has
-#' coefficients that vary over the map, and \strong{a Bayesian spatial model}
-#' (\code{bayesian_fit}) has a Gaussian-process term in the coordinates. For
-#' these, and under \code{coords = "yes"}, location gets an index of its own,
-#' built like the predictor index but in map space: \code{DI_location} is the
+#' coefficients that vary over the map, \strong{a Bayesian spatial model}
+#' (\code{bayesian_fit}) has a Gaussian-process term in the coordinates, and
+#' \strong{a forest fitted with \code{include_coords = TRUE}} splits on the
+#' coordinates. For these, and under \code{coords = "yes"}, location gets an
+#' index of its own, built like the predictor index but in map space:
+#' \code{DI_location} is the
 #' distance to the nearest training point over the mean distance between
 #' training points; the training points' own values use the same folds; and
 #' the threshold is the same outlier-removed maximum. A prediction point is
@@ -1264,12 +1266,17 @@
 #' about twice the cut-off; \code{location$threshold * location$normalizer}
 #' is the cut-off in map units, and \code{print()} shows it.
 #'
-#' \strong{A forest fitted with \code{include_coords = TRUE}} splits on the
-#' coordinates like on any other column, so there they join the predictor
-#' index as \code{"..x"} and \code{"..y"} and are centred, scaled and weighted
-#' with the rest.
+#' A forest splits on the coordinates like on any other column, so for a
+#' forest they also stay in the predictor index as \code{"..x"} and
+#' \code{"..y"}, centred, scaled and weighted with the rest. Under
+#' \code{weights = "auto"} that weight is the forest's importance, which is
+#' small for a forest that barely splits on its coordinates: in a test where
+#' half of 50 prediction points lay one half to one and a half extents beyond
+#' the data, 41 read as inside on the predictor index, 16 of them beyond the
+#' extent. The location index counts location whatever weight the
+#' coordinates get, and put none of the 25 inside.
 #'
-#' Either way geometry is needed on both sides, so \code{train_sf} and
+#' Geometry is needed on both sides, so \code{train_sf} and
 #' \code{newdata} must both be \code{sf} objects; a data.frame is refused
 #' rather than quietly measured without location. Non-\code{POINT}
 #' \code{newdata} (grid polygons, say) is reduced to representative points
@@ -1304,10 +1311,12 @@
 #'   the explicit request for equal weights. For a vector of your own, any
 #'   positive scale works. When \code{model} was fitted with
 #'   \code{include_coords = TRUE}, the coordinates \code{"..x"} and
-#'   \code{"..y"} are measured as predictors too (see below), and you are not
-#'   expected to supply importances for them: any you leave out default to the
-#'   mean of the weights you did supply, so location counts about as much as a
-#'   typical predictor. Naming them explicitly overrides that. An unnamed
+#'   \code{"..y"} are measured as predictors too, besides the location index,
+#'   which no weight changes (see \emph{Models whose predictions depend on
+#'   location}). You are not expected to supply importances for them: any
+#'   you leave out default to the mean of the weights you did supply, so in
+#'   the predictor index the coordinates count about as much as a typical
+#'   predictor. Naming them explicitly overrides that. An unnamed
 #'   vector may have one value per predictor either with or without the two
 #'   coordinate columns. Weights must be finite and non-negative, so pass
 #'   permutation importance as \code{pmax(importance, 0)}. (A forest with no
@@ -1353,7 +1362,9 @@
 #'   \code{gwr_fit}, a \code{bayesian_fit}, a forest fitted with
 #'   \code{include_coords = TRUE}) and not otherwise; \code{"yes"} measures
 #'   it whatever the model, and with no \code{model}; \code{"no"} never
-#'   does, and logs a caution for a model that depends on it. See
+#'   does, and logs a caution for a model that depends on it (for a forest
+#'   it also leaves \code{"..x"} and \code{"..y"} out of the predictor
+#'   index). See
 #'   \emph{Models whose predictions depend on location}.
 #' @param categorical What to do with factor and character predictors:
 #'   \code{"refuse"} (default) stops with a message naming them and the two
@@ -1368,13 +1379,15 @@
 #'     \item \code{aoa}: \code{newdata} with a numeric \code{DI} column
 #'       and a logical \code{AOA} column added, and between them a numeric
 #'       \code{DI_location} column when location has an index of its own.
-#'       For a forest fitted with \code{include_coords = TRUE} it is the
+#'       For a forest fitted with \code{include_coords = TRUE}, unless
+#'       \code{coords = "no"}, it is the
 #'       object the computation ran on: \code{newdata} after pointizing, CRS
 #'       reconciliation and the addition of the \code{"..x"} and \code{"..y"}
-#'       columns. With a location index it is \code{newdata} as passed. A
-#'       row whose predictors are not all finite gets \code{NA} in \code{DI},
-#'       and a row outside the training range of a predictor in
-#'       \code{dropped_vars}, or on a level no training row has, gets
+#'       columns. In every other case it is \code{newdata} as passed, also
+#'       when location has an index of its own. A row whose predictors are
+#'       not all finite gets \code{NA} in \code{DI}, and a row outside the
+#'       training range of a predictor in \code{dropped_vars}, or on a level
+#'       no training row has, gets
 #'       \code{DI = Inf} and \code{AOA = FALSE} (see \emph{Limitations}).
 #'       \code{AOA} is \code{DI <= threshold}, and with a location index
 #'       also \code{DI_location <= location$threshold}: a row outside on
@@ -1430,7 +1443,9 @@
 #'       passed a vector), \code{weights_source} (\code{"model importance"},
 #'       \code{"supplied"} or \code{"equal"}), \code{weights_note} (the kind
 #'       of importance, or why the weights are equal), \code{coords}
-#'       (\code{"location index"}, \code{"predictors"} or \code{"none"}),
+#'       (\code{"location index"}; \code{"location index and predictors"}
+#'       for a forest fitted with \code{include_coords = TRUE}, whose
+#'       coordinates are also among the predictors; or \code{"none"}),
 #'       \code{categorical} and
 #'       \code{seed}.  \code{folds_method} is the \code{method} of a
 #'       \code{\link{make_folds}()} result (\code{"block_kfold"},
@@ -1548,48 +1563,48 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # measured.  Without it, a prediction point far outside the training extent
   # but with ordinary covariate values reads as INSIDE the area of
   # applicability -- exactly the extrapolation the index exists to catch.
-  # There are two kinds of such model, and location enters the index
-  # differently for each:
-  #   "predictors"  a forest fitted with include_coords = TRUE splits on the
-  #                 coordinates like on any column, so they join the
-  #                 predictor index as "..x"/"..y" and take a weight;
-  #   "index"       a GWR's coefficients and a Bayesian fit's Gaussian
-  #                 process are functions of location whatever the
-  #                 covariates are, so location gets an index of its own --
-  #                 distance to the nearest training point in map space --
-  #                 and a point must be inside on both.  As two more
-  #                 equally weighted columns it would be diluted: with 12
-  #                 covariates, 89% of points 200 to 500 units beyond a
-  #                 1000-unit extent still read as inside.
+  # Every such model gets a location index of its own -- distance to the
+  # nearest training point in map space -- and a point must be inside on both
+  # indices:
+  #   "index"  a GWR's coefficients and a Bayesian fit's Gaussian process are
+  #            functions of location whatever the covariates are.  As two
+  #            more equally weighted columns location would be diluted: with
+  #            12 covariates, 89% of points 200 to 500 units beyond a
+  #            1000-unit extent still read as inside.
+  #   "both"   a forest fitted with include_coords = TRUE splits on the
+  #            coordinates like on any column, so they also stay in the
+  #            predictor index as "..x"/"..y", weighted like the rest.  That
+  #            weight is the forest's importance under weights = "auto", and
+  #            a forest that barely splits on its coordinates gives them
+  #            little: in a test where half of 50 points lay one half to
+  #            one and a half extents beyond the data, 41 read as inside on
+  #            that index alone, 16 of them beyond.  The location index
+  #            counts location whatever the weight.
   xy_predictors  <- !is.null(model) && isTRUE(model$info$include_coords)
   location_model <- !is.null(model) &&
-    inherits(model, c("gwr_fit", "bayesian_fit"))
+    (xy_predictors || inherits(model, c("gwr_fit", "bayesian_fit")))
   coord_mode <- switch(coords,
-    auto = if (xy_predictors) "predictors" else if (location_model) "index"
+    auto = if (xy_predictors) "both" else if (location_model) "index"
            else "none",
-    yes  = if (xy_predictors) "predictors" else "index",
+    yes  = if (xy_predictors) "both" else "index",
     no   = "none")
-  if (identical(coords, "no") && (xy_predictors || location_model))
+  loc_model_name <- if (xy_predictors) "a forest fitted with include_coords = TRUE"
+                    else if (location_model) sprintf("a %s", class(model)[1L])
+                    else NULL
+  if (identical(coords, "no") && location_model)
     .log_warn(paste0("area_of_applicability(): coords = \"no\", so location is ",
                      "not measured although this model's predictions depend on ",
                      "it (%s). A point far from every training point reads as ",
                      "inside when its covariates are ordinary."),
-              if (xy_predictors) "a forest fitted with include_coords = TRUE"
-              else sprintf("a %s", class(model)[1L]))
-  coord_model <- identical(coord_mode, "predictors")
+              loc_model_name)
+  coord_model <- identical(coord_mode, "both")
   coord_vars  <- if (coord_model) c("..x", "..y") else character(0)
-  loc_xy <- if (identical(coord_mode, "index"))
-    .aoa_location_coords(train_sf, newdata,
-                         why = if (location_model)
-                           sprintf("this model's predictions depend on location (a %s)",
-                                   class(model)[1L])
-                         else "coords = \"yes\"")
-  else NULL
   if (coord_model) {
     if (!inherits(train_sf, "sf") || !inherits(newdata, "sf"))
       stop("area_of_applicability(): this model uses the coordinates as ",
            "predictors, so both the training data and `newdata` must be sf ",
-           "objects carrying geometry.", call. = FALSE)
+           "objects carrying geometry. Pass coords = \"no\" to measure the ",
+           "other predictors alone.", call. = FALSE)
     # Both directions matter.  st_transform() on CRS-less newdata aborts with
     # sf's bare "cannot transform sfc object with missing crs", and when the
     # TRAINING data has no CRS the guard short-circuited entirely, so degrees
@@ -1609,6 +1624,15 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
     newdata  <- .aoa_add_coords(newdata)
     predictor_vars <- unique(c(predictor_vars, "..x", "..y"))
   }
+  # After the block above, so that a CRS reconciled there is not reconciled
+  # (and warned about) a second time.
+  loc_xy <- if (coord_mode %in% c("index", "both"))
+    .aoa_location_coords(train_sf, newdata,
+                         why = if (location_model)
+                           sprintf("this model's predictions depend on location (%s)",
+                                   loc_model_name)
+                         else "coords = \"yes\"")
+  else NULL
 
   des <- .aoa_design(train_sf, newdata, predictor_vars, categorical)
   X_tr_full <- des$X_tr
@@ -1952,7 +1976,8 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
         weights_supplied    = w_given,
         weights_source      = w_source,
         weights_note        = w_note,
-        coords              = switch(coord_mode, predictors = "predictors",
+        coords              = switch(coord_mode,
+                                     both  = "location index and predictors",
                                      index = "location index", "none"),
         categorical         = categorical,
         seed                = seed
@@ -2081,6 +2106,8 @@ print.aoa <- function(x, ...) {
       cat(sprintf(paste0("                (%d of %d training rows share a ",
                          "location with a row their fold trains on)\n"),
                   sum(loc$train_DI == 0, na.rm = TRUE), length(loc$train_DI)))
+    if (identical(x$params$coords, "location index and predictors"))
+      cat("                and as the predictors ..x and ..y\n")
   } else if (identical(x$params$coords, "predictors")) {
     cat("  location    : measured as the predictors ..x and ..y\n")
   } else if (!is.null(x$params$coords)) {

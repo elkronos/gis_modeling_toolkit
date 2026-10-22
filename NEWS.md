@@ -220,13 +220,28 @@ old behaviour where there is a way.
   `params$weights_source` says which.  `weights = NULL` gives equal weights
   as before.
 
-* `area_of_applicability()` measures location for a `gwr_fit` and a
-  `bayesian_fit`, which predict as a function of location.  Location has an
-  index of its own (`DI_location`, element `location`): the distance to the
-  nearest training point over the mean distance between training points,
-  with the same folds and threshold rule.  A point is inside only when it is
-  inside on both indices; `n_outside_predictors` counts the predictor index
-  alone.  `coords = "no"` gives the old result; `coords = "yes"` measures
+* `area_of_applicability()` measures location for a `gwr_fit`, a
+  `bayesian_fit` and a forest fitted with `include_coords = TRUE`, which
+  predict as a function of location.  Location has an index of its own
+  (`DI_location`, element `location`): the distance to the nearest training
+  point over the mean distance between training points, with the same folds
+  and threshold rule.  A point is inside only when it is inside on both
+  indices; `n_outside_predictors` counts the predictor index alone, and a
+  `threshold` the caller passes sets that index alone.  The forest keeps its
+  coordinates in the predictor index as `..x` and `..y`, so for it
+  `DI <= threshold` is the old answer under the same weights; its
+  `params$coords` reads `"location index and predictors"`, and `print()`
+  names both.  Three more things change for the forest.  A row outside on
+  location is `FALSE` also when a predictor is missing, where it was `NA`,
+  so `n_na` can fall and `n_outside` rise.  Folds that split repeat visits
+  to a site can give it a location threshold of 0, with the
+  `spatialkit_aoa_zero_threshold` warning, and then only points at a
+  training location are inside.  A `train_sf` passed in a geographic CRS
+  (longitude/latitude), which the predictor index measured in degrees, is
+  refused: project it, or pass `coords = "no"`.  The default `train_sf` is
+  the forest's own data, which `fit_rf_model()` projects.  For a GWR or a
+  Bayesian fit `coords = "no"` gives the old result; for the forest it
+  leaves the coordinates out of both indices.  `coords = "yes"` measures
   location for any model.
 
 * `fit_rf_model()` splits an unordered factor or character predictor with
@@ -1756,6 +1771,16 @@ old behaviour where there is a way.
   rows a small non-zero distance.**  About one copy in ten came out near
   1e-8 and could fall outside a threshold of 0.  The distance returned is
   now recomputed exactly.
+
+* **`area_of_applicability()` counted points beyond the training extent as
+  inside for a forest fitted with coordinates.**  Location was measured only
+  through the forest's `..x` and `..y` columns, which under
+  `weights = "auto"` took the forest's own importance, so a forest that
+  barely split on its coordinates gave location almost no weight: in a test
+  where half of 50 prediction points lay one half to one and a half extents
+  beyond the data, 41 read as inside, 16 of them beyond the extent.  Such a
+  forest now gets the location index a GWR and a Bayesian fit get, and none
+  of the 25 is inside.  The predictor index is unchanged.
 
 * **`select_features_forward()` always selected at least one variable with a
   forest or a GWR.**  A learner that could not fit an empty predictor set
