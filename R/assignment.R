@@ -92,7 +92,9 @@
 #'   causes are a polygon layer that stops short of the data (a coastline
 #'   drawn at another scale, a tessellation of seeds built without a
 #'   `boundary` or `cover`; see [build_tessellation()]) and points outside
-#'   the study area. With `keep_unassigned = TRUE` they are kept with an
+#'   the study area. A feature with empty geometry has no location to
+#'   assign, and the warning says how many of them there are. With
+#'   `keep_unassigned = TRUE` they are kept with an
 #'   `NA` ID and no warning is raised, unless every feature is unassigned.
 #'
 #'   The
@@ -510,6 +512,10 @@ assign_features_to_polygons <- function(
 
   n_unassigned <- length(unassigned_rows)
   n_features   <- nrow(joined)
+  # A feature with empty geometry is in no polygon too, but for want of a
+  # location, not because the polygons miss it: the texts say so, as
+  # build_tessellation() does, and keep their advice for the rest.
+  n_empty <- if (n_unassigned) sum(sf::st_is_empty(f_geom[unassigned_rows])) else 0L
   # Zero matches is almost never what the caller meant, and it is silent: the
   # function returns an empty sf and every downstream step reports zero rows
   # without saying why.  The usual cause is a CRS mismatch that could only be
@@ -518,11 +524,19 @@ assign_features_to_polygons <- function(
   if (n_unassigned == n_features && n_features > 0L)
     .warn_classed("spatialkit_unassigned",
                   paste0("assign_features_to_polygons(): none of the %d ",
-                         "feature(s) fall inside any polygon. Check that the ",
-                         "two layers cover the same ground -- a CRS that had to ",
-                         "be stamped rather than reprojected is the usual ",
-                         "cause -- or pass a different `predicate`."),
-                  n_features, data = list(n = n_unassigned, total = n_features))
+                         "feature(s) fall inside any polygon. %s"),
+                  n_features,
+                  if (n_empty == n_features)
+                    "They have empty geometry, so there is no location to assign."
+                  else paste0(
+                    if (n_empty > 0L)
+                      sprintf("%d of them %s empty geometry; for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have")
+                    else "Check",
+                    " that the two layers cover the same ground -- a CRS that had to ",
+                    "be stamped rather than reprojected is the usual ",
+                    "cause -- or pass a different `predicate`."),
+                  data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L && !keep_unassigned)
     # Rows removed from the result are data dropped, which the caller has to
     # be able to catch: this was one INFO line in the temp log, and a
@@ -533,15 +547,27 @@ assign_features_to_polygons <- function(
                   paste0("assign_features_to_polygons(): %d of %d feature(s) ",
                          "(%.1f%%) fall inside no polygon and are left out of ",
                          "the result; attr(, \"unassigned\")$which gives their ",
-                         "rows in `features_sf`. Check that the polygons cover ",
-                         "the features (cells built from seeds need a ",
-                         "`boundary` or a `cover`; see build_tessellation()), or ",
-                         "pass keep_unassigned = TRUE to keep them with an NA ID."),
+                         "rows in `features_sf`. %s"),
                   n_unassigned, n_features, 100 * n_unassigned / n_features,
+                  if (n_empty == n_unassigned)
+                    paste0("They have empty geometry, so there is no location to ",
+                           "assign; pass keep_unassigned = TRUE to keep them with an ",
+                           "NA ID.")
+                  else paste0(
+                    if (n_empty > 0L)
+                      sprintf("%d of them %s empty geometry; for the rest, check", n_empty,
+                              if (n_empty == 1L) "has" else "have")
+                    else "Check",
+                    " that the polygons cover ",
+                    "the features (cells built from seeds need a ",
+                    "`boundary` or a `cover`; see build_tessellation()), or ",
+                    "pass keep_unassigned = TRUE to keep them with an NA ID."),
                   data = list(n = n_unassigned, total = n_features))
   else if (n_unassigned > 0L)
-    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID.",
-              n_unassigned, n_features)
+    .log_info("assign_features_to_polygons(): %d of %d feature(s) fall inside no polygon and are kept with an NA ID%s.",
+              n_unassigned, n_features,
+              if (n_empty > 0L) sprintf(" (%d of them %s empty geometry)", n_empty,
+                                        if (n_empty == 1L) "has" else "have") else "")
 
   if (!keep_unassigned) {
     joined <- joined[!is.na(joined[[polygon_id_col]]), , drop = FALSE]
@@ -3511,7 +3537,9 @@ summarize_by_cell <- function(assigned_points_sf,
 #'   \code{.pooled_xy()} takes it.
 #' @return A list: \code{columns}, the new columns by name, in the order they
 #'   are appended; \code{record}, the list of class \code{spatialkit_pooled};
-#'   \code{events}, what \code{.pooled_warnings()} reads; and \code{loc}, the
+#'   \code{events}, what \code{.pooled_warnings()} reads (with
+#'   \code{response}, the response columns, which its texts tell from the
+#'   predictors); and \code{loc}, the
 #'   coordinates the columns were fitted on (\code{.pooled_xy()}'s list).
 #' @keywords internal
 #' @noRd
@@ -3588,7 +3616,8 @@ summarize_by_cell <- function(assigned_points_sf,
     work    = vapply(fits, function(r) as.numeric(r$work), numeric(1)),
     limit   = vapply(fits, function(r) as.numeric(r$limit), numeric(1)),
     skipped_rows  = sum(unlocated),
-    skipped_cells = length(unique(id[unlocated])))
+    skipped_cells = length(unique(id[unlocated])),
+    response      = resp_num)
   list(columns = columns, record = record, events = events, loc = loc)
 }
 
@@ -3649,12 +3678,13 @@ summarize_by_cell <- function(assigned_points_sf,
   w <- cols[status == "work limit"]
   if (length(w)) {
     top <- w[which.max(cells[w])]             # the column with the most cells
+    nums <- .count_text(c(ev$work[[top]], ev$limit[[top]]))
     .warn_classed("spatialkit_pool_unavailable", paste0(
       "summarize_by_cell(): the pooled columns of %s are NA: finding each cell's ",
-      "neighbours among %d cells without the FNN package would compare %.2g pairs, ",
-      "above the limit of %.2g (options(spatialkit.exact_pairs_max = )). Install FNN: ",
-      "the result is the same. The plain columns are unaffected."),
-      .cols_text(w), cells[[top]], ev$work[[top]], ev$limit[[top]],
+      "neighbours among %d cells without the FNN package would compare %s pairs, ",
+      "above the limit of %s (options(spatialkit.exact_pairs_max = )). %s The plain ",
+      "columns are unaffected."),
+      .cols_text(w), cells[[top]], nums[1L], nums[2L], .FNN_REMEDY,
       data = list(reason = "work limit", columns = w, work = ev$work[[top]],
                   limit = ev$limit[[top]], cells = cells[w]))
   }
@@ -3746,13 +3776,18 @@ summarize_by_cell <- function(assigned_points_sf,
     # sentences, which are what the reader has to see and R prints a warning's
     # first getOption("warning.length") characters only.
     inside <- if (one(w)) sprintf(" (%s)", says) else ""
+    # What a smooth-looking map does not show: the response, when the
+    # response alone is named; a predictor is not the response.
+    smooth <- if (all(worse %in% ev$response) && one(worse)) "the response varies"
+              else if (one(worse)) "the column varies"
+              else "the columns vary"
     text <- c(
       if (length(worse)) sprintf(paste0(
         "the pooled values of %s predict a left-out observation no better than one ",
         "mean for all rows%s, so %s no spatial structure these cells can use. The ",
         "values are returned. A map of them looks smooth because each is mostly its ",
-        "neighbours' mean, not because the response varies smoothly."),
-        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show"),
+        "neighbours' mean, not because %s smoothly."),
+        .cols_text(worse), inside, if (one(worse)) "it shows" else "they show", smooth),
       if (length(untold)) sprintf(paste0(
         "%s pooled values of %s predict a left-out observation better than one mean ",
         "for all rows, but the F test does not tell the cell means from one mean%s, so ",

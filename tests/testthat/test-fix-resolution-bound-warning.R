@@ -55,7 +55,12 @@ test_that("an optimum at the support ceiling is a classed warning in every funct
                  sprintf("is %d cells, the optimum of `cp`, and that optimum is the support ceiling",
                          sel$best))
     expect_match(conditionMessage(w[[1L]]), "the bound chose the count, not the criterion")
-    expect_match(conditionMessage(w[[1L]]), "Lower min_cell_n")
+    # The way on names `levels` past the ceiling, which leave the levels below
+    # it as they are; a lower min_cell_n moves every level (BUG-07).
+    expect_match(conditionMessage(w[[1L]]),
+                 "Pass `levels` that run past this count to see whether the criterion keeps going",
+                 fixed = TRUE)
+    expect_false(grepl("Lower min_cell_n", conditionMessage(w[[1L]]), fixed = TRUE))
   }
   # Caught by class, and an error under warn = 2 semantics.
   expect_identical(tryCatch(voronoi_seeds_kmeans(d, k = sel, partition = "kmeans"),

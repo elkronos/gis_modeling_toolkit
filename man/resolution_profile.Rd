@@ -739,9 +739,11 @@ finest level times \code{nstart} (times \code{iter_max} for the density
 kind without \pkg{FNN}) is above
 \code{getOption("spatialkit.fit_work_max", 1e10)}.  The message names the
 ways on: fewer starts, which keep the best of fewer; a coarser size;
-\code{partition = "density"} with \code{init = "random"} and \pkg{FNN}
-installed, which leaves a cell without a point more often (see
-\code{spatialkit_empty_cells} under "Conditions"); or a higher limit.
+\code{partition = "density"} with \code{init = "random"}, which leaves a
+cell without a point more often (see \code{spatialkit_empty_cells} under
+"Conditions") and, where \pkg{FNN} could not be loaded, needs it
+reinstalled first; or a higher limit.  The work and the limit are written
+in full, so that a work just above the limit does not print as the limit.
 The limit counts the finest level, and a ladder of several sizes fits
 every one of its levels.  At the default size the work grows with the
 square of the rows, and the limit is set where the default call's fit
@@ -961,7 +963,11 @@ the condition carries \code{n}, \code{n_response}, \code{ceiling},
 \item{\code{spatialkit_constant_response}}{\code{resolution_profile()}:
 the scored variable is constant to within rounding (a response the
 predictors fit exactly leaves such residuals), so \code{cp},
-\code{moran_i} and \code{moran_z} are \code{NA} at every level.}
+\code{moran_i} and \code{moran_z} are \code{NA} at every level.  On
+a profile with an \code{estimate} whose rows are constant too, so are
+\code{loo} and \code{loo_se}, and for pooled values
+\code{own_weight}; the message names them.  \code{summary()} of such a
+profile stops with an error that says the response is constant.}
 \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 \code{\link{get_voronoi_seeds}()} and
 \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
@@ -1030,9 +1036,11 @@ Either a size given as a number gives fewer than two cells while a
 finer one does not, and its level is 2 (\code{reason} is
 \code{"fewer than two cells"}); or a size asks for more cells than
 k-means can place, and its level is the most that can (\code{reason}
-is \code{"more cells than can be placed"}).  The condition carries
-\code{obs_per_cell},
-\code{wanted}, \code{used} and \code{reason}.  When the finest size
+is \code{"more cells than can be placed"}).  It is raised once for
+each reason, naming every size held for it.  The condition carries
+\code{obs_per_cell} and \code{wanted} (one element for each such
+size, in the order of the ladder), \code{used} and \code{reason}.
+When the finest size
 gives fewer than two cells the warning is
 \code{spatialkit_not_supported}, with \code{obs_per_cell} among its
 fields and \code{min_cell_n} \code{NA}; and
@@ -1048,9 +1056,10 @@ that share a location), \code{total} (the rows \code{loo} read) and
 \code{column}.}
 \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 with a level of more than 5,000 cells, on any ladder, when
-\pkg{FNN} or \pkg{Matrix} is not installed: \code{moran_i} and
-\code{moran_z} are \code{NA} at a level where more than 5,000 cells
-hold a scored row, and every other column is computed.  Raised once,
+\pkg{FNN} cannot be loaded or \pkg{Matrix} is not installed:
+\code{moran_i} and \code{moran_z} are \code{NA} at a level where
+more than 5,000 cells hold a scored row, and every other column is
+computed.  Raised once,
 before the first fit, when such a level can occur: the cells that
 hold a scored row are counted after a level's fit, so where rows
 without a response leave fewer of them the two columns are computed

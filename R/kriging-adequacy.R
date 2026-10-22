@@ -1102,13 +1102,38 @@ print.kriging_adequacy <- function(x, ...) {
                 stats::median(r), min(r), max(r), sum(r > 0.5)))
   # Kriging against the plain mean, both variances from the one variogram.
   # A subset or an object from before these columns existed has none.
+  # Under a pure nugget there is no spatial correlation for kriging to use,
+  # and a gain is still printed: the variogram gives every place one mean,
+  # so kriging averages every location of the cell's neighbourhood
+  # (kr_n_used), the cell's own among them, where the plain mean averages
+  # the cell's own alone.  The neighbourhood is the nmax locations nearest
+  # the cell's centre, or, for a cell those leave some of its own out of,
+  # all of its own plus the nmax nearest outside it (.cell_neighbourhoods();
+  # kr_n_used is then above nmax).  The line says so, so that the gain is not
+  # read as correlation that the warning said was not found.
   gn <- df$kr_gain[is.finite(df$kr_gain)]
+  pure_nugget <- is.data.frame(vm) && nrow(vm) > 0L && all(as.character(vm$model) == "Nug")
+  nmax <- as.integer(attr(x, "nmax"))
+  n_enlarged <- if ("kr_n_used" %in% names(df))
+    sum(is.finite(df$kr_gain) & is.finite(df$kr_n_used) & df$kr_n_used > nmax) else 0L
   if (length(gn))
     cat(sprintf(paste0("  kr_gain, the share of the plain mean's error variance that kriging ",
                        "removes under this variogram (1 - kr_var / plain_var): median %.2f, ",
                        "range %.2f-%.2f over the %d cell(s) with points and a kriged ",
-                       "estimate\n"),
-                stats::median(gn), min(gn), max(gn), length(gn)))
+                       "estimate%s\n"),
+                stats::median(gn), min(gn), max(gn), length(gn),
+                if (pure_nugget)
+                  sprintf(paste0("; under a pure nugget the variogram gives every place one ",
+                                 "mean, so this is the gain of averaging the kr_n_used ",
+                                 "locations a cell is kriged from, its own among them, over ",
+                                 "averaging its own alone (the nmax = %d nearest its centre%s)"),
+                          nmax,
+                          if (n_enlarged)
+                            sprintf(paste0(", or, for %d cell(s) with own locations beyond ",
+                                           "those, all of its own plus the %d nearest outside it"),
+                                    n_enlarged, nmax)
+                          else "")
+                else ""))
   sh <- df$kr_shift[is.finite(df$kr_shift)]
   if (length(sh))
     cat(sprintf(paste0("  kriged minus plain mean, over the standard deviation the variogram ",

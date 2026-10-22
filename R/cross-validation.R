@@ -2833,8 +2833,10 @@ sac_nugget <- function(x) {
 #'   \code{nlme::gls()}, returns the REML range, and attaches the empirical
 #'   variogram of the REML residuals for inspection.  It needs \pkg{nlme},
 #'   costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-#'   when it does not converge the \code{"ols"} path runs instead with an R
-#'   warning saying so.  The start of the fit is chosen from the profile
+#'   it takes one row a location and needs 30 locations.  When it is not
+#'   fitted (no \pkg{nlme}, or fewer than 30 locations) or does not
+#'   converge, the \code{"ols"} path runs instead with an R warning that
+#'   says which.  The start of the fit is chosen from the profile
 #'   REML likelihood on a grid of ranges and nugget proportions, and when
 #'   more than one start is fitted the fit with the largest log-likelihood
 #'   is kept.
@@ -3024,10 +3026,10 @@ sac_nugget <- function(x) {
 #'           \code{range_floor} holds the distance the refused range fell
 #'           short of.
 #'         \item \code{"fitted range is non-positive or non-finite"}.
-#'         \item \code{"no variogram model could be fitted (singular
-#'           fits)"}: fewer than three lag bins hold point pairs.
-#'           \code{variogram_model} is \code{NULL} and \code{nugget} is
-#'           \code{NA}.
+#'         \item \code{"no variogram model could be fitted: fewer than
+#'           three lag bins hold point pairs"}, which is when it is
+#'           returned.  \code{variogram_model} is \code{NULL} and
+#'           \code{nugget} is \code{NA}.
 #'       }
 #'       The reason names one ground for the refusal, in the order above.
 #'       \code{attr(attr(range, "variogram_model"), "converged")} says one
@@ -3371,13 +3373,24 @@ estimate_sac_range <- function(points_sf, response_var,
       reml_fit <- .reml_trend(mf, fml, extent = extent, max_n = reml_max_n,
                               seed = seed)
       if (is.null(reml_fit)) {
+        # Why there is no fit.  .reml_trend() fits one row a location and
+        # needs 30 of them (`reml_max_n` is at least 30, so its subsample
+        # never takes them below that); without nlme, or below 30, nothing
+        # was fitted, and only otherwise did a fit fail to converge.
+        n_loc <- sum(!duplicated(mf[, c(".sac_x", ".sac_y"), drop = FALSE]))
+        why <- if (!.has_backend("nlme"))
+          "was not fitted (package 'nlme' is not installed)"
+        else if (n_loc < 30L)
+          sprintf(paste0("was not fitted: the %d row%s lie at %d location%s, fewer than ",
+                         "the 30 it needs"),
+                  nrow(mf), if (nrow(mf) == 1L) "" else "s", n_loc,
+                  if (n_loc == 1L) "" else "s")
+        else "did not converge"
         .warn_and_log(paste0("estimate_sac_range(): the REML detrending on %s ",
-                             "did not converge%s; falling back to OLS ",
+                             "%s; falling back to OLS ",
                              "detrending, whose residual variogram is biased ",
                              "toward a shorter range (see ?estimate_sac_range)."),
-                      paste(predictor_vars, collapse = " + "),
-                      if (!requireNamespace("nlme", quietly = TRUE))
-                        " (package 'nlme' is not installed)" else "")
+                      paste(predictor_vars, collapse = " + "), why)
       } else {
         X <- try(stats::model.matrix(fml, mf), silent = TRUE)
         b <- if (inherits(X, "try-error")) NA_real_ else reml_fit$beta[colnames(X)]
@@ -3925,7 +3938,8 @@ estimate_sac_range <- function(points_sf, response_var,
                      "The empirical variogram is attached for inspection: call ",
                      "plot() on the returned value."))
     return(finish(NA_real_, rejected_range = NA_real_,
-                  rejected_reason = "no variogram model could be fitted (singular fits)"))
+                  rejected_reason = paste0("no variogram model could be fitted: fewer than ",
+                                           "three lag bins hold point pairs")))
   }
 
   if (any(!dir_ok) && dir_success)
@@ -5202,7 +5216,14 @@ make_folds <- function(points_sf, k,
     # Fewer folds than asked is a different cross-validation from the one the
     # caller wrote down.  It was a log line only, which tryCatch(), knitr and
     # spatialkit_quiet() never show.
-    if (!is.na(k_requested) && k < k_requested)
+    # One row is one fold that holds it out and leaves nothing to fit on:
+    # said as such, with no fewer folds to offer.
+    if (!is.na(k_requested) && k < k_requested && n == 1L)
+      .warn_k_reduced(k_requested, k, paste0(
+        "make_folds(random_kfold): returning 1 fold, not the k = %d asked ",
+        "for: the layer has 1 row with usable coordinates, so the fold holds ",
+        "it out and leaves no row to fit on."), k_requested)
+    else if (!is.na(k_requested) && k < k_requested)
       .warn_k_reduced(k_requested, k, paste0(
         "make_folds(random_kfold): returning %d folds, not the k = %d asked ",
         "for: the layer has %d rows with usable coordinates and every fold ",
@@ -5360,9 +5381,16 @@ make_folds <- function(points_sf, k,
             format(signif(as.numeric(bb["ymax"] - bb["ymin"]) / built$ny, 4))
           ))
         } else {
+          # The `block_size` given sets the blocks; the range is not used as
+          # their size, only compared with it below.  It is a minimum edge,
+          # as the range is in the branch above, so say what is built.
+          built <- .block_dims_from_size(bb, block_size)
           message(sprintf(
-            "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; using as minimum block size.",
-            sac_range
+            "make_folds(block_kfold): estimated spatial autocorrelation range = %.1f CRS units; the `block_size` given (%s) is used as minimum block size, so the range is only compared against it. Over the %s extent that is a %s x %s grid of blocks %s wide and %s tall.",
+            sac_range, format(as.numeric(block_size)), .block_extent_chr(bb),
+            format(built$nx, scientific = FALSE), format(built$ny, scientific = FALSE),
+            format(signif(as.numeric(bb["xmax"] - bb["xmin"]) / built$nx, 4)),
+            format(signif(as.numeric(bb["ymax"] - bb["ymin"]) / built$ny, 4))
           ))
           if (block_size < sac_range)
             .warn_and_log(

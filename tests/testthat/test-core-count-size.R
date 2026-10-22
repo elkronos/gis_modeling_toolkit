@@ -374,8 +374,13 @@ test_that("the edge labels and their hints: a ladder of sizes has its own, every
   hint <- " `obs_per_cell` sets the sizes offered; how small a cell may be is the caller's choice."
   expect_identical(.edge_hint("the finest size offered (obs_per_cell)"), hint)
   expect_identical(.edge_hint("the coarsest size offered (obs_per_cell)"), hint)
+  # At the support ceiling the hint names `levels` past it, which leave the
+  # levels below it as they are; a lower min_cell_n builds another ladder
+  # (BUG-07).
   expect_identical(.edge_hint("the support ceiling (n / min_cell_n)"),
-                   " Lower min_cell_n to see whether the criterion keeps going.")
+                   paste0(" Pass `levels` that run past this count to see whether the criterion ",
+                          "keeps going; a lower min_cell_n raises the ceiling too, but moves every ",
+                          "level below it."))
   expect_identical(.edge_hint("the only level scored"),
                    " One level leaves nothing to compare it with.")
   expect_identical(.edge_hint(NA_character_), "")
@@ -1378,12 +1383,15 @@ test_that("the notes of \"loo\" on a response without structure are Cp's, for th
   expect_identical(s$structure_p, min(1, finite * est$f_p[[as.character(s$best)]]))
   # One mean does as well as any level.
   expect_lte(s$one_cell, s$value * 1.02)
+  # The rule is one_cell <= value * (1 + tol), which holds where one mean is
+  # lower too, and the note says that, not "within 2%" (BUG-07).
   expect_identical(
     s$note,
     c(structure = sprintf(
-      paste0("the leave-one-out error at one cell (%s) is within 2%% of the optimum (%s): one ",
-             "mean for the whole layer predicts as well as any level scored, so the response ",
-             "shows no spatial structure the cells can use and the count is not identified."),
+      paste0("the leave-one-out error at one cell (%s) is not above the optimum (%s) by more ",
+             "than 2%%: one mean for the whole layer predicts as well as any level scored, so ",
+             "the response shows no spatial structure the cells can use and the count is not ",
+             "identified."),
       format(signif(s$one_cell, 3)), format(signif(s$value, 3)))))
   # The other ground: the cells beat one mean by the margin, and by no more
   # than chance.  A margin of 0 on a column made to beat one mean barely.
@@ -1883,7 +1891,7 @@ test_that("a selection by size prints its size, the estimate, the level's number
   out <- .cs_print(s)
   expect_identical(out[1:6], c(
     "Resolution by size: 133 cells",
-    "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51",
+    "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51",
     "  cells       : density-weighted k-means++ starts (power 1, 8 neighbours)",
     "  estimate    : pooled toward the 8 nearest cells",
     sprintf("  at this size: %.1f%% of the rows are alone in their cell; median own weight %.2f",
@@ -1926,9 +1934,11 @@ test_that("on the default path the note calls the size the default, not the call
   expect_identical(s$note, c(size = default))
   out <- .cs_print(s)
   expect_false(any(grepl("caller", out, fixed = TRUE)))
+  # The size line calls the size the default, as the note does: nothing was
+  # asked (BUG-07).
   expect_identical(out[1:2], c(
     "Resolution by size: 133 cells",
-    "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51"))
+    "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51"))
   expect_identical(out[7:8], c(
     "  note        : the count is set by obs_per_cell = 4.5, the default; no",
     "                criterion chose it."))
@@ -1967,7 +1977,7 @@ test_that("under the split the print says which rows the level's numbers are of"
   n_half <- attr(half, "estimate")$n
   # The size line counts the rows of both halves.
   expect_identical(out[2L],
-                   "  size        : 4.5 rows per cell asked (obs_per_cell); 600 rows / 133 cells = 4.51")
+                   "  size        : 4.5 rows per cell, the default (obs_per_cell); 600 rows / 133 cells = 4.51")
   # The rows the error read, the cells that hold one of them, and the rows
   # per such cell: 299 rows in 75 of the 133 cells.
   occupied <- unname(attr(half, "estimate")$cells[["133"]])
@@ -2149,6 +2159,10 @@ test_that("for a ladder of one size summary() says the size set the count", {
   e <- .cs_error(summary(k))
   expect_match(conditionMessage(e),
                "^summary.resolution_profile\\(\\): no count criterion is finite at any level\\. ")
+  # It says that the response is constant, and names loo (BUG-07).
+  expect_match(conditionMessage(e),
+               paste0("The response is constant over the 600 scored rows, so no criterion that ",
+                      "reads it is finite: cp, loo and moran_z are NA at every level"), fixed = TRUE)
   ending <- paste0(" The ladder is one size (obs_per_cell = 4.5); the count is set by the size, ",
                    "and select_resolution(criterion = \"size\") reads it.")
   expect_identical(substring(conditionMessage(e), nchar(conditionMessage(e)) - nchar(ending) + 1L),
@@ -2162,9 +2176,13 @@ test_that("for a ladder of one size summary() says the size set the count", {
   expect_match(conditionMessage(e), "no count criterion is finite at any level", fixed = TRUE)
   # Several sizes are named as a ladder of sizes, with the missing variogram
   # where the profile fitted none and without it where the caller gave one.
+  # The response is constant, and the error says so in place of the general
+  # sentence on what each criterion needs (BUG-07).
   present <- paste0("summary.resolution_profile(): no count criterion is finite at any level. ",
-                    "cp needs a response, reliability a usable variogram; a geometry-only ",
-                    "profile carries elbow alone, and elbow is NA when the WSS curve has no elbow.")
+                    "The response is constant over the 600 scored rows, so no criterion that ",
+                    "reads it is finite: cp, loo and moran_z are NA at every level, and ",
+                    "reliability needs a usable variogram of it; elbow, read off the points ",
+                    "alone, is NA when the WSS curve has no elbow.")
   expect_identical(
     conditionMessage(e),
     paste0(present, " The profile is on a ladder of sizes (obs_per_cell = c(9, 4.5)), which ",

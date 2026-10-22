@@ -111,7 +111,12 @@ test_that("a Cp with no noise variance does not call white noise structured", {
   seeds <- fst_catch(get_voronoi_seeds(method = "kmeans", n = s, sample_points = pts,
                                        partition = "kmeans"))
   expect_true("spatialkit_no_structure" %in% seeds$classes)
-  expect_output(print(summary(z)), "one cell for the whole layer does as well")
+  # Cp at one cell is above the optimum by more than 2%, so one cell does not
+  # do as well: summary() says that the F test is what failed (BUG-07).
+  out_z <- utils::capture.output(print(summary(z)))
+  expect_false(any(grepl("one cell for the whole layer does as well", out_z, fixed = TRUE)))
+  expect_true(any(grepl("cp: the cells beat one cell for the whole layer, but the F test does not",
+                        out_z, fixed = TRUE)))
 })
 
 test_that("with no noise variance a field with structure is still called structured, and why", {

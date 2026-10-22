@@ -1528,9 +1528,9 @@ area_of_applicability <- function(newdata, model = NULL, train_sf = NULL,
   # use_fnn = FALSE is a working alternative.  The default is guarded by
   # requireNamespace(); an explicit request needs the same courtesy.
   if (isTRUE(use_fnn) && !requireNamespace("FNN", quietly = TRUE))
-    stop("area_of_applicability(): `use_fnn = TRUE` but package 'FNN' is not ",
-         "installed. Install it with install.packages(\"FNN\"), or pass ",
-         "use_fnn = FALSE to use the dense fallback.", call. = FALSE)
+    stop("area_of_applicability(): `use_fnn = TRUE` but package 'FNN', which installs ",
+         "with spatialkit, could not be loaded. Reinstall it, or pass use_fnn = FALSE to ",
+         "use the dense fallback.", call. = FALSE)
 
   # chunk_size reached seq.int(1, nq, by = chunk_size) unvalidated.  A computed
   # value such as 1e3 / nrow(train) = 12.5 left some rows of each block at the

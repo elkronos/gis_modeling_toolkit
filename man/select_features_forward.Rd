@@ -73,8 +73,9 @@ It does not silence R warnings, nor the package's console log echo
 \item{auto_range}{Logical.  If \code{TRUE} and \code{method} is
 \code{"block_kfold"}, the autocorrelation range is estimated from the
 response (detrended on the candidates) and used as the minimum block
-size of the inner folds, exactly as in \code{\link{make_folds}()};
-\code{block_size} still applies as a floor.  Default \code{FALSE}, which
+size of the inner folds, exactly as in \code{\link{make_folds}()}:
+a \code{block_size} given takes precedence, and the range is then only
+compared with it.  Default \code{FALSE}, which
 keeps the geometric blocks.  With inner blocks smaller than the range a
 candidate can be chosen for tracking nearby values of the response, the
 case the \code{random_kfold} caution above is about, so the warning

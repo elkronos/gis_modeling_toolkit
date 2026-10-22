@@ -109,6 +109,41 @@
 }
 
 
+#' Counts, or a count and a limit on it, written in full
+#'
+#' Thousands separators and no scientific notation, so that two counts that
+#' differ print differently: 1.0004e10 is "10,004,000,000", where \code{"\%.2g"}
+#' wrote both it and 1e10 as "1e+10".  Each element is written on its own,
+#' with 7 significant digits, or with more, up to 15, where 7 would write two
+#' different numbers of \code{x} alike: a limit of 1e10 - 0.4 is
+#' "9,999,999,999.6" beside a work of 1e10.  So the numbers of one message
+#' are passed together.
+#'
+#' @param x A numeric vector.
+#' @return A character vector of the length of \code{x}.
+#' @keywords internal
+#' @noRd
+.count_text <- function(x) {
+  x <- as.numeric(x)
+  write <- function(d)
+    vapply(x, function(v) format(v, big.mark = ",", scientific = FALSE, trim = TRUE, digits = d),
+           character(1))
+  distinct <- !duplicated(x)
+  for (d in 7:15) {
+    out <- write(d)
+    if (!anyDuplicated(out[distinct])) break
+  }
+  out
+}
+
+
+# What the texts that fire when FNN cannot be loaded say to do.  FNN is in
+# Imports and installs with spatialkit, so asking the user to install it
+# misstates the case: it is there and could not be loaded.
+.FNN_REMEDY <- paste0("FNN, which installs with spatialkit, could not be loaded: reinstall ",
+                      "it; the result is the same.")
+
+
 #' Stop before an exact search that would compare too many pairs
 #'
 #' An exact search compares every row asked for with every candidate, so its
@@ -121,7 +156,7 @@
 #' @param what A short name of the search, kept in the condition's
 #'   \code{what} field.
 #' @param caller Name of the exported function, for the message.
-#' @param remedy The message's last sentence.
+#' @param remedy The message's last sentence: \code{.FNN_REMEDY} by default.
 #' @param search The search in the words of the message; \code{what} when not
 #'   given.
 #' @param data Further fields for the condition, as a named list.
@@ -129,12 +164,13 @@
 #' @keywords internal
 #' @noRd
 .work_guard <- function(work, limit, what, caller,
-                        remedy = "Install FNN: the result is the same.",
+                        remedy = .FNN_REMEDY,
                         search = what, data = list()) {
   if (!(work > limit)) return(invisible(NULL))
-  msg <- sprintf(paste0("%s(): %s would compare %.2g pairs without the FNN package, above ",
-                        "the limit of %.2g (options(spatialkit.exact_pairs_max = )). %s"),
-                 caller, search, work, limit, remedy)
+  nums <- .count_text(c(work, limit))
+  msg <- sprintf(paste0("%s(): %s would compare %s pairs without the FNN package, above ",
+                        "the limit of %s (options(spatialkit.exact_pairs_max = )). %s"),
+                 caller, search, nums[1L], nums[2L], remedy)
   stop(do.call(errorCondition,
                c(list(message = msg, class = "spatialkit_work_limit", call = NULL,
                       work = as.numeric(work), limit = as.numeric(limit), what = what),

@@ -649,6 +649,36 @@ test_that("a nugget at its bound with no level to take a noise variance from lea
   expect_match(conditionMessage(w[[1L]]),
                paste0("no level's cells hold at least two scored rows on average to take a ",
                       "noise variance from, so `cp` is NA at every level"), fixed = TRUE)
+  # The print marks the nugget and says why `cp` is NA, as the warning does
+  # (BUG-07): it printed the nugget with no mark and nothing on `cp`.
+  out <- utils::capture.output(print(p))
+  expect_true(any(grepl(paste0("  variogram   : nugget 0 (at the fit's lower bound), partial sill 1, ",
+                               "range 300; cp is NA at every level: no level's cells hold two scored ",
+                               "rows on average"), out, fixed = TRUE)))
+  # A geometry-only profile with the same `sac` has no `cp` to speak of: the
+  # mark alone.
+  g <- suppressWarnings(resolution_profile(pts, NULL, sac = .bp_sac(nugget = 0, at_bound = TRUE),
+                                           levels = c(250, 300), partition = "kmeans",
+                                           nstart = 3L, estimate = NULL, obs_per_cell = NULL))
+  expect_null(attr(g, "cp_noise"))
+  out <- utils::capture.output(print(g))
+  expect_true(any(grepl("  variogram   : nugget 0 (at the fit's lower bound), partial sill 1, range 300",
+                        out, fixed = TRUE)))
+  expect_false(any(grepl("cp is NA at every level", out, fixed = TRUE)))
+  # A constant response with the same `sac`: the mark alone, since `cp` is NA
+  # there for the reason the warning on a constant response gives, not for
+  # want of a level to take a noise variance from.
+  const <- pts; const$z <- 5
+  k <- .bp_catch(resolution_profile(const, "z", sac = .bp_sac(nugget = 0, at_bound = TRUE),
+                                    levels = c(250, 300), partition = "kmeans", nstart = 3L,
+                                    estimate = NULL, obs_per_cell = NULL))
+  expect_length(.bp_of(k, "spatialkit_constant_response"), 1L)
+  expect_null(attr(k$value, "cp_noise"))
+  expect_true(attr(k$value, "one_cell")$constant)
+  out <- utils::capture.output(print(k$value))
+  expect_true(any(grepl("  variogram   : nugget 0 (at the fit's lower bound), partial sill 1, range 300",
+                        out, fixed = TRUE)))
+  expect_false(any(grepl("cp is NA at every level", out, fixed = TRUE)))
 })
 
 test_that("the bound is a nugget of at most 1e-4 of the sill: just under it the nugget is refused, just over it taken", {

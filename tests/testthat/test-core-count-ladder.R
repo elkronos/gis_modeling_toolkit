@@ -520,11 +520,20 @@ test_that("a size that asks for more cells than can be placed is held to that ma
   expect_true(b$supported)
   expect_identical(b$size_levels, c("4.5" = 100L))
   expect_identical(r$value$cells_resp, 100L)
-  # The sizes of "auto" are held the same way, each with its warning.
+  # The sizes of "auto" are held the same way, in one warning that names
+  # them all: seven warnings that differed in one number said nothing more.
+  # Its `obs_per_cell` and `wanted` hold one element a size.
   r <- .cl_catch(.cl_profile(pts, estimate = "mean", obs_per_cell = "auto"))
   held <- .cl_of(r, "spatialkit_size_not_reached")
-  expect_identical(vapply(held, function(w) w$obs_per_cell, numeric(1)), c(18, 12, 9, 6, 4.5, 3, 2))
-  expect_true(all(vapply(held, function(w) w$reason, "") == "more cells than can be placed"))
+  expect_length(held, 1L)
+  expect_identical(conditionMessage(held[[1L]]),
+                   paste0("resolution_profile(): obs_per_cell = 18, 12, 9, 6, 4.5, 3 and 2 ask for ",
+                          "167 to 1500 cells, more than k-means can place on the layer's 100 ",
+                          "distinct locations; 100 cells are used for each (30 rows per cell)."))
+  expect_identical(.cl_fields(held[[1L]]),
+                   list(obs_per_cell = c(18, 12, 9, 6, 4.5, 3, 2),
+                        wanted = c(167L, 250L, 333L, 500L, 667L, 1000L, 1500L), used = 100L,
+                        reason = "more cells than can be placed"))
   expect_identical(r$value$levels, 100L)
 
   # A size that asks for exactly as many cells as can be placed is reached,
@@ -1093,11 +1102,15 @@ test_that("Moran's z is left out above the limit and not at it, and the warning 
     .cl_catch(.cl_profile(layer, ..., obs_per_cell = obs_per_cell, partition = "kmeans",
                           init = "random", nstart = 1))
   }
+  # FNN installs with spatialkit, so it could not be loaded; Matrix is
+  # suggested and is not installed (BUG-07: both read "is not installed").
   text <- function(limit, reach, lacking)
     sprintf(paste0("resolution_profile(): `moran_i` and `moran_z` will be NA at a level where more ",
-                   "than %d cells hold a scored row (this ladder reaches %d cells), because %s not ",
-                   "installed: Moran's z of the cell means needs FNN to find each cell's neighbours ",
-                   "and Matrix to hold them. Every other column is computed."), limit, reach, lacking)
+                   "than %d cells hold a scored row (this ladder reaches %d cells), because %s: ",
+                   "Moran's z of the cell means needs FNN to find each cell's neighbours ",
+                   "and Matrix to hold them. Every other column is computed."), limit, reach,
+            paste(c(if ("FNN" %in% lacking) "FNN could not be loaded",
+                    if ("Matrix" %in% lacking) "Matrix is not installed"), collapse = " and "))
   both <- size(159L, off = character(0))
   expect_length(both$warnings, 0L)
   expect_identical(both$value$levels, 160L)
@@ -1113,7 +1126,7 @@ test_that("Moran's z is left out above the limit and not at it, and the warning 
     above <- size(159L, off = pkg)
     expect_identical(.cl_classes(above), "spatialkit_moran_skipped", info = pkg)
     w <- above$warnings[[1L]]
-    expect_identical(conditionMessage(w), text(159L, 160L, paste(pkg, "is")), info = pkg)
+    expect_identical(conditionMessage(w), text(159L, 160L, pkg), info = pkg)
     expect_identical(.cl_fields(w), list(limit = 159L, levels = 160L, missing = pkg), info = pkg)
     expect_null(conditionCall(w))
     expect_identical(above$value$moran_i, NA_real_, info = pkg)
@@ -1122,7 +1135,7 @@ test_that("Moran's z is left out above the limit and not at it, and the warning 
       expect_identical(above$value[[col]], both$value[[col]], info = paste(pkg, col))
   }
   above <- size(159L, off = c("FNN", "Matrix"))
-  expect_identical(conditionMessage(above$warnings[[1L]]), text(159L, 160L, "FNN and Matrix are"))
+  expect_identical(conditionMessage(above$warnings[[1L]]), text(159L, 160L, c("FNN", "Matrix")))
   expect_identical(above$warnings[[1L]]$missing, c("FNN", "Matrix"))
 
   # Three levels, two of them above the limit: the condition lists those two,
@@ -1169,7 +1182,7 @@ test_that("Moran's z is left out above the limit and not at it, and the warning 
   r <- size(120L, layer = west, obs_per_cell = n_west / 160)
   w <- .cl_of(r, "spatialkit_moran_skipped")
   expect_length(w, 1L)
-  expect_identical(conditionMessage(w[[1L]]), text(120L, 160L, "FNN is"))
+  expect_identical(conditionMessage(w[[1L]]), text(120L, 160L, "FNN"))
   expect_true(is.finite(r$value$moran_z))
   expect_true(is.finite(r$value$moran_i))
 
@@ -1285,12 +1298,16 @@ test_that("above 5,000 cells Moran's z is left out without FNN or Matrix, and th
     expect_identical(.cl_classes(r), "spatialkit_moran_skipped", info = pkg)
     # Said once, before the first fit.
     expect_identical(events, c("spatialkit_moran_skipped", "fit"), info = pkg)
+    # FNN installs with spatialkit, so it could not be loaded; Matrix is
+    # suggested and is not installed (BUG-07: both read "is not installed").
     expect_identical(conditionMessage(w[[1L]]),
                      sprintf(paste0("resolution_profile(): `moran_i` and `moran_z` will be NA at a ",
                                     "level where more than 5000 cells hold a scored row (this ladder ",
-                                    "reaches 5111 cells), because %s is not installed: Moran's z of ",
+                                    "reaches 5111 cells), because %s: Moran's z of ",
                                     "the cell means needs FNN to find each cell's neighbours and ",
-                                    "Matrix to hold them. Every other column is computed."), pkg))
+                                    "Matrix to hold them. Every other column is computed."),
+                             if (pkg == "FNN") "FNN could not be loaded"
+                             else "Matrix is not installed"))
     expect_identical(.cl_fields(w[[1L]]), list(limit = 5000L, levels = 5111L, missing = pkg))
     expect_identical(r$value$moran_i, NA_real_, info = pkg)
     expect_identical(r$value$moran_z, NA_real_, info = pkg)
@@ -1304,7 +1321,8 @@ test_that("above 5,000 cells Moran's z is left out without FNN or Matrix, and th
   r <- local({ .cl_without(c("FNN", "Matrix")); .cl_catch(size()) })
   w <- .cl_of(r, "spatialkit_moran_skipped")
   expect_length(w, 1L)
-  expect_match(conditionMessage(w[[1L]]), "because FNN and Matrix are not installed", fixed = TRUE)
+  expect_match(conditionMessage(w[[1L]]),
+               "because FNN could not be loaded and Matrix is not installed:", fixed = TRUE)
   expect_identical(w[[1L]]$missing, c("FNN", "Matrix"))
   expect_identical(r$value$loo, both$value$loo)
 
@@ -1403,15 +1421,20 @@ test_that("the fit guard stops a ladder of sizes whose fits compare too many poi
     expect_identical(.cl_fields(e),
                      list(work = work, limit = work - 1, what = "partition fit", kind = cs$kind,
                           init = cs$init, nstart = cs$nstart, fnn = TRUE), info = what)
+    # The work and the limit in full, so that a work one comparison above the
+    # limit does not print as the limit; FNN is loaded here, so the way on
+    # names no package.
     expect_identical(conditionMessage(e),
                      sprintf(paste0("resolution_profile(): fitting 111 cells to 1000 rows with %s is ",
-                                    "%.2g point-to-centre comparisons, above the limit of %.2g ",
+                                    "%s point-to-centre comparisons, above the limit of %s ",
                                     "(options(spatialkit.fit_work_max = )). Ways on: fewer starts ",
                                     "(`nstart`), which keep the best of fewer; a coarser ",
-                                    "`obs_per_cell`; partition = \"density\" with init = \"random\" and ",
-                                    "the FNN package installed, which has no step that compares every ",
+                                    "`obs_per_cell`; partition = \"density\" with init = \"random\", ",
+                                    "which has no step that compares every ",
                                     "point with every centre and leaves a cell without a point more ",
-                                    "often; or a higher limit."), cs$with, work, work - 1),
+                                    "often; or a higher limit."), cs$with,
+                             format(work, big.mark = ",", scientific = FALSE),
+                             format(work - 1, big.mark = ",", scientific = FALSE)),
                      info = what)
     # At the limit the fits run: the stand-in for the fit is what stops the call.
     e <- guard(work, partition = cs$kind, init = cs$init, nstart = NULL)
@@ -1519,7 +1542,16 @@ test_that("without FNN the fit guard counts every pass of the density kind", {
                      list(work = work, limit = work - 1, what = "partition fit", kind = "density",
                           init = init, nstart = 3L, fnn = FALSE), info = init)
     expect_match(conditionMessage(e),
-                 "fitting 111 cells to 1000 rows with 3 starts of up to 100 passes each is 3.3e+07",
+                 paste0("fitting 111 cells to 1000 rows with 3 starts of up to 100 passes each is ",
+                        "33,300,000 point-to-centre comparisons, above the limit of 33,299,999"),
+                 fixed = TRUE)
+    # FNN could not be loaded, so the random starts of the density kind are a
+    # way on only once it is reinstalled.
+    expect_match(conditionMessage(e),
+                 paste0("partition = \"density\" with init = \"random\", which has no step that ",
+                        "compares every point with every centre and leaves a cell without a point ",
+                        "more often (it needs FNN, which installs with spatialkit and could not be ",
+                        "loaded: reinstall it); or a higher limit."),
                  fixed = TRUE)
     expect_identical(conditionMessage(guard(work, partition = "density", init = init,
                                             nstart = NULL)),
@@ -1615,9 +1647,9 @@ test_that("without FNN a ladder of sizes bounds the search behind the density ki
   expect_identical(conditionMessage(e),
                    paste0("resolution_profile(): the neighbour search behind the weights of ",
                           "partition = \"density\", over 50 distinct locations, would compare ",
-                          "2.5e+03 pairs without the FNN package, above the limit of 1e+02 ",
-                          "(options(spatialkit.exact_pairs_max = )). Install FNN: the result is the ",
-                          "same."))
+                          "2,500 pairs without the FNN package, above the limit of 100 ",
+                          "(options(spatialkit.exact_pairs_max = )). FNN, which installs with ",
+                          "spatialkit, could not be loaded: reinstall it; the result is the same."))
   expect_null(conditionCall(e))
   # At the limit the search runs.
   local({

@@ -1273,8 +1273,9 @@ test_that("16. an exact search above the limit stops with spatialkit_work_limit"
   expect_identical(
     conditionMessage(e),
     paste0("resolution_profile(): finding each cell's neighbours among 20 cells would compare ",
-           "4e+02 pairs without the FNN package, above the limit of 10 ",
-           "(options(spatialkit.exact_pairs_max = )). Install FNN: the result is the same."))
+           "400 pairs without the FNN package, above the limit of 10 ",
+           "(options(spatialkit.exact_pairs_max = )). FNN, which installs with spatialkit, ",
+           "could not be loaded: reinstall it; the result is the same."))
   # The caller's name is the one handed down.
   e2 <- tryCatch(.region_neighbours(cen, 8L, FALSE, caller = "cell_values_at"),
                  error = function(e) e)
@@ -1302,7 +1303,8 @@ test_that("16. the guard itself, the fit and the nearest other row", {
     conditionMessage(e),
     paste0("cell_values_at(): the spacing of 4 locations would compare 11 pairs without the ",
            "FNN package, above the limit of 10 (options(spatialkit.exact_pairs_max = )). ",
-           "Install FNN: the result is the same."))
+           "FNN, which installs with spatialkit, could not be loaded: reinstall it; the result ",
+           "is the same."))
   expect_match(conditionMessage(tryCatch(.work_guard(2, 1, "x", "f", remedy = "Do less."),
                                          error = function(e) e)), "Do less\\.$")
 

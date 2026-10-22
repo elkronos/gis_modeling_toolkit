@@ -641,10 +641,12 @@ test_that("three structureless columns raise one spatialkit_no_structure that na
     paste(paste0("summarize_by_cell(): the pooled values of 'b', 'c' and 'a' predict a left-out ",
                  "observation no better than one mean for all rows, so they show no spatial ",
                  "structure these cells can use. The values are returned. A map of them looks ",
-                 "smooth because each is mostly its neighbours' mean, not because the response ",
-                 "varies smoothly."),
+                 "smooth because each is mostly its neighbours' mean, not because the columns ",
+                 "vary smoothly."),
           piece("resp_b"), piece("pred_c"), piece("pred_a")))
   expect_null(conditionCall(w))
+  # 'c' and 'a' are predictors, so the closing sentence speaks of the
+  # columns, not of the response (BUG-07).
   # One column alone: the singular, and no name before its numbers.
   one <- .ps_catch(summarize_by_cell(A$asg, "a", id_col = "cell_id", estimate = "pooled"))
   expect_identical(.ps_classes(one), "spatialkit_no_structure")
@@ -697,7 +699,8 @@ test_that("a warning that lists many columns says what it has to say before thei
   msg <- conditionMessage(w[[1L]])
   # The whole text passes what R prints; the closing sentence does not.
   expect_gt(nchar(msg), 1000L)
-  closing <- "not because the response varies smoothly."
+  # The response and its predictors: "the columns", not "the response" (BUG-07).
+  closing <- "not because the columns vary smoothly."
   ends <- regexpr(closing, msg, fixed = TRUE) + nchar(closing) - 1L
   expect_gt(ends, 0L)
   expect_lt(ends, 600L)
@@ -999,9 +1002,10 @@ test_that("above the limit of an exact search the pooled columns are NA and noth
   expect_identical(
     conditionMessage(w),
     paste0("summarize_by_cell(): the pooled columns of 'z' and 'p' are NA: finding each cell's ",
-           "neighbours among 40 cells without the FNN package would compare 1.6e+03 pairs, ",
-           "above the limit of 1e+02 (options(spatialkit.exact_pairs_max = )). Install FNN: ",
-           "the result is the same. The plain columns are unaffected."))
+           "neighbours among 40 cells without the FNN package would compare 1,600 pairs, ",
+           "above the limit of 100 (options(spatialkit.exact_pairs_max = )). FNN, which ",
+           "installs with spatialkit, could not be loaded: reinstall it; the result is the ",
+           "same. The plain columns are unaffected."))
   out <- r$value
   new <- .ps_pooled_names(out)
   expect_length(new, 10L)
@@ -1017,7 +1021,7 @@ test_that("above the limit of an exact search the pooled columns are NA and noth
   expect_identical(.ps_fields(flipped$warnings[[1L]])[c("work", "cells")],
                    list(work = 1600, cells = c(p = 39L, z = 40L)))
   expect_match(conditionMessage(flipped$warnings[[1L]]),
-               "neighbours among 40 cells without the FNN package would compare 1.6e+03 pairs",
+               "neighbours among 40 cells without the FNN package would compare 1,600 pairs",
                fixed = TRUE)
   expect_identical(rec$resp_z$offsets, c(NA_real_, NA_real_))
   # Every column the call shares with the call of plain means is that call's.

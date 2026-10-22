@@ -29,8 +29,10 @@ test_that("a constant response is called constant, by the profile and by select_
   p <- out$value
   expect_true("spatialkit_constant_response" %in% out$classes)
   expect_true(any(grepl("the response is constant over the 200 scored row", out$text)))
-  expect_true(any(grepl("`cp`, `moran_i` and `moran_z` are NA at every level", out$text,
-                        fixed = TRUE)))
+  # The profile has the default estimate, whose columns are NA too: the
+  # warning names them (BUG-07).
+  expect_true(any(grepl(paste0("`cp`, `moran_i`, `moran_z`, `loo`, `loo_se` and `own_weight` ",
+                               "are NA at every level"), out$text, fixed = TRUE)))
   expect_true(attr(p, "one_cell")$constant)
   expect_true(all(is.na(p$cp)))
   expect_true(all(is.na(p$moran_i)) && all(is.na(p$moran_z)))

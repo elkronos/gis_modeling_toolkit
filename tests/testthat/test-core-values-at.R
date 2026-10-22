@@ -1893,8 +1893,9 @@ test_that("without FNN each exact search is bounded, and the spacing's does not 
   expect_null(e$call)
   expect_identical(conditionMessage(e), paste0(
     "cell_values_at(): the spacing of the scored rows (the nearest other of each of 20 scored ",
-    "locations) would compare 4e+02 pairs without the FNN package, above the limit of 1e+02 ",
-    "(options(spatialkit.exact_pairs_max = )). Install FNN: the result is the same."))
+    "locations) would compare 400 pairs without the FNN package, above the limit of 100 ",
+    "(options(spatialkit.exact_pairs_max = )). FNN, which installs with spatialkit, could not ",
+    "be loaded: reinstall it; the result is the same."))
   # By the polygons as well, where no seed is searched for.
   cells <- sf::st_sf(cell_id = 1:4, geometry = sf::st_buffer(sf::st_geometry(seeds), 100,
                                                             endCapStyle = "SQUARE"))

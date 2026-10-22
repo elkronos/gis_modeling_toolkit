@@ -352,7 +352,12 @@ test_that("the limit on an exact search is 2e9 pairs, and a status in the summar
   expect_identical(.pe_fields(r$warnings[[1L]]),
                    list(reason = "work limit", columns = "z", work = 3600, limit = 3599,
                         cells = c(z = 60L)))
-  expect_match(conditionMessage(r$warnings[[1L]]), "Install FNN: the result is the same.",
+  # FNN installs with spatialkit: the text says it could not be loaded, and
+  # writes the pairs in full (BUG-07).
+  expect_match(conditionMessage(r$warnings[[1L]]),
+               paste0("would compare 3,600 pairs, above the limit of 3,599 ",
+                      "(options(spatialkit.exact_pairs_max = )). FNN, which installs with ",
+                      "spatialkit, could not be loaded: reinstall it; the result is the same."),
                fixed = TRUE)
   expect_identical(attr(r$value, "pooled")$columns$resp_z$status, "work limit")
   expect_true(all(is.na(r$value$..obs_lo_resp_z)))
@@ -703,13 +708,15 @@ test_that("few values beyond one per cell: the values are returned with spatialk
            "p = %s; median own weight %.2f."),
     r1$column, format(signif(r1$loo, 4)), format(signif(r1$loo_one_cell, 4)),
     format(signif(r1$structure_p, 2)), r1$own_weight)
+  # 'wn' is a predictor, so the map is not said to look smooth for want of a
+  # smooth response, but of a smooth column (BUG-07).
   expect_identical(
     conditionMessage(ns2[[1L]]),
     paste(paste0(
       "summarize_by_cell(): the pooled values of 'wn' predict a left-out observation no better ",
       "than one mean for all rows, so it shows no spatial structure these cells can use. The ",
       "values are returned. A map of them looks smooth because each is mostly its neighbours' ",
-      "mean, not because the response varies smoothly. The pooled values of 'v' predict a ",
+      "mean, not because the column varies smoothly. The pooled values of 'v' predict a ",
       "left-out observation better than one mean for all rows, but the F test does not tell ",
       "the cell means from one mean, so no spatial structure these cells can use is shown for ",
       "it either."), piece(rec), piece(rw)))

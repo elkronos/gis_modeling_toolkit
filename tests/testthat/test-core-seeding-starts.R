@@ -244,16 +244,18 @@ test_that("with the k-means kind as its own, a random or provided seeding is war
       expect_identical(.ss_text(r), sprintf(named, method))
       expect_identical(r$value, base$value)
     }
-    # A density setting with no kind named: the present warning that the
-    # k-means kind does not read it.
+    # A density setting with no kind named: the warning that the method
+    # does not read it.  A random or provided seeding builds no density
+    # partition whatever the kind, so the k-means kind's words, which said
+    # that partition = "density" would read it, were untrue (BUG-07).
     r <- partition_warnings(f(density_power = 0.5))
-    expect_identical(.ss_text(r), paste0(
-      "get_voronoi_seeds(): `density_power` is read by partition = \"density\" only, and ",
-      "partition = \"kmeans\" ignores it."))
+    expect_identical(.ss_text(r), sprintf(paste0(
+      "get_voronoi_seeds(): `density_power` is read by method = \"kmeans\" only; ",
+      "method = \"%s\" ignores it."), method))
     r <- partition_warnings(f(density_power = 0.5, density_k = 12))
-    expect_identical(.ss_text(r), paste0(
-      "get_voronoi_seeds(): `density_power` and `density_k` are read by partition = ",
-      "\"density\" only, and partition = \"kmeans\" ignores them."))
+    expect_identical(.ss_text(r), sprintf(paste0(
+      "get_voronoi_seeds(): `density_power` and `density_k` are read by method = \"kmeans\" ",
+      "only; method = \"%s\" ignores them."), method))
     # With the density kind named too, one warning: the kind is not read.
     r <- partition_warnings(f(partition = "density", density_power = 0.5))
     expect_identical(.ss_text(r), sprintf(named, method))
@@ -464,12 +466,13 @@ test_that("with the density kind as its own, a random or provided seeding is war
         "method = \"%s\" ignores them."), method))
     }
     # The k-means kind named: nothing of the kind, and a density setting
-    # beside it is the present warning of that kind.
+    # beside it is told in the method's words: a random or provided seeding
+    # reads it under no kind (BUG-07).
     expect_length(partition_warnings(f(partition = "kmeans"))$warnings, 0L)
     r <- partition_warnings(f(partition = "kmeans", density_power = 0.5))
-    expect_identical(.ss_text(r), paste0(
-      "get_voronoi_seeds(): `density_power` is read by partition = \"density\" only, and ",
-      "partition = \"kmeans\" ignores it."))
+    expect_identical(.ss_text(r), sprintf(paste0(
+      "get_voronoi_seeds(): `density_power` is read by method = \"kmeans\" only; method = ",
+      "\"%s\" ignores it."), method))
   }
   # The line is for a random or provided seeding alone.  A fresh run of the
   # density kind as the function's own reads the settings, and is told
@@ -496,16 +499,24 @@ test_that("with the density kind as its own, a random or provided seeding is war
                    fixed = TRUE, info = info)
     }
   }
-  # With the k-means kind as the function's own the added line cannot be
-  # reached: the density kind is in force only where the call named it.
+  # With the k-means kind as the function's own the line is said too, in
+  # place of the k-means kind's words (BUG-07): a random seeding reads the
+  # setting under no kind.  With the density kind named, the warning about
+  # `partition` and `init` is the one said.
   own_kmeans <- .ss_own(get_voronoi_seeds, "kmeans")
-  for (args in list(list(density_power = 0.5), list(partition = "density", density_power = 0.5),
-                    list(partition = "kmeans", density_k = 12))) {
+  for (case in list(list(args = list(density_power = 0.5), set = "`density_power`"),
+                    list(args = list(partition = "kmeans", density_k = 12), set = "`density_k`"))) {
     r <- partition_warnings(do.call(own_kmeans, c(list(bnd, method = "random", n = 5,
-                                                       set_seed = 2), args)))
-    expect_false(any(grepl("is read by method = \"kmeans\" only; method", .ss_text(r),
-                           fixed = TRUE)))
+                                                       set_seed = 2), case$args)))
+    expect_identical(.ss_text(r), sprintf(paste0(
+      "get_voronoi_seeds(): %s is read by method = \"kmeans\" only; method = \"random\" ",
+      "ignores it."), case$set))
   }
+  r <- partition_warnings(do.call(own_kmeans, list(bnd, method = "random", n = 5, set_seed = 2,
+                                                   partition = "density", density_power = 0.5)))
+  expect_identical(.ss_text(r), paste0(
+    "get_voronoi_seeds(): `partition` and `init` are read by method = \"kmeans\" only; ",
+    "method = \"random\" ignores them."))
 })
 
 test_that("with the kind flipped and the starts NULL, a count as a number is 3 density starts", {

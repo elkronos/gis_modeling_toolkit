@@ -344,18 +344,28 @@ get_voronoi_seeds <- function(boundary = NULL,
   }
 
   # No scored centres: `density_power` or `density_k` set under partition =
-  # "kmeans" is read by nothing in this call.
-  .warn_density_unused(part, "get_voronoi_seeds")
-  # The same for a random or provided seeding with the density kind in force
-  # as this function's own: the warning above speaks of a kind the call did
-  # not get, and cannot fire here.
-  if (!identical(method, "kmeans") && identical(part$kind, "density") &&
-      !partition_given && length(density_given))
-    .warn_and_log(paste0("get_voronoi_seeds(): %s %s read by method = \"kmeans\" only; ",
-                         "method = \"%s\" ignores %s."),
-                  paste(sprintf("`%s`", density_given), collapse = " and "),
-                  if (length(density_given) > 1L) "are" else "is", method,
-                  if (length(density_given) > 1L) "them" else "it")
+  # "kmeans" is read by nothing in this call.  A k-means seeding is told so
+  # in the words of the kind.  A random or provided seeding reads neither
+  # setting whatever the kind, so it is told in the words of the method: the
+  # kind's words said that the density kind would have read the setting,
+  # which a random or provided seeding does not build.  The settings named
+  # are the ones each kind reported before: under the k-means kind those not
+  # at their defaults, under the density kind as this function's own those
+  # the call supplied (with the density kind named, the warning about
+  # `partition` and `init` above is the one said).
+  if (identical(method, "kmeans")) {
+    .warn_density_unused(part, "get_voronoi_seeds")
+  } else {
+    unread <- if (identical(part$kind, "kmeans")) part$unused
+              else if (!partition_given) density_given
+              else character(0)
+    if (length(unread))
+      .warn_and_log(paste0("get_voronoi_seeds(): %s %s read by method = \"kmeans\" only; ",
+                           "method = \"%s\" ignores %s."),
+                    paste(sprintf("`%s`", unread), collapse = " and "),
+                    if (length(unread) > 1L) "are" else "is", method,
+                    if (length(unread) > 1L) "them" else "it")
+  }
 
   # --- RNG handling (always restored) ---
   cleanup <- .with_seed(set_seed)
@@ -832,6 +842,11 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
   # the clamp below, k above .Machine$integer.max became NA through
   # as.integer(), and k = 0 or negative silently returned ONE seed -- which
   # the @return section's "at most k" does not describe.
+  # The NA determine_optimal_levels() returns where the points name no
+  # count is refused with the note get_voronoi_seeds() gives it.
+  if (is.numeric(k) && length(k) == 1L && is.na(k) && nzchar(.no_count_note(k)))
+    stop(sprintf("voronoi_seeds_kmeans(): `k` must be a single positive number of seeds; got NA.%s",
+                 .no_count_note(k)), call. = FALSE)
   .check_scalar(k, "k", "voronoi_seeds_kmeans", min = 1,
                 max = .Machine$integer.max,
                 what = "a single positive number of seeds")
@@ -989,6 +1004,11 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # the clamp below, k above .Machine$integer.max became NA through
   # as.integer(), and k = 0 or negative silently returned ONE seed -- which
   # the @return section's "at most k" does not describe.
+  # The NA determine_optimal_levels() returns where the points name no
+  # count is refused with the note get_voronoi_seeds() gives it.
+  if (is.numeric(k) && length(k) == 1L && is.na(k) && nzchar(.no_count_note(k)))
+    stop(sprintf("voronoi_seeds_random(): `k` must be a single positive number of seeds; got NA.%s",
+                 .no_count_note(k)), call. = FALSE)
   .check_scalar(k, "k", "voronoi_seeds_random", min = 1,
                 max = .Machine$integer.max,
                 what = "a single positive number of seeds")

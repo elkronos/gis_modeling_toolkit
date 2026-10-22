@@ -133,7 +133,9 @@ test_that("a variogram refused for showing no spatial structure gives Cp no nugg
   expect_true(all(is.na(p$reliability)))
   s <- select_resolution(p, "cp")
   expect_identical(s$structured, FALSE)
-  expect_true(any(grepl("the profile's variogram found no spatial structure", s$note)))
+  # After Cp's own note the variogram's is a sentence of its own, with a
+  # capital, and does not say "not identified" again (BUG-07).
+  expect_true(any(grepl("[Tt]he profile's variogram found no spatial structure", s$note)))
 })
 
 test_that("determine_optimal_levels() says a count is not a finding with a class and the numbers", {

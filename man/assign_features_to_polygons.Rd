@@ -100,7 +100,9 @@ matching the message; the condition carries \code{n} and \code{total}). The usua
 causes are a polygon layer that stops short of the data (a coastline
 drawn at another scale, a tessellation of seeds built without a
 \code{boundary} or \code{cover}; see \code{\link[=build_tessellation]{build_tessellation()}}) and points outside
-the study area. With \code{keep_unassigned = TRUE} they are kept with an
+the study area. A feature with empty geometry has no location to
+assign, and the warning says how many of them there are. With
+\code{keep_unassigned = TRUE} they are kept with an
 \code{NA} ID and no warning is raised, unless every feature is unassigned.
 
 The

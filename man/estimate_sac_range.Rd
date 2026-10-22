@@ -106,8 +106,10 @@ covariance together by residual maximum likelihood with
 \code{nlme::gls()}, returns the REML range, and attaches the empirical
 variogram of the REML residuals for inspection.  It needs \pkg{nlme},
 costs \eqn{O(n^3)}, and so runs on at most \code{reml_max_n} points;
-when it does not converge the \code{"ols"} path runs instead with an R
-warning saying so.  The start of the fit is chosen from the profile
+it takes one row a location and needs 30 locations.  When it is not
+fitted (no \pkg{nlme}, or fewer than 30 locations) or does not
+converge, the \code{"ols"} path runs instead with an R warning that
+says which.  The start of the fit is chosen from the profile
 REML likelihood on a grid of ranges and nugget proportions, and when
 more than one start is fitted the fit with the largest log-likelihood
 is kept.}
@@ -260,10 +262,10 @@ bins).  A structure that short cannot be told from a nugget.
 \code{range_floor} holds the distance the refused range fell
 short of.
 \item \code{"fitted range is non-positive or non-finite"}.
-\item \code{"no variogram model could be fitted (singular
-          fits)"}: fewer than three lag bins hold point pairs.
-\code{variogram_model} is \code{NULL} and \code{nugget} is
-\code{NA}.
+\item \code{"no variogram model could be fitted: fewer than
+          three lag bins hold point pairs"}, which is when it is
+returned.  \code{variogram_model} is \code{NULL} and
+\code{nugget} is \code{NA}.
 }
 The reason names one ground for the refusal, in the order above.
 \code{attr(attr(range, "variogram_model"), "converged")} says one

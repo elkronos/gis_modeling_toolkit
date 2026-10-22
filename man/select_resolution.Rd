@@ -72,7 +72,8 @@ an interior optimum and under \code{"size"}), \code{n_levels},
 \code{values} (the criterion
 at every level, \code{NA} where it could not be computed),
 \code{structured} (for \code{cp}: \code{FALSE} when \code{cp} at one
-cell is within \code{tol} of the optimum, when the cell means at the
+cell is not above the optimum by more than \code{tol} (below it
+included), when the cell means at the
 optimum differ from one mean by no more than chance allows, or when
 the variogram found no spatial structure; \code{TRUE} when the optimum
 beats one cell on both counts; see "What each criterion returns".

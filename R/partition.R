@@ -806,7 +806,8 @@
                    paste0("partition = \"density\" on %d locations without the FNN ",
                           "package: the neighbour searches compare every pair of ",
                           "locations, and every location with every centre at each ",
-                          "step. The result is the same; install FNN to get it sooner."),
+                          "step. FNN, which installs with spatialkit, could not be loaded; ",
+                          "reinstalling it gives the same result sooner."),
                    n_u)
   w  <- .density_weights(cbind(zx, zy), m, power, k_nn, use_fnn)
   W  <- m * w

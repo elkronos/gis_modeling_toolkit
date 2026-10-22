@@ -448,6 +448,20 @@ old behaviour where there is a way.
   `attr(profile, "centres")[[as.character(sel$best)]]`, in the CRS
   `attr(profile, "centres_crs")`.
 
+* `resolution_profile()` raises one warning of class
+  `spatialkit_size_not_reached` for all the sizes of a ladder held for the
+  same reason, where it raised one for each size.  Its `obs_per_cell` and
+  `wanted` hold one element for each such size, in the order of the ladder,
+  so a script that read them as single numbers gets vectors where several
+  sizes are held; `used` and `reason` are single values as before.  One
+  size held gives the condition it gave.
+
+* `estimate_sac_range()` gives the `rejected_reason` "no variogram model
+  could be fitted: fewer than three lag bins hold point pairs" where it gave
+  "no variogram model could be fitted (singular fits)": nothing was fitted
+  in that case.  A script that compared the reason with the old text can
+  compare its start, "no variogram model could be fitted", which both share.
+
 ## New features
 
 * `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and
@@ -662,9 +676,10 @@ old behaviour where there is a way.
 
 * `select_resolution(criterion = "cp")` says when the count is not
   identified.  `structured` is `FALSE` when one cell for the whole layer
-  scores within `tol` of the optimum, or when the cell means at the optimum
-  differ from one mean by no more than chance (an F test at 5 percent,
-  adjusted for the levels searched; `structure_p`).  The pick is unchanged.
+  scores no more than `tol` above the optimum (below it included), or when
+  the cell means at the optimum differ from one mean by no more than chance
+  (an F test at 5 percent, adjusted for the levels searched;
+  `structure_p`).  The pick is unchanged.
   On white noise of 300 points it was `FALSE` on 145 of 150 layers.  The
   functions that take the count raise a warning of class
   `spatialkit_no_structure`.  `resolution_profile()` keeps what one cell
@@ -2027,6 +2042,80 @@ old behaviour where there is a way.
   ladder; it now counts the steps between its own levels.  `plot()` of a
   profile of one level has the subtitle "1 level of 133 cells" where it had
   "1 levels from 133 to 133 cells".
+
+* **Messages asked for FNN, which installs with spatialkit, and the
+  work-limit errors printed two equal numbers.**  The texts that appear when
+  FNN cannot be loaded (the work limits of the exact searches of
+  `resolution_profile()`, `summarize_by_cell()` and `cell_values_at()`, the
+  density kind's log line, `area_of_applicability(use_fnn = TRUE)` and the
+  weights of Moran's z) said to install it, and `spatialkit_moran_skipped`
+  said that it is not installed; they now say that it could not be loaded
+  (and is to be reinstalled).  The weights' error asks for Matrix alone when
+  FNN is loaded.  The work and the limit are printed in full, with as many
+  digits as tell them apart: a work 0.04 percent over the limit read "1e+10
+  ... above the limit of 1e+10".  The fit guard of `resolution_profile()`
+  named "the FNN package installed" in a way on; it now says that the random
+  starts of the density kind need FNN only where FNN could not be loaded.
+
+* **Texts of `resolution_profile()`, `select_resolution()`, `summary()` and
+  the seeding functions that misstated the case.**  The note on a count that
+  one mean matches said "within 2% of the optimum" also where one mean was
+  lower; it says "is not above the optimum by more than 2%", which is the
+  rule.  After Cp's note, the note of a variogram that found no structure
+  was pasted in lower case with its close said twice; it is a sentence of
+  its own.  At the support ceiling the hint said to lower `min_cell_n`,
+  which moves every level of the ladder; it names `levels` that run past the
+  count.  A selection by size called the default 4.5 "asked", a selection on
+  one level read "(1 of 1 levels)", the summary of one level "(133 to 133
+  cells)" and a profile of one start "1 k-means++ restarts".  `summary()`
+  said that one cell does as well where the cells beat one cell and only the
+  F test (or, for `cp`, the profile's variogram) did not show structure; it
+  now says which, and the result then carries `attr(, "not_identified")`.
+  On a constant response the warning left out `loo`, `loo_se` and
+  `own_weight`, which are `NA` too, and `summary()` stopped with an error
+  that named neither the constant response nor `loo`; both now name them.
+  The print of a profile whose nugget is at the fit's lower bound, with no
+  level to take a noise variance from, marks the nugget and says that `cp`
+  is `NA` at every level, as the warning does.  The sizes of a ladder held
+  for the same reason raise one `spatialkit_size_not_reached` (Breaking
+  changes has the fields).  The numbers of one printed line or note share
+  one notation, where "90200000 (one cell for the layer: 1.09e+08)" mixed
+  two, and the summary's closing line reads "every pick is 60 cells" where
+  it read "picks span 60 to 60 cells (1.0x)".  `voronoi_seeds_kmeans()` and
+  `voronoi_seeds_random()` refuse the `NA` of `determine_optimal_levels()`
+  with the note `get_voronoi_seeds()` gives, which names `on_no_elbow`.
+
+* **Texts of `summarize_by_cell()`, `cell_values_at()` and
+  `assign_features_to_polygons()` that misstated the case.**  The
+  no-structure warning said of predictors that a map of their pooled values
+  looks smooth "not because the response varies smoothly"; it says "the
+  column" or "the columns" unless the response alone is named.
+  `cell_values_at()` on a logical, factor or character column asked for a
+  summary that `summarize_by_cell()`, which summarises numeric columns only,
+  cannot make; it says how to convert the column, and for a factor that
+  `as.numeric()` gives the level codes, not the labels.  Features with empty
+  geometry were said to fall outside the polygons, with advice on their
+  cover or the CRS; the warning counts them and says that they have no
+  location to assign.
+
+* **Texts of the folds, the variogram, the seeding, the fits and kriging
+  that misstated the case.**  `make_folds(auto_range = TRUE)` with a
+  `block_size` said that the range was used as the minimum block size, where
+  the `block_size` given is; it says so, with the grid of blocks that gives,
+  and `?select_features_forward` no longer calls `block_size` a floor under
+  the range.  On one row `make_folds(method = "random_kfold")` wrote "1
+  folds" and offered fewer folds.  `get_voronoi_seeds(method = "random")` or
+  `"provided"`, given a density setting under the k-means kind, said that
+  the density kind would read it; it says that the method does not.
+  `model_metrics(se.fit = TRUE)` on a fit that is not Bayesian pointed to
+  `cv_bayes()`.  The `rejected_reason` of a variogram with fewer than three
+  lag bins holding pairs said "(singular fits)" (Breaking changes has the
+  new text).  `detrend = "reml"` on fewer than 30 locations, or without
+  nlme, said that the fit did not converge; it says that it was not fitted,
+  and why.  `kriging_adequacy()`'s print gave a pure nugget a gain with no
+  word on it; it says that there the gain is that of averaging the locations
+  a cell is kriged from (`kr_n_used`), its own among them, over averaging
+  its own alone.
 
 * **Cp took a nugget at the fit's lower bound as its noise variance, and one
   that the closest pairs of points contradict.**  `resolution_profile()`

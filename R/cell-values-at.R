@@ -611,6 +611,32 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
          call. = FALSE)
 
   cols <- .values_at_columns(names(values), response_var)
+  # summarize_by_cell() summarises numeric columns only and skips any other
+  # with a warning, so for a logical, factor or character column no summary
+  # gives `values` a cell value, and the advice below would send the caller
+  # round in a circle.  The way to numbers depends on the class: as.numeric()
+  # gives a factor's level codes, not its labels, and NA for text that is
+  # not a number.
+  if (is.null(cols) && !is.numeric(rows[[response_var]])) {
+    v <- rows[[response_var]]
+    how <- if (is.logical(v)) {
+      "Convert it to numbers first (as.numeric()) and summarise it again."
+    } else if (is.factor(v)) {
+      paste0("On a factor as.numeric() gives the level codes, not the labels: where the ",
+             "labels are numbers, convert it with as.numeric(as.character()) and summarise ",
+             "it again; a factor of categories has no cell mean.")
+    } else if (is.character(v)) {
+      paste0("Where it holds numbers written as text, convert it with as.numeric() and ",
+             "summarise it again; a column of labels has no cell mean.")
+    } else {
+      "Convert it to numbers first and summarise it again."
+    }
+    stop(sprintf(paste0("cell_values_at(): '%s' is a %s column of `points`, and ",
+                        "summarize_by_cell() summarises numeric columns only, so `values` ",
+                        "has no cell value of it. %s"),
+                 response_var, if (is.factor(v)) "factor" else class(v)[1L], how),
+         call. = FALSE)
+  }
   if (is.null(cols)) {
     # The names of the role the column has in `values`: a predictor's when the
     # summary holds another statistic of it as a predictor and none as the

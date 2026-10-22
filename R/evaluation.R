@@ -334,8 +334,14 @@
   # entered whenever either is missing and always allocates W <- matrix(0,n,n),
   # so keying it on FNN alone let an unbounded n x n allocation through whenever
   # FNN was present but Matrix was not (or use_matrix = FALSE).
+  # The way on names what is missing.  FNN is in Imports, so it is there and
+  # could not be loaded; Matrix is suggested, so it may not be installed.
   if (!(has_fnn && has_matrix) && n > .KNN_DENSE_MAX)
-    stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely (the dense fallback would allocate an n*n matrix). Install both with install.packages(c(\"FNN\", \"Matrix\")).", call. = FALSE)
+    stop("n = ", n, " requires FNN for k-NN weights, and Matrix to hold them sparsely ",
+         "(the dense fallback would allocate an n*n matrix).",
+         if (!has_fnn) " FNN, which installs with spatialkit, could not be loaded: reinstall it.",
+         if (!has_matrix) " Matrix could not be loaded: install it with install.packages(\"Matrix\").",
+         call. = FALSE)
 
   # The sparse path is bounded too.  k >= n - 1 is a complete graph -- n(n-1)
   # weights however they are stored -- and the guard above only covered the

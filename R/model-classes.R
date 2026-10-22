@@ -728,6 +728,8 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
   dots <- list(...)
   shaped <- intersect(names(dots)[vapply(dots, isTRUE, logical(1))],
                       c("draws", "se.fit"))
+  # cv_bayes() scores posterior draws, so it is named where draws were asked
+  # for or the fit is Bayesian, and not for the standard errors of a GWR.
   if (length(shaped))
     stop("model_metrics(): ", paste(sprintf("`%s = TRUE`", shaped), collapse = " and "),
          " cannot be passed through `...`: the metrics are computed from one ",
@@ -735,8 +737,10 @@ model_metrics.spatial_fit <- function(object, newdata = NULL, ...) {
          if (identical(shaped, "draws")) "a matrix of posterior draws"
          else if (identical(shaped, "se.fit")) "a list with the standard errors"
          else "more than that",
-         ". Call predict() yourself for those, or cv_bayes() for CRPS and ",
-         "interval coverage.", call. = FALSE)
+         ". Call predict() yourself for those",
+         if ("draws" %in% shaped || inherits(object, "bayesian_fit"))
+           ", or cv_bayes() for CRPS and interval coverage" else "",
+         ".", call. = FALSE)
   if (is.null(newdata)) {
     y_hat <- .fitted_checked(object, .caller = "model_metrics")
     y_obs <- sf::st_drop_geometry(object$data_sf)[[object$response_var]]
