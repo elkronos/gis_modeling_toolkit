@@ -49,7 +49,14 @@ such a seed is given its cell (step 3), and without them the locations
 nearest it have none. Passed through \code{get_voronoi_seeds(method = "provided", seeds = )} before the tessellation, points placed by hand
 are seeds (see \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). Two seeds at different
 locations with one ID are an error; seeds that share a location share
-its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.}
+its cell, as \code{index} gives them. \code{NA} marks a seed without a cell.
+When no seed has the ID of a cell of \code{values} (an ID column from
+another tessellation, or IDs that are all \code{NA}), counting the cells
+step 3 gives seeds outside the polygons, the call stops, since no
+location could take its own cell's value; one seed with such an ID is
+enough, and a seed whose ID \code{values} has no row for stands for a cell
+without a value. Without a CRS beside \code{points} with one, the seeds are
+read as step 1 says.}
 }
 \value{
 A data frame with one row per row of \code{newdata}, in its order:
@@ -90,8 +97,9 @@ location),
 summary's record of how the cell count was set, or \code{NULL}). It describes
 the call: a subset of the frame's rows keeps it as it is.
 
-The function raises no classed warning of its own. It passes on what
-\code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
+The function raises no classed warning of its own; the warning that
+says how \code{seeds} without a CRS were read (step 1) is a plain one. It
+passes on what \code{\link[=coerce_to_points]{coerce_to_points()}}, a CRS transformation and
 \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} raise, but for one warning: the one
 that function raises when no location at all falls in a polygon is
 neither raised nor logged, since every such row has \code{filled = TRUE},
@@ -116,7 +124,14 @@ when it is not. \code{points}, \code{newdata} and \code{seeds} are transformed t
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used
 as they are, unless those of \code{points} look like longitude and latitude:
 both are then read as EPSG:4326, as \code{\link[=summarize_by_cell]{summarize_by_cell()}} reads
-\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning.
+\code{points}, with \code{\link[=ensure_projected]{ensure_projected()}}'s warning. \code{seeds} without a CRS
+beside \code{points} with one are read as \code{\link[=build_tessellation]{build_tessellation()}} reads a
+boundary without a CRS, with a warning: beside a projected CRS,
+coordinates that look like longitude and latitude are taken as
+EPSG:4326 and transformed, and others are taken to be in the CRS of
+\code{points}; beside a geographic CRS, coordinates within the ranges of
+longitude and latitude are taken to be in it, and others stop the call.
+\code{newdata} without a CRS beside \code{points} with one stops the call.
 \item \emph{The scored rows.} The rows of \code{points} with a finite \code{response_var},
 a cell ID and finite coordinates. Their distinct locations are the
 observations every distance below is taken from.

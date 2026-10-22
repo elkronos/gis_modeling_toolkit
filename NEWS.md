@@ -2045,6 +2045,41 @@ old behaviour where there is a way.
   tessellation makes the points seeds, and `index` then gives each its
   cell.
 
+* **`cell_values_at(seeds = )` filled every location, and raised nothing,
+  when no seed had the ID of a cell of `values`.**  Seeds whose ID column is
+  not the one the cells were built with (a column of that name from
+  elsewhere, or the `index` of another tessellation) gave every location a
+  cell that `values` has no row for, and each location took the value of
+  the cell of its nearest scored row: on a layer of 107 cells, seeds
+  numbered 1001 to 1107 filled all 120 locations asked for, and 18 of the
+  values differed from those of the locations' own cells.  Seeds whose IDs
+  are all `NA` did the same unless a seed outside the cell polygons of
+  `values` took the cell it generates, and a `values` with no cell ID (no
+  row, or every ID `NA`) gave every location the value `NA`.  Each is now
+  an error that names the argument to set: the seeds' ID column, with how
+  to set it from the tessellation, or `values`.  The cells that seeds
+  outside the polygons take count as their IDs, so points placed by hand
+  outside the boundary, all `NA` in `index`, are still the seeds of their
+  cells when `values` carries the polygons.  One seed with the ID of a cell
+  of `values` is enough for the call to run, and a seed whose ID `values`
+  has no row for still stands for a cell without a value.
+
+* **`cell_values_at()` refused `seeds` without a CRS beside `points` with
+  one, with an error that did not say which CRS to set.**  For rows without
+  a CRS whose coordinates look like longitude and latitude,
+  `get_voronoi_seeds()` returns the seeds without a CRS, in degrees, and
+  `assign_features_to_polygons()` returns the rows in the cells' projected
+  CRS, so on such rows `cell_values_at()` stopped on the seeds even once
+  `newdata` was given its CRS.  Such seeds are now read as
+  `build_tessellation()` reads a boundary without a CRS, with a warning:
+  beside `points` in a projected CRS, coordinates that look like longitude
+  and latitude are taken as EPSG:4326 and transformed, and others are taken
+  to be in the CRS of `points`, which the warning names; beside `points` in
+  a geographic CRS, coordinates within the ranges of longitude and latitude
+  are taken to be in it, and others are an error that names the CRS the
+  summary measured in.  `newdata` without a CRS beside `points` with one is
+  still an error.
+
 * **`assign_features_to_polygons()` stopped on cells returned in lon/lat
   with "duplicate vertex".**  `build_tessellation(crs = 4326)` builds the
   cells in a projected CRS and transforms them.  On gridded locations four
