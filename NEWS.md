@@ -2004,6 +2004,21 @@ old behaviour where there is a way.
   is said on the `loo` line, as for any other column.  The status in the
   record, and the warning, are unchanged.
 
+* **The warning `spatialkit_pool_few_cells` did not say when the pooled
+  values of two cells change places.**  With 2 to 9 cells a cell's target
+  is the mean of every row outside it, so the overall mean lies between
+  the target and the cell's own mean, and a cell whose own weight is below
+  its share of the column's rows gets a pooled value on the far side of
+  the overall mean.  With two cells and `tau2` at 0 every own weight is 0,
+  and each cell's pooled value is the other cell's mean.  The warning said
+  only that a cell "with a small own weight" crosses the overall mean and
+  that two cells can change order.  It now gives the share of the column's
+  rows as the bound, and names each column with two cells and `tau2` at 0,
+  whose two values change places.  The "Conditions" entry of
+  `?summarize_by_cell` says the same; its "Pooled values" section already
+  did.  The values and the condition's fields are unchanged: such a column
+  has `cells` 2 and `own_weight` 0.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when

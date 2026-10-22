@@ -1021,6 +1021,28 @@ test_that("the help and the vignette say that a size set the count of a selectio
   expect_identical(.docs_count(setting, "since the caller set it"), 0L)
 })
 
+test_that("the help says, in \"Pooled values\" and under spatialkit_pool_few_cells, that a value can cross the overall mean and two cells' values change places", {
+  # Decision 9.2.18: with 2 to 9 cells the arithmetic stays, and the help
+  # and the warning say what follows from it.
+  parts <- .docs_parts()
+  pv <- parts[["?summarize_by_cell: Pooled values"]]
+  expect_identical(.docs_count(pv, paste(
+    "A cell whose own weight is below its share of the rows, n / N, then gets a pooled value",
+    "on the far side of the overall mean from its plain mean")), 1L)
+  expect_identical(.docs_count(pv,
+    "with two cells that is the other cell's mean, so the two values change places"), 1L)
+  cond <- parts[["?summarize_by_cell: Conditions"]]
+  expect_identical(.docs_count(cond, paste(
+    "\"spatialkit_pool_few_cells\": 2 to 9 cells, so each target is the mean of all the other",
+    "cells, and a cell whose own weight is below its share of the column's rows gets a pooled",
+    "value on the far side of the overall mean from its plain mean (cells, and own_weight, the",
+    "smallest, by column).")), 1L)
+  expect_identical(.docs_count(cond, paste(
+    "The text also names each column with two cells and tau2 at 0, which has cells 2 and",
+    "own_weight 0: each cell's pooled value is then the other cell's mean, so the two values",
+    "change places.")), 1L)
+})
+
 
 # ---- NEWS -----------------------------------------------------------------------------
 
@@ -1035,6 +1057,26 @@ test_that("the NEWS entries of this work are found, name no existing units and c
     expect_identical(.docs_calibrated(news[[what]]), character(0), info = what)
   }
   expect_identical(anyDuplicated(unlist(news)), 0L)
+})
+
+test_that("NEWS says what the warning about few cells now says, names no existing units and quotes no figure", {
+  lines <- .docs_news()
+  if (is.null(lines)) skip("NEWS.md is not there to read")
+  entry <- .docs_starting(.docs_news_entries(lines),
+    "**The warning spatialkit_pool_few_cells did not say when the pooled values of two cells change places.**")
+  expect_false(is.na(entry))
+  if (is.na(entry)) entry <- ""        # so the checks below fail and do not stop
+  expect_identical(.docs_barred(entry), character(0))
+  expect_identical(.docs_calibrated(entry), character(0))
+  # "2 to 9 cells"; "tau2 at 0" and "every own weight is 0"; "cells 2 and
+  # own_weight 0": no other number.
+  expect_identical(sort(.docs_numbers(entry)), c("0", "0", "0", "0", "2", "2", "9"))
+  for (said in c(
+    "a cell whose own weight is below its share of the column's rows gets a pooled value on the far side of the overall mean",
+    "With two cells and tau2 at 0 every own weight is 0, and each cell's pooled value is the other cell's mean.",
+    "names each column with two cells and tau2 at 0, whose two values change places.",
+    "The values and the condition's fields are unchanged: such a column has cells 2 and own_weight 0."))
+    expect_identical(.docs_count(entry, said), 1L, info = said)
 })
 
 
@@ -1217,7 +1259,8 @@ test_that("no number stands in those texts but the simulation's figures, its set
       level, level, level),            # the level checked; obs_level and conf_level in the run
     "?summarize_by_cell: Conditions" = c(
       pairs, "1", "0", "0",            # the limit; own weights of 1 and of 0; tau2 is 0
-      few, num(.POOL_MIN_DF), level, needed),
+      few, "0", "2", "0",              # 2 to 9 cells; tau2 at 0, cells 2 and own_weight 0
+      num(.POOL_MIN_DF), level, needed),
     "?summarize_by_cell: Confidence intervals, the two intervals" = level,
     "?summarize_by_cell: argument estimate" = c(
       "1", nb, num(.POOL_NEIGHBOURS + 2L)),        # fewer than 10 cells: all the others

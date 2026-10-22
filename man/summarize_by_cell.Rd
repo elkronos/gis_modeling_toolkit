@@ -880,8 +880,12 @@ plain mean; also \code{n} by column), \code{"no spread inside any cell"} (every
 own weight is 1; also \code{constant} by column) or \code{"no signal between cells"} (\code{tau2} is 0 and every own weight is 0; also \code{sigma2} by
 column).
 \item \code{"spatialkit_pool_few_cells"}: 2 to 9 cells, so each target is the mean
-of all the other cells (\code{cells}, and \code{own_weight}, the smallest, by
-column).
+of all the other cells, and a cell whose own weight is below its share
+of the column's rows gets a pooled value on the far side of the overall
+mean from its plain mean (\code{cells}, and \code{own_weight}, the smallest, by
+column). The text also names each column with two cells and \code{tau2} at
+0, which has \code{cells} 2 and \code{own_weight} 0: each cell's pooled value is
+then the other cell's mean, so the two values change places.
 \item \code{"spatialkit_pool_few_df"}: \code{sigma2} rests on fewer than 30 values
 beyond one per cell (\code{needed}, and \code{df}, \code{n} and \code{cells} by column).
 \item \code{"spatialkit_no_structure"}: \code{structured} is \code{FALSE} (see "Pooled

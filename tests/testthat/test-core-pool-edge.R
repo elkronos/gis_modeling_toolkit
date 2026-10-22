@@ -445,10 +445,15 @@ test_that("with 2 to 9 cells the target is the mean of all the other cells, with
       conditionMessage(w),
       sprintf(paste0(
         "summarize_by_cell(): 'z' has values in fewer than 10 cells (%d), so each cell's target ",
-        "is the mean of all the other cells, not of cells near it. A cell with a small own ",
-        "weight then gets a pooled value on the far side of the overall mean from its plain ",
-        "mean, and two cells can change order. The `..pooled_w_*` columns hold the weights; ",
-        "estimate = \"mean\" gives the plain means."), K))
+        "is the mean of all the other cells, not of cells near it. A cell whose own weight is ",
+        "below its share of the column's rows then gets a pooled value on the far side of the ",
+        "overall mean from its plain mean, and two cells can change order. The `..pooled_w_*` ",
+        "columns hold the weights; estimate = \"mean\" gives the plain means."), K))
+    # The cells on the far side of the overall mean are those whose own weight
+    # is below their share of the rows, as the text says.
+    M <- mean(L$z)
+    expect_identical(sign(out$..pooled_resp_z - M) == -sign(out$resp_mean_z - M),
+                     out$..pooled_w_resp_z < out$n / 720, info = tag)
     # Each target is the mean of every row outside the cell.
     S <- as.numeric(tapply(L$z, L$cell_id, sum))
     expect_equal(out$..pooled_target_resp_z, (sum(L$z) - S) / (720 - out$n), tolerance = 1e-12,
@@ -486,6 +491,17 @@ test_that("two cells with no difference between them: the pooled values are the 
                                      "spatialkit_no_structure"))
   expect_identical(.pe_of(r, "spatialkit_pool_degenerate")[[1L]]$reason, "no signal between cells")
   expect_identical(.pe_of(r, "spatialkit_pool_few_cells")[[1L]]$own_weight, c(v = 0))
+  # The warning about few cells says that the two values change places.
+  expect_identical(
+    conditionMessage(.pe_of(r, "spatialkit_pool_few_cells")[[1L]]),
+    paste0(
+      "summarize_by_cell(): 'v' has values in fewer than 10 cells (2), so each cell's target ",
+      "is the mean of all the other cells, not of cells near it. A cell whose own weight is ",
+      "below its share of the column's rows then gets a pooled value on the far side of the ",
+      "overall mean from its plain mean, and two cells can change order. For 'v', with 2 cells ",
+      "and `tau2` at 0, each cell's pooled value is the other cell's mean: the two cells' ",
+      "values change places. The `..pooled_w_*` columns hold the weights; estimate = \"mean\" ",
+      "gives the plain means."))
   # The two plain means differ, and each cell's pooled value is the other's mean.
   expect_gt(abs(diff(out$resp_mean_v)), 0.01)
   expect_equal(out$..pooled_resp_v, rev(out$resp_mean_v), tolerance = 1e-12)
@@ -497,6 +513,128 @@ test_that("two cells with no difference between them: the pooled values are the 
   # The interval is computed: the residuals are real.
   expect_false(anyNA(c(out$..obs_lo_resp_v, out$..obs_hi_resp_v)))
   expect_gt(diff(rec$offsets), 1)
+})
+
+test_that("the warning about few cells names the columns whose two values change places, and no other", {
+  d <- local({
+    .pe_seed(3011)
+    data.frame(x = c(stats::runif(60, 0, 100), stats::runif(60, 200, 300)),
+               y = stats::runif(120, 0, 100), v = stats::rnorm(120))
+  })
+  cell <- rep(c("east", "west"), each = 60L)
+  # `v` as in the test above (tau2 at 0); `s` the same with the two cells set
+  # apart, so tau2 is above 0 and the two pooled values keep their order.
+  L <- .pe_points(d$x, d$y, data.frame(v = d$v, s = d$v + 3 * (cell == "west"),
+                                       cell_id = cell))
+  r <- .pe_catch(.pe_pooled(L, "v", "s"))
+  pooled <- attr(r$value, "pooled")$columns
+  expect_identical(c(pooled$resp_v$status, pooled$pred_s$status), c("no signal between cells", "ok"))
+  out <- r$value
+  expect_identical(order(out$..pooled_pred_s), order(out$pred_mean_s))
+  w <- .pe_of(r, "spatialkit_pool_few_cells")
+  expect_length(w, 1L)
+  w <- w[[1L]]
+  expect_identical(.pe_fields(w), list(columns = c("v", "s"), cells = c(v = 2L, s = 2L),
+                                       own_weight = c(v = 0, s = min(out$..pooled_w_pred_s))))
+  expect_identical(
+    conditionMessage(w),
+    paste0(
+      "summarize_by_cell(): 'v' and 's' have values in fewer than 10 cells (2, 2), so each ",
+      "cell's target is the mean of all the other cells, not of cells near it. A cell whose ",
+      "own weight is below its share of the column's rows then gets a pooled value on the far ",
+      "side of the overall mean from its plain mean, and two cells can change order. For 'v', ",
+      "with 2 cells and `tau2` at 0, each cell's pooled value is the other cell's mean: the ",
+      "two cells' values change places. The `..pooled_w_*` columns hold the weights; ",
+      "estimate = \"mean\" gives the plain means."))
+  # A response in 12 cells, outside the warning, ahead of three predictors with
+  # values in cells 1 and 2 only: 'p' and 'q' with the two cells' means 0.1 and
+  # 0.3 apart against a spread of about 1.5 and 4.5 inside each, so `tau2` is 0
+  # whatever the draw, and 's' with the cells 5 apart.  The text names 'p' and
+  # 'q', in the order of the columns, and neither 's' nor the response.
+  d12 <- local({
+    .pe_seed(3017)
+    cc <- rep(1:12, each = 10L)
+    data.frame(x = ((cc - 1L) %% 4L) * 100 + stats::runif(120, 5, 95),
+               y = ((cc - 1L) %/% 4L) * 100 + stats::runif(120, 5, 95),
+               cell_id = cc, z = stats::rnorm(120) + rep(stats::rnorm(12, 0, 2), each = 10L))
+  })
+  at <- c(-2, -1, 0, 1, 2, -2, -1, 0, 1, 2)
+  in2 <- function(a, b) ifelse(d12$cell_id == 1L, a, ifelse(d12$cell_id == 2L, b, NA))
+  d12$p <- in2(at, at + 0.1)
+  d12$s <- in2(at, at + 5)
+  d12$q <- in2(3 * at + 1, 3 * at + 0.7)
+  r12 <- .pe_catch(.pe_pooled(.pe_points(d12$x, d12$y, d12[c("cell_id", "z", "p", "s", "q")]),
+                              "z", predictor_vars = c("p", "s", "q")))
+  pooled <- attr(r12$value, "pooled")$columns
+  expect_identical(vapply(pooled, function(rec) rec$status, character(1)),
+                   c(resp_z = "ok", pred_p = "no signal between cells", pred_s = "ok",
+                     pred_q = "no signal between cells"))
+  expect_identical(vapply(pooled, function(rec) rec$cells, integer(1)),
+                   c(resp_z = 12L, pred_p = 2L, pred_s = 2L, pred_q = 2L))
+  out12 <- r12$value
+  expect_equal(out12$..pooled_pred_p[1:2], rev(out12$pred_mean_p[1:2]), tolerance = 1e-12)
+  expect_equal(out12$..pooled_pred_q[1:2], rev(out12$pred_mean_q[1:2]), tolerance = 1e-12)
+  expect_identical(order(out12$..pooled_pred_s[1:2]), order(out12$pred_mean_s[1:2]))
+  w12 <- .pe_of(r12, "spatialkit_pool_few_cells")
+  expect_length(w12, 1L)
+  w12 <- w12[[1L]]
+  expect_identical(.pe_fields(w12),
+                   list(columns = c("p", "s", "q"), cells = c(p = 2L, s = 2L, q = 2L),
+                        own_weight = c(p = 0, s = min(out12$..pooled_w_pred_s, na.rm = TRUE),
+                                       q = 0)))
+  expect_identical(
+    conditionMessage(w12),
+    paste0(
+      "summarize_by_cell(): 'p', 's' and 'q' have values in fewer than 10 cells (2, 2, 2), so ",
+      "each cell's target is the mean of all the other cells, not of cells near it. A cell ",
+      "whose own weight is below its share of the column's rows then gets a pooled value on ",
+      "the far side of the overall mean from its plain mean, and two cells can change order. ",
+      "For 'p' and 'q', with 2 cells and `tau2` at 0, each cell's pooled value is the other ",
+      "cell's mean: the two cells' values change places. The `..pooled_w_*` columns hold the ",
+      "weights; estimate = \"mean\" gives the plain means."))
+  # Three cells with tau2 at 0: each value is the mean of the other two cells,
+  # not one cell's mean, and the text says nothing of values changing places.
+  d3 <- local({
+    .pe_seed(3013)
+    data.frame(x = stats::runif(90, 0, 300), y = stats::runif(90, 0, 100))
+  })
+  L3 <- .pe_points(d3$x, d3$y, data.frame(cell_id = rep(1:3, each = 30L),
+                                          u = rep(c(-2, -1, 0, 1, 2), 18L)))
+  r3 <- .pe_catch(.pe_pooled(L3, "u"))
+  expect_identical(attr(r3$value, "pooled")$columns$resp_u$status, "no signal between cells")
+  w3 <- .pe_of(r3, "spatialkit_pool_few_cells")[[1L]]
+  expect_identical(w3$cells, c(u = 3L))
+  expect_false(grepl("change places", conditionMessage(w3), fixed = TRUE))
+})
+
+test_that("with values missing, the share in the warning about few cells is the share of the column's rows, not of the frame's n", {
+  # Three cells of 10, 30 and 30 rows; the middle one keeps 6 values of its 30.
+  # The frame's `n` counts every row, so its shares are 1/7, 3/7 and 3/7; the
+  # column's are 10/46, 6/46 and 30/46.
+  d <- local({
+    .pe_seed(3028)
+    cc <- rep(1:3, c(10L, 30L, 30L))
+    data.frame(x = (cc - 1) * 1000 + stats::runif(70, 0, 900), y = stats::runif(70, 0, 900),
+               cell_id = cc, z = stats::rnorm(70) + stats::rnorm(3, 0, 0.3)[cc])
+  })
+  d$z[d$cell_id == 2L][1:24] <- NA
+  r <- .pe_catch(.pe_pooled(.pe_points(d$x, d$y, d[c("cell_id", "z")]), "z"))
+  out <- r$value
+  rec <- attr(out, "pooled")$columns$resp_z
+  expect_identical(c(rec$status, as.character(rec$cells)), c("ok", "3"))
+  expect_identical(out$n, c(10L, 30L, 30L))
+  w <- .pe_of(r, "spatialkit_pool_few_cells")[[1L]]
+  expect_match(conditionMessage(w), "below its share of the column's rows then", fixed = TRUE)
+  # A value lies on the far side of the overall mean of the column from the
+  # cell's plain mean exactly when its own weight is below the cell's share of
+  # the column's rows.  Here the third cell crosses and the second does not;
+  # the frame's `n` would say the opposite of both.
+  n_col <- as.numeric(table(d$cell_id[!is.na(d$z)]))
+  M <- mean(d$z, na.rm = TRUE)
+  crossed <- sign(out$..pooled_resp_z - M) == -sign(out$resp_mean_z - M)
+  expect_identical(crossed, c(FALSE, FALSE, TRUE))
+  expect_identical(crossed, out$..pooled_w_resp_z < n_col / sum(n_col))
+  expect_identical(out$..pooled_w_resp_z < out$n / sum(out$n), c(FALSE, TRUE, FALSE))
 })
 
 test_that("few values beyond one per cell: the values are returned with spatialkit_pool_few_df", {

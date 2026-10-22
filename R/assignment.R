@@ -1587,8 +1587,12 @@ assign_features_to_polygons <- function(
 #'   cells"` (`tau2` is 0 and every own weight is 0; also `sigma2` by
 #'   column).
 #' * `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the mean
-#'   of all the other cells (`cells`, and `own_weight`, the smallest, by
-#'   column).
+#'   of all the other cells, and a cell whose own weight is below its share
+#'   of the column's rows gets a pooled value on the far side of the overall
+#'   mean from its plain mean (`cells`, and `own_weight`, the smallest, by
+#'   column). The text also names each column with two cells and `tau2` at
+#'   0, which has `cells` 2 and `own_weight` 0: each cell's pooled value is
+#'   then the other cell's mean, so the two values change places.
 #' * `"spatialkit_pool_few_df"`: `sigma2` rests on fewer than 30 values
 #'   beyond one per cell (`needed`, and `df`, `n` and `cells` by column).
 #' * `"spatialkit_no_structure"`: `structured` is `FALSE` (see "Pooled
@@ -3689,15 +3693,25 @@ summarize_by_cell <- function(assigned_points_sf,
   # count of cells or of values there, and nothing is said of either.
   fitted <- status %in% c("ok", "no signal between cells")
   w <- cols[fitted & cells >= 2L & cells <= 9L]
-  if (length(w))
+  if (length(w)) {
+    # Two cells and tau2 at 0: every own weight is 0 and each cell's target
+    # is the other cell's mean, so the pooled values are the plain means
+    # exchanged.  The text names the columns this happened to.
+    swap <- w[cells[w] == 2L & status[w] == "no signal between cells"]
+    swapped <- if (!length(swap)) "" else sprintf(paste0(
+      " For %s, with 2 cells and `tau2` at 0, each cell's pooled value is the other ",
+      "cell's mean: the two cells' values change places."), .cols_text(swap))
     .warn_classed("spatialkit_pool_few_cells", paste0(
       "summarize_by_cell(): %s %s values in fewer than 10 cells (%s), so each cell's ",
-      "target is the mean of all the other cells, not of cells near it. A cell with a ",
-      "small own weight then gets a pooled value on the far side of the overall mean ",
-      "from its plain mean, and two cells can change order. The `..pooled_w_*` columns ",
-      "hold the weights; estimate = \"mean\" gives the plain means."),
-      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]),
+      "target is the mean of all the other cells, not of cells near it. A cell whose ",
+      "own weight is below its share of the column's rows then gets a pooled value on ",
+      "the far side of the overall mean from its plain mean, and two cells can change ",
+      "order.%s ",
+      "The `..pooled_w_*` columns hold the weights; estimate = \"mean\" gives the plain ",
+      "means."),
+      .cols_text(w), if (one(w)) "has" else "have", listed(cells[w]), swapped,
       data = list(columns = w, cells = cells[w], own_weight = ev$w_min[w]))
+  }
   w <- cols[fitted & cells >= 2L & df >= 1L & df < .POOL_MIN_DF]
   if (length(w))
     .warn_classed("spatialkit_pool_few_df", paste0(
