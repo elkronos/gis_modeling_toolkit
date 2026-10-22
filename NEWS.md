@@ -104,7 +104,8 @@ old behaviour where there is a way.
   now raise the warnings of the pooled values, each once per call:
   `spatialkit_pool_unavailable` (a layer with no geometry, which the call
   accepts; no row with a value, a cell and a location; no two rows in any
-  cell), `spatialkit_pool_degenerate` (one cell, no spread inside any cell,
+  cell; values beyond what the arithmetic of pooled values holds),
+  `spatialkit_pool_degenerate` (one cell, no spread inside any cell,
   or no signal between cells), `spatialkit_pool_few_cells` (2 to 9 cells),
   `spatialkit_pool_few_df`, `spatialkit_no_structure` (a response the cells
   do not help with), `spatialkit_pool_rows_skipped`, and, on cells that
@@ -2256,6 +2257,54 @@ old behaviour where there is a way.
   or with another origin, since the partition counts exact ties alone, and
   its leave-one-out errors with them; `?resolution_profile` said the unit
   did not matter to the density kind, and now says this.
+
+* **`summarize_by_cell()` read columns at extreme scales as having no
+  spread.**  The test compared the spread inside the cells with the size of
+  the values, so 1e15 plus a spread of 1 was called constant, and so were
+  values near 1e200 and 1e-170, whose squares overflow and underflow.  The
+  warning said their values "do not vary inside any cell", and the pooled
+  values were the plain means.  The test now also reads the column centred
+  on its median and scaled by its largest distance from it, and a column
+  has no spread only where neither reading finds any.  On that column a
+  standard deviation, over all the rows or inside the cells, of at most
+  three units in the last place of the column's largest absolute value is
+  rounding: a column whose values differ only by their rounding (0.1 beside
+  0.3 / 3, 2 beside sqrt(2)^2) has no spread by either reading, as before,
+  while 1e15 plus a spread of 1, at eight such units, has spread.  Where the
+  raw values lose their spread to rounding, the fit is made on the scaled
+  column and put back in the column's units: for 1e15 plus a spread of 1 the
+  weights, `sigma2`, `tau2` and the leave-one-out errors are those of the
+  spread alone, and the pooled values are those of the spread plus 1e15, to
+  the rounding of a value stored at 1e15.  The warning for no spread inside
+  any cell now says the values do not vary there "to the precision of the
+  values".  A column that is not constant, with an absolute value above
+  1e150 or a largest distance from its median below 1e-150, gets `NA`
+  pooled columns, with a `spatialkit_pool_unavailable` warning whose
+  `reason` is `"values out of range"`, and its plain columns are returned:
+  beyond these bounds the squares of many values can overflow or lose their
+  precision.  A few columns just beyond them were still fitted and are now
+  refused: at 800 rows, 1e150 to 1e152 times a spread of 1, and 1e-151 to
+  1e-160 times a spread of 1.  Inside the bounds, every column whose raw
+  values show their spread gives the numbers it gave, except the standard
+  errors of the leave-one-out errors (`loo_se` in the record and in
+  `resolution_profile()`), which square the squares: for residuals above
+  about 1e77 they were `Inf`, and below about 1e-80 they lost their
+  precision and then were 0.  They are now taken on the residuals divided
+  by a power of two.  `resolution_profile()` reads its estimate's columns
+  the same way: `attr(, "estimate")$constant` and `loo_one_cell` follow the
+  engine's test, so `loo` is computed for 1e15 plus a spread of 1, and
+  values beyond those bounds leave `loo`, `loo_se` and `own_weight` `NA` at
+  every level with the same warning; `print()`, `summary()` and
+  `select_resolution(criterion = "loo")` of such a profile say why.  The
+  test of a constant response for `cp` (`attr(, "one_cell")$constant`)
+  still reads the raw values alone.  Where it finds the response constant and the
+  estimate's test does not, the warning, `print()` and
+  `select_resolution(criterion = "cp")` say what each test found and that
+  `loo` is scored, in place of saying that no cell count fits the response
+  better than another; at values beyond the bounds one
+  `spatialkit_pool_unavailable` warning names `cp`, `moran_i` and `moran_z`
+  as well, and `summary()` says the values are out of range rather than
+  constant.
 
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1

@@ -383,9 +383,13 @@ scored row of their cell) and \code{own_weight} (the median over cells
 of the weight a pooled value gives the cell's own mean; \code{NA}
 under \code{"mean"}).  \code{loo}, \code{loo_se} and
 \code{own_weight} are \code{NA} at a level where no cell holds two
-scored rows, and at every level when the response is constant over the
-rows \code{loo} reads.  All five are \code{NA} at every level when no
-row of the selection half has a response (\code{select_on = "split"};
+scored rows, at every level when the response is constant over the
+rows \code{loo} reads, and at every level when those rows' values lie
+beyond what the arithmetic of the estimate holds, values so large or so
+close to their median that the squares of many such values can overflow
+or lose their precision (\code{spatialkit_pool_unavailable}).  All five
+are \code{NA} at every level when no row of the selection half has a
+response (\code{select_on = "split"};
 \code{spatialkit_no_scored_rows}).  It also carries \code{estimate}: a
 list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 (8, or \code{NA} under \code{"mean"}), \code{response} (the column),
@@ -393,9 +397,16 @@ list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 \code{"selection half"}), \code{features} (\code{"points"}, or
 \code{"other"} when the layer held features that were reduced to
 points), \code{seed}, \code{constant} (whether the response is constant
-over those rows; \code{FALSE} for fewer than two), \code{loo_one_cell}
+over those rows by the estimate's test, which reads the raw values and
+the values centred on their median and scaled, so that 1e15 plus a
+spread of 1 is not constant while values that differ only by their
+rounding, 0.1 beside 0.3 / 3, are; \code{FALSE} for fewer than two rows;
+\code{one_cell$constant}, the test for \code{cp}, reads the raw values
+alone), \code{loo_one_cell}
 and \code{loo_one_cell_se} (the same error with one mean for all those
-rows, the reference a level has to beat), \code{loo_levels} (the
+rows, the reference a level has to beat; \code{NA} for a constant
+response, for fewer than two rows and for values beyond the arithmetic
+of the estimate), \code{loo_levels} (the
 \code{loo} column those references belong to, named by level), and,
 named by level, \code{sigma2} (the spread of the rows about their
 cell's mean), \code{tau2} (the mean squared distance between a cell's
@@ -976,7 +987,12 @@ predictors fit exactly leaves such residuals), so \code{cp},
 a profile with an \code{estimate} whose rows are constant too, so are
 \code{loo} and \code{loo_se}, and for pooled values
 \code{own_weight}; the message names them.  \code{summary()} of such a
-profile stops with an error that says the response is constant.}
+profile stops with an error that says the response is constant.  The
+test for \code{cp} reads the raw values, and the estimate's test reads
+them centred on their median and scaled as well: where the second
+finds spread beyond the rounding of the values (1e15 plus a spread of
+1), the message says that \code{loo} is scored, and the print does not
+call the response a constant.}
 \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 \code{\link{get_voronoi_seeds}()} and
 \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
@@ -1076,6 +1092,21 @@ once, after the levels are scored.  The condition carries
 \code{loo} read), \code{selection} (the rows of the selection half),
 \code{n_response} (the rows of the layer with a response) and
 \code{column}.}
+\item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
+with an \code{estimate}: the values of the response lie beyond what
+the arithmetic of the estimate holds, values so large, or so close to
+their median, that the squares of many such values can overflow or
+lose their precision, so \code{loo}, \code{loo_se} and
+\code{own_weight} are \code{NA} at every level.  Where the test for
+\code{cp} finds such a response constant, \code{cp}, \code{moran_i}
+and \code{moran_z} are \code{NA} for the same reason, and this message
+names them in place of \code{spatialkit_constant_response}.  The
+message gives the bounds; the response rescaled by a power of ten is
+scored.  Raised once, after the levels are scored.  The condition
+carries \code{reason} (\code{"values out of range"}) and
+\code{columns}, the response, as
+\code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
+for its pooled columns.}
 \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 with a level of more than 5,000 cells, on any ladder, when
 \pkg{FNN} cannot be loaded or \pkg{Matrix} is not installed:

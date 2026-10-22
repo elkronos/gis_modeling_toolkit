@@ -423,13 +423,23 @@ test_that("11. a column constant inside every region and not overall is flat, no
   }
 })
 
-test_that("11. the rule for no spread is relative to the size of the values", {
+test_that("11. the rule for no spread does not depend on where the values sit or on their size", {
   L <- .pt_small()
   noise <- local({ .pt_seed(11); stats::rnorm(400) })
-  A <- .pool_fit(1e6 + 1e-9 * noise, L$gi, L$K, L$xy, use_fnn = FALSE)
-  expect_true(A$constant)
-  expect_identical(A$status, "no spread inside any cell")
-  expect_identical(A$w, rep(1, L$K))
+  # A spread of 1e-9 on values of 1e6 is 8.6 units in the last place.  By
+  # the bound on the raw values it is rounding; on the column centred and
+  # scaled it is spread, and the fit is that of the noise (BUG-21).
+  y <- 1e6 + 1e-9 * noise
+  expect_true(.no_spread(sum((y - mean(y))^2), y))
+  A <- .pool_fit(y, L$gi, L$K, L$xy, use_fnn = FALSE)
+  E <- .pool_fit((y - 1e6) * 1e9, L$gi, L$K, L$xy, use_fnn = FALSE)
+  expect_false(A$constant)
+  expect_false(A$flat)
+  expect_identical(A$status, E$status)
+  expect_equal(A$w, E$w, tolerance = 1e-12)
+  expect_equal(A$sigma2 * 1e18, E$sigma2, tolerance = 1e-12)
+  expect_equal(A$tau2 * 1e18, E$tau2, tolerance = 1e-12)
+  expect_equal(A$loo_pooled * 1e18, E$loo_pooled, tolerance = 1e-12)
   B <- .pool_fit(1e6 + 1e-3 * noise, L$gi, L$K, L$xy, use_fnn = FALSE)
   expect_false(B$constant)
   expect_false(B$flat)

@@ -760,8 +760,9 @@ test_that("ten constant predictors raise one spatialkit_pool_degenerate, six of 
   expect_identical(
     conditionMessage(w),
     paste0("summarize_by_cell(): the values of 'k01', 'k02', 'k03', 'k04', 'k05', 'k06' and 4 ",
-           "more do not vary inside any cell, so every own weight is 1 and the pooled value is ",
-           "the plain mean. attr(, \"pooled\") says which columns are constant."))
+           "more do not vary inside any cell, to the precision of the values, so every own ",
+           "weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says which ",
+           "columns are constant."))
   for (nm in names(consts)) {
     expect_identical(r$value[[paste0("..pooled_w_pred_", nm)]], rep(1, nrow(r$value)), info = nm)
     expect_equal(r$value[[paste0("..pooled_pred_", nm)]], rep(consts[[nm]], nrow(r$value)),

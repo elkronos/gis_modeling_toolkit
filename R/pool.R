@@ -212,10 +212,19 @@
 
 #' Whether a sum of squares is rounding error on the scale of the values
 #'
-#' The test \code{resolution_profile()} applies to a constant response.  A
-#' column with no spread still has a sum of squares above zero when its value
-#' is not exact in binary (0.1, 1/3), and dividing one such sum by another
-#' gives weights that mean nothing.
+#' A column with no spread still has a sum of squares above zero when its
+#' value is not exact in binary (0.1, 1/3), and dividing one such sum by
+#' another gives weights that mean nothing.  The scale is that of \code{y}.
+#' On raw values far from 0 it calls a column constant that is not (1e15
+#' plus a spread of 1, whose values are stored to an eighth), and on values
+#' whose squares overflow or underflow (1e200 or 1e-170 times a spread of 1)
+#' it holds whatever the spread.  So \code{.pool_fit()} applies it both to
+#' the raw values and to the column centred and scaled
+#' (\code{.spread_readings()}), where a second bound keeps the rounding of
+#' the values from counting as spread (\code{.scaled_rounding()}), and the
+#' test of a constant column of \code{resolution_profile()}'s estimate reads
+#' both (\code{.constant_column()}).  The profile's test of a constant
+#' response for \code{cp} is its own, on the raw values.
 #'
 #' @param ss A sum of squared deviations of \code{y}.
 #' @param y The values.
@@ -224,6 +233,211 @@
 #' @keywords internal
 #' @noRd
 .no_spread <- function(ss, y) ss <= 100 * .Machine$double.eps^2 * sum(y^2)
+
+
+# The rounding a column's values carry, in units in the last place of its
+# largest absolute value: a standard deviation of at most this many is no
+# spread on the column centred and scaled.  A value stored once is off by
+# half a unit at most, and the same number computed two ways (0.1 and
+# 0.3 / 3, 2 and sqrt(2)^2, a unit conversion done in two orders) by a unit
+# or so: a column of the two gives a standard deviation of 0.5.  A standard
+# deviation of 1 at 1e15, where a unit is 0.125, is 8 units, and one of
+# 1e-9 at 1e6 is 8.6.
+.POOL_ULPS <- 3
+
+
+# Beyond these a column's squares are not numbers a double holds to its
+# precision.  Above 1e150 the sum of the squares of 180 million values
+# passes the largest double, and below a spread of 1e-150 the squares of the
+# spread fall near the smallest normal double and lose their bits.  A column
+# of fewer rows can be fitted a little beyond them; the bounds are set where
+# the squares of many values can overflow or lose their precision, not where
+# every column does.  The bound above is .POOL_XY_MAX's (R/assignment.R).
+.POOL_Y_MAX <- 1e150
+.POOL_Y_MIN <- 1e-150
+
+# One of those bounds as a message writes it: "1e150", "1e-150".
+.bound_text <- function(x) sub("e+", "e", format(x), fixed = TRUE)
+
+
+#' A column centred on its median and scaled by its largest distance from it
+#'
+#' The column the second reading of the test for no spread is taken on, and
+#' the one \code{.pool_fit()} fits where the raw values lose their spread to
+#' rounding.  The values are divided by the power of two at or below their
+#' largest absolute value, the median is subtracted, and the result is
+#' divided by the power of two at or below its own largest absolute value,
+#' so that the largest lies in [1, 2).  Division by a power of two is exact,
+#' and so is the subtraction wherever a value lies within a factor of two of
+#' the median, which is where raw values lose their spread.  Equal values
+#' stay equal, and a column of one value gives zeros.
+#'
+#' @param y Finite values, at least one.
+#' @return A list: \code{y}, the scaled column; \code{centre}, the median in
+#'   the column's units, and \code{scale}, the product of the two divisors,
+#'   so that \code{centre + scale * y} gives the values back to rounding;
+#'   \code{spread}, the largest distance of a value from the median in the
+#'   column's units (0 for a column of one value); and \code{unit}, one unit
+#'   in the last place of the largest absolute value, in the units of the
+#'   scaled column (\code{.Machine$double.eps} divided by the second divisor).
+#' @keywords internal
+#' @noRd
+.spread_scaled <- function(y) {
+  eps <- .Machine$double.eps
+  a <- max(abs(y))
+  if (!(a > 0)) return(list(y = y, centre = 0, scale = 1, spread = 0, unit = eps))
+  # log2() of the largest doubles rounds up to 1024, whose power is Inf, and
+  # log2() of a value just below a power of two can round up to it.
+  p  <- 2^min(floor(log2(a)), 1023)
+  if (p > a) p <- p / 2
+  u  <- y / p
+  md <- stats::median(u)
+  u  <- u - md
+  b  <- max(abs(u))
+  if (!(b > 0)) return(list(y = u, centre = md * p, scale = p, spread = 0, unit = eps))
+  q  <- 2^floor(log2(b))
+  if (q > b) q <- q / 2
+  list(y = u / q, centre = md * p, scale = p * q, spread = b * p, unit = eps / q)
+}
+
+
+#' Whether a sum of squares of the scaled column is no more than rounding
+#'
+#' The test of \code{.no_spread()} on the column of \code{.spread_scaled()},
+#' and a second bound: the standard deviation the sum gives, over \code{df}
+#' degrees of freedom, is at most \code{.POOL_ULPS} units in the last place
+#' of the column's largest absolute value.  Centred and scaled, two values
+#' one unit in the last place apart are 0 and 1, and without the second
+#' bound any two values that differ at all would count as spread: 0.1 beside
+#' 0.3 / 3 would be fitted on its last bit, which is what \code{.no_spread()}
+#' is there to prevent.
+#'
+#' @param ss A sum of squared deviations of \code{sc$y}.
+#' @param df Its degrees of freedom: the rows less one for the sum about the
+#'   overall mean, the rows less the regions for the sum inside them.
+#' @param sc \code{.spread_scaled()} of the column.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.scaled_rounding <- function(ss, df, sc)
+  .no_spread(ss, sc$y) || ss <= max(df, 0) * (.POOL_ULPS * sc$unit)^2
+
+
+#' Whether a column has spread, constant or inside its regions, on the
+#' column centred and scaled
+#'
+#' The readings \code{.pool_fit()} takes on its raw values, taken on the
+#' column of \code{.spread_scaled()} with the bound of
+#' \code{.scaled_rounding()}: no spread over all the rows, and none inside
+#' any region, by the sum about the region means or by the same sum about
+#' means corrected for the rounding of their own sums (\code{.ss_within()}).
+#'
+#' @param sc \code{.spread_scaled()} of the column.
+#' @param gi,n Region of each row, and rows per region.
+#' @return A list: \code{constant} (no spread over all the rows) and
+#'   \code{flat} (none inside any region).
+#' @keywords internal
+#' @noRd
+.spread_readings <- function(sc, gi, n) {
+  y <- sc$y
+  N <- length(y)
+  K <- length(n)
+  res   <- y - (as.numeric(rowsum(y, gi)) / n)[gi]
+  const <- .scaled_rounding(sum((y - mean(y))^2), N - 1L, sc)
+  list(constant = const,
+       flat = const || .scaled_rounding(sum(res^2), N - K, sc) ||
+         .scaled_rounding(.ss_within(res, gi, n), N - K, sc))
+}
+
+
+#' Whether a column's values lie beyond what the arithmetic of the fit holds
+#'
+#' Read for a column that is not constant: a column of one value needs no
+#' squares, at any size.
+#'
+#' @param y The values.
+#' @param sc \code{.spread_scaled(y)}.
+#' @return \code{TRUE} when an absolute value is above \code{.POOL_Y_MAX} or
+#'   the largest distance from the median is below \code{.POOL_Y_MIN}.
+#' @keywords internal
+#' @noRd
+.pool_out_of_range <- function(y, sc) max(abs(y)) > .POOL_Y_MAX || sc$spread < .POOL_Y_MIN
+
+
+#' A fit of the scaled column, put back in the column's units
+#'
+#' The estimator is unchanged by a shift and a scale of the column, so the
+#' weights, the p-value of the F test, the centroids, the neighbours, the
+#' counts, \code{constant}, \code{flat} and the status of the fit of
+#' \code{.spread_scaled()$y} are the column's.  The numbers in squared units
+#' are multiplied by the square of the scale and the residuals by the scale,
+#' which, both being powers of two, is exact; the targets and the pooled
+#' values are \code{centre + scale * x}; the sums and plain means are those
+#' of the column itself, and where the value is the plain mean (one region,
+#' or no spread inside any region) it is that mean.
+#'
+#' @param f The list \code{.pool_fit()} returned for the scaled column.
+#' @param S,m The column's sums and plain means by region.
+#' @param sc \code{.spread_scaled()} of the column.
+#' @return \code{f} in the column's units.
+#' @keywords internal
+#' @noRd
+.pool_unscale <- function(f, S, m, sc) {
+  s <- sc$scale; s2 <- s * s
+  for (v in c("sigma2", "Q", "tau2", "loo_pooled", "loo_pooled_se", "loo_mean",
+              "loo_mean_se", "loo_one", "loo_one_se"))
+    f[[v]] <- f[[v]] * s2
+  f$S <- S
+  f$m <- m
+  f$target <- sc$centre + s * f$target
+  f$value  <- if (f$status %in% c("one cell", "no spread inside any cell")) m
+              else sc$centre + s * f$value
+  if (!is.null(f$resid_pooled)) f$resid_pooled <- f$resid_pooled * s
+  if (!is.null(f$resid_mean))   f$resid_mean   <- f$resid_mean * s
+  f
+}
+
+
+#' Whether a column is constant, by the test of the fit
+#'
+#' What \code{.pool_fit()} returns as \code{constant} for the same values:
+#' no spread on the raw values, and none on the column centred and scaled
+#' beyond the rounding of its values (\code{.scaled_rounding()}).
+#' \code{resolution_profile()} reads it for its estimate's columns.
+#'
+#' @param y The values, at least one.
+#' @param sc \code{.spread_scaled(y)}.
+#' @return \code{TRUE} or \code{FALSE}.
+#' @keywords internal
+#' @noRd
+.constant_column <- function(y, sc = .spread_scaled(y))
+  .no_spread(sum((y - mean(y))^2), y) &&
+    .scaled_rounding(sum((sc$y - mean(sc$y))^2), length(y) - 1L, sc)
+
+
+#' The mean square of a set of residuals and its standard error over rows
+#'
+#' \code{c(mean(e^2), sd(e^2) / sqrt(length(e)))}.  The standard error
+#' squares the squares, which pass the largest double for residuals above
+#' about 1e77, where it came out \code{Inf}, and fall below the smallest
+#' normal double for residuals under about 1e-77, where it lost its
+#' precision and further down came out 0.  Residuals whose largest lies
+#' outside 2^-255 to 2^255 are therefore divided by the power of two at or
+#' below it first, and both numbers multiplied back by its square, which is
+#' exact; inside those bounds the numbers are computed as they stand.
+#'
+#' @param e Finite residuals, at least two.
+#' @return Two numbers.
+#' @keywords internal
+#' @noRd
+.loo_mean_square <- function(e) {
+  a <- max(abs(e))
+  if (!isTRUE(a > 0) || (a >= 2^-255 && a <= 2^255))
+    return(c(mean(e^2), stats::sd(e^2) / sqrt(length(e))))
+  s  <- 2^floor(log2(a))
+  e2 <- (e / s)^2
+  c(mean(e2), stats::sd(e2) / sqrt(length(e))) * s^2
+}
 
 
 #' The sum of squares inside the regions, about means without the rounding of
@@ -677,6 +891,12 @@
 #' The first of these that holds decides what is returned, and \code{status}
 #' is its name.
 #' \describe{
+#'   \item{\code{"values out of range"}}{The column is not constant, and an
+#'     absolute value is above \code{.POOL_Y_MAX} or the largest distance of
+#'     a value from the median is below \code{.POOL_Y_MIN}: the squares the
+#'     fit is made of are not numbers a double holds to its precision.
+#'     Nothing is fitted, and what is returned is as under \code{"no cell
+#'     holds two values"}.}
 #'   \item{\code{"one cell"}}{\code{K} is 1.  The value is the plain mean and
 #'     its weight 1; there is no target and no \code{tau2}.  Each residual is
 #'     the plain one, \code{(y - m) N / (N - 1)}, and every leave-one-out
@@ -690,9 +910,11 @@
 #'   \item{\code{"no spread inside any cell"}}{\code{flat}: the sum of
 #'     squares inside the regions is rounding error, by \code{.no_spread()}
 #'     on the sum the fit uses or on the same sum about means corrected for
-#'     the rounding of their own sums (\code{.ss_within()}).  \code{sigma2}
-#'     is 0, every weight 1 and the value the plain mean; the residual of a
-#'     row that shares its region is 0.  When the column is constant over all
+#'     the rounding of their own sums (\code{.ss_within()}), on the raw values
+#'     and on the column centred and scaled alike, where a standard deviation
+#'     of at most \code{.POOL_ULPS} units in the last place is rounding too
+#'     (below).  \code{sigma2} is 0, every weight 1 and the value the plain
+#'     mean; the residual of a row that shares its region is 0.  When the column is constant over all
 #'     its rows as well (\code{constant}), \code{tau2} is 0, every residual
 #'     is 0 and every leave-one-out error is \code{NA}: no level fits a
 #'     constant better than another.  These are set, not computed, because
@@ -701,6 +923,28 @@
 #'     is 0 and each value is its target.}
 #'   \item{\code{"ok"}}{None of the above.}
 #' }
+#'
+#' No spread is read twice: on the raw values, and on the column centred on
+#' its median and scaled by its largest distance from it
+#' (\code{.spread_scaled()}, \code{.spread_readings()}).  \code{constant}
+#' and \code{flat} are \code{TRUE} where neither reading finds spread.  The
+#' raw reading compares the sums of squares with the size of the values, so
+#' 1e15 plus a spread of 1, whose values are stored to an eighth, has none by
+#' it, and values whose squares overflow or underflow have none at any
+#' spread; the scaled reading compares them with the size of the
+#' differences, which no shift or scale of the column changes, and with the
+#' rounding of the values: a standard deviation, over all the rows or inside
+#' the regions, of at most \code{.POOL_ULPS} (3) units in the last place of
+#' the largest absolute value is no spread by it either
+#' (\code{.scaled_rounding()}).  So a column that varies only in its last
+#' bits, 0.1 beside 0.3 / 3, has no spread by either reading, while 1e15 plus
+#' a spread of 1 (8 such units) has spread by the scaled one.  Where the
+#' scaled reading finds spread the raw one does not, the raw arithmetic has
+#' lost it as well, and the fit is made on the scaled column, where the
+#' differences are exact, with the column's readings, and put back in the
+#' column's units (\code{.pool_unscale()}).  Every other column is fitted on
+#' its raw values, so where the raw values show their spread the scaled
+#' reading changes no number.
 #'
 #' Leaving one row out: under plain means a row in a region of two or more is
 #' predicted by the mean of the others, and a row alone in its region by the
@@ -734,6 +978,9 @@
 #' @param caller Name of the exported function, for the message of the error
 #'   that stops an exact search above the limit
 #'   (\code{spatialkit_work_limit}).
+#' @param readings \code{NULL}, or for the fit of the scaled column the
+#'   function makes of itself, \code{list(constant, flat)} as it read them on
+#'   the column: the values are then neither read, refused nor scaled again.
 #' @return A list: \code{n}, \code{S}, \code{m} (rows, sum and plain mean of
 #'   each region), \code{N}, \code{K}, \code{sigma2}, \code{cen}, \code{nb},
 #'   \code{target}, \code{Q}, \code{tau2}, \code{w}, \code{value} (the pooled
@@ -750,7 +997,7 @@
 #' @noRd
 .pool_fit <- function(y, gi, K, xy, want = c("pooled", "mean"), nn1 = NULL, geo = NULL,
                       use_fnn = .has_backend("FNN"), cache = NULL,
-                      caller = "resolution_profile") {
+                      caller = "resolution_profile", readings = NULL) {
   want <- unique(want)
   if (!length(want) || !all(want %in% c("pooled", "mean")))
     stop(".pool_fit(): `want` must be \"pooled\", \"mean\" or both.", call. = FALSE)
@@ -775,14 +1022,39 @@
   res   <- y - m[gi]
   ss_w  <- sum(res^2)
   tss   <- sum((y - mean(y))^2)
-  const <- .no_spread(tss, y)                       # constant over the rows
-  # No spread inside any region.  The second test is on the sum of squares the
-  # fit uses; the third is on the same sum about means that carry no rounding
-  # of their own, without which a column constant inside large regions fails
-  # the second (.ss_within()).
-  flat  <- const || .no_spread(ss_w, y) || .no_spread(.ss_within(res, gi, n), y)
+  sc <- NULL
+  rescale <- FALSE
+  if (is.null(readings)) {
+    const <- .no_spread(tss, y)                     # constant over the rows
+    # No spread inside any region.  The second test is on the sum of squares
+    # the fit uses; the third is on the same sum about means that carry no
+    # rounding of their own, without which a column constant inside large
+    # regions fails the second (.ss_within()).
+    flat  <- const || .no_spread(ss_w, y) || .no_spread(.ss_within(res, gi, n), y)
+    # The same readings on the column centred and scaled, where the raw ones
+    # find no spread: they compare the sums with the size of the values, so
+    # 1e15 plus a spread of 1 has none by them, and values whose squares
+    # overflow or underflow have none at any spread.  There a standard
+    # deviation of .POOL_ULPS units in the last place or less is rounding,
+    # so a column that varies only in its last bits (0.1 beside 0.3 / 3)
+    # stays without spread.  A column has no spread where neither reading
+    # finds any.  Where the scaled reading finds spread the raw one misses,
+    # the raw arithmetic has lost it too, and the fit is made on the scaled
+    # column (below); every other column is fitted on its raw values.
+    sc <- .spread_scaled(y)
+    if (flat) {
+      on <- .spread_readings(sc, gi, n)
+      rescale <- (const && !on$constant) || !on$flat
+      const <- const && on$constant
+      flat  <- on$flat
+    }
+  } else {
+    # The fit of the scaled column: the readings are those of the column.
+    const <- readings$constant
+    flat  <- readings$flat
+  }
   # Mean square of a set of residuals, and its standard error over rows.
-  loo_of <- function(e) c(mean(e^2), stats::sd(e^2) / sqrt(N))
+  loo_of <- .loo_mean_square
   none   <- c(NA_real_, NA_real_)
 
   out <- list(n = n, S = S, m = m, N = N, K = K, sigma2 = NA_real_,
@@ -793,6 +1065,19 @@
               loo_mean = NA_real_, loo_mean_se = NA_real_,
               loo_one = NA_real_, loo_one_se = NA_real_, f_p = NA_real_,
               constant = const, flat = flat, status = NA_character_)
+
+  # ---- 0. Beyond the arithmetic, or spread lost to it ----------------------
+  if (!is.null(sc) && !const && .pool_out_of_range(y, sc)) {
+    out$status <- "values out of range"
+    return(out)
+  }
+  # The fit of the scaled column takes the column's readings, and is not
+  # read or scaled again.
+  if (rescale)
+    return(.pool_unscale(.pool_fit(sc$y, gi, K, xy, want = want, nn1 = nn1, geo = geo,
+                                   use_fnn = use_fnn, cache = cache, caller = caller,
+                                   readings = list(constant = const, flat = flat)),
+                         S, m, sc))
 
   # ---- 1. One region: nothing to pool toward -------------------------------
   if (K == 1L) {

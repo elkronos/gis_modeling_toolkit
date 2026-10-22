@@ -140,8 +140,23 @@ test_that("a response that is constant to within rounding scores nothing, as the
   expect_true(is.na(attr(p, "one_cell")$cp))
   # No noise variance is read off rounding error, and none is announced.
   expect_false(any(grepl("takes its noise variance", out$text)))
-  expect_error(select_resolution(p, "cp"), "because the response is constant")
+  # The profile's pooled estimate also reads the values centred and scaled,
+  # where a spread of 1e-9 at 1e6 is 8.6 units in the last place and is
+  # scored, so the error says what the test for `cp` found and does not say
+  # that no count fits the response better than another (BUG-21).
+  expect_false(attr(p, "estimate")$constant)
+  expect_error(select_resolution(p, "cp"),
+               "because the test for `cp`, which reads the raw values, finds the response constant",
+               fixed = TRUE)
   expect_error(select_resolution(p, "moran_z", diagnostic = TRUE),
+               "because the test for `cp`, which reads the raw values, finds the response constant",
+               fixed = TRUE)
+  # Without an estimate the test for `cp` is the only one, and the error
+  # says the response is constant.
+  q <- suppressWarnings(resolution_profile(near, "z", n_levels = 5, nstart = 2,
+                                           estimate = NULL))
+  expect_error(select_resolution(q, "cp"), "because the response is constant")
+  expect_error(select_resolution(q, "moran_z", diagnostic = TRUE),
                "because the response is constant")
 
   # A response the predictors fit exactly leaves residuals that are rounding

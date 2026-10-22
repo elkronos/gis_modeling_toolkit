@@ -1059,7 +1059,12 @@
 #'     a profile with an \code{estimate} whose rows are constant too, so are
 #'     \code{loo} and \code{loo_se}, and for pooled values
 #'     \code{own_weight}; the message names them.  \code{summary()} of such a
-#'     profile stops with an error that says the response is constant.}
+#'     profile stops with an error that says the response is constant.  The
+#'     test for \code{cp} reads the raw values, and the estimate's test reads
+#'     them centred on their median and scaled as well: where the second
+#'     finds spread beyond the rounding of the values (1e15 plus a spread of
+#'     1), the message says that \code{loo} is scored, and the print does not
+#'     call the response a constant.}
 #'   \item{\code{spatialkit_empty_cells}}{\code{resolution_profile()},
 #'     \code{\link{get_voronoi_seeds}()} and
 #'     \code{\link{voronoi_seeds_kmeans}()} under \code{partition =
@@ -1159,6 +1164,21 @@
 #'     \code{loo} read), \code{selection} (the rows of the selection half),
 #'     \code{n_response} (the rows of the layer with a response) and
 #'     \code{column}.}
+#'   \item{\code{spatialkit_pool_unavailable}}{\code{resolution_profile()}
+#'     with an \code{estimate}: the values of the response lie beyond what
+#'     the arithmetic of the estimate holds, values so large, or so close to
+#'     their median, that the squares of many such values can overflow or
+#'     lose their precision, so \code{loo}, \code{loo_se} and
+#'     \code{own_weight} are \code{NA} at every level.  Where the test for
+#'     \code{cp} finds such a response constant, \code{cp}, \code{moran_i}
+#'     and \code{moran_z} are \code{NA} for the same reason, and this message
+#'     names them in place of \code{spatialkit_constant_response}.  The
+#'     message gives the bounds; the response rescaled by a power of ten is
+#'     scored.  Raised once, after the levels are scored.  The condition
+#'     carries \code{reason} (\code{"values out of range"}) and
+#'     \code{columns}, the response, as
+#'     \code{\link{summarize_by_cell}(estimate = "pooled")} raises the class
+#'     for its pooled columns.}
 #'   \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 #'     with a level of more than 5,000 cells, on any ladder, when
 #'     \pkg{FNN} cannot be loaded or \pkg{Matrix} is not installed:
@@ -1568,9 +1588,13 @@
 #'   of the weight a pooled value gives the cell's own mean; \code{NA}
 #'   under \code{"mean"}).  \code{loo}, \code{loo_se} and
 #'   \code{own_weight} are \code{NA} at a level where no cell holds two
-#'   scored rows, and at every level when the response is constant over the
-#'   rows \code{loo} reads.  All five are \code{NA} at every level when no
-#'   row of the selection half has a response (\code{select_on = "split"};
+#'   scored rows, at every level when the response is constant over the
+#'   rows \code{loo} reads, and at every level when those rows' values lie
+#'   beyond what the arithmetic of the estimate holds, values so large or so
+#'   close to their median that the squares of many such values can overflow
+#'   or lose their precision (\code{spatialkit_pool_unavailable}).  All five
+#'   are \code{NA} at every level when no row of the selection half has a
+#'   response (\code{select_on = "split"};
 #'   \code{spatialkit_no_scored_rows}).  It also carries \code{estimate}: a
 #'   list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 #'   (8, or \code{NA} under \code{"mean"}), \code{response} (the column),
@@ -1578,9 +1602,16 @@
 #'   \code{"selection half"}), \code{features} (\code{"points"}, or
 #'   \code{"other"} when the layer held features that were reduced to
 #'   points), \code{seed}, \code{constant} (whether the response is constant
-#'   over those rows; \code{FALSE} for fewer than two), \code{loo_one_cell}
+#'   over those rows by the estimate's test, which reads the raw values and
+#'   the values centred on their median and scaled, so that 1e15 plus a
+#'   spread of 1 is not constant while values that differ only by their
+#'   rounding, 0.1 beside 0.3 / 3, are; \code{FALSE} for fewer than two rows;
+#'   \code{one_cell$constant}, the test for \code{cp}, reads the raw values
+#'   alone), \code{loo_one_cell}
 #'   and \code{loo_one_cell_se} (the same error with one mean for all those
-#'   rows, the reference a level has to beat), \code{loo_levels} (the
+#'   rows, the reference a level has to beat; \code{NA} for a constant
+#'   response, for fewer than two rows and for values beyond the arithmetic
+#'   of the estimate), \code{loo_levels} (the
 #'   \code{loo} column those references belong to, named by level), and,
 #'   named by level, \code{sigma2} (the spread of the rows about their
 #'   cell's mean), \code{tau2} (the mean squared distance between a cell's
@@ -2559,12 +2590,16 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   one_cell <- NULL
   is_const <- FALSE
   # The engine's test of a constant column, on the rows the estimate's
-  # columns read.  It takes two rows to be constant, as it does for
-  # `one_cell`: one scored row is too few rows, and the constant-response
-  # warning is not raised for it.  Computed here, before that warning, which
-  # names the estimate's columns when this test leaves them NA.
-  est_const <- !is.null(est) && length(lay$y) >= 2L &&
-    .no_spread(sum((lay$y - mean(lay$y))^2), lay$y)
+  # columns read: on the raw values and on the column centred and scaled, as
+  # .pool_fit() reads it (.constant_column()).  It takes two rows to be
+  # constant, as it does for `one_cell`: one scored row is too few rows, and
+  # the constant-response warning is not raised for it.  Computed here,
+  # before that warning, which names the estimate's columns when this test
+  # leaves them NA.  Values beyond what the engine's arithmetic holds leave
+  # them NA too (`est_range`), with a warning of their own after the sweep.
+  est_sc    <- if (!is.null(est) && length(lay$y) >= 2L) .spread_scaled(lay$y)
+  est_const <- !is.null(est_sc) && .constant_column(lay$y, est_sc)
+  est_range <- !is.null(est_sc) && !est_const && .pool_out_of_range(lay$y, est_sc)
   if (!is.null(y) && sum(is.finite(y)) >= 2L) {
     y1 <- y[is.finite(y)]
     one_cell <- list(n = length(y1), rss = sum((y1 - mean(y1))^2), cp = NA_real_)
@@ -2584,8 +2619,24 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # estimate's `loo` and `loo_se`, and the pooled value's `own_weight`, are
     # NA too when the estimate's own test finds the column constant; the
     # message names them then, and only then, since the two tests read
-    # different rows.
-    if (is_const)
+    # different rows.  Where the estimate's test, which also reads the values
+    # centred and scaled, finds spread, the two tests disagree, and the
+    # message says what each found: on values that vary only in their last
+    # bits (1e15 plus a spread of 1) `loo` is scored; on values beyond the
+    # arithmetic (1e200 times a spread of 1) the warning of those values,
+    # after the sweep, names `cp`'s columns too.
+    est_spread <- !is.null(est_sc) && !est_const
+    if (is_const && est_spread && !est_range)
+      .warn_classed("spatialkit_constant_response",
+                    paste0("resolution_profile(): the test for `cp`, which reads the raw ",
+                           "values, finds the response constant over the %d scored row(s) ",
+                           "(its total sum of squares, %.3g, is rounding error at most on ",
+                           "their scale), so `cp`, `moran_i` and `moran_z` are NA at every ",
+                           "level. The estimate's test also reads the values centred on ",
+                           "their median and scaled, and finds spread beyond their ",
+                           "rounding: `loo` is scored."),
+                    one_cell$n, one_cell$rss, data = list(n = one_cell$n))
+    else if (is_const && !est_spread)
       .warn_classed("spatialkit_constant_response",
                     paste0("resolution_profile(): the %s is constant over the %d ",
                            "scored row(s) (its total sum of squares, %.3g, is ",
@@ -2643,17 +2694,22 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                      cells = rep(NA_integer_, m), f_p = na_m)
     n_lay <- length(lay$y)
     # The error of one mean, unless the engine's test (`est_const`, above)
-    # finds the column constant.
-    if (n_lay >= 2L && !est_const) {
-      e1 <- (lay$y - mean(lay$y)) * n_lay / (n_lay - 1)
-      est_one <- c(mean(e1^2), stats::sd(e1^2) / sqrt(n_lay))
+    # finds the column constant or its values lie beyond the arithmetic
+    # (`est_range`).  As .pool_fit() computes it: on the column centred and
+    # scaled, and put back in its units, where the raw values have no spread
+    # by the test and the scaled column has.
+    if (n_lay >= 2L && !est_const && !est_range) {
+      raw1 <- .no_spread(sum((lay$y - mean(lay$y))^2), lay$y)
+      v1   <- if (raw1) est_sc$y else lay$y
+      e1   <- (v1 - mean(v1)) * n_lay / (n_lay - 1)
+      est_one <- .loo_mean_square(e1) * (if (raw1) est_sc$scale^2 else 1)
     }
     # A row alone in its region is predicted, under plain means, from the
     # region of its nearest other row.  The nearest other location of a
     # location is the same at every level, so every level's fit shares one
     # cache: filled here in one search with FNN, and on first need without.
     est_cache <- new.env(parent = emptyenv())
-    if (identical(est, "mean") && n_lay >= 2L && !est_const && backend("FNN"))
+    if (identical(est, "mean") && n_lay >= 2L && !est_const && !est_range && backend("FNN"))
       .nearest_other(lay$xy, rep.int(1L, n_lay), seq_len(n_lay), backend("FNN"), est_cache,
                      "resolution_profile")
   }
@@ -2827,6 +2883,25 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
                               selection = n_sel, n_response = as.integer(n_support),
                               column = response_var))
   }
+  # Values beyond what the engine's arithmetic holds: every level's fit
+  # refuses them (.pool_fit(), "values out of range"), and this says why the
+  # estimate's columns are NA.  After the sweep, for the same reason.
+  # Where the test for `cp` found the response constant on such values, its
+  # columns are NA for the same reason, and this names them too.
+  if (est_range)
+    .warn_classed("spatialkit_pool_unavailable",
+                  paste0("resolution_profile(): the values of '%s' lie beyond what the ",
+                         "arithmetic of the %s holds, which is values up to %s in ",
+                         "absolute value whose largest distance from their median is at ",
+                         "least %s; beyond these bounds the squares of many values can ",
+                         "overflow or lose their precision. So %s are NA at every level. ",
+                         "Rescaled by a power of ten to within that, the response is scored."),
+                  response_var, if (is_const) "profile" else "estimate",
+                  .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN),
+                  paste0(if (is_const) "`cp`, `moran_i`, `moran_z`, " else "",
+                         if (identical(est, "pooled")) "`loo`, `loo_se` and `own_weight`"
+                         else "`loo` and `loo_se`"),
+                  data = list(reason = "values out of range", columns = response_var))
   # Each row is left out alone, and the other rows at its location stay.
   # Said once, after the levels are scored and where one of them has a
   # `loo`: on a constant response, and where no level could be scored, the
@@ -3328,9 +3403,14 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
     # rss and cp in one notation (.one_notation()).
     with_cp <- !isTRUE(one$constant) && is.finite(one$cp %||% NA_real_)
     nums <- .one_notation(c(one$rss, if (with_cp) one$cp), digits)
+    # A response the test for `cp` finds constant and the estimate's does not
+    # is not called a constant beside a `loo` that is scored.
+    case <- .cp_constant_case(one, attr(x, "estimate", exact = TRUE))
     cat(sprintf("  one cell    : rss %s%s (one mean for the layer; a level has to beat it)\n",
                 nums[1L],
-                if (isTRUE(one$constant)) ", a constant"
+                if (identical(case, "last bits")) ", constant to the test for cp"
+                else if (identical(case, "beyond")) ", values out of range"
+                else if (isTRUE(one$constant)) ", a constant"
                 else if (with_cp) sprintf(", cp %s", nums[2L])
                 else ""))
   }
@@ -3354,6 +3434,7 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
                 if (identical(est$rows, "selection half")) "selection half" else "layer",
                 if (isTRUE(est$constant)) "NA (the response is constant)"
                 else if (isTRUE(est$n < 2L)) "NA (fewer than two rows)"
+                else if (.estimate_beyond_range(est)) "NA (the values are out of range)"
                 else format(signif(est$loo_one_cell, digits))))
   if (all(c("elbow", "wss") %in% names(x)) && !any(is.finite(x$elbow)) &&
       sum(is.finite(x$wss)) >= 2L)
@@ -3902,6 +3983,26 @@ select_resolution <- function(profile,
   # A constant response is its own case: Cp is NA because no level fits a
   # constant better than another, and the message used to ask for "a level
   # whose cells hold two scored rows", which every level of that profile had.
+  # Where the estimate's test, which also reads the values centred and
+  # scaled, finds spread, the message says what each test found.
+  case <- .cp_constant_case(one, est)
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "beyond"))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the values ",
+                        "of the response lie beyond what the arithmetic of the profile ",
+                        "holds, which is values up to %s in absolute value whose largest ",
+                        "distance from their median is at least %s. Rescaled by a power of ",
+                        "ten to within that, the response is scored."),
+                 criterion, .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN)),
+         call. = FALSE)
+  if (!any(ok) && criterion %in% c("cp", "moran_z") && identical(case, "last bits"))
+    stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the test ",
+                        "for `cp`, which reads the raw values, finds the response ",
+                        "constant: its total sum of squares is rounding error at most on ",
+                        "their scale. The estimate's test also reads the values centred on ",
+                        "their median and scaled, and finds spread beyond their rounding, ",
+                        "so `loo` is scored: select_resolution(criterion = \"loo\") reads it."),
+                 criterion),
+         call. = FALSE)
   if (!any(ok) && criterion %in% c("cp", "moran_z") && is.list(one) && isTRUE(one$constant))
     stop(sprintf(paste0("select_resolution(): `%s` is NA at every level because the %s is ",
                         "constant: its total sum of squares is rounding error at most, ",
@@ -3917,6 +4018,16 @@ select_resolution <- function(profile,
                         "constant: its total sum of squares is rounding error at most, ",
                         "so no cell count fits it better than another."),
                  criterion, "response"),
+         call. = FALSE)
+  # And values beyond what the estimate's arithmetic holds: every level's
+  # fit refused them.
+  if (!any(ok) && criterion == "loo" && .estimate_beyond_range(est))
+    stop(sprintf(paste0("select_resolution(): `loo` is NA at every level because the values ",
+                        "of the response lie beyond what the arithmetic of the estimate ",
+                        "holds, which is values up to %s in absolute value whose largest ",
+                        "distance from their median is at least %s. Rescaled by a power of ",
+                        "ten to within that, the response is scored."),
+                 .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN)),
          call. = FALSE)
   # And under the split, a selection half with no response: the error read
   # no row at all, and "a cell that holds two rows" is not what it lacks.
@@ -4215,6 +4326,30 @@ select_resolution <- function(profile,
   if (is.list(est) && is.character(est$value) && length(est$value) == 1L &&
       est$value %in% c("mean", "pooled"))
     as.character(unclass(est$value)) else NA_character_
+}
+
+
+# Whether a profile's estimate is NA at every level because the response's
+# values lie beyond what the engine's arithmetic holds (.pool_out_of_range()).
+# It is the one case in which the estimate has two rows or more, a column
+# that is not constant, and no error of one mean.
+.estimate_beyond_range <- function(est)
+  is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L) &&
+    !is.finite(as.numeric(est$loo_one_cell %||% NA_real_)[1L])
+
+
+# What a profile's two tests of a constant found, where the test for `cp`
+# (`one`, the "one_cell" attribute) finds the response constant: "constant"
+# when the estimate's test agrees or there is no estimate of two rows or
+# more to ask; "beyond" when the estimate's values lie beyond the engine's
+# arithmetic (.estimate_beyond_range()); "last bits" when the estimate's
+# test, which also reads the values centred and scaled, finds spread, so
+# that `loo` is scored.  NA when the test for `cp` does not find it constant.
+.cp_constant_case <- function(one, est) {
+  if (!(is.list(one) && isTRUE(one$constant))) return(NA_character_)
+  if (.estimate_beyond_range(est)) "beyond"
+  else if (is.list(est) && isFALSE(est$constant) && isTRUE(est$n >= 2L)) "last bits"
+  else "constant"
 }
 
 
@@ -5073,6 +5208,12 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     # response" sent the caller to look for a response that is there.
     split_none <- is.list(est_c) && isTRUE(est_c$n == 0L) &&
       identical(est_c$rows, "selection half")
+    # And values beyond what the estimate's arithmetic holds: `loo` is NA for
+    # that, and not because the test for `cp` finds the response constant.
+    beyond <- .estimate_beyond_range(est_c)
+    # Where the test for `cp` finds such values constant, they are not called
+    # constant: both tests are NA for the values' size.
+    beyond_all <- beyond && identical(.cp_constant_case(one_c, est_c), "beyond")
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
          if (split_none)
            sprintf(paste0("No row of the selection half has a response, and under ",
@@ -5081,6 +5222,16 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
                           "level, and reliability needs a usable variogram of that half; ",
                           "elbow, read off the points alone, is NA when the WSS curve has ",
                           "no elbow."),
+                   if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
+         else if (beyond_all)
+           sprintf(paste0("The values of the response lie beyond what the arithmetic of the ",
+                          "profile holds, which is values up to %s in absolute value whose ",
+                          "largest distance from their median is at least %s, so no ",
+                          "criterion that reads them is finite: %s are NA at every level, and ",
+                          "reliability needs a usable variogram of them; elbow, read off the ",
+                          "points alone, is NA when the WSS curve has no elbow. Rescaled by a ",
+                          "power of ten to within that, the response is scored."),
+                   .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN),
                    if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
          else if (constant)
            sprintf(paste0("The %s is constant over the %d scored row%s, so no criterion ",
@@ -5091,10 +5242,18 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
                      "OLS residual of the response on `predictor_vars`"
                    else "response",
                    as.integer(n_const), if (identical(as.integer(n_const), 1L)) "" else "s",
-                   if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
+                   if ("loo" %in% names(object) && !beyond) "cp, loo and moran_z"
+                   else "cp and moran_z")
          else paste0("cp needs a response, reliability a usable variogram; a geometry-only ",
                      "profile carries elbow alone, ",
                      "and elbow is NA when the WSS curve has no elbow."),
+         if (beyond && !beyond_all)
+           sprintf(paste0(" loo is NA at every level because the values of the response lie ",
+                          "beyond what the arithmetic of the estimate holds, which is values ",
+                          "up to %s in absolute value whose largest distance from their ",
+                          "median is at least %s."),
+                   .bound_text(.POOL_Y_MAX), .bound_text(.POOL_Y_MIN))
+         else "",
          if ("moran_z" %in% names(object) &&
              any(is.finite(suppressWarnings(as.numeric(object[["moran_z"]])))))
            " moran_z is finite, and is a diagnostic: name it in `criteria` to see it."

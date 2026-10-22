@@ -575,11 +575,20 @@ test_that("a constant response has no loo, and the warning names it among the co
                                     "`cp`, `moran_i` and `moran_z` are NA at every level."),
                              attr(r$value, "one_cell")$rss), info = est)
   }
-  # A response that varies by rounding error alone is constant by the same rule.
+  # A response whose spread is a few units in the last place of its values:
+  # the test for `cp` reads the raw values and calls it constant, while the
+  # estimate's test, which also reads it centred and scaled, finds its
+  # spread, and `loo` is that of the spread (BUG-21).
   pts$z <- 1e6 + 1e-9 * sin(seq_len(600))
-  p <- suppressWarnings(.co_profile(pts, estimate = "pooled", obs_per_cell = 4.5))
-  expect_true(attr(p, "estimate")$constant)
-  expect_identical(p$loo, NA_real_)
+  r <- .co_catch(.co_profile(pts, estimate = "pooled", obs_per_cell = 4.5))
+  p <- r$value
+  expect_true(attr(p, "one_cell")$constant)
+  expect_true("spatialkit_constant_response" %in% .co_classes(r))
+  expect_true(any(grepl("`cp`, `moran_i` and `moran_z` are NA at every level.", .co_texts(r),
+                        fixed = TRUE)))
+  expect_false(attr(p, "estimate")$constant)
+  expect_true(is.finite(p$loo))
+  expect_true(is.finite(attr(p, "estimate")$loo_one_cell))
 })
 
 test_that("rows that share locations raise spatialkit_repeated_locations once", {

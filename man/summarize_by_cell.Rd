@@ -897,17 +897,21 @@ are in \code{attr(, "pooled")}.
 \code{reason} is \code{"no coordinates"} (a layer without geometry),
 \code{"no located value"} (no row with a value, a cell and a location),
 \code{"no cell holds two values"} (the condition also carries \code{n} and
-\code{cells} by column) or \code{"work limit"}. The last is the case of many
-cells without the 'FNN' package: the neighbour search then compares
-every pair of cells and is not made above
+\code{cells} by column), \code{"values out of range"} (values so large, or so
+close to their median, that the squares of many such values can
+overflow or lose their precision; the message gives the bounds, and the
+column rescaled by a power of ten is pooled) or \code{"work limit"}. The last
+is the case of many cells without the 'FNN' package: the neighbour
+search then compares every pair of cells and is not made above
 \code{getOption("spatialkit.exact_pairs_max", 2e9)} pairs, which is about
 44,700 cells (the condition also carries \code{work}, \code{limit}, and \code{cells}
 by column). With 'FNN' there is no such limit, and the result is the
 same.
 \item \code{"spatialkit_pool_degenerate"}: the pooled values were computed and
 carry no pooling. \code{reason} is \code{"one cell"} (the pooled value is the
-plain mean; also \code{n} by column), \code{"no spread inside any cell"} (every
-own weight is 1; also \code{constant} by column) or \code{"no signal between cells"} (\code{tau2} is 0 and every own weight is 0; also \code{sigma2} by
+plain mean; also \code{n} by column), \code{"no spread inside any cell"} (the
+values do not vary inside any cell to their precision, so every own
+weight is 1; also \code{constant} by column) or \code{"no signal between cells"} (\code{tau2} is 0 and every own weight is 0; also \code{sigma2} by
 column).
 \item \code{"spatialkit_pool_few_cells"}: 2 to 9 cells, so each target is the mean
 of all the other cells, and a cell whose own weight is below its share

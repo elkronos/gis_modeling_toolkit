@@ -1643,17 +1643,21 @@ assign_features_to_polygons <- function(
 #'   `reason` is `"no coordinates"` (a layer without geometry),
 #'   `"no located value"` (no row with a value, a cell and a location),
 #'   `"no cell holds two values"` (the condition also carries `n` and
-#'   `cells` by column) or `"work limit"`. The last is the case of many
-#'   cells without the 'FNN' package: the neighbour search then compares
-#'   every pair of cells and is not made above
+#'   `cells` by column), `"values out of range"` (values so large, or so
+#'   close to their median, that the squares of many such values can
+#'   overflow or lose their precision; the message gives the bounds, and the
+#'   column rescaled by a power of ten is pooled) or `"work limit"`. The last
+#'   is the case of many cells without the 'FNN' package: the neighbour
+#'   search then compares every pair of cells and is not made above
 #'   `getOption("spatialkit.exact_pairs_max", 2e9)` pairs, which is about
 #'   44,700 cells (the condition also carries `work`, `limit`, and `cells`
 #'   by column). With 'FNN' there is no such limit, and the result is the
 #'   same.
 #' * `"spatialkit_pool_degenerate"`: the pooled values were computed and
 #'   carry no pooling. `reason` is `"one cell"` (the pooled value is the
-#'   plain mean; also `n` by column), `"no spread inside any cell"` (every
-#'   own weight is 1; also `constant` by column) or `"no signal between
+#'   plain mean; also `n` by column), `"no spread inside any cell"` (the
+#'   values do not vary inside any cell to their precision, so every own
+#'   weight is 1; also `constant` by column) or `"no signal between
 #'   cells"` (`tau2` is 0 and every own weight is 0; also `sigma2` by
 #'   column).
 #' * `"spatialkit_pool_few_cells"`: 2 to 9 cells, so each target is the mean
@@ -3752,6 +3756,17 @@ summarize_by_cell <- function(assigned_points_sf,
       data = list(reason = "work limit", columns = w, work = ev$work[[top]],
                   limit = ev$limit[[top]], cells = cells[w]))
   }
+  w <- cols[status == "values out of range"]
+  if (length(w))
+    .warn_classed("spatialkit_pool_unavailable", paste0(
+      "summarize_by_cell(): the pooled columns of %s are NA: %s values lie beyond what the ",
+      "arithmetic of pooled values holds, which is values up to %s in absolute value whose ",
+      "largest distance from their median is at least %s; beyond these bounds the squares ",
+      "of many values can overflow or lose their precision. Rescaled by a power of ten to ",
+      "within that, %s pooled. The plain columns are unaffected."),
+      .cols_text(w), if (one(w)) "its" else "their", .bound_text(.POOL_Y_MAX),
+      .bound_text(.POOL_Y_MIN), if (one(w)) "the column is" else "the columns are",
+      data = list(reason = "values out of range", columns = w))
 
   # ---- the pooled values carry no pooling ------------------------------------
   w <- cols[status == "one cell"]
@@ -3764,9 +3779,9 @@ summarize_by_cell <- function(assigned_points_sf,
   w <- cols[status == "no spread inside any cell"]
   if (length(w))
     .warn_classed("spatialkit_pool_degenerate", paste0(
-      "summarize_by_cell(): the values of %s do not vary inside any cell, so every ",
-      "own weight is 1 and the pooled value is the plain mean. attr(, \"pooled\") says ",
-      "which columns are constant."),
+      "summarize_by_cell(): the values of %s do not vary inside any cell, to the ",
+      "precision of the values, so every own weight is 1 and the pooled value is the ",
+      "plain mean. attr(, \"pooled\") says which columns are constant."),
       .cols_text(w),
       data = list(reason = "no spread inside any cell", columns = w,
                   constant = of("constant", as.logical)[w]))
