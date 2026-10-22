@@ -24,14 +24,19 @@
   .log_warn_once("rf_include_coords",
                  paste0("fit_rf_model(): include_coords = TRUE. The forest ",
                         "splits on location and can fit the training surface ",
-                        "by memorising location, so the out-of-bag error and ",
-                        "random cross-validation overstate its accuracy. How ",
+                        "by memorising location, so its error grows quickly ",
+                        "with the distance from the data. The out-of-bag ",
+                        "error and random cross-validation measure it among ",
+                        "the samples: the error of a map over an area the ",
+                        "samples cover evenly, which reads low for ",
+                        "predictions made farther from the data. How ",
                         "much the coordinates help depends on ",
                         "how far from the training data the predictions are: ",
                         "the gain is largest between sampled points, fades ",
                         "with distance, and can reverse in a region the data ",
                         "never visited (Meyer et al. 2019). Score the forest ",
-                        "with cv_rf() and blocked or distance-matched folds ",
+                        "with cv_rf() on blocked or distance-matched folds ",
+                        "at the distances the map will predict at ",
                         "(make_folds(method = \"block_kfold\") or \"nndm\"), ",
                         "and compare it on the same folds with the forest ",
                         "fitted without coordinates: build the folds once ",
@@ -1136,7 +1141,19 @@ print.rf_fit <- function(x, ...) {
                   paste(sprintf("%s=%.4g", names(top), top), collapse = ", ")
                 }))
   }
-  cat("\n  OOB is a random hold-out and is optimistic under spatial\n")
-  cat("  autocorrelation; use cv_rf() for a spatial estimate.\n")
+  # What the out-of-bag error is the error of, and for which map it reads
+  # low, as ?fit_rf_model says it: a direction with no target named reads as
+  # true of every map.  A forest with no row out of bag has no such error, so
+  # its print says only how to score it.
+  if (no_oob) {
+    cat("\n  With no out-of-bag error to read, score the forest with cv_rf() on\n")
+    cat("  folds at the distances the map will predict at (?fold_separation).\n")
+  } else {
+    cat("\n  OOB is a random hold-out: under spatial autocorrelation it is the error\n")
+    cat("  of predicting among the samples, and reads low for predictions made\n")
+    cat("  farther from the data than the samples sit from each other. Score a map\n")
+    cat("  that predicts farther with cv_rf() on folds at its distances\n")
+    cat("  (?fold_separation).\n")
+  }
   invisible(x)
 }

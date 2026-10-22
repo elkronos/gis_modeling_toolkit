@@ -44,7 +44,7 @@
                  sum(duplicated(keep_idx))), call. = FALSE)
   if (is.null(folds)) {
     .warn_and_log(
-      "cross-validation: falling back to random k-fold CV. For spatial data, use make_folds(method='block_kfold') to avoid optimistic performance estimates."
+      "cross-validation: falling back to random k-fold CV, whose score is the error of predicting among the samples. For a map that predicts farther from the data, build folds at its distances with make_folds() (fold_separation(prediction_points = ) compares them)."
     )
     cleanup <- .with_seed(seed)
     on.exit(cleanup(), add = TRUE)

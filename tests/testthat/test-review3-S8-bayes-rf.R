@@ -156,11 +156,20 @@ test_that("print.rf_fit() says the OOB error and importance are undefined", {
   expect_match(txt, "OOB RMSE: undefined (no row is out of bag)", fixed = TRUE)
   expect_match(txt, "Importance (permutation): undefined (no row is out of bag)",
                fixed = TRUE)
+  # Its closing lines said what the out-of-bag error it does not have is the
+  # error of; they now say how to score the forest.
+  expect_no_match(txt, "OOB is a random hold-out", fixed = TRUE)
+  expect_match(gsub("[[:space:]]+", " ", txt),
+               paste("With no out-of-bag error to read, score the forest with cv_rf() on",
+                     "folds at the distances the map will predict at (?fold_separation)."),
+               fixed = TRUE)
   # An ordinary forest prints its numbers as before.
   f1  <- fit_rf_model(d, "z", c("a", "b"), num_trees = 50)
   txt <- paste(utils::capture.output(print(f1)), collapse = "\n")
   expect_match(txt, "OOB RMSE: [0-9.]+   OOB R\\^2")
   expect_match(txt, "Importance \\(permutation\\): a=[-0-9.e]+, b=")
+  expect_match(txt, "OOB is a random hold-out", fixed = TRUE)
+  expect_no_match(txt, "no out-of-bag error to read", fixed = TRUE)
 })
 
 

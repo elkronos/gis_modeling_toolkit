@@ -525,14 +525,18 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
                  nrow(train_sf), nrow(holdout_sf)))
   }
 
+  # In the words of the help's Details and vignette("diagnostics"): what
+  # each loop scores, not a direction with no target.
   if (identical(method, "random_kfold"))
     .log_warn(paste0("select_features_forward(): random_kfold inner folds ",
-                     "leak spatial autocorrelation between train and test. ",
-                     "Variables can then be selected for being spatially ",
-                     "close to the response rather than predictive of it, and ",
-                     "an outer blocked loop will report honest-looking numbers ",
-                     "for a dishonestly chosen feature set. Use ",
-                     "'block_kfold' unless you know why you are not."))
+                     "score each candidate set by its error among the ",
+                     "samples, so the sweep chooses the variables that ",
+                     "predict best there, where one that only tracks nearby ",
+                     "values of the response can win. A blocked outer loop ",
+                     "then scores the chosen set at the blocks' distance, ",
+                     "for which it was not chosen. Use inner folds that hold ",
+                     "points out as the outer ones do: 'block_kfold', the ",
+                     "default, inside blocked outer folds."))
 
   p <- length(candidate_vars)
   max_steps <- if (is.null(max_vars)) p else min(p, as.integer(max_vars))
@@ -553,10 +557,11 @@ select_features_forward <- function(train_sf, response_var, candidate_vars,
   #
   # Fold construction does not depend on the candidate set: make_folds() reads
   # `predictor_vars` only to detrend the range estimate (under auto_range, and
-  # for the leakage diagnostic), which uses the full candidate list whatever
-  # the sweep has selected so far, and every other argument is fixed across
-  # the sweep.  Rebuilding them inside score_set() therefore produced the same
-  # splits p^2/2 times -- repeating every block-size warning as many times --
+  # for the check of the blocks against the range), which uses the full
+  # candidate list whatever the sweep has selected so far, and every other
+  # argument is fixed across the sweep.  Rebuilding them inside score_set()
+  # therefore produced the same splits p^2/2 times -- repeating every
+  # block-size warning as many times --
   # and, worse, put make_folds() OUTSIDE the try() below, so a single
   # fold-construction failure (block_kfold raising when the geometry collapses
   # to one block, say) killed the whole sweep instead of the candidate being

@@ -2214,6 +2214,27 @@ old behaviour where there is a way.
   logs says that the check of the blocks against the range is skipped,
   not a "leakage check".
 
+* **Three run-time texts said which way an error errs without saying where
+  the model will predict.**  `print()` on an `rf_fit` said the out-of-bag
+  error "is optimistic under spatial autocorrelation"; the caution
+  `fit_rf_model(include_coords = TRUE)` logs said the out-of-bag error and
+  random cross-validation "overstate its accuracy"; and the caution
+  `select_features_forward(method = "random_kfold")` logs said random inner
+  folds "leak spatial autocorrelation" and that a blocked outer loop reports
+  "honest-looking numbers for a dishonestly chosen feature set".  They now
+  read as `?fit_rf_model` and `?select_features_forward` do: the out-of-bag
+  error and random folds are the error of predicting among the samples,
+  which is the error of a map over an area the samples cover evenly and
+  reads low for predictions made farther from the data, so a map that
+  predicts farther is scored with `cv_rf()` on folds at its distances;
+  random inner folds choose the variables that predict best among the
+  samples, and a blocked outer loop scores the chosen set at the blocks'
+  distance, for which it was not chosen.  A forest with no row out of bag
+  (`replace = FALSE`, `sample_fraction = 1`) has no out-of-bag error, and
+  its print no longer describes one: it says to score the forest with
+  `cv_rf()` on folds at the distances the map will predict at.  No result
+  changes.
+
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
   zero parts, and `st_line_sample()` on it segfaulted and took the session

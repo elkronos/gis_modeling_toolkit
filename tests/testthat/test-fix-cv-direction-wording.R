@@ -25,7 +25,12 @@
 #     are pinned word for word where they stand;
 #   * each cv_*() help says what folds = NULL estimates, and
 #     ?cv_block_size_sweep what the rise of its curve measures, and no page
-#     presents the sweep as the way to choose a block size.
+#     presents the sweep as the way to choose a block size;
+#   * the texts the code prints or logs are held to the same rules: the
+#     print of a forest, the cautions of fit_rf_model(include_coords = TRUE)
+#     and of select_features_forward(method = "random_kfold"), and the
+#     warning of the fallback to random folds, each line of a print's
+#     header as a sentence of its own.
 #
 # From the source tree the pages are read from man/, vignettes/, README.Rmd
 # and inst/scripts/.  Under R CMD check the help comes from the installed Rd
@@ -293,7 +298,12 @@
   "what the sweep is for", "defending a block size", "let the data choose the block size",
   "sizing it by measurement", "sizing a block by measurement", "blocks by measurement",
   "choosing a block size by cross-validated error", "should be setting your block size",
-  "makes random cross-validation optimistic")
+  "makes random cross-validation optimistic",
+  # The run-time texts: the forest's print, its include_coords caution, the
+  # random_kfold caution of select_features_forward() and the random-folds
+  # fallback.
+  "optimistic under spatial", "leak spatial autocorrelation", "honest-looking",
+  "optimistic performance")
 
 # The sentences each cv_*() help gives on what folds = NULL estimates.
 .CVW_FOLDS_NULL <- paste(
@@ -699,6 +709,160 @@ test_that("the plots of the folds and of the sweep no longer say that blocks bel
   fb$params$sac_range <- 250
   expect_identical(strsplit(plot_folds(fb, pts)$labels$subtitle, "\n", fixed = TRUE)[[1L]][2L],
                    "Estimated autocorrelation range 250")
+})
+
+# The texts the code prints or logs at run time: the forest's print, the
+# caution of fit_rf_model(include_coords = TRUE), the caution of
+# select_features_forward(method = "random_kfold") and the warning of the
+# fallback to random folds.  Each is judged by the rules the pages are.
+
+# A logged line starts with its level and time.
+.cvw_drop_stamp <- function(x) sub("^[A-Z]+ \\[[^]]*\\] ", "", x)
+
+# The texts that need ranger: the print of a forest without and with the
+# coordinates and of one with no row out of bag, and the include_coords
+# caution.
+.cvw_forest_texts <- function() {
+  pts <- .cvw_field(n = 120)
+  plain <- fit_rf_model(pts, "z", "w", num_trees = 50L)
+  rm(list = ls(spatialkit:::.warned_once), envir = spatialkit:::.warned_once)
+  coords_log <- capture_spatialkit_log(
+    with_xy <- fit_rf_model(pts, "z", "w", num_trees = 50L, include_coords = TRUE))
+  # Every tree grown on every row: the fit warns, and logs it.
+  no_oob_log <- capture_spatialkit_log(
+    no_oob <- suppressWarnings(fit_rf_model(pts, "z", "w", num_trees = 50L,
+                                            replace = FALSE, sample_fraction = 1)))
+  list(
+    "print of a forest" = utils::capture.output(print(plain)),
+    "print of a forest with coordinates" = utils::capture.output(print(with_xy)),
+    "print of a forest with no row out of bag" = utils::capture.output(print(no_oob)),
+    "include_coords caution" = .cvw_drop_stamp(grep("include_coords = TRUE", coords_log,
+                                                    value = TRUE)))
+}
+
+# The texts that need no forest: the random_kfold caution, with a linear
+# fit, and the fallback to random folds.
+.cvw_other_texts <- function() {
+  pts <- .cvw_field(n = 120)
+  select_log <- capture_spatialkit_log(
+    select_features_forward(pts, "z", "w", function(tr, vars) lm_spatial_fit(tr, "z", vars),
+                            k = 4, method = "random_kfold", seed = 1, quiet = TRUE))
+  # The fallback is raised as an R warning and logged; the log is caught so
+  # that it does not echo.
+  fallback_log <- capture_spatialkit_log(
+    fallback <- .cvw_warnings(spatialkit:::.remap_folds(NULL, 1:20)))
+  list(
+    "random_kfold caution" = .cvw_drop_stamp(grep("random_kfold inner folds", select_log,
+                                                  value = TRUE)),
+    "fallback to random folds" = fallback)
+}
+
+# What a text is judged in.  Above its first blank line a print is a header
+# of fields, one to a line and with no full stop, so each line is a sentence
+# of its own: run together, the header and the first sentence below it read
+# as one sentence, and a target named there would pass a direction word on a
+# header line.  Below the blank line the lines are paragraphs, as on a page.
+# A logged line or a warning is one paragraph.
+.cvw_runtime_units <- function(lines) {
+  blank <- which(!nzchar(trimws(lines)))
+  if (!length(blank)) return(.cvw_squash(paste(lines, collapse = " ")))
+  head <- lines[seq_len(blank[1L] - 1L)]
+  c(vapply(head, .cvw_squash, character(1), USE.NAMES = FALSE),
+    .cvw_paragraphs(paste(lines[-seq_len(blank[1L])], collapse = "\n")))
+}
+
+# The rules of the pages, applied to each text.
+.cvw_judge_runtime <- function(texts) {
+  for (what in names(texts)) {
+    # Each text is there to judge: a print, or one logged line or warning.
+    if (startsWith(what, "print")) expect_gt(length(texts[[what]]), 5L, label = what)
+    else expect_length(texts[[what]], 1L)
+    units <- .cvw_runtime_units(texts[[what]])
+    expect_identical(.cvw_untargeted(units), character(0), info = what)
+    txt <- paste(units, collapse = " ")
+    expect_identical(.cvw_wrong_way(txt), character(0), info = what)
+    low <- tolower(txt)
+    for (phrase in .CVW_BARRED)
+      expect_false(grepl(phrase, low, fixed = TRUE), info = paste(what, phrase))
+  }
+}
+
+test_that("a print is judged line by line above its closing paragraph", {
+  # A direction word on a header line is found although the closing
+  # paragraph names a target; read as one paragraph, the print passed it.
+  probe <- c("<Random Forest (ranger)> spatial model fit",
+             "  Coords as predictors: YES - see ?fit_rf_model (its OOB error is optimistic)",
+             "  OOB RMSE: 1.2900   OOB R^2: 0.3500 (both flatter the forest)",
+             "",
+             "  OOB is a random hold-out: it reads low for predictions made",
+             "  farther from the data. Score it with cv_rf().")
+  expect_identical(.cvw_untargeted(.cvw_squash(paste(probe, collapse = " "))), character(0))
+  units <- .cvw_runtime_units(probe)
+  expect_identical(units,
+                   c("<Random Forest (ranger)> spatial model fit",
+                     "Coords as predictors: YES - see ?fit_rf_model (its OOB error is optimistic)",
+                     "OOB RMSE: 1.2900 OOB R^2: 0.3500 (both flatter the forest)",
+                     paste("OOB is a random hold-out: it reads low for predictions made farther",
+                           "from the data. Score it with cv_rf().")))
+  expect_identical(.cvw_untargeted(units), units[2:3])
+  # Below the blank line a direction word needs its target in its own
+  # sentence, as on a page.
+  expect_identical(.cvw_untargeted(.cvw_runtime_units(c(probe[1L], "", "  Predictions made",
+                                                        "  here. It reads low."))),
+                   "It reads low.")
+  # A logged line or a warning is one paragraph.
+  expect_identical(.cvw_runtime_units("  One   line. It reads low.  "), "One line. It reads low.")
+})
+
+test_that("the forest's prints and its include_coords caution name where the model will predict", {
+  skip_if_not_installed("ranger")
+  texts <- .cvw_forest_texts()
+  .cvw_judge_runtime(texts)
+  # What each says instead, word for word.
+  for (what in c("print of a forest", "print of a forest with coordinates"))
+    expect_match(.cvw_squash(paste(texts[[what]], collapse = " ")),
+                 paste("OOB is a random hold-out: under spatial autocorrelation it is the",
+                       "error of predicting among the samples, and reads low for predictions",
+                       "made farther from the data than the samples sit from each other.",
+                       "Score a map that predicts farther with cv_rf() on folds at its",
+                       "distances (?fold_separation)."), fixed = TRUE, info = what)
+  # A forest with no row out of bag has no out-of-bag error to describe: its
+  # print says how to score it instead.
+  nob <- texts[["print of a forest with no row out of bag"]]
+  expect_match(.cvw_squash(paste(nob, collapse = " ")),
+               "OOB RMSE: undefined (no row is out of bag)", fixed = TRUE)
+  expect_no_match(.cvw_squash(paste(nob, collapse = " ")), "OOB is a random hold-out",
+                  fixed = TRUE)
+  expect_identical(utils::tail(.cvw_runtime_units(nob), 1L),
+                   paste("With no out-of-bag error to read, score the forest with cv_rf() on",
+                         "folds at the distances the map will predict at (?fold_separation)."))
+  expect_match(texts[["include_coords caution"]],
+               paste("so its error grows quickly with the distance from the data. The",
+                     "out-of-bag error and random cross-validation measure it among the",
+                     "samples: the error of a map over an area the samples cover evenly,",
+                     "which reads low for predictions made farther from the data."), fixed = TRUE)
+  expect_match(texts[["include_coords caution"]],
+               "Score the forest with cv_rf() on blocked or distance-matched folds at the distances the map will predict at",
+               fixed = TRUE)
+})
+
+test_that("the random_kfold caution and the random-folds fallback name where the model will predict", {
+  # Neither needs a forest, so both are judged without ranger.
+  texts <- .cvw_other_texts()
+  .cvw_judge_runtime(texts)
+  expect_match(texts[["random_kfold caution"]],
+               paste("select_features_forward(): random_kfold inner folds score each candidate",
+                     "set by its error among the samples, so the sweep chooses the variables",
+                     "that predict best there, where one that only tracks nearby values of the",
+                     "response can win. A blocked outer loop then scores the chosen set at the",
+                     "blocks' distance, for which it was not chosen. Use inner folds that hold",
+                     "points out as the outer ones do: 'block_kfold', the default, inside",
+                     "blocked outer folds."), fixed = TRUE)
+  expect_identical(texts[["fallback to random folds"]],
+                   paste("cross-validation: falling back to random k-fold CV, whose score is the",
+                         "error of predicting among the samples. For a map that predicts",
+                         "farther from the data, build folds at its distances with make_folds()",
+                         "(fold_separation(prediction_points = ) compares them)."))
 })
 
 
