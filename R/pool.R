@@ -977,8 +977,10 @@
 #' @param conf_level Level of the plain mean's t interval, or \code{NULL}.
 #' @param deff_label The design effect the t interval was built with, as it
 #'   is written in a call: \code{1}, \code{"kish"} (with its quotes),
-#'   \code{"variogram"} or a number.  It reads \code{1} exactly when the
-#'   interval carries none, which is what \code{.deff_label()} writes.
+#'   \code{"variogram"} or a number.  It reads \code{1}, alone or before a
+#'   semicolon that names the columns whose intervals are \code{NA}, exactly
+#'   when the interval carries none, which is what \code{.deff_label()}
+#'   writes.
 #' @return A data frame with the columns \code{columns} (the stems of the two
 #'   interval columns), \code{covers}, \code{centre}, \code{level} and
 #'   \code{method}; no row when both levels are \code{NULL}.
@@ -987,7 +989,9 @@
 .intervals_table <- function(obs_level, conf_level, deff_label) {
   obs <- !is.null(obs_level)
   ci  <- !is.null(conf_level)
-  own <- identical(as.character(deff_label), "1")
+  # A 1 that goes on to name the columns left NA ("1; NA for 'z', ...")
+  # describes the default's interval for every other column.
+  own <- grepl("^1(;|$)", as.character(deff_label))
   data.frame(
     columns = c(character(0),
                 if (obs) "..obs_lo_, ..obs_hi_",

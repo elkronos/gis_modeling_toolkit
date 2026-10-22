@@ -288,13 +288,36 @@ old behaviour where there is a way.
   column `deff_method`, present whenever a design effect is requested, names
   the correction each row carries.  A variogram refused because the
   response shows no spatial structure is not a fallback: its pure-nugget
-  model gives a design effect of 1.
+  model gives a design effect of 1.  It gives that design effect to every
+  column, and a warning of class `spatialkit_deff_no_structure` names the
+  predictor columns summarised under it, since the verdict is about the
+  variable the variogram was fitted to; `deff = "kish"` corrects each
+  predictor by its own ICC.
 
 * `summarize_by_cell(deff = "kish")` estimates the ICC of each predictor on
   its own.  One ICC was pooled over every predictor listed, so listing a
   second predictor changed the first one's standard error.
   `attr(, "icc")$pred` and `attr(, "deff_applied")$icc_pred` are vectors
   named by predictor column.
+
+* `summarize_by_cell(deff = "kish")`, and a `"variogram"` request that falls
+  back to it, return `NA` standard errors, in every cell of two or more
+  values, for a column whose ICC cannot be estimated: its values in one
+  cell, fewer than two cells holding two or more of them, or values that
+  fall in no cell or differ only there (rows with no cell id give no cell to
+  the ICC).  They returned the uncorrected ones, as for an ICC estimated
+  at or below 0, under the same label.  `..neff_*`, `..ci_*` and, for the
+  column that sets it, `cell_weight` are `NA` in those cells too, so a
+  regression weighted by `cell_weight` leaves them out; a cell of one
+  value keeps its `cell_weight` of 1.  A warning of class
+  `spatialkit_icc_unavailable` names the columns and the reason,
+  `attr(, "icc")` holds `NA` for each, with `reason`, and under
+  `estimate = "pooled"` the `method` of `attr(, "intervals")` names them.
+  An estimate at or below 0 still gives an ICC of 0 and the uncorrected
+  standard errors, and a column whose values are all equal, those of rows
+  with no cell id included, keeps standard errors of 0 (its ICC is `NA`,
+  with the reason "the column does not vary").  `deff = 1` gives the
+  uncorrected standard errors in every case.
 
 * Voronoi cells built on seeds reach the edge of the data the seeds stand
   for.  `build_tessellation(seeds, method = "voronoi")` without a boundary
@@ -864,7 +887,8 @@ old behaviour where there is a way.
   requests a design effect (any `deff` other than 1) also returns a logical
   `deff_applied` column, `TRUE` on every row when a correction was applied
   (a Kish fallback included; `deff_method` names the correction) and `FALSE`
-  when the standard errors are the uncorrected ones; unlike
+  when none was (the standard errors are then the uncorrected ones, or `NA`
+  where a Kish ICC cannot be estimated); unlike
   the `"deff_applied"` attribute it survives `rbind()` and
   `dplyr::bind_rows()` of many results.  At the default `deff = 1` the
   column is not added.

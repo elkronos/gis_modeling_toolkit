@@ -879,13 +879,18 @@ assign_features_to_polygons <- function(
 #'
 #' @param s Within-cell standard deviation.
 #' @param n Number of non-missing observations in the cell.
-#' @param deff Design effect for that cell, \eqn{\geq 1}.
+#' @param deff Design effect for that cell, \eqn{\geq 1}, or \code{NA} when
+#'   it is unknown (a Kish ICC that cannot be estimated).
 #' @return The standard error, or \code{NA_real_} when the cell carries no
-#'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy).
+#'   information about \eqn{\sigma} (\code{deff >= n}: complete redundancy)
+#'   or the design effect is unknown.
 #' @keywords internal
 #' @noRd
 .se_with_deff <- function(s, n, deff, correct_s2 = TRUE) {
   if (!is.finite(s) || !is.finite(n) || n <= 1L) return(NA_real_)
+  # An unknown design effect is not a design effect of 1: the uncorrected SE
+  # returned here would read as an estimate the data do not support.
+  if (is.na(deff)) return(NA_real_)
   if (!is.finite(deff) || deff <= 1) return(s / sqrt(n))
   # correct_s2 = FALSE for a design effect the CALLER supplied as a constant.
   # The E[s^2] = sigma^2 (n - deff)/(n - 1) correction below is derived from a
@@ -1101,7 +1106,7 @@ assign_features_to_polygons <- function(
 #' Warn that a requested design effect was not the one applied
 #'
 #' The classed warning for a design effect that fell back: to 1 for a refused
-#' number, and to \code{"kish"} (or, when its ICCs are 0, to nothing) for a
+#' number, and to \code{"kish"} (or, when no ICC is positive, to nothing) for a
 #' \code{"variogram"} request with no usable model.  The class is
 #' \code{"spatialkit_deff_fallback"} in both cases.
 #'
@@ -1110,6 +1115,12 @@ assign_features_to_polygons <- function(
 .warn_deff_fallback <- function(fmt, ..., data = list()) {
   .warn_classed("spatialkit_deff_fallback", fmt, ..., data = data)
 }
+
+
+# The reason .estimate_icc() gives for a column that does not vary.  Its ICC
+# is NA (the between and within variances are both 0), and its standard
+# errors are 0 whatever the correlation, so no number is withheld for it.
+.icc_reason_constant <- "the column does not vary"
 
 
 #' Summarize features by polygon/cell ID
@@ -1182,7 +1193,9 @@ assign_features_to_polygons <- function(
 #' is used for that column's SE adjustment, and each cell's effective sample
 #' size is reduced to `n_i / (1 + (n_i - 1) * rho)`. This is a first-order
 #' correction that does not require a full spatial covariance model but does
-#' require enough cells and observations for a stable ICC estimate.
+#' require enough cells and observations for a stable ICC estimate. A column
+#' whose ICC cannot be estimated at all gets `NA` standard errors (see
+#' `deff`).
 #'
 #' A design effect estimated from the data (`"kish"` or `"variogram"`) comes
 #' with a second, small-sample correction. The within-cell correlation that
@@ -1257,6 +1270,12 @@ assign_features_to_polygons <- function(
 #' because a variogram is a property of the field being modelled rather than of
 #' a variable type; a predictor whose spatial structure differs markedly from
 #' the response's will have its SE corrected by the response's correlation.
+#' When that variogram finds no spatial structure (the pure nugget
+#' [estimate_sac_range()] returns with that verdict), every column gets a
+#' design effect of 1, the predictors included, and a warning of class
+#' `"spatialkit_deff_no_structure"` names the predictor columns: the verdict
+#' is about the variable the variogram was fitted to, not about them.
+#' `deff = "kish"` gives each predictor its own ICC.
 #' The internally estimated variogram is fitted to the **response itself**,
 #' never to OLS residuals, whatever `predictor_vars` holds: the `..se_resp_*`
 #' columns estimate the grand mean of the response, so the correlation to
@@ -1654,7 +1673,8 @@ assign_features_to_polygons <- function(
 #'       warning), or no usable model (none supplied and none could be
 #'       estimated, or a rejected fit that could not be replaced by an
 #'       estimate). The standard errors, intervals and `cell_weight` are then
-#'       Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+#'       Kish's, the uncorrected ones where Kish's own ICC is 0 and `NA`
+#'       where it cannot be estimated; the
 #'       `deff_method` column says which on every row (see "Value"). The
 #'       variogram route needs an identified range, which a layer does not
 #'       always have, so read `deff_method` for the fallback. A model with
@@ -1665,7 +1685,10 @@ assign_features_to_polygons <- function(
 #'       when it finds no spatial structure (an `NA` range whose
 #'       `rejected_reason` says so): the answer is then a design effect of
 #'       1, `deff_method` reads `"variogram"`, and no fallback warning is
-#'       raised. Points with empty
+#'       raised. Predictor columns summarised under that verdict get the same
+#'       design effect of 1, and a warning of class
+#'       `"spatialkit_deff_no_structure"` names them (fields `columns` and
+#'       `reason`). Points with empty
 #'       geometry count towards their cells' values but not towards the
 #'       correlation, with a warning.}
 #'     \item{`"kish"`}{Estimate an intra-class correlation (ICC) for each
@@ -1683,12 +1706,25 @@ assign_features_to_polygons <- function(
 #'       applied to a predictor, nor one predictor's to another. It is the
 #'       response's ICC that sets `cell_weight` whenever a response was
 #'       given, and the first predictor's own ICC otherwise.
-#'       Requires at least 2 cells with 2+ observations and at least 2 residual
-#'       degrees of freedom (`N - k >= 2`); the ICC is taken as 0 (no
-#'       correction for that column) otherwise, and likewise when the
-#'       estimate itself comes out at or below 0. The `"deff_applied"`
-#'       attribute is attached when any ICC is positive, so when all are
-#'       0 there is none.}
+#'       An ICC needs at least 2 cells with 2+ observations of the column and
+#'       at least 2 residual degrees of freedom (`N - k >= 2`). Where a column
+#'       has fewer (all its values in one cell, say), its ICC cannot be
+#'       estimated: it is `NA`, `attr(, "icc")$reason` says why, and the
+#'       column's standard errors, `..neff_*` and `..ci_*` are `NA` in every
+#'       cell of two or more observations (`..df_*` stays `n - 1`), as is
+#'       `cell_weight` when that column sets it, with a warning of class
+#'       `"spatialkit_icc_unavailable"` (fields `columns` and `reason`). Rows
+#'       with no cell id (kept by `keep_unassigned = TRUE` in
+#'       [assign_features_to_polygons()]) give a summary row of their own but
+#'       no cell to the ICC, so a column whose values all fall in them, or
+#'       differ only there, has an ICC that cannot be estimated. An
+#'       estimate at or below 0 is another case: the ICC is 0 and the
+#'       column's standard errors are the uncorrected ones. A column that
+#'       does not vary (all its values equal, those of rows with no cell id
+#'       included) has an ICC of `NA` and standard errors of 0, with no
+#'       warning: its mean has no error whatever the correlation. The
+#'       `"deff_applied"` attribute is attached when any ICC is positive, so
+#'       when all are 0 or `NA` there is none.}
 #'     \item{A positive number}{Applied as a uniform design effect to every
 #'       cell, as `sd * sqrt(deff / n)`, exactly `sqrt(deff)` times the
 #'       naive SE. Use when you have an external estimate of the design
@@ -1797,14 +1833,16 @@ assign_features_to_polygons <- function(
 #'   `deff_applied` is `TRUE` on every row when a design-effect correction
 #'   was applied (exactly when the `"deff_applied"` attribute below is
 #'   attached; under `"kish"`, when any standard-error column was corrected)
-#'   and `FALSE` when the standard errors are the uncorrected ones: a
-#'   refused `deff`, or `"kish"` ICCs of 0 for every column (and `NA` on a
-#'   `cells_sf` row no point fell in). `deff_method` names the correction
+#'   and `FALSE` when none was: a refused `deff`, or `"kish"` ICCs of 0 or
+#'   `NA` for every column (the standard errors are then the uncorrected
+#'   ones, or `NA` where an ICC cannot be estimated). It is `NA` on a
+#'   `cells_sf` row no point fell in. `deff_method` names the correction
 #'   the standard errors carry, since their column names do not change with
 #'   it: `"variogram"`, `"kish"` or `"fixed"` when the one requested was
 #'   applied, `"none"` when none was, and `"kish (variogram fallback)"` or
 #'   `"none (variogram fallback)"` when a `"variogram"` request could not be
-#'   met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+#'   met and Kish stood in for it (the second when Kish's ICCs were 0 or
+#'   `NA` too).
 #'   So `deff_applied` is `TRUE` on a Kish fallback row: test
 #'   `deff_method == "variogram"` to keep only rows the variogram corrected.
 #'   Unlike the attribute, both columns survive `rbind()` and
@@ -1815,13 +1853,20 @@ assign_features_to_polygons <- function(
 #'   message. It is raised when the correction requested was not the one
 #'   applied: a refused number (the standard errors are then the uncorrected
 #'   ones) or a `"variogram"` request that fell back to Kish; the condition
-#'   of the second carries `requested` and `used`.
+#'   of the second carries `requested` and `used`. Two more classes say what
+#'   a design effect could not do: `"spatialkit_icc_unavailable"` names the
+#'   columns whose Kish ICC cannot be estimated, and
+#'   `"spatialkit_deff_no_structure"` the predictor columns given a design
+#'   effect of 1 by a variogram that found no spatial structure.
 #'
 #'   When a correction was actually applied, an attribute `"deff_applied"` is
 #'   attached recording it: `method` plus `icc_resp`/`icc_pred` and `deff`
 #'   for `"kish"` (`icc_pred` is a vector named by predictor column, one ICC
 #'   each; `deff` is the primary variable's per-cell design effect,
-#'   all 1 when only a predictor's ICC was positive; `requested` and
+#'   all 1 when only a predictor's ICC was positive, except that it is `NA`
+#'   in each cell of two or more of the primary variable's values when that
+#'   variable's ICC cannot be estimated, and its entry in `icc_resp` or
+#'   `icc_pred` is then `NA` too; `requested` and
 #'   `fallback_reason` are added when a `"variogram"` request fell back to
 #'   it),
 #'   `deff`/`deff_rows`/`rbar`/`crs`/`max_n` for `"variogram"` (`deff` is
@@ -1833,11 +1878,13 @@ assign_features_to_polygons <- function(
 #'   order, so `deff[i]` and `rbar[i]` still describe row `i`; cells with no
 #'   observations carry `NA`. No attribute is attached when no correction was
 #'   applied: `deff = 1`, or a `deff = "kish"` request (or Kish fallback)
-#'   whose ICCs are all 0. A `deff = "kish"` request, and a `"variogram"`
+#'   whose ICCs are all 0 or `NA`. A `deff = "kish"` request, and a `"variogram"`
 #'   request that fell back to it, always
 #'   records the ICCs it estimated on an attribute `"icc"` (`resp`, and
 #'   `pred`, a vector named by predictor column; `NA` for a variable type
-#'   with no numeric column), whether or not
+#'   with no numeric column and for a column whose ICC cannot be estimated;
+#'   `reason`, a character vector named by column, is then added and says
+#'   why), whether or not
 #'   they were positive enough to apply, so a result with no `"deff_applied"`
 #'   still says what the ICCs came out as.
 #'
@@ -2201,7 +2248,12 @@ summarize_by_cell <- function(assigned_points_sf,
   }
 
   # Helper: estimate intra-class correlation via one-way random-effects ANOVA.
-  # Returns a single rho in [0, 1] or 0 if estimation fails.
+  # Returns a single rho in [0, 1], 0 for an estimate at or below 0, or NA
+  # with a `reason` attribute when the data cannot give an estimate at all
+  # (the values in one cell or in none, too few cells with two or more
+  # values, or a column that does not vary).  The two used to be one 0, so
+  # a column whose ICC was unidentified got the uncorrected standard error
+  # under the label of an ICC of 0.
   #
   # Called with ONE column at a time (see .kish_iccs() below): an ICC is a
   # property of a variable, and one pooled value for several predictors was
@@ -2224,37 +2276,62 @@ summarize_by_cell <- function(assigned_points_sf,
     # predictor SE was 44% too small.  Grouping by (variable, cell) is the
     # ordinary pooled one-way ANOVA across the m*k variable-cell groups, and
     # recovers 0.49 on the same data.
+    na_icc <- function(why) structure(NA_real_, reason = why)
     vals <- numeric(0)
     grps <- character(0)
+    n_const <- 0L
+    n_all <- 0L  # non-missing values, with a cell id or without one
+    n_id  <- 0L  # those of them with a cell id
     for (v in var_cols) {
+      # Whether the column varies is read from all its values, those of rows
+      # with no cell id included: they form a summary row of their own, and
+      # its standard error is 0 whatever the correlation only when they are
+      # equal too.  Read from the rows with a cell id alone, a column equal
+      # on them and varying on the others was taken for one that does not
+      # vary, and its no-id row kept the uncorrected standard error.
+      x_all <- df[[v]][!is.na(df[[v]])]
+      n_all <- n_all + length(x_all)
+      s_all <- sd(x_all)
+      if (!is.na(s_all) && s_all < .Machine$double.eps) {
+        # Constant column — skip, contributes no variance information
+        n_const <- n_const + 1L
+        next
+      }
       # A row with no cell id belongs to no group: keep_unassigned = TRUE
       # output carries NA ids, and an NA level makes group_means[grps] NA
       # downstream ("missing value where TRUE/FALSE needed").
       ok <- !is.na(df[[v]]) & !is.na(df[[id_col]])
+      n_id <- n_id + sum(ok)
       raw <- df[[v]][ok]
       s <- sd(raw)
-      if (is.na(s) || s < .Machine$double.eps) {
-        # Constant column — skip, contributes no variance information
-        next
-      }
+      if (is.na(s) || s < .Machine$double.eps) next
       vals <- c(vals, (raw - mean(raw)) / s)
       grps <- c(grps, paste(v, as.character(df[[id_col]][ok]), sep = "\r"))
     }
     grps <- factor(grps)
     k <- nlevels(grps)
     N <- length(vals)
-    if (k < 2L || N < 4L) return(0)
+    if (k == 0L)
+      return(na_icc(
+        if (n_const > 0L) .icc_reason_constant
+        else if (n_all > 0L && n_id == 0L) "its values fall in no cell"
+        else if (n_id >= 2L) "its values differ only on rows that fall in no cell"
+        else if (n_all >= 4L) "only one of its values falls in a cell"
+        else "it has fewer than four values"))
+    if (k < 2L) return(na_icc("its values fall in one cell"))
+    if (N < 4L) return(na_icc("it has fewer than four values"))
 
     ni <- tabulate(grps)
     ni <- ni[ni > 0L]
-    # The documentation promises "at least 2 cells with 2+ observations; falls
-    # back to deff = 1 otherwise", and the k >= 2 / N >= 4 test above does not
-    # deliver it.  All-singleton groups give SSW = 0, MSW = 0 and therefore an
-    # ICC of exactly 1 -- a design effect of n from data carrying no
-    # within-cell information at all.  A single group with two members gives an
-    # ICC from one within-group degree of freedom, which is then applied to
-    # every cell.  Both are noise dressed as a measurement.
-    if (sum(ni >= 2L) < 2L || (N - k) < 2L) return(0)
+    # An ICC needs at least 2 cells with 2+ observations, and the k >= 2 /
+    # N >= 4 test above does not deliver it.  All-singleton groups give SSW =
+    # 0, MSW = 0 and therefore an ICC of exactly 1 -- a design effect of n from
+    # data carrying no within-cell information at all.  A single group with
+    # two members gives an ICC from one within-group degree of freedom, which
+    # is then applied to every cell.  Both are noise dressed as a measurement,
+    # so the ICC is NA: not estimated, which is not an estimate of 0.
+    if (sum(ni >= 2L) < 2L || (N - k) < 2L)
+      return(na_icc("fewer than two cells hold two or more of its values"))
     grand_mean <- mean(vals)
     group_means <- tapply(vals, grps, mean)
 
@@ -2267,9 +2344,12 @@ summarize_by_cell <- function(assigned_points_sf,
 
     # Unbalanced n0 (Donner 1986)
     n0 <- (N - sum(ni^2) / N) / (k - 1)
-    if (n0 < 1) return(0)
+    if (n0 < 1) return(na_icc("its cell sizes give an n0 below 1"))
 
     rho <- (MSB - MSW) / (MSB + (n0 - 1) * MSW)
+    # Not reached after the guards above; kept so that a 0/0 can never pass
+    # for an estimate.
+    if (!is.finite(rho)) return(na_icc("the variance decomposition is undefined"))
     # Clamp to [0, 1] — negative ICC implies no positive autocorrelation
     max(0, min(1, rho))
   }
@@ -2352,14 +2432,27 @@ summarize_by_cell <- function(assigned_points_sf,
   # One ICC per summarised column, the response's and each predictor's own.
   # Called here for deff = "kish", and from the variogram block below when a
   # "variogram" request cannot be met and falls back to Kish.
+  # An ICC that cannot be estimated is NA, and `icc_reason` (a character
+  # vector named by column) says why for each such column.
   resp_rho <- NULL
   pred_rho <- NULL
+  icc_reason <- character(0)
   .kish_iccs <- function() {
     resp <- NULL
     pred <- NULL
+    reason <- character(0)
+    # vapply() drops the `reason` attribute, so it is collected here.
+    one <- function(v) {
+      r <- .estimate_icc(df, id_col, v)
+      if (is.na(r)) reason[[v]] <<- attr(r, "reason")
+      as.numeric(r)
+    }
     if (length(resp_num) > 0L) {
-      resp <- .estimate_icc(df, id_col, resp_num)
-      if (resp > 0) {
+      resp <- one(resp_num)
+      if (is.na(resp)) {
+        .msg(sprintf("summarize_by_cell(): the response ICC cannot be estimated (%s).",
+                     reason[[resp_num]]))
+      } else if (resp > 0) {
         .msg(sprintf(
           "summarize_by_cell(): Kish deff using response ICC = %.4f", resp
         ))
@@ -2369,11 +2462,13 @@ summarize_by_cell <- function(assigned_points_sf,
     }
     if (length(pred_num) > 0L) {
       # Named by column; the SE closures look their own column up.
-      pred <- vapply(pred_num, function(v) .estimate_icc(df, id_col, v),
-                     numeric(1))
+      pred <- vapply(pred_num, one, numeric(1))
       names(pred) <- pred_num
       for (v in pred_num) {
-        if (pred[[v]] > 0) {
+        if (is.na(pred[[v]])) {
+          .msg(sprintf(paste0("summarize_by_cell(): the ICC of predictor '%s' ",
+                              "cannot be estimated (%s)."), v, reason[[v]]))
+        } else if (pred[[v]] > 0) {
           .msg(sprintf(
             "summarize_by_cell(): Kish deff using predictor ICC = %.4f for '%s'",
             pred[[v]], v
@@ -2388,12 +2483,27 @@ summarize_by_cell <- function(assigned_points_sf,
       .msg("summarize_by_cell(): no numeric columns for ICC estimation; deff = 1.")
     # Zero for the type that has no columns
     list(resp = if (is.null(resp)) 0 else resp,
-         pred = if (is.null(pred)) 0 else pred)
+         pred = if (is.null(pred)) 0 else pred,
+         reason = reason)
+  }
+  # The columns whose ICC is NA because they do not vary: their standard
+  # errors are 0 whatever the correlation, so they keep a design effect of 1.
+  icc_const_cols <- function() names(icc_reason)[icc_reason == .icc_reason_constant]
+  # The columns whose ICC cannot be estimated and whose numbers that leaves
+  # unknown: not a column that does not vary, and only one with a cell of
+  # two or more values (a cell of one value has no standard error to
+  # withhold).  The group of rows with no cell id is a summary row too.
+  icc_withheld <- function() {
+    v <- setdiff(names(icc_reason), icc_const_cols())
+    v[vapply(v, function(col)
+      any(tapply(!is.na(df[[col]]), factor(df[[id_col]], exclude = NULL), sum) >= 2L),
+      logical(1))]
   }
   if (use_kish) {
     icc_est  <- .kish_iccs()
     resp_rho <- icc_est$resp
     pred_rho <- icc_est$pred
+    icc_reason <- icc_est$reason
   }
   # Set when a "variogram" request fell back to Kish: why, for the record.
   vgm_fallback <- NULL
@@ -2426,6 +2536,7 @@ summarize_by_cell <- function(assigned_points_sf,
       .dfr  <- vgm$df_ratio  # per-cell df ratio over ALL rows, same path
       .vgm  <- vgm         # list(coords, cor_fn, max_n): per-column exact path
       .kish <- use_kish
+      .const <- icc_const_cols()
       .id   <- id_col
       # The ..se_, ..neff_, ..df_ and ..ci_ closures each call this for the
       # same column in the same cell (summarise() runs each of them over
@@ -2456,7 +2567,13 @@ summarize_by_cell <- function(assigned_points_sf,
           # column takes its own.  across() runs one closure list over all
           # the predictor columns, so the column is asked for here.
           rho_i  <- if (!is.null(names(.rho))) .rho[[dplyr::cur_column()]] else .rho
-          deff_i <- max(1, 1 + (n_valid - 1) * rho_i)
+          # An ICC that cannot be estimated leaves the design effect unknown,
+          # so the SE, effective n and interval are NA (the df of s^2 does
+          # not depend on rho and stays n - 1).  A column that does not vary
+          # has an SE of 0 whatever the correlation, so it keeps 1.
+          deff_i <- if (!is.na(rho_i)) max(1, 1 + (n_valid - 1) * rho_i)
+                    else if (dplyr::cur_column() %in% .const) 1
+                    else NA_real_
         } else if (!is.null(.rbar)) {
           # Variogram path.  The mean pairwise correlation is over the
           # locations of the observations that ENTER this column's mean, so
@@ -2578,8 +2695,10 @@ summarize_by_cell <- function(assigned_points_sf,
     no_structure <- function(s)
       .sac_no_structure(s) && .vgm_is_pure_nugget(attr(s, "variogram_model"))
     structure_note <- NULL  # the refusal that gave the pure nugget, for the log
+    structure_from <- NULL  # whose verdict it is, for the predictors' warning
     if (no_structure(sac)) {
       structure_note <- as.character(attr(sac, "rejected_reason"))[1L]
+      structure_from <- "of the supplied `sac`"
     } else if (!is.null(sac) && is.na(suppressWarnings(as.numeric(sac))[1L]) &&
         !is.null(attr(sac, "rejected_reason"))) {
       set_aside <- sprintf("the supplied `sac` reports no usable range (%s)",
@@ -2634,6 +2753,7 @@ summarize_by_cell <- function(assigned_points_sf,
         } else if (no_structure(est)) {
           # No structure in the response: the pure nugget is the model.
           structure_note <- as.character(attr(est, "rejected_reason"))[1L]
+          structure_from <- "estimated from `response_var`"
           vgm_model <- attr(est, "variogram_model")
           vgm_crs   <- attr(est, "crs")
         } else if (is.na(suppressWarnings(as.numeric(est))[1L]) &&
@@ -2661,6 +2781,32 @@ summarize_by_cell <- function(assigned_points_sf,
                 if (is.null(structure_note)) ""
                 else sprintf(" (the variogram's verdict: %s)", structure_note))
       cor_fn <- function(h) 0 * h
+      # That verdict is about the variable the variogram was fitted to, and
+      # the design effect of 1 it gives is the answer for that variable.  A
+      # predictor summarised beside it gets the same 1 whatever structure it
+      # has of its own: beside a white-noise response, a predictor with a
+      # range of its own kept the uncorrected standard errors without a word.
+      # The predictors are named; nothing is changed.  A pure nugget the
+      # caller built, with no verdict behind it, is applied as given.
+      under <- setdiff(pred_num, resp_num)
+      if (!is.null(structure_note) && length(under)) {
+        several <- length(under) > 1L
+        named <- sprintf("the predictor column%s %s", if (several) "s" else "",
+                         .cols_text(under))
+        .warn_classed("spatialkit_deff_no_structure", paste0(
+          "summarize_by_cell(): the variogram %s finds no spatial structure (%s), ",
+          "so %s. That verdict is about the variable the variogram was fitted ",
+          "to: the standard errors%s of %s are the uncorrected ones, whatever ",
+          "spatial structure %s of %s own. deff = \"kish\" estimates an ICC for ",
+          "each column on its own."),
+          structure_from, structure_note,
+          if (length(resp_num)) sprintf("every column gets a design effect of 1, %s included", named)
+          else sprintf("%s get%s a design effect of 1", named, if (several) "" else "s"),
+          if (is.null(conf_level)) "" else ", effective n and intervals",
+          if (several) "those columns" else "that column",
+          if (several) "they have" else "it has", if (several) "their" else "its",
+          data = list(columns = under, reason = structure_note))
+      }
     }
     if (is.null(cor_fn)) {
       # Name the family when that is the reason: a user-built Matern or power
@@ -2686,8 +2832,8 @@ summarize_by_cell <- function(assigned_points_sf,
       # no correction at all for a caller who asked for one.  A range goes
       # unidentified often enough that this is an ordinary case, not a
       # corner.  Kish needs no variogram, so it is the fallback; the
-      # uncorrected SE is returned only when Kish's own ICC is 0, and either
-      # way the rows say which.
+      # uncorrected SE is returned only when Kish's own ICC is 0 (NA when it
+      # cannot be estimated), and either way the rows say which.
       use_vgm  <- FALSE
       use_kish <- TRUE
       deff     <- 1
@@ -2695,17 +2841,42 @@ summarize_by_cell <- function(assigned_points_sf,
       icc_est  <- .kish_iccs()
       resp_rho <- icc_est$resp
       pred_rho <- icc_est$pred
+      icc_reason <- icc_est$reason
       icc_txt <- paste(c(
         if (length(resp_num)) sprintf("response '%s' %.3f", resp_num[[1L]], resp_rho),
         if (length(pred_num)) sprintf("predictor '%s' %.3f", pred_num, pred_rho)),
         collapse = ", ")
-      if (max(resp_rho, pred_rho, 0) > 0)
+      # The columns whose standard errors are NA for want of an ICC.  The
+      # texts of the two cases with none are as they were.
+      withheld <- icc_withheld()
+      withheld_txt <- if (length(withheld))
+        sprintf("NA for %s, whose ICC cannot be estimated", .cols_text(withheld))
+      else ""
+      if (max(resp_rho, pred_rho, 0, na.rm = TRUE) > 0)
         .warn_deff_fallback(paste0(
           "summarize_by_cell(): %s Falling back to deff = \"kish\" (ICC: %s): ",
           "the standard errors carry Kish's correction in place of the ",
-          "variogram's, and `deff_method` reads \"kish (variogram fallback)\" ",
+          "variogram's%s, and `deff_method` reads \"kish (variogram fallback)\" ",
           "on every row."),
-          why, icc_txt, data = list(requested = "variogram", used = "kish"))
+          why, icc_txt, if (nzchar(withheld_txt)) sprintf(" (%s)", withheld_txt) else "",
+          data = list(requested = "variogram", used = "kish"))
+      else if (anyNA(c(resp_rho, pred_rho))) {
+        # "The uncorrected ones" is said only of columns that have them: one
+        # whose ICC is 0, or one that does not vary.  When every other column
+        # is withheld, the text names the NA alone.
+        kept <- setdiff(unique(c(resp_num, pred_num)),
+                        setdiff(names(icc_reason), icc_const_cols()))
+        .warn_deff_fallback(paste0(
+          "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
+          "is 0 or cannot be estimated (%s), so no column carries a correction: ",
+          "the standard errors are %s; `deff_method` reads ",
+          "\"none (variogram fallback)\" on every row."),
+          why, icc_txt,
+          if (!nzchar(withheld_txt)) "the uncorrected ones"
+          else if (length(kept)) paste0("the uncorrected ones, and ", withheld_txt)
+          else withheld_txt,
+          data = list(requested = "variogram", used = "none"))
+      }
       else
         .warn_deff_fallback(paste0(
           "summarize_by_cell(): %s Falling back to deff = \"kish\", whose ICC ",
@@ -2786,11 +2957,34 @@ summarize_by_cell <- function(assigned_points_sf,
     }
   }
 
-  # --- single grouped summarise for all columns ---
-  grouped <- df |> dplyr::group_by(.data[[id_col]])
-
   has_resp <- length(resp_num) > 0L
   has_pred <- length(pred_num) > 0L
+
+  # --- an ICC that cannot be estimated withholds that column's numbers ---
+  # Raised only where a number is withheld: a column that does not vary keeps
+  # its standard errors of 0, and a column with no cell of two or more values
+  # had no standard error to give.  Both still carry their reason on
+  # attr(, "icc").
+  if (use_kish && length(icc_reason)) {
+    withheld <- icc_withheld()
+    if (length(withheld)) {
+      several <- length(withheld) > 1L
+      primary <- if (has_resp) resp_num[[1L]] else if (has_pred) pred_num[[1L]]
+      .warn_classed("spatialkit_icc_unavailable", paste0(
+        "summarize_by_cell(): Kish's ICC cannot be estimated for %s, so the design ",
+        "effect of %s is unknown: %s standard errors%s are NA in every cell with ",
+        "two or more values%s. deff = 1 gives the uncorrected standard errors, ",
+        "those of each cell's own mean."),
+        paste(sprintf("'%s' (%s)", withheld, icc_reason[withheld]), collapse = ", "),
+        if (several) "those columns" else "that column", if (several) "their" else "its",
+        if (is.null(conf_level)) "" else ", effective n and intervals",
+        if (!is.null(primary) && primary %in% withheld) ", and so is cell_weight" else "",
+        data = list(columns = withheld, reason = icc_reason[withheld]))
+    }
+  }
+
+  # --- single grouped summarise for all columns ---
+  grouped <- df |> dplyr::group_by(.data[[id_col]])
 
   if (has_resp && has_pred) {
     out <- grouped |>
@@ -2862,17 +3056,30 @@ summarize_by_cell <- function(assigned_points_sf,
     # weight is built from that predictor's own ICC.  From an ICC pooled over
     # every predictor listed, an unclustered primary predictor's weight fell
     # from 12 to 2.12 when a clustered one was listed after it.
-    primary_rho <- if (has_resp) max(resp_rho, 0)
-                   else if (has_pred) max(pred_rho[[1L]], 0)
+    primary_rho <- if (has_resp) resp_rho
+                   else if (has_pred) pred_rho[[1L]]
                    else 0
-    deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
-    if (primary_rho > 0)
-      out$cell_weight <- n_valid_primary / deff_per_cell
+    if (is.na(primary_rho) && !(primary_col %in% icc_const_cols())) {
+      # The primary variable's ICC cannot be estimated, so its effective n is
+      # unknown in every cell of two or more values, as its ..neff_ is.  A
+      # cell of one value has a design effect of 1 whatever the ICC, and a
+      # cell of none a weight of 0.
+      deff_per_cell <- ifelse(n_valid_primary <= 1, 1, NA_real_)
+      out$cell_weight <- ifelse(n_valid_primary <= 1, n_valid_primary, NA_real_)
+    } else {
+      # A column that does not vary has an NA ICC and a design effect of 1.
+      primary_rho <- if (is.na(primary_rho)) 0 else max(primary_rho, 0)
+      deff_per_cell <- pmax(1, 1 + (n_valid_primary - 1) * primary_rho)
+      if (primary_rho > 0)
+        out$cell_weight <- n_valid_primary / deff_per_cell
+    }
     # Recorded whenever ANY ICC corrected its column.  Keyed on the
     # primary variable alone, a clustered predictor beside an unclustered
     # response had its SEs inflated 11x on rows marked deff_applied = FALSE,
-    # with no attribute.  `deff` stays the primary variable's (all 1 then).
-    if (max(resp_rho, pred_rho, 0) > 0) {
+    # with no attribute.  `deff` stays the primary variable's (all 1 then,
+    # or NA in its cells of two or more values when its ICC cannot be
+    # estimated).
+    if (max(resp_rho, pred_rho, 0, na.rm = TRUE) > 0) {
       attr(out, "deff_applied") <- c(list(
         method   = "kish",
         icc_resp = if (has_resp) resp_rho else NA_real_,
@@ -2935,11 +3142,15 @@ summarize_by_cell <- function(assigned_points_sf,
   # enough to apply: `deff_applied` is absent exactly when nothing was
   # applied, which is when a user most wants to see what the ICC came out
   # as.  NA for a variable type that had no numeric column.
+  # An ICC that cannot be estimated is NA, and `reason`, named by column,
+  # says why; the field is there only then, so every other result keeps the
+  # two fields it had.
   if (use_kish)
-    attr(out, "icc") <- list(
+    attr(out, "icc") <- c(list(
       resp = if (has_resp) as.numeric(resp_rho) else NA_real_,
       # Named by predictor column: each has its own.
-      pred = if (has_pred) pred_rho else NA_real_)
+      pred = if (has_pred) pred_rho else NA_real_),
+      if (length(icc_reason)) list(reason = icc_reason))
   # The same fact per row.  The attribute does not survive rbind(),
   # dplyr::bind_rows() or most dplyr verbs, so results combined across calls
   # (a simulation, a benchmark over many layers) could not tell a row whose
@@ -2971,7 +3182,8 @@ summarize_by_cell <- function(assigned_points_sf,
     # The design effect the t interval carries is the one recorded above as
     # applied, not the one asked for: a refused number, and Kish ICCs of 0 for
     # every column, leave the default's numbers, and the table of intervals
-    # then describes them as the default's.
+    # then describes them as the default's.  A column whose ICC cannot be
+    # estimated is named in either case: its intervals are NA.
     deff_carried <- attr(out, "deff_applied")
     pooled <- .pooled_columns(
       assigned_points_sf, df, id_col, out[[id_col]], resp_num, pred_num,
@@ -2981,8 +3193,10 @@ summarize_by_cell <- function(assigned_points_sf,
         # Under Kish each column has its own ICC, and one of 0 leaves that
         # column's standard error as it is.
         kish_zero = if (use_kish)
-          unique(c(if (has_resp && resp_rho <= 0) resp_num,
-                   if (has_pred) pred_num[pred_rho <= 0]))),
+          unique(c(if (has_resp && isTRUE(resp_rho <= 0)) resp_num,
+                   if (has_pred) pred_num[!is.na(pred_rho) & pred_rho <= 0])),
+        # and one that cannot be estimated leaves it NA.
+        kish_na = if (use_kish) icc_withheld() else character(0)),
       crs = count_crs)
     for (nm in names(pooled$columns)) out[[nm]] <- pooled$columns[[nm]]
     attr(out, "pooled")    <- pooled$record
@@ -3241,19 +3455,27 @@ summarize_by_cell <- function(assigned_points_sf,
 #'   \code{NULL} when no correction was applied.
 #' @param kish_zero Under Kish's correction, the columns whose ICC is 0 and
 #'   whose standard errors are therefore the uncorrected ones.
+#' @param kish_na Under Kish's correction, the columns whose ICC cannot be
+#'   estimated and whose standard errors are therefore \code{NA}.
 #' @return One string for \code{.intervals_table()}: \code{1},
 #'   \code{"kish"} or \code{"variogram"} with their quotes, or the number.
-#'   It reads \code{1} only when nothing was applied: the table takes the
-#'   words of its row from that.
+#'   It reads \code{1}, alone or before a semicolon, only when nothing was
+#'   applied: the table takes the words of its row from that.  The columns
+#'   in \code{kish_na} are named after a semicolon, after \code{1} as after
+#'   \code{"kish"}: a request that corrected no column can still leave one
+#'   \code{NA}.
 #' @keywords internal
 #' @noRd
-.deff_label <- function(applied, kish_zero = character(0)) {
-  if (is.null(applied)) return("1")
+.deff_label <- function(applied, kish_zero = character(0), kish_na = character(0)) {
+  na_txt <- if (length(kish_na))
+    sprintf("; NA for %s, whose ICC cannot be estimated", .cols_text(kish_na))
+  if (is.null(applied)) return(paste0("1", na_txt))
   switch(applied$method,
     kish = paste0(
       "\"kish\"",
       if (length(kish_zero))
-        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero))),
+        sprintf("; 1 for %s, whose ICC is 0", .cols_text(kish_zero)),
+      na_txt),
     variogram = "\"variogram\"",
     {
       # A number applied is above 1, and is written so that it does not read 1.

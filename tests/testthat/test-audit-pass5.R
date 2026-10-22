@@ -553,9 +553,10 @@ test_that("a rejected sac cannot size a design effect", {
 
 
 test_that("the ICC guard matches its documentation", {
-  # Docs: "at least 2 cells with 2+ observations; falls back to deff = 1
-  # otherwise."  All-singleton cells give MSW = 0 and an ICC of exactly 1 -- a
-  # design effect of n from data with no within-cell information at all.
+  # Docs: an ICC needs at least 2 cells with 2+ observations; otherwise it
+  # cannot be estimated and is NA, with the reason.  All-singleton cells give
+  # MSW = 0 and an ICC of exactly 1 -- a design effect of n from data with no
+  # within-cell information at all.
   set.seed(13)
   singles <- sf::st_as_sf(
     data.frame(x = seq(5, 795, by = 100), y = 50,
@@ -564,6 +565,10 @@ test_that("the ICC guard matches its documentation", {
   out <- suppressWarnings(summarize_by_cell(singles, response_var = "resp",
                                             deff = "kish"))
   expect_null(attr(out, "deff_applied"))
+  icc <- attr(out, "icc")
+  expect_true(is.na(icc$resp))
+  expect_identical(icc$reason,
+                   c(resp = "fewer than two cells hold two or more of its values"))
 })
 
 

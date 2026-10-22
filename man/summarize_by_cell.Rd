@@ -86,7 +86,8 @@ reason and the ICCs: a model of any other family (named in the
 warning), or no usable model (none supplied and none could be
 estimated, or a rejected fit that could not be replaced by an
 estimate). The standard errors, intervals and \code{cell_weight} are then
-Kish's, and the uncorrected ones only where Kish's own ICC is 0; the
+Kish's, the uncorrected ones where Kish's own ICC is 0 and \code{NA}
+where it cannot be estimated; the
 \code{deff_method} column says which on every row (see "Value"). The
 variogram route needs an identified range, which a layer does not
 always have, so read \code{deff_method} for the fallback. A model with
@@ -97,7 +98,10 @@ fallback. That includes the model \code{\link[=estimate_sac_range]{estimate_sac_
 when it finds no spatial structure (an \code{NA} range whose
 \code{rejected_reason} says so): the answer is then a design effect of
 1, \code{deff_method} reads \code{"variogram"}, and no fallback warning is
-raised. Points with empty
+raised. Predictor columns summarised under that verdict get the same
+design effect of 1, and a warning of class
+\code{"spatialkit_deff_no_structure"} names them (fields \code{columns} and
+\code{reason}). Points with empty
 geometry count towards their cells' values but not towards the
 correlation, with a warning.}
 \item{\code{"kish"}}{Estimate an intra-class correlation (ICC) for each
@@ -115,12 +119,25 @@ for that column's SEs and for no other: the response's ICC is never
 applied to a predictor, nor one predictor's to another. It is the
 response's ICC that sets \code{cell_weight} whenever a response was
 given, and the first predictor's own ICC otherwise.
-Requires at least 2 cells with 2+ observations and at least 2 residual
-degrees of freedom (\code{N - k >= 2}); the ICC is taken as 0 (no
-correction for that column) otherwise, and likewise when the
-estimate itself comes out at or below 0. The \code{"deff_applied"}
-attribute is attached when any ICC is positive, so when all are
-0 there is none.}
+An ICC needs at least 2 cells with 2+ observations of the column and
+at least 2 residual degrees of freedom (\code{N - k >= 2}). Where a column
+has fewer (all its values in one cell, say), its ICC cannot be
+estimated: it is \code{NA}, \code{attr(, "icc")$reason} says why, and the
+column's standard errors, \verb{..neff_*} and \verb{..ci_*} are \code{NA} in every
+cell of two or more observations (\verb{..df_*} stays \code{n - 1}), as is
+\code{cell_weight} when that column sets it, with a warning of class
+\code{"spatialkit_icc_unavailable"} (fields \code{columns} and \code{reason}). Rows
+with no cell id (kept by \code{keep_unassigned = TRUE} in
+\code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}) give a summary row of their own but
+no cell to the ICC, so a column whose values all fall in them, or
+differ only there, has an ICC that cannot be estimated. An
+estimate at or below 0 is another case: the ICC is 0 and the
+column's standard errors are the uncorrected ones. A column that
+does not vary (all its values equal, those of rows with no cell id
+included) has an ICC of \code{NA} and standard errors of 0, with no
+warning: its mean has no error whatever the correlation. The
+\code{"deff_applied"} attribute is attached when any ICC is positive, so
+when all are 0 or \code{NA} there is none.}
 \item{A positive number}{Applied as a uniform design effect to every
 cell, as \code{sd * sqrt(deff / n)}, exactly \code{sqrt(deff)} times the
 naive SE. Use when you have an external estimate of the design
@@ -238,14 +255,16 @@ shadow the count.
 \code{deff_applied} is \code{TRUE} on every row when a design-effect correction
 was applied (exactly when the \code{"deff_applied"} attribute below is
 attached; under \code{"kish"}, when any standard-error column was corrected)
-and \code{FALSE} when the standard errors are the uncorrected ones: a
-refused \code{deff}, or \code{"kish"} ICCs of 0 for every column (and \code{NA} on a
-\code{cells_sf} row no point fell in). \code{deff_method} names the correction
+and \code{FALSE} when none was: a refused \code{deff}, or \code{"kish"} ICCs of 0 or
+\code{NA} for every column (the standard errors are then the uncorrected
+ones, or \code{NA} where an ICC cannot be estimated). It is \code{NA} on a
+\code{cells_sf} row no point fell in. \code{deff_method} names the correction
 the standard errors carry, since their column names do not change with
 it: \code{"variogram"}, \code{"kish"} or \code{"fixed"} when the one requested was
 applied, \code{"none"} when none was, and \code{"kish (variogram fallback)"} or
 \code{"none (variogram fallback)"} when a \code{"variogram"} request could not be
-met and Kish stood in for it (the second when Kish's ICCs were 0 too).
+met and Kish stood in for it (the second when Kish's ICCs were 0 or
+\code{NA} too).
 So \code{deff_applied} is \code{TRUE} on a Kish fallback row: test
 \code{deff_method == "variogram"} to keep only rows the variogram corrected.
 Unlike the attribute, both columns survive \code{rbind()} and
@@ -256,13 +275,20 @@ warning of class \code{"spatialkit_deff_fallback"} (a Kish ICC of 0 under a
 message. It is raised when the correction requested was not the one
 applied: a refused number (the standard errors are then the uncorrected
 ones) or a \code{"variogram"} request that fell back to Kish; the condition
-of the second carries \code{requested} and \code{used}.
+of the second carries \code{requested} and \code{used}. Two more classes say what
+a design effect could not do: \code{"spatialkit_icc_unavailable"} names the
+columns whose Kish ICC cannot be estimated, and
+\code{"spatialkit_deff_no_structure"} the predictor columns given a design
+effect of 1 by a variogram that found no spatial structure.
 
 When a correction was actually applied, an attribute \code{"deff_applied"} is
 attached recording it: \code{method} plus \code{icc_resp}/\code{icc_pred} and \code{deff}
 for \code{"kish"} (\code{icc_pred} is a vector named by predictor column, one ICC
 each; \code{deff} is the primary variable's per-cell design effect,
-all 1 when only a predictor's ICC was positive; \code{requested} and
+all 1 when only a predictor's ICC was positive, except that it is \code{NA}
+in each cell of two or more of the primary variable's values when that
+variable's ICC cannot be estimated, and its entry in \code{icc_resp} or
+\code{icc_pred} is then \code{NA} too; \code{requested} and
 \code{fallback_reason} are added when a \code{"variogram"} request fell back to
 it),
 \code{deff}/\code{deff_rows}/\code{rbar}/\code{crs}/\code{max_n} for \code{"variogram"} (\code{deff} is
@@ -274,11 +300,13 @@ When \code{cells_sf} is supplied, \emph{every} per-cell vector in that attribute
 order, so \code{deff[i]} and \code{rbar[i]} still describe row \code{i}; cells with no
 observations carry \code{NA}. No attribute is attached when no correction was
 applied: \code{deff = 1}, or a \code{deff = "kish"} request (or Kish fallback)
-whose ICCs are all 0. A \code{deff = "kish"} request, and a \code{"variogram"}
+whose ICCs are all 0 or \code{NA}. A \code{deff = "kish"} request, and a \code{"variogram"}
 request that fell back to it, always
 records the ICCs it estimated on an attribute \code{"icc"} (\code{resp}, and
 \code{pred}, a vector named by predictor column; \code{NA} for a variable type
-with no numeric column), whether or not
+with no numeric column and for a column whose ICC cannot be estimated;
+\code{reason}, a character vector named by column, is then added and says
+why), whether or not
 they were positive enough to apply, so a result with no \code{"deff_applied"}
 still says what the ICCs came out as.
 
@@ -457,7 +485,9 @@ one-way random-effects decomposition across all cells. Each column's ICC
 is used for that column's SE adjustment, and each cell's effective sample
 size is reduced to \code{n_i / (1 + (n_i - 1) * rho)}. This is a first-order
 correction that does not require a full spatial covariance model but does
-require enough cells and observations for a stable ICC estimate.
+require enough cells and observations for a stable ICC estimate. A column
+whose ICC cannot be estimated at all gets \code{NA} standard errors (see
+\code{deff}).
 
 A design effect estimated from the data (\code{"kish"} or \code{"variogram"}) comes
 with a second, small-sample correction. The within-cell correlation that
@@ -532,6 +562,12 @@ accepts \strong{one} correlation function and applies it to every numeric column
 because a variogram is a property of the field being modelled rather than of
 a variable type; a predictor whose spatial structure differs markedly from
 the response's will have its SE corrected by the response's correlation.
+When that variogram finds no spatial structure (the pure nugget
+\code{\link[=estimate_sac_range]{estimate_sac_range()}} returns with that verdict), every column gets a
+design effect of 1, the predictors included, and a warning of class
+\code{"spatialkit_deff_no_structure"} names the predictor columns: the verdict
+is about the variable the variogram was fitted to, not about them.
+\code{deff = "kish"} gives each predictor its own ICC.
 The internally estimated variogram is fitted to the \strong{response itself},
 never to OLS residuals, whatever \code{predictor_vars} holds: the \verb{..se_resp_*}
 columns estimate the grand mean of the response, so the correlation to
