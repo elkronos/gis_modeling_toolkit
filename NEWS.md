@@ -1693,6 +1693,30 @@ old behaviour where there is a way.
   Lambert azimuthal one in others.  The sample is now taken along the points
   sorted by coordinate.
 
+* **The projection chosen for a few detailed outlines, and the area check
+  on more than 200 polygons, depended on the order of the features.**  A
+  layer of fewer than 40 polygons or lines is scored on its outlines'
+  vertices too, and more than 160 vertices were first thinned at even
+  spacing along the vertices as the layer lists them: five outlines of 200
+  vertices over the conterminous United States got an Albers CRS in three
+  of eight feature orders and a Lambert azimuthal one in the other five.
+  The area check of `summarize_by_cell(area = TRUE)`, and of
+  `ensure_projected(purpose = "area")` on projected input, measures at most
+  200 of a layer's polygons, and they were taken at even spacing along the
+  rows: 300 cells in a UTM zone, one of them 700 km east of its central
+  meridian, were refused in five of eight row orders and given a density in
+  the other three, and `attr(, "area_error")` changed with the order.  The
+  vertices are now thinned along the outlines' distinct vertices sorted by
+  coordinate, as the points of a point layer are sampled: a vertex listed
+  twice (a ring's closing vertex, a border two features share) counts once,
+  so a ring listed from another vertex is scored the same, and a thinned
+  outline is not densified between the vertices kept.  The polygons are
+  taken along the polygons sorted by their bounding boxes, and polygons
+  that share a box, as the Delaunay triangles of gridded points do, by the
+  means of their vertices; the polygons that reach furthest along x and y,
+  either way, are always measured.  For a given layer the CRS, the area
+  error and the refusal can differ from before.
+
 * **`resolution_profile()` reported a layer too small for a ladder as
   supported.**  With fewer than two cells at `min_cell_n` it raised the
   ceiling to 2 with `supported = TRUE`.  It still scores two cells, with

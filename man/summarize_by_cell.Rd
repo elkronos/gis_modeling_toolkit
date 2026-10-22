@@ -186,7 +186,11 @@ in the cell over that area, a point density; a rate of anything else
 is that thing's \code{agg_funs} sum over \code{cell_area}).  The request is
 \strong{refused} with an error, not answered with a number, when the cells'
 CRS distorts areas across them by more than 1 percent, measured as the
-spread of planar-to-geodesic area ratios over the cells: a density is a
+spread of planar-to-geodesic area ratios over the cells (over 200 of
+them when there are more, taken at even spacing along the cells sorted
+by their bounding boxes in that CRS and then by the means of their
+vertices, together with the cells that reach furthest along x and y
+either way, so the order of the rows does not matter): a density is a
 comparison between cells and is meaningless where the map scale differs
 from one cell to the next.  Inside a UTM zone the spread is under 0.3
 percent and the request goes through; the conterminous United States

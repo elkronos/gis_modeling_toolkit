@@ -464,7 +464,9 @@
 #'
 #' The sample is taken at even spacing along the points sorted by coordinate
 #' (no RNG, and no dependence on the order of the rows), so the result is
-#' reproducible; \code{max_n} keeps the pairwise work bounded.
+#' reproducible; \code{max_n} keeps the pairwise work bounded.  A detailed
+#' outline is thinned the same way first, along its distinct vertices sorted
+#' by coordinate.
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.  Non-POINT geometry is
 #'   reduced to representative points first, so the two distance vectors are
@@ -526,13 +528,31 @@
         tryCatch(sf::st_coordinates(g_full), error = function(e) NULL)
       # Only about `max_n` of these points are measured (the evenly spaced
       # subsample below), so thin a detailed outline to a few times that
-      # first, by evenly spaced index.  unique() on the whole vertex matrix,
-      # twice, and a ring key pasted for every vertex made the score cost
-      # 2.8 s per candidate on a 300,000-vertex outline (0.04 s before the
-      # outline was scored), and ensure_projected() 14 s.  Such an outline has
-      # far more than `max_n` vertices, so it is not densified either way.
-      if (!is.null(xy) && nrow(xy) > 4L * max_n)
-        xy <- xy[unique(round(seq(1, nrow(xy), length.out = 4L * max_n))), , drop = FALSE]
+      # first, at even spacing along its distinct vertices sorted by
+      # coordinate.  The rows of st_coordinates() run feature by feature in
+      # the order of the layer, and thinned along them the vertices kept
+      # changed with that order: five detailed outlines over the conterminous
+      # United States got an Albers CRS in three of eight feature orders and
+      # a Lambert azimuthal one in the other five.  A vertex listed twice (a
+      # ring's closing vertex, a border two features share) counts once, so
+      # a ring listed from another vertex is thinned the same.  unique() on
+      # the whole vertex matrix, twice, and a ring key pasted for every
+      # vertex made the score cost 2.8 s per candidate on a 300,000-vertex
+      # outline (0.04 s before the outline was scored), and
+      # ensure_projected() 14 s; one sort costs a few hundredths of a second
+      # there.  A thinned outline is not densified: the rows kept are not
+      # neighbours along a ring, so there is no edge between them to fill.
+      # `%in% TRUE` drops the comparisons that are NA, at non-finite
+      # vertices, which the `ok` filter below would drop anyway.
+      thinned <- !is.null(xy) && nrow(xy) > 4L * max_n
+      if (thinned) {
+        o  <- order(xy[, 1L], xy[, 2L])
+        s  <- xy[o, 1:2, drop = FALSE]
+        o  <- o[c(TRUE, s[-1L, 1L] != s[-nrow(s), 1L] |
+                        s[-1L, 2L] != s[-nrow(s), 2L]) %in% TRUE]
+        xy <- xy[sort(o[unique(round(seq(1, length(o), length.out = 4L * max_n)))]), ,
+                 drop = FALSE]
+      }
       if (!is.null(xy)) {
         ring <- if (ncol(xy) > 2L)
           do.call(paste, as.data.frame(xy[, -(1:2), drop = FALSE])) else rep("1", nrow(xy))
@@ -540,7 +560,8 @@
         ok <- is.finite(xy[, 1L]) & is.finite(xy[, 2L])
         xy <- xy[ok, , drop = FALSE]; ring <- ring[ok]
         if (nrow(xy) > 0L) {
-          per_edge <- max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
+          per_edge <- if (thinned) 0L else
+            max(0L, ceiling(max_n / max(1L, nrow(unique(xy)))) - 1L)
           if (per_edge > 0L && nrow(xy) > 1L) {
             same <- ring[-1L] == ring[-length(ring)]
             a <- xy[-nrow(xy), , drop = FALSE][same, , drop = FALSE]
@@ -595,14 +616,79 @@
 }
 
 
+#' Sort keys of polygons, read off their coordinates
+#'
+#' One row per polygon of \code{g}: the bounding box (\code{xmin},
+#' \code{ymin}, \code{xmax}, \code{ymax}), then the means of the vertices'
+#' x, y, x^2, y^2 and x * y.  The means are taken over each ring's vertices
+#' without its closing vertex, so they do not depend on where a ring starts
+#' or which way it runs, and they tell apart polygons that share a bounding
+#' box: the two triangles of a split square, or a square and the diamond
+#' inscribed in it.  Two polygons agree on all nine when they are copies of
+#' one polygon, which measure the same, and otherwise only in constructed
+#' cases, such as a polygon whose vertices average to the centre of its box
+#' and the same polygon turned half a circle about that centre; such a pair
+#' keeps its row order.  The coordinates are read off the geometry lists in
+#' one pass per geometry type, about 2 microseconds a polygon.
+#'
+#' @param g An sfc of POLYGON and MULTIPOLYGON geometries, none empty.
+#' @return A numeric matrix, \code{length(g)} rows and nine columns.
+#' @keywords internal
+#' @noRd
+.polygon_sort_keys <- function(g) {
+  nm    <- c("xmin", "ymin", "xmax", "ymax", "mx", "my", "mxx", "myy", "mxy")
+  out   <- matrix(NA_real_, length(g), length(nm), dimnames = list(NULL, nm))
+  types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
+  for (ty in unique(types)) {
+    w <- which(types == ty)
+    # The rings as one list of coordinate matrices, and the feature each
+    # belongs to.  Read off the lists directly: sf::st_coordinates() alone
+    # costs about 7 microseconds a polygon.
+    gw    <- unclass(g)[w]
+    polys <- if (ty == "MULTIPOLYGON") unlist(gw, recursive = FALSE) else gw
+    feat  <- if (ty == "MULTIPOLYGON") rep(seq_along(w), lengths(gw)) else seq_along(w)
+    rings <- unlist(polys, recursive = FALSE)
+    f_r   <- rep(feat, lengths(polys))
+    d     <- vapply(rings, dim, integer(2))
+    from  <- cumsum(c(1L, d[1L, ] * d[2L, ]))[seq_len(ncol(d))]
+    # A matrix unlists column by column: a ring's x, then its y.  The last
+    # row of each ring is its closing vertex, a repeat of its first.
+    nk <- pmax(d[1L, ] - 1L, 0L)
+    v  <- unlist(rings, use.names = FALSE)
+    x  <- v[sequence(nk, from = from)]
+    y  <- v[sequence(nk, from = from + d[1L, ])]
+    f  <- rep(f_r, nk)
+    s  <- rowsum(cbind(x, y, x * x, y * y, x * y), f)
+    k  <- as.integer(rownames(s))
+    out[w[k], 5:9] <- s / tabulate(f, nbins = length(w))[k]
+    # The box: each feature's first and last vertex in the order of x, then
+    # of y.
+    for (j in 1:2) {
+      z  <- if (j == 1L) x else y
+      o  <- order(f, z)
+      fo <- f[o]
+      lo <- !duplicated(fo); hi <- !duplicated(fo, fromLast = TRUE)
+      out[w[fo[lo]], j]      <- z[o][lo]
+      out[w[fo[hi]], j + 2L] <- z[o][hi]
+    }
+  }
+  out
+}
+
+
 #' Worst-case relative area distortion of a projection over a layer
 #'
 #' The counterpart of \code{.crs_distance_error()} for the property a density
 #' or a rate depends on.  Probe polygons are measured twice: their planar
 #' area in \code{crs} and their geodesic area on the globe.  The probes are the
-#' layer's own polygons when it has them (up to \code{max_n}, by evenly spaced
-#' index), otherwise an \code{n x n} grid over its bounding box.  An equal-area
-#' projection makes the ratio of the two the same for every probe (up to the
+#' layer's own polygons when it has them, otherwise an \code{n x n} grid over
+#' its bounding box.  Above \code{max_n} polygons, \code{max_n} are taken at
+#' even spacing along the polygons sorted by \code{.polygon_sort_keys()} (the
+#' bounding box in the layer's CRS, then the means of the vertices), and the
+#' polygons with the smallest \code{xmin} and \code{ymin} and the largest
+#' \code{xmax} and \code{ymax} are added, so the figure does not depend on the
+#' order of the rows.  An equal-area projection makes the ratio of the two the
+#' same for every probe (up to the
 #' sphere-versus-ellipsoid factor of the s2 areas, which drifts slowly with
 #' latitude and stays within a few tenths of a percent), so the figure
 #' returned is the spread of that ratio: the largest relative departure from
@@ -613,7 +699,8 @@
 #' @param x An sf/sfc object with a CRS.
 #' @param crs The projection to score; default the CRS of \code{x}.
 #' @param n Probe grid size when \code{x} has no polygons.
-#' @param max_n Largest number of the layer's own polygons to measure.
+#' @param max_n Number of the layer's own polygons to measure at even spacing
+#'   when it has more; up to three more are added at the extremes.
 #' @param grid Logical; probe with the \code{n x n} grid over the bounding box
 #'   even when \code{x} has polygons.  A single study-area polygon is one
 #'   probe, and one ratio has no spread to measure.
@@ -631,7 +718,36 @@
     if (!length(g)) return(NA_real_)
     types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
     probe <- if (!isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
-      if (length(g) > max_n) g[unique(round(seq(1, length(g), length.out = max_n)))] else g
+      if (length(g) > max_n) {
+        # Evenly spaced along the polygons sorted by their bounding boxes, not
+        # along the rows: by row, which polygons were measured changed with
+        # the order of the layer, and with it the figure and whether
+        # summarize_by_cell(area = TRUE) refused the cells (300 cells of a
+        # UTM zone, one of them 700 km east of its central meridian, were
+        # refused in five of eight row orders).  The keys are read off the
+        # coordinates and never fail, where st_point_on_surface() or
+        # st_centroid() can fail on a polygon GEOS or s2 rejects, and a
+        # failure here would make summarize_by_cell(area = TRUE) refuse the
+        # cells as unmeasurable.  Polygons that share a bounding box are
+        # ordered by the means of their vertices: on the box alone they kept
+        # their row order, and 300 Delaunay triangles of gridded points, each
+        # sharing its box with the other half of its square, were refused in
+        # 2 of 21 row orders and given a density in the other 19.  The
+        # polygons with the smallest xmin and ymin and the largest xmax and
+        # ymax are always measured: even spacing along the sorted polygons
+        # can pass over the one that reaches furthest in y, and under a conic
+        # CRS 300 cells whose ratios spread by 7.5 percent, one of them far
+        # north of the rest, got a density.  The keys cost about 2
+        # microseconds a polygon; sf::st_bbox() on each polygon cost 8.
+        k  <- .polygon_sort_keys(g)
+        rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
+                    k[, 8L], k[, 9L])
+        ks <- k[rk, , drop = FALSE]
+        at <- c(round(seq(1, length(g), length.out = max_n)),
+                which.min(ks[, "xmin"]), which.min(ks[, "ymin"]),
+                which.max(ks[, "xmax"]), which.max(ks[, "ymax"]))
+        g[rk[sort(unique(at))]]
+      } else g
     } else {
       bb <- sf::st_bbox(sf::st_transform(g, crs))
       sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
