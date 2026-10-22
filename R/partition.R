@@ -454,16 +454,27 @@
 #' For chosen rows, the k nearest other locations by exact search
 #'
 #' Every squared distance is \code{(x - x')^2 + (y - y')^2} in R's own
-#' arithmetic, and ties go to the lower row number.  This is the definition
-#' the kd-tree path of \code{.knn_locations()} has to agree with.
+#' arithmetic.  With \code{tol = 0} ties go to the lower row number.  This is
+#' the definition the kd-tree path of \code{.knn_locations()} has to agree
+#' with.  With \code{tol} above 0 the \code{k} are picked by the rule of
+#' \code{.knn_pick_rows()}: squared distances within \code{tol} of each other
+#' are a tie, and a tie goes to the lower first coordinate, then the lower
+#' second, then the lower \code{num}.  The pooling's searches pass
+#' \code{.TIE_TOL}; the partition's pass nothing.
 #'
-#' @param x,y Coordinates of the locations.
+#' @param x,y Coordinates of the locations.  With \code{tol} above 0 they are
+#'   in coordinate order (first coordinate, then second), so that the lower
+#'   row is the lower coordinate.
 #' @param rows The rows to search for.
 #' @param k Number of neighbours, below \code{length(x)}.
+#' @param tol Relative difference up to which two squared distances are a
+#'   tie; 0, the default, for exact ties alone.
+#' @param num With \code{tol} above 0, the number of each location that the
+#'   last step of the rule takes the lowest of: the row, by default.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_exact_rows <- function(x, y, rows, k) {
+.knn_exact_rows <- function(x, y, rows, k, tol = 0, num = seq_along(x)) {
   n <- length(x)
   out <- matrix(0L, length(rows), k)
   if (!length(rows)) return(out)
@@ -474,8 +485,80 @@
     r  <- rows[at]
     d2 <- outer(x[r], x, "-")^2 + outer(y[r], y, "-")^2
     d2[cbind(seq_along(r), r)] <- Inf            # a location is not its own neighbour
-    # order() leaves ties in their original order: the lower row number first.
-    out[at, ] <- t(apply(d2, 1L, function(v) order(v)[seq_len(k)]))
+    if (tol > 0) {
+      # No pick of the rule is further than the k-th nearest by more than
+      # tol, so it is made among those as near as that: column i of `ord` is
+      # row i's candidates, nearest first.
+      nr   <- length(r)
+      ord  <- apply(d2, 1L, order)
+      dk   <- d2[cbind(seq_len(nr), ord[k, ])]
+      w    <- max(rowSums(d2 <= dk * (1 + tol)))
+      cand <- t(ord[seq_len(w), , drop = FALSE])
+      pick <- .knn_pick_rows(matrix(d2[cbind(rep(seq_len(nr), w), as.vector(cand))], nr, w),
+                             cand, k, tol, x, y, num)
+      out[at, ] <- matrix(cand[cbind(rep(seq_len(nr), k), as.vector(pick))], nr, k)
+    } else {
+      # order() leaves ties in their original order: the lower row number first.
+      out[at, ] <- t(apply(d2, 1L, function(v) order(v)[seq_len(k)]))
+    }
+  }
+  out
+}
+
+
+#' Of each row's candidates, the k nearest by the tie rule of the pooling
+#'
+#' For each row of \code{d2}, \code{k} times: of the candidates left, those
+#' whose squared distance is no more than \code{(1 + tol)} times the least
+#' one left are a tie.  Of these, those whose first coordinate is within
+#' \code{tol * d} of the least first coordinate among them, \code{d} the
+#' square root of that least squared distance; of those, the ones whose
+#' second coordinate is within \code{tol * d} of the least second one; and of
+#' those the one of the lowest \code{num}.  It leaves the candidates, and the
+#' next pick starts again from what is left.  With the locations in
+#' coordinate order a tie goes to the lower first coordinate, then the lower
+#' second, coordinates that differ in their last bits counting as equal, then
+#' the lower \code{num}.  The rule takes \code{k} passes over the matrix and
+#' no loop over its rows.
+#'
+#' @param d2 Matrix of squared distances: a row per location searched for, a
+#'   column per candidate, \code{Inf} where there is none.
+#' @param cand Integer matrix of the shape of \code{d2}: the candidates'
+#'   numbers.
+#' @param k Number of picks, at most the finite entries of any row.
+#' @param tol Relative difference up to which two squared distances are a
+#'   tie.
+#' @param x,y Coordinates of the locations, by number.
+#' @param num The number the last step takes the lowest of, by number: the
+#'   number itself by default.  \code{.region_neighbours()} passes each
+#'   centroid's region, so that centroids which coincide to rounding are told
+#'   apart by their region and not by their place in coordinate order, which
+#'   the rounding sets.
+#' @return An integer matrix, \code{nrow(d2) x k}: the columns of \code{d2}
+#'   picked, in the order they were picked.
+#' @keywords internal
+#' @noRd
+.knn_pick_rows <- function(d2, cand, k, tol, x, y, num = seq_along(x)) {
+  nr <- nrow(d2); q <- ncol(d2)
+  out <- matrix(0L, nr, k)
+  if (!nr) return(out)
+  rr <- seq_len(nr)
+  low <- function(M) M[cbind(rr, max.col(-M, ties.method = "first"))]   # each row's least
+  X <- matrix(x[cand], nr, q)
+  Y <- matrix(y[cand], nr, q)
+  C <- matrix(as.numeric(num[cand]), nr, q)
+  for (j in seq_len(k)) {
+    m   <- low(d2)
+    tie <- d2 <= m * (1 + tol)
+    gap <- tol * sqrt(m)
+    M <- X; M[!tie] <- Inf
+    tie <- tie & M <= low(M) + gap
+    M <- Y; M[!tie] <- Inf
+    tie <- tie & M <= low(M) + gap
+    M <- C; M[!tie] <- Inf
+    p <- max.col(-M, ties.method = "first")
+    out[, j] <- p
+    d2[cbind(rr, p)] <- Inf
   }
   out
 }
@@ -486,22 +569,27 @@
 #' The answer of \code{.knn_exact_rows()} without its comparison of each row
 #' with every location.  \pkg{FNN} shortlists more neighbours than are
 #' wanted, R recomputes their distances, and the \code{k} nearest are taken
-#' with the same rule: by distance, ties to the lower row number.  A
-#' shortlist is long enough when its furthest member is further than the
-#' \code{k}-th, by more than one part in a thousand million: every location
-#' as near as the \code{k}-th is then on it.  A row whose shortlist ends
-#' inside the tie gets one twice as long, up to all the other locations.  On
-#' a lattice, or on coordinates rounded to the metre, most rows tie and a
-#' short list settles each, so the time grows with the number of locations
-#' and not with its square.
+#' with the same rule: by distance, ties to the lower row number, or with
+#' \code{tol} above 0 by the rule of \code{.knn_pick_rows()}.  A shortlist is
+#' long enough when its furthest member is further than the furthest pick,
+#' by more than \code{tol} and one part in a thousand million: every location
+#' the rule could pick is then on it.  A row whose shortlist ends inside the
+#' tie gets one twice as long, up to all the other locations.  On a lattice,
+#' or on coordinates rounded to the metre, most rows tie and a short list
+#' settles each, so the time grows with the number of locations and not with
+#' its square.
 #'
-#' @param u Two-column matrix of distinct locations.
+#' @param u Two-column matrix of distinct locations; in coordinate order when
+#'   \code{tol} is above 0.
 #' @param rows The rows to search for.
 #' @param k Number of neighbours, below \code{nrow(u)}.
+#' @param tol As for \code{.knn_exact_rows()}: 0, the default, for exact ties
+#'   alone.
+#' @param num As for \code{.knn_exact_rows()}: the row, by default.
 #' @return An integer matrix, \code{length(rows) x k}.
 #' @keywords internal
 #' @noRd
-.knn_tied_rows <- function(u, rows, k) {
+.knn_tied_rows <- function(u, rows, k, tol = 0, num = seq_len(nrow(u))) {
   n <- nrow(u); x <- u[, 1L]; y <- u[, 2L]
   out  <- matrix(0L, length(rows), k)
   todo <- seq_along(rows)
@@ -515,18 +603,29 @@
     if (length(none)) { self[none, ] <- FALSE; self[none, q + 1L] <- TRUE }
     cand <- matrix(t(nn)[!t(self)], nr, q, byrow = TRUE)
     d2   <- matrix((x[cand] - x[r])^2 + (y[cand] - y[r])^2, nr, q)
-    # Each row's candidates by distance, then by row number: column i of
-    # `ord` is row i's, nearest first.
-    ord  <- matrix(order(rep.int(seq_len(nr), q), d2, cand), nrow = q)
-    pick <- ord[seq_len(k), , drop = FALSE]
-    dk   <- d2[pick[k, ]]
-    far  <- d2[ord[q, ]]
-    done <- q >= n - 1L | far > dk * (1 + 1e-9)
-    # as.vector(): a two-column matrix of positions would be read as pairs
-    # of (row, column).
-    if (any(done))
-      out[todo[done], ] <- matrix(cand[as.vector(pick[, done, drop = FALSE])],
-                                  sum(done), k, byrow = TRUE)
+    if (tol > 0) {
+      pick <- .knn_pick_rows(d2, cand, k, tol, x, y, num)
+      at   <- cbind(rep(seq_len(nr), k), as.vector(pick))
+      got  <- matrix(d2[at], nr, k)
+      dk   <- got[cbind(seq_len(nr), max.col(got, ties.method = "first"))]
+      far  <- d2[cbind(seq_len(nr), max.col(d2, ties.method = "first"))]
+      done <- q >= n - 1L | far > dk * (1 + tol + 1e-9)
+      if (any(done))
+        out[todo[done], ] <- matrix(cand[at], nr, k)[done, , drop = FALSE]
+    } else {
+      # Each row's candidates by distance, then by row number: column i of
+      # `ord` is row i's, nearest first.
+      ord  <- matrix(order(rep.int(seq_len(nr), q), d2, cand), nrow = q)
+      pick <- ord[seq_len(k), , drop = FALSE]
+      dk   <- d2[pick[k, ]]
+      far  <- d2[ord[q, ]]
+      done <- q >= n - 1L | far > dk * (1 + 1e-9)
+      # as.vector(): a two-column matrix of positions would be read as pairs
+      # of (row, column).
+      if (any(done))
+        out[todo[done], ] <- matrix(cand[as.vector(pick[, done, drop = FALSE])],
+                                    sum(done), k, byrow = TRUE)
+    }
     todo <- todo[!done]
     q <- min(n - 1L, 2L * q)
   }

@@ -720,14 +720,24 @@ number of values beyond one per cell. And when \code{tau2} comes out at 0,
 every own weight is 0 and each pooled value is its target; with two
 cells that is the other cell's mean, so the two values change places.
 
-A tie between two candidate neighbours goes to the centroid with the
-lower x, then the lower y, and the centroids are summed with the rows in
-coordinate order, so a cell's neighbours do not depend on the order of the
-rows. The values then agree to rounding: a cell's sums are taken in the
-order of its rows.
-The tie is between distances computed from the coordinates in the CRS the
-distances are measured in (see \code{estimate}), so on gridded locations the
-same layer in another CRS or unit can give a cell another neighbour.
+Two candidate neighbours are a tie when their squared distances differ by
+no more than one part in ten million. A tie goes to the centroid with the
+lower x, then the lower y, coordinates within that part of the distance
+counting as equal, and then to the cell whose ID sorts first. The
+centroids are summed with the rows in coordinate order, so a cell's
+neighbours do not depend on the order of the rows, and on gridded
+locations they do not depend on the unit or the origin of the coordinates
+either. The values agree to rounding under another order of the rows,
+since a cell's sums are taken in the order of its rows, and under another
+unit or origin where three or more cells' centroids coincide, since the
+rounding then sets the order in which a cell's neighbours on that point
+are summed. Where so many cells' centroids coincide that each of them has
+more cells on its point than it has neighbours, which of them it takes can
+change with the unit or the origin, and with them every pooled value,
+since \code{tau2} is fitted over the layer. Distances are measured in the CRS
+named under \code{estimate}, so the same layer in another projection can still
+give a cell other neighbours, and so can a lattice whose spacing is below
+about a ten-millionth of its coordinates.
 
 The figures on this page that describe pooled values and the two
 intervals come from one simulation, \code{dev/sim-pooled-values.R} in the

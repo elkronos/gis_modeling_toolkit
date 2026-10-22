@@ -617,9 +617,13 @@
 #' The density kind depends on the points alone.  It works on the distinct
 #' locations in coordinate order, so the order of the rows does not matter.
 #' Its two tolerances are fractions of the extent of the points (the diagonal
-#' of their bounding box), so the unit of the coordinates does not matter:
-#' the neighbour distance is not taken below a millionth of the extent, and
-#' the iteration stops when no centre moves by \eqn{10^{-12}} of it.  Points
+#' of their bounding box), so they do not depend on the unit of the
+#' coordinates: the neighbour distance is not taken below a millionth of the
+#' extent, and the iteration stops when no centre moves by \eqn{10^{-12}} of
+#' it.  On gridded locations the cells can still differ in another unit or
+#' with another origin: the searches count exact ties alone, so ties between
+#' equally near points are settled by the last bits of the coordinates,
+#' which move with the unit and the origin.  Points
 #' at one location count as that many points at it and share a cell; the
 #' neighbour distance is measured to the \code{density_k}-th nearest
 #' \emph{other} location, so it is not zero where locations repeat.  The

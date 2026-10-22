@@ -2231,6 +2231,32 @@ old behaviour where there is a way.
   did.  The values and the condition's fields are unchanged: such a column
   has `cells` 2 and `own_weight` 0.
 
+* **On gridded locations the pooling's neighbours depended on the unit and
+  the origin of the coordinates.**  A cell's 8 neighbours are the cells
+  whose centroids are nearest, and a tie between two goes to the lower x,
+  then the lower y.  Only exact ties counted: centroids of cells on a
+  lattice tie exactly in one unit and differ in their last bits in another,
+  so the same layer in metres and in feet, or with the origin moved, gave
+  some cells other neighbours, and since `tau2` is fitted over the layer
+  every pooled value of `summarize_by_cell()` moved, and so did the
+  leave-one-out error of `resolution_profile()` on the same cells.  The
+  nearest other location of a row alone in its cell, which the error of a
+  plain mean reads, had the same fault.  Two squared distances within one
+  part in ten million of each other are now a tie, coordinates within that
+  part of the distance count as equal, and of cells still tied the one of
+  the lower number is taken (in `summarize_by_cell()`, the one whose ID
+  sorts first), so the same cells in another unit or with another origin get
+  the same neighbours and the same values, cells whose centroids coincide
+  among them.  That holds while the spacing of the lattice is above about a
+  ten-millionth of its coordinates.  Where three or more cells' centroids
+  coincide the values agree to rounding, and where ten or more do, which 8
+  of them each takes can still change.  Layers without such ties are
+  unchanged.  Another projection still gives other distances.  On a lattice
+  the regions `resolution_profile()` draws can still differ in another unit
+  or with another origin, since the partition counts exact ties alone, and
+  its leave-one-out errors with them; `?resolution_profile` said the unit
+  did not matter to the density kind, and now says this.
+
 * **The print of a profile of one level read "1 levels" and "WSS rises at 0
   step(s)".**  Every default profile has one level.  The print now reads "1
   level", and leaves out the count of steps the WSS curve rises at when
@@ -2334,6 +2360,27 @@ old behaviour where there is a way.
   print's `variogram` line says which.  The `cp` column, its value at one cell and
   Cp's count change wherever either applies.  A profile on a ladder of
   sizes under `sac = "auto"` fits no variogram and is unchanged.
+
+* **On gridded locations the nearest-neighbour pairs of
+  `estimate_sac_range()` depended on whether FNN could be loaded.**  Each
+  location is paired with its nearest other location, and on a lattice two
+  to four are equally near.  FNN's kd-tree and the package's own search took
+  different ones, so `short_lag_pairs` and `short_lag_semivariance`, and
+  with them Cp's noise variance where that semivariance holds it, the `cp`
+  column and Cp at one cell, differed between a session with FNN and one
+  without (on a 12 x 12 lattice, 80 pairs against 143), and moved with the
+  unit of the coordinates.  Of several locations whose squared distances
+  agree to within one part in ten million, the pair now takes the one with
+  the lower x coordinate, then the lower y, with or without FNN, in any
+  order of the rows and in any unit or origin.  On a square lattice that
+  pairs almost every location with its neighbour along x, so the
+  semivariance measures the field along x.  Where the ties are exact, as on
+  a lattice in whole metres, that is the pick the search without FNN made,
+  so on gridded layers a session with FNN gets other pairs and other `cp`
+  values than before, and a session without FNN does where rounding had
+  broken the ties.  Layers on which each location's nearest other location
+  is nearer than the next by more than that part in squared distance are
+  unchanged.
 
 * **The two variogram warnings of `resolution_profile()` had no class.**
   The warning that the variogram gives no usable range now has class

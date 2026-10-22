@@ -27,7 +27,7 @@
 # change of result.  .pool_column() prepares one column of an assigned layer
 # for it.  Everything in this file is internal.
 #
-# Two things the result must not depend on, and how each is kept out:
+# Three things the result must not depend on, and how each is kept out:
 #
 #   the order of the rows   The centroids are summed with the rows in
 #                           coordinate order, and a row's nearest other row
@@ -39,10 +39,28 @@
 #                           kd-tree path returns the same answer to the last
 #                           bit: a row whose candidates tie is searched again
 #                           by the exact rule.
+#   the unit and origin     The searches call two squared distances within
+#                           .TIE_TOL of each other a tie, so on gridded
+#                           locations the last bits of the centroids, which
+#                           move with the unit and the origin of the
+#                           coordinates, do not decide between neighbours.
+#                           Of centroids still tied, the region of the lower
+#                           number is taken, so regions on one point stay
+#                           told apart by number when rounding parts them.
 # =============================================================================
 
 # Regions in a target.
 .POOL_NEIGHBOURS <- 8L
+
+# Relative difference up to which two squared distances are a tie in the
+# searches for neighbours.  Centroids of a lattice that tie exactly in one
+# unit differ in their last bits in another, or after a shift of the origin,
+# and each unit in the last place a centroid is off moves its squared
+# distances by about 5e-16 times the coordinates over the spacing.  A
+# centroid summed from many rows can be off by several.  So a tie holds
+# while the spacing is above about a ten-millionth of the coordinates, which
+# leaves room for that.
+.TIE_TOL <- 1e-7
 
 # Rows per region: the size a count is set by when none is given, and the
 # sizes of a ladder of sizes, coarsest first.
@@ -346,11 +364,20 @@
 #' The regions whose centroids are nearest each region's
 #'
 #' The centroids are put in coordinate order (first coordinate, then second),
-#' searched, and the result mapped back to the regions' numbers.  A tie
-#' between two candidates therefore goes to the lower first coordinate, then
-#' the lower second, whatever the regions are numbered.  Regions whose
-#' centroids coincide exactly are told apart by their number, the one place
-#' the numbering decides anything.  A region is never its own neighbour.
+#' searched, and the result mapped back to the regions' numbers.  Two
+#' candidates whose squared distances differ by no more than \code{.TIE_TOL}
+#' (one part in ten million) are a tie, and a tie goes to the lower first
+#' coordinate, then the lower second, first coordinates within that part of
+#' the distance counting as equal (\code{.knn_pick_rows()}), whatever the
+#' regions are numbered.  So the last bits of the centroids, which move with
+#' the unit and the origin of the coordinates, do not decide.  Of candidates
+#' still tied, second coordinates within that part of the distance counting
+#' as equal too, the region of the lower number is taken (\code{num = o}),
+#' not the lower place in coordinate order.  So regions whose centroids
+#' coincide are told apart by their number whether they coincide exactly or
+#' only to rounding, as another unit or origin can leave them; that is the
+#' one place the numbering decides anything.  A region is never its own
+#' neighbour.
 #'
 #' A centroid that shares its point with \code{k} others or more is not
 #' searched for at all: its neighbours are the first \code{k} of them in that
@@ -359,25 +386,31 @@
 #' carry the coordinates of a coarser unit, or a placeholder) from costing
 #' the square of their number: a kd-tree asked about such a centroid has to
 #' list every other one on its point before it can tell which come first.
+#' The point is found by exact equality.  Where another unit or origin parts
+#' such centroids by rounding they are searched for, among themselves by
+#' their tiny distances: with \code{k + 1} or fewer on the point each still
+#' takes all the others, perhaps in another order, and with more, which
+#' \code{k} it takes can change.
 #'
 #' For the rest, with \pkg{FNN} the kd-tree returns one neighbour more than
 #' is wanted, where there are that many other regions (ten regions or more
 #' for eight neighbours), and R recomputes the squared distances.  A row is
-#' settled when it is not among its own neighbours and its distances rise by
-#' more than one part in a thousand million from each neighbour to the next;
-#' it keeps the tree's first \code{k}.  Every other row is searched again by
-#' \code{.knn_tied_rows()}, by distance and then by row, which is the rule of
-#' the exact search.  Without \pkg{FNN} each of them is searched exactly,
-#' which compares it with every centroid; the pairs that makes, the rows
-#' searched for times the centroids, are what \code{.work_guard()} stops
-#' above the limit.  The two paths return the same matrix.
+#' settled when it is not among its own neighbours and its squared distances
+#' rise by more than \code{.TIE_TOL} and one part in a thousand million from
+#' each neighbour to the next; it keeps the tree's first \code{k}, which is
+#' what the rule picks.  Every other row is searched again by
+#' \code{.knn_tied_rows()} with the rule of the exact search.  Without
+#' \pkg{FNN} each of them is searched exactly, which compares it with every
+#' centroid; the pairs that makes, the rows searched for times the centroids,
+#' are what \code{.work_guard()} stops above the limit.  The two paths return
+#' the same matrix.
 #'
 #' @param cen Two-column matrix of centroids, one row per region.
 #' @param k Number of neighbours wanted.
 #' @param use_fnn Whether to use \pkg{FNN}.
 #' @param caller Name of the exported function, for the work guard's message.
 #' @return An integer matrix with a row per region and \code{min(k, K - 1)}
-#'   columns, nearest first.
+#'   columns, nearest first to within \code{.TIE_TOL}.
 #' @keywords internal
 #' @noRd
 .region_neighbours <- function(cen, k, use_fnn, caller = "resolution_profile") {
@@ -405,18 +438,18 @@
     .work_guard(as.numeric(length(rest)) * K, .exact_pairs_max(), what = "cell neighbours",
                 caller = caller,
                 search = sprintf("finding each cell's neighbours among %d cells", K))
-    idx[rest, ] <- .knn_exact_rows(x, y, rest, k)
+    idx[rest, ] <- .knn_exact_rows(x, y, rest, k, tol = .TIE_TOL, num = o)
   } else if (length(rest)) {
     kq  <- min(k + 1L, K - 1L)
     nn  <- matrix(FNN::get.knn(u, k = kq)$nn.index, K, kq)[rest, , drop = FALSE]
     d2  <- matrix((x[nn] - x[rest])^2 + (y[nn] - y[rest])^2, length(rest), kq)
     own <- rowSums(nn == rest) > 0L
     tied <- if (kq > 1L)
-      rowSums(d2[, -1L, drop = FALSE] <= d2[, -kq, drop = FALSE] * (1 + 1e-9)) > 0L
+      rowSums(d2[, -1L, drop = FALSE] <= d2[, -kq, drop = FALSE] * (1 + .TIE_TOL + 1e-9)) > 0L
     else rep(FALSE, length(rest))
     idx[rest, ] <- nn[, seq_len(k), drop = FALSE]
     redo <- rest[own | tied]
-    if (length(redo)) idx[redo, ] <- .knn_tied_rows(u, redo, k)
+    if (length(redo)) idx[redo, ] <- .knn_tied_rows(u, redo, k, tol = .TIE_TOL, num = o)
   }
   out <- matrix(0L, K, k)
   out[o, ] <- o[idx]
@@ -429,9 +462,11 @@
 #' The centroid of a region is the mean of the coordinates of its rows.  The
 #' rows are summed in coordinate order, so the centroids are the same numbers
 #' to the last bit whatever order the rows come in.  On gridded locations
-#' that is what keeps the neighbours fixed: summed in row order the centroids
-#' of a lattice differ in their last bits from one row order to the next, and
-#' exact ties between them fall differently.
+#' that keeps the neighbours fixed under another order of the rows: summed in
+#' row order the centroids of a lattice differ in their last bits from one
+#' row order to the next.  Under another unit or origin the centroids differ
+#' in their last bits all the same, and there the tie tolerance of
+#' \code{.region_neighbours()} keeps the neighbours fixed.
 #'
 #' @param gi Region of each row, \code{1..K}.
 #' @param K Number of regions.
@@ -460,14 +495,17 @@
 
 #' For chosen locations, the nearest other location, searched
 #'
-#' With \pkg{FNN} the kd-tree returns the three nearest locations of each one
+#' Two locations whose squared distances differ by no more than
+#' \code{.TIE_TOL} are a tie, as in \code{.region_neighbours()}.  With
+#' \pkg{FNN} the kd-tree returns the three nearest locations of each one
 #' asked for, itself among them, and R recomputes the squared distances.  A
-#' location is settled when it is one of its own three and its two nearest
-#' others differ by more than one part in a thousand million.  Every other
-#' location is searched again by \code{.knn_tied_rows()}, which settles a tie
-#' by row, so a lattice costs no comparison of every pair.  Without \pkg{FNN}
-#' the search is exact and is stopped by \code{.work_guard()} above the
-#' limit.  The two paths return the same locations.
+#' location is settled when it is one of its own three and the squared
+#' distances of its two nearest others differ by more than \code{.TIE_TOL}
+#' and one part in a thousand million.  Every other location is searched
+#' again by \code{.knn_tied_rows()}, which settles a tie by the rule, so a
+#' lattice costs no comparison of every pair.  Without \pkg{FNN} the search
+#' is exact and is stopped by \code{.work_guard()} above the limit.  The two
+#' paths return the same locations.
 #'
 #' @param u Two-column matrix of distinct locations in coordinate order, at
 #'   least two.
@@ -475,8 +513,9 @@
 #' @param use_fnn Whether to use \pkg{FNN}.
 #' @param caller Name of the exported function, for the work guard's message.
 #' @return For each of \code{q} the row of \code{u} nearest it and not it; a
-#'   tie goes to the lower row, which is the lower first coordinate and then
-#'   the lower second.
+#'   tie goes to the lower first coordinate, then the lower second (first
+#'   coordinates within \code{.TIE_TOL} of the distance counting as equal),
+#'   which is the lower row.
 #' @keywords internal
 #' @noRd
 .nearest_location_search <- function(u, q, use_fnn, caller = "resolution_profile") {
@@ -487,7 +526,7 @@
                 caller = caller,
                 search = sprintf("finding the nearest other location of %d of %d locations",
                                  nq, U))
-    return(.knn_exact_rows(u[, 1L], u[, 2L], q, 1L)[, 1L])
+    return(.knn_exact_rows(u[, 1L], u[, 2L], q, 1L, tol = .TIE_TOL)[, 1L])
   }
   kq <- min(3L, U)
   nn <- matrix(FNN::get.knnx(u, u[q, , drop = FALSE], k = kq)$nn.index, nq, kq)
@@ -501,8 +540,8 @@
   # The nearest of what is left: the second nearest other location, when the
   # three hold one.
   second <- if (kq > 2L) pmin(d2[, 1L], d2[, 2L], d2[, 3L]) else rep(Inf, nq)
-  redo <- which(rowSums(own) != 1L | !(second > best * (1 + 1e-9)))
-  if (length(redo)) out[redo] <- .knn_tied_rows(u, q[redo], 1L)[, 1L]
+  redo <- which(rowSums(own) != 1L | !(second > best * (1 + .TIE_TOL + 1e-9)))
+  if (length(redo)) out[redo] <- .knn_tied_rows(u, q[redo], 1L, tol = .TIE_TOL)[, 1L]
   out
 }
 
@@ -546,8 +585,9 @@
 #'     other row there: the first row of the location, or the second when it
 #'     is the first itself.
 #'   \item A row alone at its location takes the first row of its nearest
-#'     other location; a tie between locations goes to the lower first
-#'     coordinate, then the lower second.
+#'     other location; a tie between locations, squared distances within
+#'     \code{.TIE_TOL} of each other, goes to the lower first coordinate,
+#'     then the lower second (\code{.nearest_location_search()}).
 #' }
 #' An exact search on the rows as given breaks a tie by row number, so on
 #' gridded locations the neighbour would change with the order of the rows.

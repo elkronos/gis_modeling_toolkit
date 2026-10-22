@@ -36,9 +36,14 @@ nugget at its lower bound (0, or within 1e-4 of the sill): that is the
 bound and not an estimate, and a criterion that uses it as a noise
 variance has no penalty left.  \code{attr(x, "short_lag_semivariance")}
 is the semivariance of nearest-neighbour pairs, computed with no model:
-each location is paired with the nearest other location
-(\code{short_lag_pairs} and \code{short_lag_dist} give the number of
-such pairs and their median separation).  A semivariance does not fall
+each location is paired with the nearest other location (of several
+whose squared distances agree to within one part in ten million, the one
+with the lower x coordinate, then the lower y, with or without
+\pkg{FNN}) (\code{short_lag_pairs} and \code{short_lag_dist} give the
+number of such pairs and their median separation).  On a square lattice
+that pairs almost every location with its neighbour along x, so the value
+measures the field along x; with the axes of the CRS swapped it can
+differ.  A semivariance does not fall
 as the lag shrinks, so this value bounds the nugget from above, up to its
 sampling error; a fitted nugget well above it is contradicted by the
 closest pairs.  \code{attr(x, "zero_lag_semivariance")} exists where

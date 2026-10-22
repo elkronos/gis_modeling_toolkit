@@ -2436,6 +2436,20 @@
 #' rows, every pairing of its rows with those of its neighbour counts, with
 #' equal weight, and the pair of locations still counts once.
 #'
+#' On a lattice two to four other locations are equally near.  The nearest
+#' other location is found by the rule of the pooling's search
+#' (\code{.nearest_location_search()}), on the locations in coordinate
+#' order: of several whose squared distances are within \code{.TIE_TOL} (one
+#' part in ten million) of each other, the one with the lower first
+#' coordinate, then the lower second.  So the pairs are the same with and
+#' without \pkg{FNN}, in any order of the rows, and in any unit or origin of
+#' the coordinates.  The kd-tree's own pick among equally near locations is
+#' not the one the search in base R makes (80 pairs against 143 on a 12 x 12
+#' lattice).  Without \pkg{FNN} the exact search is not bounded by
+#' \code{.work_guard()}, as the variogram's own comparison of every pair of
+#' rows is not.  The pairs are taken in the order of the locations, and their
+#' separation is computed in R.
+#'
 #' \strong{Pairs at zero separation.}  Rows that share a location (repeat
 #' visits).  Half the mean squared difference over every pair of rows at one
 #' location is the variance between visits: the part of the nugget that is
@@ -2481,8 +2495,17 @@
     out$zero_df    <- n - G
   }
   if (G < 2L) return(out)
-  nn <- .sac_knn(xy[loc$first, , drop = FALSE], 1L)
-  i <- seq_len(G); j <- nn$index[, 1L]
+  # Each location's nearest other location by the tie rule of the pooling's
+  # search, on the locations in coordinate order.  Without FNN the exact
+  # search runs without the work guard of the pooling: the variogram itself
+  # compares every pair of these rows, and n_max bounds both.
+  u  <- unname(xy[loc$first, , drop = FALSE])
+  o  <- order(u[, 1L], u[, 2L])
+  us <- u[o, , drop = FALSE]
+  near <- if (.has_backend("FNN"))
+    .nearest_location_search(us, seq_len(G), TRUE, caller = "estimate_sac_range")
+  else .knn_exact_rows(us[, 1L], us[, 2L], seq_len(G), 1L, tol = .TIE_TOL)[, 1L]
+  i <- seq_len(G); j <- integer(G); j[o] <- o[near]
   a <- pmin(i, j); b <- pmax(i, j)
   keep <- !duplicated(cbind(a, b))
   a <- a[keep]; b <- b[keep]
@@ -2491,7 +2514,7 @@
   # location's mean square about its own.
   out$gamma <- mean(0.5 * ((mu[a] - mu[b])^2 + ss[a] / m[a] + ss[b] / m[b]))
   out$pairs <- length(a)
-  out$dist  <- stats::median(nn$dist[keep, 1L])
+  out$dist  <- stats::median(sqrt((u[a, 1L] - u[b, 1L])^2 + (u[a, 2L] - u[b, 2L])^2))
   out
 }
 
@@ -2517,9 +2540,14 @@
 #' bound and not an estimate, and a criterion that uses it as a noise
 #' variance has no penalty left.  \code{attr(x, "short_lag_semivariance")}
 #' is the semivariance of nearest-neighbour pairs, computed with no model:
-#' each location is paired with the nearest other location
-#' (\code{short_lag_pairs} and \code{short_lag_dist} give the number of
-#' such pairs and their median separation).  A semivariance does not fall
+#' each location is paired with the nearest other location (of several
+#' whose squared distances agree to within one part in ten million, the one
+#' with the lower x coordinate, then the lower y, with or without
+#' \pkg{FNN}) (\code{short_lag_pairs} and \code{short_lag_dist} give the
+#' number of such pairs and their median separation).  On a square lattice
+#' that pairs almost every location with its neighbour along x, so the value
+#' measures the field along x; with the axes of the CRS swapped it can
+#' differ.  A semivariance does not fall
 #' as the lag shrinks, so this value bounds the nugget from above, up to its
 #' sampling error; a fitted nugget well above it is contradicted by the
 #' closest pairs.  \code{attr(x, "zero_lag_semivariance")} exists where
