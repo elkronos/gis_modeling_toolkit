@@ -2344,6 +2344,23 @@ old behaviour where there is a way.
   kind, the default, and "k-means fitted to a subsample of 1500" for
   `partition = "kmeans"`.
 
+* **`resolution_profile(select_on = "split")` returned a `loo` read off no
+  row, with nothing said, when no row of the selection half had a
+  response.**  The estimate is scored on the selection half, and the check
+  that `estimate` has rows to read is made on the layer, so a layer whose
+  rows with a response all lay in the estimation half passed it, under a
+  named estimate and under `"auto"`, which became `"pooled"`.  `loo` and
+  the estimate's other columns are still `NA` at every level, and a warning
+  of class `spatialkit_no_scored_rows` now gives the reason; the condition
+  carries `reason`, `n`, `selection`, `n_response` and `column`.  The
+  profile's print says "loo NA: no row of the selection half has a
+  response" where it said "fewer than two rows", and so does the print of
+  the count record, which read "in NA cells".  `select_resolution(criterion
+  = "loo")`, the criterion a profile of plain means is read by, stops with
+  the same reason where it said that `loo` needs a level at which some cell
+  holds two rows with a response, and `summary()` of the profile, whose
+  error said that "cp needs a response", gives it too.  No number changes.
+
 * **The warnings of `make_folds(method = "block_kfold")` on blocks smaller
   than the autocorrelation range said "Spatial CV may leak correlated
   information across folds".**  That read blocks below the range as a

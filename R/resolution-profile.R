@@ -1142,6 +1142,19 @@
 #'     \code{NA} at every level.  The condition carries \code{n} (the rows
 #'     that share a location), \code{total} (the rows \code{loo} read) and
 #'     \code{column}.}
+#'   \item{\code{spatialkit_no_scored_rows}}{\code{resolution_profile()}
+#'     with an \code{estimate} under \code{select_on = "split"}: no row of
+#'     the selection half has a response.  The check that \code{estimate}
+#'     has rows to read is made on the layer, and the rows with a response
+#'     are all in the estimation half, so \code{loo} and the estimate's other
+#'     columns read no row and are \code{NA} at every level, as are
+#'     \code{rss}, \code{cp}, \code{moran_i} and \code{moran_z}.  Raised
+#'     once, after the levels are scored.  The condition carries
+#'     \code{reason}
+#'     (\code{"no response in the selection half"}), \code{n} (0, the rows
+#'     \code{loo} read), \code{selection} (the rows of the selection half),
+#'     \code{n_response} (the rows of the layer with a response) and
+#'     \code{column}.}
 #'   \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 #'     with a level of more than 5,000 cells, on any ladder, when
 #'     \pkg{FNN} cannot be loaded or \pkg{Matrix} is not installed:
@@ -1419,7 +1432,10 @@
 #'   errors without a \code{response_var}, with \code{predictor_vars} (the
 #'   profile would then score residuals, and the summary reports cell values
 #'   of the response), with a logical response, and with a response that has
-#'   no finite value.
+#'   no finite value.  Under \code{select_on = "split"} a selection half
+#'   with no finite response is not an error: the five columns are
+#'   \code{NA} at every level, with a warning of class
+#'   \code{spatialkit_no_scored_rows}.
 #' @param obs_per_cell Rows per cell: \code{"auto"} (default; see below);
 #'   \code{NULL} for the ladder described under "The ladder and its
 #'   bounds", the default of earlier versions, whatever the other arguments
@@ -1549,8 +1565,10 @@
 #'   under \code{"mean"}).  \code{loo}, \code{loo_se} and
 #'   \code{own_weight} are \code{NA} at a level where no cell holds two
 #'   scored rows, and at every level when the response is constant over the
-#'   rows \code{loo} reads.  It also carries \code{estimate}: a list with
-#'   \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
+#'   rows \code{loo} reads.  All five are \code{NA} at every level when no
+#'   row of the selection half has a response (\code{select_on = "split"};
+#'   \code{spatialkit_no_scored_rows}).  It also carries \code{estimate}: a
+#'   list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 #'   (8, or \code{NA} under \code{"mean"}), \code{response} (the column),
 #'   \code{n} (the rows \code{loo} read), \code{rows} (\code{"all"} or
 #'   \code{"selection half"}), \code{features} (\code{"points"}, or
@@ -2781,6 +2799,30 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       for (nm in names(est_cols)) est_cols[[nm]][i] <- lv[[nm]]
     }
   }
+  # Under select_on = "split" the estimate reads the rows of the selection
+  # half that have a response, and the check that `estimate` has rows to read
+  # is made on the layer.  A layer whose rows with a response all lie in the
+  # estimation half passed it, and the profile returned a `loo` read off no
+  # row with nothing said.  The columns stay NA, and this says why.  Raised
+  # after the sweep, so a call a guard stops says nothing of columns it never
+  # returns.
+  if (!is.null(est) && !is.null(split) && !length(lay$y)) {
+    n_sel <- length(split$selection)
+    .warn_classed("spatialkit_no_scored_rows",
+                  paste0("resolution_profile(): no row of the selection half has a finite ",
+                         "value of '%s', so `loo`, `loo_se`, `scored_per_cell`, `share_alone` ",
+                         "and `own_weight` are NA at every level, and so are `rss`, `cp`, ",
+                         "`moran_i` and `moran_z`, which also read the selection half. Under ",
+                         "select_on = \"split\" the response is read on the selection half ",
+                         "alone (%d row%s); the %d row%s with a finite value %s in the ",
+                         "estimation half."),
+                  response_var, n_sel, if (n_sel == 1L) "" else "s",
+                  as.integer(n_support), if (n_support == 1L) "" else "s",
+                  if (n_support == 1L) "is" else "are all",
+                  data = list(reason = "no response in the selection half", n = 0L,
+                              selection = n_sel, n_response = as.integer(n_support),
+                              column = response_var))
+  }
   # Each row is left out alone, and the other rows at its location stay.
   # Said once, after the levels are scored and where one of them has a
   # `loo`: on a constant response, and where no level could be scored, the
@@ -3291,7 +3333,15 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
   # The estimate the profile scores, the rows its leave-one-out error reads,
   # and that error with one mean for all of them.
   est <- attr(x, "estimate", exact = TRUE)
-  if (is.list(est) && !is.null(est$value))
+  # Under the split a selection half with no response leaves `loo` no row to
+  # read; the line says that, and not "fewer than two rows".
+  if (is.list(est) && !is.null(est$value) && isTRUE(est$n == 0L) &&
+      identical(est$rows, "selection half"))
+    cat(sprintf("  estimate    : %s; loo NA: no row of the selection half has a response\n",
+                if (identical(est$value, "pooled"))
+                  sprintf("pooled toward the %d nearest cells", est$neighbours)
+                else "plain means"))
+  else if (is.list(est) && !is.null(est$value))
     cat(sprintf("  estimate    : %s; loo on %d row%s of the %s; one cell: loo %s\n",
                 if (identical(est$value, "pooled"))
                   sprintf("pooled toward the %d nearest cells", est$neighbours)
@@ -3565,8 +3615,9 @@ print.resolution_profile <- function(x, digits = 3L, ...) {
 #' criterion that is finite at the level and says that the size set the
 #' count, and \code{plot()} draws each as one point, with no selected level
 #' and no band.  When none is finite, as on a constant response, where
-#' \code{loo} is \code{NA} too, \code{summary()} stops with an error that
-#' says so.
+#' \code{loo} is \code{NA} too, or when no row of the selection half has a
+#' response (\code{select_on = "split"} with an \code{estimate}),
+#' \code{summary()} stops with an error that says so.
 #'
 #' @param profile A \code{resolution_profile}.
 #' @param criterion Which rule sets the count: \code{"cp"} (minimised),
@@ -3862,6 +3913,14 @@ select_resolution <- function(profile,
                         "constant: its total sum of squares is rounding error at most, ",
                         "so no cell count fits it better than another."),
                  criterion, "response"),
+         call. = FALSE)
+  # And under the split, a selection half with no response: the error read
+  # no row at all, and "a cell that holds two rows" is not what it lacks.
+  if (!any(ok) && criterion == "loo" && is.list(est) && isTRUE(est$n == 0L) &&
+      identical(est$rows, "selection half"))
+    stop(paste0("select_resolution(): `loo` is NA at every level because no row of the ",
+                "selection half has a response: under select_on = \"split\" the profile ",
+                "scores the estimate on that half alone."),
          call. = FALSE)
   # A ladder of sizes that was given no `sac` fitted no variogram, so Cp has
   # no noise variance and the reliability no range.  Said here, with the
@@ -4783,7 +4842,8 @@ print.resolution_selection <- function(x, ...) {
                  if (is.finite(w)) sprintf("; median own weight %.2f", w) else ""),
           label = "at this size", width = 76)
     }
-    # Left out when the profile has neither number: a constant response.
+    # Left out when the profile has neither number: a constant response, or
+    # under the split a selection half with no response.
     loo <- x$loo %||% NA_real_
     one <- x$loo_one_cell %||% NA_real_
     if (isTRUE(is.finite(loo)) || isTRUE(is.finite(one))) {
@@ -5004,8 +5064,21 @@ summary.resolution_profile <- function(object, criteria = NULL, tol = 0.02, ...)
     constant <- (is.list(one_c) && isTRUE(one_c$constant)) ||
       (is.list(est_c) && isTRUE(est_c$constant))
     n_const <- if (is.list(one_c) && isTRUE(one_c$constant)) one_c$n else est_c$n
+    # So is a selection half with no response under select_on = "split": the
+    # layer has rows with one, all in the estimation half, and "cp needs a
+    # response" sent the caller to look for a response that is there.
+    split_none <- is.list(est_c) && isTRUE(est_c$n == 0L) &&
+      identical(est_c$rows, "selection half")
     stop("summary.resolution_profile(): no count criterion is finite at any level. ",
-         if (constant)
+         if (split_none)
+           sprintf(paste0("No row of the selection half has a response, and under ",
+                          "select_on = \"split\" the response is read on that half alone, ",
+                          "so no criterion that reads it is finite: %s are NA at every ",
+                          "level, and reliability needs a usable variogram of that half; ",
+                          "elbow, read off the points alone, is NA when the WSS curve has ",
+                          "no elbow."),
+                   if ("loo" %in% names(object)) "cp, loo and moran_z" else "cp and moran_z")
+         else if (constant)
            sprintf(paste0("The %s is constant over the %d scored row%s, so no criterion ",
                           "that reads it is finite: %s are NA at every level, and ",
                           "reliability needs a usable variogram of it; elbow, read off the ",

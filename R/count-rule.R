@@ -693,7 +693,10 @@ print.spatialkit_count_rule <- function(x, ...) {
 
   # ---- what the profile scored at the count -----------------------------------
   sc <- x$scored
-  if (is.list(sc))
+  # A selection half with no response: `loo` read no row and no cell.
+  if (is.list(sc) && half && isTRUE(sc$n == 0L))
+    cat(label("scored"), "loo NA: no row of the selection half has a response\n", sep = "")
+  else if (is.list(sc))
     cat(label("scored"),
         sprintf("loo %s on %s in %s (one cell: %s)%s\n", num(sc$loo),
                 if (half) sprintf("the %s of the selection half", count(sc$n, "row"))

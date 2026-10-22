@@ -379,8 +379,9 @@ For a ladder of one size, \code{summary()} of the profile lists each
 criterion that is finite at the level and says that the size set the
 count, and \code{plot()} draws each as one point, with no selected level
 and no band.  When none is finite, as on a constant response, where
-\code{loo} is \code{NA} too, \code{summary()} stops with an error that
-says so.
+\code{loo} is \code{NA} too, or when no row of the selection half has a
+response (\code{select_on = "split"} with an \code{estimate}),
+\code{summary()} stops with an error that says so.
 }
 
 \examples{

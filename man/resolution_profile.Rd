@@ -248,7 +248,10 @@ versions, scores none and gives the profile without the five columns.
 errors without a \code{response_var}, with \code{predictor_vars} (the
 profile would then score residuals, and the summary reports cell values
 of the response), with a logical response, and with a response that has
-no finite value.}
+no finite value.  Under \code{select_on = "split"} a selection half
+with no finite response is not an error: the five columns are
+\code{NA} at every level, with a warning of class
+\code{spatialkit_no_scored_rows}.}
 
 \item{obs_per_cell}{Rows per cell: \code{"auto"} (default; see below);
 \code{NULL} for the ladder described under "The ladder and its
@@ -381,8 +384,10 @@ of the weight a pooled value gives the cell's own mean; \code{NA}
 under \code{"mean"}).  \code{loo}, \code{loo_se} and
 \code{own_weight} are \code{NA} at a level where no cell holds two
 scored rows, and at every level when the response is constant over the
-rows \code{loo} reads.  It also carries \code{estimate}: a list with
-\code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
+rows \code{loo} reads.  All five are \code{NA} at every level when no
+row of the selection half has a response (\code{select_on = "split"};
+\code{spatialkit_no_scored_rows}).  It also carries \code{estimate}: a
+list with \code{value} (\code{"mean"} or \code{"pooled"}), \code{neighbours}
 (8, or \code{NA} under \code{"mean"}), \code{response} (the column),
 \code{n} (the rows \code{loo} read), \code{rows} (\code{"all"} or
 \code{"selection half"}), \code{features} (\code{"points"}, or
@@ -1053,6 +1058,19 @@ then describes a further observation at a place already observed.
 Raised once, after the levels are scored, and not when \code{loo} is
 \code{NA} at every level.  The condition carries \code{n} (the rows
 that share a location), \code{total} (the rows \code{loo} read) and
+\code{column}.}
+\item{\code{spatialkit_no_scored_rows}}{\code{resolution_profile()}
+with an \code{estimate} under \code{select_on = "split"}: no row of
+the selection half has a response.  The check that \code{estimate}
+has rows to read is made on the layer, and the rows with a response
+are all in the estimation half, so \code{loo} and the estimate's other
+columns read no row and are \code{NA} at every level, as are
+\code{rss}, \code{cp}, \code{moran_i} and \code{moran_z}.  Raised
+once, after the levels are scored.  The condition carries
+\code{reason}
+(\code{"no response in the selection half"}), \code{n} (0, the rows
+\code{loo} read), \code{selection} (the rows of the selection half),
+\code{n_response} (the rows of the layer with a response) and
 \code{column}.}
 \item{\code{spatialkit_moran_skipped}}{\code{resolution_profile()}
 with a level of more than 5,000 cells, on any ladder, when
