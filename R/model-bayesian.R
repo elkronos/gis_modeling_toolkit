@@ -667,6 +667,11 @@
 .bayes_ess_per_chain <- 100
 .bayes_ebfmi_min     <- 0.3
 
+# The sampler controls a call's `control` is merged over.  adapt_delta is
+# 0.99 because one divergent transition fails convergence_ok and lower
+# values leave a few on ordinary data; @param control gives the measurement.
+.bayes_control_default <- list(adapt_delta = 0.99, max_treedepth = 12)
+
 #' Sort R-hat values into the ones that fail and the ones to caution on
 #'
 #' One cut at 1.01 over every parameter fails fits that have converged.  This
@@ -780,10 +785,15 @@
   out <- character(0)
   if ("divergent" %in% failed) {
     ad <- suppressWarnings(as.numeric(adapt_delta %||% NA_real_))[1L]
+    # %.15g, not %.2f: from the default of 0.99 the next settings are 0.995
+    # and 0.999, which %.2f printed as 0.99 and 1.00.  Not format() or
+    # as.character() either: both follow options(OutDec), which prints 0,995
+    # for an R argument, and format() follows options(digits) too
+    # (digits = 2 prints 0.995 as 1).
     out <- c(out, sprintf(
       paste0("For the divergent transitions, raise adapt_delta in `control`",
              "%s; more iterations do not remove them."),
-      if (is.finite(ad)) sprintf(" (now %.2f)", ad) else ""))
+      if (is.finite(ad)) sprintf(" (now %.15g)", ad) else ""))
   }
   what <- c(if ("rhat" %in% failed) "bring R-hat down",
             if ("ess" %in% failed) "raise the effective sample size")
@@ -1132,10 +1142,26 @@
 #'   with no usable CmdStan raises an error that says how to install it, so the
 #'   failure does not come from inside the sampler.
 #' @param control Named list of sampler controls, \emph{merged} over the
-#'   package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)}
+#'   package defaults \code{list(adapt_delta = 0.99, max_treedepth = 12)}
 #'   instead of replacing them.  Passing \code{list(max_treedepth = 15)}
-#'   therefore keeps \code{adapt_delta = 0.9}, which matters, because that is
+#'   therefore keeps \code{adapt_delta = 0.99}, which matters, because that is
 #'   exactly the setting the divergence warning tells you to raise.
+#'
+#'   \code{adapt_delta} is 0.99, not Stan's 0.8, because one divergent
+#'   transition sets \code{convergence_ok} to \code{FALSE} (see
+#'   \code{check_convergence}) and lower values leave a few on ordinary data.
+#'   Four layers of 250 points over a smooth field with a 60 km range, fitted
+#'   at the default four chains of 2,000 iterations from three seeds each,
+#'   had 1 to 24 divergent transitions in every fit at 0.9, the default of
+#'   earlier versions, and none at 0.99; at 0.95 and 0.975 some fits still
+#'   had one or more.  The smaller step costs time: sampling took about
+#'   twice as long as at 0.9 (1.3 to 2.7 times).
+#'   \code{list(adapt_delta = 0.9)} runs faster and can leave a few
+#'   divergent transitions.  Some can remain at 0.99 too, for example on a
+#'   layer whose spatial field is weak against the noise; then raise it to
+#'   0.995 or 0.999, which took three to four and a half times the sampling
+#'   time of 0.9 on the four layers.  No transition reached
+#'   \code{max_treedepth = 12} there at any of these settings.
 #' @param compute_loo Logical; compute PSIS-LOO. Default TRUE.
 #' @param standardize_predictors Logical; center and scale numeric predictors
 #'   before fitting. Default FALSE. When TRUE, the scaling parameters are
@@ -1168,8 +1194,9 @@
 #'   has one weight per basis function, about 540 parameters at the usual
 #'   basis, and the largest of that many R-hat values sits near 1.01 in a
 #'   fit that has converged: four fits at the default four chains of 2,000
-#'   iterations had largest values of 1.005, 1.009, 1.009 and 1.011, with
-#'   every effective sample size at least 1,086 against the 400 required.
+#'   iterations, with \code{adapt_delta} at 0.9 or 0.95, had largest values
+#'   of 1.005, 1.009, 1.009 and 1.011, with every effective sample size at
+#'   least 1,086 against the 400 required.
 #'   Chains that have converged by construction (540 independent
 #'   parameters, four chains of 1,000 draws) had a largest value of 1.008 to
 #'   1.011 at an effective sample size near 1,300, and 130 to 160 values
@@ -1610,7 +1637,7 @@
 #'   )
 #'   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
 #'     2 * dat$elev + rnorm(n)
-#'   # Two short chains keep this to a few minutes; expect Stan to warn about
+#'   # Two short chains keep this to a few minutes; Stan may warn about
 #'   # effective sample size, which is the cost of that.  Use its defaults
 #'   # (chains = 4, iter = 2000) for a fit to report.
 #'   fit <- fit_bayesian_spatial_model(dat, "price", "elev",
@@ -1712,13 +1739,12 @@ fit_bayesian_spatial_model <- function(
          call. = FALSE)
 
   # Merge rather than replace.  A user passing control = list(max_treedepth =
-  # 15) would otherwise silently lose adapt_delta = 0.9 -- the very setting
+  # 15) would otherwise silently lose adapt_delta = 0.99 -- the very setting
   # the divergence warning further down tells them to raise.
   if (!is.list(control))
     stop("fit_bayesian_spatial_model(): `control` must be a named list of ",
          "sampler control arguments.", call. = FALSE)
-  control <- utils::modifyList(list(adapt_delta = 0.9, max_treedepth = 12),
-                               control)
+  control <- utils::modifyList(.bayes_control_default, control)
 
   # Resolve family lazily.  NOTE: gaussian() comes from stats — brms does
   # NOT export a `gaussian` object (brms::gaussian errors); brm() accepts

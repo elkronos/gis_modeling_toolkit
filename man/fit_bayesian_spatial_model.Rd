@@ -125,10 +125,26 @@ with no usable CmdStan raises an error that says how to install it, so the
 failure does not come from inside the sampler.}
 
 \item{control}{Named list of sampler controls, \emph{merged} over the
-package defaults \code{list(adapt_delta = 0.9, max_treedepth = 12)}
+package defaults \code{list(adapt_delta = 0.99, max_treedepth = 12)}
 instead of replacing them.  Passing \code{list(max_treedepth = 15)}
-therefore keeps \code{adapt_delta = 0.9}, which matters, because that is
-exactly the setting the divergence warning tells you to raise.}
+therefore keeps \code{adapt_delta = 0.99}, which matters, because that is
+exactly the setting the divergence warning tells you to raise.
+
+\code{adapt_delta} is 0.99, not Stan's 0.8, because one divergent
+transition sets \code{convergence_ok} to \code{FALSE} (see
+\code{check_convergence}) and lower values leave a few on ordinary data.
+Four layers of 250 points over a smooth field with a 60 km range, fitted
+at the default four chains of 2,000 iterations from three seeds each,
+had 1 to 24 divergent transitions in every fit at 0.9, the default of
+earlier versions, and none at 0.99; at 0.95 and 0.975 some fits still
+had one or more.  The smaller step costs time: sampling took about
+twice as long as at 0.9 (1.3 to 2.7 times).
+\code{list(adapt_delta = 0.9)} runs faster and can leave a few
+divergent transitions.  Some can remain at 0.99 too, for example on a
+layer whose spatial field is weak against the noise; then raise it to
+0.995 or 0.999, which took three to four and a half times the sampling
+time of 0.9 on the four layers.  No transition reached
+\code{max_treedepth = 12} there at any of these settings.}
 
 \item{compute_loo}{Logical; compute PSIS-LOO. Default TRUE.}
 
@@ -164,8 +180,9 @@ by \code{print()}.  The reason is the number of parameters.  This model
 has one weight per basis function, about 540 parameters at the usual
 basis, and the largest of that many R-hat values sits near 1.01 in a
 fit that has converged: four fits at the default four chains of 2,000
-iterations had largest values of 1.005, 1.009, 1.009 and 1.011, with
-every effective sample size at least 1,086 against the 400 required.
+iterations, with \code{adapt_delta} at 0.9 or 0.95, had largest values
+of 1.005, 1.009, 1.009 and 1.011, with every effective sample size at
+least 1,086 against the 400 required.
 Chains that have converged by construction (540 independent
 parameters, four chains of 1,000 draws) had a largest value of 1.008 to
 1.011 at an effective sample size near 1,300, and 130 to 160 values
@@ -667,7 +684,7 @@ if (requireNamespace("brms", quietly = TRUE)) {
   )
   dat$price <- 10 + 0.01 * (st_coordinates(dat)[, 1] - 5e5) +
     2 * dat$elev + rnorm(n)
-  # Two short chains keep this to a few minutes; expect Stan to warn about
+  # Two short chains keep this to a few minutes; Stan may warn about
   # effective sample size, which is the cost of that.  Use its defaults
   # (chains = 4, iter = 2000) for a fit to report.
   fit <- fit_bayesian_spatial_model(dat, "price", "elev",

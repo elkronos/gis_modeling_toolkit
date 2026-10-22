@@ -297,6 +297,19 @@ old behaviour where there is a way.
   failed verdict raises one warning of class `spatialkit_convergence` that
   names each failed check and its remedy.
 
+* `fit_bayesian_spatial_model()` samples at `adapt_delta = 0.99` by default,
+  where it sampled at 0.9, and so do `cv_bayes()`, `compare_models_cv()`
+  and every other call that leaves `control` unset.  At 0.9 ordinary data
+  left a few divergent transitions, and one is enough to set
+  `convergence_ok` to `FALSE` and raise `spatialkit_convergence`: four
+  layers of 250 points fitted at the default length from three seeds each
+  had 1 to 24 in every fit, and none at 0.99.  Sampling takes about two to
+  three times as long, and a fit at a given seed draws other values, so its
+  estimates, intervals and predictions change.
+  `control = list(adapt_delta = 0.9)` restores the previous setting.  The
+  warning's advice prints `adapt_delta` as it was set; it printed 0.975 as
+  0.97, 0.995 as 0.99 and 0.999 as 1.00.
+
 * `summarize_by_cell(deff = "variogram")` falls back to `"kish"`, not to
   the uncorrected standard error, when no usable variogram exists.  The
   warning of class `spatialkit_deff_fallback` gives the reason.  A new

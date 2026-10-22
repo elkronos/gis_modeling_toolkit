@@ -335,8 +335,9 @@ by pipeline step.
 
 `compare_models_cv()` scores all three on identical folds and is the
 right answer when you can afford it. It is not always cheap. On one
-recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations) the
-Bayesian GP took **1,186 s** at n = 2,000 against **109 s** for
+recorded run (one machine, 4-fold CV, 2 chains × 1,000 iterations, while
+the default `adapt_delta` was 0.9; the present 0.99 samples more slowly)
+the Bayesian GP took **1,186 s** at n = 2,000 against **109 s** for
 `cv_gwr()` on the same data. At n = 300 it was 142 s against 0.8 s, so
 the ratio is not fixed either. A `cv_rf()` of the same shape is seconds.
 So it is worth knowing what each backend is *for* before you spend an
