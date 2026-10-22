@@ -95,7 +95,10 @@ starts keeps the warning \code{\link[stats:kmeans]{stats::kmeans()}} gives.}
 An sf object of \strong{at most} \code{k} cluster-centre POINTs (fewer when
 \code{k} exceeds the number of distinct positions), with \code{seed_id} and
 \code{method = "kmeans"} columns matching \code{\link[=get_voronoi_seeds]{get_voronoi_seeds()}}, and
-\code{attr(, "cover")}, the convex hull of \code{points_sf} (an sfc in its CRS).
+\code{attr(, "cover")}, the convex hull of the coordinates of \code{points_sf}
+(an sfc in its CRS): for lon/lat points, the hull in degrees, with the
+longitudes of points on both sides of 180 degrees taken from 0 to 360
+(-170 as 190).
 Seeds placed with \code{partition = "density"} or \code{init = "kmeans++"}, and
 the scored centres of a profile of the density kind or from random
 starts, also carry \code{attr(, "partition")}: a list with

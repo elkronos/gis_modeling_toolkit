@@ -236,11 +236,13 @@ test_that("cells returned in EPSG:4326 are joined in the profile's CRS: rows in 
   # apart, which the transform to degrees puts at one point: s2 refuses such
   # a cell, and a join on the sphere stopped.  Which cells that hits rests on
   # the last bits of GEOS's corners and of PROJ, so the counts are held only
-  # on the fixture's platform: there it is every lattice under k-means and 11
-  # of the 16 under the density kind.
+  # on the fixture's platform: there it is every lattice under k-means and 10
+  # of the 16 under the density kind.  (11 while the seeds' cover was the hull
+  # s2 builds: the cells of 40 x 30 at 1 m, clipped to a boundary with fewer
+  # vertices, had one such cell.)
   if (.gt_same_platform() && sf::sf_use_s2()) {
     expect_true(all(refused$kmeans > 0L))
-    expect_identical(sum(refused$density > 0L), 11L)
+    expect_identical(sum(refused$density > 0L), 10L)
   }
 })
 

@@ -217,9 +217,12 @@ hull of the points they were fitted to, random seeds inside the
 boundary), so Voronoi cells clipped to the seeds' own hull would leave
 its edge uncovered. The result therefore
 carries that ground as \code{attr(, "cover")}: the \code{boundary} when one was
-given, otherwise the convex hull of \code{sample_points}, otherwise (for the
-scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a \code{\link[=select_resolution]{select_resolution()}}
-result passed as \code{n}) the hull of the points the profile was computed on.
+given, otherwise the convex hull of \code{sample_points} (for lon/lat points,
+the hull of their coordinates in degrees, with the longitudes of points on
+both sides of 180 degrees taken from 0 to 360, -170 as 190), otherwise
+(for the scored centres of a \code{\link[=resolution_profile]{resolution_profile()}} or a
+\code{\link[=select_resolution]{select_resolution()}} result passed as \code{n}) the hull of the points the
+profile was computed on.
 \code{\link[=build_tessellation]{build_tessellation()}} and
 \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} derive their default boundary from it, so
 \code{build_tessellation(seeds, method = "voronoi")} holds every observation

@@ -177,6 +177,228 @@ test_that("k-means seeds on a real lon/lat layer: every feature is assigned", {
   }
 })
 
+
+# --- a continent-sized lon/lat layer -----------------------------------------
+
+# Points uniform over a box in longitude and latitude, EPSG:4326.
+.fc_wide_ll <- function(lon0, lat0, w, h, n, seed) {
+  set.seed(seed)
+  d <- data.frame(lon = lon0 + runif(n, 0, w), lat = lat0 + runif(n, 0, h))
+  d$z <- sin(d$lon * 3) + cos(d$lat * 2) + rnorm(n)
+  sf::st_as_sf(d, coords = c("lon", "lat"), crs = 4326)
+}
+
+test_that("the cover of a lon/lat cloud is its hull in degrees, whatever sf_use_s2() says", {
+  # The cover is moved into the cells' CRS with its edges read as straight
+  # lines in degrees (.cover_follow()).  It was the hull s2 builds, whose
+  # edges are great circles: over the box of the conterminous United States
+  # 24 of 800 points lay outside it read that way, one of them by 130 km
+  # in the cells' CRS, more than the 2% margin.
+  obs <- .fc_wide_ll(-125, 25, 58, 24, 800, 4)
+  cov <- attr(suppressWarnings(voronoi_seeds_kmeans(obs, k = 44, set_seed = 1)), "cover")
+  expect_true(sf::st_crs(cov) == sf::st_crs(4326))
+  bare <- function(x) sf::st_set_crs(sf::st_geometry(x), NA)
+  expect_true(all(lengths(sf::st_intersects(bare(obs), bare(cov))) == 1L))
+  # The planar hull of the coordinates, whether or not sf uses s2.
+  hull <- sf::st_convex_hull(sf::st_combine(bare(obs)))
+  expect_equal(as.numeric(sf::st_area(bare(cov))), as.numeric(sf::st_area(hull)))
+  was <- suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(was)), add = TRUE)
+  expect_identical(.cover_of(obs), cov)
+})
+
+test_that("k-means seeds on a continent-sized lon/lat layer: every observation is assigned", {
+  # Over the box of the conterminous United States one point, (-75.49,
+  # 48.98), fell in no cell at 44 and at 178 seeds; over northern Asia 13 of
+  # 300 points did at 10 seeds.  Around the North Pole s2's hull, read in
+  # degrees, held 19 of 600 points and none of the seeds, so it was set
+  # aside (spatialkit_no_cover) and 230 points fell in no cell.
+  cases <- list(list(obs = .fc_wide_ll(-125, 25, 58, 24, 800, 4), k = c(44, 178)),
+                list(obs = .fc_wide_ll(60, 55, 120, 25, 300, 3), k = 10),
+                list(obs = .fc_wide_ll(-180, 70, 360, 19.5, 600, 1), k = 10))
+  for (cs in cases) for (k in cs$k) {
+    seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = k,
+                                                sample_points = cs$obs, set_seed = 1))
+    r <- .fc_route(seeds, cs$obs)
+    expect_identical(r$tess$params$boundary_source, "seeds' cover")
+    .fc_expect_all_assigned(r, cs$obs, info = paste("k =", k))
+  }
+})
+
+test_that("a continent-sized lon/lat layer: the summary's check reads match on the default path", {
+  obs <- .fc_wide_ll(-125, 25, 58, 24, 800, 4)
+  prof  <- suppressWarnings(suppressMessages(resolution_profile(obs, "z", seed = 123)))
+  sel   <- suppressWarnings(select_resolution(prof))
+  seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs))
+  tess  <- suppressMessages(build_tessellation(seeds, method = "voronoi", quiet = TRUE))
+  asg <- .fc_conditions(assign_features_to_polygons(obs, tess$cells, polygon_id_col = "cell_id"))
+  expect_false(any(.fc_has_class(asg, "spatialkit_unassigned")))
+  expect_identical(nrow(asg$value), nrow(obs))
+  out <- .fc_conditions(summarize_by_cell(asg$value, "z", id_col = "cell_id",
+                                          cells_sf = tess$cells))
+  expect_false(any(.fc_has_class(out, "spatialkit_cells_differ")))
+  chk <- attr(out$value, "count_rule")$check
+  expect_identical(chk$cells, "match")
+  expect_identical(chk$estimate, "match")
+})
+
+test_that("the cover of a cloud in another geographic CRS is its hull in degrees too", {
+  # The same 800 points in NAD83 and in ETRS89: s2's hull of either, read in
+  # degrees, left the point near the northern edge in no cell at 44 and at
+  # 178 seeds, as in WGS 84.
+  for (crs in c(4269, 4258)) {
+    obs <- sf::st_set_crs(sf::st_set_crs(.fc_wide_ll(-125, 25, 58, 24, 800, 4), NA), crs)
+    bare <- function(x) sf::st_set_crs(sf::st_geometry(x), NA)
+    hull <- sf::st_convex_hull(sf::st_combine(bare(obs)))
+    for (k in c(44, 178)) {
+      info <- sprintf("EPSG:%d, k = %d", crs, k)
+      seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = k,
+                                                  sample_points = obs, set_seed = 1))
+      cov <- attr(seeds, "cover")
+      expect_true(sf::st_crs(cov) == sf::st_crs(crs), info = info)
+      expect_equal(as.numeric(sf::st_area(bare(cov))), as.numeric(sf::st_area(hull)), info = info)
+      r <- .fc_route(seeds, obs)
+      expect_identical(r$tess$params$boundary_source, "seeds' cover", info = info)
+      .fc_expect_all_assigned(r, obs, info = info)
+    }
+  }
+})
+
+
+# --- a layer across 180 degrees ----------------------------------------------
+
+# Points uniform over a box that starts at lon0 and runs w degrees east, with
+# their longitudes put back in [-180, 180), EPSG:4326.
+.fc_across_180 <- function(lon0, lat0, w, h, n, seed) {
+  set.seed(seed)
+  d <- data.frame(lon = ((lon0 + runif(n, 0, w) + 180) %% 360) - 180,
+                  lat = lat0 + runif(n, 0, h))
+  d$z <- sin(d$lon * 3) + cos(d$lat * 2) + rnorm(n)
+  sf::st_as_sf(d, coords = c("lon", "lat"), crs = 4326)
+}
+
+test_that("the cover of points on both sides of 180 degrees is their hull with longitudes from 0 to 360", {
+  # Taken on the longitudes as given, from -180 to 180, the hull of these
+  # points ran the long way round the globe.
+  obs <- .fc_across_180(170, -45, 20, 90, 600, 1)
+  lon <- sf::st_coordinates(obs)[, 1L]
+  expect_true(any(lon < 0) && any(lon > 0))
+  cov <- attr(suppressWarnings(voronoi_seeds_kmeans(obs, k = 10, set_seed = 1)), "cover")
+  expect_true(sf::st_crs(cov) == sf::st_crs(4326))
+  bb <- sf::st_bbox(cov)
+  expect_gte(bb[["xmin"]], 170)
+  expect_gt(bb[["xmax"]], 180)
+  expect_lte(bb[["xmax"]], 190)
+  # It holds every point once the longitudes west of 180 are counted past it.
+  xy <- sf::st_coordinates(obs)
+  xy[xy[, 1L] < 0, 1L] <- xy[xy[, 1L] < 0, 1L] + 360
+  past <- sf::st_sfc(lapply(seq_len(nrow(xy)), function(i) sf::st_point(xy[i, 1:2])))
+  expect_true(all(lengths(sf::st_intersects(past, sf::st_set_crs(cov, NA))) == 1L))
+  # Longitudes that span no more as given stay as given: 0 to 360 over the
+  # Pacific, and the conterminous United States.  Others are taken from -180
+  # to 180 or from 0 to 360, whichever spans fewer degrees.
+  expect_identical(.lon_narrowest(c(160, 170, 200, 210)), c(160, 170, 200, 210))
+  expect_identical(.lon_narrowest(c(-125, -100, -67)), c(-125, -100, -67))
+  expect_identical(.lon_narrowest(c(170, 175, -175, -170)), c(170, 175, 185, 190))
+  expect_equal(.lon_narrowest(c(-100, -90, 30, 40, 170, -175)), c(260, 270, 30, 40, 170, 185))
+  expect_equal(.lon_narrowest(c(350, 355, 0, 5, 10)), c(-10, -5, 0, 5, 10))
+  expect_identical(.lon_narrowest(c(5, 5, 5)), c(5, 5, 5))
+})
+
+test_that("a cover past 180 degrees goes into Web Mercator in two pieces, and into a CRS centred on it in one", {
+  cov <- sf::st_sfc(sf::st_polygon(list(rbind(c(170, -45), c(190, -45), c(190, 45),
+                                              c(170, 45), c(170, -45)))), crs = 4326)
+  pts <- sf::st_sfc(sf::st_point(c(175, 0)), sf::st_point(c(-175, 0)), sf::st_point(c(-171, 40)),
+                    sf::st_point(c(171, -40)), crs = 4326)
+  # Web Mercator splits the map at 180: the part past it goes to the other
+  # side, where the points west of 180 are.
+  to <- sf::st_transform(pts, 3857)
+  merc <- .cover_follow(cov, pts, to)
+  expect_true(sf::st_crs(merc) == sf::st_crs(3857))
+  expect_length(sf::st_cast(merc, "POLYGON"), 2L)
+  expect_true(all(lengths(sf::st_intersects(to, merc)) == 1L))
+  # A projection centred on 180 joins the two sides, and the cover moves as
+  # it is.
+  to <- sf::st_transform(pts, "+proj=laea +lat_0=0 +lon_0=180 +datum=WGS84 +units=m +no_defs")
+  cen <- .cover_follow(cov, pts, to)
+  expect_identical(as.character(sf::st_geometry_type(cen)), "POLYGON")
+  expect_true(all(lengths(sf::st_intersects(to, cen)) == 1L))
+  expect_true(.joins_across_180(sf::st_crs(4326), sf::st_crs(to), c(-45, 45)))
+  expect_false(.joins_across_180(sf::st_crs(4326), sf::st_crs(3857), c(-45, 45)))
+  # In Mollweide and Equal Earth the 180th meridian is a curve.  The edges
+  # the cut makes along it get vertices too, so they follow it: with only
+  # their two ends they were chords, the two pieces crossed, and none of
+  # these points near 180 was inside.
+  near <- sf::st_sfc(sf::st_point(c(179.5, 0)), sf::st_point(c(-179.5, 0)),
+                     sf::st_point(c(179.9, 20)), sf::st_point(c(-179.9, -20)), crs = 4326)
+  for (crs in c("+proj=moll +datum=WGS84 +units=m +no_defs",
+                "+proj=eqearth +datum=WGS84 +units=m +no_defs")) {
+    to <- sf::st_transform(near, crs)
+    curved <- .cover_follow(cov, near, to)
+    expect_false(.joins_across_180(sf::st_crs(4326), sf::st_crs(crs), c(-45, 45)), info = crs)
+    expect_length(sf::st_cast(curved, "POLYGON"), 2L)
+    expect_true(all(sf::st_is_valid(curved)), info = crs)
+    expect_true(all(lengths(sf::st_intersects(to, curved)) == 1L), info = crs)
+  }
+})
+
+test_that("k-means seeds on layers across 180 degrees: every observation is assigned", {
+  # With the cover taken the long way round, 32 of these 600 points fell in
+  # no cell at 10 seeds between 170 E and 170 W, and 190 and 50 at 10 and 44
+  # seeds between 90 E and 100 W.  Over 190 degrees of longitude, whose seeds
+  # span less than 180 and get a projection centred on them, the cover held
+  # none of the seeds and was set aside, and 259 fell in no cell.  Over 250
+  # degrees the seeds' CRS is Web Mercator, and the cover goes in two pieces.
+  # Built in Mollweide (`crs`), whose 180th meridian is a curve, the cover in
+  # two pieces left 6 points between 170 E and 170 W in no cell while its
+  # edges along 180 had no vertices but their ends.
+  moll <- "+proj=moll +datum=WGS84 +units=m +no_defs"
+  cases <- list(list(box = c(170, -45, 20, 90), k = 10, ratio = TRUE),
+                list(box = c(90, -60, 170, 120), k = c(10, 44)),
+                list(box = c(85, -60, 190, 120), k = 10),
+                list(box = c(55, -60, 250, 120), k = 10, merc = TRUE),
+                list(box = c(170, -45, 20, 90), k = 10, crs = moll))
+  for (cs in cases) for (k in cs$k) {
+    cs$obs <- .fc_across_180(cs$box[1L], cs$box[2L], cs$box[3L], cs$box[4L], 600, 1)
+    info <- sprintf("%g degrees east from %g E, k = %d%s", cs$box[3L], cs$box[1L], k,
+                    if (is.null(cs$crs)) "" else ", in Mollweide")
+    seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = k,
+                                                sample_points = cs$obs, set_seed = 1))
+    r <- if (is.null(cs$crs)) .fc_route(seeds, cs$obs) else
+      .fc_route(seeds, cs$obs, crs = sf::st_crs(cs$crs))
+    expect_identical(r$tess$params$boundary_source, "seeds' cover", info = info)
+    .fc_expect_all_assigned(r, cs$obs, info = info)
+    if (isTRUE(cs$merc))
+      expect_true(sf::st_crs(r$tess$cells) == sf::st_crs(3857), info = info)
+    if (!is.null(cs$crs))
+      expect_true(sf::st_crs(r$tess$cells) == sf::st_crs(cs$crs), info = info)
+    if (isTRUE(cs$ratio)) {
+      # The cells hold the points' own hull and little more: the long way
+      # round they were more than ten times its area.
+      hull <- sf::st_convex_hull(sf::st_union(sf::st_transform(sf::st_geometry(cs$obs),
+                                                               sf::st_crs(r$tess$cells))))
+      expect_lt(as.numeric(sum(sf::st_area(r$tess$cells)) / sf::st_area(hull)), 1.5)
+    }
+  }
+})
+
+test_that("a layer across 180 degrees: the summary's check reads match on the default path", {
+  # 300 points between 90 E and 100 W and 60 S and 60 N: the cover taken the
+  # long way round left 14 rows in no cell, and the check read "differ".
+  obs <- .fc_across_180(90, -60, 170, 120, 300, 1)
+  prof  <- suppressWarnings(suppressMessages(resolution_profile(obs, "z", seed = 123)))
+  sel   <- suppressWarnings(select_resolution(prof))
+  seeds <- suppressWarnings(get_voronoi_seeds(method = "kmeans", n = sel, sample_points = obs))
+  tess  <- suppressMessages(build_tessellation(seeds, method = "voronoi", quiet = TRUE))
+  asg <- .fc_conditions(assign_features_to_polygons(obs, tess$cells, polygon_id_col = "cell_id"))
+  expect_false(any(.fc_has_class(asg, "spatialkit_unassigned")))
+  expect_identical(nrow(asg$value), nrow(obs))
+  out <- .fc_conditions(summarize_by_cell(asg$value, "z", id_col = "cell_id",
+                                          cells_sf = tess$cells))
+  expect_false(any(.fc_has_class(out, "spatialkit_cells_differ")))
+  expect_identical(attr(out$value, "count_rule")$check$cells, "match")
+})
+
 test_that("observations with no CRS are covered too, in degrees and in metres", {
   # Neither layer has a CRS: seeds and cover are read in one coordinate space,
   # whichever way the builder then interprets the seeds.

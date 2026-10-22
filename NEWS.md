@@ -2047,6 +2047,44 @@ old behaviour where there is a way.
   refuse them, as it refuses `sf::st_area()` and `sf::st_union()` on such
   cells: transform them to a projected CRS first.
 
+* **Cells built on seeds placed from lon/lat points could leave observations
+  near the edge of a wide layer in no cell.**  The seeding functions attach
+  the convex hull of the points they cluster as the seeds' cover, and
+  `build_tessellation()` and `create_voronoi_polygons()` move the cover into
+  the CRS the cells are built in with its edges read as straight lines in
+  degrees, then grow it by 2 percent of its diagonal.  For points in a
+  geographic CRS the hull was the one sf builds with s2, whose edges are great
+  circles, and away from the equator a great circle bows toward the pole.  Of
+  800 points uniform over the box of the conterminous United States, 24 lay
+  outside the hull read in degrees; one of them, near the northern edge, lay
+  130 km outside it in the cells' CRS against a margin of 127 km, and fell in
+  no cell at 44 and at 178 seeds.  `assign_features_to_polygons()` said so
+  (`spatialkit_unassigned`), and the summary of the cells built on a
+  selection's seeds then raised `spatialkit_cells_differ`.  Round a pole the
+  hull, read in degrees, held few of the points: of 600 points north of 70
+  degrees, 230 fell in no cell at 10 seeds, where it held none of the seeds
+  and was set aside with `spatialkit_no_cover`, and 17 at 60 seeds, where it
+  was used.  For points spread round the globe it was the whole sphere, and
+  was set aside too.  For points on both sides of 180 degrees, read in
+  degrees, it ran the long way round the globe: between 170 E and 170 W and 45
+  S and 45 N the cells on 10 seeds were 11 times the area of the points' hull,
+  and of 600 points between 105 E and 105 W and 20 N and 70 N, 239 fell in no
+  cell at 10 seeds.  The hull is now taken on the coordinates in degrees, as
+  it already was with `sf::sf_use_s2(FALSE)` and for points with no CRS, and
+  for points on both sides of 180 degrees with their longitudes taken from 0
+  to 360 (-170 as 190), the short way round.  Where the cells are built in a
+  CRS that splits the map at 180 degrees, as Web Mercator, the CRS for points
+  spread round the globe, does, a cover whose longitudes run past 180 is cut
+  there into two pieces, one at each side of the map.  On all these layers
+  every observation now has a cell, and between 170 E and 170 W the cells are
+  1.3 times the points' hull.  `attr(, "cover")` of seeds placed from lon/lat
+  points is now that hull, and its longitudes run past 180 for points on both
+  sides of 180; s2 reads its edges as great circles, so tested against it with
+  s2, points near a long edge can lie outside it.  Cells on such seeds can
+  differ at their outer edge, and differ throughout where the cover was set
+  aside or ran the long way round.  Layers in a projected CRS, seeds drawn in
+  a boundary and the hull a profile keeps are unchanged.
+
 * **A selection by size called the default size the caller's choice.**  On
   a default call, where nothing names a size, `select_resolution()`'s note
   read "the count is set by obs_per_cell = 4.5, the caller's choice; no

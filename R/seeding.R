@@ -9,9 +9,12 @@
 #' boundary), so Voronoi cells clipped to the seeds' own hull would leave
 #' its edge uncovered. The result therefore
 #' carries that ground as `attr(, "cover")`: the `boundary` when one was
-#' given, otherwise the convex hull of `sample_points`, otherwise (for the
-#' scored centres of a [resolution_profile()] or a [select_resolution()]
-#' result passed as `n`) the hull of the points the profile was computed on.
+#' given, otherwise the convex hull of `sample_points` (for lon/lat points,
+#' the hull of their coordinates in degrees, with the longitudes of points on
+#' both sides of 180 degrees taken from 0 to 360, -170 as 190), otherwise
+#' (for the scored centres of a [resolution_profile()] or a
+#' [select_resolution()] result passed as `n`) the hull of the points the
+#' profile was computed on.
 #' [build_tessellation()] and
 #' [create_voronoi_polygons()] derive their default boundary from it, so
 #' `build_tessellation(seeds, method = "voronoi")` holds every observation
@@ -766,7 +769,10 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' @return An sf object of **at most** `k` cluster-centre POINTs (fewer when
 #'   `k` exceeds the number of distinct positions), with `seed_id` and
 #'   `method = "kmeans"` columns matching [get_voronoi_seeds()], and
-#'   `attr(, "cover")`, the convex hull of `points_sf` (an sfc in its CRS).
+#'   `attr(, "cover")`, the convex hull of the coordinates of `points_sf`
+#'   (an sfc in its CRS): for lon/lat points, the hull in degrees, with the
+#'   longitudes of points on both sides of 180 degrees taken from 0 to 360
+#'   (-170 as 190).
 #'   Seeds placed with `partition = "density"` or `init = "kmeans++"`, and
 #'   the scored centres of a profile of the density kind or from random
 #'   starts, also carry `attr(, "partition")`: a list with

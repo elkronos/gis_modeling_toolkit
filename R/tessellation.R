@@ -285,8 +285,27 @@
 #' For a polygon layer, its polygons as they are; for anything else (points),
 #' the planar convex hull of the coordinates as given, which is a POINT or a
 #' LINESTRING when they have no area.  The hull is taken on the bare numbers,
-#' CRS set aside: the question is which coordinates it has to hold, and sf
-#' would otherwise build a spherical hull for lon/lat.
+#' CRS set aside, and the layer's CRS is set on it after: the question is
+#' which coordinates it has to hold, and sf would otherwise build a spherical
+#' hull for lon/lat.  \code{.cover_follow()} moves the cover into the cells'
+#' CRS with its edges read as straight lines in these coordinates.  The edges
+#' of a spherical hull are great circles, which bow toward the pole, so read
+#' that way they leave out points near a long edge (of 800 points over the
+#' conterminous United States one fell in no cell at 44 and at 178 seeds).
+#' Round a pole the spherical hull, read so, is a thin band that holds none
+#' of the seeds, and round the globe it is the full sphere; the builders set
+#' either aside.
+#'
+#' For lon/lat points the hull is taken on their longitudes from -180 to 180
+#' or from 0 to 360, whichever spans fewer degrees, unless they span no more
+#' as given (see \code{.lon_narrowest()}): points on both sides of 180
+#' degrees get the hull of their longitudes from 0 to 360 (-170 as 190), so
+#' its longitudes run past 180.  Taken from -180 to 180, the hull of such
+#' points ran the long way round the globe, and moved into a projection
+#' centred on the points, as the CRS chosen for them is, it no longer held
+#' them: of 600 points between 170 E and 170 W and 45 S and 45 N, 32 fell in
+#' no cell at 10 seeds, in cells more than ten times the area of the points'
+#' hull.
 #'
 #' @param x An sf or sfc layer, or \code{NULL}.
 #' @return An sfc in the CRS of \code{x}, or \code{NULL} when \code{x} is not
@@ -304,7 +323,33 @@
   if (ncol(xy) < 2L) return(NULL)
   xy <- xy[is.finite(xy[, 1L]) & is.finite(xy[, 2L]), 1:2, drop = FALSE]
   if (!nrow(xy)) return(NULL)
-  sf::st_convex_hull(sf::st_sfc(sf::st_multipoint(unname(xy)), crs = sf::st_crs(g)))
+  if (isTRUE(sf::st_is_longlat(g))) xy[, 1L] <- .lon_narrowest(xy[, 1L])
+  sf::st_set_crs(sf::st_convex_hull(sf::st_sfc(sf::st_multipoint(unname(xy)))),
+                 sf::st_crs(g))
+}
+
+
+#' Longitudes as given, or from -180 to 180 or 0 to 360, whichever spans least
+#'
+#' A hull in degrees runs from the least longitude to the greatest.  Points
+#' on both sides of 180 degrees given from -180 to 180 span nearly 360
+#' degrees, the long way round; from 0 to 360 (-170 as 190) they span the
+#' short way.  Longitudes that span no more as given than either
+#' way are returned as given, so 0 to 360 longitudes over the Pacific stay as
+#' they are; otherwise the narrower of the two, -180 to 180 on a tie.  Both
+#' stay within -180 to 360, the longitudes \code{sf::st_is_longlat()} takes
+#' without a warning.
+#'
+#' @param lon Finite longitudes in degrees.
+#' @return \code{lon}, as given or moved by multiples of 360.
+#' @keywords internal
+#' @noRd
+.lon_narrowest <- function(lon) {
+  w180 <- ((lon + 180) %% 360) - 180
+  w360 <- lon %% 360
+  span <- function(x) max(x) - min(x)
+  if (span(lon) <= min(span(w180), span(w360)) + 1e-9) return(lon)
+  if (span(w360) < span(w180) - 1e-9) w360 else w180
 }
 
 
@@ -329,6 +374,15 @@
 #'     United States the middle of a lon/lat hull's northern edge would
 #'     otherwise sit hundreds of kilometres inside the points it was drawn
 #'     round, once projected.
+#'   \item A lon/lat cover whose longitudes run past 180 degrees (the hull
+#'     \code{.cover_of()} takes of points on both sides of 180) goes into a
+#'     CRS that joins the two sides of 180 as it is.  A CRS that splits the
+#'     map there, as Web Mercator (the CRS for points spread round the globe)
+#'     does, would send the part past 180 to the far side of the map and
+#'     draw its edges across it, so the cover is cut at 180 first and that
+#'     part moved back by 360 degrees: it arrives in two pieces, one at each
+#'     side of the map, as the points do.  The cut comes before the vertices
+#'     are added, so the edges along 180 get them as well.
 #' }
 #'
 #' @param cover sfc geometry of the cover.
@@ -357,6 +411,13 @@
     bb  <- sf::st_bbox(g)
     ext <- max(as.numeric(bb[["xmax"]] - bb[["xmin"]]),
                as.numeric(bb[["ymax"]] - bb[["ymin"]]))
+    # Cut before the vertices are added, so the edges the cut makes along
+    # 180 get them too: in Mollweide or Equal Earth the 180th meridian is a
+    # curve, and an edge along it with no vertices but its two ends is a
+    # chord that leaves out the points near 180.
+    if (isTRUE(sf::st_is_longlat(g)) && isTRUE(bb[["xmax"]] > 180) &&
+        !.joins_across_180(sf::st_crs(g), crs_now, c(bb[["ymin"]], bb[["ymax"]])))
+      g <- .cut_at_180(g)
     if (is.finite(ext) && ext > 0) {
       crs_g <- sf::st_crs(g)
       g <- sf::st_set_crs(sf::st_segmentize(sf::st_set_crs(g, NA),
@@ -364,6 +425,65 @@
     }
   }
   sf::st_transform(g, crs_now)
+}
+
+
+#' Does a CRS join the two sides of the 180th meridian?
+#'
+#' A projection centred on the data, or on a pole, puts (180, lat) and
+#' (-180, lat) at one point; Web Mercator and the other world maps centred
+#' on the prime meridian put them at the two sides of the map.  Tested at
+#' the cover's lowest, middle and highest latitudes (kept 1 degree off the
+#' poles): joined where the two points land closer than a millionth of the
+#' length of one degree of the parallel there.
+#'
+#' @param crs_ll The geographic CRS of the cover.
+#' @param crs The CRS the cover goes to.
+#' @param lat The cover's lowest and highest latitudes.
+#' @return \code{TRUE} or \code{FALSE}; \code{FALSE} when the points cannot
+#'   be moved there.
+#' @keywords internal
+#' @noRd
+.joins_across_180 <- function(crs_ll, crs, lat) {
+  lat <- pmin(pmax(c(lat, mean(lat)), -89), 89)
+  if (!all(is.finite(lat))) return(FALSE)
+  at <- function(lon) lapply(lat, function(p) sf::st_point(c(lon, p)))
+  xy <- tryCatch(sf::st_coordinates(sf::st_transform(
+    sf::st_sfc(c(at(180), at(-180), at(179)), crs = crs_ll), crs))[, 1:2, drop = FALSE],
+    error = function(e) NULL)
+  if (is.null(xy) || !all(is.finite(xy))) return(FALSE)
+  i <- seq_along(lat)
+  apart <- function(a, b) sqrt(rowSums((xy[a, , drop = FALSE] - xy[b, , drop = FALSE])^2))
+  degree <- apart(i, 2L * length(lat) + i)
+  all(degree > 0 & apart(i, length(lat) + i) <= 1e-6 * degree)
+}
+
+
+#' Cut a lon/lat cover at 180 degrees and move the part past it back by 360
+#'
+#' @param g An sfc in a geographic CRS whose longitudes run past 180.
+#' @return An sfc in the same CRS: the part of \code{g} up to 180 as it
+#'   was, and the part past 180 moved back by 360 degrees.
+#' @keywords internal
+#' @noRd
+.cut_at_180 <- function(g) {
+  crs_g <- sf::st_crs(g)
+  h  <- sf::st_union(sf::st_set_crs(g, NA))
+  bb <- sf::st_bbox(h)
+  dim0 <- max(sf::st_dimension(h), na.rm = TRUE)
+  box <- function(x0, x1) sf::st_as_sfc(sf::st_bbox(c(
+    xmin = x0, ymin = bb[["ymin"]] - 1, xmax = x1, ymax = bb[["ymax"]] + 1)))
+  side <- function(x) {
+    x <- x[!sf::st_is_empty(x)]
+    if (length(x) && any(sf::st_geometry_type(x) == "GEOMETRYCOLLECTION"))
+      x <- suppressWarnings(sf::st_collection_extract(
+        x, c("POINT", "LINESTRING", "POLYGON")[dim0 + 1L]))
+    x[sf::st_dimension(x) == dim0]
+  }
+  near <- side(sf::st_intersection(h, box(min(bb[["xmin"]], 180) - 1, 180)))
+  far  <- side(sf::st_intersection(h, box(180, bb[["xmax"]] + 1)))
+  if (length(far)) far <- far - c(360, 0)
+  sf::st_set_crs(sf::st_union(c(near, far)), crs_g)
 }
 
 
