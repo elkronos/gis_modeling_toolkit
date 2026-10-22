@@ -462,6 +462,30 @@ old behaviour where there is a way.
   in that case.  A script that compared the reason with the old text can
   compare its start, "no variogram model could be fitted", which both share.
 
+* `new_spatial_fit()` stops on a fit its methods cannot use, with an error
+  that names the argument and what it got: `data_sf` must be an sf object,
+  `formula` a formula, `response_var` the name of one attribute column of
+  `data_sf` (a column other than its geometry), `predictor_vars` a
+  character vector of its attribute columns (`character(0)` for none),
+  `subclass` one class name and `info` a list.  It built a fit from any of
+  them: a column number or a factor as `response_var` made `summary()` and
+  `model_metrics()` score the fitted values against the column at that
+  position, a misspelt name or the geometry column's name failed later in
+  another function with a message about something else, and a `data_sf`
+  without geometry made `residual_morans_i()` blame a missing `residuals()`
+  method.  A `fit_fn` that passed `st_drop_geometry(train_sf)` has to pass
+  `train_sf`.  One whose fit names a column the training rows lack (a
+  predictor derived inside `fit_fn`, say) fails every fold of
+  `cv_spatial()`, with the message in `fold_status`: add the column to
+  `train_sf` before building the fit, or leave it out of `predictor_vars`,
+  as the README's `trend_fit` does with the coordinates it derives.  A
+  `brms::bf()` formula is passed as its `$formula`.  In
+  `select_features_forward()`, a `fit_fn` whose fit for no predictors is
+  refused (`predictor_vars = NULL` where `character(0)` is meant, say) can
+  no longer give the null-model baseline: the baseline is the training-fold
+  mean, as for any learner that cannot fit the empty set, and
+  `baseline$type` says `"fold mean"`.
+
 ## New features
 
 * `resolution_profile()`, `get_voronoi_seeds(method = "kmeans")` and

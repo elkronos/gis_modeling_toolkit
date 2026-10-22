@@ -24,6 +24,16 @@
 #' naming the method to define, without one.  \code{\link{residuals}()} and
 #' \code{\link{coef}()} methods are optional.
 #'
+#' The constructor checks the fields the package's functions read from a fit,
+#' and stops with an error that names the argument: \code{subclass} must be
+#' one class name, \code{data_sf} an sf object, \code{formula} a formula,
+#' \code{response_var} the name of one attribute column of \code{data_sf}
+#' (a column other than its geometry), \code{predictor_vars} a character
+#' vector of its attribute columns, and \code{info} a list.  It does not
+#' check the response's type (a Bayesian fit can have a factor or ordinal
+#' response); \code{summary()} and \code{model_metrics()} refuse a response
+#' that is not numeric or logical.
+#'
 #' @section The coef() contract:
 #' \code{coef()} on one of the three built-in backends either returns the
 #' coefficients or signals an error.  It never returns \code{NULL}.  A custom
@@ -50,13 +60,18 @@
 #' @param engine   The raw model object your backend produced (an \code{lm},
 #'   a \code{ranger} object, a \code{brmsfit}, ...).  Nothing inspects it
 #'   except your own methods.
-#' @param formula  A formula.
-#' @param response_var  Character(1).
-#' @param predictor_vars Character vector.
-#' @param data_sf  An sf object used for fitting.
-#' @param info     Named list of model-specific extras.  Set
-#'   \code{fitted_are_oob = TRUE} when your \code{fitted()} values are held
-#'   out instead of in-sample, so \code{summary()} labels them correctly.
+#' @param formula  A formula: the model, as \code{print()} and
+#'   \code{summary()} show it.
+#' @param response_var  Character(1): the name of the response column of
+#'   \code{data_sf}, an attribute column (not the geometry).
+#' @param predictor_vars Character vector of attribute column names of
+#'   \code{data_sf}; \code{character(0)} for a model without predictors.
+#' @param data_sf  An sf object: the rows the model was fitted on, with their
+#'   geometry, in the order \code{fitted()} returns its values.
+#' @param info     Named list of model-specific extras (\code{list()} for
+#'   none).  Set \code{fitted_are_oob = TRUE} when your \code{fitted()} values
+#'   are held out instead of in-sample, so \code{summary()} labels them
+#'   correctly.
 #' @return An object of class \code{c(subclass, "spatial_fit")}.
 #' @seealso \code{\link{cv_spatial}()}, which consumes a custom \code{fit_fn};
 #'   \code{\link{fit_rf_model}()} for a worked built-in fitter.
@@ -100,7 +115,70 @@
 #' @export
 new_spatial_fit <- function(subclass, engine, formula, response_var,
                             predictor_vars, data_sf, info = list()) {
-  stopifnot(is.character(subclass), length(subclass) == 1L)
+  if (!is.character(subclass) || length(subclass) != 1L || is.na(subclass) ||
+      !nzchar(subclass))
+    stop("new_spatial_fit(): `subclass` must be one class name, a character ",
+         "string such as \"lm_fit\"; got ",
+         if (is.null(subclass)) "NULL"
+         else if (!is.character(subclass) || length(subclass) != 1L)
+           sprintf("%s of length %d", class(subclass)[1L], length(subclass))
+         else if (is.na(subclass)) "NA" else "an empty string",
+         ".", call. = FALSE)
+  # Every method reads these four, so a malformed one is refused here, where
+  # the message can name it.  Past the constructor, a plain data.frame as
+  # `data_sf` has no residuals() fallback and no maps, a list gives n = NULL
+  # and "missing value where TRUE/FALSE needed" from summary(), a column
+  # number or a factor as `response_var` scores the fitted values against
+  # the column at that position (a factor indexes by its code), and a
+  # misspelt name fails in another function with a message about something
+  # else.  The methods read the response and the predictors from
+  # st_drop_geometry(data_sf), so the geometry column is not one of them.
+  # The response is not checked for numeric here: a Bayesian fit can have a
+  # factor or ordinal response, and summary() and model_metrics() refuse a
+  # non-numeric one themselves.
+  if (!inherits(data_sf, "sf"))
+    stop("new_spatial_fit(): `data_sf` must be an sf object (the training ",
+         "rows with their geometry); got ",
+         paste(class(data_sf), collapse = "/"), ".", call. = FALSE)
+  if (!inherits(formula, "formula"))
+    stop("new_spatial_fit(): `formula` must be a formula; got ",
+         class(formula)[1L], ".", call. = FALSE)
+  geom <- attr(data_sf, "sf_column")
+  cols <- setdiff(names(data_sf), geom)
+  if (!is.character(response_var) || length(response_var) != 1L ||
+      !(response_var %in% cols))
+    stop("new_spatial_fit(): `response_var` must name one attribute column ",
+         "of `data_sf`",
+         if (is.null(response_var)) "; got NULL"
+         else if (!is.character(response_var) || length(response_var) != 1L)
+           sprintf("; got %s of length %d", class(response_var)[1L],
+                   length(response_var))
+         else if (response_var %in% geom)
+           sprintf("; '%s' is its geometry column", response_var)
+         else sprintf("; '%s' is not one", response_var),
+         ".", call. = FALSE)
+  if (!is.character(predictor_vars))
+    stop("new_spatial_fit(): `predictor_vars` must be a character vector of ",
+         "column names (character(0) for a model without predictors); got ",
+         class(predictor_vars)[1L], ".", call. = FALSE)
+  miss <- setdiff(predictor_vars, names(data_sf))
+  if (length(miss))
+    stop("new_spatial_fit(): `predictor_vars` names ",
+         if (length(miss) == 1L) "a column" else "columns",
+         " that `data_sf` does not have: ",
+         paste(sprintf("'%s'", miss), collapse = ", "), ".", call. = FALSE)
+  if (any(predictor_vars %in% geom))
+    stop("new_spatial_fit(): `predictor_vars` names '", geom, "', the ",
+         "geometry column of `data_sf`; predictors are attribute columns.",
+         call. = FALSE)
+  # `info` is a list the methods read extras from and the cache is added to:
+  # a data.frame stopped below with "replacement has 0 rows", and a vector
+  # was coerced to a list with a warning.  NULL is no extras.
+  if (is.null(info)) info <- list()
+  if (!is.list(info) || is.data.frame(info))
+    stop("new_spatial_fit(): `info` must be a list of model-specific extras ",
+         "(list() for none); got ", paste(class(info), collapse = "/"), ".",
+         call. = FALSE)
   # Use an environment for the cache so it has reference semantics —
 
   # mutations persist across calls without triggering R copy-on-modify.
@@ -455,8 +533,9 @@ summary.spatial_fit <- function(object, ...) {
   # The same guard model_metrics() applies, for the same reason and on the same
   # columns.  Without it summary() still did what model_metrics() was fixed to
   # stop doing: a character response gave n = 0 and every metric NA with
-  # nothing said, and a factor died in `abs()`.  new_spatial_fit() is the
-  # documented entry point for a user's own backend and validates neither.
+  # nothing said, and a factor died in `abs()`.  new_spatial_fit() checks that
+  # the response is an attribute column of `data_sf`, not that it is numeric:
+  # a Bayesian fit can have a factor response.
   y_obs <- .checked_response(y_obs, object$response_var, "summary")
   # GWR fits locally varying coefficients at every observation, so the
   # global predictor count is not a valid effective-parameter count for

@@ -469,6 +469,8 @@ test_that("area_of_applicability agrees between the FNN and dense paths", {
 
 test_that("area_of_applicability takes training data from a fitted model", {
   tr <- mk_aoa_pts(60)
+  # new_spatial_fit() refuses a response that is not a column of `data_sf`.
+  tr$z <- tr$a + tr$b
   nd <- mk_aoa_new(a = c(0, 15), b = c(0, 15))
   fit <- new_spatial_fit(subclass = "stub_fit", engine = NULL,
                          formula = stats::as.formula("z ~ a + b"),
