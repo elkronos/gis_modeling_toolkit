@@ -2021,6 +2021,32 @@ old behaviour where there is a way.
   tessellation makes the points seeds, and `index` then gives each its
   cell.
 
+* **`assign_features_to_polygons()` stopped on cells returned in lon/lat
+  with "duplicate vertex".**  `build_tessellation(crs = 4326)` builds the
+  cells in a projected CRS and transforms them.  On gridded locations four
+  centres can stand the same distance from one point, and two cells meet
+  there at two corners that differ only by rounding, less than a nanometre
+  apart; the transform puts them at one point, or at two that sf's
+  spherical engine (s2) cannot tell apart, and s2 refused the cell.  Rows
+  in lon/lat were joined on the sphere, so the join stopped: on 16 lattices
+  at spacings of 1 to 1,000 m with rows in EPSG:4326, 27 of 32 paths
+  stopped under the two kinds, and 3 of the 5 others put rows on an edge in
+  another cell than the profile's.  Cells in lon/lat whose record says a
+  profile scored them are now joined in the record's projected CRS, where
+  they were drawn: every row is in the cell the profile scored it in, a
+  point on an edge goes to the cell of its nearest centre, and the
+  summary's check reads `match` on all 32.  This holds for the cells s2
+  accepts too, so features that are not points get their cell from
+  overlaps and areas measured in that CRS, and rows without a CRS, which
+  also stopped, are joined there.  `cell_values_at()` without `seeds`
+  places locations on such cells there as well.  Other cells in lon/lat are
+  joined as before: cells without the record (from a count given as a
+  number, or after a verb that drops attributes) and cells whose record
+  says they are not the cells the profile scored (`scored_cells = FALSE`,
+  such as the cells of centres refitted to every point).  s2 can still
+  refuse them, as it refuses `sf::st_area()` and `sf::st_union()` on such
+  cells: transform them to a projected CRS first.
+
 * **A selection by size called the default size the caller's choice.**  On
   a default call, where nothing names a size, `select_resolution()`'s note
   read "the count is set by obs_per_cell = 4.5, the caller's choice; no

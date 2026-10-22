@@ -158,10 +158,17 @@ at a UTM northing of 4,400 km. \code{\link[=build_tessellation]{build_tessellati
 in the CRS the record names, around the centres as the record holds
 them, whatever CRS the seeds came back in (unless its \code{crs} names
 another projected CRS), so their corners carry only the rounding of
-that computation, far less than the margin. A point
-farther from its nearest centre's cell keeps the polygon that holds it,
-and so do features that are not points, points without a CRS beside a
-record with one, and a join in longitude and latitude. A centre's cell
+that computation, far less than the margin. Cells it returns in a
+geographic \code{crs} are moved back into the record's CRS for the join (see
+Details). In a UTM zone the round trip through degrees moves a corner by
+about 2e-9 m; in the equal-area CRS the profile works in for a layer
+wider than a zone it can move one by more than the margin (how far
+depends on the PROJ build), so a point on such an edge can keep the
+polygon that holds it, and the summary's check then reads \code{"differ"}. A
+point farther from its nearest centre's cell keeps the polygon that
+holds it, and so do features that are not points, points without a CRS
+beside a record with one, and a join in longitude and latitude (polygons
+in degrees beside a record in degrees). A centre's cell
 is the one cell that holds it and no other centre; a centre outside a
 boundary that clipped its cell away from it has the cell, among those
 that hold no centre, whose inside is nearest it. Cells built from other
@@ -185,9 +192,15 @@ and cell-level counts mean what they say.
 
 The join runs in the CRS of \code{polygons_sf} whenever that CRS is projected,
 so cell edges are the straight lines the cells were drawn with and overlap
-areas are planar. A copy of \code{features_sf} is transformed for it, and the
-features come back with the coordinates they arrived with. Otherwise (the
-polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
+areas are planar. Cells in lon/lat whose record of their count says they
+are the cells a profile scored, and holds its centres in a projected CRS
+(the Voronoi cells \code{\link[=build_tessellation]{build_tessellation()}} builds on the centres a profile
+scored and returns in a geographic \code{crs}; see Value), were drawn in the
+record's CRS, and the join runs there. A copy of \code{features_sf} is
+transformed for it, and the features come back with the coordinates they
+arrived with. Otherwise (other polygons in lon/lat, such as a hex or
+square lattice sized by a selection or the cells of centres refitted to
+every point, or polygons without a CRS) the join runs in the CRS of
 \code{features_sf}.
 }
 \examples{

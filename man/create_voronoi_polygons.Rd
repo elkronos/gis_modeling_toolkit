@@ -52,7 +52,19 @@ in: the cells are built in the local projected CRS \code{\link[=ensure_projected
 picks for the points, so they are nearest-point cells on the ground, and
 are then transformed, with long edges densified. Seeds that are the
 centres a profile scored are built in the CRS the profile worked in
-instead (see "Seeds a profile scored").}
+instead (see "Seeds a profile scored"). Where four seeds stand the same
+distance from one point, as on gridded locations, two cells can meet
+there at two corners that differ only by rounding, which the transform
+to degrees can put at one point, and sf's spherical engine (s2) refuses
+such a cell. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} joins the cells of the
+centres a profile scored in the CRS they were built in, while they
+carry the record that says so (\code{scored_cells = TRUE}). \code{sf::st_area()},
+\code{sf::st_union()}, and a join of rows in degrees to other cells (cells
+without the record, such as those of a count given as a number or those
+a verb that drops attributes has stripped of it, and cells whose record
+says \code{scored_cells = FALSE}, such as those of centres refitted to every
+point) go to s2 and stop on such a cell: transform the cells to a
+projected CRS first.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

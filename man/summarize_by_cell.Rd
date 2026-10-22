@@ -404,9 +404,13 @@ whatever CRS the seeds arrive in, unless its \code{crs} names another
 projected CRS. Cells built in another projected CRS are the
 nearest-centre cells of that CRS, so a row near a boundary, on it or
 not, can sit in another cell than the profile put it in. So can a row
-joined in longitude and latitude (rows and cells both in degrees), and
-a row that reached the record's CRS by another transformation than the
-profile's, which can settle a tie the other way. The comparison then
+joined in longitude and latitude, as rows and cells in degrees are when
+the cells do not carry the record or carry one in degrees (the Voronoi
+cells of the scored centres that \code{\link[=build_tessellation]{build_tessellation()}} returns in a
+geographic \code{crs} are joined in the record's CRS while they carry it),
+and a row that reached the record's
+CRS by another transformation than the profile's, which can settle a tie
+the other way. The comparison then
 reports \code{"differ"}, with \code{what = "loo"} when it finds the same rows in
 the same number of cells with another leave-one-out error. The
 summary's own numbers describe the cells as assigned.

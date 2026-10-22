@@ -145,7 +145,10 @@ returns them there or in the geographic \code{crs}; see
 cells built in another projected CRS, named here, are the nearest-seed
 cells of that CRS, so a row near a boundary can fall in the
 neighbouring cell, and \code{\link[=summarize_by_cell]{summarize_by_cell()}} then reports that the
-cells are not the ones scored.}
+cells are not the ones scored. Voronoi cells returned in a geographic
+\code{crs} can hold two corners at one point where four seeds stand the same
+distance from a corner (gridded locations), which sf's spherical engine
+(s2) refuses; \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}} says what still stops on them.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo

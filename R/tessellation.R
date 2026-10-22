@@ -962,7 +962,19 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   picks for the points, so they are nearest-point cells on the ground, and
 #'   are then transformed, with long edges densified. Seeds that are the
 #'   centres a profile scored are built in the CRS the profile worked in
-#'   instead (see "Seeds a profile scored").
+#'   instead (see "Seeds a profile scored"). Where four seeds stand the same
+#'   distance from one point, as on gridded locations, two cells can meet
+#'   there at two corners that differ only by rounding, which the transform
+#'   to degrees can put at one point, and sf's spherical engine (s2) refuses
+#'   such a cell. [assign_features_to_polygons()] joins the cells of the
+#'   centres a profile scored in the CRS they were built in, while they
+#'   carry the record that says so (`scored_cells = TRUE`). `sf::st_area()`,
+#'   `sf::st_union()`, and a join of rows in degrees to other cells (cells
+#'   without the record, such as those of a count given as a number or those
+#'   a verb that drops attributes has stripped of it, and cells whose record
+#'   says `scored_cells = FALSE`, such as those of centres refitted to every
+#'   point) go to s2 and stop on such a cell: transform the cells to a
+#'   projected CRS first.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.
@@ -1864,7 +1876,10 @@ create_grid_polygons <- function(
 #'   cells built in another projected CRS, named here, are the nearest-seed
 #'   cells of that CRS, so a row near a boundary can fall in the
 #'   neighbouring cell, and [summarize_by_cell()] then reports that the
-#'   cells are not the ones scored.
+#'   cells are not the ones scored. Voronoi cells returned in a geographic
+#'   `crs` can hold two corners at one point where four seeds stand the same
+#'   distance from a corner (gridded locations), which sf's spherical engine
+#'   (s2) refuses; [create_voronoi_polygons()] says what still stops on them.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.

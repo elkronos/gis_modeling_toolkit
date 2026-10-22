@@ -12,9 +12,15 @@
 #'
 #' The join runs in the CRS of `polygons_sf` whenever that CRS is projected,
 #' so cell edges are the straight lines the cells were drawn with and overlap
-#' areas are planar. A copy of `features_sf` is transformed for it, and the
-#' features come back with the coordinates they arrived with. Otherwise (the
-#' polygons are in lon/lat, or carry no CRS) the join runs in the CRS of
+#' areas are planar. Cells in lon/lat whose record of their count says they
+#' are the cells a profile scored, and holds its centres in a projected CRS
+#' (the Voronoi cells [build_tessellation()] builds on the centres a profile
+#' scored and returns in a geographic `crs`; see Value), were drawn in the
+#' record's CRS, and the join runs there. A copy of `features_sf` is
+#' transformed for it, and the features come back with the coordinates they
+#' arrived with. Otherwise (other polygons in lon/lat, such as a hex or
+#' square lattice sized by a selection or the cells of centres refitted to
+#' every point, or polygons without a CRS) the join runs in the CRS of
 #' `features_sf`.
 #'
 #' @param features_sf An sf object containing features to assign.
@@ -150,10 +156,17 @@
 #'   in the CRS the record names, around the centres as the record holds
 #'   them, whatever CRS the seeds came back in (unless its `crs` names
 #'   another projected CRS), so their corners carry only the rounding of
-#'   that computation, far less than the margin. A point
-#'   farther from its nearest centre's cell keeps the polygon that holds it,
-#'   and so do features that are not points, points without a CRS beside a
-#'   record with one, and a join in longitude and latitude. A centre's cell
+#'   that computation, far less than the margin. Cells it returns in a
+#'   geographic `crs` are moved back into the record's CRS for the join (see
+#'   Details). In a UTM zone the round trip through degrees moves a corner by
+#'   about 2e-9 m; in the equal-area CRS the profile works in for a layer
+#'   wider than a zone it can move one by more than the margin (how far
+#'   depends on the PROJ build), so a point on such an edge can keep the
+#'   polygon that holds it, and the summary's check then reads `"differ"`. A
+#'   point farther from its nearest centre's cell keeps the polygon that
+#'   holds it, and so do features that are not points, points without a CRS
+#'   beside a record with one, and a join in longitude and latitude (polygons
+#'   in degrees beside a record in degrees). A centre's cell
 #'   is the one cell that holds it and no other centre; a centre outside a
 #'   boundary that clipped its cell away from it has the cell, among those
 #'   that hold no centre, whose inside is nearest it. Cells built from other
@@ -219,6 +232,25 @@ assign_features_to_polygons <- function(
   # features arrived with; a CRS-less layer is resolved into the polygons'
   # CRS and returned there, as before.
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
+  # Cells in longitude and latitude whose record says a profile scored them
+  # (the Voronoi cells of the scored centres that build_tessellation()
+  # returns in a geographic `crs`) were drawn in the record's projected CRS,
+  # and are joined there: their edges are straight in it, and the profile
+  # measured the rows in it.  The join's copy of the features is moved there
+  # from whatever CRS it is in; the rows returned keep `f_geom`, set above.
+  # On the sphere s2 refused some of these cells: where four centres stand
+  # the same distance from one point, two cells meet at two corners a
+  # fraction of a nanometre apart, which the transform to degrees puts at
+  # one point ("duplicate vertex"), and the join of rows in degrees stopped.
+  # The polygons are moved from `polygons_sf`, not from `p`, which holds
+  # them in the features' CRS when that is projected.  Projected cells are
+  # joined in their own CRS whatever CRS their record names, and cells
+  # without a CRS have none to be moved from.
+  crs_s <- if (!join_in_p && !is.na(crs_p)) .scored_crs(count_rule) else NULL
+  if (!is.null(crs_s)) {
+    if (!isTRUE(sf::st_crs(f) == crs_s)) f <- sf::st_transform(f, crs_s)
+    p <- sf::st_transform(polygons_sf, crs_s)
+  }
 
   id_candidates <- unique(c(polygon_id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
   id_col <- id_candidates[id_candidates %in% names(p)][1]
@@ -660,9 +692,11 @@ assign_features_to_polygons <- function(
 #' surface has it as its nearest centre, when no other such cell has.
 #'
 #' Edges are measured in the CRS of the join: a projected one, or none on
-#' either side when the record names none.  Polygons in longitude and
-#' latitude, features without a CRS beside a record with one, or the
-#' reverse, are left as the join placed them.
+#' either side when the record names none.  Cells in longitude and latitude
+#' beside a record in a projected CRS arrive here in that CRS, where
+#' \code{assign_features_to_polygons()} joins them.  Polygons in longitude
+#' and latitude (beside a record in degrees), features without a CRS beside
+#' a record with one, or the reverse, are left as the join placed them.
 #'
 #' @param f The join's copy of the features, in the join's CRS, one row per
 #'   row of \code{features}.
@@ -2014,9 +2048,13 @@ assign_features_to_polygons <- function(
 #'   projected CRS. Cells built in another projected CRS are the
 #'   nearest-centre cells of that CRS, so a row near a boundary, on it or
 #'   not, can sit in another cell than the profile put it in. So can a row
-#'   joined in longitude and latitude (rows and cells both in degrees), and
-#'   a row that reached the record's CRS by another transformation than the
-#'   profile's, which can settle a tie the other way. The comparison then
+#'   joined in longitude and latitude, as rows and cells in degrees are when
+#'   the cells do not carry the record or carry one in degrees (the Voronoi
+#'   cells of the scored centres that [build_tessellation()] returns in a
+#'   geographic `crs` are joined in the record's CRS while they carry it),
+#'   and a row that reached the record's
+#'   CRS by another transformation than the profile's, which can settle a tie
+#'   the other way. The comparison then
 #'   reports `"differ"`, with `what = "loo"` when it finds the same rows in
 #'   the same number of cells with another leave-one-out error. The
 #'   summary's own numbers describe the cells as assigned.
