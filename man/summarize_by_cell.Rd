@@ -398,22 +398,34 @@ between their cells, which happens on gridded locations.
 lower-numbered centre, and \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, on cells
 built from the centres the profile scored, gives a point on that
 boundary the same cell, measured in the CRS the record names, so the
-comparison reads \code{"match"} on gridded locations too.
+comparison reads \code{"match"} on gridded locations too. It does so on
+cells that carry the record, for rows that have a CRS when the record
+names one. Rows without a CRS, rows assigned to the cells after they
+lost the record (written to a file and read back, say) and summarised
+with \code{cells_sf} set to the cells that carry it, and rows given their
+cells by another join are placed by the polygons alone, so a row on a
+boundary can sit in either cell.
 \code{\link[=build_tessellation]{build_tessellation()}} draws those cells in the CRS the record names,
 whatever CRS the seeds arrive in, unless its \code{crs} names another
 projected CRS. Cells built in another projected CRS are the
-nearest-centre cells of that CRS, so a row near a boundary, on it or
-not, can sit in another cell than the profile put it in. So can a row
-joined in longitude and latitude, as rows and cells in degrees are when
-the cells do not carry the record or carry one in degrees (the Voronoi
+nearest-centre cells of that CRS, and cells transformed to another
+projected CRS are joined there, so a row near a boundary, on it or not,
+can sit in another cell than the profile put it in. So can a row joined
+in longitude and latitude, as rows and cells in degrees are when the
+cells do not carry the record or carry one in degrees (the Voronoi
 cells of the scored centres that \code{\link[=build_tessellation]{build_tessellation()}} returns in a
-geographic \code{crs} are joined in the record's CRS while they carry it),
-and a row that reached the record's
-CRS by another transformation than the profile's, which can settle a tie
-the other way. The comparison then
-reports \code{"differ"}, with \code{what = "loo"} when it finds the same rows in
-the same number of cells with another leave-one-out error. The
-summary's own numbers describe the cells as assigned.
+geographic \code{crs} are joined in the record's CRS while they carry it), a
+row in cells that carry the record but are not the Voronoi cells of its
+centres (seeds moved, or cells edited, after the selection), and a row
+that reached the record's CRS by another transformation than the
+profile's, which can settle a tie the other way. Cells returned in a
+geographic \code{crs} are moved back to the record's CRS for that join, and
+for a layer wider than a UTM zone the round trip can move a corner by
+more than the margin of \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}, so a row on an
+edge there can sit in another cell too. The comparison then reports
+\code{"differ"}, with \code{what = "loo"} when it finds the same rows in the same
+number of cells with another leave-one-out error, and the warning names
+these cases. The summary's own numbers describe the cells as assigned.
 
 The comparison uses the fit of the pooled columns when that is a fit of
 the estimate the profile scored, and fits the response once more

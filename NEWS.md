@@ -2323,6 +2323,23 @@ old behaviour where there is a way.
   `cv_rf()` on folds at the distances the map will predict at.  No result
   changes.
 
+* **The `spatialkit_cells_differ` warning named a cause the tie rule
+  removed.**  With `what = "loo"` (the same rows in the same number of
+  cells, another leave-one-out error) it said that rows exactly on a
+  boundary between two cells (gridded locations) can be assigned to the
+  other cell.  `assign_features_to_polygons()` gives such a row the cell
+  the profile scored it in on the cells the profile scored, kept in the
+  CRS it measured the rows in and carrying the record of their count, for
+  rows that have a CRS when the record names one.  The warning now names
+  the cases that remain: rows the polygons alone placed (rows without a
+  CRS, rows assigned to cells without their count record, such as cells
+  read back from a file, and rows given their cells by another join),
+  cells built in, or transformed to, another CRS than the one the profile
+  measured the rows in, cells that are not the Voronoi cells of the
+  centres the profile scored (seeds moved, cells edited), and coordinates
+  that reached that CRS by another transformation.  `?summarize_by_cell`
+  names the same cases.  No result changes.
+
 * **`coerce_to_points()` crashed R on an empty line feature.**  sf's
   `st_cast()` turns an empty MULTILINESTRING into one empty LINESTRING, not
   zero parts, and `st_line_sample()` on it segfaulted and took the session

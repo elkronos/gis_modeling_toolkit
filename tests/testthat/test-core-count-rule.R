@@ -604,16 +604,43 @@ test_that("two rows exchanged between neighbouring cells are told from rows drop
   expect_match(text, "(the leave-one-out error differs)", fixed = TRUE)
   expect_match(text, paste0(
     "The same number of rows and cells was found, so rows sit in other cells than the ",
-    "profile put them in, or values changed: rows exactly on a boundary between two cells ",
-    "(gridded locations) can be assigned to the other cell, and coordinates that reached ",
-    "this CRS by another transformation can settle a tie between neighbouring cells the ",
-    "other way."), fixed = TRUE)
+    "profile put them in, or values changed. A row on or near a boundary can sit in the ",
+    "neighbouring cell when the polygons alone placed it (as for rows without a CRS, rows ",
+    "assigned to cells without their count record, such as cells read back from a file, ",
+    "and rows given their cells by another join than assign_features_to_polygons()), ",
+    "when the cells were built in, or transformed to, another CRS than the one the ",
+    "profile measured the rows in (crs in the count record), or when they are not the ",
+    "Voronoi cells of the centres the profile scored (seeds moved, cells edited); and ",
+    "coordinates that reached that CRS by another transformation can settle a tie ",
+    "between neighbouring cells the other way."), fixed = TRUE)
+  # assign_features_to_polygons(), on the cells of the scored centres in the
+  # profile's CRS that carry the record, gives a row on a boundary the cell
+  # the profile scored it in (test-core-gridded-ties.R), so the text names
+  # only the ways a row reaches another cell.
+  expect_false(grepl("rows exactly on a boundary between two cells", text, fixed = TRUE))
   expect_false(grepl("Rows were dropped or moved between cells", text, fixed = TRUE))
   expect_identical(.cr_check(r)$cells, "differ")
   # Values changed on the same rows and cells are the same finding.
   asg <- A$asg; asg$z[1L] <- asg$z[1L] + 1
   expect_identical(.cr_of(.cr_sum(asg, cells, "pooled"), "spatialkit_cells_differ")[[1L]]$what,
                    "loo")
+  # Every row of one cell moved to its neighbour: the same rows in one cell
+  # fewer.  Those are rows moved between cells, and the text names that, not
+  # the causes of rows on a boundary.
+  asg <- A$asg
+  asg$cell_id[asg$cell_id == cells$cell_id[1L]] <- cells$cell_id[nb[[1L]][1L]]
+  w <- .cr_of(.cr_sum(asg, cells, "pooled"), "spatialkit_cells_differ")
+  expect_length(w, 1L)
+  expect_identical(w[[1L]]$what, "cells")
+  expect_identical(w[[1L]]$found$n, w[[1L]]$scored$n)
+  expect_identical(w[[1L]]$found$cells, w[[1L]]$scored$cells - 1L)
+  text <- conditionMessage(w[[1L]])
+  expect_match(text, "(the number of cells differs)", fixed = TRUE)
+  expect_match(text, paste0(
+    "Rows were dropped or moved between cells: points outside every cell, a boundary that ",
+    "clips the cells, a subset of the rows, or another layer."), fixed = TRUE)
+  expect_false(grepl("The same number of rows and cells was found", text, fixed = TRUE))
+  expect_false(grepl("the polygons alone placed it", text, fixed = TRUE))
 })
 
 test_that("cells of another selection than the assigned layer's are named by the field that differs", {

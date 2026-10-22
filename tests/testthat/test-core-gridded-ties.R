@@ -510,6 +510,255 @@ test_that("seeds placed in the CRS of a boundary are drawn in the profile's CRS;
   expect_true(sf::st_crs(P$tess$cells) == sf::st_crs(26915))
 })
 
+test_that("cells drawn in a projected CRS the caller names are its nearest-seed cells, and a row they put elsewhere is reported", {
+  # ?build_tessellation, `crs`: Voronoi cells built in another projected CRS,
+  # named there, are the nearest-seed cells of that CRS, so a row near a
+  # boundary can fall in the neighbouring cell, and summarize_by_cell() then
+  # reports that the cells are not the ones scored.  A lattice at 1000 m in
+  # EPSG:32615, its cells about 2 km across: CONUS Albers and Web Mercator
+  # put the rows the same distance from two centres metres off the edges of
+  # the cells drawn there, NAD83 / UTM 15N leaves them on the edges.
+  pts <- .gt_lattice(50L, 40L, 1000)
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (to in c(26915L, 5070L, 3857L)) {
+    info <- paste("crs", to)
+    P <- suppressWarnings(.gt_path(pts, "density", crs = to))
+    rec <- P$sel$count_rule
+    # Drawn in the CRS named, with the record of the scored centres, which
+    # the profile measured in the layer's own CRS.
+    expect_true(sf::st_crs(P$tess$cells) == sf::st_crs(to), info = info)
+    expect_true(rec$crs == sf::st_crs(32615), info = info)
+    expect_identical(attr(P$tess$cells, "count_rule")$scored_cells, TRUE, info = info)
+    # The polygons alone put each row in the cell of its nearest seed measured
+    # in that CRS, or, a row the same distance from two seeds there, in one
+    # of their two cells.
+    s_xy <- unname(sf::st_coordinates(sf::st_transform(P$seeds, to))[, 1:2])
+    p_xy <- unname(sf::st_coordinates(sf::st_transform(pts, to))[, 1:2])
+    two  <- .two_nearest(p_xy[, 1L], p_xy[, 2L], s_xy[, 1L], s_xy[, 2L], FALSE)
+    by_polygons <- .gt_polygon_rule(P, pts)
+    expect_false(anyNA(by_polygons), info = info)
+    off <- which(by_polygons != P$tess$index[two$first])
+    expect_true(all(abs(two$d2[off] - two$d1[off]) / two$d1[off] < 1e-6), info = info)
+    # A row the assignment puts in another cell than the profile's is a row
+    # the same distance from two centres in the profile's CRS.
+    rule   <- .gt_profile_rule(P, pts)
+    placed <- .gt_cell_of(P$asg, pts)
+    expect_false(anyNA(placed), info = info)
+    elsewhere <- which(placed != rule$cell)
+    if (length(elsewhere)) {
+      d2 <- function(rows, centre) (rule$xy[rows, 1L] - rule$cen[centre, 1L])^2 +
+                                   (rule$xy[rows, 2L] - rule$cen[centre, 2L])^2
+      nearest <- match(rule$cell[elsewhere], P$tess$index)
+      other   <- match(placed[elsewhere], P$tess$index)
+      gap <- abs(d2(elsewhere, other) - d2(elsewhere, nearest)) / d2(elsewhere, nearest)
+      expect_true(all(gap < 1e-6), info = info)
+    }
+    # The summary reports such rows, and only then; with the same rows in as
+    # many cells, the warning names cells built in another CRS.
+    w <- .gt_of(P, "spatialkit_cells_differ")
+    check <- attr(P$out, "count_rule")$check
+    if (length(elsewhere)) {
+      expect_identical(check$cells, "differ", info = info)
+      expect_length(w, 1L)
+      expect_true(w[[1L]]$what %in% c("cells", "loo"), info = info)
+      if (identical(w[[1L]]$what, "loo")) {
+        expect_match(conditionMessage(w[[1L]]),
+                     paste0("the cells were built in, or transformed to, another CRS than the ",
+                            "one the profile measured the rows in (crs in the count record)"),
+                     fixed = TRUE)
+        expect_false(grepl("rows exactly on a boundary between two cells",
+                           conditionMessage(w[[1L]]), fixed = TRUE), info = info)
+      }
+    } else {
+      expect_identical(check, list(estimate = "match", cells = "match"), info = info)
+      expect_length(w, 0L)
+    }
+    n_elsewhere[as.character(to)] <- length(elsewhere)
+    what[as.character(to)] <- if (length(w)) w[[1L]]$what else NA_character_
+  }
+  # Which ties the CRS named settles the other way rests on PROJ and GEOS,
+  # so the counts are held only on the platform the frozen fixture was
+  # recorded on.  There no row is elsewhere in NAD83 / UTM 15N, and 4 and 3
+  # are, each with the warning's `what = "loo"`, in Albers and Web Mercator.
+  if (.gt_same_platform()) {
+    expect_identical(n_elsewhere, c(`26915` = 0L, `5070` = 4L, `3857` = 3L))
+    expect_identical(what, c(`26915` = NA_character_, `5070` = "loo", `3857` = "loo"))
+  }
+})
+
+# The rows placed in another cell than the profile's, each checked to be a
+# row the same distance from two centres in the profile's CRS: the centre of
+# the cell it was placed in is as near as the profile's, exactly or to the
+# rounding of the coordinates.
+.gt_expect_ties <- function(rule, placed, index, info) {
+  elsewhere <- which(placed != rule$cell)
+  if (length(elsewhere)) {
+    d2 <- function(rows, centre) (rule$xy[rows, 1L] - rule$cen[centre, 1L])^2 +
+                                 (rule$xy[rows, 2L] - rule$cen[centre, 2L])^2
+    nearest <- match(rule$cell[elsewhere], index)
+    other   <- match(placed[elsewhere], index)
+    gap <- abs(d2(elsewhere, other) - d2(elsewhere, nearest)) / d2(elsewhere, nearest)
+    expect_true(all(gap < 1e-6), info = info)
+  }
+  elsewhere
+}
+
+# The summary of assigned rows, handed `cells` as `cells_sf`: "differ" with
+# one warning exactly when rows are elsewhere, and with `what = "loo"` the
+# warning holds `clause`.  Returns the warning's `what`, NA without one.
+.gt_expect_reported <- function(asg, cells, n_elsewhere, clause, info) {
+  r <- .gt_catch(summarize_by_cell(asg, "z", id_col = "cell_id", cells_sf = cells,
+                                   estimate = "pooled"))
+  w <- .gt_of(r, "spatialkit_cells_differ")
+  check <- attr(r$value, "count_rule")$check
+  if (n_elsewhere > 0L) {
+    expect_identical(check$cells, "differ", info = info)
+    expect_length(w, 1L)
+    expect_true(w[[1L]]$what %in% c("cells", "loo"), info = info)
+    if (identical(w[[1L]]$what, "loo"))
+      expect_match(conditionMessage(w[[1L]]), clause, fixed = TRUE, info = info)
+  } else {
+    expect_identical(check, list(estimate = "match", cells = "match"), info = info)
+    expect_length(w, 0L)
+  }
+  if (length(w)) w[[1L]]$what else NA_character_
+}
+
+test_that("rows the polygons alone place beside the record are reported, and the warning names that cause", {
+  # The edge rule of assign_features_to_polygons() runs on cells that carry
+  # the record, for rows with a CRS.  Rows without a CRS, rows assigned to
+  # the cells after they lost the record (a file written and read back) and
+  # rows given their cells by sf::st_join() are placed by the polygons
+  # alone.  Summarised with the scored cells as `cells_sf`, they are still
+  # checked against the record, and a row on a boundary the polygons put in
+  # the other cell is reported.
+  clause <- paste0("A row on or near a boundary can sit in the neighbouring cell when the ",
+                   "polygons alone placed it (as for rows without a CRS, rows assigned to ",
+                   "cells without their count record, such as cells read back from a file, ",
+                   "and rows given their cells by another join than ",
+                   "assign_features_to_polygons())")
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (L in list(list(c(30L, 20L), 30), list(c(50L, 40L), 1000))) {
+    d <- L[[1L]]; sp <- L[[2L]]
+    pts <- .gt_lattice(d[1L], d[2L], sp)
+    P <- .gt_lattice_path(d, sp, "density")
+    cells <- P$tess$cells
+    expect_identical(attr(cells, "count_rule")$scored_cells, TRUE)
+    rule <- .gt_profile_rule(P, pts)
+    # Rows without a CRS: the CRS of the cells is set on them, with a
+    # warning, and they take the cells' record, so the summary checks them.
+    nocrs <- .gt_catch(assign_features_to_polygons(sf::st_set_crs(pts, NA), cells,
+                                                   polygon_id_col = "cell_id", quiet = TRUE))
+    expect_length(nocrs$warnings, 1L)
+    expect_identical(attr(nocrs$value, "count_rule"), attr(cells, "count_rule"))
+    # Cells written to a GeoPackage and read back have lost the record, and
+    # are the cells without it.
+    if ("GPKG" %in% sf::st_drivers("vector")$name) {
+      file <- withr::local_tempfile(fileext = ".gpkg")
+      sf::st_write(cells, file, quiet = TRUE)
+      back <- sf::st_read(file, quiet = TRUE)
+      expect_null(attr(back, "count_rule"))
+      expect_identical(
+        .gt_cell_of(assign_features_to_polygons(pts, back, polygon_id_col = "cell_id",
+                                                quiet = TRUE), pts),
+        .gt_cell_of(assign_features_to_polygons(pts, .gt_bare(cells),
+                                                polygon_id_col = "cell_id", quiet = TRUE), pts))
+    }
+    bare <- assign_features_to_polygons(pts, .gt_bare(cells), polygon_id_col = "cell_id",
+                                        quiet = TRUE)
+    expect_null(attr(bare, "count_rule"))
+    # The caller's own join, the first cell of a row on an edge kept.
+    joined <- sf::st_join(pts, cells["cell_id"], join = sf::st_intersects, left = TRUE)
+    joined <- joined[!duplicated(joined$row), ]
+    ways <- list(`rows without a CRS` = nocrs$value, `cells without the record` = bare,
+                 `sf::st_join()` = joined)
+    for (way in names(ways)) {
+      info <- sprintf("%d x %d at %g, %s", d[1L], d[2L], sp, way)
+      placed <- .gt_cell_of(ways[[way]], pts)
+      expect_false(anyNA(placed), info = info)
+      elsewhere <- .gt_expect_ties(rule, placed, P$tess$index, info)
+      what[info] <- .gt_expect_reported(ways[[way]], cells, length(elsewhere), clause, info)
+      n_elsewhere[info] <- length(elsewhere)
+    }
+  }
+  # Which ties the polygons settle the other way rests on GEOS, so the counts
+  # are held only on the platform the frozen fixture was recorded on.  There
+  # the polygons put 3 rows of the 30 m lattice and 3 of the 1000 m one in
+  # the other cell, the first match of sf::st_join() 2 and 1, and every
+  # warning has `what = "loo"`.
+  if (.gt_same_platform()) {
+    expect_identical(unname(n_elsewhere), c(3L, 3L, 2L, 3L, 3L, 1L))
+    expect_identical(unname(what), rep("loo", 6L))
+  }
+})
+
+test_that("cells transformed to another projected CRS keep the record and are joined there, and a row they put elsewhere is reported", {
+  # sf::st_transform() keeps the record, and the join runs in the cells' CRS:
+  # a row's nearest centre is measured in the record's CRS, and a row within
+  # the margin of its own cell and of that centre's cell goes to the latter.
+  # The edges of the cells moved there are straight lines between corners
+  # moved there, so a row the same distance from two centres is off them by
+  # the bend of the bisector.  On cells about 60 m across (a lattice at
+  # 30 m) that bend is micrometres, well inside the margin, and every row is
+  # in the profile's cell.  On cells about 2 km across (at 1000 m) it is
+  # millimetres, and a row the polygons put in the other cell is reported.
+  clause <- paste0("when the cells were built in, or transformed to, another CRS than the one ",
+                   "the profile measured the rows in (crs in the count record)")
+  n_elsewhere <- integer(0)
+  what <- character(0)
+  for (L in list(list(c(30L, 20L), 30), list(c(50L, 40L), 1000))) for (to in c(5070L, 3857L)) {
+    d <- L[[1L]]; sp <- L[[2L]]
+    info <- sprintf("%d x %d at %g to EPSG:%d", d[1L], d[2L], sp, to)
+    pts <- .gt_lattice(d[1L], d[2L], sp)
+    P <- .gt_lattice_path(d, sp, "density")
+    cells <- sf::st_transform(P$tess$cells, to)
+    expect_identical(attr(cells, "count_rule"), attr(P$tess$cells, "count_rule"))
+    asg <- assign_features_to_polygons(pts, cells, polygon_id_col = "cell_id", quiet = TRUE)
+    expect_true(sf::st_crs(asg) == sf::st_crs(pts), info = info)
+    placed <- .gt_cell_of(asg, pts)
+    expect_false(anyNA(placed), info = info)
+    elsewhere <- .gt_expect_ties(.gt_profile_rule(P, pts), placed, P$tess$index, info)
+    if (sp == 30) expect_length(elsewhere, 0L)
+    what[info] <- .gt_expect_reported(asg, cells, length(elsewhere), clause, info)
+    n_elsewhere[info] <- length(elsewhere)
+  }
+  # On the platform the frozen fixture was recorded on, 5 rows of the 1000 m
+  # lattice are elsewhere in each CRS, each time with `what = "loo"`.
+  if (.gt_same_platform()) {
+    expect_identical(unname(n_elsewhere), c(0L, 0L, 5L, 5L))
+    expect_identical(unname(what), c(NA_character_, NA_character_, "loo", "loo"))
+  }
+})
+
+test_that("the help and NEWS name rows the polygons alone place among the causes of what = \"loo\"", {
+  root <- testthat::test_path("..", "..")
+  if (!(file.exists(file.path(root, "DESCRIPTION")) && dir.exists(file.path(root, "man"))))
+    skip("the help's source is not here to read")
+  read <- function(...) gsub("[[:space:]]+", " ",
+                             paste(readLines(file.path(root, ...), warn = FALSE), collapse = " "))
+  rd <- read("man", "summarize_by_cell.Rd")
+  expect_match(rd, paste0("It does so on cells that carry the record, for rows that have a CRS ",
+                          "when the record names one. Rows without a CRS, rows assigned to the ",
+                          "cells after they lost the record (written to a file and read back, ",
+                          "say) and summarised with \\code{cells_sf} set to the cells that carry ",
+                          "it, and rows given their cells by another join are placed by the ",
+                          "polygons alone, so a row on a boundary can sit in either cell."),
+               fixed = TRUE)
+  expect_match(rd, paste0("cells transformed to another projected CRS are joined there, so a row ",
+                          "near a boundary, on it or not, can sit in another cell than the ",
+                          "profile put it in."), fixed = TRUE)
+  expect_match(rd, "and the warning names these cases.", fixed = TRUE)
+  news <- read("NEWS.md")
+  expect_match(news, paste0("for rows that have a CRS when the record names one. The warning now ",
+                            "names the cases that remain: rows the polygons alone placed (rows ",
+                            "without a CRS, rows assigned to cells without their count record, ",
+                            "such as cells read back from a file, and rows given their cells by ",
+                            "another join), cells built in, or transformed to, another CRS than ",
+                            "the one the profile measured the rows in,"), fixed = TRUE)
+})
+
 test_that("on a ladder of sizes the record holds the centres of the level chosen, and the rows are placed by them", {
   pts <- .gt_lattice(30L, 20L, 30)
   for (kind in c("density", "kmeans")) for (size in c(18, 9)) {

@@ -270,10 +270,17 @@ test_that("on gridded locations the check says match exactly when no row was pla
                  else "loo"
       expect_identical(w[[1L]]$what, kind_of, info = info)
       expect_identical(w[[1L]]$found$n, 3000L - unassigned, info = info)
-      if (identical(kind_of, "loo"))
+      # This branch runs only where the edge rule did not hold on this
+      # platform: a row on a boundary that the rule did not reach was placed
+      # by the polygons alone, and the warning names that cause.
+      if (identical(kind_of, "loo")) {
         expect_match(conditionMessage(w[[1L]]),
-                     "rows exactly on a boundary between two cells (gridded locations)",
+                     "so rows sit in other cells than the profile put them in, or values changed.",
                      fixed = TRUE)
+        expect_match(conditionMessage(w[[1L]]),
+                     "A row on or near a boundary can sit in the neighbouring cell when the polygons alone placed it",
+                     fixed = TRUE)
+      }
     }
   }
   # Which lattice has rows on a boundary rests on exact ties, which another

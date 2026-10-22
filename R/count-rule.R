@@ -605,11 +605,18 @@
                   a$n, rec$response, a$cells, num(a$loo), b$n, b$cells, num(b$loo),
                   if (identical(what, "loo"))
                     paste0("The same number of rows and cells was found, so rows sit in ",
-                           "other cells than the profile put them in, or values changed: ",
-                           "rows exactly on a boundary between two cells (gridded ",
-                           "locations) can be assigned to the other cell, and coordinates ",
-                           "that reached this CRS by another transformation can settle a ",
-                           "tie between neighbouring cells the other way.")
+                           "other cells than the profile put them in, or values changed. A ",
+                           "row on or near a boundary can sit in the neighbouring cell when ",
+                           "the polygons alone placed it (as for rows without a CRS, rows ",
+                           "assigned to cells without their count record, such as cells ",
+                           "read back from a file, and rows given their cells by another ",
+                           "join than assign_features_to_polygons()), when the cells were ",
+                           "built in, or transformed to, another CRS than the one the ",
+                           "profile measured the rows in (crs in the count record), or ",
+                           "when they are not the Voronoi cells of the centres the profile ",
+                           "scored (seeds moved, cells edited); and coordinates that ",
+                           "reached that CRS by another transformation can settle a tie ",
+                           "between neighbouring cells the other way.")
                   else
                     paste0("Rows were dropped or moved between cells: points outside every ",
                            "cell, a boundary that clips the cells, a subset of the rows, or ",
