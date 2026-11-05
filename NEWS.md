@@ -1862,6 +1862,23 @@ old behaviour where there is a way.
   before; for the others the CRS, `attr(, "crs_choice")` and the logged
   figures can differ from before.
 
+* **The area check of `summarize_by_cell(area = TRUE)` and of
+  `ensure_projected(purpose = "area")` on projected input depended on how
+  many rows repeat one polygon.**  The check takes the spread of the
+  ratios of planar to geodesic area over the layer's polygons, and it
+  counted rows: copies of a polygon weighted the median by their number,
+  took places in the sample of 200 polygons, and two copies of one polygon
+  passed as two probes.  Three 50 km squares in UTM zone 14 measured 0.93
+  percent, and 1.04 percent with the left one listed three times, so
+  `ensure_projected()` warned and `summarize_by_cell()` refused the cells
+  only then; 150 squares of 1 degree in UTM zone 15 measured 24.98 percent,
+  and 30.79 percent with one of them listed 300 more times; a box in Web
+  Mercator listed twice measured 0, where alone it is unmeasured.  The
+  check now measures each distinct polygon once, the first of its exact
+  copies kept, and a layer whose polygons are all copies of one is
+  measured on the grid over its bounding box, as one polygon is.  A layer with no polygon listed
+  twice gets the same figure as before.
+
 * **Two listings of one place a few bits apart, or at longitudes 180 and
   -180, set the distance error of every candidate CRS.**
   `ensure_projected()` scores each candidate on the worst ratio of planar
@@ -2050,9 +2067,60 @@ old behaviour where there is a way.
   which leaves its points and its area as they were.  The lattice's cells
   get a density, with `attr(, "area_error")` the spread over all 133
   cells, and the warning is logged for the Web Mercator cells.  A cell s2
-  refuses even then, such as one whose edges cross, still leaves the spread
-  unmeasured, and the request is refused as before.  A layer whose cells s2
-  all accepts gets the same figure as before.
+  refuses even then, such as one whose edges cross, still leaves the
+  spread over the cells unmeasured: `summarize_by_cell(area = TRUE)`
+  refuses the request (since GEOS calls such a cell invalid, with the
+  error on invalid cells below), and `ensure_projected()` measures the
+  grid over the extent instead.  A layer whose cells s2 all accepts gets
+  the same figure as before.
+
+* **`ensure_projected(purpose = "area")` skipped its check in silence on a
+  projected layer of one polygon, and `summarize_by_cell(area = TRUE)`
+  refused one cell for a cause it did not have.**  One polygon gives one
+  ratio of planar to geodesic area, which has no spread, so the distortion
+  came out unmeasured and nothing was logged: a box from 100W to 90W and
+  from 30N to 60N in Web Mercator logged nothing, where the same box split
+  in two logs 26.2 percent.  A layer with a polygon s2 refuses in degrees,
+  such as one whose edges cross, was passed over the same way: 20 cells of
+  1 degree from 30N to 69N in Web Mercator, one of them a bowtie, logged
+  nothing.  `summarize_by_cell(area = TRUE)` refused a single cell, a 10 km
+  square in UTM zone 15 among them, because "the area distortion of
+  `cells_sf`'s CRS could not be measured (no polygon areas, or geodesic
+  areas unavailable)", though the cell has both; a single lon/lat cell was
+  refused the same way.  Both functions now measure such a layer on a 6 by
+  6 grid over its bounding box, as they measure a layer without polygons.
+  `ensure_projected()` logs the grid's figure when it exceeds 1 percent
+  (65.2 percent for the box, 124.4 percent for the cells with the bowtie),
+  and logs that the distortion could not be measured when the grid gives
+  no figure either (a single point, or a line along one axis).
+  `summarize_by_cell()` gives a single cell its density, with
+  `attr(, "area_error")` the grid's figure, or refuses it for the
+  distortion.  A layer whose polygons give a figure gets the same figure
+  and the same log as before.
+
+* **`summarize_by_cell(area = TRUE)` gave a projected cell whose edges
+  cross a density over GEOS's area of its ring.**  The area check measures
+  up to 200 of the cells, together with the cells that reach furthest; a
+  cell s2 refused among them made the request refused, but one outside them
+  got `sf::st_area()`'s area, which for a ring whose edges cross is the
+  signed sum of its lobes.  Of 400 squares of 10 km in EPSG:32615 with a
+  bowtie of 4.25e7 square metres, the bowtie got a `cell_area` of 2e7
+  square metres at cell 148 and the request was refused with the bowtie at
+  cell 1, so the outcome turned on which cells the check took.  Every
+  non-empty projected cell is now checked with `sf::st_is_valid()` in its
+  CRS before any summary, and a cell GEOS calls invalid makes the request
+  refused, with the first such cells, GEOS's reason and the remedy: repair
+  the cells with `sf::st_make_valid()` and pass them again.  A cell GEOS
+  calls invalid that s2 measures in degrees, such as one with a hole
+  outside its shell, is refused by the same check.  Valid cells get the
+  densities and `attr(, "area_error")` they got before.
+  `ensure_projected(purpose = "area")` on projected input read the same
+  planar area as a figure about the CRS: three 10 km squares of UTM zone
+  15 beside a square with a hole outside its shell logged a distortion of
+  40.0 percent, the difference between the shell minus the hole and the
+  shell plus the hole.  A layer with a polygon GEOS calls invalid is now
+  measured on the 6 by 6 grid over its extent, which logs nothing for that
+  layer.
 
 * **`resolution_profile()` reported a layer too small for a ladder as
   supported.**  With fewer than two cells at `min_cell_n` it raised the
@@ -3009,6 +3077,26 @@ old behaviour where there is a way.
   join, gives the error in its own words: it names
   `values` and the rows of `values`.  Polygons s2 accepts are joined as
   before, and an error of another kind keeps its own message.
+
+* **`summarize_by_cell(area = TRUE)` stopped without the cause on lon/lat
+  cells that s2 refuses.**  The areas of lon/lat cells are s2's, and s2
+  refuses a cell with two corners it reads as one point, which cells
+  returned in lon/lat hold on gridded locations.  When the area check
+  measured such a cell, the request was refused because "the area
+  distortion of `cells_sf`'s CRS could not be measured", which names
+  neither the cell nor a way on; above 200 cells, when the check passed
+  over it, the request ran through the summary and stopped at the cells'
+  areas with s2's bare "Loop 0 is not valid: Edge 1 is degenerate
+  (duplicate vertex)".  `?summarize_by_cell` said the check passes by
+  construction on lon/lat cells.  Every cell's area is now taken before
+  any summary, and a cell s2 refuses stops the request with the error of
+  class `spatialkit_cells_degenerate` that `assign_features_to_polygons()`
+  gives: it gives the rows of `cells_sf` s2 refuses, names the cause and
+  says to transform the cells to a projected CRS, such as the one they
+  were built in or the equal-area one `ensure_projected(purpose = "area")`
+  picks.  Lon/lat cells s2 accepts get the density and
+  `attr(, "area_error")` they got before, and with s2 off the request
+  needs lwgeom as before.
 
 * **`coerce_to_points(mode = "centroid")` and `prep_model_data(pointize =
   "centroid")` stopped with s2's bare message on a polygon in longitude and

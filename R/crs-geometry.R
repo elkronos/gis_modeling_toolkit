@@ -966,7 +966,10 @@
 #' or a rate depends on.  Probe polygons are measured twice: their planar
 #' area in \code{crs} and their geodesic area on the globe.  The probes are the
 #' layer's own polygons when it has them, otherwise an \code{n x n} grid over
-#' its bounding box.  Above \code{max_n} polygons, \code{max_n} are taken at
+#' its bounding box.  Copies of a polygon are one probe: the probes are the
+#' distinct polygons, the first copy of each kept, so a layer that lists a
+#' polygon once per period, or one cell twice, gives the figure of its
+#' distinct polygons.  Above \code{max_n} polygons, \code{max_n} are taken at
 #' even spacing along the polygons sorted by \code{.polygon_sort_keys()} (the
 #' bounding box in the layer's CRS, then the means of the vertices), and the
 #' polygons with the smallest \code{xmin} and \code{ymin} and the largest
@@ -988,15 +991,21 @@
 #' @param grid Logical; probe with the \code{n x n} grid over the bounding box
 #'   even when \code{x} has polygons.  A single study-area polygon is one
 #'   probe, and one ratio has no spread to measure.
+#' @param one_by_grid Logical; a layer of one distinct polygon whose planar
+#'   and geodesic areas are measured is measured on the \code{n x n} grid
+#'   over its bounding box instead of giving \code{NA}.
 #' @return Numeric worst-case \code{|ratio / median(ratio) - 1|}, or
 #'   \code{NA} when it cannot be computed (no CRS, fewer than two probes
-#'   with an area, a probe whose geodesic area is unavailable).  A probe
+#'   with an area, a probe whose geodesic area is unavailable, a probe
+#'   polygon \code{sf::st_is_valid()} rejects in a projected \code{crs}).  A probe
 #'   with two vertices that fall on one point in degrees is measured there
 #'   without the repeat; a probe s2 refuses even then makes the figure
-#'   \code{NA}.
+#'   \code{NA}.  With \code{one_by_grid}, a layer of one distinct polygon
+#'   that is measured gets the grid's figure.
 #' @keywords internal
 #' @noRd
-.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE) {
+.crs_area_error <- function(x, crs = NULL, n = 6L, max_n = 200L, grid = FALSE,
+                            one_by_grid = FALSE) {
   tryCatch({
     if (is.null(crs)) crs <- sf::st_crs(x)
     if (is.na(crs) || is.na(sf::st_crs(x))) return(NA_real_)
@@ -1004,7 +1013,40 @@
     g <- g[!sf::st_is_empty(g)]
     if (!length(g)) return(NA_real_)
     types <- as.character(sf::st_geometry_type(g, by_geometry = TRUE))
-    probe <- if (!isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))) {
+    own   <- !isTRUE(grid) && all(types %in% c("POLYGON", "MULTIPOLYGON"))
+    probe <- if (own) {
+      # One probe per distinct polygon.  Counted by row, copies of a polygon
+      # weighted the median by their number, took places in the sample above
+      # `max_n`, and two copies of one polygon passed as two probes: three
+      # 50 km squares of a UTM zone measured 0.93% once each and 1.04% with
+      # the left one listed three times (a warning, and a refused density),
+      # and one Web Mercator box listed twice measured 0 where alone it is
+      # unmeasured.  Copies agree on every sort key, so only polygons whose
+      # keys tie with a neighbour's are compared, exactly, and the first
+      # copy of each is kept; polygons that tie on the keys without being
+      # copies are both kept.  Below `max_n` polygons a failure to read the
+      # keys leaves the layer as it is, as before the keys were read there.
+      k <- if (length(g) > max_n) .polygon_sort_keys(g)
+           else tryCatch(.polygon_sort_keys(g), error = function(e) NULL)
+      tie <- FALSE
+      if (!is.null(k)) {
+        rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
+                    k[, 8L], k[, 9L])
+        ks <- k[rk, , drop = FALSE]
+        tie <- c(FALSE, rowSums(ks[-1L, , drop = FALSE] != ks[-nrow(ks), , drop = FALSE]) == 0) %in% TRUE
+      }
+      if (any(tie)) {
+        cand <- which(tie | c(tie[-1L], FALSE))
+        dup  <- logical(length(rk))
+        dup[cand] <- duplicated(unclass(g)[rk[cand]])
+        if (any(dup)) {
+          keep <- sort(rk[!dup])
+          g  <- g[keep]
+          k  <- k[keep, , drop = FALSE]
+          rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
+                      k[, 8L], k[, 9L])
+        }
+      }
       if (length(g) > max_n) {
         # Evenly spaced along the polygons sorted by their bounding boxes, not
         # along the rows: by row, which polygons were measured changed with
@@ -1026,9 +1068,6 @@
         # CRS 300 cells whose ratios spread by 7.5 percent, one of them far
         # north of the rest, got a density.  The keys cost about 2
         # microseconds a polygon; sf::st_bbox() on each polygon cost 8.
-        k  <- .polygon_sort_keys(g)
-        rk <- order(k[, 1L], k[, 2L], k[, 3L], k[, 4L], k[, 5L], k[, 6L], k[, 7L],
-                    k[, 8L], k[, 9L])
         ks <- k[rk, , drop = FALSE]
         at <- c(round(seq(1, length(g), length.out = max_n)),
                 which.min(ks[, "xmin"]), which.min(ks[, "ymin"]),
@@ -1040,6 +1079,17 @@
       sf::st_make_grid(sf::st_as_sfc(bb), n = c(n, n), what = "polygons")
     }
     probe  <- sf::st_transform(probe, crs)
+    # A polygon GEOS calls invalid in a projected CRS has a planar area that
+    # is not the area it encloses (a hole outside its shell is subtracted,
+    # the lobes of a bowtie cancel), while s2 may measure it in degrees: the
+    # ratio then measures the polygon, not the CRS.  Three 10 km squares of
+    # UTM zone 15 beside a square with a hole outside its shell measured 40
+    # percent, and ensure_projected(purpose = "area") logged it.  Such a
+    # layer is left unmeasured here; ensure_projected() then measures the
+    # grid over the extent, and summarize_by_cell(area = TRUE) refuses the
+    # invalid cells before it gets here.
+    if (own && !isTRUE(sf::st_is_longlat(crs)) &&
+        !all(sf::st_is_valid(probe) %in% TRUE)) return(NA_real_)
     # Densify before going to lon/lat: s2 reads each edge as a great circle,
     # and over a continental probe that is not the straight edge the planar
     # area was measured on -- an Equal Earth grid over a near-global extent
@@ -1083,7 +1133,15 @@
     if (anyNA(geod)) return(NA_real_)
     ratio  <- planar / geod
     ok <- is.finite(ratio) & is.finite(geod) & geod > 0
-    if (sum(ok) < 2L) return(NA_real_)
+    if (sum(ok) < 2L) {
+      # One polygon is one ratio, with no spread to measure.  With
+      # one_by_grid, a layer of one distinct polygon whose areas are both
+      # measured is measured on the grid over its bounding box, as a layer
+      # without polygons is; a polygon s2 refuses stays unmeasured above.
+      if (isTRUE(one_by_grid) && own && length(g) == 1L && sum(ok) == 1L)
+        return(.crs_area_error(x, crs = crs, n = n, max_n = max_n, grid = TRUE))
+      return(NA_real_)
+    }
     max(abs(ratio[ok] / stats::median(ratio[ok]) - 1))
   }, error = function(e) NA_real_)
 }
@@ -1565,7 +1623,16 @@
 #'   coverage gets Equal Earth in place of Web Mercator.  Already-projected
 #'   input is still returned untouched, but its area distortion over the
 #'   extent is measured (the spread of planar-to-geodesic area ratios over
-#'   probe polygons) and logged as a warning when it exceeds 1 percent.
+#'   probe polygons) and logged as a warning when it exceeds 1 percent.  The
+#'   probes are the layer's distinct polygons (exact copies of a polygon
+#'   count once), or a 6 by 6 grid over its bounding box for a layer without
+#'   polygons, a layer of one distinct polygon, which gives one ratio and no
+#'   spread, and a layer with a polygon s2 cannot measure in degrees (edges
+#'   that cross, a spike) or that [sf::st_is_valid()] rejects in its CRS (a
+#'   hole outside its shell), whose planar area is not the area it encloses.
+#'   When the grid gives no figure either (a single
+#'   point, a line along one axis), a warning says that the distortion could
+#'   not be measured.
 #'   Measured: a zone's own width edge to edge, 0.25 percent; the
 #'   conterminous United States forced into one zone, 14 percent; Web
 #'   Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area
@@ -1740,9 +1807,26 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # the distance choice is: the spread of planar-to-geodesic area ratios
     # over probe polygons on the extent.
     # Measured on the layer in XY when it mixes dimensions; the layer is
-    # returned as it came.
-    err <- .crs_area_error(.xy_if_mixed(x))
-    if (is.finite(err) && err > .area_error_tol)
+    # returned as it came.  A layer of one distinct polygon gives one ratio
+    # and no spread, and a polygon s2 refuses in degrees (edges that cross,
+    # a spike) leaves the polygons unmeasured; the CRS is then measured on
+    # the grid over the extent, as for a layer without polygons.  So is a
+    # layer with a polygon GEOS calls invalid in its CRS, whose planar area
+    # is not the area it encloses.  The first two were
+    # passed over without a word: a box from 100W to 90W and 30N to 60N in
+    # Web Mercator logged nothing, where split in two it logs 26.2%.
+    xy  <- .xy_if_mixed(x)
+    err <- .crs_area_error(xy)
+    if (!is.finite(err)) err <- .crs_area_error(xy, grid = TRUE)
+    if (!is.finite(err))
+      .log_warn(
+        paste0("ensure_projected(purpose = \"area\"): the area distortion of the ",
+               "input's CRS (%s) across this extent could not be measured: no two ",
+               "probes, among its polygons or the cells of a 6 by 6 grid over its ",
+               "bounding box, have both a planar and a geodesic area. It is ",
+               "returned as it is."),
+        .fold_crs_label(x))
+    else if (err > .area_error_tol)
       .log_warn(
         paste0("ensure_projected(purpose = \"area\"): the input's CRS (%s) ",
                "distorts areas across this extent by up to %.1f%% (planar ",

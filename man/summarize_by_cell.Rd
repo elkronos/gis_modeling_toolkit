@@ -205,19 +205,35 @@ comparison between cells and is meaningless where the map scale differs
 from one cell to the next.  Inside a UTM zone the spread is under 0.3
 percent and the request goes through; the conterminous United States
 forced into one zone (14 percent), or a few degrees of latitude in Web
-Mercator (4 percent at 48N), does not.  A projected cell with two
-vertices that fall on one point once in degrees, where s2 refuses it, is
-measured there without the repeat, which moves no area; when s2 refuses
-a cell it measures for another reason (edges that cross, a spike), the
-spread cannot be measured and the request is refused.
+Mercator (4 percent at 48N), does not.  Exact copies of one cell count
+once.  A layer of one distinct cell gives one ratio and no spread, so its
+distortion is measured on a 6 by 6 grid over the cell's bounding box.
+Projected cells are first checked with \code{sf::st_is_valid()} in their
+CRS, every non-empty cell before any summary: a cell GEOS calls invalid
+(edges that cross, a spike, parts that overlap) has no planar area to
+vouch for, and the request is refused with an error that names the
+first such cells and GEOS's reason and says to repair the cells with
+\code{sf::st_make_valid()}.  A valid projected cell with two vertices that
+fall on one point once in degrees, where s2 refuses it, is measured
+there without the repeat, which moves no area; when s2 refuses a valid
+cell it measures for another reason, the spread cannot be measured and
+the request is refused.
 \code{\link[=ensure_projected]{ensure_projected()}} with
 \code{purpose = "area"} chooses an equal-area CRS for lon/lat input; build the
 cells in it.  Lon/lat cells are measured geodesically instead: their
 \code{cell_area} is \code{sf::st_area()}'s area in square metres (on the sphere
-with s2, sf's default), not a planar area in squared degrees, and the
-distortion check passes by construction; with s2 switched off, sf needs
-the lwgeom package for that area and the request is refused without
-it.  The measured spread is attached as \code{attr(, "area_error")}.
+with s2, sf's default), not a planar area in squared degrees, and on
+the cells s2 measures the distortion check passes by construction.
+Every cell's area is taken before any summary, and when s2 refuses a
+cell that is not valid on the sphere, such as one with two corners it
+reads as one point (cells returned in lon/lat can hold them; see \code{crs}
+in \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}), the request stops with an error of
+class \code{"spatialkit_cells_degenerate"} that gives the rows of \code{cells_sf}
+s2 refuses (\code{rows} on the condition) and says to transform the cells to
+a projected CRS, such as the one they were built in or the equal-area
+one \code{ensure_projected(purpose = "area")} picks.  With s2 switched off,
+sf needs the lwgeom package for that area and the request is refused
+without it.  The measured spread is attached as \code{attr(, "area_error")}.
 Cells that mix XY and XYZ (or XYM) geometries are measured, and their
 spread taken, without Z and M, since sf reads a layer in the dimension
 of its first geometry; the cells are returned with their own geometry.}

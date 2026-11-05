@@ -1131,6 +1131,8 @@ clip_target_for <- function(points_sf, boundary = NULL, expand = 0, quiet = FALS
 #'   error of class `"spatialkit_cells_degenerate"` that names the cells s2
 #'   refuses, the cause and that transform; its largest-overlap join of
 #'   polygon features repairs such cells instead, with a warning.
+#'   [summarize_by_cell()] with `area = TRUE`, which takes the areas of such
+#'   cells, stops with the same error before any summary.
 #' @param quiet Logical; suppress this function's progress \code{message()}s.
 #'   It does not silence R warnings, nor the package's console log echo
 #'   (see \code{\link{spatialkit_quiet}} for that). Default \code{FALSE}.

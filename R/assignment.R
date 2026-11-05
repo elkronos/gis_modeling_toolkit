@@ -812,6 +812,8 @@ assign_features_to_polygons <- function(
 #' @param again What to do once the polygons are transformed.
 #' @param no_crs Whether the polygons came without a CRS and were read as
 #'   longitude and latitude.
+#' @param pick The projected CRS the remedy names after the one the cells
+#'   were built in, as in "or \code{pick}".
 #' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
 #'   polygon or s2 refuses no polygon of \code{polygons} (the refusal is
 #'   another layer's, or of a piece the call made): the caller then raises
@@ -820,14 +822,84 @@ assign_features_to_polygons <- function(
 #' @keywords internal
 #' @noRd
 .stop_cells_degenerate <- function(e, polygons, caller, layer, task, again,
-                                   no_crs = FALSE) {
+                                   no_crs = FALSE,
+                                   pick = "the one ensure_projected() picks for it") {
   if (!.is_s2_ring_error(e)) return(invisible(NULL))
   g <- sf::st_geometry(polygons)
   if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2())) return(invisible(NULL))
   bad <- .s2_refused_rows(g)
   if (is.null(bad) || !length(bad$rows)) return(invisible(NULL))
   .raise_cells_degenerate(e, bad$rows, bad$reasons, length(g), caller, layer, task,
-                          again, no_crs)
+                          again, no_crs, pick = pick)
+}
+
+# The ID columns summarize_by_cell() looks for, in order: among the rows'
+# columns (`.sbc_id_candidates()`), and, with the one found there as
+# `id_col`, among the cells' columns (`.cells_id_candidates()`), in the order
+# assign_features_to_polygons() reads the polygons' IDs from.
+.sbc_id_candidates <- function(id_col)
+  unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+.cells_id_candidates <- function(id_col)
+  unique(c(id_col, "poly_id", "polygon_id", "id", "cell_id", "grid_id"))
+
+#' Refuse projected cells GEOS calls invalid, before a density is taken
+#'
+#' \code{summarize_by_cell(area = TRUE)} divides by each cell's planar area,
+#' which GEOS takes on the cell's rings as they are: a ring whose edges cross
+#' gets the signed sum of its lobes, and parts that overlap are counted
+#' twice.  Every non-empty cell is checked with \code{sf::st_is_valid()} in
+#' its CRS (\code{NA} counts as invalid), and the request is refused when
+#' one is invalid, naming the first six such cells by the ID column the
+#' summaries are joined on (by row when there is none), GEOS's reason for
+#' the first, and the remedy, \code{sf::st_make_valid()}.
+#'
+#' @param cells The cells as they are measured (in XY when they mix
+#'   dimensions), row for row with \code{cells_sf}.
+#' @param cells_sf The cells as passed, for their ID column.
+#' @param id_col,assigned_points_sf As passed to \code{summarize_by_cell()}:
+#'   the ID column is found as the join finds it.
+#' @return \code{NULL}, invisibly, when every non-empty cell is valid;
+#'   otherwise it stops.
+#' @keywords internal
+#' @noRd
+.stop_cells_invalid <- function(cells, cells_sf, id_col, assigned_points_sf) {
+  g    <- sf::st_geometry(cells)
+  keep <- which(!sf::st_is_empty(g))
+  if (!length(keep)) return(invisible(NULL))
+  bad <- keep[!(suppressWarnings(sf::st_is_valid(g[keep])) %in% TRUE)]
+  if (!length(bad)) return(invisible(NULL))
+  why <- tryCatch(suppressWarnings(sf::st_is_valid(g[bad[1L]], reason = TRUE)),
+                  error = function(e) NA_character_)
+  # The ID column of the join, found as the join finds it; by row when the
+  # cells have none (the join then refuses the request with its own text).
+  idc <- tryCatch({
+    pid <- .sbc_id_candidates(id_col)
+    pid <- pid[pid %in% names(assigned_points_sf)]
+    cid <- .cells_id_candidates(if (length(pid)) pid[[1L]] else id_col)
+    cid <- cid[cid %in% names(cells_sf)]
+    if (length(cid)) cid[[1L]] else NULL
+  }, error = function(e) NULL)
+  label <- if (is.null(idc)) as.character(bad)
+           else as.character(sf::st_drop_geometry(cells_sf)[[idc]][bad])
+  k     <- length(bad)
+  what  <- if (is.null(idc)) "row" else idc
+  whats <- if (is.null(idc) && k > 1L) "rows" else what
+  named <- if (k == 1L) sprintf("%s %s", whats, label)
+           else if (k <= 6L) sprintf("%s %s and %s", whats,
+                                     paste(label[-k], collapse = ", "), label[k])
+           else sprintf("%s %s and %d more", whats, paste(label[1:6], collapse = ", "), k - 6L)
+  on   <- if (k == 1L) "" else sprintf(" for %s %s", what, label[1L])
+  geos <- if (length(why) == 1L && !is.na(why) && nzchar(why))
+    sprintf("GEOS's reason%s: \"%s\"", on, why)
+  else sprintf("GEOS gives no reason%s", on)
+  of <- if (length(g) == 1L) "the one cell of `cells_sf`"
+        else sprintf("%d of the %d cells of `cells_sf`", k, length(g))
+  stop(sprintf(paste0(
+    "summarize_by_cell(): `area = TRUE` refused: %s %s in its CRS (%s; %s), so %s ",
+    "planar area, and a density over it, cannot be vouched for. Repair the cells ",
+    "with sf::st_make_valid() and pass them again."),
+    of, if (k == 1L) "is not a valid polygon" else "are not valid polygons",
+    named, geos, if (k == 1L) "its" else "each one's"), call. = FALSE)
 }
 
 # s2's refusals of a polygon all name a ring ("Loop N ...", "... crosses
@@ -966,6 +1038,8 @@ assign_features_to_polygons <- function(
 #'   \code{largest = FALSE} and does not say that join meets the refusal.
 #' @param more A sentence added after the remedy, or \code{NULL}: another way
 #'   on that the caller offers.
+#' @param pick As for \code{.stop_cells_degenerate()}; read for the cells of a
+#'   layer with a CRS.
 #' @return Does not return.  The condition carries \code{rows}, \code{n},
 #'   \code{reasons}, \code{parent}, \code{repaired} and \code{s2_forced},
 #'   and \code{features_rows} when \code{also} is given.
@@ -975,7 +1049,8 @@ assign_features_to_polygons <- function(
                                     no_crs = FALSE, of = NULL,
                                     kind = c("cells", "features"), repaired = FALSE,
                                     also = NULL, fixable = FALSE, s2_forced = FALSE,
-                                    advise_predicate = FALSE, more = NULL) {
+                                    advise_predicate = FALSE, more = NULL,
+                                    pick = "the one ensure_projected() picks for it") {
   kind <- match.arg(kind)
   said <- trimws(strsplit(conditionMessage(parent), "\n", fixed = TRUE)[[1L]][1L])
   rows_text <- function(r) {
@@ -1047,8 +1122,7 @@ assign_features_to_polygons <- function(
             layer, again)
   else
     sprintf(paste0("Transform %s to a projected CRS, such as the one its cells were ",
-                   "built in (sf::st_transform()) or the one ensure_projected() picks ",
-                   "for it, and %s."), layer, again)
+                   "built in (sf::st_transform()) or %s, and %s."), layer, pick, again)
   # With s2 off the join by `predicate` runs with GEOS, which reads these
   # polygons in degrees.
   if (isTRUE(advise_predicate))
@@ -2427,19 +2501,35 @@ assign_features_to_polygons <- function(
 #'   from one cell to the next.  Inside a UTM zone the spread is under 0.3
 #'   percent and the request goes through; the conterminous United States
 #'   forced into one zone (14 percent), or a few degrees of latitude in Web
-#'   Mercator (4 percent at 48N), does not.  A projected cell with two
-#'   vertices that fall on one point once in degrees, where s2 refuses it, is
-#'   measured there without the repeat, which moves no area; when s2 refuses
-#'   a cell it measures for another reason (edges that cross, a spike), the
-#'   spread cannot be measured and the request is refused.
+#'   Mercator (4 percent at 48N), does not.  Exact copies of one cell count
+#'   once.  A layer of one distinct cell gives one ratio and no spread, so its
+#'   distortion is measured on a 6 by 6 grid over the cell's bounding box.
+#'   Projected cells are first checked with `sf::st_is_valid()` in their
+#'   CRS, every non-empty cell before any summary: a cell GEOS calls invalid
+#'   (edges that cross, a spike, parts that overlap) has no planar area to
+#'   vouch for, and the request is refused with an error that names the
+#'   first such cells and GEOS's reason and says to repair the cells with
+#'   `sf::st_make_valid()`.  A valid projected cell with two vertices that
+#'   fall on one point once in degrees, where s2 refuses it, is measured
+#'   there without the repeat, which moves no area; when s2 refuses a valid
+#'   cell it measures for another reason, the spread cannot be measured and
+#'   the request is refused.
 #'   [ensure_projected()] with
 #'   `purpose = "area"` chooses an equal-area CRS for lon/lat input; build the
 #'   cells in it.  Lon/lat cells are measured geodesically instead: their
 #'   `cell_area` is `sf::st_area()`'s area in square metres (on the sphere
-#'   with s2, sf's default), not a planar area in squared degrees, and the
-#'   distortion check passes by construction; with s2 switched off, sf needs
-#'   the lwgeom package for that area and the request is refused without
-#'   it.  The measured spread is attached as `attr(, "area_error")`.
+#'   with s2, sf's default), not a planar area in squared degrees, and on
+#'   the cells s2 measures the distortion check passes by construction.
+#'   Every cell's area is taken before any summary, and when s2 refuses a
+#'   cell that is not valid on the sphere, such as one with two corners it
+#'   reads as one point (cells returned in lon/lat can hold them; see `crs`
+#'   in [create_voronoi_polygons()]), the request stops with an error of
+#'   class `"spatialkit_cells_degenerate"` that gives the rows of `cells_sf`
+#'   s2 refuses (`rows` on the condition) and says to transform the cells to
+#'   a projected CRS, such as the one they were built in or the equal-area
+#'   one `ensure_projected(purpose = "area")` picks.  With s2 switched off,
+#'   sf needs the lwgeom package for that area and the request is refused
+#'   without it.  The measured spread is attached as `attr(, "area_error")`.
 #'   Cells that mix XY and XYZ (or XYM) geometries are measured, and their
 #'   spread taken, without Z and M, since sf reads a layer in the dimension
 #'   of its first geometry; the cells are returned with their own geometry.
@@ -2835,7 +2925,39 @@ summarize_by_cell <- function(assigned_points_sf,
     # geometries: GEOS and s2 read such a layer in the dimension of its first
     # geometry, and the area of an XYZ cell among XY ones came out wrong or
     # could not be taken.
-    area_err <- .crs_area_error(.xy_if_mixed(cells_sf))
+    cells_xy <- .xy_if_mixed(cells_sf)
+    if (isTRUE(sf::st_is_longlat(cells_sf))) {
+      # Lon/lat cells: their cell_area below is s2's area of every cell, and
+      # the check that follows takes s2's area for the planar one too.  s2
+      # refuses a cell that is not valid on the sphere, such as one with two
+      # corners it reads as one point, which cells returned in lon/lat hold
+      # on gridded locations.  The check measures up to 200 of the cells: a
+      # refused one among them made the request refused as unmeasurable, and
+      # one outside them stopped the request after the summary with s2's
+      # bare message.  Every cell is measured here, before any summary.  With
+      # s2 off the areas are lwgeom's, and the check below refuses the
+      # request without it, as the help says.
+      if (isTRUE(sf::sf_use_s2()))
+        tryCatch(invisible(sf::st_area(sf::st_geometry(cells_xy))), error = function(e)
+          .stop_cells_degenerate(
+            e, cells_xy, "summarize_by_cell", "`cells_sf`",
+            "the measurement of the cells' areas (`area = TRUE`)",
+            "call summarize_by_cell() again; the cells' areas are then planar areas in that CRS",
+            pick = "the equal-area one ensure_projected(purpose = \"area\") picks for it"))
+    } else {
+      # A cell GEOS calls invalid has no planar area to vouch for: a ring
+      # whose edges cross gets the signed sum of its lobes (a bowtie of
+      # 4.25e7 m^2 got 2e7), and parts that overlap are counted twice.  The
+      # distortion check measures up to 200 cells, so such a cell among them
+      # made the request refused and one outside them got a density over
+      # that area.  Every non-empty cell is checked, so the outcome does not
+      # turn on the sample.  Lon/lat cells are s2's to judge, above.
+      .stop_cells_invalid(cells_xy, cells_sf, id_col, assigned_points_sf)
+    }
+    # One distinct cell gives one ratio and no spread: it is measured on the
+    # grid over its bounding box.  A single cell was refused as unmeasured,
+    # though it has both areas.
+    area_err <- .crs_area_error(cells_xy, one_by_grid = TRUE)
     if (!is.finite(area_err))
       stop("summarize_by_cell(): `area = TRUE`: the area distortion of `cells_sf`'s ",
            "CRS could not be measured (no polygon areas, or geodesic areas ",
@@ -2864,7 +2986,7 @@ summarize_by_cell <- function(assigned_points_sf,
   df <- sf::st_drop_geometry(assigned_points_sf)
 
   # --- locate ID column ---
-  id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "cell_id"))
+  id_candidates <- .sbc_id_candidates(id_col)
   id_found <- id_candidates[id_candidates %in% names(df)]
   if (length(id_found) == 0L) {
     stop("summarize_by_cell(): could not find an ID column. Looked for: ",
@@ -3989,8 +4111,7 @@ summarize_by_cell <- function(assigned_points_sf,
       # with no geometry, and cells with 'id' and a differently numbered
       # 'cell_id' were joined on 'cell_id', putting most summaries on the
       # wrong polygons.
-      cells_id_candidates <- unique(c(id_col, "poly_id", "polygon_id", "id",
-                                      "cell_id", "grid_id"))
+      cells_id_candidates <- .cells_id_candidates(id_col)
       cells_id_found <- cells_id_candidates[cells_id_candidates %in% names(cells_sf)]
       if (length(cells_id_found) == 0L) {
         msg <- sprintf(paste0("`cells_sf` has none of the ID columns %s, so the ",

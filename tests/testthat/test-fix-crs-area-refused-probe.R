@@ -367,7 +367,10 @@ test_that("a cell s2 refuses for another reason leaves the figure NA and the den
   # simple ring: a bowtie, whose planar area from GEOS (2e7 m^2) is neither
   # lobe nor their sum, or a square with a spike.  Neither is valid in
   # EPSG:32615, and s2 refuses each in degrees with or without repeated
-  # vertices.  Left out, the bowtie got a density over 2e7 m^2.
+  # vertices.  Left out, the bowtie got a density over 2e7 m^2.  The
+  # figure stays NA; summarize_by_cell(area = TRUE) refuses such a cell
+  # before the figure is taken, with the error on cells GEOS calls invalid
+  # (it said "could not be measured" until that check came in).
   sq <- lapply(0:3, function(k) square(4e5 + 1e4 * k, 4.4e6, 1e4))
   for (odd in list(bowtie(4.3e5, 4.4e6), spike(4.3e5, 4.4e6))) {
     lay <- sf::st_sf(cell_id = 1:4, geometry = sf::st_sfc(c(sq[1:3], list(odd)), crs = 32615))
@@ -377,7 +380,8 @@ test_that("a cell s2 refuses for another reason leaves the figure NA and the den
     expect_true(is.na(spread_each(lay)))
     expect_error(quiet(summarize_by_cell(rows_in(lay), "z", id_col = "cell_id", cells_sf = lay,
                                          estimate = "mean", area = TRUE)),
-                 "could not be measured", fixed = TRUE)
+                 "1 of the 4 cells of `cells_sf` is not a valid polygon in its CRS (cell_id 4;",
+                 fixed = TRUE)
   }
   # A refused cell that the repeats are dropped from does not make up for one
   # that s2 refuses for another reason.

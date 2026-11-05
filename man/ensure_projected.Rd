@@ -26,7 +26,16 @@ zone (conformal, not equal-area) never enters that comparison, and global
 coverage gets Equal Earth in place of Web Mercator.  Already-projected
 input is still returned untouched, but its area distortion over the
 extent is measured (the spread of planar-to-geodesic area ratios over
-probe polygons) and logged as a warning when it exceeds 1 percent.
+probe polygons) and logged as a warning when it exceeds 1 percent.  The
+probes are the layer's distinct polygons (exact copies of a polygon
+count once), or a 6 by 6 grid over its bounding box for a layer without
+polygons, a layer of one distinct polygon, which gives one ratio and no
+spread, and a layer with a polygon s2 cannot measure in degrees (edges
+that cross, a spike) or that \code{\link[sf:st_is_valid]{sf::st_is_valid()}} rejects in its CRS (a
+hole outside its shell), whose planar area is not the area it encloses.
+When the grid gives no figure either (a single
+point, a line along one axis), a warning says that the distortion could
+not be measured.
 Measured: a zone's own width edge to edge, 0.25 percent; the
 conterminous United States forced into one zone, 14 percent; Web
 Mercator over 2.5 degrees of latitude at 48N, 4 percent; an equal-area

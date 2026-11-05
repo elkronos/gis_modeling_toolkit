@@ -73,7 +73,9 @@ point) go to s2 and stop on such a cell: transform the cells to a
 projected CRS first. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} then stops with an
 error of class \code{"spatialkit_cells_degenerate"} that names the cells s2
 refuses, the cause and that transform; its largest-overlap join of
-polygon features repairs such cells instead, with a warning.}
+polygon features repairs such cells instead, with a warning.
+\code{\link[=summarize_by_cell]{summarize_by_cell()}} with \code{area = TRUE}, which takes the areas of such
+cells, stops with the same error before any summary.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
