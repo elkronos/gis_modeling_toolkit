@@ -469,21 +469,34 @@
       as.numeric(rowsum(ifelse(seen, r, 0), g)) / as.numeric(rowsum(as.numeric(seen), g))
     }
     cell_xy   <- unname(rowsum(xy[, 1:2, drop = FALSE], g)) / cnt
-    cell_pred <- if (ncol(predictors)) unname(rowsum(predictors, g)) / cnt
-                 else matrix(0, n_cells, 0L)
+    pred_means <- function(P) if (ncol(P)) unname(rowsum(P, g)) / cnt
+                              else matrix(0, n_cells, 0L)
   } else {
     cell_xy   <- matrix(0, n_cells, 2)
-    cell_pred <- matrix(0, n_cells, ncol(predictors))
     masks <- lapply(cell_ids, function(id) cluster_ids == id)
     cell_means <- function(r)
       vapply(masks, function(mask) mean(r[mask], na.rm = TRUE), numeric(1))
-
-    for (j in seq_along(cell_ids)) {
-      mask <- masks[[j]]
-      cell_xy[j, ]    <- colMeans(xy[mask, , drop = FALSE])
-      cell_pred[j, ]  <- colMeans(predictors[mask, , drop = FALSE])
+    pred_means <- function(P) {
+      m <- matrix(0, n_cells, ncol(P))
+      for (j in seq_along(cell_ids)) m[j, ] <- colMeans(P[masks[[j]], , drop = FALSE])
+      m
     }
+
+    for (j in seq_along(cell_ids))
+      cell_xy[j, ] <- colMeans(xy[masks[[j]], , drop = FALSE])
   }
+  # A predictor at an offset (1e8 plus a spread of 1), which the fit below
+  # drops as collinear with the intercept or fits on the rounding of the
+  # offset, is taken about its centre (.centre_columns()) before its cell
+  # means are formed; the regression does not change under a shift of a
+  # predictor, and at 1e15 the cell means of the raw column would carry
+  # rounding of the order of its spread.  The retry and the moments below
+  # read the same design; the retry's test for an exact fit reads it with
+  # the centres added back (.rounding_design()).
+  predictors <- .centre_columns(predictors)
+  centres <- attr(predictors, "centres")
+  if (!is.null(centres)) centres <- c(0, centres)
+  cell_pred <- pred_means(predictors)
   cell_resp <- cell_means(response)
 
   # Fit OLS on cell means
@@ -528,9 +541,9 @@
       if (!is.null(fit0) && !inherits(fit0, "try-error")) {
         cell_resp <- cr0; ok <- ok0; resid <- fit0$residuals
         yr <- raw[is.finite(raw)] / rs0$p
-        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok],
-                                         cbind(1, cell_pred[ok, , drop = FALSE]),
-                                         fit0$coefficients)
+        rd <- .rounding_design(cbind(1, cell_pred[ok, , drop = FALSE]),
+                               fit0$coefficients, centres)
+        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok], rd$X, rd$b)
       }
     }
   }

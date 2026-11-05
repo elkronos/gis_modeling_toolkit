@@ -2748,6 +2748,37 @@ old behaviour where there is a way.
   of 1e3 w + 1e-11 f on w, 45 `.Machine$double.eps` times the size of the
   terms, reach the variogram fit and `cp`.
 
+* **A predictor at a large offset was left out of the OLS fits in silence,
+  so `rss`, `cp`, Moran's I and z, the nugget and the range depended on the
+  predictor's origin.**  The QR decomposition behind `lm.fit()` and `lm()`
+  drops a column whose part orthogonal to the earlier columns is under 1e-7
+  of its norm, so a predictor whose spread is under about 1e-7 of its size,
+  such as a timestamp in seconds or 1e8 plus a spread of 1, was taken as
+  collinear with the intercept, and the residuals scored were those of the
+  intercept alone.  A little below that size the column was kept, but the
+  fit worked on the rounding of the offset, and with a predictor that
+  explains most of the response the numbers moved with the origin by up to
+  1e-4 of their size.  This held in the OLS fit of `resolution_profile()`,
+  in the regression of the cell means behind `moran_i` and `moran_z` there
+  and in `determine_optimal_levels(criterion = "morans_i")` and
+  `"combined"`, and in the OLS detrending of `estimate_sac_range()`, which
+  `resolution_profile(sac = NULL)` reads.  On 600 points with a predictor
+  of unit spread, the profile's `rss` at its coarsest level was 548 at
+  offset 0 and 2768 at 1e8, and on a clustered layer the estimate's nugget
+  was 0.010 and 4.01; the warning of `determine_optimal_levels()` said the
+  cell means were regressed on the cell-mean predictors.  A predictor whose
+  centre is more than 1000 times its spread is now taken less its centre
+  before these fits (for the cell means, before they are formed), and a
+  column of times, dates or time differences that `estimate_sac_range()`
+  is given is read as the numbers `lm()` reads.  The fit of a model with an
+  intercept does not change under a shift of a predictor, so these numbers
+  are now those of the predictor at 0, to rounding.  Every other predictor
+  is fitted as it was, to the last bit, and a predictor that is constant,
+  or a linear combination of the others, is still left out.  The test for
+  an exact fit still reads the size of the terms of the predictors as
+  given, so the residuals of a response computed from a northing are still
+  constant.  The REML detrending of `estimate_sac_range()` is not changed.
+
 * **`kriging_adequacy()` kriged a response at a large offset on the
   rounding of the offset.**  At 1e15 plus a spread of 1 a double holds the
   values to an eighth, and the replicate means, the kriged and plain cell

@@ -2134,9 +2134,19 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       # first fit on every row turned one missing value into "the OLS fit
       # failed": the raw response, trend and all, was then scored against a
       # variogram estimate_sac_range() had fitted to the residuals.
+      # A predictor at an offset (1e8 plus a spread of 1), which the raw fit
+      # drops as collinear with the intercept or fits on the rounding of the
+      # offset, is fitted about its centre (.lm_fit_centred()), and so is
+      # the refit below.
       X_fit <- cbind(1, pred[use, , drop = FALSE])
-      fit <- if (sum(use) > ncol(pred) + 1L)
-        try(stats::lm.fit(x = X_fit, y = resp[use] - y_centre), silent = TRUE)
+      fit <- NULL
+      centres <- NULL
+      if (sum(use) > ncol(pred) + 1L) {
+        kept <- .lm_fit_centred(X_fit, resp[use] - y_centre)
+        fit <- kept$fit
+        X_fit <- kept$X
+        centres <- kept$centres
+      }
       # A response whose raw values show their spread through a trend (1e15
       # plus 1e5 times a predictor plus a spread of 1) is fitted on its raw
       # values, and the rounding of that fit at the offset is of the order
@@ -2159,8 +2169,11 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       }
       if (!is.null(fit) && !inherits(fit, "try-error")) {
         y[use] <- fit$residuals
-        # The fit, for the test for `cp` below (.residuals_rounding()).
-        resid_fit <- list(yd = resp[use] - y_centre, X = X_fit, b = fit$coefficients)
+        # The fit, for the test for `cp` below (.residuals_rounding()), on
+        # the predictors as given where they were centred
+        # (.rounding_design()).
+        rd <- .rounding_design(X_fit, fit$coefficients, centres)
+        resid_fit <- list(yd = resp[use] - y_centre, X = rd$X, b = rd$b)
         variable <- "residuals"
       } else {
         .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",

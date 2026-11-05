@@ -510,6 +510,118 @@
 }
 
 
+# A predictor whose centre is more than this many times its spread is
+# taken about its centre before it is regressed on.  The design cbind(1, x)
+# has a condition number of about |centre| / spread, and the rounding of
+# the fit grows with it: at 1e7 a predictor that explains most of the
+# response moves the residuals by 1e-4 of their size, and from about 1e7
+# lm.fit() drops it.  Below the bound the raw column is fitted as it is.
+.PRED_CENTRE_RATIO <- 1e3
+
+
+#' Predictor columns at an offset taken about their centres
+#'
+#' The QR decomposition behind \code{lm.fit()} and \code{lm()} drops a
+#' column whose part orthogonal to the earlier columns is under 1e-7 of its
+#' norm.  A predictor whose spread is under about 1e-7 of its size (a
+#' timestamp in seconds, a northing, 1e8 plus a spread of 1) is then taken
+#' as collinear with the intercept and left out, and the residuals are those
+#' of the intercept alone; a little below that the column is kept, but the
+#' fit's rounding grows with the ratio of its size to its spread.  Taken
+#' about its centre the same column keeps its spread, and the OLS fit of a
+#' model with an intercept does not change under a shift of a predictor.
+#' A column is taken less the centre of \code{.spread_scaled()} of its
+#' finite values where that centre is more than \code{.PRED_CENTRE_RATIO}
+#' times the column's spread; every other column is returned as it is, so a
+#' fit on such columns gives what it gave to the last bit.  A column of
+#' times, dates or time differences (\code{POSIXt}, \code{Date},
+#' \code{difftime}), which \code{lm()} reads as numbers, is read as the
+#' same numbers.  A column of one value is returned as it is, and is
+#' dropped by the fit as before.
+#'
+#' @param P A numeric matrix or a data frame of predictor columns.
+#' @return \code{P} with each column at an offset less its centre, as a
+#'   plain numeric column.  Where a column is taken less its centre,
+#'   \code{attr(, "centres")} holds the centre of each column (0 for one
+#'   left as it is), for \code{.rounding_design()}.
+#' @keywords internal
+#' @noRd
+.centre_columns <- function(P) {
+  centres <- numeric(ncol(P))
+  for (j in seq_len(ncol(P))) {
+    v <- if (is.data.frame(P)) P[[j]] else P[, j]
+    if (inherits(v, c("POSIXt", "Date", "difftime"))) v <- as.numeric(v)
+    if (!is.numeric(v) || is.matrix(v)) next
+    f <- v[is.finite(v)]
+    if (length(f) < 2L || !(max(abs(f)) > 0)) next
+    sc <- .spread_scaled(f)
+    if (!(sc$spread > 0) || !(abs(sc$centre) > .PRED_CENTRE_RATIO * sc$spread)) next
+    if (is.data.frame(P)) P[[j]] <- v - sc$centre else P[, j] <- v - sc$centre
+    centres[j] <- sc$centre
+  }
+  if (any(centres != 0)) attr(P, "centres") <- centres
+  P
+}
+
+
+#' The design and coefficients the test for an exact fit reads
+#'
+#' \code{.residuals_rounding()} takes the rounding of an exact fit on the
+#' size of the fit's terms.  A response computed from a predictor as it is
+#' given carries rounding of the size of that predictor's terms (5 times a
+#' northing of 4.5e6 is 2.25e7, on a layer 4,000 m across), and the terms
+#' of the design taken about its centres (\code{.centre_columns()}) are
+#' thousands of times smaller.  So the test reads the design with the
+#' centres added back, and the intercept less the centres times their
+#' coefficients, which give the same fitted values.  Where that design does
+#' not have full rank (\code{qr()}, the tolerance \code{lm.fit()} reads),
+#' the offset drops a column from it, its terms are not those of a fit, and
+#' the design as fitted is read.
+#'
+#' @param X The design as fitted, the intercept's column of ones first.
+#' @param b Its coefficients.
+#' @param centres The centre taken off each column of \code{X}, 0 for the
+#'   intercept and for a column left as it is; \code{NULL} for none.
+#' @return A list: \code{X} and \code{b}.
+#' @keywords internal
+#' @noRd
+.rounding_design <- function(X, b, centres) {
+  if (is.null(centres) || !any(centres != 0)) return(list(X = X, b = b))
+  Xr <- X + rep(centres, each = nrow(X))
+  if (qr(Xr)$rank < ncol(Xr)) return(list(X = X, b = b))
+  bf <- as.numeric(b)
+  bf[!is.finite(bf)] <- 0
+  b[1L] <- b[1L] - sum(centres * bf)
+  list(X = Xr, b = b)
+}
+
+
+#' An OLS fit on the predictors, those at an offset taken about their
+#' centres
+#'
+#' \code{lm.fit(X, y)} on the design with its predictor columns passed
+#' through \code{.centre_columns()}.  A design with no column at an offset
+#' is fitted as it is, to the last bit.
+#'
+#' @param X The design, the intercept's column of ones first.
+#' @param y The response.
+#' @return A list: \code{fit}, the \code{lm.fit()} result or the
+#'   \code{try-error}; \code{X}, the design it was fitted on; and
+#'   \code{centres}, the centre taken off each of its columns, or
+#'   \code{NULL} where none was (for \code{.rounding_design()}).
+#' @keywords internal
+#' @noRd
+.lm_fit_centred <- function(X, y) {
+  centres <- NULL
+  if (ncol(X) >= 2L) {
+    P <- .centre_columns(X[, -1L, drop = FALSE])
+    if (!is.null(attr(P, "centres"))) centres <- c(0, attr(P, "centres"))
+    X[, -1L] <- P
+  }
+  list(fit = try(stats::lm.fit(x = X, y = y), silent = TRUE), X = X, centres = centres)
+}
+
+
 # The rounding of an exact fit's residuals, in .Machine$double.eps times the
 # size of the fit's terms (see .residuals_rounding()): the multiple of
 # .no_spread(), whose bound is 100 eps^2 times the sum of squares.

@@ -3481,9 +3481,26 @@ estimate_sac_range <- function(points_sf, response_var,
   # coefficients, for the test of a constant below (.residuals_rounding()).
   X_design <- matrix(1, n, 1L)
   b_design <- NULL
+  # The centre taken off each of its columns (.centre_columns()), or NULL.
+  c_design <- NULL
   if (has_pred) {
     df <- pts_df
     fml <- stats::reformulate(predictor_vars, response_var)
+    # The OLS fit, with a predictor at an offset (1e8 plus a spread of 1, a
+    # timestamp in seconds), which lm() drops as collinear with the
+    # intercept or fits on the rounding of the offset, taken about its
+    # centre (.centre_columns()).  The fit does not change under a shift of
+    # a predictor, and its design is the one the tests below read; the
+    # centres go with it, for the test of a constant (.rounding_design()).
+    ols <- function(d) {
+      P <- .centre_columns(d[predictor_vars])
+      cen <- attr(P, "centres")
+      attr(P, "centres") <- NULL
+      d[predictor_vars] <- P
+      f <- try(stats::lm(fml, data = d), silent = TRUE)
+      if (!is.null(cen) && !inherits(f, "try-error")) attr(f, "centres") <- cen
+      f
+    }
     # A response whose raw values show their spread through a trend (1e15
     # plus 1e5 times a predictor plus a spread of 1) is fitted on the raw
     # values, and the rounding of that fit at the offset is of the order of
@@ -3492,7 +3509,7 @@ estimate_sac_range <- function(points_sf, response_var,
     # centre too (.residual_centre()).  Where they show spread nothing
     # changes.
     if (y_centre == 0) {
-      fit0 <- try(stats::lm(fml, data = df), silent = TRUE)
+      fit0 <- ols(df)
       if (!inherits(fit0, "try-error")) {
         e0 <- as.numeric(stats::residuals(fit0))
         y0 <- as.numeric(stats::model.response(stats::model.frame(fit0)))
@@ -3556,7 +3573,7 @@ estimate_sac_range <- function(points_sf, response_var,
         }
       }
     }
-    lm_fit <- if (is.null(reml_fit)) try(stats::lm(fml, data = df), silent = TRUE) else NULL
+    lm_fit <- if (is.null(reml_fit)) ols(df) else NULL
     if (is.null(lm_fit)) {
       # REML handled the trend above; nothing to do here.
     } else if (inherits(lm_fit, "try-error")) {
@@ -3578,6 +3595,8 @@ estimate_sac_range <- function(points_sf, response_var,
         if (!inherits(Xl, "try-error") && is.matrix(Xl) && nrow(Xl) == n) {
           X_design <- Xl
           b_design <- stats::coef(lm_fit)
+          cen <- attr(lm_fit, "centres")
+          if (!is.null(cen)) c_design <- c(0, cen)[attr(Xl, "assign") + 1L]
         }
         detrended <- TRUE
         detrend_method <- "ols"
@@ -3632,8 +3651,10 @@ estimate_sac_range <- function(points_sf, response_var,
   y_sd   <- if (is.finite(y_size) && y_size > 0) y_size * stats::sd(y / y_size) else 0
   lost   <- !is.finite(y_sd) || !(y_sd > 1e-12 * y_size)
   with_design <- detrended && !is.null(b_design) && all(is.finite(y_raw))
-  held <- with_design &&
-    isTRUE(.residuals_rounding(y, y_raw, y_raw - y_centre, X_design, b_design))
+  held <- with_design && local({
+    rd <- .rounding_design(X_design, b_design, c_design)
+    isTRUE(.residuals_rounding(y, y_raw, y_raw - y_centre, rd$X, rd$b))
+  })
   spread <- lost && all(is.finite(y_raw)) &&
     (if (with_design) !held
      else if (detrended) !.residuals_rounding(y, y_raw, y_raw - y_centre)
