@@ -2203,6 +2203,19 @@ old behaviour where there is a way.
   placed by hand outside the boundary take their cells beside such a seed,
   where the locations in the cell it named were filled.
 
+* **`cell_values_at()` without `seeds` gave every location the value `NA`,
+  marked filled, when `values` had no cell ID.**  A `values` whose ID
+  column is all `NA` placed no location in a cell, so every location was
+  filled from the cell of its nearest scored row, which `values` has no row
+  for, and took `NA`; nothing was raised.  The same `values` beside `seeds`
+  was refused.  It is now refused on both paths with the error the seeds'
+  path gave ("`values` has no cell ID (it has no row, or its ID column ...
+  is all NA)"), whatever the locations asked for.  IDs that are `NaN`
+  count as `NA`.  A `values` of no rows, or one without polygons whose IDs
+  are all `NA`, without `seeds`, refused before because it carries no
+  polygons, gets that error too.  A `values` with some IDs `NA` runs as
+  before.
+
 * **`cell_values_at()` refused `seeds` without a CRS beside `points` with
   one, with an error that did not say which CRS to set.**  For rows without
   a CRS whose coordinates look like longitude and latitude,

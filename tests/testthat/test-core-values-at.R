@@ -986,13 +986,17 @@ test_that("the assignment is handed the cells' polygons and IDs alone: a grouped
   expect_true(all(is.na(at$cell_id[hit])))
   expect_identical(at$filled, hit)
   expect_identical(.va_cols(at[!hit, ]), .va_cols(want[!hit, ]))
-  # No ID at all: no location has a cell, and the assignment is not called.
+  # No ID at all: no location could have a cell, so the call stops, as it does beside
+  # seeds, and the assignment is not called.
   seen$n <- NULL
   values$cell_id <- NA_integer_
-  at <- .va_at(L, L$held, values = values, seeds = NULL)
+  e <- .va_error(.va_at(L, L$held, values = values, seeds = NULL))
+  expect_identical(conditionMessage(e), paste0(
+    "cell_values_at(): `values` has no cell ID (it has no row, or its ID column 'cell_id' is ",
+    "all NA), so no location could take its own cell's value; it must be the ",
+    "summarize_by_cell() result for `points`."))
+  expect_null(e$call)
   expect_null(seen$n)
-  expect_identical(at$filled, rep(TRUE, nrow(at)))
-  expect_true(all(is.na(at$cell_id)))
 })
 
 test_that("the warning that no location is in a polygon is neither raised nor logged, and every other warning of the assignment is", {
@@ -1490,10 +1494,12 @@ test_that("what `seeds` and `values` must be", {
     "(seeds$cell_id <- tess$index).")
   expect_identical(conditionMessage(.va_error(.va_at(L, L$held, values = flat, seeds = NULL))),
                    polygons_text)
-  # A summary of no rows has no polygon either; with seeds it has no cell a seed could name.
+  # A summary of no rows has no cell ID, with seeds or without them.
   expect_identical(
     conditionMessage(.va_error(.va_at(L, L$held, values = L$pooled[0, ], seeds = NULL))),
-    polygons_text)
+    paste0("cell_values_at(): `values` has no cell ID (it has no row, or its ID column ",
+           "'cell_id' is all NA), so no location could take its own cell's value; it must be ",
+           "the summarize_by_cell() result for `points`."))
   expect_identical(
     conditionMessage(.va_error(.va_at(L, L$held[1:5, ], values = L$pooled[0, ]))),
     paste0("cell_values_at(): `values` has no cell ID (it has no row, or its ID column ",
@@ -1631,6 +1637,57 @@ test_that("seeds of which no ID is an ID of `values` are refused, and one that i
   at <- .va_at(L, L$held, seeds = half)
   expect_identical(at$filled, !mine)
   expect_identical(at$value[mine], want$value[mine])
+})
+
+test_that("a summary with no cell ID is refused with seeds and without them, and one with some runs", {
+  L <- .va_full()
+  values_text <- paste0(
+    "cell_values_at(): `values` has no cell ID (it has no row, or its ID column 'cell_id' is ",
+    "all NA), so no location could take its own cell's value; it must be the ",
+    "summarize_by_cell() result for `points`.")
+  lost <- L$pooled; lost$cell_id <- NA_integer_
+  lost_chr <- L$pooled; lost_chr$cell_id <- NA_character_
+  # Double IDs that are NaN, or NA and NaN: is.na() holds for both, though NaN reads as
+  # the text "NaN".
+  lost_nan <- L$pooled; lost_nan$cell_id <- NaN
+  lost_mix <- L$pooled
+  lost_mix$cell_id <- ifelse(seq_len(nrow(lost_mix)) %% 2L == 0L, NA_real_, NaN)
+  for (s in list(L$seeds, NULL)) {
+    # IDs all NA, as integers, as text, or as doubles NaN: a plain error, raised without
+    # a call or warning.
+    for (v in list(lost, lost_chr, lost_nan, lost_mix)) {
+      r <- .va_catch(.va_error(.va_at(L, L$held, values = v, seeds = s)))
+      expect_identical(conditionMessage(r$value), values_text)
+      expect_null(r$value$call)
+      expect_identical(class(r$value), c("simpleError", "error", "condition"))
+      expect_length(r$warnings, 0L)
+    }
+    # The verdict does not depend on the locations asked for.
+    expect_identical(
+      conditionMessage(.va_error(.va_at(L, L$held[0, ], values = lost, seeds = s))),
+      values_text)
+  }
+  # Without seeds the same summary without its polygons gives the same text: the missing
+  # IDs are said first, since cells without an ID could hold no location.
+  for (v in list(lost, lost_nan))
+    expect_identical(
+      conditionMessage(.va_error(.va_at(L, L$held, values = sf::st_drop_geometry(v),
+                                        seeds = NULL))),
+      values_text)
+  # Some IDs NA: the call runs on both paths, and a location whose cell keeps its ID has
+  # that cell's value, as with every ID.
+  some <- L$pooled
+  gone <- some$cell_id[1:3]
+  some$cell_id[1:3] <- NA
+  for (s in list(L$seeds, NULL)) {
+    want <- .va_at(L, L$held, seeds = s)
+    at <- .va_at(L, L$held, values = some, seeds = s)
+    expect_identical(nrow(at), nrow(L$held))
+    kept <- !(want$cell_id %in% gone)
+    expect_gt(sum(kept), 0L)
+    expect_lt(sum(kept), nrow(want))
+    expect_identical(.va_cols(at[kept, ]), .va_cols(want[kept, ]))
+  }
 })
 
 test_that("seeds with the IDs of cells and no location are refused, and one with a location suffices", {

@@ -23,7 +23,8 @@ stops.}
 the ID column and a cell value of \code{response_var}: the pooled value
 (\code{estimate = "pooled"}) or the mean (the default \code{agg_funs}). With
 \code{seeds = NULL} it must also carry the cell polygons, which it does when
-it was made with \code{cells_sf}.}
+it was made with \code{cells_sf}. A \code{values} with no row, or whose IDs are
+all \code{NA}, stops the call, with or without \code{seeds}.}
 
 \item{points}{The assigned layer \code{values} was computed from: an sf layer
 with the ID column and \code{response_var}, and at least one scored row.}

@@ -287,9 +287,10 @@
 #' @return \code{NULL} when \code{values} carries no polygons, no seed with
 #'   an \code{NA} ID and a location lies outside them, or every polygon is
 #'   named by a seed with a location (one without names no location, so
-#'   the cell whose ID it carries is still free); otherwise a list: \code{lost}, the rows of those seeds;
-#'   \code{xy}, a point inside each polygon no seed names, in the working
-#'   CRS; \code{id}, the IDs of those polygons as text.
+#'   the cell whose ID it carries is still free); otherwise a list:
+#'   \code{lost}, the rows of those seeds; \code{xy}, a point inside each
+#'   polygon no seed names, in the working CRS; \code{id}, the IDs of those
+#'   polygons as text.
 #' @keywords internal
 #' @noRd
 .values_at_free_cells <- function(seed_ids, seed_xy, values, id_col, crs, frame) {
@@ -597,7 +598,8 @@
 #'   the ID column and a cell value of `response_var`: the pooled value
 #'   (`estimate = "pooled"`) or the mean (the default `agg_funs`). With
 #'   `seeds = NULL` it must also carry the cell polygons, which it does when
-#'   it was made with `cells_sf`.
+#'   it was made with `cells_sf`. A `values` with no row, or whose IDs are
+#'   all `NA`, stops the call, with or without `seeds`.
 #' @param points The assigned layer `values` was computed from: an sf layer
 #'   with the ID column and `response_var`, and at least one scored row.
 #' @param response_var Name of the summarised column wanted: the response,
@@ -806,6 +808,19 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
                  paste0(p, "mean_", response_var)), call. = FALSE)
   }
 
+  # A `values` with no cell ID (no row, or every ID NA) has no cell a
+  # location could be placed in, with or without seeds: every location would
+  # be filled from the cell of its nearest scored row, which `values` has no
+  # row for, and take NA.  NA is dropped before the IDs are read as text,
+  # which reads a double NaN as "NaN": NaN is no ID either.
+  of_values <- values[[id_col]]
+  of_values <- .id_as_character(of_values[!is.na(of_values)])
+  if (!length(of_values))
+    stop(sprintf(paste0("cell_values_at(): `values` has no cell ID (it has no row, or its ",
+                        "ID column '%s' is all NA), so no location could take its own ",
+                        "cell's value; it must be the summarize_by_cell() result for ",
+                        "`points`."), id_col), call. = FALSE)
+
   by_seeds <- !is.null(seeds)
   if (!by_seeds) {
     polygons <- inherits(values, "sf") && nrow(values) > 0L &&
@@ -845,21 +860,15 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # Seeds of which no ID is a cell of `values` (an ID column from elsewhere,
     # the index of another tessellation, IDs all NA) would leave every
     # location without its cell's value: each would be filled from its
-    # nearest scored row.  NA is dropped on both sides, since NA %in% NA is
-    # TRUE.  One seed with a location and a cell's ID is enough: a seed whose
-    # ID `values` has no row for stands for a cell without a value (step 5).
+    # nearest scored row.  NA is dropped on both sides (`of_values` holds no
+    # NA), since NA %in% NA is TRUE.  One seed with a location and a cell's
+    # ID is enough: a seed whose ID `values` has no row for stands for a cell
+    # without a value (step 5).
     # Only a seed with a location counts.  One without (an empty point, a
     # coordinate that is not finite or lies beyond .POOL_XY_MAX, as
     # .values_at_xy() reads it) is the nearest seed of no location, and is
     # given no cell in step 3.  The coordinates are read as given, before any
     # CRS work, and again once the seeds are placed in the working CRS.
-    of_values <- .id_as_character(values[[id_col]])
-    of_values <- of_values[!is.na(of_values)]
-    if (!length(of_values))
-      stop(sprintf(paste0("cell_values_at(): `values` has no cell ID (it has no row, or its ",
-                          "ID column '%s' is all NA), so no location could take its own ",
-                          "cell's value; it must be the summarize_by_cell() result for ",
-                          "`points`."), id_col), call. = FALSE)
     # A seed with an NA ID outside every polygon of `values` is given the
     # cell it generates in step 3, and points placed by hand outside the
     # boundary can all be such seeds.  Beside polygons the check then
@@ -1041,7 +1050,7 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
         cell <- seed_ids[as_cen$seed[j]]
       }
     }
-  } else if (length(live) && !all(is.na(values[[id_col]]))) {
+  } else if (length(live)) {
     # The assignment is given the points and no column of `newdata`, so none
     # can collide with the ID column, and the cells' polygons with their IDs
     # and no other column or class of `values`.  A row of `values` without
