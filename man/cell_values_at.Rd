@@ -158,7 +158,12 @@ a location on the edge between two cells the profile scored is placed
 as that function places such a row (see "Ties"); a location in no
 polygon has no cell. Polygons without a CRS are read as that function
 read them for the rows of \code{points}: the locations are handed to it in
-the CRS of \code{points}, whatever CRS \code{newdata} arrived in.
+the CRS of \code{points}, whatever CRS \code{newdata} arrived in. Where that
+join runs on the sphere and s2 refuses a polygon of \code{values} (see
+Details in \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}}), the call stops with an
+error of class \code{"spatialkit_cells_degenerate"} that gives the rows of
+\code{values} s2 refuses (\code{rows} on the condition), names the cause and
+says to transform \code{values} to a projected CRS.
 \item \emph{The value.} The cell's pooled value of \code{response_var},
 \verb{..pooled_<prefix><response_var>} with the prefix \code{resp_} or \code{pred_},
 when \code{values} has that column; otherwise its mean,

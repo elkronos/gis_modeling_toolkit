@@ -2207,6 +2207,33 @@ old behaviour where there is a way.
   refuse them, as it refuses `sf::st_area()` and `sf::st_union()` on such
   cells: transform them to a projected CRS first.
 
+* **`assign_features_to_polygons()` stopped with s2's bare message on
+  polygons in lon/lat that s2 refuses.**  A join in longitude and latitude
+  runs on the sphere, where s2 refuses a polygon with two corners it reads
+  as one point, and the join stopped with "Loop 0 is not valid: Edge 20 is
+  degenerate (duplicate vertex)", which names neither the polygon nor a way
+  on.  Cells returned in lon/lat hold such corners on gridded locations, and
+  the joins that do not run in the record's CRS met them: s2 refuses 4 of
+  the 133 k-means cells of a 30 by 20 lattice at 30 m returned in
+  EPSG:4326, and the join of rows in degrees stopped once the cells had lost
+  their record or their CRS; the cells of centres refitted to every point
+  (`scored_cells = FALSE`) on a 50 by 40 lattice at 250 m stopped it the
+  same way.  The join by `predicate` now stops with an error of class
+  `spatialkit_cells_degenerate` that gives the number and rows of the
+  polygons s2 refuses (`rows` on the condition), quotes s2, names the cause
+  and says to transform `polygons_sf` to a projected CRS, such as the one
+  the cells were built in, where the join runs.  Every refusal by s2 of a
+  polygon of the layer gets this error, among them a hole that crosses its
+  outer ring and two holes that share an edge, which also stopped with s2's
+  bare message.  The largest-overlap join of polygon features still repairs
+  the polygons s2 refuses, with its warning, and runs; on a polygon s2
+  refuses even after the repair (a hole that crosses its outer ring) it
+  stops with the same error, where it advised `largest = FALSE`, which meets
+  the same refusal.  `cell_values_at()` without `seeds`, which places its
+  locations with this join, gives the error in its own words: it names
+  `values` and the rows of `values`.  Polygons s2 accepts are joined as
+  before, and an error of another kind keeps its own message.
+
 * **Cells built on seeds placed from lon/lat points could leave observations
   near the edge of a wide layer in no cell.**  The seeding functions attach
   the convex hull of the points they cluster as the seeds' cover, and

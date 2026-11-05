@@ -201,7 +201,19 @@ transformed for it, and the features come back with the coordinates they
 arrived with. Otherwise (other polygons in lon/lat, such as a hex or
 square lattice sized by a selection or the cells of centres refitted to
 every point, or polygons without a CRS) the join runs in the CRS of
-\code{features_sf}.
+\code{features_sf}. In longitude and latitude, with s2 on (\code{sf::sf_use_s2()},
+sf's default), sf joins on the sphere with s2, which refuses a polygon
+that is not valid there, such as one with two corners it reads as one
+point or with edges that cross; cells returned in lon/lat can hold two
+corners that differ only by rounding and fall on one point in degrees
+(see \code{crs} in \code{\link[=create_voronoi_polygons]{create_voronoi_polygons()}}). A join by \code{predicate} then
+stops with an error of class \code{"spatialkit_cells_degenerate"} that gives
+the rows of the polygons s2 refuses (the condition carries them as
+\code{rows}), names the cause and says to transform \code{polygons_sf} to a
+projected CRS, where the join runs. The largest-overlap join repairs such
+polygons first (see \code{largest}), and stops with that error when s2 still
+refuses a polygon it repaired, such as one whose hole crosses its outer
+ring.
 }
 \examples{
 library(sf)

@@ -21,7 +21,19 @@
 #' arrived with. Otherwise (other polygons in lon/lat, such as a hex or
 #' square lattice sized by a selection or the cells of centres refitted to
 #' every point, or polygons without a CRS) the join runs in the CRS of
-#' `features_sf`.
+#' `features_sf`. In longitude and latitude, with s2 on (`sf::sf_use_s2()`,
+#' sf's default), sf joins on the sphere with s2, which refuses a polygon
+#' that is not valid there, such as one with two corners it reads as one
+#' point or with edges that cross; cells returned in lon/lat can hold two
+#' corners that differ only by rounding and fall on one point in degrees
+#' (see `crs` in [create_voronoi_polygons()]). A join by `predicate` then
+#' stops with an error of class `"spatialkit_cells_degenerate"` that gives
+#' the rows of the polygons s2 refuses (the condition carries them as
+#' `rows`), names the cause and says to transform `polygons_sf` to a
+#' projected CRS, where the join runs. The largest-overlap join repairs such
+#' polygons first (see `largest`), and stops with that error when s2 still
+#' refuses a polygon it repaired, such as one whose hole crosses its outer
+#' ring.
 #'
 #' @param features_sf An sf object containing features to assign.
 #' @param polygons_sf An sf or sfc polygonal layer.
@@ -397,14 +409,23 @@ assign_features_to_polygons <- function(
                     conditionMessage(w), fixed = TRUE))
             invokeRestart("muffleWarning")
         }),
-      error = function(e) stop(sprintf(paste0(
-        "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
-        "Pass largest = FALSE to assign every feature by `predicate` and ",
-        "`tie_break` instead%s."),
-        conditionMessage(e),
-        if (isTRUE(sf::st_is_longlat(f)))
-          ", or project both layers first (see ensure_projected())" else ""),
-        call. = FALSE))
+      error = function(e) {
+        # The polygons s2 refuses were repaired above, and s2 accepts most
+        # of them then.  It still refuses some (a hole that crosses its
+        # outer ring stays two rings whose edges cross), and `largest =
+        # FALSE` would meet the same refusal, so the error names the cause
+        # and the transform that helps instead of advising it.
+        .stop_cells_degenerate(e, p_sel, "assign_features_to_polygons",
+                               "`polygons_sf`", "the join", .JOIN_AGAIN, is.na(crs_p))
+        stop(sprintf(paste0(
+          "assign_features_to_polygons(): the largest-overlap join failed (%s). ",
+          "Pass largest = FALSE to assign every feature by `predicate` and ",
+          "`tie_break` instead%s."),
+          conditionMessage(e),
+          if (isTRUE(sf::st_is_longlat(f)))
+            ", or project both layers first (see ensure_projected())" else ""),
+          call. = FALSE)
+      })
     # sf keeps the largest intersection piece without asking whether it has
     # any area, so under GEOS a feature that only shares an edge or a corner
     # with the cells was assigned to one of them with zero overlap, while
@@ -446,7 +467,20 @@ assign_features_to_polygons <- function(
                 length(lt$rows), nrow(f), tie_break)
     }
   } else {
-    joined <- do.call(sf::st_join, join_args)
+    # In longitude and latitude sf joins with s2, which refuses a polygon
+    # with two corners it reads as one point.  Cells returned in degrees hold
+    # such corners on gridded locations, and the join stopped with s2's
+    # "Loop 0 is not valid: Edge 20 is degenerate (duplicate vertex)", which
+    # names neither the polygon nor a way on: the k-means cells of a 30 by 20
+    # lattice at 30 m returned in EPSG:4326 stopped it once they had lost
+    # their record or their CRS.  Such a refusal, and every other refusal
+    # of a polygon of the layer by s2, now stops with the cause and the
+    # remedy; every other error passes as it was raised.
+    joined <- withCallingHandlers(
+      do.call(sf::st_join, join_args),
+      error = function(e)
+        .stop_cells_degenerate(e, p_sel, "assign_features_to_polygons",
+                               "`polygons_sf`", "the join", .JOIN_AGAIN, is.na(crs_p)))
   }
   # The join ran on copies (moved into the polygons' CRS, repaired); hand
   # back the geometry the caller passed, in the CRS it arrived in, rather
@@ -619,6 +653,125 @@ assign_features_to_polygons <- function(
                             list(n = n_unassigned,
                                  which = as.integer(unassigned_rows)))
   .count_rule_put(joined, count_rule)
+}
+
+
+# What the caller of a join does once the polygons are transformed.
+.JOIN_AGAIN <- "assign again; the join then runs in that CRS"
+
+#' Stop with the cause when s2 refuses a polygon of a layer in degrees
+#'
+#' sf measures geometry in longitude and latitude with s2, which refuses a
+#' polygon that is not valid on the sphere: a ring with two corners it reads
+#' as one point ("Loop 0 is not valid: Edge 20 is degenerate (duplicate
+#' vertex)") or with edges that cross; a hole that crosses its outer ring
+#' ("Loop 0 edge 1 crosses loop 1 edge 0"); two rings that share an edge
+#' ("Loop 1 edge 2 has duplicate near loop 2 edge 3").  Its error names
+#' neither the polygon nor a way on.  Cells built in a projected CRS and
+#' returned in degrees hold such corners where four seeds stand the same
+#' distance from one point: two cells meet there at two corners that differ
+#' only by rounding, which the transform puts at one point.  Called from an
+#' error handler around an sf call on \code{polygons}.
+#'
+#' @param e The error caught.  s2's refusals of a polygon all name a ring
+#'   ("Loop N ...", "... crosses loop N ...", "Inconsistent loop orientations
+#'   detected" for oriented polygons), so an error that names none is not
+#'   one; sf's own check of the polygons below then tells s2's refusal of
+#'   these polygons from that of another layer's.
+#' @param polygons The polygons as the failed call had them (sf or sfc).
+#' @param caller Name of the exported function, for the message.
+#' @param layer The argument the polygons came in, as the message names it.
+#' @param task What cannot run, as in "so \code{task} cannot run in degrees".
+#' @param again What to do once the polygons are transformed.
+#' @param no_crs Whether the polygons came without a CRS and were read as
+#'   longitude and latitude.
+#' @return \code{NULL}, invisibly, when \code{e} is not s2's refusal of a
+#'   polygon or s2 refuses no polygon of \code{polygons} (the refusal is
+#'   another layer's, or of a piece the call made): the caller then raises
+#'   \code{e} as it would.  Otherwise it stops with the error
+#'   \code{.raise_cells_degenerate()} builds.
+#' @keywords internal
+#' @noRd
+.stop_cells_degenerate <- function(e, polygons, caller, layer, task, again,
+                                   no_crs = FALSE) {
+  said <- conditionMessage(e)
+  if (!grepl("[Ll]oop [0-9]+|loop orientations", said)) return(invisible(NULL))
+  g <- sf::st_geometry(polygons)
+  if (!isTRUE(sf::st_is_longlat(g)) || !isTRUE(sf::sf_use_s2())) return(invisible(NULL))
+  check <- function(...) tryCatch(suppressWarnings(sf::st_is_valid(g, ...)),
+                                  error = function(err) NULL)
+  ok  <- check()
+  why <- check(reason = TRUE)
+  if (length(ok) != length(g) || length(why) != length(g)) return(invisible(NULL))
+  bad <- which(ok %in% FALSE)
+  if (!length(bad)) return(invisible(NULL))
+  .raise_cells_degenerate(e, bad, unname(why[bad]), length(g), caller, layer, task,
+                          again, no_crs)
+}
+
+#' The error of class "spatialkit_cells_degenerate"
+#'
+#' Builds and raises the error \code{.stop_cells_degenerate()} found the
+#' cause of.  A function that hands its polygons to another that raised this
+#' error calls it again with the fields of that condition and its own words,
+#' so the message names the argument the caller passed.
+#'
+#' @param parent s2's error, quoted in the message.
+#' @param rows The rows of \code{layer} s2 refuses.
+#' @param reasons s2's reason for each of \code{rows}
+#'   (\code{sf::st_is_valid(reason = TRUE)}).
+#' @param n The number of polygons s2 was handed.
+#' @param caller,layer,task,again,no_crs As for \code{.stop_cells_degenerate()}.
+#' @param of The polygons counted, as in "refuses 2 of \code{of}"; \code{NULL}
+#'   for "the \code{n} polygons of \code{layer}".
+#' @return Does not return.  The condition carries \code{rows}, \code{n},
+#'   \code{reasons} and \code{parent}.
+#' @keywords internal
+#' @noRd
+.raise_cells_degenerate <- function(parent, rows, reasons, n, caller, layer, task, again,
+                                    no_crs = FALSE, of = NULL) {
+  said <- conditionMessage(parent)
+  rows_text <- function(r) {
+    k <- length(r)
+    if (k == 1L) sprintf("row %d", r)
+    else if (k <= 6L) sprintf("rows %s and %d", paste(r[-k], collapse = ", "), r[k])
+    else sprintf("rows %s and %d more", paste(r[1:6], collapse = ", "), k - 6L)
+  }
+  k <- length(rows)
+  # s2 gives "duplicate vertex" for two corners it reads as one point; the
+  # cause and its usual source are named for those polygons only.
+  dup <- grepl("duplicate vertex", reasons, fixed = TRUE)
+  other <- which(!dup)
+  cause <- if (!any(dup)) "" else paste0(
+    if (!length(other)) {
+      if (k == 1L) "It has two corners that s2 reads as one point. "
+      else "Each has two corners that s2 reads as one point. "
+    } else sprintf(paste0("%d of them %s two corners that s2 reads as one point, and ",
+                          "s2 refuses the other %d for another reason (%s: \"%s\"). "),
+                   sum(dup), if (sum(dup) == 1L) "has" else "have", length(other),
+                   rows_text(rows[other[1L]]), reasons[other[1L]]),
+    "Cells built in a projected CRS and returned in longitude and latitude (by ",
+    "build_tessellation() or create_voronoi_polygons() with a geographic `crs`) can ",
+    "hold such corners: where four seeds stand the same distance from one point, two ",
+    "cells meet there at two corners that differ only by rounding, which the ",
+    "transform to degrees puts at one point. ")
+  remedy <- if (isTRUE(no_crs))
+    sprintf(paste0("%s has no CRS and was read as longitude and latitude: give it its ",
+                   "CRS with sf::st_set_crs(), transform it to a projected CRS, such as ",
+                   "the one its cells were built in, with sf::st_transform(), and %s."),
+            layer, again)
+  else
+    sprintf(paste0("Transform %s to a projected CRS, such as the one its cells were ",
+                   "built in (sf::st_transform()) or the one ensure_projected() picks ",
+                   "for it, and %s."), layer, again)
+  if (is.null(of)) of <- sprintf("the %d polygons of %s", n, layer)
+  msg <- sprintf(paste0(
+    "%s(): s2, the engine sf uses for geometry in longitude and latitude, refuses %d ",
+    "of %s (%s; \"%s\"), so %s cannot run in degrees. %s%s"),
+    caller, k, of, rows_text(rows),
+    trimws(strsplit(said, "\n", fixed = TRUE)[[1L]][1L]), task, cause, remedy)
+  stop(errorCondition(msg, class = "spatialkit_cells_degenerate", call = NULL,
+                      rows = rows, n = n, reasons = reasons, parent = parent))
 }
 
 

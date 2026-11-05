@@ -447,7 +447,12 @@
 #'    as that function places such a row (see "Ties"); a location in no
 #'    polygon has no cell. Polygons without a CRS are read as that function
 #'    read them for the rows of `points`: the locations are handed to it in
-#'    the CRS of `points`, whatever CRS `newdata` arrived in.
+#'    the CRS of `points`, whatever CRS `newdata` arrived in. Where that
+#'    join runs on the sphere and s2 refuses a polygon of `values` (see
+#'    Details in [assign_features_to_polygons()]), the call stops with an
+#'    error of class `"spatialkit_cells_degenerate"` that gives the rows of
+#'    `values` s2 refuses (`rows` on the condition), names the cause and
+#'    says to transform `values` to a projected CRS.
 #' 4. *The value.* The cell's pooled value of `response_var`,
 #'    `..pooled_<prefix><response_var>` with the prefix `resp_` or `pred_`,
 #'    when `values` has that column; otherwise its mean,
@@ -1001,10 +1006,22 @@ cell_values_at <- function(newdata, values, points, response_var, id_col = "poly
     # That function's warning that no feature falls in any polygon is neither
     # raised nor logged: every such row is returned with filled = TRUE.  Its
     # other warnings pass.
+    # When s2 refuses polygons of `values` in degrees, that function's error
+    # named `polygons_sf` and said to assign again, where the caller passed
+    # `values` and asked for no assignment; it is raised again in this
+    # function's words, with the rows of `values`.
     answered <- .answer_for_classed("spatialkit_unassigned")
     held <- tryCatch(
       assign_features_to_polygons(feat, cells_at, polygon_id_col = id_col,
                                   keep_unassigned = TRUE, quiet = TRUE),
+      spatialkit_cells_degenerate = function(e)
+        .raise_cells_degenerate(
+          e$parent, which(has_id)[e$rows], e$reasons, e$n, "cell_values_at", "`values`",
+          "the placement of the locations in its polygons",
+          "call cell_values_at() again; the locations are then placed in that CRS",
+          no_crs = is.na(sf::st_crs(cells_at)),
+          of = if (all(has_id)) NULL
+               else sprintf("the %d polygons of `values` that carry an ID", e$n)),
       finally = answered())
     if (nrow(held) != length(live))
       stop("cell_values_at(): the assignment returned ", nrow(held), " rows for ",

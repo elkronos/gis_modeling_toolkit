@@ -64,7 +64,10 @@ without the record, such as those of a count given as a number or those
 a verb that drops attributes has stripped of it, and cells whose record
 says \code{scored_cells = FALSE}, such as those of centres refitted to every
 point) go to s2 and stop on such a cell: transform the cells to a
-projected CRS first.}
+projected CRS first. \code{\link[=assign_features_to_polygons]{assign_features_to_polygons()}} then stops with an
+error of class \code{"spatialkit_cells_degenerate"} that names the cells s2
+refuses, the cause and that transform; its largest-overlap join of
+polygon features repairs such cells instead, with a warning.}
 
 \item{quiet}{Logical; suppress this function's progress \code{message()}s.
 It does not silence R warnings, nor the package's console log echo
