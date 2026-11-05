@@ -1792,6 +1792,32 @@ old behaviour where there is a way.
   either way, are always measured.  For a given layer the CRS, the area
   error and the refusal can differ from before.
 
+* **A small lon/lat layer whose features share edges, or meet another
+  feature's edge at a corner, got its projection chosen on rounding
+  noise.**  When a layer of fewer than 40 polygons or lines lists at most
+  160 vertices, fewer than 40 of them distinct, `ensure_projected()` scores
+  the candidates on points added along each edge of its outlines as well.
+  An edge two features share was filled once from each end, some copies of
+  an added point differed in their last bits, and the pair, about 1e-9 m
+  apart, set the worst-case distance error of every candidate.  Two boxes of
+  12 by 15 degrees, one above the other, scored 76.9 percent in UTM zone 13
+  and 86.8 percent in EPSG:5070, where their outline as one box scores 0.5
+  and 10.9 percent, and the zone was kept with "76.92% vs 76.92%".  A 2 by 2
+  grid of boxes moved to a Lambert azimuthal CRS with "11.22% against the
+  zone's 13.50%", where its outline gives 0.06% and 0.26%.  The same held
+  where a point added along one feature's edge falls on a corner of another
+  (a T-junction, or a corner that touches the edge) or on a point added
+  along an edge that overlaps it in part.  Each edge is now filled from the
+  same end whichever feature lists it, and an added point within about 1e-9
+  degrees (0.1 mm) of a vertex or of another added point is left out; the
+  vertices are kept as they are.  The two layers above score within a tenth
+  of a percentage point of their outlines, and the log quotes the outlines'
+  figures.  A layer on which no added point lies within 1e-9 degrees of
+  another point scores as before, but for the last bits.  For the others
+  the CRS, `attr(, "crs_choice")` and the logged figures can differ from
+  before, and the points added along an edge no longer depend on the
+  direction in which its ring is listed.
+
 * **`resolution_profile()` reported a layer too small for a ladder as
   supported.**  With fewer than two cells at `min_cell_n` it raised the
   ceiling to 2 with `supported = TRUE`.  It still scores two cells, with

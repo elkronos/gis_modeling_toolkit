@@ -473,7 +473,11 @@
 #'   the same length (\code{st_coordinates()} yields one row per vertex).
 #'   With fewer than \code{max_n} features the outline's vertices, densified
 #'   along its edges, are added to those points, so that a single study-area
-#'   polygon is measured across its extent rather than not at all.
+#'   polygon is measured across its extent rather than not at all.  Each
+#'   edge is filled from the same end whichever way its ring runs, and an
+#'   added point within about 1e-9 degrees of a point listed before it is
+#'   left out, so an edge two features share, or a vertex on another
+#'   feature's edge, adds no pair of points a few bits apart.
 #' @param crs Candidate \code{sf::crs}.
 #' @param max_n Maximum number of points to sample.  Default 40 (780 pairs).
 #' @return Numeric worst-case \code{|d_planar / d_geodesic - 1|}, or \code{NA}
@@ -566,6 +570,21 @@
             same <- ring[-1L] == ring[-length(ring)]
             a <- xy[-nrow(xy), , drop = FALSE][same, , drop = FALSE]
             b <- xy[-1L, , drop = FALSE][same, , drop = FALSE]
+            # Each edge is filled from the end with the smaller longitude (the
+            # smaller latitude when the two are equal), whichever way its ring
+            # runs.  An edge two features share is listed once by each, from
+            # opposite ends.  Filled from each end in turn, some copies of an
+            # added point differed in their last bits; unique() kept both,
+            # and the pair, about 1e-9 m apart, set every candidate's score.
+            # Two boxes of 12 by 15 degrees, one above the other, scored 76.9%
+            # in UTM zone 13 and 86.8% in EPSG:5070, where their outline as
+            # one box scores 0.5% and 10.9%, and ensure_projected() kept the
+            # zone with "76.92% vs 76.92%".  Filled from the same end, the two
+            # copies are the same point.
+            sw <- a[, 1L] > b[, 1L] | (a[, 1L] == b[, 1L] & a[, 2L] > b[, 2L])
+            ab <- a[sw, , drop = FALSE]
+            a[sw, ] <- b[sw, ]
+            b[sw, ] <- ab
             f <- rep(seq_len(per_edge) / (per_edge + 1), each = nrow(a))
             a <- a[rep(seq_len(nrow(a)), per_edge), , drop = FALSE]
             b <- b[rep(seq_len(nrow(b)), per_edge), , drop = FALSE]
@@ -578,7 +597,29 @@
             dl <- ((dl + 180) %% 360) - 180
             lon <- ((a[, 1L] + f * dl + 180) %% 360) - 180
             lat <- a[, 2L] + f * (b[, 2L] - a[, 2L])
-            xy <- rbind(xy, cbind(lon, lat))
+            # An added point can still fall on a point listed before it, with
+            # other last bits: a vertex of another feature that lies on this
+            # edge (a T-junction, or a corner touching the edge), or a point
+            # added along an edge that overlaps this one in part.  Rounding
+            # the added points alone moved them off such vertices.  An added
+            # point is left out when it shares a cell of 1e-9 degrees (about
+            # 0.1 mm) with an earlier point, the cells taken in each
+            # coordinate from either of two grids half a cell apart.  Two
+            # points less than half a cell apart in both coordinates share a
+            # cell under one of the four pairings of the grids, so copies a
+            # few bits apart are never kept either side of a cell's border;
+            # points 1e-9 degrees or more apart in one coordinate are both
+            # kept.  The vertices stay as they are.  The added points go in
+            # sorted by coordinate, so the copy kept does not depend on the
+            # order of the features.
+            add <- cbind(lon, lat)
+            add <- add[order(add[, 1L], add[, 2L]), , drop = FALSE]
+            p <- rbind(xy, add)
+            near <- logical(nrow(p))
+            for (kx in list(round(p[, 1L] * 1e9), floor(p[, 1L] * 1e9)))
+              for (ky in list(round(p[, 2L] * 1e9), floor(p[, 2L] * 1e9)))
+                near <- near | duplicated(paste(kx, ky))
+            xy <- rbind(xy, add[!near[-seq_len(nrow(xy))], , drop = FALSE])
           }
           xy <- unique(xy)
           g <- c(sf::st_geometry(g), sf::st_geometry(sf::st_as_sf(
