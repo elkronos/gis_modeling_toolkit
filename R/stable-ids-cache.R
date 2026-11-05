@@ -19,11 +19,18 @@
 #' secondary tie-breakers) and then assigning sequential IDs.
 #'
 #' @param polygons_sf An sf or sfc object containing polygonal features.
+#'   Polygons that mix XY and XYZ (or XYM) geometries are keyed without Z
+#'   and M, since sf reads a layer in the dimension of its first geometry
+#'   (see \code{make_valid} for the rows returned).
 #' @param id_col Character scalar; name of the identifier column.
 #' @param method One of "centroid", "surface_point", "bbox_center".
 #' @param make_valid Logical; apply st_make_valid() first. Default TRUE.
 #'   The copy the sort key is measured on is repaired as well, after it has
-#'   been transformed (see Details); with \code{FALSE} neither is.
+#'   been transformed (see Details); with \code{FALSE} neither is. The rows
+#'   returned are the repaired polygons; polygons that mix XY and XYZ (or XYM)
+#'   geometries are repaired in XY and returned in XY, with a warning of class
+#'   \code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
+#'   with the geometry they arrived with, Z and M included.
 #' @param transform_for_sort CRS used only for computing sort-key coordinates.
 #'   Default 4326. This is the whole mechanism by which the IDs are stable
 #'   (sorting in one common CRS is what makes the same layer get the same IDs
@@ -115,8 +122,24 @@ ensure_stable_poly_id <- function(polygons_sf,
   if (nrow(polygons_sf) == 0L)
     stop("ensure_stable_poly_id(): no polygon rows found.")
 
-  if (isTRUE(make_valid))
+  # Polygons that mix XY and XYZ (or XYM) are keyed in x and y: sf reads a
+  # layer in the dimension of its first geometry, so GEOS stopped on the
+  # repair, the transform stopped with "OGR error", and s2 refused rings it
+  # read out of step.  The repaired copy is returned, and for a mixed layer
+  # it can only be made in XY, so it comes back in XY with a warning of class
+  # "spatialkit_zm_dropped" (.xy_if_mixed_warn()).  Without the repair the
+  # caller's rows come back with their Z, keyed from a copy in XY
+  # (.xy_if_mixed()).  A layer in one dimension takes its old path.
+  # The warning is raised before the repair, whose suppressWarnings() would
+  # otherwise take it as a lazily evaluated argument.
+  if (isTRUE(make_valid)) {
+    polygons_sf <- .xy_if_mixed_warn(
+      polygons_sf, "ensure_stable_poly_id", "polygons_sf",
+      why = paste0("which sf::st_make_valid() reads wrongly, so Z and M are ",
+                   "dropped and the repaired polygons are returned in XY"))
     polygons_sf <- .safe_make_valid(polygons_sf)
+  }
+  key_sf <- .xy_if_mixed(polygons_sf)
 
   method <- match.arg(method)
 
@@ -140,7 +163,7 @@ ensure_stable_poly_id <- function(polygons_sf,
     suppressMessages(sf::sf_use_s2(TRUE))
     on.exit(suppressMessages(sf::sf_use_s2(FALSE)), add = TRUE)
   }
-  sort_sf <- polygons_sf
+  sort_sf <- key_sf
   if (!is.null(transform_for_sort) && !is.na(sf::st_crs(sort_sf)))
     sort_sf <- tryCatch(
       sf::st_transform(sort_sf, transform_for_sort),
@@ -204,7 +227,7 @@ ensure_stable_poly_id <- function(polygons_sf,
   # .sort_key_with_refusals() measures the features s2 refuses another way
   # and leaves every other feature's key exactly as it is computed above.
   if (inherits(rep_sfc, "error") || inherits(area, "error")) {
-    key <- .sort_key_with_refusals(sort_sf, polygons_sf, method, rep_sfc, area,
+    key <- .sort_key_with_refusals(sort_sf, key_sf, method, rep_sfc, area,
                                    repair = isTRUE(make_valid))
     rep_sfc <- key$points
     area    <- key$area
@@ -547,7 +570,10 @@ ensure_stable_poly_id <- function(polygons_sf,
 #' Builds a grid via \code{create_grid_polygons()} and memoizes the result
 #' so repeated calls with the same inputs return instantly.
 #'
-#' @param boundary An sf or sfc polygonal object.
+#' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
+#'   (or XYM) geometries is read without Z and M, as in
+#'   [create_grid_polygons()], and shares its cache entry with the same
+#'   boundary in XY.
 #' @param target_cells Approximate desired number of cells. Default `NULL`,
 #'   as in [create_grid_polygons()], so the grid can be sized by `cellsize`
 #'   or `n` passed through `...` instead.
@@ -603,6 +629,12 @@ create_grid_polygons_cached <- function(boundary,
   if (!inherits(bnd, "sf"))
     stop(paste0("create_grid_polygons_cached(): 'boundary' must be sf/sfc POLYGON/MULTIPOLYGON",
                 .tess_hint(bnd, "$boundary"), "."))
+  # A boundary that mixes XY and XYZ (or XYM) polygons is read in XY
+  # (.xy_if_mixed()) before the projection and the cache key, as
+  # create_grid_polygons() reads it: the union the key hashes stopped on it
+  # with GEOS's message.  The grid is new geometry, so nothing is said, and
+  # a mixed boundary shares its key with the same boundary in XY.
+  bnd <- .xy_if_mixed(bnd)
   # The same projection create_grid_polygons() makes, so a cached grid is laid
   # in the CRS an uncached one would be (see .project_for_grid()).
   bnd <- .project_for_grid(bnd, "create_grid_polygons_cached")

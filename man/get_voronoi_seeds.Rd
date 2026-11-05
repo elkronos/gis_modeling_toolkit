@@ -20,7 +20,9 @@ get_voronoi_seeds(
 )
 }
 \arguments{
-\item{boundary}{Optional polygonal sf object defining the sampling area.}
+\item{boundary}{Optional polygonal sf object defining the sampling area.
+One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
+since sf reads a layer in the dimension of its first geometry.}
 
 \item{method}{One of "kmeans", "random", "provided".}
 
@@ -89,7 +91,11 @@ default. A call that supplies none of the four is told nothing,
 whichever kind and settings the profile was built with. Pass the
 count as a number (\code{n = sel$best}) for a fresh k-means instead.}
 
-\item{seeds}{sf POINT object of user-provided seeds (method = "provided").}
+\item{seeds}{sf POINT object of user-provided seeds (method = "provided").
+Seeds in another CRS than \code{boundary} are returned in the boundary's CRS;
+seeds that mix XY and XYZ (or XYM) points are then returned in XY, with a
+warning of class \code{"spatialkit_zm_dropped"}, since sf reads a layer in
+the dimension of its first geometry.}
 
 \item{sample_points}{Optional sf POINT cloud for k-means clustering. Only
 the first two coordinate columns are clustered, so a Z or M dimension does
@@ -98,7 +104,9 @@ non-finite coordinates are dropped with a warning, so they never reach
 \code{stats::kmeans()}, which fails on them without naming a cause. A lon/lat
 cloud, or one with no CRS whose coordinates look like lon/lat (the
 heuristic \code{\link[=ensure_projected]{ensure_projected()}} applies, with its warning), is projected
-before clustering.}
+before clustering. A cloud that mixes XY and XYZ (or XYM) points is read
+without Z and M before it is projected or clustered, since sf reads a
+layer in the dimension of its first geometry.}
 
 \item{kmeans_nstart}{The number of starts, of which the best is kept.
 \code{NULL} (default) is the kind's own number: 3 for \code{partition = "density"} and 10 for \code{partition = "kmeans"}, the default of earlier

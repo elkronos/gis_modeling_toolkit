@@ -17,7 +17,9 @@ voronoi_seeds_kmeans(
 )
 }
 \arguments{
-\item{points_sf}{An sf object with POINT geometries.}
+\item{points_sf}{An sf object with POINT geometries. Points that mix XY
+and XYZ (or XYM) are read without Z and M before they are projected or
+clustered, since sf reads a layer in the dimension of its first geometry.}
 
 \item{k}{Integer; requested number of clusters, treated as an upper bound
 only. It is clamped, with a warning, to whichever is smaller of the number

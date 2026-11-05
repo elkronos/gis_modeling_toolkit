@@ -37,6 +37,8 @@
 #' warning of class `spatialkit_unassigned` gives the number.
 #'
 #' @param boundary Optional polygonal sf object defining the sampling area.
+#'   One that mixes XY and XYZ (or XYM) geometries is read without Z and M,
+#'   since sf reads a layer in the dimension of its first geometry.
 #' @param method One of "kmeans", "random", "provided".
 #' @param n Integer; number of seeds to return. Required for
 #'   `method = "kmeans"` and `method = "random"`. **Ignored** for
@@ -104,6 +106,10 @@
 #'   whichever kind and settings the profile was built with. Pass the
 #'   count as a number (`n = sel$best`) for a fresh k-means instead.
 #' @param seeds sf POINT object of user-provided seeds (method = "provided").
+#'   Seeds in another CRS than `boundary` are returned in the boundary's CRS;
+#'   seeds that mix XY and XYZ (or XYM) points are then returned in XY, with a
+#'   warning of class `"spatialkit_zm_dropped"`, since sf reads a layer in
+#'   the dimension of its first geometry.
 #' @param sample_points Optional sf POINT cloud for k-means clustering. Only
 #'   the first two coordinate columns are clustered, so a Z or M dimension does
 #'   not join the distance calculation and dominate it; rows with empty or
@@ -111,7 +117,9 @@
 #'   `stats::kmeans()`, which fails on them without naming a cause. A lon/lat
 #'   cloud, or one with no CRS whose coordinates look like lon/lat (the
 #'   heuristic [ensure_projected()] applies, with its warning), is projected
-#'   before clustering.
+#'   before clustering. A cloud that mixes XY and XYZ (or XYM) points is read
+#'   without Z and M before it is projected or clustered, since sf reads a
+#'   layer in the dimension of its first geometry.
 #' @param kmeans_nstart The number of starts, of which the best is kept.
 #'   `NULL` (default) is the kind's own number: 3 for `partition =
 #'   "density"` and 10 for `partition = "kmeans"`, the default of earlier
@@ -316,6 +324,14 @@ get_voronoi_seeds <- function(boundary = NULL,
     }
   }
   if (!is.null(sample_points)) .assert_sf(sample_points, "POINT", "sample_points")
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in XY
+  # (.xy_if_mixed()), before any union, transform or read of its
+  # coordinates: sf reads a layer in the dimension of its first geometry, so
+  # the cloud was clustered on garbled coordinates or stopped, and GEOS or s2
+  # stopped on the boundary or sampled it on other rings.  The seeds are new
+  # points and the cover is this function's copy, so nothing is said.
+  if (!is.null(boundary)) boundary <- .xy_if_mixed(boundary)
+  if (!is.null(sample_points)) sample_points <- .xy_if_mixed(sample_points)
 
   # A select_resolution() result or a resolution_profile() as `n` carries the
   # centres of the partition the profile scored at that count.  A k-means
@@ -393,6 +409,15 @@ get_voronoi_seeds <- function(boundary = NULL,
 
     "provided" = {
       s <- seeds
+      # The seeds are returned in the boundary's CRS (.align_crs() below).
+      # Moved there, a layer that mixes XY and XYZ (or XYM) points stopped
+      # sf::st_transform() with "OGR error" when its first point had Z, so
+      # the transformed copy is returned in XY with a warning of class
+      # "spatialkit_zm_dropped" (.xy_if_mixed_warn()).  Seeds that are not
+      # moved come back as they were given, Z included.
+      if (!is.null(boundary) && !is.na(sf::st_crs(s)) && !is.na(sf::st_crs(boundary)) &&
+          sf::st_crs(s) != sf::st_crs(boundary))
+        s <- .xy_if_mixed_warn(s, "get_voronoi_seeds", "seeds")
       s$seed_id <- seq_len(nrow(s))
       s$method  <- "provided"
       # Seeds that carry the record of a count are handed on with it (the
@@ -707,7 +732,9 @@ get_voronoi_seeds <- function(boundary = NULL,
 #' (grown by 2 percent of its diagonal) when no `boundary` is passed, so every
 #' point of `points_sf` falls in a cell.
 #'
-#' @param points_sf An sf object with POINT geometries.
+#' @param points_sf An sf object with POINT geometries. Points that mix XY
+#'   and XYZ (or XYM) are read without Z and M before they are projected or
+#'   clustered, since sf reads a layer in the dimension of its first geometry.
 #' @param k Integer; requested number of clusters, treated as an upper bound
 #'   only. It is clamped, with a warning, to whichever is smaller of the number
 #'   of distinct point positions and `nrow(points_sf) - 1`, because k-means can
@@ -819,6 +846,10 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
                                  partition = c("density", "kmeans"), init = NULL,
                                  density_power = 1, density_k = 8, iter_max = NULL) {
   .assert_sf(points_sf, "POINT", "points_sf")
+  # Points that mix XY and XYZ (or XYM) are read in XY (.xy_if_mixed()),
+  # before the projection and the read of their coordinates, as in
+  # get_voronoi_seeds(); the seeds are new points, so nothing is said.
+  points_sf <- .xy_if_mixed(points_sf)
   partition_given <- !missing(partition)
   # The density settings the caller supplied (see get_voronoi_seeds()).
   density_given <- c(if (!missing(density_power)) "density_power",
@@ -988,7 +1019,9 @@ voronoi_seeds_kmeans <- function(points_sf, k, set_seed = 456, nstart = NULL,
 #' result has exactly `k` seeds; only a geometry that still yields too few
 #' after ten top-ups returns fewer, and that shortfall is logged.
 #'
-#' @param boundary An sf or sfc polygonal object.
+#' @param boundary An sf or sfc polygonal object. One that mixes XY and XYZ
+#'   (or XYM) geometries is read without Z and M, since sf reads a layer in
+#'   the dimension of its first geometry.
 #' @param k Integer; number of random seeds.
 #' @param set_seed Optional integer RNG seed. Default `NULL`: the seeds are
 #'   drawn from the session's random-number stream, so consecutive calls give
@@ -1034,6 +1067,10 @@ voronoi_seeds_random <- function(boundary, k, set_seed = NULL) {
   # `@param boundary` documents sf *or* sfc, and .assert_sf() only accepts sf.
   if (inherits(boundary, "sfc")) boundary <- sf::st_as_sf(boundary)
   .assert_sf(boundary, c("POLYGON", "MULTIPOLYGON"), "boundary")
+  # A boundary that mixes XY and XYZ (or XYM) polygons is read in XY
+  # (.xy_if_mixed()), as in get_voronoi_seeds(): GEOS stopped on it, and s2
+  # sampled other rings in silence.
+  boundary <- .xy_if_mixed(boundary)
 
   cleanup <- .with_seed(set_seed)
   on.exit(cleanup(), add = TRUE)

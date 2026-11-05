@@ -2375,6 +2375,46 @@ old behaviour where there is a way.
   x and y in the same way.  Any other layer in one dimension, XY or XYZ
   throughout, is read as before.
 
+* **The seeding functions, `ensure_stable_poly_id()` and
+  `create_grid_polygons_cached()` stopped with a bare message from base R,
+  sf, GEOS or s2, or gave other seeds in silence, on layers that mixed XY
+  and XYZ (or XYM) geometries.**  sf reads a layer in the dimension of its
+  first geometry.  `get_voronoi_seeds(method = "kmeans")` and
+  `voronoi_seeds_kmeans()` clustered `sample_points` or `points_sf` with
+  an XYZ point first on other coordinates, with base R's "data length is
+  not a sub-multiple" warning as the only sign, and stopped with base R's
+  "length of 'dimnames' [2] not equal to array extent" when the XYZ point
+  came later; in degrees they stopped with "OGR error" or gave other seeds.
+  With a profile or a selection as `n`, `get_voronoi_seeds()` stopped with
+  GEOS's "ParseException: Unexpected EOF parsing WKB" or the `dimnames`
+  message.  `voronoi_seeds_random()` and `get_voronoi_seeds()` stopped on
+  such a `boundary` with GEOS's message ("ParseException", "Points of
+  LinearRing do not form a closed linestring" or "GEOS does not support
+  XYM") or s2's "Loop 0 is not valid"; in degrees an XYZ polygon after the
+  first gave random seeds that fell outside the boundary, with no warning.
+  `ensure_stable_poly_id()` stopped on such polygons with GEOS's message,
+  sf's "OGR error" or wk's parse error, or keyed them under a false warning
+  that s2 refused most of them.  `create_grid_polygons_cached()` stopped
+  with GEOS's message on such a `boundary` while it built the cache key.
+  These layers are now read in x and y, before any transform, union or
+  repair, and give what the same rows in XY give.  The seeders return new
+  points and the cached grid is new geometry, so they say nothing; a mixed
+  boundary shares its cache key with the same boundary in XY.
+  `ensure_stable_poly_id(make_valid = FALSE)` returns the caller's rows
+  with their Z, keyed in XY; with `make_valid = TRUE` (the default) it
+  returns its repaired copy, which for such polygons is made in XY, with a
+  warning of class `spatialkit_zm_dropped`.  A layer in one dimension, XY
+  or XYZ throughout, is read as before.
+
+* **`get_voronoi_seeds(method = "provided")` stopped with sf's "OGR
+  error" on `seeds` in another CRS than `boundary` whose first point had a
+  Z or M coordinate among XY points.**  The seeds are returned in the
+  boundary's CRS, and `sf::st_transform()` reads a layer in the dimension
+  of its first geometry.  Such seeds are now returned in the boundary's
+  CRS in XY, with a warning of class `spatialkit_zm_dropped` that carries
+  the rows with Z or M as `rows`.  Seeds in the boundary's CRS, or given
+  without a boundary, come back as they were given, Z included.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

@@ -7,7 +7,9 @@
 voronoi_seeds_random(boundary, k, set_seed = NULL)
 }
 \arguments{
-\item{boundary}{An sf or sfc polygonal object.}
+\item{boundary}{An sf or sfc polygonal object. One that mixes XY and XYZ
+(or XYM) geometries is read without Z and M, since sf reads a layer in
+the dimension of its first geometry.}
 
 \item{k}{Integer; number of random seeds.}
 

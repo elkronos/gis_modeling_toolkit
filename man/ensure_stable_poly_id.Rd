@@ -13,7 +13,10 @@ ensure_stable_poly_id(
 )
 }
 \arguments{
-\item{polygons_sf}{An sf or sfc object containing polygonal features.}
+\item{polygons_sf}{An sf or sfc object containing polygonal features.
+Polygons that mix XY and XYZ (or XYM) geometries are keyed without Z
+and M, since sf reads a layer in the dimension of its first geometry
+(see \code{make_valid} for the rows returned).}
 
 \item{id_col}{Character scalar; name of the identifier column.}
 
@@ -21,7 +24,11 @@ ensure_stable_poly_id(
 
 \item{make_valid}{Logical; apply st_make_valid() first. Default TRUE.
 The copy the sort key is measured on is repaired as well, after it has
-been transformed (see Details); with \code{FALSE} neither is.}
+been transformed (see Details); with \code{FALSE} neither is. The rows
+returned are the repaired polygons; polygons that mix XY and XYZ (or XYM)
+geometries are repaired in XY and returned in XY, with a warning of class
+\code{"spatialkit_zm_dropped"}. With \code{FALSE} the rows come back
+with the geometry they arrived with, Z and M included.}
 
 \item{transform_for_sort}{CRS used only for computing sort-key coordinates.
 Default 4326. This is the whole mechanism by which the IDs are stable
