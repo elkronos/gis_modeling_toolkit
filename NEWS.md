@@ -1911,8 +1911,51 @@ old behaviour where there is a way.
   conterminous United States with a 40th row at longitude `Inf` were put
   in UTM zone 14 with an `NA` in `attr(, "crs_choice")`, where the 39 get
   an Albers CRS.  Such a row now takes no part in the scores, as an empty
-  row does, and the zone's figure is the stations'.  The extent from which
-  the candidates are built still reads the row.
+  row does, and the zone's figure is the stations'.
+
+* **A row of a lon/lat layer with a coordinate that is not finite or lies
+  beyond 1e150 shaped the projection chosen for the other rows.**
+  `ensure_projected()` read the extent, the longitudes of the antimeridian
+  test and the centre on every row.  Among 300 points near (-80.4, 45.6), a
+  row at longitude 1e200 was taken for a layer across the antimeridian, and
+  the call stopped with sf's "invalid crs" for a `lon_0` of -2.95e190, as
+  did every function that projects lon/lat input through it
+  (`resolution_profile()` among them); a row at latitude 1e200 under
+  `purpose = "area"` gave a Lambert azimuthal projection in place of the
+  Albers conic the other 299 points get, and moved the second point by
+  21 km; the 39 stations above with a 40th row at longitude `Inf` were put
+  in UTM zone 14.  Such rows also raised sf's "bounding box has
+  potentially an invalid value range for longlat data".  The projection is
+  now chosen with those rows empty, so the layer gets the CRS, and the other
+  rows the coordinates, it gets with them empty, without that warning.  A
+  layer in which no row has a location gets Web Mercator (Equal Earth for
+  `purpose = "area"`), and the log line says so, where it
+  quoted a centre at "lon = NaN, lat = NaN".  Moved from lon/lat, with or
+  without `target_crs`, the rows come back empty in their own geometry
+  type: a polygon or line with one such vertex lost that vertex in
+  `sf::st_transform()` and came back as a smaller finite shape, a
+  half-degree square near (-93, 45) as a triangle of about half its area.
+
+* **One coordinate that is not finite or lies beyond 1e150 made a layer
+  without a CRS read as planar.**  The lon/lat test of a layer without a
+  CRS read its bounding box, which one such row made infinite or put off
+  the lon/lat envelope.  Five points in degrees near (-93, 45) and a sixth
+  at x = `Inf` were left in degrees by `ensure_projected()` with no
+  warning, and `prep_model_data()` returned them in degrees for the fit;
+  with a target CRS, or wherever a layer without a CRS takes the CRS of
+  another (`harmonize_crs()`, a `boundary` beside projected points), the
+  target was stamped on the degrees with a warning that they "do not look
+  like lon/lat"; `build_tessellation()` on them stopped with GEOS's
+  "encountered NaN/Inf numbers".  A row at latitude 1e200 did the same.  A
+  boundary in metres without a CRS, given with points in EPSG:4326, was
+  given EPSG:4326 when one vertex was infinite, and the call then stopped
+  with "`boundary` must be polygonal".  The test now reads the box of the
+  coordinates that have a location: the points are taken as EPSG:4326 and
+  projected, with the warning, and the boundary is refused with the error
+  that names both layers.  A boundary without a CRS that has no such
+  coordinate (no rows, or every coordinate infinite), given with points in
+  a geographic CRS, is now refused with an error that says so; it was given
+  the points' CRS and refused later as "not polygonal".
 
 * **The projection chosen for a small lon/lat MULTIPOINT layer depended on
   the order of the points in each feature.**  A layer of features that

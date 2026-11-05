@@ -4146,6 +4146,76 @@ summarize_by_cell <- function(assigned_points_sf,
 # searches then stop or disagree.
 .POOL_XY_MAX <- 1e150
 
+#' The features that have a coordinate without a location
+#'
+#' The test \code{.values_at_xy()} applies to a point, read on the x and y of
+#' every vertex: a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} is not a location.  A feature with one such vertex has
+#' no location as a whole, since no centre, area or transform of it can be
+#' taken.  Empty features are not counted: they are empty already.  The
+#' vertices are read only when the layer's bounding box is not finite or
+#' reaches beyond the bound; otherwise no feature can have such a vertex.
+#'
+#' @param g An sfc.
+#' @return A logical vector, one element per feature.
+#' @keywords internal
+#' @noRd
+.unlocated_features <- function(g) {
+  n   <- length(g)
+  out <- logical(n)
+  if (!n) return(out)
+  bb <- sf::st_bbox(g)
+  if (all(is.finite(bb)) && all(abs(bb) <= .POOL_XY_MAX)) return(out)
+  off <- function(v) any(!is.finite(v) | abs(v) > .POOL_XY_MAX)
+  if (inherits(g, "sfc_POINT")) {
+    xy <- sf::st_coordinates(g)[, 1:2, drop = FALSE]
+    empty <- is.na(xy[, 1L]) & is.na(xy[, 2L])
+    return(!empty & (!is.finite(xy[, 1L]) | !is.finite(xy[, 2L]) |
+                     abs(xy[, 1L]) > .POOL_XY_MAX | abs(xy[, 2L]) > .POOL_XY_MAX))
+  }
+  # A POINT is a vector, a LINESTRING or MULTIPOINT a matrix, and the other
+  # types (collections included) lists of those.
+  bad <- function(s) {
+    if (is.list(s)) return(any(vapply(s, bad, logical(1))))
+    if (is.matrix(s)) return(nrow(s) > 0L && off(s[, 1:2]))
+    length(s) >= 2L && !all(is.na(s)) && off(s[1:2])
+  }
+  vapply(unclass(g), bad, logical(1))
+}
+
+#' Give rows an empty geometry of their own type and dimension
+#'
+#' A row without a location (\code{.unlocated_features()}) is emptied before a
+#' reading it would otherwise shape: the bounding box a projection or a
+#' lon/lat test is read from, a centre, a distance score.  The empty geometry
+#' keeps the type and the dimensions of the feature, since sf needs one
+#' dimension per layer; an empty POINT holds \code{NA} coordinates.  The
+#' layer read with these rows emptied is read as the same layer with those
+#' rows empty to begin with.
+#'
+#' @param x An sf or sfc object.
+#' @param rows The rows to empty; \code{NULL} for the rows
+#'   \code{.unlocated_features()} finds.
+#' @return \code{x}, with those rows emptied; \code{x} itself when there are
+#'   none.
+#' @keywords internal
+#' @noRd
+.empty_unlocated <- function(x, rows = NULL) {
+  g <- sf::st_geometry(x)
+  if (is.null(rows)) rows <- which(.unlocated_features(g))
+  if (!length(rows)) return(x)
+  g[rows] <- sf::st_sfc(lapply(rows, function(i) {
+    s   <- g[[i]]
+    cls <- class(s)
+    if (inherits(s, "POINT"))
+      sf::st_point(rep(NA_real_, nchar(cls[1L])), dim = cls[1L])
+    else if (is.matrix(s))
+      structure(unclass(s)[0L, , drop = FALSE], class = cls)
+    else structure(list(), class = cls)
+  }), crs = sf::st_crs(g))
+  if (inherits(x, "sf")) sf::st_set_geometry(x, g) else g
+}
+
 #' The coordinates the pooled values are computed from
 #'
 #' One row per row of the layer, in a projected CRS.  Features that are not
@@ -4207,15 +4277,7 @@ summarize_by_cell <- function(assigned_points_sf,
   # chosen from, and the test of a layer without a CRS for lon/lat, then read
   # what they read with the rows emptied.  The empty point keeps the
   # dimensions of the feature, as sf needs one dimension per layer.
-  far_at <- which(far_given)
-  if (length(far_at)) {
-    g <- sf::st_geometry(layer)
-    g[far_at] <- sf::st_sfc(lapply(far_at, function(i) {
-      d <- class(g[[i]])[1L]
-      sf::st_point(rep(NA_real_, nchar(d)), dim = d)
-    }), crs = sf::st_crs(g))
-    layer <- sf::st_set_geometry(layer, g)
-  }
+  layer <- .empty_unlocated(layer, which(far_given))
   layer <- if (is.null(crs)) ensure_projected(layer)
            else ensure_projected(layer, target_crs = crs)
   xy <- unname(sf::st_coordinates(layer)[, 1:2, drop = FALSE])

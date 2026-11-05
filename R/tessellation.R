@@ -63,7 +63,9 @@
 #' working CRS on it was right only when that zone happened to be the user's.
 #' That, and stamping degrees on it (a metre polygon then transformed to
 #' nothing and was refused as "not polygonal"), are refused with an error
-#' naming both layers.
+#' naming both layers.  The box is the one \code{.looks_like_lonlat()} reads,
+#' over the coordinates that have a location; a boundary with no such
+#' coordinate is refused too.
 #'
 #' @param boundary CRS-less sf/sfc polygon layer.
 #' @param crs_ll The points' geographic \code{sf::crs}.
@@ -76,21 +78,31 @@
 #' @noRd
 .crsless_boundary_as_lonlat <- function(boundary, crs_ll, caller, assumed = FALSE) {
   bb <- .looks_like_lonlat(boundary)$bb
-  in_env <- is.null(bb) ||
-    (bb[["xmin"]] >= -180 && bb[["xmax"]] <= 180 &&
-     bb[["ymin"]] >= -90  && bb[["ymax"]] <= 90)
+  pts_txt <- if (assumed) "has no CRS either and was taken as lon/lat (EPSG:4326)"
+             else sprintf("is in a geographic CRS (%s)", .fold_crs_label(crs_ll))
+  # No box: no coordinate of the boundary has a location (it has no rows, or
+  # each coordinate is not finite or lies beyond 1e150).  Read as inside the
+  # envelope, such a boundary was given the points' CRS in silence, and one
+  # in metres with a single infinite vertex with it.
+  if (is.null(bb))
+    stop(sprintf(paste0(
+      "%s(): `boundary` has no CRS and no coordinate that is finite and within ",
+      "1e150, so it cannot be read as lon/lat beside `points_sf`, which %s. ",
+      "Pass a boundary with coordinates that are finite and within 1e150, ",
+      "or set its CRS with sf::st_crs()."),
+      caller, pts_txt), call. = FALSE)
+  in_env <- bb[["xmin"]] >= -180 && bb[["xmax"]] <= 180 &&
+            bb[["ymin"]] >= -90  && bb[["ymax"]] <= 90
   if (!in_env)
     stop(sprintf(paste0(
       "%s(): `boundary` has no CRS and its coordinates (xmin=%.6g, xmax=%.6g, ",
       "ymin=%.6g, ymax=%.6g) are not lon/lat, but `points_sf` %s, so the two ",
       "cannot be placed in one space. Set the CRS of `boundary`%s with ",
       "sf::st_crs()."),
-      caller, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]],
-      if (assumed) "has no CRS either and was taken as lon/lat (EPSG:4326)"
-      else sprintf("is in a geographic CRS (%s)", .fold_crs_label(crs_ll)),
+      caller, bb[["xmin"]], bb[["xmax"]], bb[["ymin"]], bb[["ymax"]], pts_txt,
       if (assumed) " and of `points_sf`" else ""),
       call. = FALSE)
-  if (!assumed && !is.null(bb))
+  if (!assumed)
     .warn_and_log(paste0(
       "%s(): `boundary` has no CRS; its coordinates look like lon/lat (they fit ",
       "the lon/lat envelope: xmin=%.2f, xmax=%.2f, ymin=%.2f, ymax=%.2f) and ",

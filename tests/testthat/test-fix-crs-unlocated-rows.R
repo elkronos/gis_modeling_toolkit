@@ -53,9 +53,14 @@ test_that("a row at a coordinate that is not finite is scored as an empty row is
   e60 <- lapply(c(32614, 5070), function(code) .crs_distance_error(as_points(st60), sf::st_crs(code)))
   x <- as_points(rbind(st60, data.frame(lon = c(Inf, -100), lat = c(40, Inf))))
   expect_identical(lapply(c(32614, 5070), function(code) .crs_distance_error(x, sf::st_crs(code))), e60)
-  # The chooser's own extent still reads the row (a separate item), so the
-  # layer keeps UTM zone 14; its score is now the stations' and not NA.
+  # The chooser reads the layer as the 39 stations (BUG-137): it kept UTM
+  # zone 14 when its extent read the row.  The zone's score is the stations'
+  # and not NA.
   x <- quiet(ensure_projected(as_points(rbind(st, data.frame(lon = Inf, lat = 40)))))
   ch <- attr(x, "crs_choice")
   expect_identical(ch$distance_error[ch$name == "UTM zone 14"], e39[[1L]])
+  ref <- quiet(ensure_projected(as_points(st)))
+  expect_identical(sf::st_crs(x), sf::st_crs(ref))
+  expect_identical(ch, attr(ref, "crs_choice"))
+  expect_false(identical(sf::st_crs(x), sf::st_crs(32614)))
 })

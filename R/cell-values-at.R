@@ -117,10 +117,10 @@
 #'
 #' The seeds that have a location are read; those without one (an empty
 #' point, a coordinate that is not finite or lies beyond \code{.POOL_XY_MAX})
-#' are given the same CRS and stay without one.  One seed with an infinite
-#' coordinate leaves the layer no finite bounding box, and both readers then
-#' take any coordinates for planar ones: metre seeds beside a geographic
-#' \code{points} would be given its CRS with no warning.
+#' are given the same CRS and stay without one.  The readers leave such
+#' coordinates out of the box they read (\code{.looks_like_lonlat()}); the
+#' split also keeps those seeds out of any move, which can bring a coordinate
+#' beyond the bound back finite.
 #'
 #' @param pts The seeds, as \code{.values_at_points()} returns them.
 #' @param points_crs The CRS of \code{points}.

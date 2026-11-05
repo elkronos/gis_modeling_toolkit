@@ -116,13 +116,26 @@ falls back to EPSG:3857 (Equal Earth for \code{purpose = "area"}).}
 \item{Missing CRS}{With no \code{target_crs}, a bounding box that looks like
 lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 then apply; coordinates the heuristic declines are left exactly as they
-are. With \code{target_crs} supplied there is no source CRS to reproject
+are. The box is the one of the coordinates that have a location (see
+the next item). With \code{target_crs} supplied there is no source CRS to reproject
 from, so the same heuristic decides between two outcomes: lon/lat-looking
 coordinates are read as EPSG:4326 and reprojected to the target (a real
 warning), and anything else has the target \strong{stamped on without
 reprojection}. That is a relabel, logged only, so verify the
 coordinates really are in that CRS. Set the CRS explicitly to suppress
 either.}
+\item{Rows without a location}{A coordinate that is not finite or lies
+beyond 1e150 has no location, and nor does a row whose geometry is
+empty. The lon/lat test of a layer without a CRS reads the
+coordinates that have a location, vertex by vertex: a polygon with one
+such vertex is read on its other vertices. The choice of a projection
+reads the rows that have a location: a row with one such coordinate
+takes no part in it, as an empty row would, and a layer in which no
+row has a location gets Web Mercator (Equal Earth for
+\code{purpose = "area"}). Moved from
+lon/lat, these rows come back empty, in their own geometry type;
+\code{\link[sf:st_transform]{sf::st_transform()}} would drop the vertex it cannot move and return
+the rest of the feature.}
 }
 
 \code{target_crs} overrides all of this. Pass it whenever you need a specific,

@@ -48,7 +48,9 @@
 #' the vertices' unit vectors (for a point layer exactly what s2 returns),
 #' which needs no valid geometry; each ring's closing vertex counts once
 #' there, so the mean does not depend on where a ring starts, and a log
-#' line says it was used.
+#' line says it was used.  A row with a coordinate that is not finite or lies
+#' beyond \code{.POOL_XY_MAX} is read as an empty row
+#' (\code{.empty_unlocated()}).
 #'
 #' @param x_ll An sf/sfc object in a geographic CRS.
 #' @return A 1 x 2 matrix (\code{X}, \code{Y}) in degrees, possibly
@@ -56,7 +58,8 @@
 #' @keywords internal
 #' @noRd
 .lonlat_centre <- function(x_ll) {
-  g <- sf::st_geometry(x_ll)
+  # A row without a location places nothing: it is read as an empty row.
+  g <- sf::st_geometry(.empty_unlocated(x_ll))
   centre_of <- function(geom) {
     ctr <- sf::st_coordinates(sf::st_centroid(sf::st_union(geom)))
     if (!is.numeric(ctr) || length(ctr) < 2L) stop("no centroid")
@@ -157,6 +160,10 @@
 #' projection fits worse -- falls back to Web Mercator (Equal Earth for
 #' \code{purpose = "area"}).
 #'
+#' Rows with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} take no part in the choice: it is made on the layer
+#' with those rows emptied (\code{.empty_unlocated()}).
+#'
 #' @param x An sf or sfc object.
 #' @return A list with \code{crs} (the chosen \code{sf::crs}) and
 #'   \code{candidates}, a data.frame with one row per projection considered:
@@ -177,6 +184,13 @@
   if (!inherits(x, c("sf", "sfc"))) return(list(crs = sf::NA_crs_, candidates = NULL))
   crs <- sf::st_crs(x)
   if (!is.na(crs) && !.is_longlat(x)) return(list(crs = crs, candidates = NULL))
+  # Rows without a location (a coordinate that is not finite or lies beyond
+  # .POOL_XY_MAX) take no part in the choice: the box, the longitudes of the
+  # wrap test, the centre and the scores are read as with those rows empty.
+  # Read, a longitude of 1e200 made a box "across the antimeridian" and a
+  # lon_0 PROJ refuses, and a latitude of 1e200 moved the standard parallels
+  # of every other row's projection.
+  x <- .empty_unlocated(x)
   # The measured candidates travel back with the choice.  On the comparison
   # paths the warning quotes two of the figures and drops the rest; here
   # every candidate's error is kept, since the number that propagates into
@@ -211,6 +225,18 @@
   }
   if (is.na(sf::st_crs(x_ll)) || !.is_longlat(x_ll))
     return(list(crs = global_crs(), candidates = NULL))
+  # No row has a location: nothing places a projection.  Read on, the centre
+  # came out as NaN and the log line below quoted "lon = NaN, lat = NaN".
+  # Empty parts are dropped first: sf::st_is_empty() calls a feature empty
+  # when its first part is empty (.drop_empty_parts()).
+  if (all(sf::st_is_empty(.drop_empty_parts(sf::st_geometry(x_ll))))) {
+    .log_warn(paste0(
+      ".pick_local_projected_crs(): no row has a location (each geometry is ",
+      "empty, or has a coordinate that is not finite or lies beyond 1e150); ",
+      "falling back to %s."),
+      if (purpose == "area") "Equal Earth" else "EPSG:3857")
+    return(list(crs = global_crs(), candidates = NULL))
+  }
 
   # On the sphere whatever sf_use_s2() says, and without failing on a polygon
   # s2 rejects: see .lonlat_centre().
@@ -1313,15 +1339,45 @@
 #' refuses, is read feature by feature (\code{.vertex_coords()}): the
 #' refusal made a layer in degrees that mixes types look planar.
 #'
+#' Both tests read the coordinates that have a location: a coordinate that is
+#' not finite or lies beyond \code{.POOL_XY_MAX} (the test
+#' \code{.values_at_xy()} applies) is left out.  One such row made the
+#' layer's box infinite or put it off the envelope, and the whole layer was
+#' then read as planar.  The coordinates are read for the box only when the
+#' layer's own box is not finite or reaches beyond the bound.
+#'
 #' @param x An sf/sfc object with no CRS.
-#' @return A list: \code{lonlat} (logical) and \code{bb} (the bbox, or
-#'   \code{NULL} if it could not be taken).
+#' @return A list: \code{lonlat} (logical) and \code{bb} (the bounding box
+#'   of the coordinates that have a location, or \code{NULL} when it could
+#'   not be taken or no coordinate has one).
 #' @keywords internal
 #' @noRd
 .looks_like_lonlat <- function(x) {
   bb <- try(sf::st_bbox(x), silent = TRUE)
-  if (inherits(bb, "try-error") || !all(is.finite(bb)))
-    return(list(lonlat = FALSE, bb = NULL))
+  if (inherits(bb, "try-error")) return(list(lonlat = FALSE, bb = NULL))
+  # The coordinates of the layer in XY, without its empty geometries, the
+  # ones without a location left out; NULL when they cannot be read.
+  located_xy <- function() {
+    xc <- x
+    if (inherits(x, c("sf", "sfc"))) {
+      xc <- sf::st_geometry(x)
+      xc <- .drop_empty_parts(xc)
+      xc <- .xy_if_mixed(xc[!sf::st_is_empty(xc)])
+    }
+    cc <- try(.vertex_coords(xc), silent = TRUE)
+    if (inherits(cc, "try-error")) return(NULL)
+    keep <- is.finite(cc[, 1L]) & is.finite(cc[, 2L]) &
+            abs(cc[, 1L]) <= .POOL_XY_MAX & abs(cc[, 2L]) <= .POOL_XY_MAX
+    cc[keep, 1:2, drop = FALSE]
+  }
+  xy <- NULL
+  if (!all(is.finite(bb)) || any(abs(bb) > .POOL_XY_MAX)) {
+    xy <- located_xy()
+    if (is.null(xy) || !nrow(xy)) return(list(lonlat = FALSE, bb = NULL))
+    bb <- sf::st_bbox(c(xmin = min(xy[, 1L]), ymin = min(xy[, 2L]),
+                        xmax = max(xy[, 1L]), ymax = max(xy[, 2L])),
+                      crs = sf::st_crs(bb))
+  }
   in_env <- bb["xmin"] >= -180 && bb["xmax"] <= 180 &&
             bb["ymin"] >= -90  && bb["ymax"] <= 90
   if (!in_env) return(list(lonlat = FALSE, bb = bb))
@@ -1331,14 +1387,8 @@
   has_large_extent <- (x_range > 1) || (y_range > 1)
   has_geo_precision <- FALSE
   if (!has_large_extent) {
-    xc <- x
-    if (inherits(x, c("sf", "sfc"))) {
-      xc <- sf::st_geometry(x)
-      xc <- .drop_empty_parts(xc)
-      xc <- .xy_if_mixed(xc[!sf::st_is_empty(xc)])
-    }
-    coords_mat <- try(.vertex_coords(xc), silent = TRUE)
-    if (!inherits(coords_mat, "try-error") && nrow(coords_mat) > 0) {
+    coords_mat <- if (is.null(xy)) located_xy() else xy
+    if (!is.null(coords_mat) && nrow(coords_mat) > 0) {
       frac <- abs(c(coords_mat[, 1], coords_mat[, 2]) %% 1)
       has_geo_precision <- any(frac > 0.001 & frac < 0.999)
     }
@@ -1400,6 +1450,26 @@
 }
 
 
+#' Move a layer out of lon/lat with its rows without a location left empty
+#'
+#' A row with a coordinate that is not finite or lies beyond
+#' \code{.POOL_XY_MAX} (\code{.unlocated_features()}) is read as given,
+#' before the move, and comes back empty, in its own type and dimension
+#' (\code{.empty_unlocated()}).  Moved as it is, a polygon or line with one
+#' such vertex lost that vertex in \code{sf::st_transform()} and came back
+#' as a smaller finite shape: a square with a vertex at longitude 1e200 came
+#' back as a triangle.
+#'
+#' @param x An sf or sfc object in a geographic CRS.
+#' @param crs The CRS to move it to.
+#' @return \code{x} in \code{crs}, with those rows empty.
+#' @keywords internal
+#' @noRd
+.transform_keep_unlocated <- function(x, crs) {
+  rows <- which(.unlocated_features(sf::st_geometry(x)))
+  .empty_unlocated(sf::st_transform(x, crs), rows)
+}
+
 #' Ensure an object has a projected CRS (with sensible defaults)
 #'
 #' Coerces spatial objects to a projected coordinate reference system suitable
@@ -1452,13 +1522,26 @@
 #'   \item{Missing CRS}{With no `target_crs`, a bounding box that looks like
 #'     lon/lat means EPSG:4326 is assumed (a real warning) and the rules above
 #'     then apply; coordinates the heuristic declines are left exactly as they
-#'     are. With `target_crs` supplied there is no source CRS to reproject
+#'     are. The box is the one of the coordinates that have a location (see
+#'     the next item). With `target_crs` supplied there is no source CRS to reproject
 #'     from, so the same heuristic decides between two outcomes: lon/lat-looking
 #'     coordinates are read as EPSG:4326 and reprojected to the target (a real
 #'     warning), and anything else has the target **stamped on without
 #'     reprojection**. That is a relabel, logged only, so verify the
 #'     coordinates really are in that CRS. Set the CRS explicitly to suppress
 #'     either.}
+#'   \item{Rows without a location}{A coordinate that is not finite or lies
+#'     beyond 1e150 has no location, and nor does a row whose geometry is
+#'     empty. The lon/lat test of a layer without a CRS reads the
+#'     coordinates that have a location, vertex by vertex: a polygon with one
+#'     such vertex is read on its other vertices. The choice of a projection
+#'     reads the rows that have a location: a row with one such coordinate
+#'     takes no part in it, as an empty row would, and a layer in which no
+#'     row has a location gets Web Mercator (Equal Earth for
+#'     `purpose = "area"`). Moved from
+#'     lon/lat, these rows come back empty, in their own geometry type;
+#'     [sf::st_transform()] would drop the vertex it cannot move and return
+#'     the rest of the feature.}
 #' }
 #'
 #' `target_crs` overrides all of this. Pass it whenever you need a specific,
@@ -1580,7 +1663,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
           tcrs$input %||% "unknown"
         )
         sf::st_crs(x) <- sf::st_crs(4326)
-        x <- sf::st_transform(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
+        x <- .transform_keep_unlocated(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
         attr(x, "crs_assumed") <- "EPSG:4326"
         return(x)
       }
@@ -1591,8 +1674,10 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       sf::st_crs(x) <- tcrs
       return(x)
     }
-    if (!identical(xcrs, tcrs))
-      x <- sf::st_transform(.xy_if_mixed_warn(x, "ensure_projected", "x"), tcrs)
+    if (!identical(xcrs, tcrs)) {
+      x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
+      x <- if (.is_longlat(x)) .transform_keep_unlocated(x, tcrs) else sf::st_transform(x, tcrs)
+    }
     return(x)
   }
 
@@ -1615,7 +1700,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
       # from it, as below.
       x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
       tr <- .pick_local_projected_crs(x, purpose = purpose)
-      x <- sf::st_transform(x, tr$crs)
+      x <- .transform_keep_unlocated(x, tr$crs)
       attr(x, "crs_choice") <- tr$candidates
       # Recorded so a predict() on CRS-less newdata can replay the same
       # interpretation (see .replay_crs_assumption()).
@@ -1647,7 +1732,7 @@ ensure_projected <- function(x, target_crs = NULL, purpose = c("distance", "area
     # layer in Missouri got UTM zone 25 South), and the transform returns it.
     x <- .xy_if_mixed_warn(x, "ensure_projected", "x")
     tr <- .pick_local_projected_crs(x, purpose = purpose)
-    x <- sf::st_transform(x, tr$crs)
+    x <- .transform_keep_unlocated(x, tr$crs)
     attr(x, "crs_choice") <- tr$candidates
   } else if (purpose == "area") {
     # Projected input is never reprojected, but when areas are what matter
