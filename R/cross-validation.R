@@ -552,7 +552,11 @@
     ids  <- x[["..row_id"]]
     take <- unique(round(seq(1, nrow(x), length.out = min(nrow(x), max_probe))))
     all_points <- all(sf::st_geometry_type(x, by_geometry = TRUE) == "POINT")
-    g    <- sf::st_geometry(x)[take]
+    # Rows that mix XY and XYZ (or XYM) geometries are read in x and y: sf
+    # reads a set in the dimension of its first geometry, so the transform
+    # stopped (and the probe was not taken) or the coordinates came out of
+    # step.  So are rows that carry M, whose centroids GEOS refuses.
+    g    <- .xy_if_mixed_or_m(sf::st_geometry(x)[take])
     if (!all(sf::st_geometry_type(g, by_geometry = TRUE) == "POINT"))
       g <- if (isTRUE(legacy)) suppressWarnings(sf::st_centroid(g))
            else .planar_centroid(g)
@@ -747,12 +751,17 @@
 #' @param boundary The caller's \code{boundary}, or \code{NULL}.
 #' @param caller Calling function name, for the warning.
 #' @param to \code{NULL}, or the prepared data whose CRS to stamp.
-#' @return \code{boundary}, with a CRS where one was assumed.
+#' @return \code{boundary}, with a CRS where one was assumed, and in XY when
+#'   it mixes dimensions.
 #' @keywords internal
 #' @noRd
 .cv_boundary_crs <- function(boundary, caller, to = NULL) {
-  if (!(inherits(boundary, "sf") || inherits(boundary, "sfc")) ||
-      !is.na(sf::st_crs(boundary)))
+  if (!(inherits(boundary, "sf") || inherits(boundary, "sfc")))
+    return(boundary)
+  # A boundary that mixes XY and XYZ (or XYM) geometries, or whose polygons
+  # carry M, is passed on in x and y; the wrappers do not return it.
+  boundary <- .xy_if_mixed_or_m(boundary)
+  if (!is.na(sf::st_crs(boundary)))
     return(boundary)
   if (is.null(to)) {
     ll <- .looks_like_lonlat(boundary)
@@ -3260,9 +3269,10 @@ estimate_sac_range <- function(points_sf, response_var,
   # different feature than row i, and every fold below misaligns silently.
   # coerce_to_points() takes centroids, matching prep_model_data().
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
-  # before the coerce and after it, as prep_model_data() reads it.
+  # before the coerce and after it, as prep_model_data() reads it, and so is
+  # one whose geometries carry M, which GEOS refuses in the coerce.
   if (!all(sf::st_geometry_type(points_sf, by_geometry = TRUE) == "POINT"))
-    points_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(points_sf), "auto"))
+    points_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(points_sf), "auto"))
 
   # gstat::variogram() uses EVERY coordinate dimension, so an XYZ layer has
   # its elevation folded into each lag and the "range" is a length in 3-D,
@@ -4714,7 +4724,10 @@ print.sac_range <- function(x, ...) {
 #'   along an edge is not a block.  A boundary without a CRS is brought into
 #'   the points' CRS: reprojected from EPSG:4326 when its coordinates look
 #'   like lon/lat, otherwise stamped, with a warning either way.  The same
-#'   goes for \code{prediction_points} and \code{blocks}.
+#'   goes for \code{prediction_points} and \code{blocks}.  A boundary that
+#'   mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
+#'   a layer in the dimension of its first geometry, and so is one whose
+#'   polygons carry M (XYM or XYZM), which GEOS refuses.
 #' @param buffer For \code{"buffered_loo"}: a single positive number, the
 #'   distance within which the held-out point's neighbours are excluded from
 #'   its training set.  Like \code{block_size} it is in the units of the CRS
@@ -4738,7 +4751,13 @@ print.sac_range <- function(x, ...) {
 #'   first, so the target distances are point-to-point.  A point-to-polygon
 #'   distance is zero for every cell that contains a training point, which
 #'   pulls the target distribution towards zero and degenerates the CV towards
-#'   plain leave-one-out.
+#'   plain leave-one-out.  A layer that mixes XY and XYZ (or XYM) geometries
+#'   is read in x and y, before and after it is reduced to points,
+#'   since sf reads a layer in the dimension of its first geometry.  So is a
+#'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
+#'   points a layer is reduced to are read in x and y when they mix
+#'   dimensions, as those of a layer XYZ throughout that holds points and
+#'   polygons do.
 #' @param min_train For \code{method = "nndm"}: the smallest fraction of the
 #'   data any fold's training set may be reduced to by neighbour exclusion.
 #'   Default \code{0.5}, as in \code{CAST::nndm()}.  Where it binds, the
@@ -5018,7 +5037,11 @@ print.sac_range <- function(x, ...) {
 #'   \code{block_multiplier} and \code{boundary} have nothing to act on and
 #'   are ignored (logged); \code{auto_range} only compares the estimated range
 #'   against the blocks.  See \strong{Supplied blocks} below for the CRS,
-#'   overlap and coverage rules.  An error for any other \code{method}.
+#'   overlap and coverage rules.  Blocks that mix XY and XYZ (or XYM)
+#'   polygons are read in x and y, since sf reads a layer in the dimension
+#'   of its first geometry, and \code{params$blocks} holds them in XY.  So
+#'   are blocks whose polygons carry M (XYM or XYZM), which GEOS refuses.  An
+#'   error for any other \code{method}.
 #' @param balance_tol A number of at least 1, default 3.  For \code{"block_kfold"}:
 #'   the ratio of the largest fold's point count to the smallest's above
 #'   which the folds are reported as imbalanced, with a warning (an R
@@ -5337,6 +5360,11 @@ make_folds <- function(points_sf, k,
     if (nrow(blocks) < 2L)
       stop("make_folds(): `blocks` must hold at least 2 polygons; got ",
            nrow(blocks), ".", call. = FALSE)
+    # Blocks that mix XY and XYZ (or XYM) polygons are read in x and y: sf
+    # reads a layer in the dimension of its first geometry, so the transform
+    # stopped with "OGR error" and the repair with GEOS's message.  So are
+    # blocks whose polygons carry M, which GEOS refuses.
+    blocks <- .xy_if_mixed_or_m(blocks)
   }
   if (!is.numeric(balance_tol) || length(balance_tol) != 1L || is.na(balance_tol) ||
       balance_tol < 1)
@@ -5364,9 +5392,13 @@ make_folds <- function(points_sf, k,
     max_test <- as.integer(max_test)
   }
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
-  # from here on, the probe included; the points reduced from it are tested
-  # again, as prep_model_data() tests them.
-  points_sf <- .xy_if_mixed(points_sf)
+  # from here on, the probe included, and so is one whose geometries carry
+  # M, which GEOS refuses (.xy_if_mixed_or_m()); the points reduced from it
+  # are tested again, as prep_model_data() tests them.
+  points_sf <- .xy_if_mixed_or_m(points_sf)
+  # So is a boundary, before it is moved, repaired or intersected.
+  if (inherits(boundary, "sf") || inherits(boundary, "sfc"))
+    boundary <- .xy_if_mixed_or_m(boundary)
   # The provenance probe is taken on the geometry AS SUPPLIED -- before
   # pointization -- because that is what the cv_*() wrappers will probe too.
   row_probe <- .fold_row_probe(points_sf)
@@ -6964,12 +6996,19 @@ make_folds <- function(points_sf, k,
          "predict_surface()).", call. = FALSE)
   if (inherits(prediction_points, "sfc"))
     prediction_points <- sf::st_sf(geometry = prediction_points)
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and the move and again after the coerce: sf reads a
+  # layer in the dimension of its first geometry.  So is one whose
+  # geometries carry M, which GEOS refuses in the coerce.  It is not
+  # returned, so no warning.
+  if (inherits(prediction_points, "sf"))
+    prediction_points <- .xy_if_mixed_or_m(prediction_points)
   if (!all(sf::st_geometry_type(prediction_points,
                                 by_geometry = TRUE) == "POINT")) {
     .log_info(paste0("make_folds(%s): `prediction_points` are not POINTs; ",
                      "using representative points so the target distances ",
                      "are point-to-point."), label)
-    prediction_points <- coerce_to_points(prediction_points, "auto")
+    prediction_points <- .xy_if_mixed(coerce_to_points(prediction_points, "auto"))
   }
   if (is.na(sf::st_crs(pts)) && !is.na(sf::st_crs(prediction_points))) {
     pts <- .transform_or_stamp(pts, sf::st_crs(prediction_points),

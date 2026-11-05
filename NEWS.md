@@ -2483,6 +2483,78 @@ old behaviour where there is a way.
   `create_grid_polygons_cached()` key are new geometry in XY and raise no
   such warning.
 
+* **`resolution_profile()`, `determine_optimal_levels()`, the fold
+  provenance check, `make_folds()`'s `boundary`, `blocks` and
+  `prediction_points`, and `fold_separation()` stopped with a bare message
+  from base R, sf or GEOS, read other coordinates, or let foreign folds
+  through, on layers that mixed XY and XYZ (or XYM) geometries.**  sf
+  reads a layer in the dimension of its first geometry.
+  `resolution_profile()` stopped on points with an XYZ point first with
+  GEOS's "ParseException: Unexpected EOF parsing WKB", after base R's
+  "data length is not a sub-multiple" warning, and with base R's "length
+  of 'dimnames' [2] not equal to array extent" when the XYZ point came
+  later; `determine_optimal_levels()` clustered other coordinates with
+  that base R warning as the only sign, or stopped with the `dimnames`
+  message.  In degrees both stopped with sf's "OGR error" when the first
+  point had Z.  The
+  provenance check that `cv_rf()`, `cv_gwr()`, `cv_bayes()`,
+  `cv_spatial()`, `compare_models_cv()`, `fold_separation()`,
+  `kriging_adequacy()` and `area_of_applicability(folds =)` run on supplied
+  folds could not take its sample of the layer when the first row had a Z
+  or M coordinate, and passed folds built on other data with no word; on
+  a layer without a CRS it read the coordinates out of step and refused
+  folds built on the same rows as built from different data.
+  `make_folds(method = "block_kfold")` stopped on such a `boundary` or
+  `blocks` with sf's "OGR error" when the first polygon had Z or M, and
+  with GEOS's "Points of LinearRing do not form a closed linestring" when
+  a later one had, also through the `boundary` of the `cv_*()` functions.
+  `make_folds(method = "nndm")` and `"knndm"` stopped with "OGR error" on
+  `prediction_points` with a Z or M point first, and `fold_separation()`
+  did the same on its `prediction_points`, and on `data_sf` when it moves
+  it into the CRS of the range or projects it from degrees.  Polygon
+  layers that mixed dimensions stopped these functions with GEOS's
+  message.  These layers are now read in x and y, before they are reduced
+  to points, moved or repaired, and again after they are reduced to
+  points, with no warning, as none of these functions returns them; they
+  give what the same rows in XY give.  The blocks a `make_folds()` result
+  records as `params$blocks` are its working copy and come back in XY for
+  such `blocks`.  The points a layer is reduced to are read in x and y
+  too: those of a layer XYZ throughout that holds points beside polygons
+  mix XY and XYZ, since the point on the surface of a POLYGON Z is XY.
+  With a point first, `resolution_profile()` stopped on such a layer with
+  "ParseException: Unexpected EOF parsing WKB", `determine_optimal_levels()`
+  clustered other coordinates with base R's "data length" warning as the
+  only sign, `make_folds(method = "nndm")`, `"knndm"` and
+  `fold_separation()` stopped with "OGR error" on such `prediction_points`,
+  and `fold_separation()` did the same on such `data_sf` when it moves it
+  into the CRS of the range.  With a polygon first, `resolution_profile()`
+  and `determine_optimal_levels()` stopped with the `dimnames` message.
+  Either way `fold_separation()` raised `ensure_projected()`'s
+  `spatialkit_zm_dropped` warning when it projects such `data_sf` from
+  degrees.  Any other layer XY or XYZ throughout is read as before.
+
+* **`resolution_profile()`, `determine_optimal_levels()`,
+  `estimate_sac_range()`, `prep_model_data()`, `make_folds()` and
+  `fold_separation()` stopped with GEOS's "GEOS does not support XYM or
+  XYZM geometries" on layers whose geometries all carry M.**  The profile
+  stopped on points or polygons XYM; `determine_optimal_levels()`,
+  `estimate_sac_range()` and `prep_model_data()`, and through it the
+  `cv_*()` functions, on polygons; `make_folds()` on such a `boundary`
+  (also through the `boundary` of the `cv_*()` functions), such `blocks`,
+  and polygon `points_sf` or `prediction_points`; `fold_separation()` on
+  polygon `data_sf` or `prediction_points`.  These functions read these
+  layers only for their x and y and do not return them, so the layers are
+  now read in x and y, as the tessellation builders read a `boundary` that
+  carries M, with no warning, and give what the same rows in XY give.  A
+  layer XY or XYZ throughout is read as before.
+
+* **`prep_model_data()` raised `ensure_projected()`'s
+  `spatialkit_zm_dropped` warning, which says the layer is returned in XY,
+  for a `boundary` in degrees that mixed XY and XYZ (or XYM) geometries.**
+  Only the boundary's CRS is taken and the boundary is not returned.  Such
+  a boundary is now read in x and y before it is projected, with no
+  warning, and the data are projected as for the same boundary in XY.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

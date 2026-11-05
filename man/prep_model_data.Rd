@@ -26,7 +26,9 @@ one; the GWR and random-forest backends do not and reject it themselves).}
 \item{boundary}{Optional sf/sfc whose CRS the data are projected to.  It
 is not a clip: rows that fall outside it are kept.  Subset
 \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
-restrict the rows.}
+restrict the rows.  One that mixes XY and XYZ (or XYM) geometries is
+read in x and y, since sf reads a layer in the dimension of its first
+geometry.}
 
 \item{pointize}{Strategy for non-point geometry coercion, passed to
 \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),

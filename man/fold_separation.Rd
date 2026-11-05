@@ -18,7 +18,12 @@ whose recorded rows sit at other locations here (folds built on another
 layer, such as the points before
 \code{\link{assign_features_to_polygons}()} dropped some) is refused;
 the location check is skipped when one of the two layers is POINT and
-the other is not.}
+the other is not.  A layer that mixes XY and XYZ (or XYM) geometries is
+read in x and y, for the distances and for that check, since sf reads
+a layer in the dimension of its first geometry.  So is a layer whose
+geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
+layer is reduced to are read in x and y when they mix dimensions, as
+those of a layer XYZ throughout that holds points and polygons do.}
 
 \item{sac}{Optional: an \code{\link{estimate_sac_range}()} result or a
 single number.  Defaults to the range the folds carry, if any.  Supplying
@@ -40,11 +45,14 @@ locations the model will predict at: the grid from
 is reduced to one representative point per feature, as in
 \code{make_folds(method = "nndm")}, so pass grid cells or points, not
 one polygon of the region.  It is brought into the CRS the distances are
-measured in.  Default \code{NULL}: no target and no reading, except for
-NNDM and kNNDM folds (\code{method = "nndm"} and \code{"knndm"}), which
-carry the distances from the prediction points they were built for and
-are compared against those, measured to all sites.  The carried
-distances are lengths in the CRS the folds were built in
+measured in; one that mixes XY and XYZ (or XYM) geometries is read in x
+and y first.  So is one whose geometries carry M (XYM or XYZM), and so
+are the points it is reduced to when they mix dimensions.  Default
+\code{NULL}: no target and no reading, except for NNDM and kNNDM folds
+(\code{method = "nndm"} and \code{"knndm"}), which carry the distances
+from the prediction points they were built for and are compared
+against those, measured to all sites.  The carried distances are
+lengths in the CRS the folds were built in
 (\code{folds$params$crs}).  When the distances here are measured in
 another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 records another), the two are not compared, \code{print()} says so, and

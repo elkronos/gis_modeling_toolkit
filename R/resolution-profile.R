@@ -1303,7 +1303,13 @@
 #'
 #' @param data_sf An sf object of points (other geometries are reduced to
 #'   representative points).  Features with empty or non-finite coordinates
-#'   are dropped with a warning.
+#'   are dropped with a warning.  A layer that mixes XY and XYZ (or XYM)
+#'   geometries is read in x and y, before and after it is reduced to points,
+#'   since sf reads a layer in the dimension of its first geometry.  So is a
+#'   layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
+#'   points a layer is reduced to are read in x and y when they mix
+#'   dimensions, as those of a layer XYZ throughout that holds points and
+#'   polygons do.
 #' @param response_var Optional response column name (numeric or logical).
 #'   Enables \code{cp} and \code{moran_z}, and, when it is numeric, the
 #'   pooled estimate the default profile scores by \code{loo}.  A variogram
@@ -1852,11 +1858,17 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     stop("resolution_profile(): pass one of `obs_per_cell` and `levels`: each sets the ",
          "ladder.", call. = FALSE)
 
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and again after it: sf reads a layer in the dimension
+  # of its first geometry.  So is one whose geometries carry M, which GEOS
+  # refuses at the hull and in the coerce (.xy_if_mixed_or_m()).  The
+  # profile does not return the layer, so no warning.
+  data_sf <- .xy_if_mixed_or_m(data_sf)
   # Whether the layer came as points: a feature that is not one is scored at
   # the point it is reduced to, and the record of an estimate says so.
   was_points <- all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")
   if (!was_points)
-    data_sf <- coerce_to_points(data_sf, "auto")
+    data_sf <- .xy_if_mixed(coerce_to_points(data_sf, "auto"))
   data_sf <- ensure_projected(data_sf)
   xy <- sf::st_coordinates(data_sf)[, 1:2, drop = FALSE]
   ok_xy <- is.finite(xy[, 1]) & is.finite(xy[, 2])

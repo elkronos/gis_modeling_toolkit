@@ -29,7 +29,13 @@ resolution_profile(
 \arguments{
 \item{data_sf}{An sf object of points (other geometries are reduced to
 representative points).  Features with empty or non-finite coordinates
-are dropped with a warning.}
+are dropped with a warning.  A layer that mixes XY and XYZ (or XYM)
+geometries is read in x and y, before and after it is reduced to points,
+since sf reads a layer in the dimension of its first geometry.  So is a
+layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
+points a layer is reduced to are read in x and y when they mix
+dimensions, as those of a layer XYZ throughout that holds points and
+polygons do.}
 
 \item{response_var}{Optional response column name (numeric or logical).
 Enables \code{cp} and \code{moran_z}, and, when it is numeric, the

@@ -19,7 +19,13 @@ determine_optimal_levels(
 }
 \arguments{
 \item{data_sf}{An sf object.  Features with empty or non-finite
-coordinates are dropped with a warning.}
+coordinates are dropped with a warning.  A layer that mixes XY and XYZ
+(or XYM) geometries is read in x and y, before and after it is reduced
+to points, since sf reads a layer in the dimension of its first geometry.
+So is a layer whose geometries carry M (XYM or XYZM), which GEOS
+refuses.  The points a layer is reduced to are read in x and y when they
+mix dimensions, as those of a layer XYZ throughout that holds points and
+polygons do.}
 
 \item{max_levels}{Integer upper bound on levels. Default 12.  The sweep
 also stops at the number of distinct locations (k-means cannot place

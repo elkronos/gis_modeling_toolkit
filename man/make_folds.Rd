@@ -187,7 +187,13 @@ non-POINT layer (grid cells, polygons) is reduced to representative points
 first, so the target distances are point-to-point.  A point-to-polygon
 distance is zero for every cell that contains a training point, which
 pulls the target distribution towards zero and degenerates the CV towards
-plain leave-one-out.}
+plain leave-one-out.  A layer that mixes XY and XYZ (or XYM) geometries
+is read in x and y, before and after it is reduced to points,
+since sf reads a layer in the dimension of its first geometry.  So is a
+layer whose geometries carry M (XYM or XYZM), which GEOS refuses.  The
+points a layer is reduced to are read in x and y when they mix
+dimensions, as those of a layer XYZ throughout that holds points and
+polygons do.}
 
 \item{predictor_vars}{Optional character vector of predictor column names.
 Passed to \code{estimate_sac_range()} for residual variogram estimation.}
@@ -197,7 +203,10 @@ clipped to it; a cell that the boundary only touches at a corner or
 along an edge is not a block.  A boundary without a CRS is brought into
 the points' CRS: reprojected from EPSG:4326 when its coordinates look
 like lon/lat, otherwise stamped, with a warning either way.  The same
-goes for \code{prediction_points} and \code{blocks}.}
+goes for \code{prediction_points} and \code{blocks}.  A boundary that
+mixes XY and XYZ (or XYM) geometries is read in x and y, since sf reads
+a layer in the dimension of its first geometry, and so is one whose
+polygons carry M (XYM or XYZM), which GEOS refuses.}
 
 \item{buffer}{For \code{"buffered_loo"}: a single positive number, the
 distance within which the held-out point's neighbours are excluded from
@@ -250,7 +259,11 @@ it, and the blocks are then assigned to folds exactly as grid cells are.
 \code{block_multiplier} and \code{boundary} have nothing to act on and
 are ignored (logged); \code{auto_range} only compares the estimated range
 against the blocks.  See \strong{Supplied blocks} below for the CRS,
-overlap and coverage rules.  An error for any other \code{method}.}
+overlap and coverage rules.  Blocks that mix XY and XYZ (or XYM)
+polygons are read in x and y, since sf reads a layer in the dimension
+of its first geometry, and \code{params$blocks} holds them in XY.  So
+are blocks whose polygons carry M (XYM or XYZM), which GEOS refuses.  An
+error for any other \code{method}.}
 
 \item{balance_tol}{A number of at least 1, default 3.  For \code{"block_kfold"}:
 the ratio of the largest fold's point count to the smallest's above

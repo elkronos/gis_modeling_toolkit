@@ -30,7 +30,9 @@
 #' @param boundary Optional sf/sfc whose CRS the data are projected to.  It
 #'   is not a clip: rows that fall outside it are kept.  Subset
 #'   \code{data_sf} yourself (for example with \code{sf::st_filter()}) to
-#'   restrict the rows.
+#'   restrict the rows.  One that mixes XY and XYZ (or XYM) geometries is
+#'   read in x and y, since sf reads a layer in the dimension of its first
+#'   geometry.
 #' @param pointize Strategy for non-point geometry coercion, passed to
 #'   \code{\link{coerce_to_points}}.  One of \code{"auto"} (default),
 #'   \code{"centroid"}, \code{"point_on_surface"}, \code{"surface"} (an alias
@@ -193,9 +195,12 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
   # MULTIPOINTs (common in shapefiles) are unchanged in practice.
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
   # (.xy_if_mixed()), before the coerce and again after it: the point on the
-  # surface of a POLYGON Z is XY beside the POINT Z rows kept.
+  # surface of a POLYGON Z is XY beside the POINT Z rows kept.  So is one
+  # whose geometries carry M, which GEOS refuses in the coerce
+  # (.xy_if_mixed_or_m()); .drop_zm() below drops Z and M from the points
+  # in any case.
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed(data_sf), pointize))
+    data_sf <- .xy_if_mixed(coerce_to_points(.xy_if_mixed_or_m(data_sf), pointize))
   }
 
   # Drop any Z or M coordinate.  Every backend works in 2-D map distance, but
@@ -213,7 +218,10 @@ prep_model_data <- function(data_sf, response_var, predictor_vars,
     if (!inherits(bnd, "sf"))
       stop("prep_model_data(): 'boundary' must be sf/sfc when supplied.",
            call. = FALSE)
-    bnd <- ensure_projected(bnd)
+    # Only its CRS is taken, so a boundary that mixes XY and XYZ (or XYM)
+    # geometries is read in x and y before it is projected, with no warning
+    # about a copy that is not returned.
+    bnd <- ensure_projected(.xy_if_mixed(bnd))
     data_sf <- ensure_projected(data_sf, .crs_or_null(bnd))
   } else {
     data_sf <- ensure_projected(data_sf)

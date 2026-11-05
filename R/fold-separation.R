@@ -85,7 +85,12 @@
 #'   layer, such as the points before
 #'   \code{\link{assign_features_to_polygons}()} dropped some) is refused;
 #'   the location check is skipped when one of the two layers is POINT and
-#'   the other is not.
+#'   the other is not.  A layer that mixes XY and XYZ (or XYM) geometries is
+#'   read in x and y, for the distances and for that check, since sf reads
+#'   a layer in the dimension of its first geometry.  So is a layer whose
+#'   geometries carry M (XYM or XYZM), which GEOS refuses.  The points a
+#'   layer is reduced to are read in x and y when they mix dimensions, as
+#'   those of a layer XYZ throughout that holds points and polygons do.
 #' @param sac Optional: an \code{\link{estimate_sac_range}()} result or a
 #'   single number.  Defaults to the range the folds carry, if any.  Supplying
 #'   one adds the \code{mean_cor} column and, with a prediction target,
@@ -105,11 +110,14 @@
 #'   is reduced to one representative point per feature, as in
 #'   \code{make_folds(method = "nndm")}, so pass grid cells or points, not
 #'   one polygon of the region.  It is brought into the CRS the distances are
-#'   measured in.  Default \code{NULL}: no target and no reading, except for
-#'   NNDM and kNNDM folds (\code{method = "nndm"} and \code{"knndm"}), which
-#'   carry the distances from the prediction points they were built for and
-#'   are compared against those, measured to all sites.  The carried
-#'   distances are lengths in the CRS the folds were built in
+#'   measured in; one that mixes XY and XYZ (or XYM) geometries is read in x
+#'   and y first.  So is one whose geometries carry M (XYM or XYZM), and so
+#'   are the points it is reduced to when they mix dimensions.  Default
+#'   \code{NULL}: no target and no reading, except for NNDM and kNNDM folds
+#'   (\code{method = "nndm"} and \code{"knndm"}), which carry the distances
+#'   from the prediction points they were built for and are compared
+#'   against those, measured to all sites.  The carried distances are
+#'   lengths in the CRS the folds were built in
 #'   (\code{folds$params$crs}).  When the distances here are measured in
 #'   another CRS (\code{data_sf} is in another projected CRS, or \code{sac}
 #'   records another), the two are not compared, \code{print()} says so, and
@@ -248,9 +256,14 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
       rng_crs <- cr
   }
 
-  pts <- data_sf
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and the move and again after the coerce: sf reads a
+  # layer in the dimension of its first geometry.  So is one whose
+  # geometries carry M, which GEOS refuses in the coerce.  It is not
+  # returned, so no warning.
+  pts <- .xy_if_mixed_or_m(data_sf)
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
-    pts <- coerce_to_points(pts, "auto")
+    pts <- .xy_if_mixed(coerce_to_points(pts, "auto"))
   pts <- if (is.null(rng_crs)) ensure_projected(pts) else
     .transform_or_stamp(pts, rng_crs, what = "data_sf", caller = "fold_separation")
   pts <- sf::st_zm(pts, drop = TRUE, what = "ZM")
@@ -468,11 +481,13 @@ fold_separation <- function(folds, data_sf, sac = NULL, prediction_points = NULL
          class(prediction_points)[1L], ".", call. = FALSE)
   if (!nrow(prediction_points))
     stop("fold_separation(): `prediction_points` has no rows.", call. = FALSE)
+  # Read in x and y when it mixes dimensions or carries M, as `data_sf` is.
+  prediction_points <- .xy_if_mixed_or_m(prediction_points)
   if (!all(sf::st_geometry_type(prediction_points, by_geometry = TRUE) == "POINT")) {
     .log_info(paste0("fold_separation(): `prediction_points` are not POINTs; ",
                      "using one representative point per feature so the ",
                      "target distances are point-to-point."))
-    prediction_points <- coerce_to_points(prediction_points, "auto")
+    prediction_points <- .xy_if_mixed(coerce_to_points(prediction_points, "auto"))
   }
   if (is.null(.crs_or_null(pts))) {
     if (!is.na(sf::st_crs(prediction_points)))

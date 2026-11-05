@@ -807,7 +807,13 @@
 #' count.
 #'
 #' @param data_sf An sf object.  Features with empty or non-finite
-#'   coordinates are dropped with a warning.
+#'   coordinates are dropped with a warning.  A layer that mixes XY and XYZ
+#'   (or XYM) geometries is read in x and y, before and after it is reduced
+#'   to points, since sf reads a layer in the dimension of its first geometry.
+#'   So is a layer whose geometries carry M (XYM or XYZM), which GEOS
+#'   refuses.  The points a layer is reduced to are read in x and y when they
+#'   mix dimensions, as those of a layer XYZ throughout that holds points and
+#'   polygons do.
 #' @param max_levels Integer upper bound on levels. Default 12.  The sweep
 #'   also stops at the number of distinct locations (k-means cannot place
 #'   more centres) and one short of the number of points.
@@ -1133,8 +1139,14 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
   # returns one row per VERTEX, so any multi-vertex feature makes xy[i, ] a
   # different feature than row i of resp_vec/pred_mat, and every index below
   # reads the wrong rows silently.  Matches the guard in estimate_sac_range().
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y,
+  # before the coerce and again after it: sf reads a layer in the dimension
+  # of its first geometry.  So is one whose geometries carry M, which GEOS
+  # refuses in the coerce (.xy_if_mixed_or_m()).  The layer is not
+  # returned, so no warning.
+  data_sf <- .xy_if_mixed_or_m(data_sf)
   if (!all(sf::st_geometry_type(data_sf, by_geometry = TRUE) == "POINT")) {
-    data_sf <- coerce_to_points(data_sf, "auto")
+    data_sf <- .xy_if_mixed(coerce_to_points(data_sf, "auto"))
   }
   data_sf <- ensure_projected(data_sf)
 
