@@ -39,7 +39,8 @@
     })
     pts  <- sf::st_as_sf(d$d, coords = c("x", "y"), crs = 32617)
     rows <- pts[-d$te, ]
-    seeds <- get_voronoi_seeds(method = "kmeans", n = 20, sample_points = rows, seed = 1)
+    seeds <- get_voronoi_seeds(method = "kmeans", n = 20, sample_points = rows,
+                               set_seed = 1)
     tess  <- build_tessellation(seeds, method = "voronoi", quiet = TRUE)
     asg   <- assign_features_to_polygons(rows, tess$cells, polygon_id_col = "cell_id",
                                          quiet = TRUE)
@@ -329,4 +330,70 @@ test_that("?cell_values_at and ?summarize_by_cell say the layers are read in x a
   expect_match(txt, paste0("The distances are taken in x and y: a layer whose features, or the ",
                            "points taken from them, do not all have the same dimensions (some ",
                            "with a Z or M coordinate) is read without its Z and M."), fixed = TRUE)
+})
+
+# Row `i` of the polygons of `values` given a third coordinate, Z or M.
+.zm_poly_row <- function(l, i, dim = "XYZ") {
+  g <- sf::st_geometry(l)
+  g[[i]] <- sf::st_polygon(lapply(unclass(g[[i]]), function(r) cbind(r, 3)), dim = dim)
+  sf::st_set_geometry(l, sf::st_sfc(as.list(g), crs = sf::st_crs(l), recompute_bbox = TRUE))
+}
+
+test_that("polygons of values that mix XY and XYZ give the frame of the same polygons in XY", {
+  L <- .zm_layer()
+  # A seed without an ID inside its cell, and one moved beyond every cell,
+  # whose cell then has no seed and is offered to it (.values_at_free_cells()).
+  inside <- L$seeds
+  inside$cell_id[3] <- NA
+  beyond <- inside
+  g <- sf::st_geometry(beyond)
+  g[3] <- g[3] + c(1e6, 0)
+  beyond <- sf::st_set_geometry(beyond, g)
+  free <- which(L$pooled$cell_id == L$seeds$cell_id[3])
+  # The free cell is a row of its own, besides rows 1 and 5.
+  expect_length(free, 1L)
+  expect_false(free %in% c(1L, 5L))
+  at <- function(values, seeds)
+    .zm_catch(cell_values_at(L$held, values, L$asg, "z", id_col = "cell_id", seeds = seeds))
+  # values in the working CRS, in degrees (moved into the working CRS on the
+  # way), and without a CRS.
+  pooled <- list(
+    "EPSG:32617" = L$pooled,
+    "EPSG:4326"  = sf::st_set_geometry(L$pooled,
+                                       sf::st_transform(sf::st_geometry(L$pooled), 4326)),
+    "no CRS"     = sf::st_set_geometry(L$pooled,
+                                       sf::st_set_crs(sf::st_geometry(L$pooled), NA)))
+  for (crs in names(pooled)) for (s in list(inside = inside, beyond = beyond)) {
+    v <- pooled[[crs]]
+    ref <- at(v, s)
+    for (dim in c("XYZ", "XYM")) for (i in c(1L, 5L, free)) {
+      got <- at(.zm_poly_row(v, i, dim), s)
+      .zm_same(got, ref, sprintf("values %s row %d %s", crs, i, dim))
+    }
+  }
+  # Without seeds: the polygons are joined.
+  ref <- .zm_catch(cell_values_at(L$held, L$pooled, L$asg, "z", id_col = "cell_id"))
+  for (i in c(1L, 5L)) {
+    got <- .zm_catch(cell_values_at(L$held, .zm_poly_row(L$pooled, i), L$asg, "z",
+                                    id_col = "cell_id"))
+    .zm_same(got, ref, sprintf("values row %d XYZ, no seeds", i))
+  }
+  # Polygons XYZ throughout give the frame they gave.
+  allz <- L$pooled
+  for (i in seq_len(nrow(allz))) allz <- .zm_poly_row(allz, i)
+  expect_identical(.xy_if_mixed(sf::st_geometry(allz)), sf::st_geometry(allz))
+  .zm_same(at(allz, beyond), at(L$pooled, beyond), "values XYZ throughout")
+})
+
+test_that("?cell_values_at says the polygons of values are read in x and y", {
+  page <- function(name) {
+    file <- test_path("..", "..", "man", name)
+    rd <- if (file.exists(file)) tools::parse_Rd(file)
+          else tools::Rd_db("spatialkit")[[name]]
+    expect_s3_class(rd, "Rd")
+    gsub("[[:space:]]+", " ", paste(unlist(rd), collapse = ""))
+  }
+  expect_match(page("cell_values_at.Rd"),
+               paste0("So are the polygons of values when they do not all have the same ",
+                      "dimensions."), fixed = TRUE)
 })

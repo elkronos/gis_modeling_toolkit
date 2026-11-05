@@ -2011,7 +2011,10 @@ assign_features_to_polygons <- function(
 #'       lets correlation decay with distance, which matters increasingly as
 #'       cells get larger and Kish's single-`rho` assumption degrades. Supply
 #'       the fit via `sac`, or it is estimated when `response_var` is given and
-#'       'gstat' is available. Exponential, spherical and Gaussian models are
+#'       'gstat' is available. The distances are taken in x and y: a layer
+#'       whose features, or the points taken from them, do not all have the
+#'       same dimensions (some with a Z or M coordinate) is read without its
+#'       Z and M. Exponential, spherical and Gaussian models are
 #'       supported, with a nugget and with several structured components
 #'       (each weighted by its partial sill) and with gstat's 2-D geometric
 #'       anisotropy (`vgm(..., anis = c(angle, ratio))`), applied as gstat
@@ -3314,9 +3317,15 @@ summarize_by_cell <- function(assigned_points_sf,
       # coords_mat with `df` and feed the wrong points into every cell.
       # coerce_to_points() takes representative points, matching the guard in
       # estimate_sac_range().
-      pts_for_deff <- assigned_points_sf
+      # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+      # (.xy_if_mixed()), before the coerce and the move into the variogram's
+      # CRS and again after the coerce, whose points can mix dimensions: sf
+      # reads such a layer in the dimension of its first geometry, so the
+      # move stopped with "OGR error" or st_coordinates() below read other
+      # coordinates.  These points are not returned, so nothing is said.
+      pts_for_deff <- .xy_if_mixed(assigned_points_sf)
       if (!all(sf::st_geometry_type(pts_for_deff, by_geometry = TRUE) == "POINT"))
-        pts_for_deff <- coerce_to_points(pts_for_deff, "auto")
+        pts_for_deff <- .xy_if_mixed(coerce_to_points(pts_for_deff, "auto"))
 
       # The variogram range is a LENGTH in the CRS the variogram was fitted in
       # -- estimate_sac_range() always fits in a projected CRS, in metres.

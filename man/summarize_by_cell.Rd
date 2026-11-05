@@ -76,7 +76,10 @@ off-diagonal correlation recovers \code{1 + (n - 1) * rho} exactly) but
 lets correlation decay with distance, which matters increasingly as
 cells get larger and Kish's single-\code{rho} assumption degrades. Supply
 the fit via \code{sac}, or it is estimated when \code{response_var} is given and
-'gstat' is available. Exponential, spherical and Gaussian models are
+'gstat' is available. The distances are taken in x and y: a layer
+whose features, or the points taken from them, do not all have the
+same dimensions (some with a Z or M coordinate) is read without its
+Z and M. Exponential, spherical and Gaussian models are
 supported, with a nugget and with several structured components
 (each weighted by its partial sill) and with gstat's 2-D geometric
 anisotropy (\code{vgm(..., anis = c(angle, ratio))}), applied as gstat

@@ -235,7 +235,10 @@
 #' \code{NA} with a warning, and \code{print()} says how many.
 #'
 #' @param assigned_points_sf Points with a cell identifier column, as
-#'   \code{\link{assign_features_to_polygons}()} returns.
+#'   \code{\link{assign_features_to_polygons}()} returns.  A layer whose
+#'   points, or the points taken from its multipoints, do not all have the
+#'   same dimensions (some with a Z or M coordinate) is read without its Z
+#'   and M, since sf reads a layer in the dimension of its first geometry.
 #' @param response_var The response column: numeric or logical. A logical
 #'   column is kriged as 0/1, so its cell mean is a share. Any other class
 #'   (a factor, an ordered factor, character, a date) is an error naming the
@@ -245,7 +248,8 @@
 #'   levels. For a category, pass an indicator (\code{x == "level"}).
 #' @param cells_sf The cell polygons, with the matching ID column.  A layer
 #'   with no CRS is taken to be in the points' CRS (and points with none in
-#'   the cells'), with a warning.
+#'   the cells'), with a warning.  Cells that do not all have the same
+#'   dimensions are read in x and y, without their Z and M.
 #' @param id_col Preferred name of the ID column, found as
 #'   \code{\link{summarize_by_cell}()} finds it: on the points the first of
 #'   \code{id_col}, \code{"poly_id"}, \code{"polygon_id"} and
@@ -416,8 +420,13 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # anything is moved: the points were assigned to these cells, so they share
   # a coordinate space.  .align_crs() leaves a CRS-less layer as it is, and
   # gstat::krige() then failed on the mismatch with an internal assertion.
-  pts <- assigned_points_sf
-  cells_in <- cells_sf
+  # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
+  # (.xy_if_mixed()) before it is moved, pointized or repaired: sf reads such
+  # a layer in the dimension of its first geometry, so the moves stopped with
+  # "OGR error" and GEOS with its own message on the cells.  Neither layer is
+  # returned, so nothing is said.
+  pts <- .xy_if_mixed(assigned_points_sf)
+  cells_in <- .xy_if_mixed(cells_sf)
   pts_na   <- is.na(sf::st_crs(pts))
   cells_na <- is.na(sf::st_crs(cells_in))
   if (cells_na && !pts_na)
@@ -428,7 +437,7 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
                                what = "assigned_points_sf",
                                caller = "kriging_adequacy")
   if (!all(sf::st_geometry_type(pts, by_geometry = TRUE) == "POINT"))
-    pts <- coerce_to_points(pts, "auto")
+    pts <- .xy_if_mixed(coerce_to_points(pts, "auto"))
   # A supplied variogram's range is a length in the CRS it was fitted in, so
   # the points go into that CRS, as summarize_by_cell() puts them.  Projected
   # anew here instead, a sac fitted in metres met points in km (or US feet)

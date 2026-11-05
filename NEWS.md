@@ -2349,6 +2349,32 @@ old behaviour where there is a way.
   before.
   `?coerce_to_points` states the rule.
 
+* **`summarize_by_cell(deff = "variogram")`, `kriging_adequacy()` and
+  `cell_values_at()` stopped with a bare message from sf or GEOS, or read
+  other coordinates, on layers that mixed XY and XYZ (or XYM)
+  geometries.**  sf reads a layer in the dimension of its first geometry.
+  The variogram design effect of `summarize_by_cell()` stopped with "OGR
+  error" on points with an XYZ point first when `sac` records its CRS;
+  when it records none, it read other coordinates with base R's "data
+  length is not a sub-multiple" warning as the only sign, or stopped with
+  base R's "length of 'dimnames' [2] not equal to array extent".
+  `kriging_adequacy()` stopped or read other coordinates the same ways on
+  such points; with `sac = NULL` the other coordinates came with a warning
+  that points share a location, though none did.  It stopped on such
+  `cells_sf` with GEOS's "ParseException: Unexpected EOF parsing WKB",
+  "Points of LinearRing do not form a closed linestring" or "GEOS does not
+  support XYM", or with "OGR error" for cells in degrees.
+  `cell_values_at()` with `seeds` whose ID is `NA` stopped with "OGR error"
+  or the LinearRing message on such polygons in `values`.  These layers,
+  and the points `coerce_to_points()` takes from such polygon features or
+  multipoints, are now read in x and y, with no warning, as none of the
+  three functions returns them, and give what the same rows in XY give.
+  A layer XYZ throughout that puts POINT Z rows beside MULTIPOINT Z or
+  POLYGON Z rows stopped with "OGR error" or read other coordinates, as the
+  points taken from its multipoints and polygons are XY; it is now read in
+  x and y in the same way.  Any other layer in one dimension, XY or XYZ
+  throughout, is read as before.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was

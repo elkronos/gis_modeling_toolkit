@@ -301,7 +301,10 @@
   lost <- which(is.na(seed_ids) & is.finite(seed_xy[, 1L]) & is.finite(seed_xy[, 2L]))
   if (!length(lost) || !inherits(values, "sf") || nrow(values) == 0L) return(NULL)
   vid <- .id_as_character(values[[id_col]])
-  g   <- sf::st_geometry(values)
+  # Polygons that mix XY and XYZ (or XYM) are read in x and y, as `newdata`
+  # and the seeds are: sf and GEOS read such a layer in the dimension of its
+  # first geometry and stopped on it.
+  g   <- .xy_if_mixed(sf::st_geometry(values))
   keep <- !is.na(vid) & !sf::st_is_empty(g) &
     sf::st_geometry_type(g, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON")
   # A grouped summary has a row per group: one polygon per cell.
@@ -456,6 +459,8 @@
 #'    points, or the points taken from its other features, do not all have
 #'    the same dimensions (some with a Z or M coordinate) is read without its
 #'    Z and M, since sf reads a layer in the dimension of its first point.
+#'    So are the polygons of `values` when they do not all have the same
+#'    dimensions.
 #'    When neither `points` nor `newdata` has a CRS the coordinates are used
 #'    as they are, unless those of `points` look like longitude and latitude:
 #'    both are then read as EPSG:4326, as [summarize_by_cell()] reads
