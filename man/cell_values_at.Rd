@@ -17,14 +17,16 @@ cell_values_at(
 \item{newdata}{The locations: an sf layer. A feature that is not a point
 is reduced to one with \code{\link[=coerce_to_points]{coerce_to_points(, "auto")}}.
 No column of it is read. With no CRS while \code{points} has one, the call
-stops.}
+stops. A layer whose geometries mix dimensions or carry M (XYM or
+XYZM) is read in x and y (step 1).}
 
 \item{values}{The \code{\link[=summarize_by_cell]{summarize_by_cell()}} result for \code{points}. It must hold
 the ID column and a cell value of \code{response_var}: the pooled value
 (\code{estimate = "pooled"}) or the mean (the default \code{agg_funs}). With
 \code{seeds = NULL} it must also carry the cell polygons, which it does when
 it was made with \code{cells_sf}. A \code{values} with no row, or whose IDs are
-all \code{NA}, stops the call, with or without \code{seeds}.}
+all \code{NA}, stops the call, with or without \code{seeds}. Its polygons are
+read in x and y when they mix dimensions or carry M (XYM or XYZM).}
 
 \item{points}{The assigned layer \code{values} was computed from: an sf layer
 with the ID column and \code{response_var}, and at least one scored row.}
@@ -134,10 +136,11 @@ when it is not. \code{points}, \code{newdata} and \code{seeds} are transformed t
 points, or the points taken from its other features, do not all have
 the same dimensions (some with a Z or M coordinate) is read without its
 Z and M, since sf reads a layer in the dimension of its first point.
-So is a layer of polygons or lines in \code{newdata} or \code{points} whose
-geometries carry M (XYM or XYZM), which GEOS does not read.
+So is a layer of points, polygons or lines in \code{newdata} or \code{points}
+whose geometries carry M (XYM or XYZM), which GEOS does not read.
 So are the polygons of \code{values} when they do not all have the same
-dimensions.
+dimensions. Polygons of \code{values} whose geometries carry M are read in
+x and y as well.
 When neither \code{points} nor \code{newdata} has a CRS the coordinates are used
 as they are, unless those of \code{points} look like longitude and latitude:
 both are then read as EPSG:4326, as \code{\link[=summarize_by_cell]{summarize_by_cell()}} reads

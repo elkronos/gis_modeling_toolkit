@@ -39,7 +39,8 @@ levels. For a category, pass an indicator (\code{x == "level"}).}
 \item{cells_sf}{The cell polygons, with the matching ID column.  A layer
 with no CRS is taken to be in the points' CRS (and points with none in
 the cells'), with a warning.  Cells that do not all have the same
-dimensions are read in x and y, without their Z and M.}
+dimensions are read in x and y, without their Z and M.  So are cells
+whose geometries carry M (XYM or XYZM), which GEOS does not read.}
 
 \item{id_col}{Preferred name of the ID column, found as
 \code{\link{summarize_by_cell}()} finds it: on the points the first of

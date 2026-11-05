@@ -40,13 +40,21 @@
 #' geometries wrongly; `rbind()` of an XY and an XYZ layer gives one. When
 #' either layer mixes dimensions, the join runs on a copy of it without Z and
 #' M, and the rows come back with the geometry they arrived with, Z and M
-#' included. Features without a CRS that mix dimensions and are moved from
+#' included. The same holds, with no warning, for a layer whose geometries
+#' carry M (XYM or XYZM), which GEOS does not read: the join is defined in
+#' x and y. Features without a CRS that mix dimensions and are moved from
 #' lon/lat into the polygons' CRS come back moved and in XY, with a warning
 #' of class `"spatialkit_zm_dropped"`, unless their only geometries of
-#' another dimension than the first are empty and not points.
+#' another dimension than the first are empty and not points. Features
+#' without a CRS in one dimension that carry M come back with their own
+#' geometry: with the CRS they were given, or moved from lon/lat with
+#' [sf::st_transform()], which keeps their M.
 #'
-#' @param features_sf An sf object containing features to assign.
-#' @param polygons_sf An sf or sfc polygonal layer.
+#' @param features_sf An sf object containing features to assign. A layer
+#'   whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
+#'   and y, and the rows returned keep their Z and M (see Details).
+#' @param polygons_sf An sf or sfc polygonal layer. Polygons whose
+#'   geometries mix dimensions or carry M (XYM or XYZM) are read in x and y.
 #' @param polygon_id_col Name of the polygon identifier column: the column of
 #'   `polygons_sf` the IDs are read from, and the name they are returned
 #'   under. Default "poly_id". When `polygons_sf` has no column of that name,
@@ -259,29 +267,37 @@ assign_features_to_polygons <- function(
   # only when the first geometry carries them, and GEOS and the transform
   # read an XYZ ring among XY rows as XY pairs.  With a clean XYZ square in
   # row 3 of six XY squares, the point in it fell in no polygon and three
-  # others in two; in a projected CRS GEOS stopped on the ring.  Every
-  # geometric step of the join below reads these copies.
-  features_mixed <- .mixes_zm(features_sf)
-  features_xy <- if (features_mixed) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
+  # others in two; in a projected CRS GEOS stopped on the ring.  So is a
+  # layer whose geometries carry M (XYM or XYZM): GEOS does not read M and
+  # stopped the join, the overlap and the validity check with "GEOS does not
+  # support XYM or XYZM geometries".  The join is defined in x and y and
+  # reads M nowhere.  Every geometric step of the join below reads these
+  # copies; a layer XY or XYZ throughout is read as it came.
+  features_dims <- .geom_dims(features_sf)
+  features_flat <- length(features_dims) > 1L || any(features_dims %in% c("XYM", "XYZM"))
+  features_xy <- if (features_flat) sf::st_zm(features_sf, drop = TRUE, what = "ZM")
                  else features_sf
-  polygons_xy <- .xy_if_mixed(polygons_sf)
+  polygons_xy <- .xy_if_mixed_or_m(polygons_sf)
   hh <- harmonize_crs(features_xy, polygons_xy,
                       prefer = if (join_in_p) "b" else "a")
   f <- hh$a; p <- hh$b
   # `f` is only the join's copy.  The rows returned keep the geometry the
   # features arrived with, Z and M included; a CRS-less layer is resolved
   # into the polygons' CRS and returned there, as before.  A CRS-less layer
-  # that mixes dimensions keeps them when it was only given a CRS; when it
-  # was moved from lon/lat, the rows come back moved, in XY, and a warning
-  # says so, unless sf transforms the layer right (below).
+  # read in XY for the join keeps its Z and M when it was only given a CRS.
+  # When it was moved from lon/lat, a layer in one dimension (M throughout)
+  # comes back moved with its M, since sf transforms such a layer right; one
+  # that mixes dimensions comes back moved, in XY, and a warning says so,
+  # unless sf transforms the layer right (below).
   f_geom <- if (is.na(orig_crs)) sf::st_geometry(f) else sf::st_geometry(features_sf)
-  if (is.na(orig_crs) && features_mixed) {
+  if (is.na(orig_crs) && features_flat) {
     if (identical(f_geom, sf::st_set_crs(sf::st_geometry(features_xy), sf::st_crs(f))))
       f_geom <- sf::st_set_crs(sf::st_geometry(features_sf), sf::st_crs(f))
     else if (identical(.xy_if_mixed_warn(features_sf, "assign_features_to_polygons",
                                          "features_sf"), features_sf))
-      # Its only geometries of another dimension than the first are empty
-      # and not points, which sf transforms right: the rows are moved with their Z, from
+      # A layer in one dimension (M throughout), or one whose only geometries
+      # of another dimension than the first are empty and not points, which
+      # sf transforms right: the rows are moved with their Z and M, from
       # EPSG:4326 as harmonize_crs() took them.
       f_geom <- sf::st_transform(sf::st_set_crs(sf::st_geometry(features_sf), 4326),
                                  sf::st_crs(f))

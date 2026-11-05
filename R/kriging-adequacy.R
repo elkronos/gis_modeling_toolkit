@@ -251,7 +251,8 @@
 #' @param cells_sf The cell polygons, with the matching ID column.  A layer
 #'   with no CRS is taken to be in the points' CRS (and points with none in
 #'   the cells'), with a warning.  Cells that do not all have the same
-#'   dimensions are read in x and y, without their Z and M.
+#'   dimensions are read in x and y, without their Z and M.  So are cells
+#'   whose geometries carry M (XYM or XYZM), which GEOS does not read.
 #' @param id_col Preferred name of the ID column, found as
 #'   \code{\link{summarize_by_cell}()} finds it: on the points the first of
 #'   \code{id_col}, \code{"poly_id"}, \code{"polygon_id"} and
@@ -425,10 +426,12 @@ kriging_adequacy <- function(assigned_points_sf, response_var, cells_sf,
   # A layer that mixes XY and XYZ (or XYM) geometries is read in x and y
   # (.xy_if_mixed()) before it is moved, pointized or repaired: sf reads such
   # a layer in the dimension of its first geometry, so the moves stopped with
-  # "OGR error" and GEOS with its own message on the cells.  Neither layer is
+  # "OGR error" and GEOS with its own message on the cells.  Cells whose
+  # geometries carry M are read in x and y as well (.xy_if_mixed_or_m()):
+  # GEOS does not read M, and the repair stopped on them.  Neither layer is
   # returned, so nothing is said.
   pts <- .xy_if_mixed(assigned_points_sf)
-  cells_in <- .xy_if_mixed(cells_sf)
+  cells_in <- .xy_if_mixed_or_m(cells_sf)
   pts_na   <- is.na(sf::st_crs(pts))
   cells_na <- is.na(sf::st_crs(cells_in))
   if (cells_na && !pts_na)

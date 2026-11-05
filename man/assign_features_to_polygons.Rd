@@ -16,9 +16,12 @@ assign_features_to_polygons(
 )
 }
 \arguments{
-\item{features_sf}{An sf object containing features to assign.}
+\item{features_sf}{An sf object containing features to assign. A layer
+whose geometries mix dimensions or carry M (XYM or XYZM) is joined in x
+and y, and the rows returned keep their Z and M (see Details).}
 
-\item{polygons_sf}{An sf or sfc polygonal layer.}
+\item{polygons_sf}{An sf or sfc polygonal layer. Polygons whose
+geometries mix dimensions or carry M (XYM or XYZM) are read in x and y.}
 
 \item{polygon_id_col}{Name of the polygon identifier column: the column of
 \code{polygons_sf} the IDs are read from, and the name they are returned
@@ -227,10 +230,15 @@ sf reads a layer in the dimension of its first geometry, so s2, GEOS and
 geometries wrongly; \code{rbind()} of an XY and an XYZ layer gives one. When
 either layer mixes dimensions, the join runs on a copy of it without Z and
 M, and the rows come back with the geometry they arrived with, Z and M
-included. Features without a CRS that mix dimensions and are moved from
+included. The same holds, with no warning, for a layer whose geometries
+carry M (XYM or XYZM), which GEOS does not read: the join is defined in
+x and y. Features without a CRS that mix dimensions and are moved from
 lon/lat into the polygons' CRS come back moved and in XY, with a warning
 of class \code{"spatialkit_zm_dropped"}, unless their only geometries of
-another dimension than the first are empty and not points.
+another dimension than the first are empty and not points. Features
+without a CRS in one dimension that carry M come back with their own
+geometry: with the CRS they were given, or moved from lon/lat with
+\code{\link[sf:st_transform]{sf::st_transform()}}, which keeps their M.
 }
 \examples{
 library(sf)

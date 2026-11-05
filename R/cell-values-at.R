@@ -302,10 +302,11 @@
   lost <- which(is.na(seed_ids) & is.finite(seed_xy[, 1L]) & is.finite(seed_xy[, 2L]))
   if (!length(lost) || !inherits(values, "sf") || nrow(values) == 0L) return(NULL)
   vid <- .id_as_character(values[[id_col]])
-  # Polygons that mix XY and XYZ (or XYM) are read in x and y, as `newdata`
-  # and the seeds are: sf and GEOS read such a layer in the dimension of its
-  # first geometry and stopped on it.
-  g   <- .xy_if_mixed(sf::st_geometry(values))
+  # Polygons that mix XY and XYZ (or XYM), or that carry M, are read in x and
+  # y, as `newdata` and the seeds are: sf and GEOS read a mixed layer in the
+  # dimension of its first geometry and stopped on it, and GEOS does not read
+  # M ("GEOS does not support XYM or XYZM geometries").
+  g   <- .xy_if_mixed_or_m(sf::st_geometry(values))
   keep <- !is.na(vid) & !sf::st_is_empty(g) &
     sf::st_geometry_type(g, by_geometry = TRUE) %in% c("POLYGON", "MULTIPOLYGON")
   # A grouped summary has a row per group: one polygon per cell.
@@ -460,10 +461,11 @@
 #'    points, or the points taken from its other features, do not all have
 #'    the same dimensions (some with a Z or M coordinate) is read without its
 #'    Z and M, since sf reads a layer in the dimension of its first point.
-#'    So is a layer of polygons or lines in `newdata` or `points` whose
-#'    geometries carry M (XYM or XYZM), which GEOS does not read.
+#'    So is a layer of points, polygons or lines in `newdata` or `points`
+#'    whose geometries carry M (XYM or XYZM), which GEOS does not read.
 #'    So are the polygons of `values` when they do not all have the same
-#'    dimensions.
+#'    dimensions. Polygons of `values` whose geometries carry M are read in
+#'    x and y as well.
 #'    When neither `points` nor `newdata` has a CRS the coordinates are used
 #'    as they are, unless those of `points` look like longitude and latitude:
 #'    both are then read as EPSG:4326, as [summarize_by_cell()] reads
@@ -618,13 +620,15 @@
 #' @param newdata The locations: an sf layer. A feature that is not a point
 #'   is reduced to one with [`coerce_to_points(, "auto")`][coerce_to_points].
 #'   No column of it is read. With no CRS while `points` has one, the call
-#'   stops.
+#'   stops. A layer whose geometries mix dimensions or carry M (XYM or
+#'   XYZM) is read in x and y (step 1).
 #' @param values The [summarize_by_cell()] result for `points`. It must hold
 #'   the ID column and a cell value of `response_var`: the pooled value
 #'   (`estimate = "pooled"`) or the mean (the default `agg_funs`). With
 #'   `seeds = NULL` it must also carry the cell polygons, which it does when
 #'   it was made with `cells_sf`. A `values` with no row, or whose IDs are
-#'   all `NA`, stops the call, with or without `seeds`.
+#'   all `NA`, stops the call, with or without `seeds`. Its polygons are
+#'   read in x and y when they mix dimensions or carry M (XYM or XYZM).
 #' @param points The assigned layer `values` was computed from: an sf layer
 #'   with the ID column and `response_var`, and at least one scored row.
 #' @param response_var Name of the summarised column wanted: the response,

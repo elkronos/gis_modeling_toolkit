@@ -2638,6 +2638,26 @@ old behaviour where there is a way.
   `plot_tessellation_map()` are taken in x and y.  A layer XY or XYZ
   throughout is read as before.
 
+* **`assign_features_to_polygons()`, `cell_values_at()` and
+  `kriging_adequacy()` stopped with GEOS's "GEOS does not support XYM or
+  XYZM geometries" on layers whose geometries all carry M.**
+  `assign_features_to_polygons()` stopped on such `features_sf`, points or
+  polygons, and on such `polygons_sf`, with `largest = TRUE` or `FALSE`,
+  wherever the join runs with GEOS (in a projected CRS, without a CRS, or
+  in degrees with s2 off); in degrees on the sphere s2 drops M and the join
+  ran.  `cell_values_at()` stopped on such
+  `values` without `seeds` or beside a seed with an `NA` ID, and on point
+  `newdata` without `seeds`; `kriging_adequacy()` on such `cells_sf`.  The
+  same layers XYZ throughout ran, and a layer that mixed XY and XYM rows
+  was already joined in x and y.  The join and the
+  cells are defined in x and y and M is read nowhere, so these layers are
+  now read in x and y, with no warning, and give what the same rows in XY
+  give.  The rows `assign_features_to_polygons()` returns keep the
+  geometry they arrived with, M included; features without a CRS in one
+  dimension that are moved from lon/lat into the polygons' CRS come back
+  moved with `sf::st_transform()`, which keeps their M.  A layer XY or XYZ
+  throughout is read as before.
+
 * **`cell_values_at()` without `seeds` gave every location the value `NA`,
   marked filled, when `values` had no cell ID.**  A `values` whose ID
   column is all `NA` placed no location in a cell, so every location was
