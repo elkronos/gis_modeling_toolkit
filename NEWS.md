@@ -3097,6 +3097,33 @@ old behaviour where there is a way.
   permutation of a layer gives the same result.  Results for a given seed
   differ from 2.0.0's for that reason too.
 
+* **Under `criterion = "morans_i"`, `top_n` could change the count
+  `determine_optimal_levels()` ranks first.**  The model-aware criteria
+  re-run k-means at each count of the window around the elbow, the elbow
+  plus or minus `max(4, top_n)`, and the re-runs drew from one random
+  stream in order.  A `top_n` above 4 starts the window lower, so more
+  re-runs came before each count, and the cells of every count in the
+  window changed, and with them `wss_eval`, `moran_i` and `moran_z`.  On
+  480 points in twelve clusters with `max_levels = 30`, `"morans_i"` put 15
+  first at `top_n` 1 to 4 and 16 at `top_n = 5`, both counts in both
+  windows, and k = 17 had a |z| of 0.0013 at `top_n = 6` and of 0.30 at
+  `top_n = 7`.  Under `"combined"` the ranking stayed and the diagnostics
+  moved.  Each re-run is now seeded with one integer drawn after the sweep
+  plus its count, and the stream is put back after it, so with the other
+  arguments fixed a count gets the same cells, `wss_eval` and Moran's I
+  whichever `top_n` sets the window.  A
+  wider window still scores more counts, and under `"morans_i"` one of
+  them can rank first: on the same layer the first count is 15 at `top_n`
+  1 to 4, 17 at 5 and 18 at 6 and 7, each the count of smallest |z| in its
+  window, and 17 and 18 are counts the wider windows add.  For a given
+  seed, `moran_i`, `moran_z`, `wss_eval` and the `"morans_i"` ranking can
+  differ from before, and a `"morans_i"` call can fall back to the
+  geometric ranking where it ranked, or rank where it fell back; the
+  sweep, the elbow and the `"combined"` ranking are as before.  With
+  `set_seed = NULL` the re-runs take one draw from the caller's stream in
+  place of the draws of every re-run, so the stream after the call no
+  longer depends on `top_n`.
+
 * **`determine_optimal_levels()` blamed the wrong cause when its
   model-aware criteria had nothing to score, and its help page understated
   the fix.**  The model-aware pass scores only the elbow's neighbourhood,

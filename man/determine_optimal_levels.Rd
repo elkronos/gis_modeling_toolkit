@@ -28,7 +28,11 @@ more centres) and one short of the number of points.}
 \item{top_n}{Integer; how many candidates to return. Default 3. Under
 \code{criterion = "geometric"} the candidate set is the elbow and its two
 immediate neighbours, so at most 3 values are ever returned no matter how
-large \code{top_n} is; only the model-aware criteria can return more.}
+large \code{top_n} is; only the model-aware criteria can return more.
+Under those it also sets the counts scored, the elbow plus or minus
+\code{max(4, top_n)}: a \code{top_n} above 4 scores more counts, and
+under \code{"morans_i"} one of them can rank first.  A count scores the
+same whichever \code{top_n} puts it in the window.}
 
 \item{sample_n}{Integer; subsample size for speed. Default 1500.}
 
@@ -258,7 +262,11 @@ without retaining cluster assignments.  Moran's I is then evaluated
 lazily: k-means is re-run only for a focused neighbourhood around the
 elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 promising candidate k values incur the cost of the full Moran's I
-computation.
+computation.  The re-run at each count draws its starts from a stream of
+its own, so with the other arguments fixed a count gets the same cells,
+\code{wss_eval} and Moran's I whichever \code{top_n} sets the
+neighbourhood: a larger \code{top_n} adds counts to the neighbourhood and
+leaves the scores of the others as they were.
 
 \strong{The WSS curve is read for its shape, so it is fitted to be
 smooth.}  Every point on it is a k-means local optimum, and with a few

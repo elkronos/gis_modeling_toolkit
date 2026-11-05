@@ -606,7 +606,11 @@
 #' lazily: k-means is re-run only for a focused neighbourhood around the
 #' elbow (±4 by default, or ±\code{top_n} if larger), so that only the most
 #' promising candidate k values incur the cost of the full Moran's I
-#' computation.
+#' computation.  The re-run at each count draws its starts from a stream of
+#' its own, so with the other arguments fixed a count gets the same cells,
+#' \code{wss_eval} and Moran's I whichever \code{top_n} sets the
+#' neighbourhood: a larger \code{top_n} adds counts to the neighbourhood and
+#' leaves the scores of the others as they were.
 #'
 #' \strong{The WSS curve is read for its shape, so it is fitted to be
 #' smooth.}  Every point on it is a k-means local optimum, and with a few
@@ -726,6 +730,10 @@
 #'   \code{criterion = "geometric"} the candidate set is the elbow and its two
 #'   immediate neighbours, so at most 3 values are ever returned no matter how
 #'   large \code{top_n} is; only the model-aware criteria can return more.
+#'   Under those it also sets the counts scored, the elbow plus or minus
+#'   \code{max(4, top_n)}: a \code{top_n} above 4 scores more counts, and
+#'   under \code{"morans_i"} one of them can rank first.  A count scores the
+#'   same whichever \code{top_n} puts it in the window.
 #' @param sample_n Integer; subsample size for speed. Default 1500.
 #' @param set_seed Integer RNG seed for the subsample and the k-means++
 #'   restarts; restored afterwards. Default 123.  The rows are put in
@@ -1415,16 +1423,30 @@ determine_optimal_levels <- function(data_sf, max_levels = 12L, top_n = 3L,
 
   # Run k-means only for the candidate k values and compute Moran's I.
   # The WSS of the re-run clustering is recorded (wss_eval) beside the
-  # Moran's I computed on it: the sweep's RNG state differs, so the re-run
-  # can land in a different local optimum than the sweep did.  No ranking
-  # reads it; "combined" ranks by the sweep's sag, the one the elbow is read
-  # from.
+  # Moran's I computed on it: the re-run draws its starts from another
+  # stream than the sweep, so it can land in a different local optimum than
+  # the sweep did.  No ranking reads it; "combined" ranks by the sweep's
+  # sag, the one the elbow is read from.
+  #
+  # Each re-run has a stream of its own: one integer is drawn here, after
+  # the sweep, and the re-run at k is seeded with it plus k, then the stream
+  # is put back.  So a count gets the same cells, wss_eval and Moran's I
+  # whichever top_n sets the window, and a window that starts lower (top_n
+  # above 4) does not move the counts the narrower window holds.  Nothing
+  # draws from the stream between the sweep and here, so top_n, which sets
+  # the window, does not reach the draw; the bound keeps the integer plus
+  # k_max an integer.  The integer depends on set_seed, or with set_seed =
+  # NULL on the caller's stream, which then moves by this one draw for
+  # every top_n.
   moran_vals <- rep(NA_real_, k_max)   # raw I, reported in $diagnostics
   moran_z    <- rep(NA_real_, k_max)   # standardised deviate, ranks under "morans_i"
   wss_eval   <- wss
+  rerun_seed <- sample.int(.Machine$integer.max - k_max, 1L)
   for (k in eval_ks) {
+    restore_stream <- .with_seed(rerun_seed + k)
     kb <- .partition_centres(xy, k, partition = "kmeans", init = "kmeans++",
                              nstart = nstart)
+    restore_stream()
     if (is.null(kb)) next
     km <- kb$km
     wss_eval[k]   <- km$tot.withinss
