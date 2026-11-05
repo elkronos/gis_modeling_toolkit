@@ -2633,15 +2633,18 @@ sac_nugget <- function(x) {
 #' 1e-12 of its largest absolute value, which no change of unit alters, and
 #' the values centred on their median and scaled have a standard deviation
 #' of at most three units in the last place of that value.  Residuals of
-#' the predictors are called constant under the same floor when they are
-#' no more than the rounding of the regression or three such units of the
-#' response.  So 1e15 plus a spread of 1, stored to an eighth, is not
+#' the predictors are called constant when they are no more than the
+#' rounding of the regression, taken on the size of the fit's terms, or
+#' three such units of the response, whether or not the floor finds spread
+#' in them, as the test for \code{cp} of \code{resolution_profile()} reads
+#' them.  So 1e15 plus a spread of 1, stored to an eighth, is not
 #' constant, and the residuals of a response the predictors fit exactly
-#' are.  A response that loses its spread on the raw values is centred on
-#' its median before the predictors are fitted to it and before the test
-#' for spatial structure, neither of which changes under a shift, and so is
-#' a response whose OLS residuals on the raw values lose their spread (1e15
-#' plus 1e5 times a predictor plus a spread of 1, on that predictor).
+#' are, on a predictor far from 0 (a northing) as well.  A response that
+#' loses its spread on the raw values is centred on its median before the
+#' predictors are fitted to it and before the test for spatial structure,
+#' neither of which changes under a shift, and so is a response whose OLS
+#' residuals on the raw values lose their spread (1e15 plus 1e5 times a
+#' predictor plus a spread of 1, on that predictor).
 #' And the model is fitted without iteration: the criterion is \pkg{gstat}'s weighted least
 #' squares (weights \eqn{N / h^2}) on lags divided by the cutoff; for each
 #' trial range the nugget and the partial sill are solved exactly, with both
@@ -3474,8 +3477,10 @@ estimate_sac_range <- function(points_sf, response_var,
   detrend_method <- NA_character_
   reml_fit <- NULL
   # The design of the trend removed from the response, for the structure
-  # test: an intercept alone unless a detrending fit succeeds.
+  # test: an intercept alone unless a detrending fit succeeds.  Its
+  # coefficients, for the test of a constant below (.residuals_rounding()).
   X_design <- matrix(1, n, 1L)
+  b_design <- NULL
   if (has_pred) {
     df <- pts_df
     fml <- stats::reformulate(predictor_vars, response_var)
@@ -3539,6 +3544,7 @@ estimate_sac_range <- function(points_sf, response_var,
         } else {
           y <- as.numeric(mf[[response_var]] - X %*% b)
           X_design <- X
+          b_design <- b
           detrended <- TRUE
           detrend_method <- "reml"
           .log_info(paste0("estimate_sac_range(): REML detrending on %s fitted ",
@@ -3569,7 +3575,10 @@ estimate_sac_range <- function(points_sf, response_var,
       } else {
         y <- as.numeric(resid)
         Xl <- try(stats::model.matrix(lm_fit), silent = TRUE)
-        if (!inherits(Xl, "try-error") && is.matrix(Xl) && nrow(Xl) == n) X_design <- Xl
+        if (!inherits(Xl, "try-error") && is.matrix(Xl) && nrow(Xl) == n) {
+          X_design <- Xl
+          b_design <- stats::coef(lm_fit)
+        }
         detrended <- TRUE
         detrend_method <- "ols"
       }
@@ -3605,20 +3614,31 @@ estimate_sac_range <- function(points_sf, response_var,
   # On raw values far from 0 the floor calls a column constant that is not
   # (1e15 plus a spread of 1, eight units in the last place), so where it
   # finds no spread the column is read again before it is refused: the
-  # response centred and scaled (.constant_column()), residuals against the
-  # rounding of the regression and of the raw response
-  # (.residuals_rounding()), so that the residuals of an exact fit stay
-  # constant.  Where the OLS fit on the raw values leaves residuals with no
-  # spread, the residuals read here are those of the fit about the
-  # response's centre (`y_centre`, above).  Where the raw floor finds spread
-  # nothing changes.
+  # response centred and scaled (.constant_column()), and residuals without
+  # their design against the rounding of the raw response
+  # (.residuals_rounding()).  Residuals whose design and coefficients are
+  # known are read against the rounding of the regression, on the size of
+  # the fit's terms, and of the raw response (.residuals_rounding()) alone,
+  # whether or not the floor finds spread, as the test for `cp` of
+  # resolution_profile() reads them.  So the residuals of an exact fit are
+  # constant in both, on a predictor far from 0 (a northing of 4.5e6) as
+  # well: lm() leaves those at about 2 .Machine$double.eps times the size of
+  # the terms, which can be thousands of times the response, and the floor
+  # then finds spread in the rounding.  Where the OLS fit on the raw values
+  # leaves residuals with no spread, the residuals read here are those of
+  # the fit about the response's centre (`y_centre`, above).
   y_size <- max(abs(y_raw))
   y_mean <- mean(y)
   y_sd   <- if (is.finite(y_size) && y_size > 0) y_size * stats::sd(y / y_size) else 0
   lost   <- !is.finite(y_sd) || !(y_sd > 1e-12 * y_size)
+  with_design <- detrended && !is.null(b_design) && all(is.finite(y_raw))
+  held <- with_design &&
+    isTRUE(.residuals_rounding(y, y_raw, y_raw - y_centre, X_design, b_design))
   spread <- lost && all(is.finite(y_raw)) &&
-    (if (detrended) !.residuals_rounding(y, y_raw, y_raw - y_centre)
+    (if (with_design) !held
+     else if (detrended) !.residuals_rounding(y, y_raw, y_raw - y_centre)
      else !.constant_column(y_raw))
+  lost <- lost || held
   if (spread) {
     yc <- if (detrended) y else y - y_centre
     yc_size <- max(abs(yc))

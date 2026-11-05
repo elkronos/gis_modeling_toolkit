@@ -2122,6 +2122,7 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
   variable <- NA_character_
   y <- NULL
   y_centre <- 0
+  resid_fit <- NULL
   if (has_resp) {
     use <- if (is.null(in_sel)) resp_ok else resp_ok & in_sel
     y <- rep(NA_real_, n)
@@ -2133,24 +2134,23 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       # first fit on every row turned one missing value into "the OLS fit
       # failed": the raw response, trend and all, was then scored against a
       # variogram estimate_sac_range() had fitted to the residuals.
+      X_fit <- cbind(1, pred[use, , drop = FALSE])
       fit <- if (sum(use) > ncol(pred) + 1L)
-        try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use] - y_centre),
-            silent = TRUE)
+        try(stats::lm.fit(x = X_fit, y = resp[use] - y_centre), silent = TRUE)
       # A response whose raw values show their spread through a trend (1e15
       # plus 1e5 times a predictor plus a spread of 1) is fitted on its raw
       # values, and the rounding of that fit at the offset is of the order
-      # of the spread.  So where its residuals show no spread to the test
-      # for `cp` below, the fit is taken again about the response's centre
-      # (.residual_centre()), and those residuals are scored and tested.
-      # Where they show spread nothing changes.
+      # of the spread.  So where its residuals show no spread to the raw
+      # bound of the test for `cp` below, the fit is taken again about the
+      # response's centre (.residual_centre()), and those residuals are
+      # scored and tested.  Where they show spread nothing changes.
       if (!is.null(fit) && !inherits(fit, "try-error") && y_centre == 0) {
         e0 <- fit$residuals
         if (isTRUE(sum((e0 - mean(e0))^2) <= 100 * .Machine$double.eps^2 *
                      max(sum(e0^2), sum(resp[use]^2)))) {
           c0 <- .residual_centre(resp[use])
           fit0 <- if (c0 != 0)
-            try(stats::lm.fit(x = cbind(1, pred[use, , drop = FALSE]), y = resp[use] - c0),
-                silent = TRUE)
+            try(stats::lm.fit(x = X_fit, y = resp[use] - c0), silent = TRUE)
           if (!is.null(fit0) && !inherits(fit0, "try-error")) {
             fit <- fit0
             y_centre <- c0
@@ -2159,6 +2159,8 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
       }
       if (!is.null(fit) && !inherits(fit, "try-error")) {
         y[use] <- fit$residuals
+        # The fit, for the test for `cp` below (.residuals_rounding()).
+        resid_fit <- list(yd = resp[use] - y_centre, X = X_fit, b = fit$coefficients)
         variable <- "residuals"
       } else {
         .log_warn(paste0("resolution_profile(): the OLS fit on `predictor_vars` failed ",
@@ -2703,26 +2705,27 @@ resolution_profile <- function(data_sf, response_var = NULL, predictor_vars = NU
     # response the predictors fit exactly are all rounding error, of size
     # 1e-15, and against their own sum of squares they never looked constant
     # (Cp was then computed with a noise variance of 7.9e-31).
-    one_cell$constant <- one_cell$rss <=
-      100 * .Machine$double.eps^2 * max(sum(y1^2), sum(resp[is.finite(y)]^2))
-    # On raw values far from 0 that bound calls a column constant that is not
-    # (1e15 plus a spread of 1, eight units in the last place), so where it
-    # finds no spread the column is read again: the response as the
+    # A response is first read against 100 eps^2 times the sum of squares of
+    # its values.  On raw values far from 0 that bound calls a column
+    # constant that is not (1e15 plus a spread of 1, eight units in the last
+    # place), so where it finds no spread the response is read again as the
     # estimate's test reads it, centred and scaled (.constant_column()), with
     # values beyond the arithmetic left constant, as they were, for the
-    # warning after the sweep; residuals against the rounding of the
-    # regression and of the raw response (.residuals_rounding()), so the
-    # residuals of an exact fit stay constant.  Where the raw values show
-    # spread nothing changes.
-    if (isTRUE(one_cell$constant)) {
-      r1 <- resp[is.finite(y)]
-      one_cell$constant <- if (identical(variable, "residuals"))
-        .residuals_rounding(y1, r1, r1 - y_centre)
-      else {
-        sc1 <- .spread_scaled(r1)
-        .constant_column(r1, sc1) || .pool_out_of_range(r1, sc1)
-      }
-    }
+    # warning after the sweep.  Where the raw values show spread nothing
+    # changes.
+    # Residuals are read against the rounding of the regression and of the
+    # raw response alone (.residuals_rounding()), which holds the residuals
+    # of exact fits whatever the number of predictors and rows.  The bound
+    # on the response's sum of squares held some and not others (7 w - 2 w2
+    # on w and w2 left a sum of squares more than twice it), and those were scored on
+    # their rounding while estimate_sac_range() refused the same layer.
+    r1 <- resp[is.finite(y)]
+    one_cell$constant <- if (identical(variable, "residuals"))
+      .residuals_rounding(y1, r1, resid_fit$yd, resid_fit$X, resid_fit$b)
+    else if (one_cell$rss <= 100 * .Machine$double.eps^2 * max(sum(y1^2), sum(r1^2))) {
+      sc1 <- .spread_scaled(r1)
+      .constant_column(r1, sc1) || .pool_out_of_range(r1, sc1)
+    } else FALSE
     is_const <- isTRUE(one_cell$constant)
     # Nothing is scored on a constant: `cp`, `moran_i` and `moran_z` stay NA
     # (see the sweep), which is what the message says.  A response called

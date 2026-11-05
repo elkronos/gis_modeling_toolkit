@@ -2668,7 +2668,9 @@ old behaviour where there is a way.
   value, values that differ only by their rounding (0.1 beside 0.3 / 3) and
   the residuals of an exact fit stay constant.  Every response whose raw
   values show their spread, and with `predictor_vars` whose OLS residuals
-  on the raw values show theirs, gives the numbers it gave.  Values whose
+  on the raw values show theirs, gives the numbers it gave, except the
+  residuals of an exact fit that the bound on the raw values took for
+  spread (see the next entry).  Values whose
   spread is between three units in the last place and 1e-12 of their size,
   such as 3 times (1 + 4 eps times noise), were constant to
   `estimate_sac_range()` and now reach the variogram fit, and so do
@@ -2681,6 +2683,47 @@ old behaviour where there is a way.
   `print()` and `select_resolution(criterion = "cp")` now say that.  They
   said that the test for `cp` reads the raw values alone and the estimate's
   also reads them centred and scaled, which was untrue of that case.
+
+* **The test for `cp` in `resolution_profile()` scored the residuals of some
+  exact fits, where `estimate_sac_range()` refused the same layer.** With
+  `predictor_vars`, the test read the OLS residuals against 100
+  `.Machine$double.eps^2` times the response's sum of squares first, and
+  only where that bound found no spread against the rounding of the
+  regression.  `estimate_sac_range()` read the bound on the regression's
+  rounding only where its floor, a standard deviation of 1e-12 of the
+  response's largest value, found no spread.  `lm.fit()` and `lm()` leave
+  more rounding than either bound on some exact fits, and more with more
+  rows.  On 800 points, 7 w - 2 w2 on w and w2 left a sum of squares more
+  than twice the first bound, so `cp` was scored on rounding with no
+  `spatialkit_constant_response` warning and `select_resolution(criterion =
+  "cp")` returned 2, while `estimate_sac_range()` refused the layer as an
+  exact fit by a margin of 4%.  Of 100 exact fits on one to three predictors
+  of that layer, at offsets 0 and 1e6, both scored 8 of the 200: the profile
+  gave them a `cp`, and the estimate ran its test for spatial structure on
+  the rounding and returned "no spatial structure detected".  On a predictor
+  far from 0, such as a northing of 4.5e6 plus the y coordinate, `lm()`
+  leaves the residuals of an exact fit at about 2 `.Machine$double.eps`
+  times the size of the terms, which is thousands of times the response, so
+  the floor found spread in them and the estimate ran its test for spatial
+  structure on the rounding.  Both functions now read one bound on the
+  residuals alone, whether or not the earlier bounds find spread, taken on
+  the size of the fit's terms (each row's absolute intercept plus the
+  absolute products of its predictors and their coefficients) and read on
+  the residuals taken again from the coefficients, which carry the rounding
+  of the response and not that of the fit's arithmetic.  Residuals with a
+  root mean square of at most 10 `.Machine$double.eps` times that of the
+  terms, or of three units in the last place of the response, are constant,
+  whatever the number of predictors and rows.  So the residuals of an exact
+  fit are constant in both: `estimate_sac_range()` says the predictors
+  explain the response exactly, `cp`, `moran_i` and `moran_z` are `NA` with
+  the constant-response warning, and `select_resolution(criterion = "cp")`
+  refuses as it does for any constant response.  The same bound refuses
+  Moran's I of the cell means in `determine_optimal_levels(criterion =
+  "morans_i")` where it regresses them again about the response's centre, so
+  the cell means of an exact fit on an integer predictor over 300 cells are
+  no longer scored.  Residuals above the bound are scored as before: those
+  of 1e3 w + 1e-11 f on w, 45 `.Machine$double.eps` times the size of the
+  terms, reach the variogram fit and `cp`.
 
 * **`kriging_adequacy()` kriged a response at a large offset on the
   rounding of the offset.**  At 1e15 plus a spread of 1 a double holds the

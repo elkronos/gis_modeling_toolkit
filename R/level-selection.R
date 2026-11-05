@@ -512,8 +512,10 @@
   # means are formed and regressed again about the response's centre
   # (.residual_centre(), as resolution_profile() takes its fit since
   # BUG-36), and refused only if those residuals are within the rounding of
-  # the regression or of the raw values (.residuals_rounding()).  Residuals
-  # do not change under a shift, so this changes nothing but the rounding.
+  # the regression, taken on the size of the fit's terms, or of the raw
+  # values (.residuals_rounding(), the bound resolution_profile() and
+  # estimate_sac_range() read).  Residuals do not change under a shift, so
+  # this changes nothing but the rounding.
   if (centre == 0 && (no_spread || sum(resid^2) <= 1e-12 * sum(cell_resp[ok]^2))) {
     c0 <- .residual_centre(raw, bounded = FALSE)
     if (c0 != 0) {
@@ -526,7 +528,9 @@
       if (!is.null(fit0) && !inherits(fit0, "try-error")) {
         cell_resp <- cr0; ok <- ok0; resid <- fit0$residuals
         yr <- raw[is.finite(raw)] / rs0$p
-        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok])
+        no_spread <- .residuals_rounding(resid, yr, cell_resp[ok],
+                                         cbind(1, cell_pred[ok, , drop = FALSE]),
+                                         fit0$coefficients)
       }
     }
   }

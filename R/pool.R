@@ -232,8 +232,8 @@
 #' test of a constant column of \code{resolution_profile()}'s estimate reads
 #' both (\code{.constant_column()}).  The profile's test of a constant
 #' response for \code{cp} applies it to the raw values, and where it finds
-#' no spread there reads the column again in the same way, or for residuals
-#' with \code{.residuals_rounding()}.
+#' no spread there reads the column again in the same way.  Residuals it
+#' reads with \code{.residuals_rounding()} alone.
 #'
 #' @param ss A sum of squared deviations of \code{y}.
 #' @param y The values.
@@ -510,32 +510,81 @@
 }
 
 
+# The rounding of an exact fit's residuals, in .Machine$double.eps times the
+# size of the fit's terms (see .residuals_rounding()): the multiple of
+# .no_spread(), whose bound is 100 eps^2 times the sum of squares.
+.FIT_EPS <- 10
+
+
 #' Whether residuals are no more than the rounding of the response they are
 #' of
 #'
 #' The residuals of a response the predictors fit exactly are rounding: of
-#' the regression, about \code{.Machine$double.eps} times the response as
-#' regressed, and of the values, a few units in the last place of the raw
-#' response.  Either bound holds them.  The first is the bound of
-#' \code{.no_spread()} on the response as regressed (centred by
-#' \code{.regression_centre()} or \code{.residual_centre()}, or raw), the
-#' second \code{.POOL_ULPS} units
-#' in the last place of the raw response's largest absolute value, as a
-#' standard deviation over the residuals' degrees of freedom.  Against the
-#' second alone the residuals of some exact fits count as spread: on the
-#' raw values \code{lm()} leaves those of 7 + 2 w and 1e6 + w - 3 w2 at 3
-#' to 17 units, and about a centre near 0 \code{lm.fit()} leaves those of
-#' w and 1e6 w, on w, above 3.
+#' the values, a few units in the last place of the raw response, and of
+#' the regression.  Either bound holds them.  The first is
+#' \code{.POOL_ULPS} units in the last place of the raw response's largest
+#' absolute value, as a standard deviation over the residuals' degrees of
+#' freedom.  The second is taken on the size of the fit's terms: each row's
+#' absolute intercept plus the absolute products of its predictors and
+#' their coefficients.  An exact fit's response is those terms summed, and
+#' its rounding is at most a few \code{.Machine$double.eps} times their size,
+#' whatever the number of rows.  The residuals an OLS fit returns carry
+#' more, and more with more rows: \code{lm.fit()} leaves those of 7 w - 2 w2
+#' on 800 rows at 13 \code{.Machine$double.eps} times the root mean square
+#' of the terms, and those of 2.5 x on 30,000 rows of an integer x at 600
+#' times.  So the residuals are taken again from the coefficients,
+#' \code{yd - X b}, less their own OLS fit on \code{X}, which leaves the
+#' rounding of the response and of that sum.  On exact fits with one to five
+#' predictors, 30 to 100,000 rows, at offsets 0 and 1e6, raw and about the
+#' response's centre, those residuals that the first bound does not hold
+#' come out at most 0.37 \code{.Machine$double.eps} times the root mean
+#' square of the terms.  The bound is a root mean square of
+#' \code{.FIT_EPS} (10) \code{.Machine$double.eps} times that of the terms,
+#' the multiple \code{.no_spread()} takes on a column, and residuals above
+#' it count as spread: those of 1e3 w + 1e-11 f on w, a field f, are 45 times.
+#' The sums are taken on the residuals and terms divided by the power of two
+#' at or below the largest term or value, which is exact, so that they
+#' neither overflow nor underflow.
 #'
-#' @param e The residuals.
+#' @param e The residuals the fit returned.
 #' @param y The raw response.
-#' @param yd The response as regressed.
+#' @param yd The response as regressed (centred by
+#'   \code{.regression_centre()} or \code{.residual_centre()}, or raw).
+#' @param X The fit's design, with the intercept's column of ones; its rows
+#'   are those of \code{yd}.  \code{NULL} where the design is not known,
+#'   and the regression's bound is then that of \code{.no_spread()} on
+#'   \code{yd}, read on \code{e}.
+#' @param b The fit's coefficients; \code{NA} (an aliased column) counts as
+#'   0.
 #' @return \code{TRUE} or \code{FALSE}.
 #' @keywords internal
 #' @noRd
-.residuals_rounding <- function(e, y, yd)
-  sum((e - mean(e))^2) <= max(100 * .Machine$double.eps^2 * sum(yd^2),
-                              (length(e) - 1L) * (.POOL_ULPS * .ulp_of(y))^2)
+.residuals_rounding <- function(e, y, yd, X = NULL, b = NULL) {
+  ss <- function(r) sum((r - mean(r))^2)
+  if (is.null(X) || is.null(b))
+    return(ss(e) <= max(100 * .Machine$double.eps^2 * sum(yd^2),
+                        (length(e) - 1L) * (.POOL_ULPS * .ulp_of(y))^2))
+  X <- as.matrix(X)
+  b <- as.numeric(b)
+  b[!is.finite(b)] <- 0
+  size <- drop(abs(X) %*% abs(b))
+  a <- max(size, abs(yd))
+  # The power of two at or below it, so that the division is exact.
+  a <- if (is.finite(a) && a > 0) 2^min(floor(log2(a)), 1023) else 1
+  if (a > max(size, abs(yd))) a <- a / 2
+  # .POOL_ULPS units in the last place of the raw response, as a standard
+  # deviation over n - 1 degrees of freedom, on the scale of `a`.
+  ulps <- function(r) (length(r) - 1L) * (.POOL_ULPS * .ulp_of(y) / a)^2
+  if (ss(e / a) <= ulps(e)) return(TRUE)
+  r <- yd / a - drop(X %*% (b / a))
+  fit <- try(stats::lm.fit(X, r), silent = TRUE)
+  if (!inherits(fit, "try-error")) {
+    b2 <- fit$coefficients
+    b2[!is.finite(b2)] <- 0
+    r <- r - drop(X %*% b2)
+  }
+  ss(r) <= max(ulps(r), (.FIT_EPS * .Machine$double.eps)^2 * sum((size / a)^2))
+}
 
 
 #' The mean square of a set of residuals and its standard error over rows
